@@ -31,9 +31,9 @@ export default function Sidebar() {
   return (
     <aside className="w-52 shrink-0 border-r border-gray-800 flex flex-col">
       <div className="px-4 py-3 border-b border-gray-800">
-        <span className="font-mono text-sm font-bold tracking-wide text-white">
+        <Link href="/" className="font-mono text-sm font-bold tracking-wide text-white hover:text-gray-300 transition-colors">
           BBTerminal
-        </span>
+        </Link>
       </div>
       <nav className="flex-1 p-2 space-y-0.5">
         {navItems.map(({ href, label }) => (
