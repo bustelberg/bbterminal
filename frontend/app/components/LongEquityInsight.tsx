@@ -236,113 +236,6 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-function IngestPanel({ onDone }: { onDone: () => void }) {
-  const [latestAvailable, setLatestAvailable] = useState<string | null>(null);
-  const [loadingAvailable, setLoadingAvailable] = useState(true);
-  const [ingesting, setIngesting] = useState(false);
-  const [log, setLog] = useState<{ type: string; message: string }[]>([]);
-  const logEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    fetch(`${API_URL}/api/longequity/latest-available`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.available) {
-          setLatestAvailable(`${MONTH_NAMES[d.month]} ${d.year}`);
-        } else {
-          setLatestAvailable('Not found');
-        }
-      })
-      .catch(() => setLatestAvailable('Unknown'))
-      .finally(() => setLoadingAvailable(false));
-  }, []);
-
-  useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [log]);
-
-  async function runIngest() {
-    setIngesting(true);
-    setLog([]);
-    try {
-      const res = await fetch(`${API_URL}/api/ingest/long-equity`, { method: 'POST' });
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop() ?? '';
-        for (const part of parts) {
-          for (const line of part.split('\n')) {
-            if (line.startsWith('data: ')) {
-              try {
-                const event = JSON.parse(line.slice(6));
-                setLog((prev) => [...prev, event]);
-                if (event.type === 'done' || event.type === 'error') {
-                  setIngesting(false);
-                  onDone();
-                }
-              } catch {}
-            }
-          }
-        }
-      }
-    } catch (e) {
-      setLog((prev) => [...prev, { type: 'error', message: String(e) }]);
-    }
-    setIngesting(false);
-  }
-
-  return (
-    <div className="border border-gray-800 rounded px-4 py-3 mb-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="font-mono text-xs space-y-0.5">
-          <div className="text-gray-500">
-            Latest available month from Longequity:{' '}
-            <span className="text-white font-semibold">
-              {loadingAvailable ? 'Checking...' : latestAvailable}
-            </span>
-          </div>
-          {!loadingAvailable && (
-            <div className="text-gray-600">
-              as of: {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
-            </div>
-          )}
-        </div>
-        <button
-          onClick={runIngest}
-          disabled={ingesting}
-          className="px-3 py-1 rounded text-xs font-mono bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white transition-colors"
-        >
-          {ingesting ? 'Running...' : 'Run ingest pipeline'}
-        </button>
-      </div>
-      {log.length > 0 && (
-        <div className="bg-gray-950 border border-gray-800 rounded p-2 max-h-64 overflow-y-auto font-mono text-xs space-y-0.5">
-          {log.map((entry, i) => (
-            <div
-              key={i}
-              className={
-                entry.type === 'error'
-                  ? 'text-red-400'
-                  : entry.type === 'done'
-                  ? 'text-green-400'
-                  : 'text-gray-400'
-              }
-            >
-              {entry.message || '\u00a0'}
-            </div>
-          ))}
-          <div ref={logEndRef} />
-        </div>
-      )}
-    </div>
-  );
-}
-
 function escapeCsv(value: string | null | undefined): string {
   const s = value?.trim() ?? '';
   return s.includes(',') || s.includes('"') || s.includes('\n')
@@ -379,7 +272,62 @@ export default function LongEquityInsight({ snapshots }: { snapshots: Snapshot[]
   );
   const [data, setData] = useState<SnapshotData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [showIngest, setShowIngest] = useState(false);
+
+  const [latestAvailable, setLatestAvailable] = useState<string | null>(null);
+  const [loadingAvailable, setLoadingAvailable] = useState(true);
+  const [ingesting, setIngesting] = useState(false);
+  const [ingestLog, setIngestLog] = useState<{ type: string; message: string }[]>([]);
+  const logEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/longequity/latest-available`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.available) setLatestAvailable(`${MONTH_NAMES[d.month]} ${d.year}`);
+        else setLatestAvailable('Not found');
+      })
+      .catch(() => setLatestAvailable('Unknown'))
+      .finally(() => setLoadingAvailable(false));
+  }, []);
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [ingestLog]);
+
+  async function runIngest() {
+    setIngesting(true);
+    setIngestLog([]);
+    try {
+      const res = await fetch(`${API_URL}/api/ingest/long-equity`, { method: 'POST' });
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() ?? '';
+        for (const part of parts) {
+          for (const line of part.split('\n')) {
+            if (line.startsWith('data: ')) {
+              try {
+                const event = JSON.parse(line.slice(6));
+                setIngestLog((prev) => [...prev, event]);
+                if (event.type === 'done' || event.type === 'error') {
+                  setIngesting(false);
+                  window.location.reload();
+                }
+              } catch {}
+            }
+          }
+        }
+      }
+    } catch (e) {
+      setIngestLog((prev) => [...prev, { type: 'error', message: String(e) }]);
+    }
+    setIngesting(false);
+  }
 
   useEffect(() => {
     if (selectedId === null) return;
@@ -428,7 +376,7 @@ export default function LongEquityInsight({ snapshots }: { snapshots: Snapshot[]
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-gray-800 flex items-start justify-between">
+      <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between gap-6">
         <div>
           <h1 className="font-mono text-base font-bold text-white">LongEquity Insight</h1>
           {selectedSnapshot && (
@@ -437,12 +385,28 @@ export default function LongEquityInsight({ snapshots }: { snapshots: Snapshot[]
             </p>
           )}
         </div>
-        <button
-          onClick={() => setShowIngest((v) => !v)}
-          className="px-3 py-1 rounded text-xs font-mono text-gray-400 border border-gray-700 hover:text-white hover:border-gray-500 transition-colors"
-        >
-          {showIngest ? 'Hide ingest' : 'Ingest'}
-        </button>
+        <div className="flex items-center gap-4 shrink-0">
+          <div className="font-mono text-xs text-right">
+            <div className="text-gray-400">
+              Latest available month from Longequity:{' '}
+              <span className="text-white font-semibold">
+                {loadingAvailable ? 'Checking...' : latestAvailable}
+              </span>
+            </div>
+            {!loadingAvailable && (
+              <div className="text-gray-600">
+                as of: {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={runIngest}
+            disabled={ingesting}
+            className="px-3 py-1 rounded text-xs font-mono bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white transition-colors whitespace-nowrap"
+          >
+            {ingesting ? 'Running...' : 'Run ingest pipeline'}
+          </button>
+        </div>
       </div>
 
       {/* Month tabs */}
@@ -464,8 +428,22 @@ export default function LongEquityInsight({ snapshots }: { snapshots: Snapshot[]
 
       {/* Content */}
       <div className="flex-1 overflow-auto px-6 py-4">
-        {showIngest && (
-          <IngestPanel onDone={() => window.location.reload()} />
+        {ingestLog.length > 0 && (
+          <div className="bg-gray-950 border border-gray-800 rounded p-2 max-h-64 overflow-y-auto font-mono text-xs space-y-0.5 mb-4">
+            {ingestLog.map((entry, i) => (
+              <div
+                key={i}
+                className={
+                  entry.type === 'error' ? 'text-red-400'
+                  : entry.type === 'done' ? 'text-green-400'
+                  : 'text-gray-400'
+                }
+              >
+                {entry.message || '\u00a0'}
+              </div>
+            ))}
+            <div ref={logEndRef} />
+          </div>
         )}
 
         {loading && (
