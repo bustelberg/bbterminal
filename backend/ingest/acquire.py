@@ -116,6 +116,32 @@ def _get_file(supabase: Client, fmt: LongEquityFormat, timeout: int) -> bytes:
     return content
 
 
+def check_latest_available_month(
+    *,
+    now: datetime | None = None,
+    timeout: int = 10,
+    max_checks: int = 4,
+) -> MonthSpec | None:
+    """
+    Walk backwards from current month (up to max_checks months),
+    checking remote URL availability without downloading.
+    Returns the most recent MonthSpec that exists, or None.
+    """
+    spec = _current_month(now)
+    for _ in range(max_checks):
+        if _is_before_hard_stop(spec):
+            return None
+        fmt = _format_month(spec)
+        try:
+            with requests.get(fmt.url, stream=True, timeout=timeout) as r:
+                if r.status_code == 200:
+                    return spec
+        except Exception:
+            pass
+        spec = _prev_month(spec)
+    return None
+
+
 def acquire_raw_longequity_backfill(
     supabase: Client,
     *,

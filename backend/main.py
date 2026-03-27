@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from supabase import create_client
 from dotenv import load_dotenv
 
-from ingest.acquire import acquire_raw_longequity_backfill
+from ingest.acquire import acquire_raw_longequity_backfill, check_latest_available_month
 from ingest.flatten import flatten_excel
 from ingest.extend_primary import enrich_flattened_df_with_primary_listing
 from ingest.transformation import prepare_flattened_for_schema
@@ -230,6 +230,14 @@ async def _ingest_long_equity_stream():
         f"Total new rows — companies: {total_companies}, "
         f"numeric facts: {total_fn}, text facts: {total_ft}."
     ))
+
+
+@app.get("/api/longequity/latest-available")
+async def get_latest_available():
+    spec = await asyncio.to_thread(check_latest_available_month)
+    if spec is None:
+        return {"available": False, "year": None, "month": None}
+    return {"available": True, "year": spec.year, "month": spec.month}
 
 
 @app.get("/api/longequity/snapshots")
