@@ -4,11 +4,23 @@ import os
 import re
 from datetime import date
 
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from supabase import create_client
 from dotenv import load_dotenv
+
+from portfolio import (
+    parse_airs_excel,
+    match_holding,
+    get_all_companies,
+    list_portfolios as _list_portfolios,
+    get_portfolio_weights as _get_portfolio_weights,
+    create_portfolio as _create_portfolio,
+    update_portfolio_weights as _update_portfolio_weights,
+    delete_portfolio as _delete_portfolio,
+)
 
 from ingest.acquire import acquire_raw_longequity_backfill, check_latest_available_month
 from ingest.flatten import flatten_excel
@@ -310,3 +322,98 @@ async def ingest_long_equity():
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ─────────────────────────── Portfolio endpoints ─────────────────────────────
+
+class WeightEntry(BaseModel):
+    company_id: int
+    weight: float
+
+
+class CreatePortfolioRequest(BaseModel):
+    portfolio_name: str
+    target_date: str
+    published_at: str
+    weights: list[WeightEntry]
+    normalize: bool = True
+
+
+class UpdateWeightsRequest(BaseModel):
+    weights: list[WeightEntry]
+    normalize: bool = True
+
+
+@app.post("/api/portfolios/parse")
+async def parse_portfolio(file: UploadFile = File(...)):
+    content = await file.read()
+    try:
+        holdings = await asyncio.to_thread(parse_airs_excel, content)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    companies = await asyncio.to_thread(get_all_companies, supabase)
+    company_options = [
+        {
+            "company_id": c["company_id"],
+            "label": f"{c['company_name']} — {c['primary_ticker']} ({c['primary_exchange']})",
+        }
+        for c in companies
+    ]
+
+    parsed = []
+    for h in holdings:
+        cid, label, score = match_holding(h.holding_name, companies)
+        parsed.append({
+            "holding_name": h.holding_name,
+            "mv_eur": h.mv_eur,
+            "weight": h.weight,
+            "currency": h.currency,
+            "include": h.include,
+            "weight_source": h.weight_source,
+            "match_company_id": cid,
+            "match_label": label,
+            "match_score": score,
+        })
+
+    return {"holdings": parsed, "companies": company_options}
+
+
+@app.get("/api/portfolios")
+async def get_portfolios():
+    return await asyncio.to_thread(_list_portfolios, supabase)
+
+
+@app.get("/api/portfolios/{portfolio_id}/weights")
+async def get_weights(portfolio_id: int):
+    return await asyncio.to_thread(_get_portfolio_weights, supabase, portfolio_id)
+
+
+@app.post("/api/portfolios")
+async def create_portfolio(req: CreatePortfolioRequest):
+    weights = [{"company_id": w.company_id, "weight": w.weight} for w in req.weights]
+    portfolio_id = await asyncio.to_thread(
+        _create_portfolio,
+        supabase,
+        portfolio_name=req.portfolio_name,
+        target_date=req.target_date,
+        published_at=req.published_at,
+        weights=weights,
+        normalize=req.normalize,
+    )
+    return {"portfolio_id": portfolio_id}
+
+
+@app.put("/api/portfolios/{portfolio_id}/weights")
+async def update_weights(portfolio_id: int, req: UpdateWeightsRequest):
+    weights = [{"company_id": w.company_id, "weight": w.weight} for w in req.weights]
+    await asyncio.to_thread(
+        _update_portfolio_weights, supabase, portfolio_id, weights, req.normalize
+    )
+    return {"ok": True}
+
+
+@app.delete("/api/portfolios/{portfolio_id}")
+async def delete_portfolio(portfolio_id: int):
+    await asyncio.to_thread(_delete_portfolio, supabase, portfolio_id)
+    return {"ok": True}

@@ -7,6 +7,7 @@ import { createClient } from '../../lib/supabase/client';
 
 const navItems = [
   { href: '/longequity', label: 'LongEquity Insight' },
+  { href: '/airs-portfolio', label: 'AIRS Portfolio Upload' },
 ];
 
 export default function Sidebar() {
