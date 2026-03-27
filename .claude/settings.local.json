@@ -8,7 +8,8 @@
       "Bash(node -e \"const ssr = require\\(''@supabase/ssr''\\); console.log\\(Object.keys\\(ssr\\)\\)\")",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(uv add:*)"
     ]
   }
 }
