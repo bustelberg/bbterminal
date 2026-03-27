@@ -299,11 +299,18 @@ function IngestPanel({ onDone }: { onDone: () => void }) {
   return (
     <div className="border border-gray-800 rounded px-4 py-3 mb-4 space-y-3">
       <div className="flex items-center justify-between">
-        <div className="font-mono text-xs text-gray-500">
-          Latest available:{' '}
-          <span className="text-gray-300">
-            {loadingAvailable ? 'Checking...' : latestAvailable}
-          </span>
+        <div className="font-mono text-xs space-y-0.5">
+          <div className="text-gray-500">
+            Latest available month from Longequity:{' '}
+            <span className="text-white font-semibold">
+              {loadingAvailable ? 'Checking...' : latestAvailable}
+            </span>
+          </div>
+          {!loadingAvailable && (
+            <div className="text-gray-600">
+              as of: {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+            </div>
+          )}
         </div>
         <button
           onClick={runIngest}
