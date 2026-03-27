@@ -1,0 +1,141 @@
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+
+import requests
+
+_OPENFIGI_URL = "https://api.openfigi.com/v3/mapping"
+_BATCH_SIZE = 100
+
+# OpenFIGI exchCode → our primary_exchange label.
+# Unknown codes are kept as-is (still better than UNKNOWN).
+_EXCHCODE_MAP: dict[str, str] = {
+    "UW": "NASDAQ",
+    "UN": "NYSE",
+    "UA": "NYSE",
+    "UP": "NYSE",
+    "UR": "NYSE",
+    "LN": "LSE",
+    "TT": "TSE",
+    "GY": "XETRA",
+    "GF": "XETRA",
+    "HK": "HKEX",
+    "AU": "ASX",
+    "NA": "EURONEXT",
+    "FP": "EURONEXT",
+    "BB": "EURONEXT",
+    "SM": "BME",
+    "IM": "BORSA",
+    "DC": "OCSE",
+    "ST": "STO",
+    "HB": "OMX",
+    "VX": "SIX",
+    "SS": "SSE",
+    "SZ": "SZSE",
+    "KS": "KRX",
+    "TW": "TWSE",
+    "JT": "JSE",
+    "MX": "BMV",
+}
+
+
+def _exchcode_to_exchange(code: str | None) -> str:
+    if not code:
+        return "UNKNOWN"
+    return _EXCHCODE_MAP.get(code, code)
+
+
+def detect_unknown_tickers(
+    df,
+    *,
+    fill_path: Path | None = None,
+    db_overrides: list[dict] | None = None,
+) -> list[dict]:
+    """
+    Return tickers in df not covered by fill_ticker.json or db_overrides.
+    Each entry: {ticker, country, exchange}.
+    """
+    import pandas as pd
+
+    if fill_path is None:
+        fill_path = Path(__file__).resolve().parent / "fill_ticker.json"
+
+    def _norm(t: str) -> str:
+        return t.upper().replace("-", ".")
+
+    known: set[str] = set()
+    if fill_path.exists():
+        data = json.loads(fill_path.read_text(encoding="utf-8"))
+        known |= {_norm(row["ticker"]) for row in data if "ticker" in row}
+    if db_overrides:
+        known |= {_norm(row["ticker"]) for row in db_overrides}
+
+    unknowns: list[dict] = []
+    seen: set[str] = set()
+    for _, row in df.iterrows():
+        ticker = str(row.get("ticker", "") or "").strip()
+        if not ticker or _norm(ticker) in known or _norm(ticker) in seen:
+            continue
+        seen.add(_norm(ticker))
+        unknowns.append({
+            "ticker": ticker,
+            "country": str(row.get("country", "") or "").strip(),
+            "exchange": str(row.get("exchange", "") or "").strip(),
+        })
+    return unknowns
+
+
+def _best_match(results: list[dict]) -> dict | None:
+    """Pick the best equity match from an OpenFIGI data array."""
+    if not results:
+        return None
+    for r in results:
+        if r.get("securityType") in ("Common Stock", "Ordinary Shares"):
+            return r
+    return results[0]
+
+
+def resolve_via_openfigi(unknowns: list[dict]) -> list[dict]:
+    """
+    Resolve unknown tickers via the OpenFIGI API.
+    Returns list of {ticker, primary_ticker, primary_exchange, source} for each resolved ticker.
+    Unresolvable tickers are silently skipped.
+    Set OPENFIGI_API_KEY env var for higher rate limits (optional).
+    """
+    if not unknowns:
+        return []
+
+    api_key = os.environ.get("OPENFIGI_API_KEY")
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["X-OPENFIGI-APIKEY"] = api_key
+
+    resolved: list[dict] = []
+
+    for i in range(0, len(unknowns), _BATCH_SIZE):
+        batch = unknowns[i : i + _BATCH_SIZE]
+        jobs = [
+            {"idType": "TICKER", "idValue": u["ticker"].replace("-", " ")}
+            for u in batch
+        ]
+
+        resp = requests.post(_OPENFIGI_URL, json=jobs, headers=headers, timeout=30)
+        resp.raise_for_status()
+        items = resp.json()
+
+        for u, item in zip(batch, items):
+            if "data" not in item or not item["data"]:
+                continue
+            match = _best_match(item["data"])
+            if not match:
+                continue
+            resolved.append({
+                "ticker": u["ticker"],
+                "primary_ticker": match.get("ticker") or u["ticker"],
+                "primary_exchange": _exchcode_to_exchange(match.get("exchCode")),
+                "source": "openfigi",
+            })
+
+    return resolved

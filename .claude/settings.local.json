@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run python -c \":*)",
+      "Bash(python3:*)",
+      "Bash(uv run:*)",
+      "Bash(grep -E \"\\\\.\\(tsx?|json|js|css\\)$\")",
+      "Bash(node -e \"const ssr = require\\(''@supabase/ssr''\\); console.log\\(Object.keys\\(ssr\\)\\)\")"
+    ]
+  }
+}
