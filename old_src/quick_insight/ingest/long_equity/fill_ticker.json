@@ -1,0 +1,2078 @@
+[
+  {
+    "ticker": "POOL",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "NOVO.B",
+    "country": "Denmark",
+    "exchange": "OCSE",
+    "primary_exchange": "OCSE",
+    "primary_ticker": "NOVO B"
+  },
+  {
+    "ticker": "IDXX",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "GMAB",
+    "country": "Denmark",
+    "exchange": "OCSE"
+  },
+  {
+    "ticker": "REC",
+    "country": "Italy",
+    "exchange": "MIL"
+  },
+  {
+    "ticker": "DSG",
+    "country": "Canada",
+    "exchange": "TSX"
+  },
+  {
+    "ticker": "NOVN",
+    "country": "Switzerland",
+    "exchange": "XSWX"
+  },
+  {
+    "ticker": "CL",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "PAYX",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "LSRCF",
+    "country": "Japan",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "Likely OTC/foreign listing; verify primary Japan exchange",
+    "primary_ticker": "6920",
+    "primary_exchange": "TSE"
+  },
+  {
+    "ticker": "MOUR",
+    "country": "Belgium",
+    "exchange": "XBRU"
+  },
+  {
+    "ticker": "LECO",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "AZO",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "CHD",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "BESI",
+    "country": "Netherlands",
+    "exchange": "XAMS"
+  },
+  {
+    "ticker": "UMG",
+    "country": "Netherlands",
+    "exchange": "XAMS"
+  },
+  {
+    "ticker": "HMS",
+    "country": "Sweden",
+    "exchange": "OSTO"
+  },
+  {
+    "ticker": "STE",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "CLA",
+    "country": "Canada",
+    "exchange": "TSX"
+  },
+  {
+    "ticker": "TET",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "JDG",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "DSFIR",
+    "country": "Switzerland",
+    "exchange": "XAMS"
+  },
+  {
+    "ticker": "NEE",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "ADBE",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "NEM",
+    "country": "Germany",
+    "exchange": "XTER"
+  },
+  {
+    "ticker": "SNPS",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "GEBN",
+    "country": "Switzerland",
+    "exchange": "XSWX"
+  },
+  {
+    "ticker": "DEMANT",
+    "country": "Denmark",
+    "exchange": "OCSE"
+  },
+  {
+    "ticker": "TXRH",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "LMAT",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "CER",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "INTU",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "TT",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "SU",
+    "country": "France",
+    "exchange": "XPAR"
+  },
+  {
+    "ticker": "TFII",
+    "country": "Canada",
+    "exchange": "TSX"
+  },
+  {
+    "ticker": "CSL",
+    "country": "Australia",
+    "exchange": "ASX"
+  },
+  {
+    "ticker": "ATD",
+    "country": "Canada",
+    "exchange": "TSX"
+  },
+  {
+    "ticker": "TSCO",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "ABBV",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "CBRAIN",
+    "country": "Denmark",
+    "exchange": "OCSE"
+  },
+  {
+    "ticker": "AMBU-B",
+    "country": "Denmark",
+    "exchange": "OCSE",
+    "alert": true,
+    "note": "Likely OTC/foreign listing; verify primary Japan exchange",
+    "primary_ticker": "AMBU B",
+    "primary_exchange": "OCSE"
+  },
+  {
+    "ticker": "SGN",
+    "country": "Poland",
+    "exchange": "WAR"
+  },
+  {
+    "ticker": "ASML",
+    "country": "Netherlands",
+    "exchange": "XAMS"
+  },
+  {
+    "ticker": "GTT",
+    "country": "France",
+    "exchange": "XPAR"
+  },
+  {
+    "ticker": "JKHY",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "ROL",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "CKN",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "MC",
+    "country": "France",
+    "exchange": "XPAR"
+  },
+  {
+    "ticker": "TMO",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "TOELF",
+    "country": "Japan",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "Likely OTC/foreign listing; verify primary Japan exchange",
+    "primary_ticker": "8035",
+    "primary_exchange": "TSE"
+  },
+  {
+    "ticker": "LR",
+    "country": "France",
+    "exchange": "XPAR"
+  },
+  {
+    "ticker": "MCD",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "NTDOY",
+    "country": "Japan",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "ADR/OTC ticker; primary listing is Japan",
+    "primary_ticker": "7974",
+    "primary_exchange": "TSE"
+  },
+  {
+    "ticker": "CSGP",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "WM",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "ATP",
+    "country": "Poland",
+    "exchange": "WAR"
+  },
+  {
+    "ticker": "AOF",
+    "country": "Germany",
+    "exchange": "XTER"
+  },
+  {
+    "ticker": "ADYEN",
+    "country": "Netherlands",
+    "exchange": "XAMS"
+  },
+  {
+    "ticker": "CCC",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "MYCR",
+    "country": "Sweden",
+    "exchange": "OSTO"
+  },
+  {
+    "ticker": "ALFA",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "V",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "KNSL",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "ENX",
+    "country": "France",
+    "exchange": "XPAR"
+  },
+  {
+    "ticker": "PANW",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "MNST",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "MLI",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "ABBN",
+    "country": "Switzerland",
+    "exchange": "XSWX"
+  },
+  {
+    "ticker": "MMC",
+    "country": "USA",
+    "exchange": "NYSE",
+    "primary_exchange": "NYSE",
+    "primary_ticker": "MRSH"
+  },
+  {
+    "ticker": "MONC",
+    "country": "Italy",
+    "exchange": "MIL"
+  },
+  {
+    "ticker": "CBOE",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "VITR",
+    "country": "Sweden",
+    "exchange": "OSTO"
+  },
+  {
+    "ticker": "ICE",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "SPGI",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "ULTA",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "CTAS",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "AMS",
+    "country": "Spain",
+    "exchange": "XMAD"
+  },
+  {
+    "ticker": "SGE",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "SMNNY",
+    "country": "Japan",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "ADR/OTC ticker; verify primary Japan exchange",
+    "primary_exchange": "TSE",
+    "primary_ticker": "5713"
+  },
+  {
+    "ticker": "KAOCF",
+    "country": "Japan",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "Likely OTC/foreign listing; verify primary Japan exchange",
+    "primary_exchange": "TSE",
+    "primary_ticker": "4452"
+  },
+  {
+    "ticker": "DIE",
+    "country": "Belgium",
+    "exchange": "XBRU"
+  },
+  {
+    "ticker": "ROP",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "NZYM.B",
+    "country": "Denmark",
+    "exchange": "OCSE",
+    "primary_ticker": "NSIS B",
+    "primary_exchange": "OCSE"
+  },
+  {
+    "ticker": "TXN",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "TVK",
+    "country": "Canada",
+    "exchange": "TSX"
+  },
+  {
+    "ticker": "TEQ",
+    "country": "Sweden",
+    "exchange": "OSTO"
+  },
+  {
+    "ticker": "AXON",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "CP",
+    "country": "Canada",
+    "exchange": "TSX"
+  },
+  {
+    "ticker": "ORCL",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "NZX",
+    "country": "New Zealand",
+    "exchange": "NZSE"
+  },
+  {
+    "ticker": "LRCX",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "QCOM",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "INFY",
+    "country": "India",
+    "exchange": "NSE"
+  },
+  {
+    "ticker": "CHE",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "BRO",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "AME",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "RAA",
+    "country": "Germany",
+    "exchange": "XTER"
+  },
+  {
+    "ticker": "RACE",
+    "country": "Italy",
+    "exchange": "MIL"
+  },
+  {
+    "ticker": "SRT3",
+    "country": "Germany",
+    "exchange": "XTER"
+  },
+  {
+    "ticker": "EVD",
+    "country": "Germany",
+    "exchange": "XTER"
+  },
+  {
+    "ticker": "HEXA.B",
+    "country": "Sweden",
+    "exchange": "OCSE",
+    "primary_ticker": "HEXA B",
+    "primary_exchange": "OCSE"
+  },
+  {
+    "ticker": "NOW",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "DSCSY",
+    "country": "Japan",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "ADR/OTC ticker; verify primary Japan exchange",
+    "primary_exchange": "TSE",
+    "primary_ticker": "6146"
+  },
+  {
+    "ticker": "UI",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "CTSH",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "LOTB",
+    "country": "Belgium",
+    "exchange": "XBRU"
+  },
+  {
+    "ticker": "NDAQ",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "TPL",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "SY1",
+    "country": "Germany",
+    "exchange": "XTER"
+  },
+  {
+    "ticker": "AMT",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "AMAT",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "GAMA",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "QLYS",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "BVXP",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "NET",
+    "country": "UK",
+    "exchange": "LSE",
+    "alert": true,
+    "note": "NET is ambiguous (e.g., Cloudflare is NYSE:NET). Verify intended company/listing."
+  },
+  {
+    "ticker": "ATCO.A",
+    "country": "Sweden",
+    "exchange": "OSTO"
+  },
+  {
+    "ticker": "NVR",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "GOOGL",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "MTHRY",
+    "country": "Japan",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "ADR/OTC ticker; verify primary Japan exchange",
+    "primary_exchange": "TSE",
+    "primary_ticker": "8031"
+  },
+  {
+    "ticker": "MCO",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "FAST",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "JNJ",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "ATEYY",
+    "country": "Japan",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "ADR/OTC ticker; verify primary Japan exchange",
+    "primary_exchange": "TSE",
+    "primary_ticker": "6857"
+  },
+  {
+    "ticker": "LOGN",
+    "country": "Switzerland",
+    "exchange": "XSWX"
+  },
+  {
+    "ticker": "WSO",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "CPRT",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "BR",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "CFR",
+    "country": "Switzerland",
+    "exchange": "XSWX"
+  },
+  {
+    "ticker": "BMI",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "LISN",
+    "country": "Switzerland",
+    "exchange": "XSWX"
+  },
+  {
+    "ticker": "CEVI",
+    "country": "Sweden",
+    "exchange": "OSTO"
+  },
+  {
+    "ticker": "SPSY",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "TDY",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "SSNLF",
+    "country": "South Korea",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "Likely OTC/foreign listing; primary is KRX",
+    "primary_exchange": "XKRX",
+    "primary_ticker": "005930"
+  },
+  {
+    "ticker": "CNR",
+    "country": "Canada",
+    "exchange": "TSX"
+  },
+  {
+    "ticker": "IMCD",
+    "country": "Netherlands",
+    "exchange": "XAMS"
+  },
+  {
+    "ticker": "SAP",
+    "country": "Germany",
+    "exchange": "XTER"
+  },
+  {
+    "ticker": "ANDR",
+    "country": "Austria",
+    "exchange": "XPRA"
+  },
+  {
+    "ticker": "LIN",
+    "country": "Ireland",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "MCHP",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "PLTR",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "AMZN",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "AAPL",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "MANH",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "SQN",
+    "country": "Switzerland",
+    "exchange": "XSWX"
+  },
+  {
+    "ticker": "SCT",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "ORLY",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "IFCN",
+    "country": "Switzerland",
+    "exchange": "XSWX"
+  },
+  {
+    "ticker": "FANUY",
+    "country": "Japan",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "ADR/OTC ticker; verify primary Japan exchange",
+    "primary_exchange": "TSE",
+    "primary_ticker": "6954"
+  },
+  {
+    "ticker": "TSM",
+    "country": "Taiwan",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "IP",
+    "country": "Italy",
+    "exchange": "MIL"
+  },
+  {
+    "ticker": "DPLM",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "REG1V",
+    "country": "Finland",
+    "exchange": "OHEL"
+  },
+  {
+    "ticker": "CSPCY",
+    "country": "China / HK",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "ADR/OTC ticker; primary likely HKEX",
+    "primary_exchange": "HKSE",
+    "primary_ticker": "01093"
+  },
+  {
+    "ticker": "KPG",
+    "country": "Australia",
+    "exchange": "ASX"
+  },
+  {
+    "ticker": "ABT",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "ERF",
+    "country": "France",
+    "exchange": "XPAR"
+  },
+  {
+    "ticker": "NIBE.B",
+    "country": "Sweden",
+    "exchange": "OCSE",
+    "primary_ticker": "NIBE B",
+    "primary_exchange": "OCSE"
+  },
+  {
+    "ticker": "KLAC",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "WSM",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "META",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "BYCRF",
+    "country": "Japan",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "Likely OTC/foreign listing; verify primary Japan exchange",
+    "primary_exchange": "TSE",
+    "primary_ticker": "6532"
+  },
+  {
+    "ticker": "LAGR.B",
+    "country": "Sweden",
+    "exchange": "OCSE",
+    "primary_ticker": "LAGR B",
+    "primary_exchange": "OCSE"
+  },
+  {
+    "ticker": "FDS",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "ZTS",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "MEKKO",
+    "country": "Finland",
+    "exchange": "OHEL"
+  },
+  {
+    "ticker": "KNIN",
+    "country": "Switzerland",
+    "exchange": "XSWX"
+  },
+  {
+    "ticker": "EVS",
+    "country": "Belgium",
+    "exchange": "XBRU"
+  },
+  {
+    "ticker": "AAD",
+    "country": "Germany",
+    "exchange": "XTER"
+  },
+  {
+    "ticker": "ANPDY",
+    "country": "China / HK",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "ADR/OTC ticker; primary likely HKEX",
+    "primary_exchange": "HKSE",
+    "primary_ticker": "02020"
+  },
+  {
+    "ticker": "ITP",
+    "country": "France",
+    "exchange": "XPAR"
+  },
+  {
+    "ticker": "PAYC",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "WAT",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "BAG",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "ECL",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "MFT",
+    "country": "New Zealand",
+    "exchange": "NZSE"
+  },
+  {
+    "ticker": "VID",
+    "country": "Spain",
+    "exchange": "XMAD"
+  },
+  {
+    "ticker": "ZBRA",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "FPH",
+    "country": "New Zealand",
+    "exchange": "NZSE"
+  },
+  {
+    "ticker": "INVE.A",
+    "country": "Sweden",
+    "exchange": "OSTO"
+  },
+  {
+    "ticker": "XRO",
+    "country": "New Zealand",
+    "exchange": "ASX"
+  },
+  {
+    "ticker": "MDT",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "OCL",
+    "country": "Australia",
+    "exchange": "ASX"
+  },
+  {
+    "ticker": "DOL",
+    "country": "Canada",
+    "exchange": "TSX"
+  },
+  {
+    "ticker": "TCEHY",
+    "country": "China / HK",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "ADR/OTC ticker; primary is HKEX:0700",
+    "primary_exchange": "HKSE",
+    "primary_ticker": "00700"
+  },
+  {
+    "ticker": "DHR",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "OTCM",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "LSTR",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "UFPI",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "FN",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "REY",
+    "country": "Italy",
+    "exchange": "MIL"
+  },
+  {
+    "ticker": "NKE",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "HLMA",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "RBT",
+    "country": "France",
+    "exchange": "XPAR"
+  },
+  {
+    "ticker": "SOL",
+    "country": "Italy",
+    "exchange": "MIL"
+  },
+  {
+    "ticker": "ASM",
+    "country": "Netherlands",
+    "exchange": "XAMS"
+  },
+  {
+    "ticker": "SOON",
+    "country": "Switzerland",
+    "exchange": "XSWX"
+  },
+  {
+    "ticker": "AMP",
+    "country": "Italy",
+    "exchange": "MIL"
+  },
+  {
+    "ticker": "ODFL",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "AVGO",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "COH",
+    "country": "Australia",
+    "exchange": "ASX"
+  },
+  {
+    "ticker": "DLR",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "AHT",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "EFX",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "APPF",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "NTES",
+    "country": "China / HK",
+    "exchange": "NASDAQ",
+    "alert": true,
+    "note": "NTES is US-listed ADS; primary is HKEX:9999",
+    "primary_exchange": "HKSE",
+    "primary_ticker": "09999"
+  },
+  {
+    "ticker": "FTNT",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "FICO",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "NVDA",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "DIA",
+    "country": "Italy",
+    "exchange": "MIL"
+  },
+  {
+    "ticker": "SCHN",
+    "country": "Switzerland",
+    "exchange": "XSWX"
+  },
+  {
+    "ticker": "AOS",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "VRSN",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "DSY",
+    "country": "France",
+    "exchange": "XPAR"
+  },
+  {
+    "ticker": "ANSS",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "DE",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "RKT",
+    "country": "UK",
+    "exchange": "LSE",
+    "alert": true,
+    "note": "RKT may be ambiguous; verify UK listing"
+  },
+  {
+    "ticker": "A",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "LSE",
+    "country": "UK",
+    "exchange": "LSE",
+    "alert": true,
+    "note": "Ticker equals exchange acronym; verify",
+    "primary_exchange": "LSE",
+    "primary_ticker": "LSEG"
+  },
+  {
+    "ticker": "SPX",
+    "country": "UK",
+    "exchange": "LSE",
+    "alert": true,
+    "note": "SPX may be ambiguous; verify"
+  },
+  {
+    "ticker": "SAF",
+    "country": "France",
+    "exchange": "XPAR"
+  },
+  {
+    "ticker": "PEP",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "ITX",
+    "country": "Spain",
+    "exchange": "XMAD"
+  },
+  {
+    "ticker": "TSTL",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "LNNGY",
+    "country": "China / HK",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "ADR/OTC ticker; primary is HKEX:2331",
+    "primary_exchange": "HKSE",
+    "primary_ticker": "02331"
+  },
+  {
+    "ticker": "TDG",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "EL",
+    "country": "France",
+    "exchange": "XPAR",
+    "alert": true,
+    "note": "EL is commonly US (Estée Lauder); verify France mapping"
+  },
+  {
+    "ticker": "AI",
+    "country": "France",
+    "exchange": "XPAR"
+  },
+  {
+    "ticker": "EVO",
+    "country": "Sweden",
+    "exchange": "OSTO"
+  },
+  {
+    "ticker": "MEDP",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "EXPO",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "REA",
+    "country": "Australia",
+    "exchange": "ASX"
+  },
+  {
+    "ticker": "LOW",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "CCOEY",
+    "country": "Japan",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "ADR/OTC ticker; verify primary Japan exchange",
+    "primary_exchange": "TSE",
+    "primary_ticker": "9697"
+  },
+  {
+    "ticker": "ADDT.B",
+    "country": "Sweden",
+    "exchange": "OSTO",
+    "primary_exchange": "OSTO",
+    "primary_ticker": "ADDT B"
+  },
+  {
+    "ticker": "VRSK",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "KNEBV",
+    "country": "Finland",
+    "exchange": "OHEL"
+  },
+  {
+    "ticker": "ANET",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "SYK",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "CHEMM",
+    "country": "Denmark",
+    "exchange": "OCSE"
+  },
+  {
+    "ticker": "STMN",
+    "country": "Switzerland",
+    "exchange": "XSWX"
+  },
+  {
+    "ticker": "APH",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "SSD",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "MELI",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "DIM",
+    "country": "France",
+    "exchange": "XPAR"
+  },
+  {
+    "ticker": "SBAC",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "WTC",
+    "country": "Australia",
+    "exchange": "ASX"
+  },
+  {
+    "ticker": "HEI",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "BAM",
+    "country": "Canada",
+    "exchange": "TSX",
+    "alert": true,
+    "note": "BAM also exists in US; verify intended listing"
+  },
+  {
+    "ticker": "TNE",
+    "country": "Australia",
+    "exchange": "ASX"
+  },
+  {
+    "ticker": "MA",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "EDEN",
+    "country": "France",
+    "exchange": "XPAR"
+  },
+  {
+    "ticker": "LVC",
+    "country": "Poland",
+    "exchange": "WAR",
+    "alert": true,
+    "note": "Previously known as LiveChat Software",
+    "primary_exchange": "WAR",
+    "primary_ticker": "TXT"
+  },
+  {
+    "ticker": "OBIIF",
+    "country": "Japan",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "Likely OTC/foreign listing; verify primary Japan exchange",
+    "primary_exchange": "TSE",
+    "primary_ticker": "4684"
+  },
+  {
+    "ticker": "CDNS",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "GIB.A",
+    "country": "Canada",
+    "exchange": "TSX"
+  },
+  {
+    "ticker": "CVCO",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "KOBNF",
+    "country": "Japan",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "Likely OTC/foreign listing; verify primary Japan exchange",
+    "primary_exchange": "TSE",
+    "primary_ticker": "3038"
+  },
+  {
+    "ticker": "BEAN",
+    "country": "Switzerland",
+    "exchange": "XSWX"
+  },
+  {
+    "ticker": "TER",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "LLY",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "EW",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "NORBT",
+    "country": "Norway",
+    "exchange": "OSL"
+  },
+  {
+    "ticker": "MORN",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "DSV",
+    "country": "Denmark",
+    "exchange": "OCSE"
+  },
+  {
+    "ticker": "SIKA",
+    "country": "Switzerland",
+    "exchange": "XSWX"
+  },
+  {
+    "ticker": "AFX",
+    "country": "Germany",
+    "exchange": "XTER"
+  },
+  {
+    "ticker": "GRG",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "CPU",
+    "country": "Australia",
+    "exchange": "ASX"
+  },
+  {
+    "ticker": "EQIX",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "CSU",
+    "country": "Canada",
+    "exchange": "TSX"
+  },
+  {
+    "ticker": "MSCI",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "FIX",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "PME",
+    "country": "Australia",
+    "exchange": "ASX"
+  },
+  {
+    "ticker": "BC8",
+    "country": "Germany",
+    "exchange": "XTER"
+  },
+  {
+    "ticker": "VIT.B",
+    "country": "Sweden",
+    "exchange": "OCSE",
+    "primary_ticker": "VIT B",
+    "primary_exchange": "OCSE"
+  },
+  {
+    "ticker": "DB1",
+    "country": "Germany",
+    "exchange": "XTER"
+  },
+  {
+    "ticker": "ACN",
+    "country": "Ireland",
+    "exchange": "NYSE",
+    "alert": true,
+    "note": "ACN is NYSE-listed; country Ireland may be domicile"
+  },
+  {
+    "ticker": "SECT.B",
+    "country": "Sweden",
+    "exchange": "OCSE",
+    "primary_ticker": "SECT B",
+    "primary_exchange": "OCSE"
+  },
+  {
+    "ticker": "EXPD",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "ITW",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "PGHN",
+    "country": "Switzerland",
+    "exchange": "XSWX"
+  },
+  {
+    "ticker": "NRO",
+    "country": "France",
+    "exchange": "XPAR"
+  },
+  {
+    "ticker": "UNH",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "VEEV",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "PH",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "OR",
+    "country": "France",
+    "exchange": "XPAR"
+  },
+  {
+    "ticker": "SAN",
+    "country": "France",
+    "exchange": "XPAR",
+    "alert": true,
+    "note": "SAN is used by multiple companies; verify"
+  },
+  {
+    "ticker": "PG",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "GMYTF",
+    "country": "Japan",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "Likely OTC/foreign listing; verify primary Japan exchange",
+    "primary_exchange": "TSE",
+    "primary_ticker": "3769"
+  },
+  {
+    "ticker": "AZN",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "WDFC",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "HKXCY",
+    "country": "China / HK",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "ADR/OTC ticker; primary is HKEX:0388",
+    "primary_exchange": "HKSE",
+    "primary_ticker": "00388"
+  },
+  {
+    "ticker": "IVSO",
+    "country": "Sweden",
+    "exchange": "OSTO"
+  },
+  {
+    "ticker": "BN",
+    "country": "Canada",
+    "exchange": "TSX",
+    "alert": true,
+    "note": "BN/BAM structures can vary; verify intended listing"
+  },
+  {
+    "ticker": "CRWD",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "AZPN",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "NFLX",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "AMD",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "LII",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "WKL",
+    "country": "Netherlands",
+    "exchange": "XAMS"
+  },
+  {
+    "ticker": "MTD",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "ADP",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "AUTO",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "RMV",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "MUM",
+    "country": "Germany",
+    "exchange": "XTER"
+  },
+  {
+    "ticker": "INDT",
+    "country": "Sweden",
+    "exchange": "OSTO"
+  },
+  {
+    "ticker": "LIFCO.B",
+    "country": "Sweden",
+    "exchange": "OSTO",
+    "primary_exchange": "OSTO",
+    "primary_ticker": "LIFCO B"
+  },
+  {
+    "ticker": "HOCPY",
+    "country": "Japan",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "ADR/OTC ticker; verify primary Japan exchange",
+    "primary_exchange": "TSE",
+    "primary_ticker": "7741"
+  },
+  {
+    "ticker": "IT",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "RMD",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "ASSA.B",
+    "country": "Sweden",
+    "exchange": "OSTO",
+    "primary_exchange": "OSTO",
+    "primary_ticker": "ASSA B"
+  },
+  {
+    "ticker": "MPWR",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "LATO.B",
+    "country": "Sweden",
+    "exchange": "OSTO",
+    "primary_exchange": "OSTO",
+    "primary_ticker": "LATO B"
+  },
+  {
+    "ticker": "ADI",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "SHW",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "FI",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "ARGX",
+    "country": "Belgium",
+    "exchange": "XBRU"
+  },
+  {
+    "ticker": "TIH",
+    "country": "Canada",
+    "exchange": "TSX"
+  },
+  {
+    "ticker": "WST",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "BKNG",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "WCN",
+    "country": "Canada",
+    "exchange": "TSX"
+  },
+  {
+    "ticker": "LMGIF",
+    "country": "Canada",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "OTC/foreign listing; primary is TSX Venture",
+    "primary_exchange": "TSXV",
+    "primary_ticker": "LMN"
+  },
+  {
+    "ticker": "XTB",
+    "country": "Poland",
+    "exchange": "WAR"
+  },
+  {
+    "ticker": "IBKR",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "EXPN",
+    "country": "Ireland",
+    "exchange": "LSE",
+    "alert": true,
+    "note": "EXPN is typically LSE-listed; Ireland may be mismatch"
+  },
+  {
+    "ticker": "BLK",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "MSFT",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "ADSK",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "TOI",
+    "country": "Netherlands",
+    "exchange": "XAMS",
+    "alert": true,
+    "note": "TOI may be ambiguous; verify listing",
+    "primary_exchange": "TSXV",
+    "primary_ticker": "TOI"
+  },
+  {
+    "ticker": "TRI",
+    "country": "Canada",
+    "exchange": "TSX"
+  },
+  {
+    "ticker": "CRM",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "WTS",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "CVLT",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "HD",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "CME",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "POT",
+    "country": "New Zealand",
+    "exchange": "NZSE"
+  },
+  {
+    "ticker": "ORNBV",
+    "country": "Finland",
+    "exchange": "OHEL"
+  },
+  {
+    "ticker": "DG",
+    "country": "France",
+    "exchange": "XPAR",
+    "alert": true,
+    "note": "DG is used by multiple companies; verify France mapping"
+  },
+  {
+    "ticker": "COST",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "ISRG",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "DNP",
+    "country": "Poland",
+    "exchange": "WAR"
+  },
+  {
+    "ticker": "RMS",
+    "country": "France",
+    "exchange": "XPAR"
+  },
+  {
+    "ticker": "ROG",
+    "country": "Switzerland",
+    "exchange": "XSWX"
+  },
+  {
+    "ticker": "5344",
+    "country": "Japan",
+    "exchange": "TSE",
+    "alert": true,
+    "note": "Numeric ticker—verify company mapping",
+    "primary_exchange": "TSE",
+    "primary_ticker": "5344"
+  },
+  {
+    "ticker": "GWW",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "KYCCF",
+    "country": "Japan",
+    "exchange": "OTC",
+    "alert": true,
+    "note": "Likely OTC/foreign listing; verify primary Japan exchange",
+    "primary_exchange": "TSE",
+    "primary_ticker": "6861"
+  },
+  {
+    "ticker": "REL",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "TTC",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "BIOG.B",
+    "country": "Sweden",
+    "exchange": "OSTO",
+    "primary_exchange": "OSTO",
+    "primary_ticker": "BIOG B"
+
+  },
+  {
+    "ticker": "CTZ",
+    "country": "Canada",
+    "exchange": "TSXV"
+  },
+  {
+    "ticker": "HOLCO",
+    "country": "Netherlands",
+    "exchange": "XAMS",
+    "alert": true,
+    "note": "May be holding/vehicle—verify listing"
+  },
+  {
+    "ticker": "GIVN",
+    "country": "Switzerland",
+    "exchange": "XSWX"
+  },
+  {
+    "ticker": "IEX",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "HSY",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "KO",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "VZN",
+    "country": "Switzerland",
+    "exchange": "XSWX"
+  },
+  {
+    "ticker": "HEM",
+    "country": "Sweden",
+    "exchange": "OSTO"
+  },
+  {
+    "ticker": "PRY",
+    "country": "Italy",
+    "exchange": "MIL"
+  },
+  {
+    "ticker": "YOU",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "SE",
+    "country": "Singapore",
+    "exchange": "NYSE",
+    "alert": true,
+    "note": "SE is US-listed ADR; primary ties to Singapore/SEA"
+  },
+  {
+    "ticker": "FFH",
+    "country": "Canada",
+    "exchange": "TSX"
+  },
+  {
+    "ticker": "NTEK.B",
+    "country": "Sweden",
+    "exchange": "OSTO",
+    "primary_exchange": "OSTO",
+    "primary_ticker": "NTEK B"
+  },
+  {
+    "ticker": "PI",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "DIGIA",
+    "country": "Finland",
+    "exchange": "OHEL"
+  },
+  {
+    "ticker": "STRL",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "PLXS",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "LIME",
+    "country": "Sweden",
+    "exchange": "OSTO"
+  },
+  {
+    "ticker": "LNTH",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "BOX",
+    "country": "USA",
+    "exchange": "NYSE"
+  },
+  {
+    "ticker": "PCTY",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "660",
+    "country": "South Korea",
+    "exchange": "KRX",
+    "alert": true,
+    "note": "Numeric ticker—verify company mapping",
+    "primary_exchange": "XKRX",
+    "primary_ticker": "000660"
+  },
+  {
+    "ticker": "5930",
+    "country": "South Korea",
+    "exchange": "KRX",
+    "alert": true,
+    "note": "Numeric ticker—verify company mapping",
+    "primary_exchange": "XKRX",
+    "primary_ticker": "005930"
+  },
+  {
+    "ticker": "SGSN",
+    "country": "Switzerland",
+    "exchange": "XSWX"
+  },
+  {
+    "ticker": "CMCX",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "ULVR",
+    "country": "UK",
+    "exchange": "LSE"
+  },
+  {
+    "ticker": "MU",
+    "country": "USA",
+    "exchange": "NASDAQ"
+  },
+  {
+    "ticker": "UCB",
+    "country": "Belgium",
+    "exchange": "XBRU"
+  },
+  {
+    "ticker": "BABA",
+    "country": "Canada",
+    "exchange": "TSXV",
+    "alert": true,
+    "note": "Ticker-country combo unusual; Alibaba ADR is typically NYSE:BABA and HKEX:9988. Verify intended listing.",
+    "primary_exchange": "NYSE",
+    "primary_ticker": "BABA"
+  }
+]

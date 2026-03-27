@@ -1,0 +1,1 @@
+from quick_insight.ingest.gurufocus.financials.endpoint import fetch_financials
