@@ -205,3 +205,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+
+## my additions
+
+.env.local
+.env
+backend/.venv/
+frontend/.next/
+frontend/node_modules/
