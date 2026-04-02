@@ -39,6 +39,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "https://bbterminal.vercel.app",
+        "https://bbterminal-api.vercel.app",
     ],
     allow_methods=["*"],
     allow_headers=["*"],
