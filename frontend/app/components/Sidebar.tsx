@@ -11,6 +11,7 @@ const navItems = [
   { href: '/companies', label: 'Companies' },
 ];
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 const AUTH_PAGES = ['/login', '/set-password'];
 
 export default function Sidebar() {
@@ -18,6 +19,8 @@ export default function Sidebar() {
   const router = useRouter();
   const [email, setEmail] = useState<string | null>(null);
   const [checked, setChecked] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
@@ -32,6 +35,28 @@ export default function Sidebar() {
     await supabase.auth.signOut();
     router.push('/login');
     router.refresh();
+  }
+
+  async function handleDeleteAccount() {
+    setDeleting(true);
+    try {
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('No session');
+      const res = await fetch(`${API_URL}/api/auth/delete-account`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (!res.ok) throw new Error('Delete failed');
+      await supabase.auth.signOut();
+      router.push('/login');
+      router.refresh();
+    } catch {
+      alert('Failed to delete account. Please try again.');
+    } finally {
+      setDeleting(false);
+      setShowDeleteConfirm(false);
+    }
   }
 
   // Hide sidebar on auth pages or when not logged in
@@ -71,6 +96,33 @@ export default function Sidebar() {
         >
           Sign out
         </button>
+        {!showDeleteConfirm ? (
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="w-full px-3 py-2.5 rounded-lg text-sm font-medium text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors text-left"
+          >
+            Delete account
+          </button>
+        ) : (
+          <div className="px-3 py-2 space-y-2">
+            <p className="text-sm text-rose-400">Are you sure? This cannot be undone.</p>
+            <div className="flex gap-2">
+              <button
+                onClick={handleDeleteAccount}
+                disabled={deleting}
+                className="flex-1 px-2 py-1.5 rounded-lg text-sm font-medium bg-rose-600 hover:bg-rose-500 text-white transition-colors disabled:opacity-50"
+              >
+                {deleting ? 'Deleting...' : 'Yes, delete'}
+              </button>
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="flex-1 px-2 py-1.5 rounded-lg text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </aside>
   );

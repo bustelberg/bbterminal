@@ -4,7 +4,7 @@ import os
 import re
 from datetime import date
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -62,6 +62,20 @@ def _as_of_date_from_filename(filename: str) -> date:
     month = _MONTHS[m.group(1)]
     year = int(m.group(2))
     return date(year, month, 1)
+
+
+@app.delete("/api/auth/delete-account")
+async def delete_account(authorization: str = Header(...)):
+    """Delete the authenticated user's account."""
+    token = authorization.replace("Bearer ", "")
+    # Verify the token and get the user
+    user_resp = supabase.auth.get_user(token)
+    if not user_resp or not user_resp.user:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user_id = user_resp.user.id
+    # Delete user via admin API (requires service role key)
+    supabase.auth.admin.delete_user(user_id)
+    return {"ok": True}
 
 
 @app.get("/api/hello")
