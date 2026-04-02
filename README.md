@@ -42,7 +42,7 @@ This spins up a local Postgres instance, auth server, and Studio UI at `http://l
 
 ```bash
 cd backend
-uv sync                   # install dependencies
+uv sync                   # install dependencies via uv tool
 uv run uvicorn main:app --reload --port 8000
 ```
 
