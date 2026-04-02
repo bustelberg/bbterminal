@@ -68,13 +68,17 @@ def _as_of_date_from_filename(filename: str) -> date:
 async def delete_account(authorization: str = Header(...)):
     """Delete the authenticated user's account."""
     token = authorization.replace("Bearer ", "")
-    # Verify the token and get the user
-    user_resp = supabase.auth.get_user(token)
+    try:
+        user_resp = supabase.auth.get_user(token)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Token verification failed: {e}")
     if not user_resp or not user_resp.user:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(status_code=401, detail="Invalid token — no user found")
     user_id = user_resp.user.id
-    # Delete user via admin API (requires service role key)
-    supabase.auth.admin.delete_user(user_id)
+    try:
+        supabase.auth.admin.delete_user(user_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Admin delete failed: {e}")
     return {"ok": True}
 
 

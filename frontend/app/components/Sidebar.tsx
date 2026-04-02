@@ -47,12 +47,15 @@ export default function Sidebar() {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
-      if (!res.ok) throw new Error('Delete failed');
+      if (!res.ok) {
+        const body = await res.text();
+        throw new Error(`${res.status}: ${body}`);
+      }
       await supabase.auth.signOut();
       router.push('/login');
       router.refresh();
-    } catch {
-      alert('Failed to delete account. Please try again.');
+    } catch (err) {
+      alert(`Failed to delete account:\n${err instanceof Error ? err.message : err}`);
     } finally {
       setDeleting(false);
       setShowDeleteConfirm(false);
