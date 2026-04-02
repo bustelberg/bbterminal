@@ -88,6 +88,30 @@ def hello():
     return {"message": "Hello from FastAPI + uv!"}
 
 
+@app.get("/api/health")
+def health():
+    """Check Supabase connectivity."""
+    try:
+        url = os.environ.get("SUPABASE_URL", "NOT SET")
+        has_key = "YES" if os.environ.get("SUPABASE_SERVICE_KEY") else "NO"
+        # Try a simple query
+        resp = supabase.table("company").select("company_id").limit(1).execute()
+        return {
+            "status": "ok",
+            "supabase_url": url,
+            "has_service_key": has_key,
+            "test_query": "success",
+            "rows": len(resp.data or []),
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "supabase_url": os.environ.get("SUPABASE_URL", "NOT SET"),
+            "has_service_key": "YES" if os.environ.get("SUPABASE_SERVICE_KEY") else "NO",
+            "error": str(e),
+        }
+
+
 @app.get("/api/items")
 def get_items():
     try:
