@@ -130,7 +130,6 @@ function PortfolioDetail({ portfolio, onBack }: { portfolio: CachedPortfolio; on
                 <th className="px-3 py-3 text-right font-medium w-28">Current EUR</th>
                 <th className="px-3 py-3 text-right font-medium w-28">YTD EUR</th>
                 <th className="px-3 py-3 text-right font-medium w-24">YTD % EUR</th>
-                <th className="px-3 py-3 text-right font-medium w-24">YTD % Local</th>
                 <th className="px-3 py-3 text-right font-medium w-20">Weight</th>
               </tr>
             </thead>
@@ -144,7 +143,6 @@ function PortfolioDetail({ portfolio, onBack }: { portfolio: CachedPortfolio; on
                   <td className="px-3 py-2.5 text-right text-gray-300 font-mono text-xs">{fmtEur(h.current_value_eur)}</td>
                   <td className={`px-3 py-2.5 text-right font-mono text-xs ${returnColor(h.ytd_return_eur)}`}>{fmtEur(h.ytd_return_eur)}</td>
                   <td className={`px-3 py-2.5 text-right font-mono text-xs font-medium ${returnColor(h.ytd_return_pct)}`}>{fmtPct(h.ytd_return_pct)}</td>
-                  <td className={`px-3 py-2.5 text-right font-mono text-xs ${returnColor(h.ytd_return_local_pct)}`}>{fmtPct(h.ytd_return_local_pct)}</td>
                   <td className="px-3 py-2.5 text-right text-gray-500 font-mono text-xs">{h.weight != null ? (h.weight * 100).toFixed(2) + '%' : '—'}</td>
                 </tr>
               ))}
@@ -158,7 +156,6 @@ function PortfolioDetail({ portfolio, onBack }: { portfolio: CachedPortfolio; on
                 <td className="px-3 py-3 text-right text-white font-mono text-xs font-semibold">{fmtEur(result.total_current_eur)}</td>
                 <td className={`px-3 py-3 text-right font-mono text-xs font-semibold ${returnColor(result.total_ytd_eur)}`}>{fmtEur(result.total_ytd_eur)}</td>
                 <td className={`px-3 py-3 text-right font-mono text-xs font-semibold ${returnColor(result.total_ytd_pct)}`}>{fmtPct(result.total_ytd_pct)}</td>
-                <td></td>
                 <td className="px-3 py-3 text-right text-gray-400 font-mono text-xs font-medium">
                   {(result.holdings.reduce((s, h) => s + (h.weight ?? 0), 0) * 100).toFixed(2)}%
                 </td>

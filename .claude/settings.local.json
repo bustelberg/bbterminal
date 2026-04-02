@@ -13,7 +13,9 @@
       "Bash(curl -s http://localhost:8000/api/longequity/snapshots)",
       "Bash(python -m json.tool)",
       "Bash(npx tsc:*)",
-      "Bash(find /c/Users/ReinierSchepBustelbe/Documents/github/bbterminal/old_src -name .env* -o -name *.env)"
+      "Bash(find /c/Users/ReinierSchepBustelbe/Documents/github/bbterminal/old_src -name .env* -o -name *.env)",
+      "Bash(grep -E \"\\\\.\\(py|tsx|jsx\\)$\")",
+      "Bash(npx next:*)"
     ]
   }
 }

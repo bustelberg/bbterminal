@@ -24,6 +24,8 @@ from ingest.load_into_supabase import (
     fix_company_primary_keys,
 )
 from ingest.resolve_tickers import detect_unknown_tickers, resolve_via_openfigi
+from ingest.earnings import fetch_financials, fetch_analyst_estimates, fetch_indicators
+from ingest.prices import ensure_prices_for_company
 
 load_dotenv()
 
@@ -499,5 +501,197 @@ async def delete_company(company_id: int):
     supabase.table("metric_data").delete().eq("company_id", company_id).execute()
     supabase.table("company").delete().eq("company_id", company_id).execute()
     return {"ok": True}
+
+
+# ─────────────────────────── Earnings endpoints ────────────────────────────
+
+def _get_company_or_404(company_id: int) -> dict:
+    resp = (
+        supabase.table("company")
+        .select("company_id,primary_ticker,primary_exchange,company_name")
+        .eq("company_id", company_id)
+        .limit(1)
+        .execute()
+    )
+    if not resp.data:
+        raise HTTPException(status_code=404, detail="Company not found")
+    return resp.data[0]
+
+
+async def _earnings_refresh_stream(company_id: int, sources: list[str], force: bool):
+    """SSE stream for earnings data refresh."""
+    def event(msg_type: str, message: str) -> str:
+        return f"data: {json.dumps({'type': msg_type, 'message': message})}\n\n"
+
+    company = _get_company_or_404(company_id)
+    ticker = company["primary_ticker"]
+    exchange = company["primary_exchange"]
+    name = company.get("company_name") or f"{ticker}.{exchange}"
+
+    yield event("info", f"Refreshing earnings data for {name} ({ticker}.{exchange})")
+
+    for source in sources:
+        yield event("info", f"")
+        yield event("info", f"--- {source.upper()} ---")
+
+        try:
+            if source == "financials":
+                r = await asyncio.to_thread(
+                    fetch_financials, supabase, company_id, ticker, exchange,
+                    force_refresh=force,
+                )
+            elif source == "analyst_estimates":
+                r = await asyncio.to_thread(
+                    fetch_analyst_estimates, supabase, company_id, ticker, exchange,
+                    force_refresh=force,
+                )
+            elif source == "indicators":
+                r = await asyncio.to_thread(
+                    fetch_indicators, supabase, company_id, ticker, exchange,
+                    force_refresh=force,
+                )
+            elif source == "prices":
+                pr = await asyncio.to_thread(
+                    ensure_prices_for_company, supabase, company_id, ticker, exchange,
+                    force_refresh=force,
+                )
+                for log_line in pr.logs:
+                    yield event("info", f"  {log_line}")
+                if pr.error:
+                    yield event("error", f"  Error: {pr.error}")
+                else:
+                    yield event("info", f"  Result: {pr.rows_loaded} rows loaded, {pr.total_prices} total prices")
+                continue
+            else:
+                yield event("error", f"Unknown source: {source}")
+                continue
+
+            for log_line in r.logs:
+                yield event("info", f"  {log_line}")
+
+            if r.error:
+                yield event("error", f"  Error: {r.error}")
+            else:
+                yield event("info", f"  Result: {r.rows_loaded} rows loaded, {r.metrics_found} metrics")
+
+        except Exception as e:
+            yield event("error", f"  {source} failed: {e}")
+
+    yield event("info", "")
+    yield event("done", "Earnings refresh complete.")
+
+
+@app.post("/api/earnings/{company_id}/refresh/{source}")
+async def refresh_earnings_source(company_id: int, source: str, force: bool = False):
+    """Refresh a single earnings data source. SSE stream."""
+    valid = {"financials", "analyst_estimates", "indicators"}
+    if source not in valid:
+        raise HTTPException(status_code=400, detail=f"source must be one of {valid}")
+    return StreamingResponse(
+        _earnings_refresh_stream(company_id, [source], force),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/earnings/{company_id}/refresh-all")
+async def refresh_earnings_all(company_id: int, force: bool = False):
+    """Refresh all earnings data sources. SSE stream."""
+    return StreamingResponse(
+        _earnings_refresh_stream(
+            company_id, ["financials", "analyst_estimates", "indicators"], force
+        ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+_DASHBOARD_METRIC_CODES = [
+    # Financials — Per Share Data
+    "annuals__Per Share Data__Month End Stock Price",
+    "annuals__Per Share Data__EPS without NRI",
+    "annuals__Per Share Data__Dividends per Share",
+    "annuals__Per Share Data__Free Cash Flow per Share",
+    "annuals__Per Share Data__Earnings per Share (Diluted)",
+    # Financials — Balance Sheet
+    "annuals__Balance Sheet__Debt-to-Equity",
+    # Financials — Ratios
+    "annuals__Ratios__Capex-to-Revenue",
+    "annuals__Ratios__Capex-to-Operating-Cash-Flow",
+    # Financials — Cashflow / Income
+    "annuals__Cashflow Statement__Free Cash Flow",
+    "annuals__Income Statement__Net Income",
+    "annuals__Income Statement__EPS (Diluted)",
+    # Financials — Valuation
+    "annuals__Valuation Ratios__FCF Yield %",
+    # Indicators (quarterly)
+    "indicator_q_interest_coverage",
+    "indicator_q_roe",
+    "indicator_q_roic",
+    "indicator_q_gross_margin",
+    "indicator_q_net_margin",
+    "indicator_q_forward_pe_ratio",
+    "indicator_q_peg_ratio",
+    "indicator_q_fcf_yield",
+    # Daily close prices
+    "close_price",
+    # Analyst estimates (annual_*)
+    # These are fetched with a prefix filter below
+]
+
+
+@app.get("/api/earnings/{company_id}/metrics")
+async def get_earnings_metrics(company_id: int):
+    """Get dashboard metrics for a company (source=gurufocus, dates >= 2015)."""
+    try:
+        # Fetch specific metric codes
+        resp = (
+            supabase.table("metric_data")
+            .select("metric_code,target_date,numeric_value,is_prediction")
+            .eq("company_id", company_id)
+            .eq("source_code", "gurufocus")
+            .gte("target_date", "2015-01-01")
+            .in_("metric_code", _DASHBOARD_METRIC_CODES)
+            .order("target_date")
+            .limit(5000)
+            .execute()
+        )
+        rows = resp.data or []
+
+        # Also fetch analyst estimates (annual_* prefix) — separate query
+        resp2 = (
+            supabase.table("metric_data")
+            .select("metric_code,target_date,numeric_value,is_prediction")
+            .eq("company_id", company_id)
+            .eq("source_code", "gurufocus")
+            .eq("is_prediction", True)
+            .gte("target_date", "2015-01-01")
+            .like("metric_code", "annual_%")
+            .order("target_date")
+            .limit(2000)
+            .execute()
+        )
+        rows.extend(resp2.data or [])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Query failed: {e}")
+    return rows
+
+
+@app.get("/api/earnings/{company_id}/metric-codes")
+async def get_earnings_metric_codes(company_id: int):
+    """Debug: list distinct metric codes stored for a company."""
+    try:
+        resp = (
+            supabase.table("metric_data")
+            .select("metric_code")
+            .eq("company_id", company_id)
+            .eq("source_code", "gurufocus")
+            .limit(10000)
+            .execute()
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Query failed: {e}")
+    codes = sorted(set(r["metric_code"] for r in (resp.data or [])))
+    return {"count": len(codes), "codes": codes}
 
 
