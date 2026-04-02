@@ -298,7 +298,10 @@ def _get_db_longequity_months() -> set[str]:
 
 @app.get("/api/longequity/latest-available")
 async def get_latest_available():
-    spec = await asyncio.to_thread(check_latest_available_month, supabase=supabase)
+    try:
+        spec = await asyncio.to_thread(check_latest_available_month, supabase=supabase)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"check_latest_available_month failed: {e}")
     if spec is None:
         return {"available": False, "year": None, "month": None}
     return {"available": True, "year": spec.year, "month": spec.month}
@@ -306,7 +309,10 @@ async def get_latest_available():
 
 @app.get("/api/longequity/snapshots")
 def get_longequity_snapshots():
-    resp = supabase.rpc("get_distinct_dates", {"p_source_code": "longequity"}).execute()
+    try:
+        resp = supabase.rpc("get_distinct_dates", {"p_source_code": "longequity"}).execute()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"get_longequity_snapshots failed: {e}")
     return [{"target_date": row["target_date"]} for row in (resp.data or [])]
 
 
