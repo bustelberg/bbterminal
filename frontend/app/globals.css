@@ -20,8 +20,7 @@
 }
 
 html {
-  /* Responsive base: 17px at 1280px, scales up to 20px at 1920px+ */
-  font-size: clamp(17px, 0.8rem + 0.5vw, 20px);
+  font-size: 23px;
 }
 
 body {
