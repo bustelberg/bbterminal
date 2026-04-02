@@ -57,7 +57,7 @@ export default function LoginPage() {
       if (error) {
         setError(error.message)
       } else {
-        router.push('/longequity')
+        router.push('/')
         router.refresh()
       }
     }
@@ -66,49 +66,49 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-black flex items-center justify-center">
-      <div className="w-full max-w-sm border border-gray-800 rounded p-8">
-        <h1 className="font-mono text-base font-bold text-white mb-1">BBTerminal</h1>
-        <p className="font-mono text-xs text-gray-500 mb-6">
+    <div className="min-h-screen bg-[#0f1117] flex items-center justify-center">
+      <div className="w-full max-w-sm bg-[#151821] border border-gray-800/40 rounded-xl p-8">
+        <h1 className="text-lg font-semibold text-white mb-1">BBTerminal</h1>
+        <p className="text-sm text-gray-500 mb-6">
           {mode === 'signin' ? 'Sign in to your account' : 'Request access'}
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block font-mono text-xs text-gray-400 mb-1">Email</label>
+            <label className="block text-xs font-medium text-gray-400 mb-1.5">Email</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
               autoComplete="email"
-              className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm font-mono text-white placeholder-gray-600 focus:outline-none focus:border-gray-500"
+              className="w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
               placeholder="you@bustelberg.nl"
             />
           </div>
 
           {mode === 'signin' && (
             <div>
-              <label className="block font-mono text-xs text-gray-400 mb-1">Password</label>
+              <label className="block text-xs font-medium text-gray-400 mb-1.5">Password</label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 autoComplete="current-password"
-                className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm font-mono text-white placeholder-gray-600 focus:outline-none focus:border-gray-500"
+                className="w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
                 placeholder="••••••••"
               />
             </div>
           )}
 
-          {error && <p className="font-mono text-xs text-red-400">{error}</p>}
-          {info  && <p className="font-mono text-xs text-green-400">{info}</p>}
+          {error && <p className="text-xs text-rose-400">{error}</p>}
+          {info  && <p className="text-xs text-emerald-400">{info}</p>}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white font-mono text-sm rounded px-4 py-2 transition-colors"
+            className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg px-4 py-2.5 transition-colors"
           >
             {loading
               ? 'Please wait...'
@@ -118,7 +118,7 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <p className="mt-4 font-mono text-xs text-gray-600 text-center">
+        <p className="mt-5 text-xs text-gray-600 text-center">
           {mode === 'signin' ? 'New user?' : 'Already have an account?'}{' '}
           <button
             onClick={() => {
@@ -126,7 +126,7 @@ export default function LoginPage() {
               setError(null)
               setInfo(null)
             }}
-            className="text-gray-400 hover:text-white underline"
+            className="text-indigo-400 hover:text-indigo-300 transition-colors"
           >
             {mode === 'signin' ? 'Request access' : 'Sign in'}
           </button>

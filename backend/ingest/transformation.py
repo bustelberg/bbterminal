@@ -2,41 +2,36 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Literal
 
 import pandas as pd
 from pandas.api.types import (
     is_bool_dtype,
     is_datetime64_any_dtype,
     is_numeric_dtype,
-    is_object_dtype,
     is_string_dtype,
+    is_object_dtype,
 )
 
 
 @dataclass(frozen=True)
 class PreparedForSchema:
     company: pd.DataFrame
-    metric: pd.DataFrame
-    snapshot: pd.DataFrame
-    source: pd.DataFrame
-    facts_number: pd.DataFrame
-    facts_text: pd.DataFrame
+    metric_data: pd.DataFrame  # unified: company columns + metric_code, target_date, source_code, numeric_value, text_value
+    target_date: date
+    source_code: str
 
 
-def _infer_value_type(series: pd.Series) -> Literal["number", "text", "bool", "date"]:
+def _infer_value_type(series: pd.Series) -> str:
     if is_bool_dtype(series.dtype):
-        return "bool"
+        return "text"
     if is_datetime64_any_dtype(series.dtype):
-        return "date"
+        return "text"
     if is_numeric_dtype(series.dtype):
         return "number"
     return "text"
 
 
 def _to_text_series(series: pd.Series) -> pd.Series:
-    if is_string_dtype(series.dtype) or is_object_dtype(series.dtype):
-        return series.astype("string")
     return series.astype("string")
 
 
@@ -60,6 +55,7 @@ def prepare_flattened_for_schema(
     if as_of_date is None:
         as_of_date = df.attrs.get("as_of_date") or df.attrs.get("asof_date")
     as_of_ts = _normalize_as_of_date(as_of_date)
+    target_date_val = as_of_ts.date()
 
     required = {"ticker", "company", "country", "primary_ticker", "primary_exchange"}
     missing = required - set(df.columns)
@@ -99,73 +95,46 @@ def prepare_flattened_for_schema(
     for col in company_cols:
         company[col] = company[col].astype("string")
 
-    # Metric definitions
+    # Identify metric columns
     non_metric_cols = {"ticker", "company", "country", "primary_ticker", "primary_exchange"}
     if "sector" in df.columns:
         non_metric_cols.add("sector")
     metric_cols = [c for c in df.columns if c not in non_metric_cols]
 
-    metric = pd.DataFrame([
-        {"metric_code": str(col), "value_type": _infer_value_type(df[col])}
-        for col in metric_cols
-    ]).drop_duplicates(subset=["metric_code"]).reset_index(drop=True)
-    metric["metric_code"] = metric["metric_code"].astype("string")
-    metric["value_type"] = metric["value_type"].astype("string")
+    # Determine value type per metric column
+    metric_type_map = {col: _infer_value_type(df[col]) for col in metric_cols}
 
-    # Snapshot + source
-    snapshot = pd.DataFrame({"as_of_date": pd.to_datetime([as_of_ts]).normalize()})
-    source = pd.DataFrame({"source_code": pd.Series([source_code], dtype="string")})
-
-    # Long-form facts
-    long = df[["ticker", "primary_ticker", "primary_exchange"] + metric_cols].melt(
-        id_vars=["ticker", "primary_ticker", "primary_exchange"],
+    # Melt to long form
+    long = df[["primary_ticker", "primary_exchange"] + metric_cols].melt(
+        id_vars=["primary_ticker", "primary_exchange"],
         var_name="metric_code",
-        value_name="metric_value_raw",
+        value_name="raw_value",
     )
-    long["longequity_ticker"] = _to_text_series(long["ticker"])
-    long["primary_ticker"] = _to_text_series(long["primary_ticker"])
-    long["primary_exchange"] = _to_text_series(long["primary_exchange"])
-    long["as_of_date"] = pd.to_datetime(as_of_ts).normalize()
-    long["source_code"] = source_code
-    long = long.drop(columns=["ticker"])
 
-    metric_type_map = dict(zip(metric["metric_code"], metric["value_type"]))
     long["value_type"] = long["metric_code"].map(metric_type_map).fillna("text")
 
+    # Split into numeric and text values
     num_mask = long["value_type"].eq("number")
+    long["numeric_value"] = None
+    long["text_value"] = None
 
-    facts_number = long.loc[num_mask, [
-        "longequity_ticker", "primary_ticker", "primary_exchange",
-        "metric_code", "as_of_date", "source_code", "metric_value_raw",
-    ]].copy()
-    facts_number["metric_value"] = pd.to_numeric(facts_number["metric_value_raw"], errors="coerce")
-    facts_number = facts_number.drop(columns=["metric_value_raw"])
+    long.loc[num_mask, "numeric_value"] = pd.to_numeric(long.loc[num_mask, "raw_value"], errors="coerce")
+    long.loc[~num_mask, "text_value"] = long.loc[~num_mask, "raw_value"].astype("string")
 
-    facts_text = long.loc[~num_mask, [
-        "longequity_ticker", "primary_ticker", "primary_exchange",
-        "metric_code", "as_of_date", "source_code", "metric_value_raw",
-    ]].copy()
-    facts_text["metric_value"] = _to_text_series(facts_text["metric_value_raw"]).astype("string")
-    facts_text = facts_text.drop(columns=["metric_value_raw"])
+    # Drop rows where both values are null
+    long = long[long["numeric_value"].notna() | (long["text_value"].notna() & (long["text_value"] != "<NA>"))].copy()
 
-    pk = ["primary_ticker", "primary_exchange", "metric_code", "as_of_date", "source_code"]
-    for df_out in (facts_number, facts_text):
-        for col in ["longequity_ticker", "primary_ticker", "primary_exchange", "metric_code", "source_code"]:
-            df_out[col] = df_out[col].astype("string")
-        df_out["as_of_date"] = pd.to_datetime(df_out["as_of_date"]).dt.normalize()
-    facts_number = facts_number.drop_duplicates(subset=pk).reset_index(drop=True)
-    facts_text = facts_text.drop_duplicates(subset=pk).reset_index(drop=True)
+    long["source_code"] = source_code
+    long["target_date"] = target_date_val
+    long["is_prediction"] = False
 
-    facts_number["is_prediction"] = False
-    facts_number = facts_number[[
-        "longequity_ticker", "primary_ticker", "primary_exchange",
-        "metric_code", "as_of_date", "source_code", "metric_value", "is_prediction",
-    ]]
-    facts_number["is_prediction"] = facts_number["is_prediction"].astype("bool")
+    # Deduplicate
+    pk = ["primary_ticker", "primary_exchange", "metric_code", "source_code", "target_date"]
+    long = long.drop_duplicates(subset=pk).reset_index(drop=True)
 
-    facts_text = facts_text[[
-        "longequity_ticker", "primary_ticker", "primary_exchange",
-        "metric_code", "as_of_date", "source_code", "metric_value",
+    metric_data = long[[
+        "primary_ticker", "primary_exchange", "metric_code",
+        "source_code", "target_date", "numeric_value", "text_value", "is_prediction",
     ]]
 
     base_company_cols = ["longequity_ticker", "primary_ticker", "primary_exchange", "country", "company_name"]
@@ -175,9 +144,7 @@ def prepare_flattened_for_schema(
 
     return PreparedForSchema(
         company=company,
-        metric=metric,
-        snapshot=snapshot,
-        source=source,
-        facts_number=facts_number,
-        facts_text=facts_text,
+        metric_data=metric_data,
+        target_date=target_date_val,
+        source_code=source_code,
     )

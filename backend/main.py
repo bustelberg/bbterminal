@@ -11,16 +11,7 @@ from pydantic import BaseModel
 from supabase import create_client
 from dotenv import load_dotenv
 
-from portfolio import (
-    parse_airs_excel,
-    match_holding,
-    get_all_companies,
-    list_portfolios as _list_portfolios,
-    get_portfolio_weights as _get_portfolio_weights,
-    create_portfolio as _create_portfolio,
-    update_portfolio_weights as _update_portfolio_weights,
-    delete_portfolio as _delete_portfolio,
-)
+from portfolio import parse_airs_excel
 
 from ingest.acquire import acquire_raw_longequity_backfill, check_latest_available_month
 from ingest.flatten import flatten_excel
@@ -70,9 +61,7 @@ def _as_of_date_from_filename(filename: str) -> date:
         raise ValueError(f"Could not parse month-year from filename: {filename}")
     month = _MONTHS[m.group(1)]
     year = int(m.group(2))
-    if month == 12:
-        return date(year + 1, 1, 1)
-    return date(year, month + 1, 1)
+    return date(year, month, 1)
 
 
 @app.get("/api/hello")
@@ -94,21 +83,38 @@ async def _ingest_long_equity_stream():
         return f"data: {json.dumps({'type': msg_type, 'message': message})}\n\n"
 
     # ------------------------------------------------------------------ #
-    # Acquire files
+    # Check which months are already in the DB
+    # ------------------------------------------------------------------ #
+    existing_months = await asyncio.to_thread(_get_db_longequity_months)
+    yield event("info", f"{len(existing_months)} month(s) already in DB.")
+
+    # ------------------------------------------------------------------ #
+    # Acquire files (only months not yet in DB)
     # ------------------------------------------------------------------ #
     yield event("info", "Acquiring Long Equity files (Storage → remote URL)...")
     try:
-        files = await asyncio.to_thread(acquire_raw_longequity_backfill, supabase)
+        all_files = await asyncio.to_thread(acquire_raw_longequity_backfill, supabase)
     except Exception as e:
         yield event("error", f"Acquire failed: {e}")
         return
 
+    # Filter to only new months
+    files: list[tuple[str, bytes]] = []
+    for filename, content in all_files:
+        try:
+            as_of = _as_of_date_from_filename(filename)
+            ym = f"{as_of.year:04d}-{as_of.month:02d}"
+            if ym in existing_months:
+                continue
+            files.append((filename, content))
+        except ValueError:
+            files.append((filename, content))  # can't parse date — process anyway
+
     if not files:
-        yield event("done", "Pipeline finished — no files found.")
+        yield event("done", f"Pipeline finished — all {len(all_files)} month(s) already loaded.")
         return
 
-    files = sorted(files, key=lambda t: _as_of_date_from_filename(t[0]))
-    yield event("info", f"Found {len(files)} file(s). Processing oldest → newest.")
+    yield event("info", f"{len(files)} new file(s) to process (skipped {len(all_files) - len(files)} already in DB).")
 
     # ------------------------------------------------------------------ #
     # Load persisted ticker overrides once (shared across all files)
@@ -121,8 +127,7 @@ async def _ingest_long_equity_stream():
         db_overrides = []
 
     total_companies = 0
-    total_fn = 0
-    total_ft = 0
+    total_metric_rows = 0
     all_new_resolutions: list[dict] = []
 
     # ------------------------------------------------------------------ #
@@ -191,7 +196,7 @@ async def _ingest_long_equity_stream():
             continue
 
         # Transform
-        yield event("info", "  Transforming to star schema...")
+        yield event("info", "  Transforming to metric_data...")
         try:
             prepared = await asyncio.to_thread(
                 prepare_flattened_for_schema, df,
@@ -200,7 +205,7 @@ async def _ingest_long_equity_stream():
         except Exception as e:
             yield event("error", f"  Transform failed: {e}")
             continue
-        yield event("info", f"  {len(prepared.company)} companies, {len(prepared.metric)} metrics")
+        yield event("info", f"  {len(prepared.company)} companies, {len(prepared.metric_data)} metric rows")
 
         # Load
         yield event("info", "  Loading into Supabase...")
@@ -211,13 +216,11 @@ async def _ingest_long_equity_stream():
             continue
 
         total_companies += result.company_inserted
-        total_fn += result.facts_number_inserted
-        total_ft += result.facts_text_inserted
+        total_metric_rows += result.metric_data_inserted
 
         yield event("info", (
             f"  Inserted: {result.company_inserted} companies, "
-            f"{result.facts_number_inserted} numeric facts, "
-            f"{result.facts_text_inserted} text facts"
+            f"{result.metric_data_inserted} metric rows"
         ))
 
     # ------------------------------------------------------------------ #
@@ -240,13 +243,19 @@ async def _ingest_long_equity_stream():
     yield event("done", (
         f"Pipeline complete. {len(files)} file(s) processed. "
         f"Total new rows — companies: {total_companies}, "
-        f"numeric facts: {total_fn}, text facts: {total_ft}."
+        f"metric data: {total_metric_rows}."
     ))
+
+
+def _get_db_longequity_months() -> set[str]:
+    """Return set of 'YYYY-MM' strings already loaded in metric_data for longequity."""
+    resp = supabase.rpc("get_distinct_dates", {"p_source_code": "longequity"}).execute()
+    return {str(row["target_date"])[:7] for row in (resp.data or [])}
 
 
 @app.get("/api/longequity/latest-available")
 async def get_latest_available():
-    spec = await asyncio.to_thread(check_latest_available_month)
+    spec = await asyncio.to_thread(check_latest_available_month, supabase=supabase)
     if spec is None:
         return {"available": False, "year": None, "month": None}
     return {"available": True, "year": spec.year, "month": spec.month}
@@ -254,18 +263,13 @@ async def get_latest_available():
 
 @app.get("/api/longequity/snapshots")
 def get_longequity_snapshots():
-    resp = (
-        supabase.table("snapshot")
-        .select("snapshot_id,target_date,published_at")
-        .order("target_date")
-        .execute()
-    )
-    return resp.data or []
+    resp = supabase.rpc("get_distinct_dates", {"p_source_code": "longequity"}).execute()
+    return [{"target_date": row["target_date"]} for row in (resp.data or [])]
 
 
-@app.get("/api/longequity/companies/{snapshot_id}")
-def get_longequity_companies(snapshot_id: int):
-    # Fetch all companies upfront (small table ~400 rows) to avoid large .in_() URL params
+@app.get("/api/longequity/companies")
+def get_longequity_companies(target_date: str):
+    # Fetch all companies upfront (small table ~400 rows)
     all_companies_resp = (
         supabase.table("company")
         .select("company_id,primary_ticker,primary_exchange,country,company_name,longequity_ticker")
@@ -276,38 +280,32 @@ def get_longequity_companies(snapshot_id: int):
         c["company_id"]: c for c in (all_companies_resp.data or [])
     }
 
-    def _company_ids_in_snapshot(sid: int) -> set[int]:
-        """Return distinct company_ids that have facts in a snapshot via RPC."""
-        resp = supabase.rpc("get_snapshot_company_ids", {"p_snapshot_id": sid}).execute()
+    def _company_ids_for_date(td: str) -> set[int]:
+        resp = supabase.rpc("get_company_ids_for_date", {
+            "p_source_code": "longequity",
+            "p_target_date": td,
+        }).execute()
         return {r["company_id"] for r in (resp.data or [])}
 
-    current_ids = _company_ids_in_snapshot(snapshot_id)
+    current_ids = _company_ids_for_date(target_date)
     companies = [all_companies[cid] for cid in current_ids if cid in all_companies]
 
-    snap_resp = (
-        supabase.table("snapshot")
-        .select("snapshot_id,target_date")
-        .eq("snapshot_id", snapshot_id)
-        .execute()
-    )
+    # Find previous month for diff
+    all_dates = supabase.rpc("get_distinct_dates", {"p_source_code": "longequity"}).execute()
+    dates_list = [r["target_date"] for r in (all_dates.data or [])]
+    prev_date = None
+    for d in dates_list:
+        if d < target_date:
+            prev_date = d
+        else:
+            break
 
     added: list[dict] = []
     removed: list[dict] = []
-
-    if snap_resp.data:
-        current_date = snap_resp.data[0]["target_date"]
-        prev_resp = (
-            supabase.table("snapshot")
-            .select("snapshot_id,target_date")
-            .lt("target_date", current_date)
-            .order("target_date", desc=True)
-            .limit(1)
-            .execute()
-        )
-        if prev_resp.data:
-            prev_ids = _company_ids_in_snapshot(prev_resp.data[0]["snapshot_id"])
-            added   = [all_companies[cid] for cid in (current_ids - prev_ids) if cid in all_companies]
-            removed = [all_companies[cid] for cid in (prev_ids - current_ids) if cid in all_companies]
+    if prev_date:
+        prev_ids = _company_ids_for_date(prev_date)
+        added   = [all_companies[cid] for cid in (current_ids - prev_ids) if cid in all_companies]
+        removed = [all_companies[cid] for cid in (prev_ids - current_ids) if cid in all_companies]
 
     return {"companies": companies, "added": added, "removed": removed}
 
@@ -326,24 +324,6 @@ async def ingest_long_equity():
 
 # ─────────────────────────── Portfolio endpoints ─────────────────────────────
 
-class WeightEntry(BaseModel):
-    company_id: int
-    weight: float
-
-
-class CreatePortfolioRequest(BaseModel):
-    portfolio_name: str
-    target_date: str
-    published_at: str
-    weights: list[WeightEntry]
-    normalize: bool = True
-
-
-class UpdateWeightsRequest(BaseModel):
-    weights: list[WeightEntry]
-    normalize: bool = True
-
-
 @app.post("/api/portfolios/parse")
 async def parse_portfolio(file: UploadFile = File(...)):
     content = await file.read()
@@ -352,68 +332,123 @@ async def parse_portfolio(file: UploadFile = File(...)):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    companies = await asyncio.to_thread(get_all_companies, supabase)
-    company_options = [
-        {
-            "company_id": c["company_id"],
-            "label": f"{c['company_name']} — {c['primary_ticker']} ({c['primary_exchange']})",
-        }
-        for c in companies
-    ]
+    total_start = sum(h.start_value_eur for h in holdings if h.start_value_eur is not None)
+    total_current = sum(h.current_value_eur for h in holdings if h.current_value_eur is not None)
+    total_ytd_eur = round(total_current - total_start, 2) if total_start else None
+    total_ytd_pct = round((total_current - total_start) / abs(total_start), 6) if total_start else None
 
-    parsed = []
-    for h in holdings:
-        cid, label, score = match_holding(h.holding_name, companies)
-        parsed.append({
-            "holding_name": h.holding_name,
-            "mv_eur": h.mv_eur,
-            "weight": h.weight,
-            "currency": h.currency,
-            "include": h.include,
-            "weight_source": h.weight_source,
-            "match_company_id": cid,
-            "match_label": label,
-            "match_score": score,
-        })
-
-    return {"holdings": parsed, "companies": company_options}
-
-
-@app.get("/api/portfolios")
-async def get_portfolios():
-    return await asyncio.to_thread(_list_portfolios, supabase)
+    return {
+        "holdings": [
+            {
+                "holding_name": h.holding_name,
+                "quantity": h.quantity,
+                "currency": h.currency,
+                "weight": h.weight,
+                "start_value_eur": h.start_value_eur,
+                "current_value_eur": h.current_value_eur,
+                "ytd_return_eur": h.ytd_return_eur,
+                "ytd_return_pct": h.ytd_return_pct,
+                "ytd_return_local_pct": h.ytd_return_local_pct,
+            }
+            for h in holdings
+        ],
+        "total_start_eur": round(total_start, 2) if total_start else None,
+        "total_current_eur": round(total_current, 2) if total_current else None,
+        "total_ytd_eur": total_ytd_eur,
+        "total_ytd_pct": total_ytd_pct,
+    }
 
 
-@app.get("/api/portfolios/{portfolio_id}/weights")
-async def get_weights(portfolio_id: int):
-    return await asyncio.to_thread(_get_portfolio_weights, supabase, portfolio_id)
-
-
-@app.post("/api/portfolios")
-async def create_portfolio(req: CreatePortfolioRequest):
-    weights = [{"company_id": w.company_id, "weight": w.weight} for w in req.weights]
-    portfolio_id = await asyncio.to_thread(
-        _create_portfolio,
-        supabase,
-        portfolio_name=req.portfolio_name,
-        target_date=req.target_date,
-        published_at=req.published_at,
-        weights=weights,
-        normalize=req.normalize,
+@app.get("/api/companies/field-options")
+async def get_company_field_options():
+    resp = (
+        supabase.table("company")
+        .select("primary_exchange,country,sector")
+        .limit(10000)
+        .execute()
     )
-    return {"portfolio_id": portfolio_id}
+    rows = resp.data or []
+    exchanges = sorted({r["primary_exchange"] for r in rows if r.get("primary_exchange")})
+    countries = sorted({r["country"] for r in rows if r.get("country") and r["country"].strip()})
+    sectors = sorted({r["sector"] for r in rows if r.get("sector") and r["sector"].strip()})
+    return {"exchanges": exchanges, "countries": countries, "sectors": sectors}
 
 
-@app.put("/api/portfolios/{portfolio_id}/weights")
-async def update_weights(portfolio_id: int, req: UpdateWeightsRequest):
-    weights = [{"company_id": w.company_id, "weight": w.weight} for w in req.weights]
-    await asyncio.to_thread(
-        _update_portfolio_weights, supabase, portfolio_id, weights, req.normalize
+class CreateCompanyRequest(BaseModel):
+    company_name: str
+    primary_ticker: str
+    primary_exchange: str
+    country: str = ""
+    sector: str = ""
+
+
+class UpdateCompanyRequest(BaseModel):
+    company_name: str | None = None
+    primary_ticker: str | None = None
+    primary_exchange: str | None = None
+    country: str | None = None
+    sector: str | None = None
+
+
+@app.get("/api/companies")
+async def list_companies():
+    resp = (
+        supabase.table("company")
+        .select("company_id,company_name,primary_ticker,primary_exchange,longequity_ticker,country,sector")
+        .order("company_name")
+        .limit(10000)
+        .execute()
     )
+    return resp.data or []
+
+
+@app.post("/api/companies")
+async def create_company(req: CreateCompanyRequest):
+    row = {
+        "company_name": req.company_name,
+        "primary_ticker": req.primary_ticker.upper(),
+        "primary_exchange": req.primary_exchange.upper(),
+        "country": req.country or None,
+        "sector": req.sector or None,
+    }
+    resp = supabase.table("company").insert(row).execute()
+    if not resp.data:
+        raise HTTPException(status_code=400, detail="Insert failed")
+    return resp.data[0]
+
+
+@app.put("/api/companies/{company_id}")
+async def update_company(company_id: int, req: UpdateCompanyRequest):
+    updates = {}
+    if req.company_name is not None:
+        updates["company_name"] = req.company_name
+    if req.primary_ticker is not None:
+        updates["primary_ticker"] = req.primary_ticker.upper()
+    if req.primary_exchange is not None:
+        updates["primary_exchange"] = req.primary_exchange.upper()
+    if req.country is not None:
+        updates["country"] = req.country or None
+    if req.sector is not None:
+        updates["sector"] = req.sector or None
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    resp = (
+        supabase.table("company")
+        .update(updates)
+        .eq("company_id", company_id)
+        .execute()
+    )
+    if not resp.data:
+        raise HTTPException(status_code=404, detail="Company not found")
+    return resp.data[0]
+
+
+@app.delete("/api/companies/{company_id}")
+async def delete_company(company_id: int):
+    # Cascade: delete referencing rows first
+    supabase.table("portfolio_weight").delete().eq("company_id", company_id).execute()
+    supabase.table("metric_data").delete().eq("company_id", company_id).execute()
+    supabase.table("company").delete().eq("company_id", company_id).execute()
     return {"ok": True}
 
 
-@app.delete("/api/portfolios/{portfolio_id}")
-async def delete_portfolio(portfolio_id: int):
-    await asyncio.to_thread(_delete_portfolio, supabase, portfolio_id)
-    return {"ok": True}

@@ -1,9 +1,7 @@
 import LongEquityInsight from '../components/LongEquityInsight';
 
 export type Snapshot = {
-  snapshot_id: number;
   target_date: string;
-  published_at: string;
 };
 
 export default async function LongEquityPage() {

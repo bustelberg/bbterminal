@@ -118,13 +118,14 @@ def _get_file(supabase: Client, fmt: LongEquityFormat, timeout: int) -> bytes:
 
 def check_latest_available_month(
     *,
+    supabase: Client | None = None,
     now: datetime | None = None,
     timeout: int = 10,
     max_checks: int = 4,
 ) -> MonthSpec | None:
     """
-    Walk backwards from current month (up to max_checks months),
-    checking remote URL availability without downloading.
+    Walk backwards from current month (up to max_checks months).
+    Checks Supabase Storage first (cheap), then remote URL.
     Returns the most recent MonthSpec that exists, or None.
     """
     spec = _current_month(now)
@@ -132,6 +133,12 @@ def check_latest_available_month(
         if _is_before_hard_stop(spec):
             return None
         fmt = _format_month(spec)
+        # Check storage first (no external request needed)
+        if supabase is not None:
+            cached = _fetch_from_storage(supabase, fmt.filename)
+            if cached is not None:
+                return spec
+        # Fall back to remote URL check
         try:
             with requests.get(fmt.url, stream=True, timeout=timeout) as r:
                 if r.status_code == 200:
@@ -142,6 +149,13 @@ def check_latest_available_month(
     return None
 
 
+def _next_month(spec: MonthSpec) -> MonthSpec:
+    month = spec.month + 1
+    if month == 13:
+        return MonthSpec(year=spec.year + 1, month=1)
+    return MonthSpec(year=spec.year, month=month)
+
+
 def acquire_raw_longequity_backfill(
     supabase: Client,
     *,
@@ -150,39 +164,28 @@ def acquire_raw_longequity_backfill(
     verbose: bool = True,
 ) -> list[tuple[str, bytes]]:
     """
-    Walk backwards from the current month.
+    Walk forward from the hard-stop month up to (and including) the current month.
     For each month: check Supabase Storage first, fall back to remote URL.
-    Stops after two consecutive 404s or when reaching the hard-stop month.
-    Returns list of (filename, bytes) ordered [most recent → oldest].
+    Skips 404s without stopping so no month is missed due to gaps at the recent end.
+    Returns list of (filename, bytes) ordered [oldest → most recent].
     """
     _ensure_bucket(supabase)
 
+    current = _current_month(now)
     results: list[tuple[str, bytes]] = []
-    spec = _current_month(now)
-    consecutive_404 = 0
+    spec = MonthSpec(year=_HARD_STOP[0], month=_HARD_STOP[1])
 
-    while True:
-        if _is_before_hard_stop(spec):
-            if verbose:
-                print(f"[acquire] hard stop ({_HARD_STOP[0]}-{_HARD_STOP[1]:02d}), stopping.")
-            break
-
+    while (spec.year, spec.month) <= (current.year, current.month):
         fmt = _format_month(spec)
         try:
             content = _get_file(supabase, fmt, timeout)
             results.append((fmt.filename, content))
-            consecutive_404 = 0
             if verbose:
                 print(f"[acquire] ok: {spec.yyyymm} -> {fmt.filename}")
         except RemoteNotFound:
-            consecutive_404 += 1
             if verbose:
-                print(f"[acquire] 404: {spec.yyyymm} -> {fmt.filename}")
-            if consecutive_404 >= 2:
-                if verbose:
-                    print("[acquire] two consecutive 404s, stopping.")
-                break
+                print(f"[acquire] 404: {spec.yyyymm} -> {fmt.filename} (skipping)")
 
-        spec = _prev_month(spec)
+        spec = _next_month(spec)
 
     return results
