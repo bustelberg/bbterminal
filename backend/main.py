@@ -786,7 +786,7 @@ async def _earnings_refresh_stream(company_id: int, sources: list[str], force: b
 @app.post("/api/earnings/{company_id}/refresh/{source}")
 async def refresh_earnings_source(company_id: int, source: str, force: bool = False):
     """Refresh a single earnings data source. SSE stream."""
-    valid = {"financials", "analyst_estimates", "indicators"}
+    valid = {"financials", "analyst_estimates", "indicators", "prices"}
     if source not in valid:
         raise HTTPException(status_code=400, detail=f"source must be one of {valid}")
     return StreamingResponse(
@@ -801,7 +801,7 @@ async def refresh_earnings_all(company_id: int, force: bool = False):
     """Refresh all earnings data sources. SSE stream."""
     return StreamingResponse(
         _earnings_refresh_stream(
-            company_id, ["financials", "analyst_estimates", "indicators"], force
+            company_id, ["financials", "analyst_estimates", "indicators", "prices"], force
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
@@ -846,21 +846,43 @@ _DASHBOARD_METRIC_CODES = [
 async def get_earnings_metrics(company_id: int):
     """Get dashboard metrics for a company (source=gurufocus, dates >= 2015)."""
     try:
-        # Fetch specific metric codes
+        # Fetch non-price metric codes (low volume, fits in one page)
+        non_price_codes = [c for c in _DASHBOARD_METRIC_CODES if c != "close_price"]
         resp = (
             supabase.table("metric_data")
             .select("metric_code,target_date,numeric_value,is_prediction")
             .eq("company_id", company_id)
             .eq("source_code", "gurufocus")
             .gte("target_date", "2015-01-01")
-            .in_("metric_code", _DASHBOARD_METRIC_CODES)
+            .in_("metric_code", non_price_codes)
             .order("target_date")
             .limit(5000)
             .execute()
         )
         rows = resp.data or []
 
-        # Also fetch analyst estimates (annual_* prefix) — separate query
+        # Fetch daily close prices separately (can be thousands of rows)
+        offset = 0
+        page_size = 1000
+        while True:
+            page = (
+                supabase.table("metric_data")
+                .select("metric_code,target_date,numeric_value,is_prediction")
+                .eq("company_id", company_id)
+                .eq("source_code", "gurufocus")
+                .eq("metric_code", "close_price")
+                .gte("target_date", "2015-01-01")
+                .order("target_date")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            batch = page.data or []
+            rows.extend(batch)
+            if len(batch) < page_size:
+                break
+            offset += page_size
+
+        # Also fetch analyst estimates (annual_* prefix)
         resp2 = (
             supabase.table("metric_data")
             .select("metric_code,target_date,numeric_value,is_prediction")

@@ -15,7 +15,7 @@ from urllib.request import Request, urlopen
 from supabase import Client
 
 _BUCKET = "gurufocus-raw"
-_PRICE_CUTOFF = date(2023, 1, 1)
+_PRICE_CUTOFF = date(2015, 1, 1)
 
 US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX"}
 

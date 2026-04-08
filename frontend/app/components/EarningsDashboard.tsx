@@ -277,7 +277,7 @@ function RefreshButton({ label, running, onClick }: { label: string; running: bo
 function LogPanel({ logs, logEndRef }: { logs: { type: string; message: string }[]; logEndRef: React.RefObject<HTMLDivElement | null> }) {
   if (logs.length === 0) return null;
   return (
-    <div className="mt-3 max-h-48 overflow-y-auto bg-[#0b0d13] border border-gray-800/40 rounded-lg p-3 font-mono text-xs">
+    <div className="max-h-[5.5rem] overflow-y-auto bg-[#0b0d13] border border-gray-800/40 rounded-lg p-3 font-mono text-xs">
       {logs.map((l, i) => (
         <div key={i} className={l.type === 'error' ? 'text-rose-400' : l.type === 'done' ? 'text-emerald-400' : 'text-gray-400'}>
           {l.message}
@@ -520,7 +520,11 @@ function FCFYieldChart({ metrics }: { metrics: MetricRow[] }) {
 
 function RelativeGrowthChart({ metrics }: { metrics: MetricRow[] }) {
   const data = useMemo(() => {
-    const priceSeries = annualSeries(metrics, MC.PRICE);
+    // Daily close prices for a smooth price line, fall back to annual
+    const dailyPrice = timeSeries(metrics, 'close_price');
+    const annualPrice = annualSeries(metrics, MC.PRICE);
+    const priceSeries = dailyPrice.length > 0 ? dailyPrice : annualPrice;
+
     const epsActual = annualSeries(metrics, MC.EPS_WO_NRI);
     const divActual = annualSeries(metrics, MC.DIV_PS);
     const epsEst = annualSeries(metrics, MC.EPS_EST);
@@ -559,11 +563,15 @@ function RelativeGrowthChart({ metrics }: { metrics: MetricRow[] }) {
     const priceBase = firstPrice.value;
     const oeBase = firstOE.value;
 
+    // Cap chart end date: last price date + 2 years so estimates don't stretch x-axis
+    const lastPriceDate = priceSeries[priceSeries.length - 1].date;
+    const endCutoff = `${parseInt(lastPriceDate.slice(0, 4)) + 2}-12-31`;
+
     // Build lookup maps
     const oeActMap: Record<string, number> = {};
     for (const o of oeActual) oeActMap[o.date] = o.value;
     const oeEstMap: Record<string, number> = {};
-    for (const o of oeEst) oeEstMap[o.date] = o.value;
+    for (const o of oeEst) if (o.date <= endCutoff) oeEstMap[o.date] = o.value;
     const priceMap: Record<string, number> = {};
     for (const p of priceSeries) priceMap[p.date] = p.value;
 
@@ -576,14 +584,15 @@ function RelativeGrowthChart({ metrics }: { metrics: MetricRow[] }) {
     // Collect all dates from all series
     const allDates = new Set<string>();
     for (const p of priceSeries) if (p.date >= startDate) allDates.add(p.date);
-    for (const o of oeActual) if (o.date >= startDate) allDates.add(o.date);
-    for (const o of oeEst) if (o.date >= startDate) allDates.add(o.date);
+    for (const o of oeActual) if (o.date >= startDate && o.date <= endCutoff) allDates.add(o.date);
+    for (const d of Object.keys(oeEstMap)) if (d >= startDate) allDates.add(d);
     const sortedDates = [...allDates].sort();
 
     const chartData = sortedDates.map((d) => {
       const oeEstVal = oeEstMap[d] != null && oeEstMap[d] > 0 ? (oeEstMap[d] / oeBase) * 100 : undefined;
       return {
         date: d,
+        ts: new Date(d).getTime(),
         price: priceMap[d] != null ? (priceMap[d] / priceBase) * 100 : undefined,
         oe_actual: oeActMap[d] != null && oeActMap[d] > 0 ? (oeActMap[d] / oeBase) * 100 : undefined,
         // Bridge: at the last actual date, also set oe_est so the red line starts there
@@ -591,8 +600,9 @@ function RelativeGrowthChart({ metrics }: { metrics: MetricRow[] }) {
       };
     });
 
-    // CAGRs
-    const priceFiltered = priceSeries.filter((p) => p.date >= startDate);
+    // CAGRs — use annual price for CAGR to match OE intervals
+    const annualPriceForCagr = annualSeries(metrics, MC.PRICE);
+    const priceFiltered = annualPriceForCagr.filter((p) => p.date >= startDate);
     const oeActFiltered = oeActual.filter((o) => o.date >= startDate && o.value > 0);
     const oeEstFiltered = oeEst.filter((o) => o.date >= startDate && o.value > 0);
 
@@ -621,14 +631,26 @@ function RelativeGrowthChart({ metrics }: { metrics: MetricRow[] }) {
       <ResponsiveContainer width="100%" height={350}>
         <LineChart data={data.chartData} margin={{ top: 10, right: 20, bottom: 10, left: 10 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2330" />
-          <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#6b7280' }} tickFormatter={(v: string) => v.slice(0, 4)} />
+          <XAxis
+            dataKey="ts"
+            type="number"
+            scale="time"
+            domain={['dataMin', 'dataMax']}
+            tick={{ fontSize: 11, fill: '#6b7280' }}
+            tickFormatter={(v: number) => new Date(v).getFullYear().toString()}
+          />
           <YAxis
             scale="log"
             domain={['auto', 'auto']}
             tick={{ fontSize: 11, fill: '#6b7280' }}
             tickFormatter={(v: number) => v.toFixed(0)}
           />
-          <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: '#9ca3af' }} formatter={(v) => [Number(v).toFixed(1), '']} />
+          <Tooltip
+            contentStyle={tooltipStyle}
+            labelStyle={{ color: '#9ca3af' }}
+            labelFormatter={(v: number) => new Date(v).toISOString().slice(0, 10)}
+            formatter={(v) => [Number(v).toFixed(1), '']}
+          />
           <Legend wrapperStyle={{ fontSize: 12 }} />
           <Line type="monotone" dataKey="price" name="Price" stroke="#6366f1" strokeWidth={2} dot={false} connectNulls />
           <Line type="monotone" dataKey="oe_actual" name="OE Actual" stroke="#34d399" strokeWidth={2} dot={false} connectNulls />
@@ -739,11 +761,7 @@ export default function EarningsDashboard() {
   const [metrics, setMetrics] = useState<MetricRow[]>([]);
   const [loadingMetrics, setLoadingMetrics] = useState(false);
 
-  const snapshotSSE = useSSERefresh();
-  const estimatesSSE = useSSERefresh();
-  const allSSE = useSSERefresh();
-
-  const anyRunning = snapshotSSE.running || estimatesSSE.running || allSSE.running;
+  const sse = useSSERefresh();
 
   useEffect(() => {
     fetch(`${API_URL}/api/companies`)
@@ -764,20 +782,11 @@ export default function EarningsDashboard() {
 
   useEffect(() => { loadMetrics(); }, [loadMetrics]);
 
-  function refreshSnapshot() {
+  const refresh = (source: string) => {
     if (!selected) return;
-    snapshotSSE.start(`${API_URL}/api/earnings/${selected.company_id}/refresh-all?force=true`, loadMetrics);
-  }
-
-  function refreshEstimates() {
-    if (!selected) return;
-    estimatesSSE.start(`${API_URL}/api/earnings/${selected.company_id}/refresh/analyst_estimates?force=true`, loadMetrics);
-  }
-
-  function refreshAll() {
-    if (!selected) return;
-    allSSE.start(`${API_URL}/api/earnings/${selected.company_id}/refresh-all?force=true`, loadMetrics);
-  }
+    const endpoint = source === 'all' ? 'refresh-all' : `refresh/${source}`;
+    sse.start(`${API_URL}/api/earnings/${selected.company_id}/${endpoint}?force=true`, loadMetrics);
+  };
 
   return (
     <div className="px-8 py-5 space-y-6">
@@ -788,7 +797,7 @@ export default function EarningsDashboard() {
       {/* Company picker */}
       <div className="flex items-center gap-4">
         <CompanyPicker companies={companies} selected={selected} onSelect={setSelected} />
-        {selected && <RefreshButton label="Refresh All" running={anyRunning} onClick={refreshAll} />}
+        {selected && <RefreshButton label="Refresh All" running={sse.running} onClick={() => refresh('all')} />}
       </div>
 
       {!selected && (
@@ -802,15 +811,14 @@ export default function EarningsDashboard() {
             {loadingMetrics && <span className="ml-2 text-gray-600">Loading metrics...</span>}
           </div>
 
-          <LogPanel logs={allSSE.logs} logEndRef={allSSE.logEndRef} />
+          <LogPanel logs={sse.logs} logEndRef={sse.logEndRef} />
 
           {/* Snapshot Stats */}
           <section className="bg-[#151821] rounded-xl border border-gray-800/40 p-5 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-white font-medium">Snapshot Stats</h2>
-              <RefreshButton label="Refresh Snapshot" running={anyRunning} onClick={refreshSnapshot} />
+              <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('indicators')} />
             </div>
-            <LogPanel logs={snapshotSSE.logs} logEndRef={snapshotSSE.logEndRef} />
             <SnapshotStats metrics={metrics} />
           </section>
 
@@ -818,19 +826,28 @@ export default function EarningsDashboard() {
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
             {/* FCF Yield */}
             <section className="bg-[#151821] rounded-xl border border-gray-800/40 p-5 space-y-3">
-              <h2 className="text-white font-medium">FCF Yield %</h2>
+              <div className="flex items-center justify-between">
+                <h2 className="text-white font-medium">FCF Yield %</h2>
+                <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('indicators')} />
+              </div>
               <FCFYieldChart metrics={metrics} />
             </section>
 
             {/* Relative Growth */}
             <section className="bg-[#151821] rounded-xl border border-gray-800/40 p-5 space-y-3">
-              <h2 className="text-white font-medium">Relative Growth (log)</h2>
+              <div className="flex items-center justify-between">
+                <h2 className="text-white font-medium">Relative Growth (log)</h2>
+                <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('prices')} />
+              </div>
               <RelativeGrowthChart metrics={metrics} />
             </section>
 
             {/* FCF/share Growth */}
             <section className="bg-[#151821] rounded-xl border border-gray-800/40 p-5 space-y-3">
-              <h2 className="text-white font-medium">FCF/share Growth (log)</h2>
+              <div className="flex items-center justify-between">
+                <h2 className="text-white font-medium">FCF/share Growth (log)</h2>
+                <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('financials')} />
+              </div>
               <FCFShareChart metrics={metrics} />
             </section>
           </div>
@@ -839,9 +856,8 @@ export default function EarningsDashboard() {
           <section className="bg-[#151821] rounded-xl border border-gray-800/40 p-5 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-white font-medium">Analyst Estimates</h2>
-              <RefreshButton label="Refresh Estimates" running={anyRunning} onClick={refreshEstimates} />
+              <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('analyst_estimates')} />
             </div>
-            <LogPanel logs={estimatesSSE.logs} logEndRef={estimatesSSE.logEndRef} />
             <AnalystEstimates metrics={metrics} />
           </section>
         </>
