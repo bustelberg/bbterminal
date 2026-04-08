@@ -677,7 +677,7 @@ function RelativeGrowthChart({ metrics }: { metrics: MetricRow[] }) {
           <Tooltip
             contentStyle={tooltipStyle}
             labelStyle={{ color: '#9ca3af' }}
-            labelFormatter={(v: number) => new Date(v).toISOString().slice(0, 10)}
+            labelFormatter={(v) => new Date(Number(v)).toISOString().slice(0, 10)}
             formatter={(v) => [Number(v).toFixed(1), '']}
           />
           <Line type="monotone" dataKey="price" name="Price" stroke="#6366f1" strokeWidth={2} dot={false} connectNulls />

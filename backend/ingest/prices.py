@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from urllib.error import HTTPError, URLError
@@ -97,20 +98,25 @@ def _fetch_price_from_api(ticker: str, exchange: str, timeout: int = 30) -> tupl
     # Log URL with masked API key
     masked_url = url.replace(api_key, api_key[:4] + "***")
 
-    req = Request(url, headers={"User-Agent": _USER_AGENT, "Accept": "application/json"})
-    try:
-        with urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-            if not raw:
-                return None, f"API returned empty response for {symbol} ({masked_url})"
-            data = json.loads(raw)
-            return data, f"API OK for {symbol}"
-    except HTTPError as e:
-        return None, f"API HTTP {e.code} for {symbol}: {e.reason} ({masked_url})"
-    except URLError as e:
-        return None, f"API URL error for {symbol}: {e.reason}"
-    except Exception as e:
-        return None, f"API error for {symbol}: {type(e).__name__}: {e}"
+    for attempt in range(3):
+        req = Request(url, headers={"User-Agent": _USER_AGENT, "Accept": "application/json"})
+        try:
+            with urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+                if not raw:
+                    return None, f"API returned empty response for {symbol} ({masked_url})"
+                data = json.loads(raw)
+                return data, f"API OK for {symbol}"
+        except HTTPError as e:
+            if e.code == 403 and attempt < 2:
+                time.sleep(3 * (attempt + 1))
+                continue
+            return None, f"API HTTP {e.code} for {symbol}: {e.reason} ({masked_url})"
+        except URLError as e:
+            return None, f"API URL error for {symbol}: {e.reason}"
+        except Exception as e:
+            return None, f"API error for {symbol}: {type(e).__name__}: {e}"
+    return None, f"API failed after 3 attempts for {symbol} ({masked_url})"
 
 
 def _parse_price_series(data: list | dict) -> list[tuple[date, float]]:

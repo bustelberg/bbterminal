@@ -11,6 +11,7 @@ import calendar
 import json
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from itertools import zip_longest
@@ -106,30 +107,47 @@ def _upload_to_storage(supabase: Client, path: str, data: Any) -> None:
             pass
 
 
-def _api_request(url: str, timeout: int = 30) -> tuple[Any | None, str]:
+_last_api_call: float = 0.0
+_API_MIN_INTERVAL = 2.0  # seconds between requests to avoid Cloudflare blocks
+
+
+def _api_request(url: str, timeout: int = 30, _retries: int = 3) -> tuple[Any | None, str]:
+    global _last_api_call
     masked_url = url
     api_key = os.environ.get("GURUFOCUS_API_KEY", "")
     if api_key:
         masked_url = url.replace(api_key, api_key[:4] + "***")
 
-    req = Request(url, headers={"User-Agent": _USER_AGENT, "Accept": "application/json"})
-    try:
-        with urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-            if not raw:
-                return None, f"API empty response ({masked_url})"
-            return json.loads(raw), f"API OK"
-    except HTTPError as e:
-        body = ""
+    for attempt in range(_retries + 1):
+        # Rate-limit: wait between API calls
+        elapsed = time.time() - _last_api_call
+        if elapsed < _API_MIN_INTERVAL:
+            time.sleep(_API_MIN_INTERVAL - elapsed)
+        _last_api_call = time.time()
+
+        req = Request(url, headers={"User-Agent": _USER_AGENT, "Accept": "application/json"})
         try:
-            body = e.read().decode("utf-8", errors="replace")[:200]
-        except Exception:
-            pass
-        return None, f"API HTTP {e.code}: {e.reason} body={body} ({masked_url})"
-    except URLError as e:
-        return None, f"API URL error: {e.reason}"
-    except Exception as e:
-        return None, f"API error: {type(e).__name__}: {e}"
+            with urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+                if not raw:
+                    return None, f"API empty response ({masked_url})"
+                return json.loads(raw), f"API OK"
+        except HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace")[:200]
+            except Exception:
+                pass
+            if e.code == 403 and attempt < _retries:
+                wait = 5 * (attempt + 1)
+                time.sleep(wait)
+                continue
+            return None, f"API HTTP {e.code}: {e.reason} body={body} ({masked_url})"
+        except URLError as e:
+            return None, f"API URL error: {e.reason}"
+        except Exception as e:
+            return None, f"API error: {type(e).__name__}: {e}"
+    return None, f"API failed after {_retries + 1} attempts ({masked_url})"
 
 
 def _build_api_url(path: str, query: dict[str, str] | None = None) -> str:
