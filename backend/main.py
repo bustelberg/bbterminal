@@ -12,6 +12,7 @@ from supabase import create_client
 from dotenv import load_dotenv
 
 from portfolio import parse_airs_excel
+from airs_scanner import scan_portfolios_sync, download_portfolio_sync
 
 from ingest.acquire import acquire_raw_longequity_backfill, check_latest_available_month
 from ingest.flatten import flatten_excel
@@ -374,6 +375,93 @@ async def ingest_long_equity():
 
 
 # ─────────────────────────── Portfolio endpoints ─────────────────────────────
+
+async def _airs_scan_stream():
+    import threading
+    import queue as thread_queue
+
+    q: thread_queue.Queue = thread_queue.Queue()
+
+    def send_event(msg_type: str, **kwargs):
+        payload = {"type": msg_type, **kwargs}
+        q.put(f"data: {json.dumps(payload)}\n\n")
+
+    def run_scanner():
+        try:
+            scan_portfolios_sync(send_event)
+        except Exception as e:
+            q.put(f"data: {json.dumps({'type': 'error', 'message': f'{type(e).__name__}: {e}'})}\n\n")
+        finally:
+            q.put(None)
+
+    thread = threading.Thread(target=run_scanner, daemon=True)
+    thread.start()
+
+    while True:
+        item = await asyncio.to_thread(q.get)
+        if item is None:
+            break
+        yield item
+
+
+@app.get("/api/airs/scan")
+async def airs_scan():
+    return StreamingResponse(
+        _airs_scan_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/api/airs/portfolio/{portfolio_name}")
+async def airs_portfolio_download(portfolio_name: str, datum_van: str | None = None, datum_tot: str | None = None):
+    """Download and parse ATT Excel report for a portfolio."""
+    import io
+    import pandas as pd
+    from datetime import date as dt_date
+
+    today = dt_date.today()
+    if not datum_van:
+        datum_van = f"{today.year}-01-01"
+    if not datum_tot:
+        datum_tot = today.isoformat()
+
+    try:
+        content = await asyncio.to_thread(download_portfolio_sync, portfolio_name, datum_van, datum_tot)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Download failed: {e}")
+
+    try:
+        df = await asyncio.to_thread(pd.read_excel, io.BytesIO(content), engine="xlrd")
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Could not parse Excel: {e}")
+
+    rows = []
+    for _, r in df.iterrows():
+        rows.append({
+            "periode": str(r.get("Periode", ""))[:10],
+            "beginvermogen": round(float(r["Beginvermogen"]), 2) if pd.notna(r.get("Beginvermogen")) else None,
+            "stortingen": round(float(r["Stortingen"]), 2) if pd.notna(r.get("Stortingen")) else None,
+            "onttrekkingen": round(float(r["Onttrekkingen"]), 2) if pd.notna(r.get("Onttrekkingen")) else None,
+            "koersresultaat": round(float(r["Koersresultaat"]), 2) if pd.notna(r.get("Koersresultaat")) else None,
+            "opbrengsten": round(float(r["Opbrengsten"]), 2) if pd.notna(r.get("Opbrengsten")) else None,
+            "kosten": round(float(r["Kosten"]), 2) if pd.notna(r.get("Kosten")) else None,
+            "beleggingsresultaat": round(float(r["Beleggingsresultaat"]), 2) if pd.notna(r.get("Beleggingsresultaat")) else None,
+            "eindvermogen": round(float(r["Eindvermogen"]), 2) if pd.notna(r.get("Eindvermogen")) else None,
+            "rendement": round(float(r["Rendement"]), 6) if pd.notna(r.get("Rendement")) else None,
+            "cumulatief_rendement": round(float(r["Cumulatief rendement"]), 6) if pd.notna(r.get("Cumulatief rendement")) else None,
+        })
+
+    return {
+        "portfolio_name": portfolio_name,
+        "datum_van": datum_van,
+        "datum_tot": datum_tot,
+        "rows": rows,
+    }
+
 
 @app.post("/api/portfolios/parse")
 async def parse_portfolio(file: UploadFile = File(...)):

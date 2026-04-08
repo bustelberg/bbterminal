@@ -15,7 +15,11 @@
       "Bash(npx tsc:*)",
       "Bash(find /c/Users/ReinierSchepBustelbe/Documents/github/bbterminal/old_src -name .env* -o -name *.env)",
       "Bash(grep -E \"\\\\.\\(py|tsx|jsx\\)$\")",
-      "Bash(npx next:*)"
+      "Bash(npx next:*)",
+      "Bash(uv sync:*)",
+      "Bash(curl -s -N --max-time 30 http://localhost:8000/api/airs/scan)",
+      "Bash(curl -s -N --max-time 60 http://localhost:8000/api/airs/scan)",
+      "Bash(curl:*)"
     ]
   }
 }

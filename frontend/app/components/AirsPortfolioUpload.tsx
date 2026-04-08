@@ -1,69 +1,43 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
-type Holding = {
-  holding_name: string;
-  quantity: number | null;
-  currency: string;
-  weight: number | null;
-  start_value_eur: number | null;
-  current_value_eur: number | null;
-  ytd_return_eur: number | null;
-  ytd_return_pct: number | null;
-  ytd_return_local_pct: number | null;
+type ProgressEvent = {
+  type: 'progress';
+  step: string;
+  status: 'in_progress' | 'done';
+  message: string;
 };
 
-type ParseResult = {
-  holdings: Holding[];
-  total_start_eur: number | null;
-  total_current_eur: number | null;
-  total_ytd_eur: number | null;
-  total_ytd_pct: number | null;
+type Portfolio = {
+  portefeuille: string;
+  depotbank: string;
+  client: string;
+  naam: string;
 };
 
-type CachedPortfolio = {
-  id: string;
-  result: ParseResult;
-  uploadedAt: string;
-  fileName: string;
+type PerfRow = {
+  periode: string;
+  beginvermogen: number | null;
+  stortingen: number | null;
+  onttrekkingen: number | null;
+  koersresultaat: number | null;
+  opbrengsten: number | null;
+  kosten: number | null;
+  beleggingsresultaat: number | null;
+  eindvermogen: number | null;
+  rendement: number | null;
+  cumulatief_rendement: number | null;
 };
 
-const CACHE_KEY = 'airs_portfolios';
-
-function loadAll(): CachedPortfolio[] {
-  try {
-    const raw = localStorage.getItem(CACHE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed) && parsed.result) {
-      const entry: CachedPortfolio = { id: crypto.randomUUID(), ...parsed };
-      localStorage.setItem(CACHE_KEY, JSON.stringify([entry]));
-      return [entry];
-    }
-    return parsed;
-  } catch { return []; }
-}
-
-function saveAll(entries: CachedPortfolio[]) {
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify(entries)); } catch {}
-}
-
-function addToCache(result: ParseResult, fileName: string): CachedPortfolio {
-  const entries = loadAll();
-  const entry: CachedPortfolio = { id: crypto.randomUUID(), result, uploadedAt: new Date().toISOString(), fileName };
-  entries.unshift(entry);
-  saveAll(entries);
-  return entry;
-}
-
-function removeFromCache(id: string) {
-  saveAll(loadAll().filter((e) => e.id !== id));
-}
-
-// ─── Formatters ───────────────────────────────────────────────────────────────
+type PortfolioDetail = {
+  portfolio_name: string;
+  datum_van: string;
+  datum_tot: string;
+  rows: PerfRow[];
+};
 
 function fmtEur(v: number | null): string {
   if (v == null) return '—';
@@ -72,7 +46,7 @@ function fmtEur(v: number | null): string {
 
 function fmtPct(v: number | null): string {
   if (v == null) return '—';
-  return (v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%';
+  return (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
 }
 
 function returnColor(v: number | null): string {
@@ -80,14 +54,10 @@ function returnColor(v: number | null): string {
   return v >= 0 ? 'text-emerald-400' : 'text-rose-400';
 }
 
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
+// ─── Detail view ─────────────────────────────────────────────────────────────
 
-// ─── Detail view ──────────────────────────────────────────────────────────────
-
-function PortfolioDetail({ portfolio, onBack }: { portfolio: CachedPortfolio; onBack: () => void }) {
-  const { result } = portfolio;
+function PortfolioDetailView({ detail, onBack }: { detail: PortfolioDetail; onBack: () => void }) {
+  const last = detail.rows[detail.rows.length - 1];
 
   return (
     <div className="flex flex-col h-full">
@@ -100,20 +70,18 @@ function PortfolioDetail({ portfolio, onBack }: { portfolio: CachedPortfolio; on
             &larr; Back
           </button>
           <div>
-            <h1 className="text-lg font-semibold text-white">{portfolio.fileName}</h1>
+            <h1 className="text-lg font-semibold text-white">{detail.portfolio_name}</h1>
             <p className="text-xs text-gray-500 mt-0.5">
-              {result.holdings.length} holdings — uploaded {fmtDate(portfolio.uploadedAt)}
+              {detail.datum_van} to {detail.datum_tot} — {detail.rows.length} period{detail.rows.length !== 1 ? 's' : ''}
             </p>
           </div>
         </div>
-        {result.total_ytd_pct != null && (
+        {last?.cumulatief_rendement != null && (
           <div className="text-right">
-            <span className={`text-lg font-semibold ${returnColor(result.total_ytd_pct)}`}>
-              {fmtPct(result.total_ytd_pct)}
+            <span className={`text-lg font-semibold ${returnColor(last.cumulatief_rendement)}`}>
+              {fmtPct(last.cumulatief_rendement)}
             </span>
-            <p className="text-xs text-gray-500 mt-0.5">
-              {fmtEur(result.total_ytd_eur)} EUR
-            </p>
+            <p className="text-xs text-gray-500 mt-0.5">YTD cumulative return</p>
           </div>
         )}
       </div>
@@ -123,44 +91,30 @@ function PortfolioDetail({ portfolio, onBack }: { portfolio: CachedPortfolio; on
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800/60 text-gray-500 text-xs">
-                <th className="px-4 py-3 text-left font-medium">Holding</th>
-                <th className="px-3 py-3 text-right font-medium w-16">Qty</th>
-                <th className="px-3 py-3 text-right font-medium w-12">Ccy</th>
-                <th className="px-3 py-3 text-right font-medium w-28">Start EUR</th>
-                <th className="px-3 py-3 text-right font-medium w-28">Current EUR</th>
-                <th className="px-3 py-3 text-right font-medium w-28">YTD EUR</th>
-                <th className="px-3 py-3 text-right font-medium w-24">YTD % EUR</th>
-                <th className="px-3 py-3 text-right font-medium w-20">Weight</th>
+                <th className="px-4 py-3 text-left font-medium">Periode</th>
+                <th className="px-3 py-3 text-right font-medium">Beginvermogen</th>
+                <th className="px-3 py-3 text-right font-medium">Koersresultaat</th>
+                <th className="px-3 py-3 text-right font-medium">Opbrengsten</th>
+                <th className="px-3 py-3 text-right font-medium">Beleggingsresultaat</th>
+                <th className="px-3 py-3 text-right font-medium">Eindvermogen</th>
+                <th className="px-3 py-3 text-right font-medium">Rendement</th>
+                <th className="px-3 py-3 text-right font-medium">Cumulatief</th>
               </tr>
             </thead>
             <tbody>
-              {result.holdings.map((h, i) => (
+              {detail.rows.map((r, i) => (
                 <tr key={i} className="border-b border-gray-800/30 hover:bg-white/[0.02] transition-colors">
-                  <td className="px-4 py-2.5 text-gray-200 font-medium">{h.holding_name}</td>
-                  <td className="px-3 py-2.5 text-right text-gray-400 font-mono text-xs">{h.quantity ?? '—'}</td>
-                  <td className="px-3 py-2.5 text-right text-gray-500 text-xs">{h.currency || '—'}</td>
-                  <td className="px-3 py-2.5 text-right text-gray-400 font-mono text-xs">{fmtEur(h.start_value_eur)}</td>
-                  <td className="px-3 py-2.5 text-right text-gray-300 font-mono text-xs">{fmtEur(h.current_value_eur)}</td>
-                  <td className={`px-3 py-2.5 text-right font-mono text-xs ${returnColor(h.ytd_return_eur)}`}>{fmtEur(h.ytd_return_eur)}</td>
-                  <td className={`px-3 py-2.5 text-right font-mono text-xs font-medium ${returnColor(h.ytd_return_pct)}`}>{fmtPct(h.ytd_return_pct)}</td>
-                  <td className="px-3 py-2.5 text-right text-gray-500 font-mono text-xs">{h.weight != null ? (h.weight * 100).toFixed(2) + '%' : '—'}</td>
+                  <td className="px-4 py-2.5 text-gray-200 font-medium">{r.periode}</td>
+                  <td className="px-3 py-2.5 text-right text-gray-400 font-mono text-xs">{fmtEur(r.beginvermogen)}</td>
+                  <td className={`px-3 py-2.5 text-right font-mono text-xs ${returnColor(r.koersresultaat)}`}>{fmtEur(r.koersresultaat)}</td>
+                  <td className="px-3 py-2.5 text-right text-gray-400 font-mono text-xs">{fmtEur(r.opbrengsten)}</td>
+                  <td className={`px-3 py-2.5 text-right font-mono text-xs font-medium ${returnColor(r.beleggingsresultaat)}`}>{fmtEur(r.beleggingsresultaat)}</td>
+                  <td className="px-3 py-2.5 text-right text-gray-300 font-mono text-xs">{fmtEur(r.eindvermogen)}</td>
+                  <td className={`px-3 py-2.5 text-right font-mono text-xs font-medium ${returnColor(r.rendement)}`}>{fmtPct(r.rendement)}</td>
+                  <td className={`px-3 py-2.5 text-right font-mono text-xs font-medium ${returnColor(r.cumulatief_rendement)}`}>{fmtPct(r.cumulatief_rendement)}</td>
                 </tr>
               ))}
             </tbody>
-            <tfoot>
-              <tr className="border-t border-gray-700/60 bg-white/[0.02]">
-                <td className="px-4 py-3 text-white font-semibold">Total</td>
-                <td></td>
-                <td></td>
-                <td className="px-3 py-3 text-right text-gray-300 font-mono text-xs font-medium">{fmtEur(result.total_start_eur)}</td>
-                <td className="px-3 py-3 text-right text-white font-mono text-xs font-semibold">{fmtEur(result.total_current_eur)}</td>
-                <td className={`px-3 py-3 text-right font-mono text-xs font-semibold ${returnColor(result.total_ytd_eur)}`}>{fmtEur(result.total_ytd_eur)}</td>
-                <td className={`px-3 py-3 text-right font-mono text-xs font-semibold ${returnColor(result.total_ytd_pct)}`}>{fmtPct(result.total_ytd_pct)}</td>
-                <td className="px-3 py-3 text-right text-gray-400 font-mono text-xs font-medium">
-                  {(result.holdings.reduce((s, h) => s + (h.weight ?? 0), 0) * 100).toFixed(2)}%
-                </td>
-              </tr>
-            </tfoot>
           </table>
         </div>
       </div>
@@ -168,139 +122,106 @@ function PortfolioDetail({ portfolio, onBack }: { portfolio: CachedPortfolio; on
   );
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
+// ─── Main ────────────────────────────────────────────────────────────────────
 
 export default function AirsPortfolioUpload() {
-  const [portfolios, setPortfolios] = useState<CachedPortfolio[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [parsing, setParsing] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [progress, setProgress] = useState<ProgressEvent[]>([]);
+  const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const dragCounter = useRef(0);
+  const [loading, setLoading] = useState<string | null>(null);
+  const [detail, setDetail] = useState<PortfolioDetail | null>(null);
 
-  useEffect(() => { setPortfolios(loadAll()); }, []);
-
-  const selectPortfolio = useCallback((id: string | null, pushState = true) => {
-    setSelectedId(id);
-    if (pushState) {
-      history.pushState({ portfolioId: id ?? null }, '');
-    }
-  }, []);
-
-  useEffect(() => {
-    function onPopState(e: PopStateEvent) {
-      setSelectedId(e.state?.portfolioId ?? null);
-    }
-    window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
-  }, []);
-
-  async function uploadFiles(files: File[]) {
-    setParsing(true);
+  function startScan() {
+    setScanning(true);
+    setProgress([]);
+    setPortfolios([]);
     setError(null);
-    let lastEntry: CachedPortfolio | null = null;
+    setDetail(null);
 
-    for (const file of files) {
-      const form = new FormData();
-      form.append('file', file);
-      try {
-        const res = await fetch(`${API_URL}/api/portfolios/parse`, {
-          method: 'POST',
-          body: form,
+    const eventSource = new EventSource(`${API_URL}/api/airs/scan`);
+    eventSource.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === 'progress') {
+        setProgress((prev) => {
+          const existing = prev.findIndex(
+            (p) => p.step === data.step && p.status === 'in_progress' && data.status === 'done'
+          );
+          if (existing !== -1) {
+            const updated = [...prev];
+            updated[existing] = data;
+            return updated;
+          }
+          return [...prev, data];
         });
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(`${file.name}: ${body.detail ?? `HTTP ${res.status}`}`);
-        }
-        const data: ParseResult = await res.json();
-        lastEntry = addToCache(data, file.name);
-        setPortfolios(loadAll());
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+      } else if (data.type === 'portfolios') {
+        setPortfolios(data.data);
+      } else if (data.type === 'done') {
+        setScanning(false);
+        eventSource.close();
+      } else if (data.type === 'error') {
+        setError(data.message);
+        setScanning(false);
+        eventSource.close();
       }
+    };
+    eventSource.onerror = () => {
+      setError('Connection lost');
+      setScanning(false);
+      eventSource.close();
+    };
+  }
+
+  async function openPortfolio(name: string) {
+    setLoading(name);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/airs/portfolio/${encodeURIComponent(name)}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail ?? `HTTP ${res.status}`);
+      }
+      const data: PortfolioDetail = await res.json();
+      setDetail(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(null);
     }
-
-    if (files.length === 1 && lastEntry) {
-      selectPortfolio(lastEntry.id);
-    }
-    setParsing(false);
   }
 
-  function handleDelete(id: string) {
-    removeFromCache(id);
-    setPortfolios(loadAll());
-    if (selectedId === id) setSelectedId(null);
+  function statusIcon(status: string) {
+    if (status === 'done') return <span className="text-emerald-400">&#10003;</span>;
+    if (status === 'in_progress') return <span className="text-indigo-400 animate-pulse">&#9679;</span>;
+    return <span className="text-gray-500">&#9675;</span>;
   }
 
-  function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files;
-    if (files && files.length > 0) uploadFiles(Array.from(files));
-    if (fileRef.current) fileRef.current.value = '';
-  }
-
-  function handleDragEnter(e: React.DragEvent) { e.preventDefault(); dragCounter.current++; setDragging(true); }
-  function handleDragLeave(e: React.DragEvent) { e.preventDefault(); dragCounter.current--; if (dragCounter.current === 0) setDragging(false); }
-  function handleDragOver(e: React.DragEvent) { e.preventDefault(); }
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault();
-    dragCounter.current = 0;
-    setDragging(false);
-    const files = Array.from(e.dataTransfer.files).filter((f) => /\.xlsx?$/i.test(f.name));
-    if (files.length > 0) uploadFiles(files);
-  }
-
-  const selected = selectedId ? portfolios.find((p) => p.id === selectedId) : null;
-  if (selected) {
-    return <PortfolioDetail portfolio={selected} onBack={() => selectPortfolio(null)} />;
+  if (detail) {
+    return <PortfolioDetailView detail={detail} onBack={() => setDetail(null)} />;
   }
 
   return (
-    <div
-      className="flex flex-col h-full relative"
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
-    >
-      {dragging && (
-        <div className="absolute inset-0 z-50 bg-[#0f1117]/90 backdrop-blur-sm border-2 border-dashed border-indigo-500/50 rounded-xl flex items-center justify-center">
-          <div className="text-center">
-            <p className="text-base font-medium text-white">Drop Excel files here</p>
-            <p className="text-sm text-gray-400 mt-1">Supports .xlsx and .xls</p>
-          </div>
-        </div>
-      )}
-
+    <div className="flex flex-col h-full">
       <div className="px-8 py-5 border-b border-gray-800/60 flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-lg font-semibold text-white">AIRS Portfolio</h1>
+          <h1 className="text-lg font-semibold text-white">AIRS Portfolio Scanner</h1>
           <p className="text-xs text-gray-500 mt-0.5">
-            {portfolios.length} portfolio{portfolios.length !== 1 ? 's' : ''} cached
+            Scan broker system for available portfolios
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {portfolios.length > 0 && (
-            <button
-              onClick={() => { if (confirm('Delete all cached portfolios?')) { saveAll([]); setPortfolios([]); setSelectedId(null); } }}
-              className="px-4 py-2 rounded-lg text-sm font-medium text-rose-400 hover:bg-rose-500/10 transition-colors"
-            >
-              Delete all
-            </button>
+        <button
+          onClick={startScan}
+          disabled={scanning || loading !== null}
+          className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+        >
+          {scanning && (
+            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
           )}
-          <label className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors cursor-pointer">
-            {parsing ? 'Parsing...' : 'Upload Excel'}
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".xlsx,.xls"
-              multiple
-              onChange={handleInputChange}
-              disabled={parsing}
-              className="hidden"
-            />
-          </label>
-        </div>
+          {scanning ? 'Scanning...' : 'Start Scan'}
+        </button>
       </div>
 
       {error && (
@@ -310,51 +231,81 @@ export default function AirsPortfolioUpload() {
         </div>
       )}
 
-      <div className="flex-1 overflow-auto px-8 py-6">
-        {portfolios.length === 0 && !parsing && (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-gray-800/50 flex items-center justify-center mb-4">
-              <svg className="w-8 h-8 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-              </svg>
+      <div className="flex-1 overflow-auto px-8 py-6 space-y-6">
+        {/* Progress log */}
+        {progress.length > 0 && (
+          <div className="bg-[#151821] rounded-xl border border-gray-800/40 px-5 py-4">
+            <h2 className="text-sm font-medium text-gray-400 mb-3">Progress</h2>
+            <div className="space-y-1.5">
+              {progress.map((p, i) => (
+                <div key={i} className="flex items-center gap-2.5 text-sm">
+                  {statusIcon(p.status)}
+                  <span className={p.status === 'done' ? 'text-gray-400' : 'text-gray-200'}>
+                    {p.message}
+                  </span>
+                </div>
+              ))}
             </div>
-            <p className="text-sm font-medium text-gray-400">Drag & drop Excel files here</p>
-            <p className="text-xs text-gray-600 mt-1">or use the Upload button above</p>
           </div>
         )}
 
+        {/* Portfolio table */}
         {portfolios.length > 0 && (
-          <div className="space-y-3">
-            {portfolios.map((p) => (
-              <div
-                key={p.id}
-                className="flex items-center gap-4 bg-[#151821] border border-gray-800/40 rounded-xl px-5 py-4 hover:bg-[#1a1d27] hover:border-gray-700/50 transition-all cursor-pointer group"
-                onClick={() => selectPortfolio(p.id)}
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-white truncate group-hover:text-indigo-300 transition-colors">{p.fileName}</p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {p.result.holdings.length} holdings — {fmtDate(p.uploadedAt)}
-                  </p>
-                </div>
-                {p.result.total_ytd_pct != null && (
-                  <span className={`text-base font-semibold shrink-0 ${returnColor(p.result.total_ytd_pct)}`}>
-                    {fmtPct(p.result.total_ytd_pct)}
-                  </span>
-                )}
-                {p.result.total_current_eur != null && (
-                  <span className="text-xs text-gray-500 shrink-0 font-mono">
-                    {fmtEur(p.result.total_current_eur)} EUR
-                  </span>
-                )}
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleDelete(p.id); }}
-                  className="px-2 py-1 rounded-lg text-xs text-gray-600 hover:text-rose-400 hover:bg-rose-500/10 transition-colors shrink-0 opacity-0 group-hover:opacity-100"
-                >
-                  Delete
-                </button>
-              </div>
-            ))}
+          <div className="bg-[#151821] rounded-xl border border-gray-800/40 overflow-hidden">
+            <div className="px-5 py-3 border-b border-gray-800/40">
+              <h2 className="text-sm font-medium text-gray-400">
+                Portfolios ({portfolios.length} found) — click to view performance
+              </h2>
+            </div>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-800/60 text-gray-500 text-xs">
+                  <th className="px-5 py-3 text-left font-medium w-10">#</th>
+                  <th className="px-3 py-3 text-left font-medium">Portefeuille</th>
+                  <th className="px-3 py-3 text-left font-medium w-20">Dp</th>
+                  <th className="px-3 py-3 text-left font-medium w-24">Client</th>
+                  <th className="px-3 py-3 text-left font-medium">Naam</th>
+                </tr>
+              </thead>
+              <tbody>
+                {portfolios.map((p, i) => (
+                  <tr
+                    key={i}
+                    className="border-b border-gray-800/30 hover:bg-white/[0.02] transition-colors cursor-pointer group"
+                    onClick={() => !loading && openPortfolio(p.portefeuille)}
+                  >
+                    <td className="px-5 py-2.5 text-gray-500 font-mono text-xs">{i + 1}</td>
+                    <td className="px-3 py-2.5 text-gray-200 font-medium group-hover:text-indigo-300 transition-colors">
+                      {loading === p.portefeuille ? (
+                        <span className="flex items-center gap-2">
+                          <svg className="animate-spin h-3.5 w-3.5 text-indigo-400" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                          {p.portefeuille}
+                        </span>
+                      ) : p.portefeuille}
+                    </td>
+                    <td className="px-3 py-2.5 text-gray-400 text-xs">{p.depotbank}</td>
+                    <td className="px-3 py-2.5 text-gray-400 text-xs">{p.client}</td>
+                    <td className="px-3 py-2.5 text-gray-300">{p.naam}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Empty state */}
+        {progress.length === 0 && portfolios.length === 0 && !scanning && (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-gray-800/50 flex items-center justify-center mb-4">
+              <svg className="w-8 h-8 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+              </svg>
+            </div>
+            <p className="text-sm font-medium text-gray-400">No scan results yet</p>
+            <p className="text-xs text-gray-600 mt-1">Click &quot;Start Scan&quot; to connect to the broker system</p>
           </div>
         )}
       </div>
