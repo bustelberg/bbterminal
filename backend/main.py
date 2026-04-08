@@ -416,6 +416,33 @@ def _parse_att_excel(content: bytes) -> list[dict]:
     return rows
 
 
+@app.get("/api/airs/portfolios")
+async def airs_portfolios_from_db():
+    """Return portfolios we already have performance data for, with their latest YTD."""
+    try:
+        resp = await asyncio.to_thread(
+            lambda: supabase.table("airs_performance")
+            .select("portefeuille,cumulatief_rendement,periode,fetched_at")
+            .order("portefeuille")
+            .order("periode", desc=True)
+            .execute()
+        )
+        # Dedupe to latest row per portfolio
+        seen = {}
+        for r in (resp.data or []):
+            name = r["portefeuille"]
+            if name not in seen:
+                seen[name] = {
+                    "portefeuille": name,
+                    "cumulatief_rendement": r["cumulatief_rendement"],
+                    "periode": r["periode"],
+                    "fetched_at": r["fetched_at"],
+                }
+        return list(seen.values())
+    except Exception:
+        return []
+
+
 async def _airs_scan_stream():
     import threading
     import queue as thread_queue
