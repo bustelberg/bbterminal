@@ -49,6 +49,30 @@ const MC = {
   NET_INCOME: 'annuals__Income Statement__Net Income',
   EPS_DILUTED: 'annuals__Income Statement__EPS (Diluted)',
   EPS_FY1_EST: 'annual_per_share_eps_estimate',
+  // Reverse DCF / WACC metrics
+  WACC: 'annuals__Ratios__WACC %',
+  ROIC: 'annuals__Ratios__ROIC %',
+  BETA: 'annuals__Valuation and Quality__Beta',
+  NET_CASH_PS: 'annuals__Valuation and Quality__Net Cash per Share',
+  GF_INTRINSIC: 'annuals__Valuation and Quality__Intrinsic Value: Projected FCF',
+  PIOTROSKI: 'annuals__Valuation and Quality__Piotroski F-Score',
+  ALTMAN_Z: 'annuals__Valuation and Quality__Altman Z-Score',
+  BUYBACK_RATIO: 'annuals__Valuation and Quality__Shares Buyback Ratio %',
+  YOY_REV_GROWTH: 'annuals__Valuation and Quality__YoY Rev. per Sh. Growth',
+  EBITDA_5Y_GROWTH: 'annuals__Valuation and Quality__5-Year EBITDA Growth Rate (Per Share)',
+  YOY_EPS_GROWTH: 'annuals__Valuation and Quality__YoY EPS Growth',
+  DIV_YIELD: 'annuals__Valuation Ratios__Dividend Yield %',
+  TAX_RATE: 'annuals__Income Statement__Tax Rate %',
+  // LongEquity metrics
+  SP_5Y_CAGR: 'share_price_5yr_cagr',
+  SP_5Y_RSQ: 'share_price_5yr_rsq',
+  SP_10Y_CAGR: 'share_price_10yr_cagr',
+  SP_10Y_RSQ: 'share_price_10yr_rsq',
+  REV_GROWTH_5Y: 'revenue_growth_5yr',
+  REV_GROWTH_RSQ: 'revenue_growth_rsq',
+  FCF_GROWTH_5Y: 'fcf_growth_5yr',
+  FCF_GROWTH_SD: 'fcf_growth_sd',
+  FCF_GROWTH_RSQ: 'fcf_growth_rsq',
 };
 
 // ---------------------------------------------------------------------------
@@ -60,6 +84,17 @@ function latestValue(metrics: MetricRow[], code: string): { value: number; date:
   for (const m of metrics) {
     if (m.metric_code !== code || m.numeric_value == null) continue;
     if (!best || m.target_date > best.target_date) best = m;
+  }
+  return best ? { value: best.numeric_value!, date: best.target_date } : null;
+}
+
+/** Pick the earliest estimate after a reference date (for FY1 = next fiscal year). */
+function earliestFutureValue(metrics: MetricRow[], code: string, afterDate: string): { value: number; date: string } | null {
+  let best: MetricRow | null = null;
+  for (const m of metrics) {
+    if (m.metric_code !== code || m.numeric_value == null) continue;
+    if (m.target_date <= afterDate) continue;
+    if (!best || m.target_date < best.target_date) best = m;
   }
   return best ? { value: best.numeric_value!, date: best.target_date } : null;
 }
@@ -288,6 +323,17 @@ function LogPanel({ logs, logEndRef }: { logs: { type: string; message: string }
   );
 }
 
+function InfoTip({ text }: { text: string }) {
+  return (
+    <span className="relative group cursor-help">
+      <span className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-gray-600 text-gray-500 text-[10px] leading-none hover:border-indigo-400 hover:text-indigo-400 transition-colors">i</span>
+      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 px-3 py-2 bg-[#1e2130] border border-gray-700 rounded-lg text-xs text-gray-300 leading-relaxed opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity z-50 shadow-xl">
+        {text}
+      </span>
+    </span>
+  );
+}
+
 function StatCard({ label, value, sub }: { label: string; value: string; sub?: string | null }) {
   return (
     <div className="bg-[#0f1117] rounded-lg p-3 border border-gray-800/40">
@@ -321,14 +367,6 @@ const tooltipStyle = { backgroundColor: '#151821', border: '1px solid #374151', 
 function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
   const lv = useCallback((code: string) => latestValue(metrics, code), [metrics]);
 
-  // Derived: EGM = (EPS_FY1_EST - EPS_DILUTED) / EPS_DILUTED
-  const egm = useMemo(() => {
-    const eps = lv(MC.EPS_DILUTED);
-    const fy1 = lv(MC.EPS_FY1_EST);
-    if (!eps || !fy1 || eps.value === 0) return null;
-    return (fy1.value - eps.value) / eps.value;
-  }, [lv]);
-
   // Derived: FCF / Net Income
   const fcfOverNi = useMemo(() => {
     const fcf = lv(MC.FCF);
@@ -337,30 +375,10 @@ function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
     return fcf.value / ni.value;
   }, [lv]);
 
-  // Derived: EPS 5Y CAGR
-  const eps5y = useMemo(() => {
-    const series = annualSeries(metrics, MC.EPS_WO_NRI);
-    return computeCAGRWindow(series, 5);
-  }, [metrics]);
 
-  // Derived: Price CAGRs
-  const priceSeries = useMemo(() => annualSeries(metrics, MC.PRICE), [metrics]);
-  const price3y = useMemo(() => computeCAGRWindow(priceSeries, 3), [priceSeries]);
-  const price5y = useMemo(() => computeCAGRWindow(priceSeries, 5), [priceSeries]);
-  const priceAll = useMemo(() => computeCAGR(priceSeries), [priceSeries]);
+
 
   // Derived: FCF/share CAGR windows
-  const fcfpsSeries = useMemo(() => annualSeries(metrics, MC.FCF_PS), [metrics]);
-  const fcfSh5y = useMemo(() => computeCAGRWindow(fcfpsSeries, 5), [fcfpsSeries]);
-  const fcfSh10y = useMemo(() => computeCAGRWindow(fcfpsSeries, 10), [fcfpsSeries]);
-
-  // Dates for derived metrics
-  const epsLatestDate = useMemo(() => {
-    const series = annualSeries(metrics, MC.EPS_WO_NRI);
-    return series.length > 0 ? series[series.length - 1].date : null;
-  }, [metrics]);
-  const priceLatestDate = useMemo(() => priceSeries.length > 0 ? priceSeries[priceSeries.length - 1].date : null, [priceSeries]);
-  const fcfpsLatestDate = useMemo(() => fcfpsSeries.length > 0 ? fcfpsSeries[fcfpsSeries.length - 1].date : null, [fcfpsSeries]);
 
   type StatRow = { label: string; value: string; date?: string | null; info?: string };
 
@@ -391,17 +409,31 @@ function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
       rows: [
         { label: 'Gross Margin', value: fmtPctPoints(lv(MC.GROSS_MARGIN)?.value ?? null), date: lv(MC.GROSS_MARGIN)?.date, info: 'Gross Profit / Revenue. Indicates pricing power and cost of goods sold efficiency.' },
         { label: 'Net Margin', value: fmtPctPoints(lv(MC.NET_MARGIN)?.value ?? null), date: lv(MC.NET_MARGIN)?.date, info: 'Net Income / Revenue. Bottom-line profitability after all expenses.' },
+        { label: 'FCF / Net Income', value: fmtPct(fcfOverNi), date: lv(MC.FCF)?.date, info: 'Free Cash Flow / Net Income. Above 1 means cash earnings exceed accounting earnings (high quality).' },
       ],
     },
     {
-      title: 'Historical Growth',
+      title: 'Value Creation',
       rows: [
-        { label: 'EPS 5Y CAGR', value: fmtPct(eps5y), date: epsLatestDate, info: 'Compound Annual Growth Rate of EPS (ex NRI) over the last 5 years.' },
+        { label: 'Price 5Y CAGR', value: fmtPct(lv(MC.SP_5Y_CAGR)?.value ?? null), date: lv(MC.SP_5Y_CAGR)?.date, info: 'Compound Annual Growth Rate of share price over the last 5 years (LongEquity).' },
+        { label: 'Price 5Y R²', value: fmtNum(lv(MC.SP_5Y_RSQ)?.value ?? null), date: lv(MC.SP_5Y_RSQ)?.date, info: 'R-squared of 5-year share price trend. Higher = more consistent growth.' },
+        { label: 'Price 10Y CAGR', value: fmtPct(lv(MC.SP_10Y_CAGR)?.value ?? null), date: lv(MC.SP_10Y_CAGR)?.date, info: 'Compound Annual Growth Rate of share price over the last 10 years (LongEquity).' },
+        { label: 'Price 10Y R²', value: fmtNum(lv(MC.SP_10Y_RSQ)?.value ?? null), date: lv(MC.SP_10Y_RSQ)?.date, info: 'R-squared of 10-year share price trend. Higher = more consistent growth.' },
       ],
     },
   ];
 
   const rightSections: { title: string; rows: StatRow[] }[] = [
+    {
+      title: 'Historical Growth',
+      rows: [
+        { label: 'Revenue 5Y Growth', value: fmtPct(lv(MC.REV_GROWTH_5Y)?.value ?? null), date: lv(MC.REV_GROWTH_5Y)?.date, info: '5-year revenue growth rate (LongEquity).' },
+        { label: 'Revenue R²', value: fmtNum(lv(MC.REV_GROWTH_RSQ)?.value ?? null), date: lv(MC.REV_GROWTH_RSQ)?.date, info: 'R-squared of revenue growth trend. Higher = more consistent growth.' },
+        { label: 'FCF 5Y Growth', value: fmtPct(lv(MC.FCF_GROWTH_5Y)?.value ?? null), date: lv(MC.FCF_GROWTH_5Y)?.date, info: '5-year FCF growth rate (LongEquity).' },
+        { label: 'FCF Growth R²', value: fmtNum(lv(MC.FCF_GROWTH_RSQ)?.value ?? null), date: lv(MC.FCF_GROWTH_RSQ)?.date, info: 'R-squared of FCF growth trend. Higher = more consistent growth.' },
+        { label: 'FCF Growth SD', value: fmtNum(lv(MC.FCF_GROWTH_SD)?.value ?? null), date: lv(MC.FCF_GROWTH_SD)?.date, info: 'Standard deviation of FCF growth. Lower = more predictable.' },
+      ],
+    },
     {
       title: 'Outlook',
       rows: [
@@ -413,28 +445,6 @@ function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
       rows: [
         { label: 'Forward P/E', value: fmtNum(lv(MC.FWD_PE)?.value ?? null), date: lv(MC.FWD_PE)?.date, info: 'Price / Forward EPS estimate. Lower = cheaper relative to expected earnings.' },
         { label: 'PEG', value: fmtNum(lv(MC.PEG)?.value ?? null), date: lv(MC.PEG)?.date, info: 'P/E / EPS Growth Rate. Below 1 suggests undervalued relative to growth; above 2 may be expensive.' },
-      ],
-    },
-    {
-      title: 'Value Creation',
-      rows: [
-        { label: 'CAGR 3Y', value: fmtPct(price3y), date: priceLatestDate, info: 'Compound Annual Growth Rate of stock price over the last 3 years.' },
-        { label: 'CAGR 5Y', value: fmtPct(price5y), date: priceLatestDate, info: 'Compound Annual Growth Rate of stock price over the last 5 years.' },
-        { label: 'CAGR All', value: fmtPct(priceAll), date: priceLatestDate, info: 'Compound Annual Growth Rate of stock price over the entire available history.' },
-      ],
-    },
-    {
-      title: 'Expected Return',
-      rows: [
-        { label: 'EGM', value: fmtPct(egm), date: lv(MC.EPS_FY1_EST)?.date, info: 'Earnings Growth Multiple = (FY1 EPS Est - Current EPS) / Current EPS. Indicates expected near-term earnings growth.' },
-      ],
-    },
-    {
-      title: 'Cashflow',
-      rows: [
-        { label: 'FCF / Net Income', value: fmtPct(fcfOverNi), date: lv(MC.FCF)?.date, info: 'Free Cash Flow / Net Income. Above 1 means cash earnings exceed accounting earnings (high quality).' },
-        { label: 'FCF/sh 5Y CAGR', value: fmtPct(fcfSh5y), date: fcfpsLatestDate, info: 'Compound Annual Growth Rate of Free Cash Flow per Share over the last 5 years.' },
-        { label: 'FCF/sh 10Y CAGR', value: fmtPct(fcfSh10y), date: fcfpsLatestDate, info: 'Compound Annual Growth Rate of Free Cash Flow per Share over the last 10 years.' },
       ],
     },
   ];
@@ -450,14 +460,7 @@ function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
                 <div key={r.label} className="flex justify-between items-center">
                   <span className="text-gray-400 text-sm flex items-center gap-1.5">
                     {r.label}
-                    {r.info && (
-                      <span className="relative group cursor-help">
-                        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-gray-600 text-gray-500 text-[10px] leading-none hover:border-indigo-400 hover:text-indigo-400 transition-colors">i</span>
-                        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 px-3 py-2 bg-[#1e2130] border border-gray-700 rounded-lg text-xs text-gray-300 leading-relaxed opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity z-50 shadow-xl">
-                          {r.info}
-                        </span>
-                      </span>
-                    )}
+                    {r.info && <InfoTip text={r.info} />}
                   </span>
                   <span className="text-right">
                     <span className="text-white font-mono text-sm">{r.value}</span>
@@ -499,7 +502,7 @@ function FCFYieldChart({ metrics }: { metrics: MetricRow[] }) {
 
   return (
     <>
-      <div className="text-gray-500 text-xs mb-2">All-time avg: <span className="text-rose-400 font-mono">{mean.toFixed(2)}%</span> (red dotted)</div>
+      <div className="text-gray-500 text-xs mb-2 flex items-center gap-1">All-time avg: <span className="text-rose-400 font-mono">{mean.toFixed(2)}%</span> (red dotted) <InfoTip text="FCF Yield = Free Cash Flow / Market Cap. Shows how much cash the business generates relative to its price. Higher = cheaper. The red line is the historical average — useful for spotting when the stock is above or below its typical yield." /></div>
       <ResponsiveContainer width="100%" height={300}>
         <LineChart data={data} margin={{ top: 10, right: 20, bottom: 10, left: 10 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2330" />
@@ -622,12 +625,24 @@ function RelativeGrowthChart({ metrics }: { metrics: MetricRow[] }) {
 
   return (
     <>
-      <div className="text-gray-500 text-xs mb-2">Price vs Owner Earnings (Actual → Estimate), indexed to 100</div>
-      <KPIRow items={[
-        { label: 'CAGR Price', value: fmtPct(data.cagrs.price ?? null) },
-        { label: 'CAGR OE Actual', value: fmtPct(data.cagrs.oe_act ?? null) },
-        { label: 'CAGR OE Est', value: fmtPct(data.cagrs.oe_est ?? null) },
-      ]} />
+      <div className="text-gray-500 text-xs mb-2 flex items-center gap-1">Price vs Owner Earnings (Actual → Estimate), indexed to 100 <InfoTip text="Compares share price growth to Owner Earnings (EPS + Dividends) growth on a log scale. If price grows faster than OE, the stock is getting more expensive (multiple expansion). If OE outpaces price, it's getting cheaper." /></div>
+      <div className="flex gap-6 mb-3">
+        <div className="flex items-center gap-1">
+          <div className="text-gray-500 text-xs">CAGR Price</div>
+          <InfoTip text="Compound Annual Growth Rate of the share price over the full chart period." />
+          <div className="text-white font-mono ml-1">{fmtPct(data.cagrs.price ?? null)}</div>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="text-gray-500 text-xs">CAGR OE Actual</div>
+          <InfoTip text="Compound Annual Growth Rate of actual Owner Earnings (EPS + Dividends). Represents real earnings power growth." />
+          <div className="text-white font-mono ml-1">{fmtPct(data.cagrs.oe_act ?? null)}</div>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="text-gray-500 text-xs">CAGR OE Est</div>
+          <InfoTip text="Compound Annual Growth Rate including analyst estimates for future Owner Earnings. Shows the expected trajectory if estimates are met." />
+          <div className="text-white font-mono ml-1">{fmtPct(data.cagrs.oe_est ?? null)}</div>
+        </div>
+      </div>
       <ResponsiveContainer width="100%" height={350}>
         <LineChart data={data.chartData} margin={{ top: 10, right: 20, bottom: 10, left: 10 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2330" />
@@ -685,12 +700,24 @@ function FCFShareChart({ metrics }: { metrics: MetricRow[] }) {
 
   return (
     <>
-      <div className="text-gray-500 text-xs mb-2">Indexed to 100 at first positive point</div>
-      <KPIRow items={[
-        { label: 'CAGR FCF/sh', value: fmtPct(cagr) },
-        { label: 'Start', value: startDate ?? '—' },
-        { label: 'Base', value: baseVal != null ? fmtNum(baseVal, 4) : '—' },
-      ]} />
+      <div className="text-gray-500 text-xs mb-2 flex items-center gap-1">Indexed to 100 at first positive point <InfoTip text="Free Cash Flow per share growth over time, indexed to 100 at the first positive data point. Log scale shows the consistency of compounding. Steeper = faster FCF growth." /></div>
+      <div className="flex gap-6 mb-3">
+        <div className="flex items-center gap-1">
+          <div className="text-gray-500 text-xs">CAGR FCF/sh</div>
+          <InfoTip text="Compound Annual Growth Rate of Free Cash Flow per share over the full period. The core measure of cash generation growth." />
+          <div className="text-white font-mono ml-1">{fmtPct(cagr)}</div>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="text-gray-500 text-xs">Start</div>
+          <InfoTip text="The start date of the indexed series (first year with positive FCF/share)." />
+          <div className="text-white font-mono ml-1">{startDate ?? '—'}</div>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="text-gray-500 text-xs">Base</div>
+          <InfoTip text="The actual FCF/share value at the start date, which is indexed to 100 on the chart." />
+          <div className="text-white font-mono ml-1">{baseVal != null ? fmtNum(baseVal, 4) : '—'}</div>
+        </div>
+      </div>
       <ResponsiveContainer width="100%" height={300}>
         <LineChart data={data} margin={{ top: 10, right: 20, bottom: 10, left: 10 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2330" />
@@ -717,36 +744,270 @@ function FCFShareChart({ metrics }: { metrics: MetricRow[] }) {
 }
 
 // ---------------------------------------------------------------------------
-// Analyst Estimates grid
+// EGM Calculator (interactive)
 // ---------------------------------------------------------------------------
 
-function AnalystEstimates({ metrics }: { metrics: MetricRow[] }) {
-  const grouped = useMemo(() => {
-    const estMetrics = metrics.filter((m) => m.metric_code.startsWith('annual_') && m.is_prediction && m.numeric_value != null);
-    const map: Record<string, MetricRow[]> = {};
-    for (const m of estMetrics) (map[m.metric_code] ||= []).push(m);
-    return map;
-  }, [metrics]);
+function EGMCalculator({ metrics }: { metrics: MetricRow[] }) {
+  const epsRaw = latestValue(metrics, MC.EPS_DILUTED);
+  const fy1Raw = epsRaw
+    ? earliestFutureValue(metrics, MC.EPS_FY1_EST, epsRaw.date)
+    : latestValue(metrics, MC.EPS_FY1_EST);
+  const yoyEpsGrowth = latestValue(metrics, MC.YOY_EPS_GROWTH);
 
-  if (Object.keys(grouped).length === 0) {
-    return <div className="text-gray-500 text-sm py-4 text-center">No analyst estimate data. Click Refresh Estimates to load.</div>;
-  }
+  const [eps, setEps] = useState<string>('');
+  const [fy1, setFy1] = useState<string>('');
+  const [initialized, setInitialized] = useState(false);
+
+  const resetDefaults = useCallback(() => {
+    setEps(epsRaw ? epsRaw.value.toFixed(2) : '');
+    setFy1(fy1Raw ? fy1Raw.value.toFixed(2) : '');
+  }, [epsRaw, fy1Raw]);
+
+  useEffect(() => {
+    if (!initialized && (epsRaw || fy1Raw)) {
+      resetDefaults();
+      setInitialized(true);
+    }
+  }, [initialized, epsRaw, fy1Raw, resetDefaults]);
+
+  const epsNum = parseFloat(eps);
+  const fy1Num = parseFloat(fy1);
+  const egm = !isNaN(epsNum) && !isNaN(fy1Num) && epsNum !== 0
+    ? (fy1Num - epsNum) / epsNum
+    : null;
+
+  const inputClass = "w-28 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-1.5 text-white font-mono text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none";
 
   return (
-    <div className="grid grid-cols-3 gap-3">
-      {Object.entries(grouped).slice(0, 12).map(([code, rows]) => {
-        const sorted = [...rows].sort((a, b) => b.target_date.localeCompare(a.target_date));
-        const latest = sorted[0];
-        const label = code.replace('annual_', '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-        return (
-          <StatCard
-            key={code}
-            label={label}
-            value={latest.numeric_value?.toLocaleString(undefined, { maximumFractionDigits: 2 }) ?? '—'}
-            sub={`as of ${latest.target_date}`}
-          />
-        );
-      })}
+    <div className="flex items-center gap-6">
+      <div>
+        <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">
+          Current EPS {epsRaw && <span className="text-gray-600">({epsRaw.date})</span>}
+          <InfoTip text="Diluted EPS (excluding non-recurring items) for the most recent fiscal year. Used as the base for calculating expected growth." />
+        </div>
+        <input type="number" step="0.01" value={eps} onChange={(e) => setEps(e.target.value)} className={inputClass} />
+      </div>
+      <div>
+        <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">
+          FY1 EPS Est {fy1Raw && <span className="text-gray-600">({fy1Raw.date})</span>}
+          <InfoTip text="Analyst consensus EPS estimate for the next fiscal year. The growth from Current EPS to this value determines the EGM." />
+        </div>
+        <input type="number" step="0.01" value={fy1} onChange={(e) => setFy1(e.target.value)} className={inputClass} />
+      </div>
+      <div>
+        <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">
+          EGM
+          <InfoTip text="Earnings Growth Multiple = (FY1 EPS Est - Current EPS) / Current EPS. Shows expected year-over-year earnings growth. Green if above historic YoY EPS, red if below." />
+        </div>
+        <div className={`font-mono text-2xl font-semibold ${egm != null && yoyEpsGrowth ? (egm >= yoyEpsGrowth.value / 100 ? 'text-emerald-400' : 'text-rose-400') : 'text-white'}`}>
+          {egm != null ? fmtPct(egm) : '—'}
+        </div>
+      </div>
+      <div>
+        <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">
+          Historic YoY EPS
+          <InfoTip text={`Year-over-year EPS growth for the most recent fiscal year (${yoyEpsGrowth?.date ?? '—'}). Single year, not a multi-year average. Used as a benchmark for the EGM.`} />
+        </div>
+        <div className="font-mono text-2xl font-semibold text-gray-400">
+          {yoyEpsGrowth ? fmtPct(yoyEpsGrowth.value / 100) : '—'}
+        </div>
+      </div>
+      <div>
+        <div className="text-gray-500 text-xs mb-1">&nbsp;</div>
+        <button onClick={resetDefaults} className="px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5 border border-gray-700 transition-colors">
+          Reset
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Reverse DCF Calculator (interactive)
+// ---------------------------------------------------------------------------
+
+/** Compute intrinsic value given FCF/sh, growth, discount rate, terminal growth, years. */
+function dcfValue(fcf: number, growth: number, discount: number, termGrowth: number, years: number): number {
+  let total = 0;
+  let projected = fcf;
+  for (let t = 1; t <= years; t++) {
+    projected *= (1 + growth);
+    total += projected / Math.pow(1 + discount, t);
+  }
+  // Terminal value (Gordon growth)
+  const terminalFCF = projected * (1 + termGrowth);
+  const terminalValue = terminalFCF / (discount - termGrowth);
+  total += terminalValue / Math.pow(1 + discount, years);
+  return total;
+}
+
+/** Binary search for implied growth rate that matches current price. */
+function solveImpliedGrowth(fcf: number, price: number, discount: number, termGrowth: number, years: number): number | null {
+  if (fcf <= 0 || price <= 0 || discount <= termGrowth) return null;
+  let lo = -0.5, hi = 1.0;
+  for (let i = 0; i < 100; i++) {
+    const mid = (lo + hi) / 2;
+    const val = dcfValue(fcf, mid, discount, termGrowth, years);
+    if (val < price) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+function ReverseDCF({ metrics }: { metrics: MetricRow[] }) {
+  const priceRaw = latestValue(metrics, 'close_price') ?? latestValue(metrics, MC.PRICE);
+  const fcfRaw = latestValue(metrics, MC.FCF_PS);
+  const waccRaw = latestValue(metrics, MC.WACC);
+  const netCashRaw = latestValue(metrics, MC.NET_CASH_PS);
+  const historicFcfGrowth = latestValue(metrics, MC.FCF_GROWTH_5Y);
+
+  // Context metrics
+  const roic = latestValue(metrics, MC.ROIC);
+  const gfIntrinsic = latestValue(metrics, MC.GF_INTRINSIC);
+  const buybackRatio = latestValue(metrics, MC.BUYBACK_RATIO);
+  const divYield = latestValue(metrics, MC.DIV_YIELD);
+  const piotroski = latestValue(metrics, MC.PIOTROSKI);
+  const altmanZ = latestValue(metrics, MC.ALTMAN_Z);
+  const ebitda5y = latestValue(metrics, MC.EBITDA_5Y_GROWTH);
+  const yoyRevGrowth = latestValue(metrics, MC.YOY_REV_GROWTH);
+
+  const [price, setPrice] = useState<string>('');
+  const [fcf, setFcf] = useState<string>('');
+  const [netCash, setNetCash] = useState<string>('');
+  const [discount, setDiscount] = useState<string>('10');
+  const [termGrowth, setTermGrowth] = useState<string>('2');
+  const [years, setYears] = useState<string>('10');
+  const [initialized, setInitialized] = useState(false);
+
+  const resetDefaults = useCallback(() => {
+    setPrice(priceRaw ? priceRaw.value.toFixed(2) : '');
+    setFcf(fcfRaw ? fcfRaw.value.toFixed(2) : '');
+    setNetCash(netCashRaw ? netCashRaw.value.toFixed(2) : '0');
+    setDiscount(waccRaw ? waccRaw.value.toFixed(1) : '10');
+    setTermGrowth('2');
+    setYears('10');
+  }, [priceRaw, fcfRaw, netCashRaw, waccRaw]);
+
+  // Only auto-fill on first data load, not on every re-render
+  useEffect(() => {
+    if (!initialized && (priceRaw || fcfRaw)) {
+      resetDefaults();
+      setInitialized(true);
+    }
+  }, [initialized, priceRaw, fcfRaw, resetDefaults]);
+
+  const priceNum = parseFloat(price);
+  const fcfNum = parseFloat(fcf);
+  const netCashNum = parseFloat(netCash) || 0;
+  const discountNum = parseFloat(discount) / 100;
+  const termGrowthNum = parseFloat(termGrowth) / 100;
+  const yearsNum = parseInt(years);
+
+  // Subtract net cash from price to get the operating value the DCF needs to justify
+  const operatingValue = priceNum - netCashNum;
+
+  const impliedGrowth = !isNaN(priceNum) && !isNaN(fcfNum) && !isNaN(discountNum) && !isNaN(termGrowthNum) && !isNaN(yearsNum)
+    && fcfNum > 0 && operatingValue > 0 && discountNum > termGrowthNum && yearsNum > 0
+    ? solveImpliedGrowth(fcfNum, operatingValue, discountNum, termGrowthNum, yearsNum)
+    : null;
+
+  const inputClass = "w-24 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-1.5 text-white font-mono text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none";
+  const dataLabel = <span className="text-emerald-600 text-xs ml-1">DATA</span>;
+  const assumptionLabel = <span className="text-amber-600 text-xs ml-1">ASSUMPTION</span>;
+
+  return (
+    <div className="space-y-5">
+      {/* Inputs row */}
+      <div className="flex flex-wrap items-end gap-5">
+        <div>
+          <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">Share Price{dataLabel} <InfoTip text="Current market price per share. The DCF model solves for what FCF growth rate justifies this price." /></div>
+          <input type="number" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">FCF/share{dataLabel} <InfoTip text="Free Cash Flow per share for the most recent fiscal year. Starting point for projecting future cash flows in the DCF model." /></div>
+          <input type="number" step="0.01" value={fcf} onChange={(e) => setFcf(e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">Net Cash/sh{dataLabel} <InfoTip text="Cash minus debt per share. Subtracted from share price to isolate the operating value that FCF must justify." /></div>
+          <input type="number" step="0.01" value={netCash} onChange={(e) => setNetCash(e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">WACC %{waccRaw ? dataLabel : assumptionLabel} <InfoTip text="Weighted Average Cost of Capital — the discount rate. Blends cost of equity and cost of debt weighted by capital structure. Pre-filled from GuruFocus when available." /></div>
+          <input type="number" step="0.5" value={discount} onChange={(e) => setDiscount(e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">Terminal Growth %{assumptionLabel} <InfoTip text="Perpetual growth rate after the projection period (Gordon Growth Model). Typically 2-3%, roughly matching long-term GDP/inflation. Higher values dramatically increase valuation." /></div>
+          <input type="number" step="0.5" value={termGrowth} onChange={(e) => setTermGrowth(e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">Years{assumptionLabel} <InfoTip text="Number of years in the explicit projection period before terminal value kicks in. Standard is 10 years. Shorter periods put more weight on terminal value." /></div>
+          <input type="number" step="1" value={years} onChange={(e) => setYears(e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <div className="text-gray-500 text-xs mb-1">&nbsp;</div>
+          <button onClick={resetDefaults} className="px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5 border border-gray-700 transition-colors">
+            Reset
+          </button>
+        </div>
+      </div>
+
+      {/* Result */}
+      <div className="flex items-end gap-8">
+        <div>
+          <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">Implied FCF Growth <InfoTip text="The annual FCF growth rate the market is pricing in. Solved via binary search: what growth rate makes the DCF value equal the current share price? Green if at or below historic FCF growth (reasonable), red if above (optimistic)." /></div>
+          <div className={`font-mono text-2xl font-semibold ${impliedGrowth != null && historicFcfGrowth ? (impliedGrowth <= historicFcfGrowth.value ? 'text-emerald-400' : 'text-rose-400') : 'text-white'}`}>
+            {impliedGrowth != null ? fmtPct(impliedGrowth) : '—'}
+          </div>
+        </div>
+        <div>
+          <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">Historic FCF 5Y <InfoTip text="5-year historic FCF growth rate from LongEquity. Used as the benchmark to judge whether the implied growth rate is reasonable." /></div>
+          <div className="font-mono text-2xl font-semibold text-gray-400">
+            {historicFcfGrowth ? fmtPct(historicFcfGrowth.value) : '—'}
+          </div>
+        </div>
+        <div>
+          <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">GF Intrinsic Value <InfoTip text="GuruFocus intrinsic value based on projected FCF. An independent reference point — compare to the current share price to gauge over/undervaluation." /></div>
+          <div className="font-mono text-lg text-gray-400">
+            {gfIntrinsic ? `$${fmtNum(gfIntrinsic.value, 2)}` : '—'}
+          </div>
+        </div>
+      </div>
+
+      {/* Context metrics */}
+      <div className="grid grid-cols-4 sm:grid-cols-8 gap-4 pt-2 border-t border-gray-800/40">
+        <div>
+          <div className="text-gray-500 text-xs flex items-center gap-1">ROIC <InfoTip text="Return on Invested Capital. Measures how efficiently the company generates returns on all capital (debt + equity). Higher = better capital allocation." /></div>
+          <div className="text-gray-300 font-mono text-sm">{roic ? `${fmtNum(roic.value)}%` : '—'}</div>
+        </div>
+        <div>
+          <div className="text-gray-500 text-xs flex items-center gap-1">EBITDA 5Y Gr. <InfoTip text="5-year EBITDA growth rate per share. Indicates underlying business earnings power growth before interest, taxes, depreciation, and amortization." /></div>
+          <div className="text-gray-300 font-mono text-sm">{ebitda5y ? fmtPct(ebitda5y.value / 100) : '—'}</div>
+        </div>
+        <div>
+          <div className="text-gray-500 text-xs flex items-center gap-1">YoY Rev/sh Gr. <InfoTip text="Year-over-year revenue per share growth. Per-share basis adjusts for dilution from share issuance." /></div>
+          <div className="text-gray-300 font-mono text-sm">{yoyRevGrowth ? fmtPct(yoyRevGrowth.value / 100) : '—'}</div>
+        </div>
+        <div>
+          <div className="text-gray-500 text-xs flex items-center gap-1">Buyback <InfoTip text="Shares buyback ratio — percentage of shares repurchased. Positive = company is buying back shares (reduces share count, boosts per-share metrics)." /></div>
+          <div className="text-gray-300 font-mono text-sm">{buybackRatio ? `${fmtNum(buybackRatio.value)}%` : '—'}</div>
+        </div>
+        <div>
+          <div className="text-gray-500 text-xs flex items-center gap-1">Div Yield <InfoTip text="Annual dividend as a percentage of share price. Part of total shareholder return alongside price appreciation and buybacks." /></div>
+          <div className="text-gray-300 font-mono text-sm">{divYield ? `${fmtNum(divYield.value)}%` : '—'}</div>
+        </div>
+        <div>
+          <div className="text-gray-500 text-xs flex items-center gap-1">Piotroski <InfoTip text="Piotroski F-Score (0-9). Scores financial strength based on profitability, leverage, and operating efficiency. 8-9 is strong, 0-2 is weak." /></div>
+          <div className="text-gray-300 font-mono text-sm">{piotroski ? fmtNum(piotroski.value, 0) : '—'}</div>
+        </div>
+        <div>
+          <div className="text-gray-500 text-xs flex items-center gap-1">Altman Z <InfoTip text="Altman Z-Score predicts bankruptcy risk. Above 3.0 = safe zone, 1.8-3.0 = grey zone, below 1.8 = distress zone." /></div>
+          <div className="text-gray-300 font-mono text-sm">{altmanZ ? fmtNum(altmanZ.value) : '—'}</div>
+        </div>
+        <div>
+          <div className="text-gray-500 text-xs flex items-center gap-1">Beta <InfoTip text="Stock's volatility relative to the market. Beta = 1 means same as market, >1 = more volatile, <1 = less volatile. Used in CAPM to estimate cost of equity." /></div>
+          <div className="text-gray-300 font-mono text-sm">{latestValue(metrics, MC.BETA) ? fmtNum(latestValue(metrics, MC.BETA)!.value) : '—'}</div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -827,7 +1088,7 @@ export default function EarningsDashboard() {
             {/* FCF Yield */}
             <section className="bg-[#151821] rounded-xl border border-gray-800/40 p-5 space-y-3">
               <div className="flex items-center justify-between">
-                <h2 className="text-white font-medium">FCF Yield %</h2>
+                <h2 className="text-white font-medium flex items-center gap-1.5">FCF Yield % <InfoTip text="Free Cash Flow Yield over time. Shows how the market prices this company's cash generation ability. Compare to the historical average to spot relative cheapness or richness." /></h2>
                 <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('indicators')} />
               </div>
               <FCFYieldChart metrics={metrics} />
@@ -836,7 +1097,7 @@ export default function EarningsDashboard() {
             {/* Relative Growth */}
             <section className="bg-[#151821] rounded-xl border border-gray-800/40 p-5 space-y-3">
               <div className="flex items-center justify-between">
-                <h2 className="text-white font-medium">Relative Growth (log)</h2>
+                <h2 className="text-white font-medium flex items-center gap-1.5">Relative Growth (log) <InfoTip text="Tracks whether the share price is growing in line with Owner Earnings (EPS + Dividends). On a log scale, parallel lines mean the valuation multiple is stable. Divergence signals re-rating." /></h2>
                 <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('prices')} />
               </div>
               <RelativeGrowthChart metrics={metrics} />
@@ -845,20 +1106,23 @@ export default function EarningsDashboard() {
             {/* FCF/share Growth */}
             <section className="bg-[#151821] rounded-xl border border-gray-800/40 p-5 space-y-3">
               <div className="flex items-center justify-between">
-                <h2 className="text-white font-medium">FCF/share Growth (log)</h2>
+                <h2 className="text-white font-medium flex items-center gap-1.5">FCF/share Growth (log) <InfoTip text="Free Cash Flow per share growth on a log scale. A straight line on log scale indicates consistent compounding. Dips may signal cyclicality or one-off events." /></h2>
                 <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('financials')} />
               </div>
               <FCFShareChart metrics={metrics} />
             </section>
           </div>
 
-          {/* Analyst Estimates */}
+          {/* EGM Calculator */}
           <section className="bg-[#151821] rounded-xl border border-gray-800/40 p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-white font-medium">Analyst Estimates</h2>
-              <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('analyst_estimates')} />
-            </div>
-            <AnalystEstimates metrics={metrics} />
+            <h2 className="text-white font-medium flex items-center gap-1.5">Expected Return (EGM) <InfoTip text="Earnings Growth Multiple — the projected year-over-year EPS growth from the current fiscal year to the next (FY1 estimate). Compares analyst expectations to the stock's actual recent EPS growth rate." /></h2>
+            <EGMCalculator metrics={metrics} />
+          </section>
+
+          {/* Reverse DCF */}
+          <section className="bg-[#151821] rounded-xl border border-gray-800/40 p-5 space-y-4">
+            <h2 className="text-white font-medium flex items-center gap-1.5">Reverse DCF <InfoTip text="Reverse Discounted Cash Flow — instead of estimating a fair value, it solves for the FCF growth rate the market is currently pricing in. If implied growth exceeds historic growth, the market expects acceleration (or the stock may be overvalued)." /></h2>
+            <ReverseDCF metrics={metrics} />
           </section>
         </>
       )}

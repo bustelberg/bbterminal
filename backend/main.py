@@ -826,6 +826,22 @@ _DASHBOARD_METRIC_CODES = [
     "annuals__Income Statement__EPS (Diluted)",
     # Financials — Valuation
     "annuals__Valuation Ratios__FCF Yield %",
+    "annuals__Valuation Ratios__Dividend Yield %",
+    # Financials — Ratios (WACC / returns)
+    "annuals__Ratios__WACC %",
+    "annuals__Ratios__ROIC %",
+    # Financials — Income Statement
+    "annuals__Income Statement__Tax Rate %",
+    # Financials — Valuation and Quality
+    "annuals__Valuation and Quality__Net Cash per Share",
+    "annuals__Valuation and Quality__Intrinsic Value: Projected FCF",
+    "annuals__Valuation and Quality__Beta",
+    "annuals__Valuation and Quality__Piotroski F-Score",
+    "annuals__Valuation and Quality__Altman Z-Score",
+    "annuals__Valuation and Quality__Shares Buyback Ratio %",
+    "annuals__Valuation and Quality__YoY Rev. per Sh. Growth",
+    "annuals__Valuation and Quality__5-Year EBITDA Growth Rate (Per Share)",
+    "annuals__Valuation and Quality__YoY EPS Growth",
     # Indicators (quarterly)
     "indicator_q_interest_coverage",
     "indicator_q_roe",
@@ -839,6 +855,18 @@ _DASHBOARD_METRIC_CODES = [
     "close_price",
     # Analyst estimates (annual_*)
     # These are fetched with a prefix filter below
+]
+
+_LONGEQUITY_METRIC_CODES = [
+    "share_price_5yr_cagr",
+    "share_price_5yr_rsq",
+    "share_price_10yr_cagr",
+    "share_price_10yr_rsq",
+    "revenue_growth_5yr",
+    "revenue_growth_rsq",
+    "fcf_growth_5yr",
+    "fcf_growth_sd",
+    "fcf_growth_rsq",
 ]
 
 
@@ -896,6 +924,19 @@ async def get_earnings_metrics(company_id: int):
             .execute()
         )
         rows.extend(resp2.data or [])
+
+        # Fetch LongEquity metrics
+        resp3 = (
+            supabase.table("metric_data")
+            .select("metric_code,target_date,numeric_value,is_prediction")
+            .eq("company_id", company_id)
+            .eq("source_code", "longequity")
+            .in_("metric_code", _LONGEQUITY_METRIC_CODES)
+            .order("target_date")
+            .limit(1000)
+            .execute()
+        )
+        rows.extend(resp3.data or [])
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Query failed: {e}")
     return rows
