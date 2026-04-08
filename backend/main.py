@@ -374,14 +374,53 @@ async def ingest_long_equity():
     )
 
 
-# ─────────────────────────── Portfolio endpoints ─────────────────────────────
+# ─────────────────────────── AIRS endpoints ──────────────────────────────────
+
+
+def _save_performance_to_db(portfolio_name: str, rows: list[dict]):
+    """Upsert performance rows into airs_performance table."""
+    if not rows:
+        return
+    for r in rows:
+        supabase.table("airs_performance").upsert({
+            "portefeuille": portfolio_name,
+            "periode": r["periode"],
+            "beginvermogen": r["beginvermogen"],
+            "koersresultaat": r["koersresultaat"],
+            "opbrengsten": r["opbrengsten"],
+            "beleggingsresultaat": r["beleggingsresultaat"],
+            "eindvermogen": r["eindvermogen"],
+            "rendement": r["rendement"],
+            "cumulatief_rendement": r["cumulatief_rendement"],
+        }, on_conflict="portefeuille,periode").execute()
+
+
+def _parse_att_excel(content: bytes) -> list[dict]:
+    """Parse ATT Excel bytes into a list of performance row dicts."""
+    import io
+    import pandas as pd
+
+    df = pd.read_excel(io.BytesIO(content), engine="xlrd")
+    rows = []
+    for _, r in df.iterrows():
+        rows.append({
+            "periode": str(r.get("Periode", ""))[:10],
+            "beginvermogen": round(float(r["Beginvermogen"]), 2) if pd.notna(r.get("Beginvermogen")) else None,
+            "koersresultaat": round(float(r["Koersresultaat"]), 2) if pd.notna(r.get("Koersresultaat")) else None,
+            "opbrengsten": round(float(r["Opbrengsten"]), 2) if pd.notna(r.get("Opbrengsten")) else None,
+            "beleggingsresultaat": round(float(r["Beleggingsresultaat"]), 2) if pd.notna(r.get("Beleggingsresultaat")) else None,
+            "eindvermogen": round(float(r["Eindvermogen"]), 2) if pd.notna(r.get("Eindvermogen")) else None,
+            "rendement": round(float(r["Rendement"]), 6) if pd.notna(r.get("Rendement")) else None,
+            "cumulatief_rendement": round(float(r["Cumulatief rendement"]), 6) if pd.notna(r.get("Cumulatief rendement")) else None,
+        })
+    return rows
+
 
 async def _airs_scan_stream():
     import threading
     import queue as thread_queue
 
     q: thread_queue.Queue = thread_queue.Queue()
-
     def send_event(msg_type: str, **kwargs):
         payload = {"type": msg_type, **kwargs}
         q.put(f"data: {json.dumps(payload)}\n\n")
@@ -417,10 +456,13 @@ async def airs_scan():
 
 
 @app.get("/api/airs/portfolio/{portfolio_name}")
-async def airs_portfolio_download(portfolio_name: str, datum_van: str | None = None, datum_tot: str | None = None):
-    """Download and parse ATT Excel report for a portfolio."""
-    import io
-    import pandas as pd
+async def airs_portfolio_download(
+    portfolio_name: str,
+    datum_van: str | None = None,
+    datum_tot: str | None = None,
+    refresh: bool = False,
+):
+    """Return performance data. Serves from DB cache unless refresh=true or no cache."""
     from datetime import date as dt_date
 
     today = dt_date.today()
@@ -429,37 +471,82 @@ async def airs_portfolio_download(portfolio_name: str, datum_van: str | None = N
     if not datum_tot:
         datum_tot = today.isoformat()
 
+    # Check what we have in DB
+    db_rows = []
+    needs_refresh = True
     try:
-        content = await asyncio.to_thread(download_portfolio_sync, portfolio_name, datum_van, datum_tot)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Download failed: {e}")
+        resp = await asyncio.to_thread(
+            lambda: supabase.table("airs_performance")
+            .select("periode,beginvermogen,koersresultaat,opbrengsten,beleggingsresultaat,eindvermogen,rendement,cumulatief_rendement,fetched_at")
+            .eq("portefeuille", portfolio_name)
+            .order("periode")
+            .execute()
+        )
+        db_rows = resp.data or []
+        if db_rows and not refresh:
+            # Fresh if the most recent row was fetched today
+            last_fetched = db_rows[-1].get("fetched_at", "")[:10]
+            needs_refresh = last_fetched != today.isoformat()
+    except Exception:
+        pass  # table may not exist yet
 
-    try:
-        df = await asyncio.to_thread(pd.read_excel, io.BytesIO(content), engine="xlrd")
-    except Exception as e:
-        raise HTTPException(status_code=422, detail=f"Could not parse Excel: {e}")
+    # Download fresh data if needed
+    if needs_refresh:
+        try:
+            content = await asyncio.to_thread(download_portfolio_sync, portfolio_name, datum_van, datum_tot)
+            fresh_rows = await asyncio.to_thread(_parse_att_excel, content)
+        except Exception as e:
+            # If download fails but we have DB data, return that
+            if db_rows:
+                rows = [{k: v for k, v in r.items() if k != "fetched_at"} for r in db_rows]
+                return {
+                    "portfolio_name": portfolio_name,
+                    "datum_van": datum_van,
+                    "datum_tot": datum_tot,
+                    "rows": rows,
+                    "cached": True,
+                }
+            raise HTTPException(status_code=500, detail=f"Download failed: {e}")
 
-    rows = []
-    for _, r in df.iterrows():
-        rows.append({
-            "periode": str(r.get("Periode", ""))[:10],
-            "beginvermogen": round(float(r["Beginvermogen"]), 2) if pd.notna(r.get("Beginvermogen")) else None,
-            "stortingen": round(float(r["Stortingen"]), 2) if pd.notna(r.get("Stortingen")) else None,
-            "onttrekkingen": round(float(r["Onttrekkingen"]), 2) if pd.notna(r.get("Onttrekkingen")) else None,
-            "koersresultaat": round(float(r["Koersresultaat"]), 2) if pd.notna(r.get("Koersresultaat")) else None,
-            "opbrengsten": round(float(r["Opbrengsten"]), 2) if pd.notna(r.get("Opbrengsten")) else None,
-            "kosten": round(float(r["Kosten"]), 2) if pd.notna(r.get("Kosten")) else None,
-            "beleggingsresultaat": round(float(r["Beleggingsresultaat"]), 2) if pd.notna(r.get("Beleggingsresultaat")) else None,
-            "eindvermogen": round(float(r["Eindvermogen"]), 2) if pd.notna(r.get("Eindvermogen")) else None,
-            "rendement": round(float(r["Rendement"]), 6) if pd.notna(r.get("Rendement")) else None,
-            "cumulatief_rendement": round(float(r["Cumulatief rendement"]), 6) if pd.notna(r.get("Cumulatief rendement")) else None,
-        })
+        # Upsert fresh rows into DB (adds new periods, updates existing)
+        try:
+            await asyncio.to_thread(_save_performance_to_db, portfolio_name, fresh_rows)
+        except Exception:
+            pass
 
+        # Re-read full history from DB
+        try:
+            resp = await asyncio.to_thread(
+                lambda: supabase.table("airs_performance")
+                .select("periode,beginvermogen,koersresultaat,opbrengsten,beleggingsresultaat,eindvermogen,rendement,cumulatief_rendement")
+                .eq("portefeuille", portfolio_name)
+                .order("periode")
+                .execute()
+            )
+            return {
+                "portfolio_name": portfolio_name,
+                "datum_van": datum_van,
+                "datum_tot": datum_tot,
+                "rows": resp.data or fresh_rows,
+                "cached": False,
+            }
+        except Exception:
+            return {
+                "portfolio_name": portfolio_name,
+                "datum_van": datum_van,
+                "datum_tot": datum_tot,
+                "rows": fresh_rows,
+                "cached": False,
+            }
+
+    # Cache is fresh — return full history from DB
+    rows = [{k: v for k, v in r.items() if k != "fetched_at"} for r in db_rows]
     return {
         "portfolio_name": portfolio_name,
         "datum_van": datum_van,
         "datum_tot": datum_tot,
         "rows": rows,
+        "cached": True,
     }
 
 
