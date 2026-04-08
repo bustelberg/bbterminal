@@ -520,12 +520,7 @@ function FCFYieldChart({ metrics }: { metrics: MetricRow[] }) {
 
 function RelativeGrowthChart({ metrics }: { metrics: MetricRow[] }) {
   const data = useMemo(() => {
-    // Daily close prices for a smooth price line
-    const dailyPrice = timeSeries(metrics, 'close_price');
-    // Fall back to annual price if no daily data
-    const annualPrice = annualSeries(metrics, MC.PRICE);
-    const priceSource = dailyPrice.length > 0 ? dailyPrice : annualPrice;
-
+    const priceSeries = annualSeries(metrics, MC.PRICE);
     const epsActual = annualSeries(metrics, MC.EPS_WO_NRI);
     const divActual = annualSeries(metrics, MC.DIV_PS);
     const epsEst = annualSeries(metrics, MC.EPS_EST);
@@ -551,14 +546,13 @@ function RelativeGrowthChart({ metrics }: { metrics: MetricRow[] }) {
       return { date: e.date, value: e.value + div };
     });
 
-    if (priceSource.length === 0 || oeActual.length === 0) return { chartData: [], cagrs: {} };
+    if (priceSeries.length === 0 || oeActual.length === 0) return { chartData: [], cagrs: {} };
 
     // Find the earliest date where both price and OE actual exist and are positive.
-    // For daily prices, find the first price date on or after the first positive OE date.
     const firstOE = oeActual.find((o) => o.value > 0);
     if (!firstOE) return { chartData: [], cagrs: {} };
 
-    const firstPrice = priceSource.find((p) => p.date >= firstOE.date && p.value > 0);
+    const firstPrice = priceSeries.find((p) => p.date >= firstOE.date && p.value > 0);
     if (!firstPrice) return { chartData: [], cagrs: {} };
 
     const startDate = firstPrice.date;
@@ -570,6 +564,8 @@ function RelativeGrowthChart({ metrics }: { metrics: MetricRow[] }) {
     for (const o of oeActual) oeActMap[o.date] = o.value;
     const oeEstMap: Record<string, number> = {};
     for (const o of oeEst) oeEstMap[o.date] = o.value;
+    const priceMap: Record<string, number> = {};
+    for (const p of priceSeries) priceMap[p.date] = p.value;
 
     // Find the last actual OE date to bridge the gap to estimates
     const lastActualDate = [...oeActual].filter((o) => o.date >= startDate && o.value > 0).pop()?.date;
@@ -577,17 +573,12 @@ function RelativeGrowthChart({ metrics }: { metrics: MetricRow[] }) {
       ? (oeActMap[lastActualDate] / oeBase) * 100
       : undefined;
 
-    // Build chart data from daily prices as the primary x-axis,
-    // plus OE actual/estimate dates that may not coincide with a price date
+    // Collect all dates from all series
     const allDates = new Set<string>();
-    for (const p of priceSource) if (p.date >= startDate) allDates.add(p.date);
+    for (const p of priceSeries) if (p.date >= startDate) allDates.add(p.date);
     for (const o of oeActual) if (o.date >= startDate) allDates.add(o.date);
     for (const o of oeEst) if (o.date >= startDate) allDates.add(o.date);
     const sortedDates = [...allDates].sort();
-
-    // Price lookup for daily data
-    const priceMap: Record<string, number> = {};
-    for (const p of priceSource) priceMap[p.date] = p.value;
 
     const chartData = sortedDates.map((d) => {
       const oeEstVal = oeEstMap[d] != null && oeEstMap[d] > 0 ? (oeEstMap[d] / oeBase) * 100 : undefined;
@@ -601,7 +592,7 @@ function RelativeGrowthChart({ metrics }: { metrics: MetricRow[] }) {
     });
 
     // CAGRs
-    const priceFiltered = priceSource.filter((p) => p.date >= startDate);
+    const priceFiltered = priceSeries.filter((p) => p.date >= startDate);
     const oeActFiltered = oeActual.filter((o) => o.date >= startDate && o.value > 0);
     const oeEstFiltered = oeEst.filter((o) => o.date >= startDate && o.value > 0);
 
