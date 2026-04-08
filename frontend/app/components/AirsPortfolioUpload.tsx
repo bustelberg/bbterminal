@@ -450,16 +450,12 @@ export default function AirsPortfolioUpload() {
                 <tr className="border-b border-gray-800/60 text-gray-500 text-xs">
                   <th className="px-5 py-3 text-left font-medium w-10">#</th>
                   <th className="px-3 py-3 text-left font-medium cursor-pointer hover:text-gray-300 select-none" onClick={() => toggleSort('portefeuille')}>Portefeuille{sortArrow('portefeuille')}</th>
-                  {portfolios[0]?.depotbank && <th className="px-3 py-3 text-left font-medium w-20">Dp</th>}
-                  {portfolios[0]?.client && <th className="px-3 py-3 text-left font-medium w-24">Client</th>}
-                  {portfolios[0]?.naam !== undefined && portfolios[0]?.depotbank && <th className="px-3 py-3 text-left font-medium">Naam</th>}
                   <th className="px-3 py-3 text-right font-medium w-24 cursor-pointer hover:text-gray-300 select-none" onClick={() => toggleSort('ytd')}>YTD{sortArrow('ytd')}</th>
                   <th className="px-3 py-3 text-right font-medium w-28 cursor-pointer hover:text-gray-300 select-none" onClick={() => toggleSort('asOf')}>As of{sortArrow('asOf')}</th>
                 </tr>
               </thead>
               <tbody>
                 {sortedPortfolios.map((p, i) => {
-                  const hasExtra = !!p.depotbank;
                   const ytdInfo = renderYtd(p.portefeuille);
                   return (
                     <tr
@@ -476,9 +472,6 @@ export default function AirsPortfolioUpload() {
                           </span>
                         ) : p.portefeuille}
                       </td>
-                      {hasExtra && <td className="px-3 py-2.5 text-gray-400 text-xs">{p.depotbank}</td>}
-                      {hasExtra && <td className="px-3 py-2.5 text-gray-400 text-xs">{p.client}</td>}
-                      {hasExtra && <td className="px-3 py-2.5 text-gray-300">{p.naam}</td>}
                       <td className="px-3 py-2.5 text-right">{ytdInfo.ytd}</td>
                       <td className="px-3 py-2.5 text-right">{ytdInfo.asOf}</td>
                     </tr>
