@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -79,6 +81,9 @@ def _upload_to_storage(supabase: Client, path: str, data: list) -> None:
             pass
 
 
+_HAS_CURL = shutil.which("curl") is not None
+
+
 def _fetch_price_from_api(ticker: str, exchange: str, timeout: int = 30) -> tuple[list | None, str]:
     """Fetch price indicator from GuruFocus API. Returns (raw_data, log_message)."""
     base_url = os.environ.get("GURUFOCUS_BASE_URL", "")
@@ -94,29 +99,38 @@ def _fetch_price_from_api(ticker: str, exchange: str, timeout: int = 30) -> tupl
 
     symbol = _build_symbol(ticker, exchange)
     url = f"{base}/public/user/{api_key}/stock/{quote(symbol, safe=':')}/price"
-
-    # Log URL with masked API key
     masked_url = url.replace(api_key, api_key[:4] + "***")
 
-    for attempt in range(3):
+    if _HAS_CURL:
+        try:
+            result = subprocess.run(
+                ["curl", "-s", "-f", "--max-time", str(timeout),
+                 "-H", f"User-Agent: {_USER_AGENT}",
+                 "-H", "Accept: application/json",
+                 url],
+                capture_output=True, text=True, timeout=timeout + 5,
+            )
+            if result.returncode != 0:
+                return None, f"API error for {symbol}: curl exit {result.returncode} ({masked_url})"
+            if not result.stdout:
+                return None, f"API returned empty response for {symbol} ({masked_url})"
+            return json.loads(result.stdout), f"API OK for {symbol}"
+        except Exception as e:
+            return None, f"API error for {symbol}: {type(e).__name__}: {e}"
+    else:
         req = Request(url, headers={"User-Agent": _USER_AGENT, "Accept": "application/json"})
         try:
             with urlopen(req, timeout=timeout) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
                 if not raw:
                     return None, f"API returned empty response for {symbol} ({masked_url})"
-                data = json.loads(raw)
-                return data, f"API OK for {symbol}"
+                return json.loads(raw), f"API OK for {symbol}"
         except HTTPError as e:
-            if e.code == 403 and attempt < 2:
-                time.sleep(3 * (attempt + 1))
-                continue
             return None, f"API HTTP {e.code} for {symbol}: {e.reason} ({masked_url})"
         except URLError as e:
             return None, f"API URL error for {symbol}: {e.reason}"
         except Exception as e:
             return None, f"API error for {symbol}: {type(e).__name__}: {e}"
-    return None, f"API failed after 3 attempts for {symbol} ({masked_url})"
 
 
 def _parse_price_series(data: list | dict) -> list[tuple[date, float]]:

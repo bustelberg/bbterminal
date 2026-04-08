@@ -11,6 +11,8 @@ import calendar
 import json
 import os
 import re
+import shutil
+import subprocess
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -108,46 +110,81 @@ def _upload_to_storage(supabase: Client, path: str, data: Any) -> None:
 
 
 _last_api_call: float = 0.0
-_API_MIN_INTERVAL = 2.0  # seconds between requests to avoid Cloudflare blocks
+_API_MIN_INTERVAL = 1.5  # seconds between requests
+
+# Use curl if available — Python's urllib TLS fingerprint gets blocked by Cloudflare
+_HAS_CURL = shutil.which("curl") is not None
 
 
-def _api_request(url: str, timeout: int = 30, _retries: int = 3) -> tuple[Any | None, str]:
-    global _last_api_call
+def _api_request_curl(url: str, timeout: int = 30) -> tuple[Any | None, str]:
+    """Fetch via curl subprocess to bypass Cloudflare TLS fingerprinting."""
     masked_url = url
     api_key = os.environ.get("GURUFOCUS_API_KEY", "")
     if api_key:
         masked_url = url.replace(api_key, api_key[:4] + "***")
 
-    for attempt in range(_retries + 1):
-        # Rate-limit: wait between API calls
-        elapsed = time.time() - _last_api_call
-        if elapsed < _API_MIN_INTERVAL:
-            time.sleep(_API_MIN_INTERVAL - elapsed)
-        _last_api_call = time.time()
+    try:
+        result = subprocess.run(
+            ["curl", "-s", "-f", "--max-time", str(timeout),
+             "-H", f"User-Agent: {_USER_AGENT}",
+             "-H", "Accept: application/json",
+             url],
+            capture_output=True, text=True, timeout=timeout + 5,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.strip()[:200] if result.stderr else ""
+            # curl -f returns 22 for HTTP errors
+            if result.returncode == 22:
+                return None, f"API HTTP error (curl exit 22) {stderr} ({masked_url})"
+            return None, f"curl exit {result.returncode}: {stderr} ({masked_url})"
+        if not result.stdout:
+            return None, f"API empty response ({masked_url})"
+        return json.loads(result.stdout), "API OK"
+    except subprocess.TimeoutExpired:
+        return None, f"API timeout after {timeout}s ({masked_url})"
+    except json.JSONDecodeError as e:
+        return None, f"API returned invalid JSON: {e} ({masked_url})"
+    except Exception as e:
+        return None, f"curl error: {type(e).__name__}: {e} ({masked_url})"
 
-        req = Request(url, headers={"User-Agent": _USER_AGENT, "Accept": "application/json"})
+
+def _api_request_urllib(url: str, timeout: int = 30) -> tuple[Any | None, str]:
+    """Fetch via urllib (fallback if curl not available)."""
+    masked_url = url
+    api_key = os.environ.get("GURUFOCUS_API_KEY", "")
+    if api_key:
+        masked_url = url.replace(api_key, api_key[:4] + "***")
+
+    req = Request(url, headers={"User-Agent": _USER_AGENT, "Accept": "application/json"})
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            if not raw:
+                return None, f"API empty response ({masked_url})"
+            return json.loads(raw), "API OK"
+    except HTTPError as e:
+        body = ""
         try:
-            with urlopen(req, timeout=timeout) as resp:
-                raw = resp.read().decode("utf-8", errors="replace")
-                if not raw:
-                    return None, f"API empty response ({masked_url})"
-                return json.loads(raw), f"API OK"
-        except HTTPError as e:
-            body = ""
-            try:
-                body = e.read().decode("utf-8", errors="replace")[:200]
-            except Exception:
-                pass
-            if e.code == 403 and attempt < _retries:
-                wait = 5 * (attempt + 1)
-                time.sleep(wait)
-                continue
-            return None, f"API HTTP {e.code}: {e.reason} body={body} ({masked_url})"
-        except URLError as e:
-            return None, f"API URL error: {e.reason}"
-        except Exception as e:
-            return None, f"API error: {type(e).__name__}: {e}"
-    return None, f"API failed after {_retries + 1} attempts ({masked_url})"
+            body = e.read().decode("utf-8", errors="replace")[:200]
+        except Exception:
+            pass
+        return None, f"API HTTP {e.code}: {e.reason} body={body} ({masked_url})"
+    except URLError as e:
+        return None, f"API URL error: {e.reason}"
+    except Exception as e:
+        return None, f"API error: {type(e).__name__}: {e}"
+
+
+def _api_request(url: str, timeout: int = 30) -> tuple[Any | None, str]:
+    global _last_api_call
+    elapsed = time.time() - _last_api_call
+    if elapsed < _API_MIN_INTERVAL:
+        time.sleep(_API_MIN_INTERVAL - elapsed)
+    _last_api_call = time.time()
+
+    if _HAS_CURL:
+        return _api_request_curl(url, timeout)
+    return _api_request_urllib(url, timeout)
 
 
 def _build_api_url(path: str, query: dict[str, str] | None = None) -> str:
