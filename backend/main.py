@@ -27,6 +27,9 @@ from ingest.load_into_supabase import (
 from ingest.resolve_tickers import detect_unknown_tickers, resolve_via_openfigi
 from ingest.earnings import fetch_financials, fetch_analyst_estimates, fetch_indicators
 from ingest.prices import ensure_prices_for_company
+from momentum.data import load_universe, load_all_prices
+from momentum.signals import PRICE_SIGNAL_DEFS
+from momentum.backtest import BacktestConfig, run_backtest
 
 load_dotenv()
 
@@ -960,3 +963,127 @@ async def get_earnings_metric_codes(company_id: int):
     return {"count": len(codes), "codes": codes}
 
 
+# ─────────────────────────── Momentum Backtest ─────────────────────────────
+
+
+@app.get("/api/momentum/signals")
+async def get_momentum_signals():
+    """Return available signal definitions for the frontend."""
+    return {"signals": PRICE_SIGNAL_DEFS}
+
+
+class BacktestRequest(BaseModel):
+    start_date: str = "2016-01-01"
+    end_date: str = "2026-03-01"
+    data_cutoff: str = f"{date.today().year}-01-01"  # don't fetch/use data newer than this
+    signal_weights: dict[str, float] | None = None
+    top_n_sectors: int = 4
+    top_n_per_sector: int = 6
+
+
+async def _momentum_backtest_stream(req: BacktestRequest):
+    """SSE generator for the momentum backtest."""
+    def _emit(data: dict) -> str:
+        return f"data: {json.dumps(data)}\n\n"
+
+    try:
+        yield _emit({"type": "progress", "pct": 0, "message": "Loading universe..."})
+        universe_df = await asyncio.to_thread(load_universe, supabase)
+        if universe_df.empty:
+            yield _emit({"type": "error", "message": "No companies found in database"})
+            return
+        yield _emit({"type": "progress", "pct": 5, "message": f"Found {len(universe_df)} companies"})
+
+        company_ids = universe_df["company_id"].tolist()
+        config = BacktestConfig.from_dict({
+            "start_date": req.start_date,
+            "end_date": req.end_date,
+            "signal_weights": req.signal_weights or {s["key"]: s["default_weight"] for s in PRICE_SIGNAL_DEFS},
+            "top_n_sectors": req.top_n_sectors,
+            "top_n_per_sector": req.top_n_per_sector,
+        })
+
+        # Ensure price data exists for every company (fetch from GuruFocus if missing)
+        data_cutoff = date.fromisoformat(req.data_cutoff)
+        total_companies = len(universe_df)
+        blocked_exchanges: set[str] = set()
+        skipped_count = 0
+        yield _emit({"type": "progress", "pct": 5, "message": f"Ensuring price data for {total_companies} companies (cutoff: {data_cutoff})..."})
+        for idx, (_, row) in enumerate(universe_df.iterrows()):
+            pct = 5 + round((idx / total_companies) * 55)
+            ticker = row["primary_ticker"]
+            exchange = row["primary_exchange"]
+            symbol = f"{exchange}:{ticker}"
+
+            # Skip companies on blocked exchanges
+            if exchange in blocked_exchanges:
+                skipped_count += 1
+                continue
+
+            yield _emit({"type": "progress", "pct": pct, "message": f"Prices: {symbol} ({idx + 1}/{total_companies})"})
+            try:
+                pr = await asyncio.to_thread(
+                    ensure_prices_for_company,
+                    supabase, int(row["company_id"]), ticker, exchange,
+                    data_cutoff=data_cutoff,
+                )
+                if pr.is_forbidden:
+                    blocked_exchanges.add(exchange)
+                    yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: 403 — skipping all {exchange} companies"})
+                elif pr.source == "cache":
+                    yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: cache fresh ({pr.total_prices} prices)"})
+                elif pr.source == "api":
+                    yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: fetched from API ({pr.total_prices} prices, {pr.rows_loaded} loaded)"})
+                elif pr.error:
+                    yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: {pr.error}"})
+            except Exception as e:
+                yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: error — {e}"})
+
+        if blocked_exchanges:
+            yield _emit({"type": "progress", "pct": 60, "message": f"Blocked exchanges (403): {', '.join(sorted(blocked_exchanges))} — {skipped_count} companies skipped"})
+
+
+        # Load all prices in bulk — capped at data_cutoff
+        from datetime import timedelta
+        price_start = date.fromisoformat(req.start_date) - timedelta(days=460)
+        price_end = min(data_cutoff, date.fromisoformat(req.end_date) + timedelta(days=35))
+
+        yield _emit({"type": "progress", "pct": 62, "message": "Loading price data from DB..."})
+        prices_df = await asyncio.to_thread(
+            load_all_prices, supabase, company_ids, price_start, price_end
+        )
+        if prices_df.empty:
+            yield _emit({"type": "error", "message": "No price data found after ingestion."})
+            return
+        yield _emit({"type": "progress", "pct": 65, "message": f"Loaded {len(prices_df):,} price observations"})
+
+        # Run backtest with progress callback
+        events: list[dict] = []
+
+        def send_event(event_type: str, **kwargs):
+            events.append({"type": event_type, **kwargs})
+
+        result = await asyncio.to_thread(
+            run_backtest, config, prices_df, universe_df, send_event
+        )
+
+        # Stream collected progress events
+        for evt in events:
+            if evt["type"] == "progress":
+                scaled_pct = 65 + round(evt.get("pct", 0) * 0.30)
+                yield _emit({"type": "progress", "pct": scaled_pct, "message": evt.get("message", "")})
+
+        yield _emit({"type": "result", "data": result.to_dict()})
+        yield _emit({"type": "done", "message": "Backtest complete"})
+
+    except Exception as e:
+        yield _emit({"type": "error", "message": str(e)})
+
+
+@app.post("/api/momentum/backtest")
+async def momentum_backtest(req: BacktestRequest):
+    return StreamingResponse(
+        _momentum_backtest_stream(req),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

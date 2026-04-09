@@ -17,6 +17,8 @@ from urllib.request import Request, urlopen
 
 from supabase import Client
 
+from ingest.staleness import is_cache_fresh
+
 _BUCKET = "gurufocus-raw"
 _PRICE_CUTOFF = date(2015, 1, 1)
 
@@ -36,6 +38,7 @@ class PriceResult:
     source: str = ""  # "cache", "api", "stale_cache", "none"
     logs: list[str] = field(default_factory=list)
     error: str | None = None
+    is_forbidden: bool = False  # True if 403 / unsubscribed region
 
 
 def _build_symbol(ticker: str, exchange: str) -> str:
@@ -84,14 +87,14 @@ def _upload_to_storage(supabase: Client, path: str, data: list) -> None:
 _HAS_CURL = shutil.which("curl") is not None
 
 
-def _fetch_price_from_api(ticker: str, exchange: str, timeout: int = 30) -> tuple[list | None, str]:
-    """Fetch price indicator from GuruFocus API. Returns (raw_data, log_message)."""
+def _fetch_price_from_api(ticker: str, exchange: str, timeout: int = 30) -> tuple[list | None, str, int | None]:
+    """Fetch price indicator from GuruFocus API. Returns (raw_data, log_message, http_status)."""
     base_url = os.environ.get("GURUFOCUS_BASE_URL", "")
     api_key = os.environ.get("GURUFOCUS_API_KEY", "")
     if not base_url:
-        return None, "GURUFOCUS_BASE_URL env var not set"
+        return None, "GURUFOCUS_BASE_URL env var not set", None
     if not api_key:
-        return None, "GURUFOCUS_API_KEY env var not set"
+        return None, "GURUFOCUS_API_KEY env var not set", None
 
     base = base_url.strip().rstrip("/")
     if base.endswith("/data"):
@@ -104,33 +107,45 @@ def _fetch_price_from_api(ticker: str, exchange: str, timeout: int = 30) -> tupl
     if _HAS_CURL:
         try:
             result = subprocess.run(
-                ["curl", "-s", "-f", "--max-time", str(timeout),
+                ["curl", "-s", "--max-time", str(timeout),
+                 "-w", "\n%{http_code}",
                  "-H", f"User-Agent: {_USER_AGENT}",
                  "-H", "Accept: application/json",
                  url],
                 capture_output=True, text=True, timeout=timeout + 5,
             )
+            output = result.stdout.rsplit("\n", 1)
+            body = output[0] if len(output) > 1 else result.stdout
+            status = int(output[-1]) if len(output) > 1 and output[-1].isdigit() else None
+
+            if status and status >= 400:
+                return None, f"API HTTP {status} for {symbol} body={body[:200]} ({masked_url})", status
             if result.returncode != 0:
-                return None, f"API error for {symbol}: curl exit {result.returncode} ({masked_url})"
-            if not result.stdout:
-                return None, f"API returned empty response for {symbol} ({masked_url})"
-            return json.loads(result.stdout), f"API OK for {symbol}"
+                return None, f"API error for {symbol}: curl exit {result.returncode} ({masked_url})", status
+            if not body:
+                return None, f"API returned empty response for {symbol} ({masked_url})", status
+            return json.loads(body), f"API OK for {symbol}", status
         except Exception as e:
-            return None, f"API error for {symbol}: {type(e).__name__}: {e}"
+            return None, f"API error for {symbol}: {type(e).__name__}: {e}", None
     else:
         req = Request(url, headers={"User-Agent": _USER_AGENT, "Accept": "application/json"})
         try:
             with urlopen(req, timeout=timeout) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
                 if not raw:
-                    return None, f"API returned empty response for {symbol} ({masked_url})"
-                return json.loads(raw), f"API OK for {symbol}"
+                    return None, f"API returned empty response for {symbol} ({masked_url})", resp.status
+                return json.loads(raw), f"API OK for {symbol}", resp.status
         except HTTPError as e:
-            return None, f"API HTTP {e.code} for {symbol}: {e.reason} ({masked_url})"
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace")[:200]
+            except Exception:
+                pass
+            return None, f"API HTTP {e.code} for {symbol}: {e.reason} body={body} ({masked_url})", e.code
         except URLError as e:
-            return None, f"API URL error for {symbol}: {e.reason}"
+            return None, f"API URL error for {symbol}: {e.reason}", None
         except Exception as e:
-            return None, f"API error for {symbol}: {type(e).__name__}: {e}"
+            return None, f"API error for {symbol}: {type(e).__name__}: {e}", None
 
 
 def _parse_price_series(data: list | dict) -> list[tuple[date, float]]:
@@ -207,8 +222,15 @@ def ensure_prices_for_company(
     exchange: str,
     *,
     force_refresh: bool = False,
+    data_cutoff: date | None = None,
 ) -> PriceResult:
-    """Full pipeline: fetch -> cache -> load. Returns detailed result."""
+    """Full pipeline: fetch -> cache -> load. Returns detailed result.
+
+    Args:
+        data_cutoff: If set, judge cache freshness against this date instead of
+                     today. When the cache covers up to this date, skip the API
+                     fetch entirely. Data newer than this date is ignored.
+    """
     result = PriceResult()
     _ensure_bucket(supabase)
     path = _storage_path(ticker, exchange)
@@ -220,24 +242,32 @@ def ensure_prices_for_company(
         if cached is not None:
             parsed = _parse_price_series(cached)
             if parsed:
-                latest = max(d for d, _ in parsed)
-                age_days = (date.today() - latest).days
-                if age_days <= 3:
+                dates = sorted(d for d, _ in parsed)
+                fresh, reason = is_cache_fresh(dates, today=data_cutoff)
+                if fresh:
                     result.source = "cache"
                     result.total_prices = len(parsed)
-                    result.logs.append(f"cache hit ({len(parsed)} prices, latest {latest}, {age_days}d old)")
+                    result.logs.append(f"cache fresh ({reason})")
                     result.rows_loaded = load_prices_into_db(supabase, company_id, parsed)
                     return result
                 else:
-                    result.logs.append(f"cache stale ({age_days}d old, latest {latest}), refreshing from API")
+                    result.logs.append(f"cache stale ({reason}), refreshing from API")
             else:
                 result.logs.append(f"cache exists but parsed 0 prices from it")
         else:
             result.logs.append(f"no cache at {path}")
 
     # 2. Fetch from API
-    data, api_log = _fetch_price_from_api(ticker, exchange)
+    data, api_log, http_status = _fetch_price_from_api(ticker, exchange)
     result.logs.append(api_log)
+
+    # Detect 403 / unsubscribed region
+    if http_status == 403 or (data is None and api_log and "unsubscribed region" in api_log.lower()):
+        result.source = "forbidden"
+        result.is_forbidden = True
+        result.error = f"403 unsubscribed region for {symbol}"
+        result.logs.append(f"Forbidden — exchange {exchange} not in subscription")
+        return result
 
     if data is None:
         # Fall back to stale cache

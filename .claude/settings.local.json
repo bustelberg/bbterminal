@@ -19,7 +19,9 @@
       "Bash(uv sync:*)",
       "Bash(curl -s -N --max-time 30 http://localhost:8000/api/airs/scan)",
       "Bash(curl -s -N --max-time 60 http://localhost:8000/api/airs/scan)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(xargs grep:*)",
+      "Bash(find /c/Users/ReinierSchepBustelbe/Documents/github/bbterminal -type f -name \"*.py\" -exec grep -l \"metric_code\\\\|metric_data\" {} \\\\;)"
     ]
   }
 }

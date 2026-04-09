@@ -24,6 +24,8 @@ from urllib.request import Request, urlopen
 
 from supabase import Client
 
+from ingest.staleness import is_cache_fresh
+
 _BUCKET = "gurufocus-raw"
 _CUTOFF = date(2015, 1, 1)
 
@@ -60,6 +62,7 @@ class EarningsResult:
     cache_status: str = ""  # "cache_hit", "api_fresh", "api_error"
     logs: list[str] = field(default_factory=list)
     error: str | None = None
+    is_forbidden: bool = False  # True if 403 / unsubscribed region
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +119,26 @@ _API_MIN_INTERVAL = 1.5  # seconds between requests
 _HAS_CURL = shutil.which("curl") is not None
 
 
-def _api_request_curl(url: str, timeout: int = 30) -> tuple[Any | None, str]:
+class ApiResult:
+    """Structured API response with status code for 403 detection."""
+    __slots__ = ("data", "log", "status_code")
+
+    def __init__(self, data: Any | None, log: str, status_code: int | None = None):
+        self.data = data
+        self.log = log
+        self.status_code = status_code
+
+    @property
+    def is_forbidden(self) -> bool:
+        """True if the response indicates an unsubscribed region (403 or body hint)."""
+        if self.status_code == 403:
+            return True
+        if self.data is None and self.log and "unsubscribed region" in self.log.lower():
+            return True
+        return False
+
+
+def _api_request_curl(url: str, timeout: int = 30) -> ApiResult:
     """Fetch via curl subprocess to bypass Cloudflare TLS fingerprinting."""
     masked_url = url
     api_key = os.environ.get("GURUFOCUS_API_KEY", "")
@@ -124,31 +146,38 @@ def _api_request_curl(url: str, timeout: int = 30) -> tuple[Any | None, str]:
         masked_url = url.replace(api_key, api_key[:4] + "***")
 
     try:
+        # Use -w to capture HTTP status code, remove -f so we get the body on errors
         result = subprocess.run(
-            ["curl", "-s", "-f", "--max-time", str(timeout),
+            ["curl", "-s", "--max-time", str(timeout),
+             "-w", "\n%{http_code}",
              "-H", f"User-Agent: {_USER_AGENT}",
              "-H", "Accept: application/json",
              url],
             capture_output=True, text=True, timeout=timeout + 5,
         )
-        if result.returncode != 0:
+        if result.returncode != 0 and result.returncode != 22:
             stderr = result.stderr.strip()[:200] if result.stderr else ""
-            # curl -f returns 22 for HTTP errors
-            if result.returncode == 22:
-                return None, f"API HTTP error (curl exit 22) {stderr} ({masked_url})"
-            return None, f"curl exit {result.returncode}: {stderr} ({masked_url})"
-        if not result.stdout:
-            return None, f"API empty response ({masked_url})"
-        return json.loads(result.stdout), "API OK"
+            return ApiResult(None, f"curl exit {result.returncode}: {stderr} ({masked_url})")
+
+        # Split body from status code (last line)
+        output = result.stdout.rsplit("\n", 1)
+        body = output[0] if len(output) > 1 else result.stdout
+        status_code = int(output[-1]) if len(output) > 1 and output[-1].isdigit() else None
+
+        if status_code and status_code >= 400:
+            return ApiResult(None, f"API HTTP {status_code} body={body[:200]} ({masked_url})", status_code)
+        if not body:
+            return ApiResult(None, f"API empty response ({masked_url})", status_code)
+        return ApiResult(json.loads(body), "API OK", status_code)
     except subprocess.TimeoutExpired:
-        return None, f"API timeout after {timeout}s ({masked_url})"
+        return ApiResult(None, f"API timeout after {timeout}s ({masked_url})")
     except json.JSONDecodeError as e:
-        return None, f"API returned invalid JSON: {e} ({masked_url})"
+        return ApiResult(None, f"API returned invalid JSON: {e} ({masked_url})")
     except Exception as e:
-        return None, f"curl error: {type(e).__name__}: {e} ({masked_url})"
+        return ApiResult(None, f"curl error: {type(e).__name__}: {e} ({masked_url})")
 
 
-def _api_request_urllib(url: str, timeout: int = 30) -> tuple[Any | None, str]:
+def _api_request_urllib(url: str, timeout: int = 30) -> ApiResult:
     """Fetch via urllib (fallback if curl not available)."""
     masked_url = url
     api_key = os.environ.get("GURUFOCUS_API_KEY", "")
@@ -160,22 +189,22 @@ def _api_request_urllib(url: str, timeout: int = 30) -> tuple[Any | None, str]:
         with urlopen(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
             if not raw:
-                return None, f"API empty response ({masked_url})"
-            return json.loads(raw), "API OK"
+                return ApiResult(None, f"API empty response ({masked_url})", resp.status)
+            return ApiResult(json.loads(raw), "API OK", resp.status)
     except HTTPError as e:
         body = ""
         try:
             body = e.read().decode("utf-8", errors="replace")[:200]
         except Exception:
             pass
-        return None, f"API HTTP {e.code}: {e.reason} body={body} ({masked_url})"
+        return ApiResult(None, f"API HTTP {e.code}: {e.reason} body={body} ({masked_url})", e.code)
     except URLError as e:
-        return None, f"API URL error: {e.reason}"
+        return ApiResult(None, f"API URL error: {e.reason}")
     except Exception as e:
-        return None, f"API error: {type(e).__name__}: {e}"
+        return ApiResult(None, f"API error: {type(e).__name__}: {e}")
 
 
-def _api_request(url: str, timeout: int = 30) -> tuple[Any | None, str]:
+def _api_request(url: str, timeout: int = 30) -> ApiResult:
     global _last_api_call
     elapsed = time.time() - _last_api_call
     if elapsed < _API_MIN_INTERVAL:
@@ -239,6 +268,53 @@ def _upsert_metric_rows(supabase: Client, rows: list[dict]) -> int:
         ).execute()
         total += len(resp.data)
     return total
+
+
+# ---------------------------------------------------------------------------
+# Date extraction helpers (for staleness checks)
+# ---------------------------------------------------------------------------
+
+def _extract_financials_dates(data: dict) -> list[date]:
+    """Extract all target dates from a financials JSON response."""
+    financials = data.get("financials")
+    if not isinstance(financials, dict):
+        return []
+    dates: set[date] = set()
+    for block_name in ("annuals", "quarterly", "quarterlys"):
+        block = financials.get(block_name)
+        if not isinstance(block, dict):
+            continue
+        for c in ("Fiscal Year", "Fiscal Quarter", "Quarter", "Date", "date"):
+            if c in block and isinstance(block[c], list):
+                for ps in block[c]:
+                    td = _yyyy_mm_to_month_end(str(ps).strip())
+                    if td and td >= _CUTOFF:
+                        dates.add(td)
+                break
+    return sorted(dates)
+
+
+def _extract_analyst_dates(data: dict) -> list[date]:
+    """Extract all target dates from an analyst_estimate JSON response."""
+    dates: set[date] = set()
+    for freq in ("annual", "quarterly"):
+        block = data.get(freq) or {}
+        for d in (block.get("date") or []):
+            td = _yyyy_mm_to_month_end(d)
+            if td and td >= _CUTOFF:
+                dates.add(td)
+    return sorted(dates)
+
+
+def _extract_indicator_dates(data: Any) -> list[date]:
+    """Extract all dates from a single indicator JSON response."""
+    pairs = _extract_indicator_series(data)
+    dates: list[date] = []
+    for d_raw, _ in pairs:
+        td = _parse_indicator_date(d_raw)
+        if td and td >= _CUTOFF:
+            dates.append(td)
+    return sorted(set(dates))
 
 
 # ===========================================================================
@@ -327,27 +403,44 @@ def fetch_financials(
 
     # Check cache
     cached = None
+    need_api = True
     if not force_refresh:
         cached = _fetch_from_storage(supabase, path)
         if cached is not None:
-            result.cache_status = "cache_hit"
-            result.logs.append("Using cached financials")
+            dates = _extract_financials_dates(cached) if isinstance(cached, dict) else []
+            fresh, reason = is_cache_fresh(dates) if dates else (False, "no dates parsed")
+            if fresh:
+                need_api = False
+                result.cache_status = "cache_hit"
+                result.logs.append(f"Cache fresh ({reason})")
+            else:
+                result.logs.append(f"Cache stale ({reason}), refreshing from API")
 
     # Fetch from API if needed
-    if cached is None:
+    if need_api:
         url = _build_api_url(f"stock/{quote(symbol, safe=':')}/financials", {"order": "desc"})
-        data, log = _api_request(url)
-        result.logs.append(log)
-        if data is None:
-            result.cache_status = "api_error"
-            result.error = log
+        api = _api_request(url)
+        result.logs.append(api.log)
+        if api.is_forbidden:
+            result.cache_status = "forbidden"
+            result.is_forbidden = True
+            result.error = f"403 unsubscribed region for {symbol}"
+            result.logs.append(f"Forbidden — exchange {exchange} not in subscription")
             return result
-        cached = data
-        result.cache_status = "api_fresh"
-        _upload_to_storage(supabase, path, data)
-        result.logs.append("Cached to storage")
+        if api.data is None:
+            if cached is not None:
+                result.logs.append("API failed, using stale cache")
+            else:
+                result.cache_status = "api_error"
+                result.error = api.log
+                return result
+        else:
+            cached = api.data
+            result.cache_status = "api_fresh"
+            _upload_to_storage(supabase, path, api.data)
+            result.logs.append("Cached to storage")
 
-    # Parse and load
+    # Parse and load into DB (always, even on cache hit)
     rows = _parse_financials(cached, company_id)
     result.metrics_found = len(set(r["metric_code"] for r in rows))
     result.logs.append(f"Parsed {len(rows)} rows, {result.metrics_found} metrics")
@@ -408,25 +501,43 @@ def fetch_analyst_estimates(
     symbol = _build_symbol(ticker, exchange)
 
     cached = None
+    need_api = True
     if not force_refresh:
         cached = _fetch_from_storage(supabase, path)
         if cached is not None:
-            result.cache_status = "cache_hit"
-            result.logs.append("Using cached analyst estimates")
+            dates = _extract_analyst_dates(cached) if isinstance(cached, dict) else []
+            fresh, reason = is_cache_fresh(dates) if dates else (False, "no dates parsed")
+            if fresh:
+                need_api = False
+                result.cache_status = "cache_hit"
+                result.logs.append(f"Cache fresh ({reason})")
+            else:
+                result.logs.append(f"Cache stale ({reason}), refreshing from API")
 
-    if cached is None:
+    if need_api:
         url = _build_api_url(f"stock/{quote(symbol, safe=':')}/analyst_estimate")
-        data, log = _api_request(url)
-        result.logs.append(log)
-        if data is None:
-            result.cache_status = "api_error"
-            result.error = log
+        api = _api_request(url)
+        result.logs.append(api.log)
+        if api.is_forbidden:
+            result.cache_status = "forbidden"
+            result.is_forbidden = True
+            result.error = f"403 unsubscribed region for {symbol}"
+            result.logs.append(f"Forbidden — exchange {exchange} not in subscription")
             return result
-        cached = data
-        result.cache_status = "api_fresh"
-        _upload_to_storage(supabase, path, data)
-        result.logs.append("Cached to storage")
+        if api.data is None:
+            if cached is not None:
+                result.logs.append("API failed, using stale cache")
+            else:
+                result.cache_status = "api_error"
+                result.error = api.log
+                return result
+        else:
+            cached = api.data
+            result.cache_status = "api_fresh"
+            _upload_to_storage(supabase, path, api.data)
+            result.logs.append("Cached to storage")
 
+    # Always load into DB
     rows = _parse_analyst_estimates(cached, company_id)
     result.metrics_found = len(set(r["metric_code"] for r in rows))
     result.logs.append(f"Parsed {len(rows)} rows, {result.metrics_found} metrics")
@@ -562,23 +673,40 @@ def fetch_indicators(
         path = _storage_path(ticker, exchange, f"indicator_q_{key}")
 
         cached = None
+        need_api = True
         if not force_refresh:
             cached = _fetch_from_storage(supabase, path)
+            if cached is not None:
+                dates = _extract_indicator_dates(cached)
+                fresh, reason = is_cache_fresh(dates) if dates else (False, "no dates parsed")
+                if fresh:
+                    need_api = False
+                    result.logs.append(f"{key}: cache fresh ({reason})")
+                else:
+                    result.logs.append(f"{key}: cache stale ({reason})")
 
-        if cached is not None:
-            result.logs.append(f"{key}: cache hit")
-        else:
+        if need_api:
             url = _build_api_url(
                 f"stock/{quote(symbol, safe=':')}/{quote(key, safe='')}",
                 {"type": "quarterly"},
             )
-            data, log = _api_request(url)
-            result.logs.append(f"{key}: {log}")
-            if data is None:
-                continue
-            cached = data
-            _upload_to_storage(supabase, path, data)
+            api = _api_request(url)
+            result.logs.append(f"{key}: {api.log}")
+            if api.is_forbidden:
+                result.is_forbidden = True
+                result.logs.append(f"{key}: Forbidden — exchange {exchange} not in subscription")
+                # No point trying more indicators for this exchange
+                break
+            if api.data is None:
+                if cached is not None:
+                    result.logs.append(f"{key}: API failed, using stale cache")
+                else:
+                    continue
+            else:
+                cached = api.data
+                _upload_to_storage(supabase, path, api.data)
 
+        # Always parse and load into DB
         rows = _parse_single_indicator(cached, key, company_id)
         all_rows.extend(rows)
         result.logs.append(f"{key}: {len(rows)} rows parsed")
