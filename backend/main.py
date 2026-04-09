@@ -972,13 +972,18 @@ async def get_momentum_signals():
     return {"signals": PRICE_SIGNAL_DEFS}
 
 
+_DEFAULT_END = f"{date.today().year}-01-01"
+_DEFAULT_START = f"{date.today().year - 10}-01-01"
+
+
 class BacktestRequest(BaseModel):
-    start_date: str = "2016-01-01"
-    end_date: str = "2026-03-01"
-    data_cutoff: str = f"{date.today().year}-01-01"  # don't fetch/use data newer than this
+    start_date: str = _DEFAULT_START
+    end_date: str = _DEFAULT_END  # also used as data cutoff — no data newer than this
     signal_weights: dict[str, float] | None = None
     top_n_sectors: int = 4
     top_n_per_sector: int = 6
+    skip_price_fetch: bool = False
+    max_companies: int = 0  # 0 = all, otherwise limit universe (alphabetical)
 
 
 async def _momentum_backtest_stream(req: BacktestRequest):
@@ -992,7 +997,12 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         if universe_df.empty:
             yield _emit({"type": "error", "message": "No companies found in database"})
             return
-        yield _emit({"type": "progress", "pct": 5, "message": f"Found {len(universe_df)} companies"})
+        # Optionally limit universe size (alphabetical by ticker)
+        if req.max_companies > 0 and len(universe_df) > req.max_companies:
+            universe_df = universe_df.sort_values("primary_ticker").head(req.max_companies).reset_index(drop=True)
+            yield _emit({"type": "progress", "pct": 5, "message": f"Limited to {len(universe_df)} companies (alphabetical)"})
+        else:
+            yield _emit({"type": "progress", "pct": 5, "message": f"Found {len(universe_df)} companies"})
 
         company_ids = universe_df["company_id"].tolist()
         config = BacktestConfig.from_dict({
@@ -1003,59 +1013,90 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             "top_n_per_sector": req.top_n_per_sector,
         })
 
-        # Ensure price data exists for every company (fetch from GuruFocus if missing)
-        data_cutoff = date.fromisoformat(req.data_cutoff)
-        total_companies = len(universe_df)
-        blocked_exchanges: set[str] = set()
-        skipped_count = 0
-        yield _emit({"type": "progress", "pct": 5, "message": f"Ensuring price data for {total_companies} companies (cutoff: {data_cutoff})..."})
-        for idx, (_, row) in enumerate(universe_df.iterrows()):
-            pct = 5 + round((idx / total_companies) * 55)
-            ticker = row["primary_ticker"]
-            exchange = row["primary_exchange"]
-            symbol = f"{exchange}:{ticker}"
+        data_cutoff = date.fromisoformat(req.end_date)
 
-            # Skip companies on blocked exchanges
-            if exchange in blocked_exchanges:
-                skipped_count += 1
-                continue
+        if req.skip_price_fetch:
+            yield _emit({"type": "progress", "pct": 60, "message": "Skipping price fetch (using existing DB data)"})
+        else:
+            # Ensure price data exists for every company (fetch from GuruFocus if missing)
+            total_companies = len(universe_df)
+            blocked_exchanges: set[str] = set()
+            skipped_count = 0
+            yield _emit({"type": "progress", "pct": 5, "message": f"Ensuring price data for {total_companies} companies (cutoff: {data_cutoff})..."})
+            for idx, (_, row) in enumerate(universe_df.iterrows()):
+                pct = 5 + round((idx / total_companies) * 55)
+                ticker = row["primary_ticker"]
+                exchange = row["primary_exchange"]
+                symbol = f"{exchange}:{ticker}"
 
-            yield _emit({"type": "progress", "pct": pct, "message": f"Prices: {symbol} ({idx + 1}/{total_companies})"})
-            try:
-                pr = await asyncio.to_thread(
-                    ensure_prices_for_company,
-                    supabase, int(row["company_id"]), ticker, exchange,
-                    data_cutoff=data_cutoff,
-                )
-                if pr.is_forbidden:
-                    blocked_exchanges.add(exchange)
-                    yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: 403 — skipping all {exchange} companies"})
-                elif pr.source == "cache":
-                    yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: cache fresh ({pr.total_prices} prices)"})
-                elif pr.source == "api":
-                    yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: fetched from API ({pr.total_prices} prices, {pr.rows_loaded} loaded)"})
-                elif pr.error:
-                    yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: {pr.error}"})
-            except Exception as e:
-                yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: error — {e}"})
+                # Skip companies on blocked exchanges
+                if exchange in blocked_exchanges:
+                    skipped_count += 1
+                    continue
 
-        if blocked_exchanges:
-            yield _emit({"type": "progress", "pct": 60, "message": f"Blocked exchanges (403): {', '.join(sorted(blocked_exchanges))} — {skipped_count} companies skipped"})
+                yield _emit({"type": "progress", "pct": pct, "message": f"Prices: {symbol} ({idx + 1}/{total_companies})"})
+                try:
+                    pr = await asyncio.to_thread(
+                        ensure_prices_for_company,
+                        supabase, int(row["company_id"]), ticker, exchange,
+                        data_cutoff=data_cutoff,
+                    )
+                    if pr.is_forbidden:
+                        blocked_exchanges.add(exchange)
+                        yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: unsubscribed region — skipping all {exchange} companies"})
+                    else:
+                        # Build detail from logs
+                        detail = pr.source
+                        if pr.source == "cache":
+                            detail = f"cache fresh — {pr.rows_loaded} rows in DB"
+                        elif pr.source == "api":
+                            detail = f"API OK — {pr.total_prices} prices fetched, {pr.rows_loaded} loaded to DB"
+                        elif pr.source == "stale_cache":
+                            detail = f"API failed, used stale cache — {pr.rows_loaded} rows in DB"
+                        elif pr.source == "none":
+                            detail = f"no data — {pr.error or 'unknown'}"
+                        elif pr.error:
+                            detail = pr.error
+                        # Include HTTP status if API was called and failed
+                        for log_line in pr.logs:
+                            if "API HTTP" in log_line:
+                                detail += f" [{log_line.split('(')[0].strip()}]"
+                                break
+                        yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: {detail}"})
+                except Exception as e:
+                    yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: error — {e}"})
 
+            if blocked_exchanges:
+                yield _emit({"type": "progress", "pct": 60, "message": f"Blocked exchanges (unsubscribed): {', '.join(sorted(blocked_exchanges))} — {skipped_count} companies skipped"})
 
         # Load all prices in bulk — capped at data_cutoff
         from datetime import timedelta
         price_start = date.fromisoformat(req.start_date) - timedelta(days=460)
         price_end = min(data_cutoff, date.fromisoformat(req.end_date) + timedelta(days=35))
 
-        yield _emit({"type": "progress", "pct": 62, "message": "Loading price data from DB..."})
+        yield _emit({"type": "progress", "pct": 62, "message": f"Loading prices from DB ({price_start} to {price_end}, starts early for 200-day MA)..."})
+
+        # Use a list to collect progress from the sync loader thread
+        load_progress: list[dict] = []
+        def _on_load_progress(rows_so_far: int, page_num: int):
+            load_progress.append({"rows": rows_so_far, "page": page_num})
+
         prices_df = await asyncio.to_thread(
-            load_all_prices, supabase, company_ids, price_start, price_end
+            load_all_prices, supabase, company_ids, price_start, price_end,
+            on_progress=_on_load_progress,
         )
+
+        # Stream the collected page progress
+        for lp in load_progress:
+            pct = 62 + min(3, round(lp["rows"] / max(1, len(load_progress) * 1000) * 3))
+            yield _emit({"type": "progress", "pct": pct, "message": f"  DB page {lp['page']}: {lp['rows']:,} rows loaded so far..."})
+
         if prices_df.empty:
             yield _emit({"type": "error", "message": "No price data found after ingestion."})
             return
-        yield _emit({"type": "progress", "pct": 65, "message": f"Loaded {len(prices_df):,} price observations"})
+
+        n_companies_with_prices = prices_df["company_id"].nunique()
+        yield _emit({"type": "progress", "pct": 65, "message": f"Loaded {len(prices_df):,} prices for {n_companies_with_prices} companies"})
 
         # Run backtest with progress callback
         events: list[dict] = []

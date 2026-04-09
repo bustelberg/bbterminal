@@ -261,8 +261,9 @@ def ensure_prices_for_company(
     data, api_log, http_status = _fetch_price_from_api(ticker, exchange)
     result.logs.append(api_log)
 
-    # Detect 403 / unsubscribed region
-    if http_status == 403 or (data is None and api_log and "unsubscribed region" in api_log.lower()):
+    # Detect unsubscribed region (check body, not just status code —
+    # a bare 403 can mean a specific ticker is restricted/delisted)
+    if data is None and api_log and "unsubscribed region" in api_log.lower():
         result.source = "forbidden"
         result.is_forbidden = True
         result.error = f"403 unsubscribed region for {symbol}"

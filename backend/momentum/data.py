@@ -47,8 +47,15 @@ def load_all_prices(
     company_ids: list[int],
     start_date: date,
     end_date: date,
+    on_progress: callable = None,
 ) -> pd.DataFrame:
-    """Bulk-load daily closing prices for all companies in one pass.
+    """Bulk-load daily closing prices for all companies.
+
+    Batches company_ids into chunks of 50 to avoid Cloudflare 502 errors
+    from overly long query strings.
+
+    Args:
+        on_progress: Optional callback(rows_so_far, page_num) called after each page.
 
     Returns DataFrame with columns: company_id, target_date, price
     sorted by (company_id, target_date).
@@ -58,28 +65,36 @@ def load_all_prices(
 
     rows: list[dict] = []
     page_size = 1000
-    offset = 0
+    page_num = 0
+    chunk_size = 50  # keep .in_() URL short enough for Cloudflare
 
-    while True:
-        resp = (
-            supabase.table("metric_data")
-            .select("company_id, target_date, numeric_value")
-            .eq("metric_code", "close_price")
-            .eq("source_code", "gurufocus")
-            .in_("company_id", company_ids)
-            .gte("target_date", start_date.isoformat())
-            .lte("target_date", end_date.isoformat())
-            .order("company_id")
-            .order("target_date")
-            .range(offset, offset + page_size - 1)
-            .execute()
-        )
-        if not resp.data:
-            break
-        rows.extend(resp.data)
-        if len(resp.data) < page_size:
-            break
-        offset += page_size
+    for chunk_start in range(0, len(company_ids), chunk_size):
+        chunk = company_ids[chunk_start : chunk_start + chunk_size]
+        offset = 0
+
+        while True:
+            resp = (
+                supabase.table("metric_data")
+                .select("company_id, target_date, numeric_value")
+                .eq("metric_code", "close_price")
+                .eq("source_code", "gurufocus")
+                .in_("company_id", chunk)
+                .gte("target_date", start_date.isoformat())
+                .lte("target_date", end_date.isoformat())
+                .order("company_id")
+                .order("target_date")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            if not resp.data:
+                break
+            rows.extend(resp.data)
+            page_num += 1
+            if on_progress:
+                on_progress(len(rows), page_num)
+            if len(resp.data) < page_size:
+                break
+            offset += page_size
 
     if not rows:
         return pd.DataFrame(columns=["company_id", "target_date", "price"])

@@ -12,32 +12,58 @@ _BATCH_SIZE = 100
 # OpenFIGI exchCode → our primary_exchange label.
 # Unknown codes are kept as-is (still better than UNKNOWN).
 _EXCHCODE_MAP: dict[str, str] = {
+    # OpenFIGI exchCode → GuruFocus exchange name
+    # US exchanges
+    "US": "NYSE",
     "UW": "NASDAQ",
     "UN": "NYSE",
-    "UA": "NYSE",
-    "UP": "NYSE",
-    "UR": "NYSE",
+    "UA": "NYSE",      # NYSE American (AMEX)
+    "UP": "NYSE",      # NYSE Arca
+    "UR": "NYSE",      # NYSE Arca
+    "UQ": "NASDAQ",
+    # Europe
     "LN": "LSE",
-    "TT": "TSE",
     "GY": "XETRA",
     "GF": "XETRA",
+    "GR": "XETRA",     # German regional → XETRA
+    "NA": "EURONEXT",   # Amsterdam
+    "FP": "EURONEXT",   # Paris
+    "BB": "EURONEXT",   # Brussels
+    "SM": "BME",        # Madrid
+    "IM": "MIL",        # Milan
+    "DC": "OCSE",       # Copenhagen
+    "NO": "OSL",        # Oslo
+    "ST": "OSTO",       # Stockholm
+    "HB": "OSTO",       # Stockholm (alt)
+    "FH": "OHEL",       # Helsinki
+    "VX": "XSWX",       # Swiss
+    "PW": "WAR",        # Warsaw
+    "AV": "XETRA",      # Vienna → XETRA (GuruFocus groups them)
+    # Americas
+    "CN": "TSX",        # Toronto
+    "CT": "TSX",        # Toronto (alt)
+    "MF": "BMV",        # Mexico
+    "MX": "BMV",
+    # Asia-Pacific
+    "TT": "TSE",        # Tokyo
     "HK": "HKEX",
     "AU": "ASX",
-    "NA": "EURONEXT",
-    "FP": "EURONEXT",
-    "BB": "EURONEXT",
-    "SM": "BME",
-    "IM": "BORSA",
-    "DC": "OCSE",
-    "ST": "STO",
-    "HB": "OMX",
-    "VX": "SIX",
-    "SS": "SSE",
-    "SZ": "SZSE",
-    "KS": "KRX",
-    "TW": "TWSE",
-    "JT": "JSE",
-    "MX": "BMV",
+    "NZ": "NZSE",       # New Zealand
+    "SS": "SSE",        # Shanghai
+    "SZ": "SZSE",       # Shenzhen
+    "KS": "KRX",        # Korea
+    "TW": "TWSE",       # Taiwan
+    "IN": "NSE",        # India
+    "JT": "JSE",        # Johannesburg
+    # MIC codes that may come through directly
+    "XAMS": "EURONEXT",
+    "XPAR": "EURONEXT",
+    "XBRU": "EURONEXT",
+    "XMAD": "BME",
+    "XKRX": "KRX",
+    "XSWX": "XSWX",
+    "XTER": "XETRA",
+    "XPRA": "XETRA",    # Prague → XETRA (GuruFocus)
 }
 
 

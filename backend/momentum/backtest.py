@@ -114,22 +114,28 @@ def _generate_month_starts(start: date, end: date) -> list[date]:
     return months
 
 
-def _get_price_on_or_after(prices_df: pd.DataFrame, company_id: int, target: pd.Timestamp) -> float | None:
-    """Get the first available price on or after target date for a company."""
-    mask = (prices_df["company_id"] == company_id) & (prices_df["target_date"] >= target)
-    subset = prices_df[mask]
-    if subset.empty:
-        return None
-    return float(subset.iloc[0]["price"])
+def _build_price_index(prices_df: pd.DataFrame) -> dict[int, pd.Series]:
+    """Pre-index prices into a dict of {company_id: Series(price, DatetimeIndex)}.
+
+    One-time cost that eliminates repeated DataFrame filtering.
+    """
+    result: dict[int, pd.Series] = {}
+    for cid, group in prices_df.groupby("company_id"):
+        s = pd.Series(
+            group["price"].values,
+            index=pd.DatetimeIndex(group["target_date"]),
+            dtype="float64",
+        ).sort_index()
+        result[int(cid)] = s
+    return result
 
 
-def _get_price_on_or_before(prices_df: pd.DataFrame, company_id: int, target: pd.Timestamp) -> float | None:
-    """Get the last available price on or before target date for a company."""
-    mask = (prices_df["company_id"] == company_id) & (prices_df["target_date"] <= target)
-    subset = prices_df[mask]
+def _price_on_or_after(series: pd.Series, target: pd.Timestamp) -> float | None:
+    """Get the first available price on or after target date from a pre-indexed Series."""
+    subset = series[series.index >= target]
     if subset.empty:
         return None
-    return float(subset.iloc[-1]["price"])
+    return float(subset.iloc[0])
 
 
 def run_backtest(
@@ -149,6 +155,9 @@ def run_backtest(
     months = _generate_month_starts(config.start_date, config.end_date)
     if len(months) < 2:
         raise ValueError("Need at least 2 months for a backtest")
+
+    # Build price index once — eliminates repeated DataFrame filtering
+    price_index = _build_price_index(prices_df)
 
     monthly_records: list[MonthlyRecord] = []
     cumulative = 0.0  # cumulative return in %
@@ -171,7 +180,10 @@ def run_backtest(
             )
 
         # Compute signals as of this month
-        signals_df = compute_price_signals(prices_df, universe_df, as_of_date=month_date)
+        signals_df = compute_price_signals(
+            prices_df, universe_df, as_of_date=month_date,
+            price_index=price_index,
+        )
         if signals_df.empty:
             monthly_records.append(MonthlyRecord(
                 date=month_date.isoformat()[:7],
@@ -203,14 +215,18 @@ def run_backtest(
         weight = 1.0 / n_holdings
         holdings_counts.append(n_holdings)
 
-        # Compute forward returns
+        # Compute forward returns using pre-indexed series
         holdings: list[MonthlyHolding] = []
         returns: list[float] = []
+        entry_ts = pd.Timestamp(month_date)
+        exit_ts = pd.Timestamp(next_month)
 
         for _, row in selected.iterrows():
             cid = int(row["company_id"])
-            entry_price = _get_price_on_or_after(prices_df, cid, pd.Timestamp(month_date))
-            exit_price = _get_price_on_or_after(prices_df, cid, pd.Timestamp(next_month))
+            series = price_index.get(cid)
+
+            entry_price = _price_on_or_after(series, entry_ts) if series is not None else None
+            exit_price = _price_on_or_after(series, exit_ts) if series is not None else None
 
             fwd_return = None
             if entry_price and exit_price and entry_price > 0:

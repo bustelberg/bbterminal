@@ -73,11 +73,13 @@ export default function MomentumBacktester() {
   const [weights, setWeights] = useState<Record<string, number>>({});
 
   // Config
-  const [startDate, setStartDate] = useState('2016-01');
-  const [endDate, setEndDate] = useState('2026-03');
-  const [dataCutoff, setDataCutoff] = useState(`${new Date().getFullYear()}-01-01`);
+  const currentYear = new Date().getFullYear();
+  const [startDate, setStartDate] = useState(`${currentYear - 10}-01`);
+  const [endDate, setEndDate] = useState(`${currentYear}-01`);
   const [topSectors, setTopSectors] = useState(4);
   const [topPerSector, setTopPerSector] = useState(6);
+  const [skipPriceFetch, setSkipPriceFetch] = useState(false);
+  const [maxCompanies, setMaxCompanies] = useState(0);
 
   // State
   const [running, setRunning] = useState(false);
@@ -125,10 +127,11 @@ export default function MomentumBacktester() {
         body: JSON.stringify({
           start_date: `${startDate}-01`,
           end_date: `${endDate}-01`,
-          data_cutoff: dataCutoff,
           signal_weights: weights,
           top_n_sectors: topSectors,
           top_n_per_sector: topPerSector,
+          skip_price_fetch: skipPriceFetch,
+          max_companies: maxCompanies,
         }),
       });
 
@@ -208,16 +211,6 @@ export default function MomentumBacktester() {
               />
             </div>
             <div>
-              <label className="text-gray-500 text-xs block mb-1">Data Cutoff</label>
-              <input
-                type="date"
-                value={dataCutoff}
-                onChange={(e) => setDataCutoff(e.target.value)}
-                className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-                title="Don't fetch or use data newer than this date"
-              />
-            </div>
-            <div>
               <label className="text-gray-500 text-xs block mb-1">Top Sectors</label>
               <input
                 type="number"
@@ -239,6 +232,28 @@ export default function MomentumBacktester() {
                 className="w-16 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
               />
             </div>
+            <div>
+              <label className="text-gray-500 text-xs block mb-1">Max Companies</label>
+              <input
+                type="number"
+                min={0}
+                max={500}
+                value={maxCompanies}
+                onChange={(e) => setMaxCompanies(Number(e.target.value))}
+                className="w-20 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                title="0 = all companies, otherwise limit alphabetically"
+              />
+              <span className="text-gray-600 text-xs ml-1">0 = all</span>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer self-center pt-4">
+              <input
+                type="checkbox"
+                checked={skipPriceFetch}
+                onChange={(e) => setSkipPriceFetch(e.target.checked)}
+                className="accent-indigo-500 w-4 h-4 cursor-pointer"
+              />
+              <span className="text-gray-400 text-xs">Skip price fetch</span>
+            </label>
             <button
               onClick={runBacktest}
               disabled={running}
@@ -339,10 +354,10 @@ export default function MomentumBacktester() {
                   />
                   <Tooltip
                     {...tooltipStyle}
-                    formatter={(value: number, name: string) => [
-                      `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`,
-                      name === 'cumReturn' ? 'Cumulative' : 'Monthly',
-                    ]}
+                    formatter={(value, name) => {
+                      const v = Number(value);
+                      return [`${v >= 0 ? '+' : ''}${v.toFixed(2)}%`, name === 'cumReturn' ? 'Cumulative' : 'Monthly'];
+                    }}
                   />
                   <Line
                     type="monotone"

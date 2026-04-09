@@ -138,13 +138,17 @@ def compute_price_signals(
     prices_df: pd.DataFrame,
     universe_df: pd.DataFrame,
     as_of_date: date,
+    *,
+    price_index: dict[int, pd.Series] | None = None,
 ) -> pd.DataFrame:
     """Compute price signals for all companies as of a given date.
 
     Args:
-        prices_df: Full price DataFrame with columns [company_id, target_date, price].
+        prices_df: Full price DataFrame (unused if price_index is provided).
         universe_df: Company DataFrame with at least [company_id, sector].
         as_of_date: Only use prices on or before this date (no look-ahead).
+        price_index: Pre-indexed dict of {company_id: Series}. If provided,
+                     avoids repeated DataFrame filtering (much faster).
 
     Returns:
         DataFrame with company_id, sector, and all signal columns.
@@ -152,23 +156,33 @@ def compute_price_signals(
     """
     cutoff = pd.Timestamp(as_of_date)
 
-    available = prices_df[prices_df["target_date"] <= cutoff]
-
     results = []
-    for cid in universe_df["company_id"].unique():
-        company_prices = available[available["company_id"] == cid]
-        if company_prices.empty or len(company_prices) < 20:
-            continue
 
-        series = pd.Series(
-            company_prices["price"].values,
-            index=pd.DatetimeIndex(company_prices["target_date"]),
-            dtype="float64",
-        ).sort_index()
-
-        signals = _compute_single_company_signals(series)
-        signals["company_id"] = cid
-        results.append(signals)
+    if price_index is not None:
+        for cid in universe_df["company_id"].unique():
+            series = price_index.get(int(cid))
+            if series is None or len(series) < 20:
+                continue
+            trimmed = series[series.index <= cutoff]
+            if len(trimmed) < 20:
+                continue
+            signals = _compute_single_company_signals(trimmed)
+            signals["company_id"] = cid
+            results.append(signals)
+    else:
+        available = prices_df[prices_df["target_date"] <= cutoff]
+        for cid in universe_df["company_id"].unique():
+            company_prices = available[available["company_id"] == cid]
+            if company_prices.empty or len(company_prices) < 20:
+                continue
+            series = pd.Series(
+                company_prices["price"].values,
+                index=pd.DatetimeIndex(company_prices["target_date"]),
+                dtype="float64",
+            ).sort_index()
+            signals = _compute_single_company_signals(series)
+            signals["company_id"] = cid
+            results.append(signals)
 
     if not results:
         return pd.DataFrame()

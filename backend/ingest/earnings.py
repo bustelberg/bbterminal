@@ -130,9 +130,11 @@ class ApiResult:
 
     @property
     def is_forbidden(self) -> bool:
-        """True if the response indicates an unsubscribed region (403 or body hint)."""
-        if self.status_code == 403:
-            return True
+        """True if the response indicates an unsubscribed region.
+
+        Only triggers on 'unsubscribed region' in the body, NOT on bare 403s,
+        because a 403 can also mean a specific ticker is restricted/delisted.
+        """
         if self.data is None and self.log and "unsubscribed region" in self.log.lower():
             return True
         return False
