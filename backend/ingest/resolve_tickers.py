@@ -13,23 +13,25 @@ _BATCH_SIZE = 100
 # Unknown codes are kept as-is (still better than UNKNOWN).
 _EXCHCODE_MAP: dict[str, str] = {
     # OpenFIGI exchCode → GuruFocus exchange name
+    # Verified against GuruFocus API (404 = wrong name, 200/403 = correct)
+    #
     # US exchanges
     "US": "NYSE",
     "UW": "NASDAQ",
     "UN": "NYSE",
-    "UA": "NYSE",      # NYSE American (AMEX)
-    "UP": "NYSE",      # NYSE Arca
-    "UR": "NYSE",      # NYSE Arca
+    "UA": "NYSE",       # NYSE American (AMEX)
+    "UP": "NYSE",       # NYSE Arca
+    "UR": "NYSE",       # NYSE Arca
     "UQ": "NASDAQ",
-    # Europe
+    # Europe — GuruFocus uses MIC codes for most European exchanges
     "LN": "LSE",
-    "GY": "XETRA",
-    "GF": "XETRA",
-    "GR": "XETRA",     # German regional → XETRA
-    "NA": "EURONEXT",   # Amsterdam
-    "FP": "EURONEXT",   # Paris
-    "BB": "EURONEXT",   # Brussels
-    "SM": "BME",        # Madrid
+    "GY": "XTER",       # Germany (XETRA) → GuruFocus uses XTER
+    "GF": "FRA",        # Frankfurt
+    "GR": "XTER",       # German regional → XTER
+    "NA": "XAMS",       # Amsterdam
+    "FP": "XPAR",       # Paris
+    "BB": "XBRU",       # Brussels
+    "SM": "XMAD",       # Madrid
     "IM": "MIL",        # Milan
     "DC": "OCSE",       # Copenhagen
     "NO": "OSL",        # Oslo
@@ -38,7 +40,7 @@ _EXCHCODE_MAP: dict[str, str] = {
     "FH": "OHEL",       # Helsinki
     "VX": "XSWX",       # Swiss
     "PW": "WAR",        # Warsaw
-    "AV": "XETRA",      # Vienna → XETRA (GuruFocus groups them)
+    "AV": "XPRA",       # Vienna → GuruFocus uses XPRA
     # Americas
     "CN": "TSX",        # Toronto
     "CT": "TSX",        # Toronto (alt)
@@ -46,24 +48,15 @@ _EXCHCODE_MAP: dict[str, str] = {
     "MX": "BMV",
     # Asia-Pacific
     "TT": "TSE",        # Tokyo
-    "HK": "HKEX",
+    "HK": "HKSE",       # Hong Kong — GuruFocus uses HKSE
     "AU": "ASX",
     "NZ": "NZSE",       # New Zealand
     "SS": "SSE",        # Shanghai
     "SZ": "SZSE",       # Shenzhen
-    "KS": "KRX",        # Korea
+    "KS": "XKRX",       # Korea — GuruFocus uses XKRX
     "TW": "TWSE",       # Taiwan
     "IN": "NSE",        # India
     "JT": "JSE",        # Johannesburg
-    # MIC codes that may come through directly
-    "XAMS": "EURONEXT",
-    "XPAR": "EURONEXT",
-    "XBRU": "EURONEXT",
-    "XMAD": "BME",
-    "XKRX": "KRX",
-    "XSWX": "XSWX",
-    "XTER": "XETRA",
-    "XPRA": "XETRA",    # Prague → XETRA (GuruFocus)
 }
 
 

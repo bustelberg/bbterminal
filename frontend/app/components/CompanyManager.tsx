@@ -162,6 +162,7 @@ export default function CompanyManager() {
   const [search, setSearch] = useState('');
   const [filterExchange, setFilterExchange] = useState('');
   const [filterCountry, setFilterCountry] = useState('');
+  const [filterSector, setFilterSector] = useState('');
   const [sortField, setSortField] = useState<SortField>('company_name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -196,6 +197,20 @@ export default function CompanyManager() {
     return [...s].sort();
   }, [companies]);
 
+  // Detect duplicate company names (case-insensitive)
+  const duplicateNames = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const c of companies) {
+      const name = (c.company_name ?? '').toLowerCase().trim();
+      if (name) counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    const dupes = new Set<string>();
+    for (const [name, count] of counts) {
+      if (count > 1) dupes.add(name);
+    }
+    return dupes;
+  }, [companies]);
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     let list = companies;
@@ -210,6 +225,7 @@ export default function CompanyManager() {
     }
     if (filterExchange) list = list.filter((c) => c.primary_exchange === filterExchange);
     if (filterCountry) list = list.filter((c) => c.country === filterCountry);
+    if (filterSector) list = list.filter((c) => c.sector === filterSector);
 
     return [...list].sort((a, b) => {
       const av = (a[sortField] ?? '') as string;
@@ -217,7 +233,7 @@ export default function CompanyManager() {
       const cmp = av.localeCompare(bv, undefined, { sensitivity: 'base' });
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [companies, search, filterExchange, filterCountry, sortField, sortDir]);
+  }, [companies, search, filterExchange, filterCountry, filterSector, sortField, sortDir]);
 
   function handleSort(field: SortField) {
     if (sortField === field) {
@@ -329,9 +345,17 @@ export default function CompanyManager() {
           <option value="">All countries</option>
           {countryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
-        {(search || filterExchange || filterCountry) && (
+        <select
+          value={filterSector}
+          onChange={(e) => setFilterSector(e.target.value)}
+          className="bg-[#151821] border border-gray-800/60 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
+        >
+          <option value="">All sectors</option>
+          {sectorOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        {(search || filterExchange || filterCountry || filterSector) && (
           <button
-            onClick={() => { setSearch(''); setFilterExchange(''); setFilterCountry(''); }}
+            onClick={() => { setSearch(''); setFilterExchange(''); setFilterCountry(''); setFilterSector(''); }}
             className="text-sm text-gray-500 hover:text-white transition-colors"
           >
             Clear filters
@@ -352,7 +376,22 @@ export default function CompanyManager() {
             <thead>
               <tr className="border-b border-gray-800/60 text-gray-500">
                 <th className="px-4 py-3 text-left text-xs font-medium w-12">ID</th>
-                <th className={thCls} onClick={() => handleSort('company_name')}>Name{sortIcon('company_name')}</th>
+                <th className={thCls} onClick={() => handleSort('company_name')}>
+                  <span className="flex items-center gap-2">
+                    Name{sortIcon('company_name')}
+                    {!loading && (
+                      duplicateNames.size > 0 ? (
+                        <span className="px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/15 text-amber-400 border border-amber-500/25 rounded">
+                          {duplicateNames.size} dupe{duplicateNames.size > 1 ? 's' : ''}
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 text-[10px] font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 rounded">
+                          no dupes
+                        </span>
+                      )
+                    )}
+                  </span>
+                </th>
                 <th className={`${thCls} w-24`} onClick={() => handleSort('primary_ticker')}>Ticker{sortIcon('primary_ticker')}</th>
                 <th className={`${thCls} w-24`} onClick={() => handleSort('primary_exchange')}>Exchange{sortIcon('primary_exchange')}</th>
                 <th className="px-3 py-3 text-left text-xs font-medium w-24">LE Ticker</th>
@@ -385,7 +424,14 @@ export default function CompanyManager() {
                 ) : (
                   <tr key={c.company_id} className="border-b border-gray-800/30 hover:bg-white/[0.02] transition-colors group">
                     <td className="px-4 py-2.5 text-gray-600 text-xs">{c.company_id}</td>
-                    <td className="px-3 py-2.5 text-gray-200 font-medium">{c.company_name ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-gray-200 font-medium">
+                      {c.company_name ?? '—'}
+                      {c.company_name && duplicateNames.has(c.company_name.toLowerCase().trim()) && (
+                        <span className="ml-2 px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/15 text-amber-400 border border-amber-500/25 rounded" title="Duplicate company name">
+                          DUPE
+                        </span>
+                      )}
+                    </td>
                     <td className="px-3 py-2.5">
                       <a
                         href={guruFocusUrl(c.primary_ticker, c.primary_exchange)}
