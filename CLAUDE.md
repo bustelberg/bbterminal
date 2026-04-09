@@ -4,10 +4,11 @@ A financial data terminal for wealth management. Analyses stocks using data from
 
 ## Architecture
 
-- **Frontend**: Next.js (App Router) deployed on Vercel — `frontend/`
-- **Backend**: FastAPI (Python) with uv — `backend/`
-- **Database**: Supabase (Postgres) — schema in `supabase/migrations/`
+- **Frontend**: Next.js (App Router) deployed on Vercel (free tier) — `frontend/`
+- **Backend**: FastAPI (Python) with uv — `backend/` — planned migration to Railway ($5/mo)
+- **Database**: Supabase (Postgres, free tier) — schema in `supabase/migrations/`
 - **Auth**: Supabase Auth (email/password)
+- **Two Supabase projects**: dev and prod. Dev has all data; prod needs migrations + data sync.
 
 ## Running locally
 
@@ -38,8 +39,16 @@ Frontend runs on `http://localhost:3000`, backend on `http://localhost:8000`.
 - `ingest/transformation.py` — Transforms flattened data into DB schema format
 - `ingest/load_into_supabase.py` — Loads prepared data into Supabase tables
 - `ingest/resolve_tickers.py` — Resolves unknown tickers via OpenFIGI
-- `ingest/prices.py` — Fetches daily closing prices from GuruFocus API, caches in Supabase Storage
-- `playground/main.py` — **Ignore for now.** Standalone scratch file with working logic to compute YTD returns per stock/bond and total portfolio TWR from three AIRS Excel exports (VOLK, MUT, ATT). Useful as reference for the return calculation formulas but not part of the app.
+- `ingest/prices.py` — Fetches daily closing prices AND volumes from GuruFocus API, caches in Supabase Storage
+- `momentum/` — Momentum backtester engine (see section below)
+- `playground/main.py` — **Ignore for now.** Standalone scratch file.
+
+### Momentum module (`backend/momentum/`)
+
+- `data.py` — Bulk data loaders: `load_universe()`, `load_all_prices()`, `load_all_volumes()`. Queries batched in chunks of 50 company IDs to avoid Cloudflare 502 on Supabase.
+- `signals.py` — Signal computation. 5 price signals (mom_12_1, mom_6m, volatility_adjusted_return_6m, drawdown_from_recent_high_pct, above_200ma) + 2 volume signals (vol_20d_vs_60d, vol_trend_3m). Each signal has a `"group"` field ("price" or "volume"). Uses pre-indexed `dict[int, pd.Series]` for O(1) lookups.
+- `scoring.py` — Category-based scoring: each category (price, volume) gets independent 0-100 min-max normalized score, then combined via adjustable category weights into final `momentum_score`.
+- `backtest.py` — Monthly rebalance loop: compute signals → score & select → equal-weight portfolio → forward 1-month returns → cumulative tracking. Streams progress via SSE.
 
 **API endpoints**:
 - `GET /api/companies` — List all companies
@@ -52,6 +61,17 @@ Frontend runs on `http://localhost:3000`, backend on `http://localhost:8000`.
 - `POST /api/ingest/long-equity` — SSE stream: runs full ingest pipeline
 - `GET /api/airs/scan` — SSE stream: runs Playwright broker scan, returns portfolio list
 - `GET /api/companies/field-options` — Distinct exchanges/countries/sectors for dropdowns
+- `POST /api/momentum/backtest` — SSE stream: runs momentum backtest, streams progress + result
+- `GET /api/momentum/signals` — Returns signal definitions (keys, defaults, groups, categories)
+- `GET /api/momentum/backtests` — List saved backtest runs
+- `POST /api/momentum/backtests` — Save a backtest run
+- `DELETE /api/momentum/backtests/{id}` — Delete saved backtest
+- `GET /api/benchmarks` — List benchmarks with price date ranges
+- `POST /api/benchmarks` — Create benchmark (fetches prices from GuruFocus, cutoff 2015-01-01)
+- `PUT /api/benchmarks/{id}/refresh` — Refresh benchmark prices
+- `DELETE /api/benchmarks/{id}` — Delete benchmark
+- `GET /api/benchmarks/{id}/prices` — Get monthly benchmark prices
+- `GET /api/earnings` — Earnings dashboard data
 
 **Environment variables** (`.env`):
 - `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`
@@ -67,6 +87,9 @@ Frontend runs on `http://localhost:3000`, backend on `http://localhost:8000`.
 - `/longequity` — LongEquity Insight: monthly snapshots of stock universe, grouped by region/country
 - `/airs-portfolio` — AIRS Portfolio: broker scanner + drag & drop Excel uploads, YTD returns table
 - `/companies` — Company management: searchable/filterable table, inline edit, add/delete
+- `/momentum` — Momentum Portfolio Backtester
+- `/benchmarks` — Benchmark management (create/refresh/delete index benchmarks)
+- `/earnings` — Earnings dashboard
 - `/login`, `/set-password` — Auth pages
 
 **Components** (`frontend/app/components/`):
@@ -75,17 +98,23 @@ Frontend runs on `http://localhost:3000`, backend on `http://localhost:8000`.
 - `AirsPortfolioUpload.tsx` — Portfolio scanner + list/detail views, drag & drop, localStorage cache
 - `CompanyManager.tsx` — Company CRUD table with inline editing
 - `IngestButton.tsx` — Ingest trigger button
+- `MomentumBacktester.tsx` — Momentum backtest UI: config panel with signal weight sliders (grouped by category), category weight sliders, equity curve chart (Recharts), benchmark comparison, summary stats, monthly portfolio table with per-category scores. Saved backtests CRUD.
+- `BenchmarkManager.tsx` — Benchmark CRUD: add index tickers (e.g. SPY, ACWI), fetch prices, show date ranges
+- `EarningsDashboard.tsx` — Earnings data viewer
 
 ---
 
 ## Database schema
 
-**Tables** (see `supabase/migrations/20260402130000_schema.sql`):
+**Tables** (see `supabase/migrations/`):
 - `company` — Primary key `company_id`, unique on `(primary_ticker, primary_exchange)`
-- `metric_data` — Time-series data, PK `(company_id, metric_code, source_code, target_date)`
+- `metric_data` — Time-series data, PK `(company_id, metric_code, source_code, target_date)`. Stores both prices (`metric_code='close_price'`) and volumes (`metric_code='volume'`).
 - `portfolio` — Portfolio metadata, unique on `(portfolio_name, target_date)`
 - `portfolio_weight` — Portfolio holdings, PK `(portfolio_id, company_id)`
 - `ticker_override` — OpenFIGI ticker resolutions
+- `backtest_run` — Saved backtest configurations and results (see `20260409120000_backtest_runs.sql`)
+- `benchmark` — Benchmark index metadata (ticker, exchange, name) (see `20260409130000_benchmarks.sql`)
+- `benchmark_price` — Monthly benchmark prices (benchmark_id, target_date, price)
 
 ---
 
@@ -119,10 +148,27 @@ Modern fintech dark theme. Key principles:
 
 - All frontend components are client components (`'use client'`)
 - Backend uses `asyncio.to_thread()` for blocking Supabase calls
-- SSE (Server-Sent Events) for long-running operations (ingest pipeline, broker scanner)
+- SSE (Server-Sent Events) for long-running operations (ingest pipeline, broker scanner, backtest)
+- SSE keepalive comments (`: keepalive\n\n`) sent before long-running operations to prevent proxy timeouts
 - AIRS portfolio data is parsed server-side but cached client-side in localStorage (no DB storage)
 - Company deletion cascades: removes metric_data and portfolio_weight rows first
 - GuruFocus API subscription covers USA + Europe regions only
+- Price/volume data cutoff: `2015-01-01` — no data before this date is stored
+- Supabase `.in_()` queries batched in chunks of 50 to avoid Cloudflare 502 errors
+- GuruFocus raw API responses cached in Supabase Storage bucket `gurufocus-raw` as JSON files
+- Storage paths: `{EXCHANGE}_{TICKER}/indicator__price.json` and `indicator__volume.json`
+
+## Deployment
+
+- **Current**: Both frontend and backend deployed on Vercel. Backend SSE streams break on Vercel Hobby (10s function timeout).
+- **Planned**: Migrate backend to Railway ($5/mo) for long-running SSE streams. Keep frontend on Vercel free tier. Supabase stays on free tier.
+- **Railway migration**: Not yet done — next task. Will need `Procfile` or `Dockerfile`, env vars configured, and Vercel frontend pointed to Railway backend URL.
+
+## Known issues
+
+- Vercel Hobby 10s timeout cuts off backtest SSE streams in production. Workaround: SSE keepalive comments + frontend reconnect handling. Real fix: Railway backend.
+- Sidebar occasionally disappears after login — likely hydration/auth state timing issue. Hard refresh fixes it.
+- Universe for backtesting uses current company list retroactively (survivorship bias) since LongEquity snapshots only exist from Aug 2025.
 
 ---
 

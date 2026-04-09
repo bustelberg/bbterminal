@@ -994,6 +994,9 @@ async def _momentum_backtest_stream(req: BacktestRequest):
     def _emit(data: dict) -> str:
         return f"data: {json.dumps(data)}\n\n"
 
+    def _keepalive() -> str:
+        return ": keepalive\n\n"
+
     try:
         yield _emit({"type": "progress", "pct": 0, "message": "Loading universe..."})
         universe_df = await asyncio.to_thread(load_universe, supabase)
@@ -1039,6 +1042,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                 yield _emit({"type": "progress", "pct": pct, "message": f"Data: {symbol} ({idx + 1}/{total_companies})"})
                 try:
                     cid = int(row["company_id"])
+                    yield _keepalive()
                     pr = await asyncio.to_thread(
                         ensure_prices_for_company,
                         supabase, cid, ticker, exchange,
@@ -1047,6 +1051,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                     # Also fetch volume (non-blocking on failure)
                     vr = None
                     try:
+                        yield _keepalive()
                         vr = await asyncio.to_thread(
                             ensure_volume_for_company,
                             supabase, cid, ticker, exchange,
@@ -1131,6 +1136,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         price_end = min(data_cutoff, date.fromisoformat(req.end_date) + timedelta(days=35))
 
         yield _emit({"type": "progress", "pct": 62, "message": f"Loading prices from DB ({price_start} to {price_end}, starts early for 200-day MA)..."})
+        yield _keepalive()
 
         # Use a list to collect progress from the sync loader thread
         load_progress: list[dict] = []
@@ -1156,6 +1162,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
 
         # Load volumes from DB
         yield _emit({"type": "progress", "pct": 66, "message": "Loading volumes from DB..."})
+        yield _keepalive()
         volumes_df = await asyncio.to_thread(
             load_all_volumes, supabase, company_ids, price_start, price_end,
         )
@@ -1168,6 +1175,8 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         def send_event(event_type: str, **kwargs):
             events.append({"type": event_type, **kwargs})
 
+        yield _emit({"type": "progress", "pct": 68, "message": "Running backtest computation..."})
+        yield _keepalive()
         result = await asyncio.to_thread(
             run_backtest, config, prices_df, universe_df, send_event,
             volumes_df=volumes_df,

@@ -290,10 +290,14 @@ export default function MomentumBacktester() {
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let receivedDone = false;
+      let receivedResult = false;
+      let lastEventTime = Date.now();
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        lastEventTime = Date.now();
         buffer += decoder.decode(value, { stream: true });
 
         const lines = buffer.split('\n');
@@ -307,17 +311,33 @@ export default function MomentumBacktester() {
               setProgress((prev) => [...prev, { pct: data.pct, message: data.message }]);
             } else if (data.type === 'result') {
               setResult(data.data);
+              receivedResult = true;
               if (data.universe) setUniverse(data.universe);
             } else if (data.type === 'done') {
+              receivedDone = true;
               setRunning(false);
             } else if (data.type === 'error') {
               setError(data.message);
               setRunning(false);
+            } else if (data.type === 'keepalive') {
+              // ignore, just keeps connection alive
             }
-          } catch {}
+          } catch (parseErr) {
+            console.warn('SSE parse error:', line, parseErr);
+          }
         }
       }
-      setRunning(false);
+      // Stream ended — if we never got a 'done' event, something went wrong
+      if (!receivedDone) {
+        if (receivedResult) {
+          // Got result but stream cut before 'done' — still usable
+          setRunning(false);
+        } else {
+          const elapsed = Math.round((Date.now() - lastEventTime) / 1000);
+          setError(`Stream disconnected unexpectedly (last event ${elapsed}s ago). This can happen due to proxy timeouts — try again with "Skip data fetch" checked if prices are already loaded.`);
+          setRunning(false);
+        }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unknown error');
       setRunning(false);
