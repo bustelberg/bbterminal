@@ -39,6 +39,7 @@ class PriceResult:
     logs: list[str] = field(default_factory=list)
     error: str | None = None
     is_forbidden: bool = False  # True if 403 / unsubscribed region
+    is_delisted: bool = False   # True if 403 / delisted stock
 
 
 def _build_symbol(ticker: str, exchange: str) -> str:
@@ -47,8 +48,8 @@ def _build_symbol(ticker: str, exchange: str) -> str:
     return f"{exchange}:{ticker}"
 
 
-def _storage_path(ticker: str, exchange: str) -> str:
-    return f"{exchange.upper()}_{ticker.upper()}/indicator__price.json"
+def _storage_path(ticker: str, exchange: str, indicator: str = "price") -> str:
+    return f"{exchange.upper()}_{ticker.upper()}/indicator__{indicator}.json"
 
 
 def _ensure_bucket(supabase: Client) -> None:
@@ -87,8 +88,8 @@ def _upload_to_storage(supabase: Client, path: str, data: list) -> None:
 _HAS_CURL = shutil.which("curl") is not None
 
 
-def _fetch_price_from_api(ticker: str, exchange: str, timeout: int = 30) -> tuple[list | None, str, int | None]:
-    """Fetch price indicator from GuruFocus API. Returns (raw_data, log_message, http_status)."""
+def _fetch_indicator_from_api(ticker: str, exchange: str, indicator: str = "price", timeout: int = 30) -> tuple[list | None, str, int | None]:
+    """Fetch an indicator from GuruFocus API. Returns (raw_data, log_message, http_status)."""
     base_url = os.environ.get("GURUFOCUS_BASE_URL", "")
     api_key = os.environ.get("GURUFOCUS_API_KEY", "")
     if not base_url:
@@ -101,7 +102,7 @@ def _fetch_price_from_api(ticker: str, exchange: str, timeout: int = 30) -> tupl
         base = base[: -len("/data")]
 
     symbol = _build_symbol(ticker, exchange)
-    url = f"{base}/public/user/{api_key}/stock/{quote(symbol, safe=':')}/price"
+    url = f"{base}/public/user/{api_key}/stock/{quote(symbol, safe=':')}/{indicator}"
     masked_url = url.replace(api_key, api_key[:4] + "***")
 
     if _HAS_CURL:
@@ -146,6 +147,11 @@ def _fetch_price_from_api(ticker: str, exchange: str, timeout: int = 30) -> tupl
             return None, f"API URL error for {symbol}: {e.reason}", None
         except Exception as e:
             return None, f"API error for {symbol}: {type(e).__name__}: {e}", None
+
+
+def _fetch_price_from_api(ticker: str, exchange: str, timeout: int = 30) -> tuple[list | None, str, int | None]:
+    """Backwards-compatible wrapper for price fetching."""
+    return _fetch_indicator_from_api(ticker, exchange, "price", timeout)
 
 
 def _parse_price_series(data: list | dict) -> list[tuple[date, float]]:
@@ -215,6 +221,94 @@ def load_prices_into_db(
     return total
 
 
+def load_volume_into_db(
+    supabase: Client,
+    company_id: int,
+    volumes: list[tuple[date, float]],
+) -> int:
+    """Upsert volume data into metric_data. Only loads dates >= 2015-01-01."""
+    rows = [
+        {
+            "company_id": company_id,
+            "metric_code": "volume",
+            "source_code": "gurufocus",
+            "target_date": d.isoformat(),
+            "numeric_value": v,
+        }
+        for d, v in volumes
+        if d >= _PRICE_CUTOFF
+    ]
+    if not rows:
+        return 0
+
+    batch_size = 500
+    total = 0
+    for i in range(0, len(rows), batch_size):
+        batch = rows[i : i + batch_size]
+        resp = supabase.table("metric_data").upsert(
+            batch, on_conflict="company_id,metric_code,source_code,target_date", ignore_duplicates=False
+        ).execute()
+        total += len(resp.data)
+    return total
+
+
+def ensure_volume_for_company(
+    supabase: Client,
+    company_id: int,
+    ticker: str,
+    exchange: str,
+    *,
+    data_cutoff: date | None = None,
+) -> PriceResult:
+    """Fetch volume data from GuruFocus, cache, and load into DB."""
+    result = PriceResult()
+    _ensure_bucket(supabase)
+    path = _storage_path(ticker, exchange, "volume")
+    symbol = _build_symbol(ticker, exchange)
+
+    # 1. Check cache
+    cached = _fetch_from_storage(supabase, path)
+    if cached is not None:
+        parsed = _parse_price_series(cached)  # same [date, value] format
+        if parsed:
+            dates = sorted(d for d, _ in parsed)
+            fresh, reason = is_cache_fresh(dates, today=data_cutoff)
+            if fresh:
+                result.source = "cache"
+                result.total_prices = len(parsed)
+                result.rows_loaded = load_volume_into_db(supabase, company_id, parsed)
+                return result
+
+    # 2. Fetch from API
+    data, api_log, http_status = _fetch_indicator_from_api(ticker, exchange, "volume")
+    result.logs.append(api_log)
+
+    if data is None:
+        # Fall back to stale cache
+        if cached is not None:
+            parsed = _parse_price_series(cached)
+            if parsed:
+                result.source = "stale_cache"
+                result.total_prices = len(parsed)
+                result.rows_loaded = load_volume_into_db(supabase, company_id, parsed)
+                return result
+        result.source = "none"
+        result.error = f"no volume data for {symbol}"
+        return result
+
+    # 3. Cache and load
+    _upload_to_storage(supabase, path, data)
+    parsed = _parse_price_series(data)
+    if parsed:
+        result.source = "api"
+        result.total_prices = len(parsed)
+        result.rows_loaded = load_volume_into_db(supabase, company_id, parsed)
+    else:
+        result.source = "none"
+        result.error = f"parsed 0 volume entries for {symbol}"
+    return result
+
+
 def ensure_prices_for_company(
     supabase: Client,
     company_id: int,
@@ -268,6 +362,14 @@ def ensure_prices_for_company(
         result.is_forbidden = True
         result.error = f"403 unsubscribed region for {symbol}"
         result.logs.append(f"Forbidden — exchange {exchange} not in subscription")
+        return result
+
+    # Detect delisted stocks (403 with "Delisted stocks" in body)
+    if data is None and api_log and "delisted" in api_log.lower():
+        result.source = "delisted"
+        result.is_delisted = True
+        result.error = f"delisted: {symbol}"
+        result.logs.append(f"Delisted — {symbol}")
         return result
 
     if data is None:

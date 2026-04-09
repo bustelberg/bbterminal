@@ -2074,5 +2074,61 @@
     "note": "Ticker-country combo unusual; Alibaba ADR is typically NYSE:BABA and HKEX:9988. Verify intended listing.",
     "primary_exchange": "NYSE",
     "primary_ticker": "BABA"
+  },
+  {
+    "ticker": "ROG",
+    "country": "Switzerland",
+    "exchange": "XSWX",
+    "primary_exchange": "XSWX",
+    "primary_ticker": "ROP"
+  },
+  {
+    "ticker": "HEXA.B",
+    "country": "Sweden",
+    "exchange": "OSTO",
+    "primary_exchange": "OSTO",
+    "primary_ticker": "HEXA B"
+  },
+  {
+    "ticker": "LAGR.B",
+    "country": "Sweden",
+    "exchange": "OSTO",
+    "primary_exchange": "OSTO",
+    "primary_ticker": "LAGR B"
+  },
+  {
+    "ticker": "NIBE.B",
+    "country": "Sweden",
+    "exchange": "OSTO",
+    "primary_exchange": "OSTO",
+    "primary_ticker": "NIBE B"
+  },
+  {
+    "ticker": "SECT.B",
+    "country": "Sweden",
+    "exchange": "OSTO",
+    "primary_exchange": "OSTO",
+    "primary_ticker": "SECT B"
+  },
+  {
+    "ticker": "VIT.B",
+    "country": "Sweden",
+    "exchange": "OSTO",
+    "primary_exchange": "OSTO",
+    "primary_ticker": "VIT B"
+  },
+  {
+    "ticker": "INVE.A",
+    "country": "Sweden",
+    "exchange": "OSTO",
+    "primary_exchange": "OSTO",
+    "primary_ticker": "INVE B"
+  },
+  {
+    "ticker": "ATCO.A",
+    "country": "Sweden",
+    "exchange": "OSTO",
+    "primary_exchange": "OSTO",
+    "primary_ticker": "ATCO A"
   }
 ]

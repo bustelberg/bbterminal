@@ -26,8 +26,8 @@ from ingest.load_into_supabase import (
 )
 from ingest.resolve_tickers import detect_unknown_tickers, resolve_via_openfigi
 from ingest.earnings import fetch_financials, fetch_analyst_estimates, fetch_indicators
-from ingest.prices import ensure_prices_for_company
-from momentum.data import load_universe, load_all_prices
+from ingest.prices import ensure_prices_for_company, ensure_volume_for_company, PriceResult, _fetch_price_from_api, _parse_price_series
+from momentum.data import load_universe, load_all_prices, load_all_volumes
 from momentum.signals import PRICE_SIGNAL_DEFS
 from momentum.backtest import BacktestConfig, run_backtest
 
@@ -968,21 +968,24 @@ async def get_earnings_metric_codes(company_id: int):
 
 @app.get("/api/momentum/signals")
 async def get_momentum_signals():
-    """Return available signal definitions for the frontend."""
-    return {"signals": PRICE_SIGNAL_DEFS}
+    """Return available signal definitions and categories for the frontend."""
+    from momentum.scoring import _get_category_keys
+    categories = list(_get_category_keys().keys())
+    return {"signals": PRICE_SIGNAL_DEFS, "categories": categories}
 
 
-_DEFAULT_END = f"{date.today().year}-01-01"
-_DEFAULT_START = f"{date.today().year - 10}-01-01"
+_DEFAULT_END = "2026-01-01"
+_DEFAULT_START = "2017-01-01"
 
 
 class BacktestRequest(BaseModel):
     start_date: str = _DEFAULT_START
     end_date: str = _DEFAULT_END  # also used as data cutoff — no data newer than this
     signal_weights: dict[str, float] | None = None
+    category_weights: dict[str, float] | None = None  # e.g. {"price": 50, "volume": 50}
     top_n_sectors: int = 4
     top_n_per_sector: int = 6
-    skip_price_fetch: bool = False
+    skip_price_fetch: bool = False  # skips both price and volume fetch
     max_companies: int = 0  # 0 = all, otherwise limit universe (alphabetical)
 
 
@@ -997,32 +1000,30 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         if universe_df.empty:
             yield _emit({"type": "error", "message": "No companies found in database"})
             return
-        # Optionally limit universe size (alphabetical by ticker)
-        if req.max_companies > 0 and len(universe_df) > req.max_companies:
-            universe_df = universe_df.sort_values("primary_ticker").head(req.max_companies).reset_index(drop=True)
-            yield _emit({"type": "progress", "pct": 5, "message": f"Limited to {len(universe_df)} companies (alphabetical)"})
-        else:
-            yield _emit({"type": "progress", "pct": 5, "message": f"Found {len(universe_df)} companies"})
-
-        company_ids = universe_df["company_id"].tolist()
+        yield _emit({"type": "progress", "pct": 5, "message": f"Found {len(universe_df)} companies"})
         config = BacktestConfig.from_dict({
             "start_date": req.start_date,
             "end_date": req.end_date,
             "signal_weights": req.signal_weights or {s["key"]: s["default_weight"] for s in PRICE_SIGNAL_DEFS},
+            "category_weights": req.category_weights,
             "top_n_sectors": req.top_n_sectors,
             "top_n_per_sector": req.top_n_per_sector,
         })
 
         data_cutoff = date.fromisoformat(req.end_date)
 
+        excluded_ids: set[int] = set()
+
         if req.skip_price_fetch:
-            yield _emit({"type": "progress", "pct": 60, "message": "Skipping price fetch (using existing DB data)"})
+            yield _emit({"type": "progress", "pct": 60, "message": "Skipping data fetch (using existing DB prices & volumes)"})
         else:
             # Ensure price data exists for every company (fetch from GuruFocus if missing)
             total_companies = len(universe_df)
             blocked_exchanges: set[str] = set()
             skipped_count = 0
-            yield _emit({"type": "progress", "pct": 5, "message": f"Ensuring price data for {total_companies} companies (cutoff: {data_cutoff})..."})
+            ok_count = 0
+            max_ok = req.max_companies if req.max_companies > 0 else 0  # 0 = unlimited
+            yield _emit({"type": "progress", "pct": 5, "message": f"Ensuring price & volume data for {total_companies} companies (cutoff: {data_cutoff})..."})
             for idx, (_, row) in enumerate(universe_df.iterrows()):
                 pct = 5 + round((idx / total_companies) * 55)
                 ticker = row["primary_ticker"]
@@ -1032,42 +1033,97 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                 # Skip companies on blocked exchanges
                 if exchange in blocked_exchanges:
                     skipped_count += 1
+                    excluded_ids.add(int(row["company_id"]))
                     continue
 
-                yield _emit({"type": "progress", "pct": pct, "message": f"Prices: {symbol} ({idx + 1}/{total_companies})"})
+                yield _emit({"type": "progress", "pct": pct, "message": f"Data: {symbol} ({idx + 1}/{total_companies})"})
                 try:
+                    cid = int(row["company_id"])
                     pr = await asyncio.to_thread(
                         ensure_prices_for_company,
-                        supabase, int(row["company_id"]), ticker, exchange,
+                        supabase, cid, ticker, exchange,
                         data_cutoff=data_cutoff,
                     )
+                    # Also fetch volume (non-blocking on failure)
+                    vr = None
+                    try:
+                        vr = await asyncio.to_thread(
+                            ensure_volume_for_company,
+                            supabase, cid, ticker, exchange,
+                            data_cutoff=data_cutoff,
+                        )
+                    except Exception as ve:
+                        vr = PriceResult()
+                        vr.source = "error"
+                        vr.error = str(ve)
                     if pr.is_forbidden:
                         blocked_exchanges.add(exchange)
+                        excluded_ids.add(cid)
                         yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: unsubscribed region — skipping all {exchange} companies"})
+                    elif pr.is_delisted:
+                        excluded_ids.add(cid)
+                        # Remove delisted companies from DB
+                        await asyncio.to_thread(
+                            lambda: (
+                                supabase.table("metric_data").delete().eq("company_id", cid).execute(),
+                                supabase.table("portfolio_weight").delete().eq("company_id", cid).execute(),
+                                supabase.table("company").delete().eq("company_id", cid).execute(),
+                            )
+                        )
+                        yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: DELISTED — removed from database"})
                     else:
-                        # Build detail from logs
-                        detail = pr.source
+                        ok_count += 1
+                        # Build price detail
+                        parts: list[str] = []
                         if pr.source == "cache":
-                            detail = f"cache fresh — {pr.rows_loaded} rows in DB"
+                            parts.append(f"price: cache ({pr.rows_loaded})")
                         elif pr.source == "api":
-                            detail = f"API OK — {pr.total_prices} prices fetched, {pr.rows_loaded} loaded to DB"
+                            parts.append(f"price: API ({pr.rows_loaded})")
                         elif pr.source == "stale_cache":
-                            detail = f"API failed, used stale cache — {pr.rows_loaded} rows in DB"
+                            parts.append(f"price: stale cache ({pr.rows_loaded})")
                         elif pr.source == "none":
-                            detail = f"no data — {pr.error or 'unknown'}"
-                        elif pr.error:
-                            detail = pr.error
-                        # Include HTTP status if API was called and failed
-                        for log_line in pr.logs:
-                            if "API HTTP" in log_line:
-                                detail += f" [{log_line.split('(')[0].strip()}]"
-                                break
-                        yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: {detail}"})
+                            parts.append(f"price: none")
+                        else:
+                            parts.append(f"price: {pr.source}")
+                        # Build volume detail
+                        if vr:
+                            if vr.source == "cache":
+                                parts.append(f"vol: cache ({vr.rows_loaded})")
+                            elif vr.source == "api":
+                                parts.append(f"vol: API ({vr.rows_loaded})")
+                            elif vr.source == "stale_cache":
+                                parts.append(f"vol: stale cache ({vr.rows_loaded})")
+                            elif vr.source == "error":
+                                parts.append(f"vol: error ({vr.error})")
+                            else:
+                                parts.append(f"vol: none ({vr.error or 'unknown'})")
+                        else:
+                            parts.append("vol: failed")
+                        yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: {' | '.join(parts)}"})
+                        # Stop once we have enough valid companies
+                        if max_ok and ok_count >= max_ok:
+                            # Mark remaining companies as excluded
+                            remaining_ids = set(universe_df["company_id"].iloc[idx + 1:].astype(int))
+                            excluded_ids.update(remaining_ids - {cid for cid in excluded_ids})
+                            yield _emit({"type": "progress", "pct": 60, "message": f"Reached {ok_count} valid companies — stopping data fetch"})
+                            break
                 except Exception as e:
                     yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: error — {e}"})
 
             if blocked_exchanges:
                 yield _emit({"type": "progress", "pct": 60, "message": f"Blocked exchanges (unsubscribed): {', '.join(sorted(blocked_exchanges))} — {skipped_count} companies skipped"})
+
+        # Remove excluded companies (blocked exchanges, delisted) from universe
+        if excluded_ids:
+            universe_df = universe_df[~universe_df["company_id"].isin(excluded_ids)].reset_index(drop=True)
+            yield _emit({"type": "progress", "pct": 61, "message": f"Universe after exclusions: {len(universe_df)} companies"})
+
+        # Optionally limit universe size (alphabetical by ticker) — applied after exclusions
+        if req.max_companies > 0 and len(universe_df) > req.max_companies:
+            universe_df = universe_df.sort_values("primary_ticker").head(req.max_companies).reset_index(drop=True)
+            yield _emit({"type": "progress", "pct": 61, "message": f"Limited to {len(universe_df)} companies (alphabetical)"})
+
+        company_ids = universe_df["company_id"].tolist()
 
         # Load all prices in bulk — capped at data_cutoff
         from datetime import timedelta
@@ -1098,6 +1154,14 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         n_companies_with_prices = prices_df["company_id"].nunique()
         yield _emit({"type": "progress", "pct": 65, "message": f"Loaded {len(prices_df):,} prices for {n_companies_with_prices} companies"})
 
+        # Load volumes from DB
+        yield _emit({"type": "progress", "pct": 66, "message": "Loading volumes from DB..."})
+        volumes_df = await asyncio.to_thread(
+            load_all_volumes, supabase, company_ids, price_start, price_end,
+        )
+        n_vol = volumes_df["company_id"].nunique() if not volumes_df.empty else 0
+        yield _emit({"type": "progress", "pct": 67, "message": f"Loaded {len(volumes_df):,} volume records for {n_vol} companies"})
+
         # Run backtest with progress callback
         events: list[dict] = []
 
@@ -1105,7 +1169,8 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             events.append({"type": event_type, **kwargs})
 
         result = await asyncio.to_thread(
-            run_backtest, config, prices_df, universe_df, send_event
+            run_backtest, config, prices_df, universe_df, send_event,
+            volumes_df=volumes_df,
         )
 
         # Stream collected progress events
@@ -1114,7 +1179,19 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                 scaled_pct = 65 + round(evt.get("pct", 0) * 0.30)
                 yield _emit({"type": "progress", "pct": scaled_pct, "message": evt.get("message", "")})
 
-        yield _emit({"type": "result", "data": result.to_dict()})
+        # Build universe snapshot for saving
+        universe_snapshot = [
+            {
+                "company_id": int(row["company_id"]),
+                "ticker": str(row["primary_ticker"]),
+                "exchange": str(row["primary_exchange"]),
+                "company_name": str(row.get("company_name", "")),
+                "sector": str(row.get("sector", "")),
+            }
+            for _, row in universe_df.iterrows()
+        ]
+
+        yield _emit({"type": "result", "data": result.to_dict(), "universe": universe_snapshot})
         yield _emit({"type": "done", "message": "Backtest complete"})
 
     except Exception as e:
@@ -1128,3 +1205,240 @@ async def momentum_backtest(req: BacktestRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ─── Backtest save / load ────────────────────────────────────────────────────
+
+
+class SaveBacktestRequest(BaseModel):
+    name: str
+    config: dict
+    summary: dict
+    monthly_records: list
+    universe: list  # [{company_id, ticker, exchange, company_name, sector}]
+
+
+@app.post("/api/momentum/backtests")
+async def save_backtest(req: SaveBacktestRequest):
+    """Save a backtest run to the database."""
+    row = {
+        "name": req.name.strip(),
+        "config": req.config,
+        "summary": req.summary,
+        "monthly_records": req.monthly_records,
+        "universe": req.universe,
+    }
+    resp = await asyncio.to_thread(
+        lambda: supabase.table("backtest_run").insert(row).execute()
+    )
+    if not resp.data:
+        raise HTTPException(500, "Failed to save backtest")
+    return resp.data[0]
+
+
+@app.get("/api/momentum/backtests")
+async def list_backtests():
+    """List saved backtests (metadata only, no monthly_records)."""
+    resp = await asyncio.to_thread(
+        lambda: supabase.table("backtest_run")
+        .select("run_id, name, created_at, config, summary")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return resp.data
+
+
+@app.get("/api/momentum/backtests/{run_id}")
+async def load_backtest(run_id: int):
+    """Load a full backtest run."""
+    resp = await asyncio.to_thread(
+        lambda: supabase.table("backtest_run")
+        .select("*")
+        .eq("run_id", run_id)
+        .execute()
+    )
+    if not resp.data:
+        raise HTTPException(404, "Backtest not found")
+    return resp.data[0]
+
+
+@app.delete("/api/momentum/backtests/{run_id}")
+async def delete_backtest(run_id: int):
+    """Delete a saved backtest run."""
+    resp = await asyncio.to_thread(
+        lambda: supabase.table("backtest_run")
+        .delete()
+        .eq("run_id", run_id)
+        .execute()
+    )
+    if not resp.data:
+        raise HTTPException(404, "Backtest not found")
+    return {"ok": True}
+
+
+# ─── Benchmarks ───────────────────────────────────────────────────────────────
+
+
+class CreateBenchmarkRequest(BaseModel):
+    ticker: str
+    name: str
+
+
+@app.get("/api/benchmarks")
+async def list_benchmarks():
+    """List all benchmarks with price date range."""
+    resp = await asyncio.to_thread(
+        lambda: supabase.table("benchmark")
+        .select("benchmark_id, ticker, name, created_at")
+        .order("name")
+        .execute()
+    )
+    benchmarks = resp.data
+    for b in benchmarks:
+        bid = b["benchmark_id"]
+        min_resp = await asyncio.to_thread(
+            lambda bid=bid: supabase.table("benchmark_price")
+            .select("target_date")
+            .eq("benchmark_id", bid)
+            .order("target_date")
+            .limit(1)
+            .execute()
+        )
+        max_resp = await asyncio.to_thread(
+            lambda bid=bid: supabase.table("benchmark_price")
+            .select("target_date")
+            .eq("benchmark_id", bid)
+            .order("target_date", desc=True)
+            .limit(1)
+            .execute()
+        )
+        b["price_from"] = min_resp.data[0]["target_date"] if min_resp.data else None
+        b["price_to"] = max_resp.data[0]["target_date"] if max_resp.data else None
+    return benchmarks
+
+
+@app.post("/api/benchmarks")
+async def create_benchmark(req: CreateBenchmarkRequest):
+    """Create a benchmark and fetch its prices from GuruFocus."""
+    ticker = req.ticker.strip().upper()
+    name = req.name.strip()
+    if not ticker or not name:
+        raise HTTPException(400, "Ticker and name are required")
+
+    # Check for duplicate
+    existing = await asyncio.to_thread(
+        lambda: supabase.table("benchmark").select("benchmark_id").eq("ticker", ticker).execute()
+    )
+    if existing.data:
+        raise HTTPException(409, f"Benchmark {ticker} already exists")
+
+    # Fetch prices from GuruFocus (ETFs are US-listed, no exchange prefix needed)
+    data, log, status = await asyncio.to_thread(_fetch_price_from_api, ticker, "NYSE")
+    if data is None:
+        raise HTTPException(502, f"Failed to fetch prices for {ticker}: {log}")
+
+    parsed = _parse_price_series(data)
+    if not parsed:
+        raise HTTPException(502, f"No prices parsed for {ticker}")
+
+    # Create benchmark record
+    resp = await asyncio.to_thread(
+        lambda: supabase.table("benchmark").insert({"ticker": ticker, "name": name}).execute()
+    )
+    if not resp.data:
+        raise HTTPException(500, "Failed to create benchmark")
+    benchmark_id = resp.data[0]["benchmark_id"]
+
+    # Load prices (honour the same 2015-01-01 cutoff as company prices)
+    _BM_CUTOFF = date(2015, 1, 1)
+    rows = [
+        {"benchmark_id": benchmark_id, "target_date": d.isoformat(), "price": p}
+        for d, p in parsed
+        if d >= _BM_CUTOFF
+    ]
+    batch_size = 500
+    total_loaded = 0
+    for i in range(0, len(rows), batch_size):
+        batch = rows[i : i + batch_size]
+        await asyncio.to_thread(
+            lambda b=batch: supabase.table("benchmark_price")
+            .upsert(b, on_conflict="benchmark_id,target_date")
+            .execute()
+        )
+        total_loaded += len(batch)
+
+    return {**resp.data[0], "prices_loaded": total_loaded, "price_range": f"{parsed[0][0]} to {parsed[-1][0]}"}
+
+
+@app.post("/api/benchmarks/{benchmark_id}/refresh")
+async def refresh_benchmark(benchmark_id: int):
+    """Re-fetch prices for an existing benchmark."""
+    bm = await asyncio.to_thread(
+        lambda: supabase.table("benchmark").select("*").eq("benchmark_id", benchmark_id).execute()
+    )
+    if not bm.data:
+        raise HTTPException(404, "Benchmark not found")
+    ticker = bm.data[0]["ticker"]
+
+    data, log, status = await asyncio.to_thread(_fetch_price_from_api, ticker, "NYSE")
+    if data is None:
+        raise HTTPException(502, f"Failed to fetch prices: {log}")
+
+    parsed = _parse_price_series(data)
+    if not parsed:
+        raise HTTPException(502, f"No prices parsed for {ticker}")
+
+    _BM_CUTOFF = date(2015, 1, 1)
+    rows = [
+        {"benchmark_id": benchmark_id, "target_date": d.isoformat(), "price": p}
+        for d, p in parsed
+        if d >= _BM_CUTOFF
+    ]
+    batch_size = 500
+    total_loaded = 0
+    for i in range(0, len(rows), batch_size):
+        batch = rows[i : i + batch_size]
+        await asyncio.to_thread(
+            lambda b=batch: supabase.table("benchmark_price")
+            .upsert(b, on_conflict="benchmark_id,target_date")
+            .execute()
+        )
+        total_loaded += len(batch)
+
+    return {"ticker": ticker, "prices_loaded": total_loaded}
+
+
+@app.delete("/api/benchmarks/{benchmark_id}")
+async def delete_benchmark(benchmark_id: int):
+    """Delete a benchmark and its prices (cascade)."""
+    resp = await asyncio.to_thread(
+        lambda: supabase.table("benchmark").delete().eq("benchmark_id", benchmark_id).execute()
+    )
+    if not resp.data:
+        raise HTTPException(404, "Benchmark not found")
+    return {"ok": True}
+
+
+@app.get("/api/benchmarks/{benchmark_id}/prices")
+async def get_benchmark_prices(benchmark_id: int, start_date: str = "", end_date: str = ""):
+    """Get prices for a benchmark, optionally filtered by date range."""
+    query = supabase.table("benchmark_price").select("target_date, price").eq("benchmark_id", benchmark_id).order("target_date")
+    if start_date:
+        query = query.gte("target_date", start_date)
+    if end_date:
+        query = query.lte("target_date", end_date)
+
+    # Paginate to handle large datasets
+    rows: list[dict] = []
+    page_size = 1000
+    offset = 0
+    while True:
+        resp = await asyncio.to_thread(lambda o=offset: query.range(o, o + page_size - 1).execute())
+        if not resp.data:
+            break
+        rows.extend(resp.data)
+        if len(resp.data) < page_size:
+            break
+        offset += page_size
+
+    return rows

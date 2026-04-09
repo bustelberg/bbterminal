@@ -1,50 +1,100 @@
 """Scoring engine: normalize signals, weight, select top sectors & companies.
 
-Ported from old_src/quick_insight/ai_momentum/scoring/scorer.py and utils.py.
+Supports multiple signal categories (e.g. price, volume) each scored 0-100
+independently, then combined via category weights into a final score.
 """
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
+from .signals import PRICE_SIGNAL_DEFS
 
-def compute_weighted_score(
+
+def _score_category(
     df: pd.DataFrame,
-    weights: dict[str, float],
-    *,
-    score_col: str = "momentum_score",
+    signal_weights: dict[str, float],
+    signal_keys: list[str],
+    score_col: str,
 ) -> pd.DataFrame:
-    """Min-max normalize signals and compute a weighted score (0-100).
+    """Min-max normalize signals within a category and compute a 0-100 score.
 
-    Columns not present in df are silently skipped.
+    Only signals present in both signal_keys and df.columns are used.
     """
     df = df.copy()
-    active_weights = {k: v for k, v in weights.items() if k in df.columns and v != 0}
+    active = {k: signal_weights.get(k, 0) for k in signal_keys if k in df.columns and signal_weights.get(k, 0) != 0}
 
-    if not active_weights:
-        df[score_col] = 50.0
+    if not active:
+        df[score_col] = np.nan
         return df
 
-    weight_sum = sum(abs(w) for w in active_weights.values())
-    normed_weights = {k: v / weight_sum for k, v in active_weights.items()}
+    weight_sum = sum(abs(w) for w in active.values())
+    normed = {k: v / weight_sum for k, v in active.items()}
 
     score = np.zeros(len(df))
-
-    for col, weight in normed_weights.items():
+    for col, weight in normed.items():
         series = pd.to_numeric(df[col], errors="coerce").astype(float)
         min_val = series.min()
         max_val = series.max()
-
         if pd.isna(min_val) or pd.isna(max_val) or min_val == max_val:
             norm = pd.Series(0.5, index=df.index)
         else:
             norm = (series - min_val) / (max_val - min_val)
-
-        # Fill NaN with 0.5 (neutral) so missing signals don't skew results
         norm = norm.fillna(0.5)
         score += norm.values * weight
 
     df[score_col] = (score * 100).round(2)
+    return df
+
+
+def _get_category_keys() -> dict[str, list[str]]:
+    """Build {category: [signal_keys]} from PRICE_SIGNAL_DEFS."""
+    cats: dict[str, list[str]] = {}
+    for s in PRICE_SIGNAL_DEFS:
+        group = s.get("group", "price")
+        cats.setdefault(group, []).append(s["key"])
+    return cats
+
+
+def compute_category_scores(
+    df: pd.DataFrame,
+    signal_weights: dict[str, float],
+    category_weights: dict[str, float] | None = None,
+) -> pd.DataFrame:
+    """Score each company per category (0-100), then compute a weighted final score.
+
+    Adds columns: score_price, score_volume, ..., momentum_score (final).
+    """
+    cats = _get_category_keys()
+
+    if category_weights is None:
+        # Default: equal weight per category
+        n = len(cats)
+        category_weights = {c: 1.0 / n for c in cats}
+
+    # Normalize category weights
+    cw_sum = sum(abs(v) for v in category_weights.values())
+    if cw_sum == 0:
+        cw_sum = 1.0
+    cw_normed = {c: v / cw_sum for c, v in category_weights.items()}
+
+    # Score each category independently
+    for cat, keys in cats.items():
+        col = f"score_{cat}"
+        df = _score_category(df, signal_weights, keys, col)
+
+    # Compute weighted final score
+    final = np.zeros(len(df))
+    has_any = np.zeros(len(df), dtype=bool)
+    for cat in cats:
+        col = f"score_{cat}"
+        if col in df.columns:
+            valid = df[col].notna()
+            has_any |= valid
+            values = df[col].fillna(0).values
+            final += values * cw_normed.get(cat, 0)
+
+    df["momentum_score"] = np.where(has_any, np.round(final, 2), 50.0)
     return df
 
 
@@ -69,6 +119,7 @@ def score_and_select(
     *,
     top_n_sectors: int = 4,
     top_n_per_sector: int = 6,
+    category_weights: dict[str, float] | None = None,
 ) -> pd.DataFrame:
     """Full pipeline: score companies -> pick top sectors -> pick top companies.
 
@@ -77,8 +128,8 @@ def score_and_select(
     if signals_df.empty:
         return pd.DataFrame()
 
-    # Score each company
-    scored = compute_weighted_score(signals_df, signal_weights)
+    # Score each company with per-category scores
+    scored = compute_category_scores(signals_df, signal_weights, category_weights)
 
     # Aggregate to sector and pick top sectors
     sector_scores = aggregate_to_sector(scored)
@@ -87,7 +138,7 @@ def score_and_select(
     # Filter to top sectors only
     in_top_sectors = scored[scored["sector"].isin(top_sectors)].copy()
 
-    # Within each top sector, pick top N companies
+    # Within each top sector, pick top N companies by final score
     selected = (
         in_top_sectors
         .sort_values(["sector", "momentum_score"], ascending=[True, False])

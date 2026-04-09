@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from .signals import PRICE_SIGNAL_DEFS, compute_price_signals
-from .scoring import score_and_select
+from .scoring import score_and_select, _get_category_keys
 
 
 @dataclass
@@ -19,6 +19,7 @@ class BacktestConfig:
     signal_weights: dict[str, float]
     top_n_sectors: int = 4
     top_n_per_sector: int = 6
+    category_weights: dict[str, float] | None = None  # e.g. {"price": 0.5, "volume": 0.5}
 
     @classmethod
     def from_dict(cls, d: dict) -> BacktestConfig:
@@ -28,6 +29,7 @@ class BacktestConfig:
             signal_weights=d.get("signal_weights", {s["key"]: s["default_weight"] for s in PRICE_SIGNAL_DEFS}),
             top_n_sectors=d.get("top_n_sectors", 4),
             top_n_per_sector=d.get("top_n_per_sector", 6),
+            category_weights=d.get("category_weights"),
         )
 
 
@@ -38,6 +40,7 @@ class MonthlyHolding:
     company_name: str
     sector: str
     score: float
+    category_scores: dict[str, float | None]  # e.g. {"price": 72.5, "volume": 45.1}
     weight: float
     forward_return_pct: float | None
 
@@ -78,6 +81,7 @@ class BacktestResult:
                             "company_name": h.company_name,
                             "sector": h.sector,
                             "score": h.score,
+                            "category_scores": h.category_scores,
                             "weight": round(h.weight, 4),
                             "forward_return_pct": h.forward_return_pct,
                         }
@@ -138,16 +142,33 @@ def _price_on_or_after(series: pd.Series, target: pd.Timestamp) -> float | None:
     return float(subset.iloc[0])
 
 
+def _build_volume_index(volumes_df: pd.DataFrame) -> dict[int, pd.Series]:
+    """Build a dict of {company_id: Series} from the volumes DataFrame."""
+    if volumes_df.empty:
+        return {}
+    result: dict[int, pd.Series] = {}
+    for cid, group in volumes_df.groupby("company_id"):
+        s = pd.Series(
+            group["volume"].values,
+            index=pd.DatetimeIndex(group["target_date"]),
+            dtype="float64",
+        ).sort_index()
+        result[int(cid)] = s
+    return result
+
+
 def run_backtest(
     config: BacktestConfig,
     prices_df: pd.DataFrame,
     universe_df: pd.DataFrame,
     send_event: Callable[..., Any] | None = None,
+    *,
+    volumes_df: pd.DataFrame | None = None,
 ) -> BacktestResult:
     """Run the monthly momentum backtest.
 
     For each month:
-    1. Compute price signals using data up to that month
+    1. Compute price and volume signals using data up to that month
     2. Score and select top companies
     3. Compute forward 1-month return for each holding
     4. Track cumulative portfolio return
@@ -158,6 +179,7 @@ def run_backtest(
 
     # Build price index once — eliminates repeated DataFrame filtering
     price_index = _build_price_index(prices_df)
+    volume_index = _build_volume_index(volumes_df) if volumes_df is not None and not volumes_df.empty else None
 
     monthly_records: list[MonthlyRecord] = []
     cumulative = 0.0  # cumulative return in %
@@ -183,6 +205,7 @@ def run_backtest(
         signals_df = compute_price_signals(
             prices_df, universe_df, as_of_date=month_date,
             price_index=price_index,
+            volume_index=volume_index,
         )
         if signals_df.empty:
             monthly_records.append(MonthlyRecord(
@@ -199,6 +222,7 @@ def run_backtest(
             config.signal_weights,
             top_n_sectors=config.top_n_sectors,
             top_n_per_sector=config.top_n_per_sector,
+            category_weights=config.category_weights,
         )
 
         if selected.empty:
@@ -233,12 +257,22 @@ def run_backtest(
                 fwd_return = round((exit_price / entry_price - 1) * 100, 2)
                 returns.append(fwd_return)
 
+            # Extract per-category scores
+            cat_scores: dict[str, float | None] = {}
+            for cat in _get_category_keys():
+                col = f"score_{cat}"
+                if col in row.index and pd.notna(row[col]):
+                    cat_scores[cat] = round(float(row[col]), 1)
+                else:
+                    cat_scores[cat] = None
+
             holdings.append(MonthlyHolding(
                 company_id=cid,
                 ticker=str(row.get("primary_ticker", "")),
                 company_name=str(row.get("company_name", "")),
                 sector=str(row["sector"]),
                 score=round(float(row["momentum_score"]), 2),
+                category_scores=cat_scores,
                 weight=weight,
                 forward_return_pct=fwd_return,
             ))

@@ -160,4 +160,14 @@ def enrich_flattened_df_with_primary_listing(
     df = df.drop(
         columns=["_ticker_upper", "exchange_fill", "primary_ticker_fill", "primary_exchange_fill"]
     )
+
+    # Normalize Nordic share class tickers: "NOVO.B" -> "NOVO B"
+    from ingest.resolve_tickers import _normalize_ticker_for_gurufocus
+    df["primary_ticker"] = df.apply(
+        lambda row: _normalize_ticker_for_gurufocus(
+            str(row["primary_ticker"]), str(row["primary_exchange"])
+        ),
+        axis=1,
+    ).astype("string")
+
     return df

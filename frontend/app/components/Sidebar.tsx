@@ -10,6 +10,7 @@ const navItems = [
   { href: '/earnings', label: 'Earnings Dashboard' },
   { href: '/momentum', label: 'Momentum' },
   { href: '/airs-portfolio', label: 'AIRS Portfolio' },
+  { href: '/benchmarks', label: 'Benchmarks' },
   { href: '/companies', label: 'Companies' },
 ];
 

@@ -66,6 +66,25 @@ def _exchcode_to_exchange(code: str | None) -> str:
     return _EXCHCODE_MAP.get(code, code)
 
 
+# Nordic exchanges where share classes use a space (e.g., "NOVO B", "ATCO A")
+_NORDIC_EXCHANGES = {"OSTO", "OCSE", "OHEL", "OSL"}
+
+
+def _normalize_ticker_for_gurufocus(ticker: str, exchange: str) -> str:
+    """Normalize ticker for GuruFocus API compatibility.
+
+    Nordic share classes: dots/dashes before a single letter become spaces.
+    E.g., "NOVO.B" -> "NOVO B", "ATCO-A" -> "ATCO A".
+    """
+    import re
+    if exchange in _NORDIC_EXCHANGES:
+        # "NOVO.B" or "NOVO-B" -> "NOVO B"
+        m = re.match(r'^(.+)[.\-]([A-Z])$', ticker)
+        if m:
+            return f"{m.group(1)} {m.group(2)}"
+    return ticker
+
+
 def detect_unknown_tickers(
     df,
     *,
@@ -150,10 +169,13 @@ def resolve_via_openfigi(unknowns: list[dict]) -> list[dict]:
             match = _best_match(item["data"])
             if not match:
                 continue
+            exchange = _exchcode_to_exchange(match.get("exchCode"))
+            raw_ticker = match.get("ticker") or u["ticker"]
+            primary_ticker = _normalize_ticker_for_gurufocus(raw_ticker, exchange)
             resolved.append({
                 "ticker": u["ticker"],
-                "primary_ticker": match.get("ticker") or u["ticker"],
-                "primary_exchange": _exchcode_to_exchange(match.get("exchCode")),
+                "primary_ticker": primary_ticker,
+                "primary_exchange": exchange,
                 "source": "openfigi",
             })
 
