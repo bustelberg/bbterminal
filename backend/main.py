@@ -1132,8 +1132,8 @@ async def _momentum_backtest_stream(req: BacktestRequest):
 
         # Load all prices in bulk — capped at data_cutoff
         from datetime import timedelta
-        price_start = date.fromisoformat(req.start_date) - timedelta(days=460)
-        price_end = min(data_cutoff, date.fromisoformat(req.end_date) + timedelta(days=35))
+        price_start = date.fromisoformat(req.start_date) - timedelta(days=300)
+        price_end = date.fromisoformat(req.end_date) + timedelta(days=35)
 
         yield _emit({"type": "progress", "pct": 62, "message": f"Loading prices from DB ({price_start} to {price_end}, starts early for 200-day MA)..."})
         yield _keepalive()
