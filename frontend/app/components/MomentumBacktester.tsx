@@ -130,6 +130,7 @@ export default function MomentumBacktester() {
   const [benchmarkOptions, setBenchmarkOptions] = useState<BenchmarkOption[]>([]);
   const [selectedBenchmarkId, setSelectedBenchmarkId] = useState<number | null>(null);
   const [benchmarkPrices, setBenchmarkPrices] = useState<BenchmarkPrice[]>([]);
+  const [logScale, setLogScale] = useState(false);
 
   // Load signal definitions + saved runs
   useEffect(() => {
@@ -254,6 +255,16 @@ export default function MomentumBacktester() {
     }));
     return origin ? [origin, ...points] : points;
   }, [result, benchmarkReturns, selectedBenchmarkId]);
+
+  // Log-scale chart data: ln(1 + cumReturn/100) * 100
+  const displayChartData = useMemo(() => {
+    if (!logScale) return chartData;
+    return chartData.map((p) => ({
+      ...p,
+      cumReturn: p.cumReturn != null ? Math.log(1 + p.cumReturn / 100) * 100 : null,
+      benchmark: p.benchmark != null ? Math.log(1 + p.benchmark / 100) * 100 : null,
+    }));
+  }, [chartData, logScale]);
 
   // Run backtest
   const runBacktest = async () => {
@@ -690,15 +701,26 @@ export default function MomentumBacktester() {
 
             {/* Equity Curve */}
             <div className="bg-[#151821] rounded-xl border border-gray-800/40 p-5">
-              <h3 className="text-white text-sm font-medium mb-4">Equity Curve (Cumulative Return %)</h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-white text-sm font-medium">Equity Curve ({logScale ? 'Log' : 'Cumulative'} Return %)</h3>
+                <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={logScale}
+                    onChange={(e) => setLogScale(e.target.checked)}
+                    className="accent-indigo-500 w-3.5 h-3.5"
+                  />
+                  Log scale
+                </label>
+              </div>
               <ResponsiveContainer width="100%" height={350}>
-                <LineChart data={chartData}>
+                <LineChart data={displayChartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
                   <XAxis
                     dataKey="date"
                     tick={{ fill: '#6b7280', fontSize: 11 }}
                     tickLine={false}
-                    interval={Math.max(0, Math.floor(chartData.length / 12) - 1)}
+                    interval={Math.max(0, Math.floor(displayChartData.length / 12) - 1)}
                   />
                   <YAxis
                     tick={{ fill: '#6b7280', fontSize: 11 }}
