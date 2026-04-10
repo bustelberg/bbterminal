@@ -2079,5 +2079,12 @@
     "exchange": "OSTO",
     "primary_exchange": "OSTO",
     "primary_ticker": "ATCO A"
+  },
+  {
+    "ticker": "TOELY",
+    "country": "Japan",
+    "exchange": "TSE",
+    "primary_ticker": "8035",
+    "primary_exchange": "TSE"
   }
 ]

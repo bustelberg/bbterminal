@@ -1,10 +1,33 @@
 """Bulk data loaders for the momentum backtester."""
 from __future__ import annotations
 
+import logging
+import time
 from datetime import date
 
 import pandas as pd
 from supabase import Client
+
+_logger = logging.getLogger(__name__)
+
+_MAX_RETRIES = 3
+_RETRY_DELAY = 5  # seconds
+
+
+def _query_with_retry(query_fn, description: str = "query"):
+    """Execute a Supabase query with retry on transient errors (502, etc.)."""
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            return query_fn()
+        except Exception as e:
+            err = str(e).lower()
+            is_transient = "502" in err or "bad gateway" in err or "timeout" in err
+            if is_transient and attempt < _MAX_RETRIES:
+                wait = _RETRY_DELAY * attempt
+                _logger.warning(f"{description}: attempt {attempt} failed ({e}), retrying in {wait}s...")
+                time.sleep(wait)
+            else:
+                raise
 
 
 def load_universe(supabase: Client) -> pd.DataFrame:
@@ -18,11 +41,14 @@ def load_universe(supabase: Client) -> pd.DataFrame:
     offset = 0
 
     while True:
-        resp = (
-            supabase.table("company")
-            .select("company_id, company_name, primary_ticker, primary_exchange, sector, country")
-            .range(offset, offset + page_size - 1)
-            .execute()
+        resp = _query_with_retry(
+            lambda o=offset: (
+                supabase.table("company")
+                .select("company_id, company_name, primary_ticker, primary_exchange, sector, country")
+                .range(o, o + page_size - 1)
+                .execute()
+            ),
+            description="load_universe",
         )
         if not resp.data:
             break
@@ -73,18 +99,21 @@ def load_all_prices(
         offset = 0
 
         while True:
-            resp = (
-                supabase.table("metric_data")
-                .select("company_id, target_date, numeric_value")
-                .eq("metric_code", "close_price")
-                .eq("source_code", "gurufocus")
-                .in_("company_id", chunk)
-                .gte("target_date", start_date.isoformat())
-                .lte("target_date", end_date.isoformat())
-                .order("company_id")
-                .order("target_date")
-                .range(offset, offset + page_size - 1)
-                .execute()
+            resp = _query_with_retry(
+                lambda o=offset, c=chunk: (
+                    supabase.table("metric_data")
+                    .select("company_id, target_date, numeric_value")
+                    .eq("metric_code", "close_price")
+                    .eq("source_code", "gurufocus")
+                    .in_("company_id", c)
+                    .gte("target_date", start_date.isoformat())
+                    .lte("target_date", end_date.isoformat())
+                    .order("company_id")
+                    .order("target_date")
+                    .range(o, o + page_size - 1)
+                    .execute()
+                ),
+                description=f"load_all_prices chunk {chunk_start // chunk_size + 1}",
             )
             if not resp.data:
                 break
@@ -132,18 +161,21 @@ def load_all_volumes(
         offset = 0
 
         while True:
-            resp = (
-                supabase.table("metric_data")
-                .select("company_id, target_date, numeric_value")
-                .eq("metric_code", "volume")
-                .eq("source_code", "gurufocus")
-                .in_("company_id", chunk)
-                .gte("target_date", start_date.isoformat())
-                .lte("target_date", end_date.isoformat())
-                .order("company_id")
-                .order("target_date")
-                .range(offset, offset + page_size - 1)
-                .execute()
+            resp = _query_with_retry(
+                lambda o=offset, c=chunk: (
+                    supabase.table("metric_data")
+                    .select("company_id, target_date, numeric_value")
+                    .eq("metric_code", "volume")
+                    .eq("source_code", "gurufocus")
+                    .in_("company_id", c)
+                    .gte("target_date", start_date.isoformat())
+                    .lte("target_date", end_date.isoformat())
+                    .order("company_id")
+                    .order("target_date")
+                    .range(o, o + page_size - 1)
+                    .execute()
+                ),
+                description=f"load_all_volumes chunk {chunk_start // chunk_size + 1}",
             )
             if not resp.data:
                 break

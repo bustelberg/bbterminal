@@ -134,6 +134,10 @@ export default function MomentumBacktester() {
   const [benchmarkPrices, setBenchmarkPrices] = useState<BenchmarkPrice[]>([]);
   const [logScale, setLogScale] = useState(false);
 
+  // Universe label state
+  const [universeLabels, setUniverseLabels] = useState<{ label: string; start_month: string; end_month: string; month_count: number; avg_passing: number }[]>([]);
+  const [selectedUniverseLabel, setSelectedUniverseLabel] = useState<string>('');
+
   // Load signal definitions + saved runs
   useEffect(() => {
     fetch(`${API_URL}/api/momentum/signals`)
@@ -156,7 +160,23 @@ export default function MomentumBacktester() {
       .then((r) => r.json())
       .then((data) => setBenchmarkOptions(data))
       .catch(() => {});
+    fetch(`${API_URL}/api/universe/labels`)
+      .then((r) => r.json())
+      .then((data) => setUniverseLabels(data))
+      .catch(() => {});
   }, []);
+
+  // When universe label changes, auto-set start/end dates from the label's range
+  const handleUniverseLabel = (label: string) => {
+    setSelectedUniverseLabel(label);
+    if (label) {
+      const entry = universeLabels.find(l => l.label === label);
+      if (entry) {
+        setStartDate(entry.start_month);
+        setEndDate(entry.end_month);
+      }
+    }
+  };
 
   const loadSavedRuns = () => {
     fetch(`${API_URL}/api/momentum/backtests`)
@@ -291,6 +311,7 @@ export default function MomentumBacktester() {
           top_n_per_sector: topPerSector,
           skip_price_fetch: skipPriceFetch,
           max_companies: maxCompanies,
+          universe_label: selectedUniverseLabel || null,
         }),
       });
 
@@ -373,6 +394,7 @@ export default function MomentumBacktester() {
             category_weights: categoryWeights,
             top_n_sectors: topSectors,
             top_n_per_sector: topPerSector,
+            universe_label: selectedUniverseLabel || null,
           },
           summary: result.summary,
           monthly_records: result.monthly_records,
@@ -403,6 +425,7 @@ export default function MomentumBacktester() {
       if (cfg.category_weights) setCategoryWeights(cfg.category_weights);
       if (cfg.top_n_sectors) setTopSectors(cfg.top_n_sectors);
       if (cfg.top_n_per_sector) setTopPerSector(cfg.top_n_per_sector);
+      setSelectedUniverseLabel(cfg.universe_label ?? '');
 
       // Restore result
       setResult({ monthly_records: data.monthly_records, summary: data.summary });
@@ -470,6 +493,22 @@ export default function MomentumBacktester() {
         {/* Config Panel */}
         <div className="bg-[#151821] rounded-xl border border-gray-800/40 p-5">
           <div className="flex flex-wrap items-end gap-5 mb-5">
+            {/* Universe Label */}
+            <div>
+              <label className="text-gray-500 text-xs block mb-1">Universe</label>
+              <select
+                value={selectedUniverseLabel}
+                onChange={(e) => handleUniverseLabel(e.target.value)}
+                className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+              >
+                <option value="">All companies</option>
+                {universeLabels.map(l => (
+                  <option key={l.label} value={l.label}>
+                    {l.label} ({l.start_month} – {l.end_month}, ~{l.avg_passing}/mo)
+                  </option>
+                ))}
+              </select>
+            </div>
             {/* Date Range */}
             <div>
               <label className="text-gray-500 text-xs block mb-1">Start</label>

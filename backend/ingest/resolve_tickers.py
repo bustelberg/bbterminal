@@ -135,6 +135,40 @@ def _best_match(results: list[dict]) -> dict | None:
     return results[0]
 
 
+# Map country names from LongEquity to OpenFIGI exchCode hints.
+# This helps OpenFIGI return the correct exchange for ambiguous tickers.
+_COUNTRY_TO_EXCHCODE: dict[str, str] = {
+    "USA": "US",
+    "United States": "US",
+    "Canada": "CN",
+    "UK": "LN",
+    "United Kingdom": "LN",
+    "Germany": "GY",
+    "France": "FP",
+    "Netherlands": "NA",
+    "Belgium": "BB",
+    "Spain": "SM",
+    "Italy": "IM",
+    "Denmark": "DC",
+    "Norway": "NO",
+    "Sweden": "ST",
+    "Finland": "FH",
+    "Switzerland": "VX",
+    "Poland": "PW",
+    "Austria": "AV",
+    "Japan": "TT",
+    "Hong Kong": "HK",
+    "Australia": "AU",
+    "New Zealand": "NZ",
+    "South Korea": "KS",
+    "Taiwan": "TW",
+    "India": "IN",
+    "Mexico": "MF",
+    "Brazil": "BZ",
+    "South Africa": "JT",
+}
+
+
 def resolve_via_openfigi(unknowns: list[dict]) -> list[dict]:
     """
     Resolve unknown tickers via the OpenFIGI API.
@@ -154,10 +188,15 @@ def resolve_via_openfigi(unknowns: list[dict]) -> list[dict]:
 
     for i in range(0, len(unknowns), _BATCH_SIZE):
         batch = unknowns[i : i + _BATCH_SIZE]
-        jobs = [
-            {"idType": "TICKER", "idValue": u["ticker"].replace("-", " ")}
-            for u in batch
-        ]
+        jobs = []
+        for u in batch:
+            job: dict = {"idType": "TICKER", "idValue": u["ticker"].replace("-", " ")}
+            # Use country hint to guide OpenFIGI to the right exchange
+            country = u.get("country", "").strip()
+            exchcode_hint = _COUNTRY_TO_EXCHCODE.get(country)
+            if exchcode_hint:
+                job["exchCode"] = exchcode_hint
+            jobs.append(job)
 
         resp = requests.post(_OPENFIGI_URL, json=jobs, headers=headers, timeout=30)
         resp.raise_for_status()
@@ -165,7 +204,22 @@ def resolve_via_openfigi(unknowns: list[dict]) -> list[dict]:
 
         for u, item in zip(batch, items):
             if "data" not in item or not item["data"]:
-                continue
+                # If country-scoped search returned nothing, retry without exchCode
+                country = u.get("country", "").strip()
+                if _COUNTRY_TO_EXCHCODE.get(country):
+                    retry_job = [{"idType": "TICKER", "idValue": u["ticker"].replace("-", " ")}]
+                    try:
+                        retry_resp = requests.post(_OPENFIGI_URL, json=retry_job, headers=headers, timeout=30)
+                        retry_resp.raise_for_status()
+                        retry_items = retry_resp.json()
+                        if retry_items and "data" in retry_items[0] and retry_items[0]["data"]:
+                            item = retry_items[0]
+                        else:
+                            continue
+                    except Exception:
+                        continue
+                else:
+                    continue
             match = _best_match(item["data"])
             if not match:
                 continue

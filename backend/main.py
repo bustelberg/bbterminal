@@ -32,6 +32,8 @@ from ingest.api_usage import track_api_call, get_usage
 from momentum.data import load_universe, load_all_prices, load_all_volumes
 from momentum.signals import PRICE_SIGNAL_DEFS
 from momentum.backtest import BacktestConfig, run_backtest
+from universe.screen import screen_universe, build_and_store_universes, validate_vs_longequity
+from universe.criteria import CRITERIA_NAMES, CRITERIA_DESCRIPTIONS, CRITERIA_MIN_YEARS
 
 load_dotenv()
 
@@ -1044,6 +1046,7 @@ class BacktestRequest(BaseModel):
     top_n_per_sector: int = 6
     skip_price_fetch: bool = False  # skips both price and volume fetch
     max_companies: int = 0  # 0 = all, otherwise limit universe (alphabetical)
+    universe_label: str | None = None  # if set, use universe_snapshot for per-month filtering
 
 
 async def _momentum_backtest_stream(req: BacktestRequest):
@@ -1061,6 +1064,42 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             yield _emit({"type": "error", "message": "No companies found in database"})
             return
         yield _emit({"type": "progress", "pct": 5, "message": f"Found {len(universe_df)} companies"})
+
+        # Load universe snapshot if a label is specified
+        monthly_eligible: dict[str, set[int]] | None = None
+        if req.universe_label:
+            yield _emit({"type": "progress", "pct": 6, "message": f"Loading universe snapshot '{req.universe_label}'..."})
+
+            def _load_snapshot():
+                rows = []
+                offset = 0
+                while True:
+                    resp = supabase.table("universe_snapshot").select(
+                        "target_month, company_id"
+                    ).eq("label", req.universe_label).eq(
+                        "passes", True
+                    ).range(offset, offset + 999).execute()
+                    batch = resp.data or []
+                    rows.extend(batch)
+                    if len(batch) < 1000:
+                        break
+                    offset += 1000
+                result: dict[str, set[int]] = {}
+                for r in rows:
+                    m = r["target_month"]
+                    if m not in result:
+                        result[m] = set()
+                    result[m].add(r["company_id"])
+                return result
+
+            monthly_eligible = await asyncio.to_thread(_load_snapshot)
+            n_months = len(monthly_eligible)
+            if n_months == 0:
+                yield _emit({"type": "error", "message": f"No universe snapshot data for label '{req.universe_label}'"})
+                return
+            avg_pass = sum(len(v) for v in monthly_eligible.values()) // n_months
+            yield _emit({"type": "progress", "pct": 7, "message": f"Universe snapshot: {n_months} months, ~{avg_pass} passing/month"})
+
         config = BacktestConfig.from_dict({
             "start_date": req.start_date,
             "end_date": req.end_date,
@@ -1237,6 +1276,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         result = await asyncio.to_thread(
             run_backtest, config, prices_df, universe_df, send_event,
             volumes_df=volumes_df,
+            monthly_eligible=monthly_eligible,
         )
 
         # Stream collected progress events
@@ -1516,3 +1556,223 @@ async def get_benchmark_prices(benchmark_id: int, start_date: str = "", end_date
 async def api_usage():
     """Get GuruFocus API usage for the current month."""
     return await asyncio.to_thread(get_usage, supabase)
+
+
+# ===========================================================================
+# UNIVERSE SCREENING
+# ===========================================================================
+
+@app.get("/api/universe/criteria")
+async def universe_criteria():
+    """Return the list of LongEquity quality criteria."""
+    return [
+        {
+            "key": key,
+            "label": label,
+            "description": CRITERIA_DESCRIPTIONS.get(key, ""),
+            "min_years": CRITERIA_MIN_YEARS.get(key, 1),
+        }
+        for key, label in CRITERIA_NAMES
+    ]
+
+
+class ScreenRequest(BaseModel):
+    as_of_year: str | None = None  # e.g. "2025-12"
+    force_refresh: bool = False
+
+
+@app.post("/api/universe/screen")
+async def universe_screen(body: ScreenRequest = ScreenRequest()):
+    """Screen all companies against LongEquity criteria. Returns SSE stream."""
+    import queue
+
+    as_of = body.as_of_year
+    force = body.force_refresh
+
+    def _run(q: queue.Queue):
+        # Get all companies
+        resp = supabase.table("company").select(
+            "company_id, primary_ticker, primary_exchange, company_name, sector, country"
+        ).limit(10000).execute()
+        companies = resp.data or []
+        label = f" as of {as_of}" if as_of else ""
+        q.put(json.dumps({"type": "progress", "message": f"Found {len(companies)} companies to screen{label}."}))
+
+        for event in screen_universe(supabase, companies, as_of_year=as_of, force_refresh=force):
+            q.put(json.dumps(event))
+        q.put(None)  # sentinel
+
+    async def generate():
+        yield ": keepalive\n\n"
+        q: queue.Queue = queue.Queue()
+        loop = asyncio.get_event_loop()
+        task = loop.run_in_executor(None, _run, q)
+
+        while True:
+            try:
+                msg = await asyncio.to_thread(q.get, timeout=0.15)
+            except Exception:
+                if task.done():
+                    # Drain remaining messages
+                    while not q.empty():
+                        msg = q.get_nowait()
+                        if msg is not None:
+                            yield f"data: {msg}\n\n"
+                    break
+                continue
+            if msg is None:
+                break
+            yield f"data: {msg}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+class BuildUniverseRequest(BaseModel):
+    start_month: str  # "YYYY-MM"
+    end_month: str    # "YYYY-MM"
+    label: str = "default"
+
+
+@app.post("/api/universe/build")
+async def universe_build(body: BuildUniverseRequest):
+    """Build monthly universes for a date range and store in DB. Returns SSE stream."""
+    import queue
+
+    start = body.start_month
+    end = body.end_month
+    lbl = body.label
+
+    def _run(q: queue.Queue):
+        resp = supabase.table("company").select(
+            "company_id, primary_ticker, primary_exchange, company_name, sector, country"
+        ).limit(10000).execute()
+        companies = resp.data or []
+
+        for event in build_and_store_universes(supabase, companies, start, end, label=lbl):
+            q.put(json.dumps(event))
+        q.put(None)
+
+    async def generate():
+        yield ": keepalive\n\n"
+        q: queue.Queue = queue.Queue()
+        loop = asyncio.get_event_loop()
+        task = loop.run_in_executor(None, _run, q)
+
+        while True:
+            try:
+                msg = await asyncio.to_thread(q.get, timeout=0.15)
+            except Exception:
+                if task.done():
+                    while not q.empty():
+                        msg = q.get_nowait()
+                        if msg is not None:
+                            yield f"data: {msg}\n\n"
+                    break
+                continue
+            if msg is None:
+                break
+            yield f"data: {msg}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@app.get("/api/universe/labels")
+async def universe_labels():
+    """List all universe labels with date ranges and counts."""
+    def _run():
+        resp = supabase.rpc("universe_labels").execute()
+        return resp.data or []
+    return await asyncio.to_thread(_run)
+
+
+@app.get("/api/universe/months")
+async def universe_months(label: str = "default"):
+    """List stored universe months with counts for a label."""
+    def _run():
+        resp = supabase.rpc("universe_month_counts", {"p_label": label}).execute()
+        return resp.data or []
+
+    return await asyncio.to_thread(_run)
+
+
+@app.get("/api/universe/months/{month}")
+async def universe_month_detail(month: str, label: str = "default"):
+    """Get all companies for a specific month with scores."""
+    def _run():
+        resp = supabase.table("universe_snapshot").select(
+            "company_id, total_score, scores, details, passes"
+        ).eq("label", label).eq("target_month", month).limit(10000).execute()
+        snapshot_rows = resp.data or []
+
+        if not snapshot_rows:
+            return []
+
+        # Get company info
+        cids = [r["company_id"] for r in snapshot_rows]
+        company_map: dict[int, dict] = {}
+        for i in range(0, len(cids), 50):
+            batch = cids[i:i + 50]
+            cr = supabase.table("company").select(
+                "company_id, primary_ticker, primary_exchange, company_name, sector, country"
+            ).in_("company_id", batch).execute()
+            for c in (cr.data or []):
+                company_map[c["company_id"]] = c
+
+        result = []
+        for r in snapshot_rows:
+            info = company_map.get(r["company_id"], {})
+            result.append({
+                "company_id": r["company_id"],
+                "ticker": info.get("primary_ticker", ""),
+                "exchange": info.get("primary_exchange", ""),
+                "company_name": info.get("company_name", ""),
+                "sector": info.get("sector", ""),
+                "country": info.get("country", ""),
+                "total_score": r["total_score"],
+                "scores": r["scores"],
+                "details": r["details"],
+                "passes": r["passes"],
+            })
+        return result
+
+    return await asyncio.to_thread(_run)
+
+
+@app.delete("/api/universe/months/{month}")
+async def universe_delete_month(month: str, label: str = "default"):
+    """Delete a specific month's universe snapshot."""
+    def _run():
+        supabase.table("universe_snapshot").delete().eq(
+            "label", label
+        ).eq("target_month", month).execute()
+        return {"deleted": month}
+    return await asyncio.to_thread(_run)
+
+
+@app.delete("/api/universe/labels/{label}")
+async def universe_delete_label(label: str):
+    """Delete all months for a specific universe label."""
+    def _run():
+        supabase.table("universe_snapshot").delete().eq("label", label).execute()
+        return {"deleted": label}
+    return await asyncio.to_thread(_run)
+
+
+@app.get("/api/universe/validate")
+async def universe_validate():
+    """Compare current screening results against LongEquity snapshots."""
+    def _run():
+        resp = supabase.table("company").select(
+            "company_id, primary_ticker, primary_exchange, company_name, sector, country"
+        ).limit(10000).execute()
+        companies = resp.data or []
+
+        results = []
+        for event in screen_universe(supabase, companies):
+            if event["type"] == "done":
+                results = event["data"]["results"]
+                break
+
+        return validate_vs_longequity(supabase, results)
+
+    return await asyncio.to_thread(_run)

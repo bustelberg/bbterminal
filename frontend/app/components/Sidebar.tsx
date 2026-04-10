@@ -9,6 +9,7 @@ const navItems = [
   { href: '/longequity', label: 'LongEquity Insight' },
   { href: '/earnings', label: 'Earnings Dashboard' },
   { href: '/momentum', label: 'Momentum' },
+  { href: '/universe', label: 'Universe' },
   { href: '/airs-portfolio', label: 'AIRS Portfolio' },
   { href: '/benchmarks', label: 'Benchmarks' },
   { href: '/companies', label: 'Companies' },

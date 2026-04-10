@@ -164,6 +164,7 @@ def run_backtest(
     send_event: Callable[..., Any] | None = None,
     *,
     volumes_df: pd.DataFrame | None = None,
+    monthly_eligible: dict[str, set[int]] | None = None,
 ) -> BacktestResult:
     """Run the monthly momentum backtest.
 
@@ -172,6 +173,9 @@ def run_backtest(
     2. Score and select top companies
     3. Compute forward 1-month return for each holding
     4. Track cumulative portfolio return
+
+    If monthly_eligible is provided (from universe_snapshot), only companies
+    in the eligible set for that month are considered.
     """
     months = _generate_month_starts(config.start_date, config.end_date)
     if len(months) < 2:
@@ -201,9 +205,26 @@ def run_backtest(
                 message=f"Computing signals for {month_date.strftime('%b %Y')}...",
             )
 
+        # Filter universe for this month if snapshot-based
+        month_universe_df = universe_df
+        if monthly_eligible is not None:
+            month_key = month_date.isoformat()[:7]
+            eligible_ids = monthly_eligible.get(month_key, set())
+            if not eligible_ids:
+                monthly_records.append(MonthlyRecord(
+                    date=month_date.isoformat()[:7],
+                    holdings=[],
+                    portfolio_return_pct=None,
+                    cumulative_return_pct=round(cumulative, 2),
+                ))
+                continue
+            month_universe_df = universe_df[
+                universe_df["company_id"].isin(eligible_ids)
+            ].reset_index(drop=True)
+
         # Compute signals as of this month
         signals_df = compute_price_signals(
-            prices_df, universe_df, as_of_date=month_date,
+            prices_df, month_universe_df, as_of_date=month_date,
             price_index=price_index,
             volume_index=volume_index,
         )

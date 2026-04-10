@@ -163,6 +163,7 @@ export default function CompanyManager() {
   const [filterExchange, setFilterExchange] = useState('');
   const [filterCountry, setFilterCountry] = useState('');
   const [filterSector, setFilterSector] = useState('');
+  const [filterDupes, setFilterDupes] = useState(false);
   const [sortField, setSortField] = useState<SortField>('company_name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -226,6 +227,17 @@ export default function CompanyManager() {
     if (filterExchange) list = list.filter((c) => c.primary_exchange === filterExchange);
     if (filterCountry) list = list.filter((c) => c.country === filterCountry);
     if (filterSector) list = list.filter((c) => c.sector === filterSector);
+    if (filterDupes) {
+      const nameCounts = new Map<string, number>();
+      for (const c of companies) {
+        const name = (c.company_name ?? '').trim().toLowerCase();
+        if (name) nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+      }
+      list = list.filter((c) => {
+        const name = (c.company_name ?? '').trim().toLowerCase();
+        return name && (nameCounts.get(name) ?? 0) > 1;
+      });
+    }
 
     return [...list].sort((a, b) => {
       const av = (a[sortField] ?? '') as string;
@@ -233,7 +245,7 @@ export default function CompanyManager() {
       const cmp = av.localeCompare(bv, undefined, { sensitivity: 'base' });
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [companies, search, filterExchange, filterCountry, filterSector, sortField, sortDir]);
+  }, [companies, search, filterExchange, filterCountry, filterSector, filterDupes, sortField, sortDir]);
 
   function handleSort(field: SortField) {
     if (sortField === field) {
@@ -353,9 +365,19 @@ export default function CompanyManager() {
           <option value="">All sectors</option>
           {sectorOptions.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
-        {(search || filterExchange || filterCountry || filterSector) && (
+        <button
+          onClick={() => setFilterDupes(!filterDupes)}
+          className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+            filterDupes
+              ? 'bg-rose-500/20 border border-rose-500/40 text-rose-400'
+              : 'bg-[#151821] border border-gray-800/60 text-gray-400 hover:text-white'
+          }`}
+        >
+          Duplicates
+        </button>
+        {(search || filterExchange || filterCountry || filterSector || filterDupes) && (
           <button
-            onClick={() => { setSearch(''); setFilterExchange(''); setFilterCountry(''); setFilterSector(''); }}
+            onClick={() => { setSearch(''); setFilterExchange(''); setFilterCountry(''); setFilterSector(''); setFilterDupes(false); }}
             className="text-sm text-gray-500 hover:text-white transition-colors"
           >
             Clear filters
