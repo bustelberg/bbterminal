@@ -1631,6 +1631,7 @@ class BuildUniverseRequest(BaseModel):
     start_month: str  # "YYYY-MM"
     end_month: str    # "YYYY-MM"
     label: str = "default"
+    max_companies: int = 5
 
 
 @app.post("/api/universe/build")
@@ -1641,6 +1642,7 @@ async def universe_build(body: BuildUniverseRequest):
     start = body.start_month
     end = body.end_month
     lbl = body.label
+    max_co = body.max_companies
 
     def _run(q: queue.Queue):
         resp = supabase.table("company").select(
@@ -1648,7 +1650,7 @@ async def universe_build(body: BuildUniverseRequest):
         ).limit(10000).execute()
         companies = resp.data or []
 
-        for event in build_and_store_universes(supabase, companies, start, end, label=lbl):
+        for event in build_and_store_universes(supabase, companies, start, end, label=lbl, max_companies=max_co):
             q.put(json.dumps(event))
         q.put(None)
 

@@ -119,6 +119,19 @@ CREATE TABLE IF NOT EXISTS universe_snapshot (
   PRIMARY KEY (label, target_month, company_id)
 );
 
+-- Migrate existing table: add label column if missing
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'universe_snapshot' AND column_name = 'label'
+  ) THEN
+    ALTER TABLE universe_snapshot ADD COLUMN label TEXT NOT NULL DEFAULT 'default';
+    ALTER TABLE universe_snapshot DROP CONSTRAINT IF EXISTS universe_snapshot_pkey;
+    ALTER TABLE universe_snapshot ADD PRIMARY KEY (label, target_month, company_id);
+  END IF;
+END $$;
+
+DROP INDEX IF EXISTS idx_universe_snapshot_month;
 CREATE INDEX IF NOT EXISTS idx_universe_snapshot_label_month
   ON universe_snapshot (label, target_month);
 
@@ -199,3 +212,6 @@ BEGIN
   DELETE FROM metric_data WHERE company_id = p_from_id;
 END;
 $$ LANGUAGE plpgsql;
+
+-- ─── Reload PostgREST schema cache ─────────────────────────
+NOTIFY pgrst, 'reload schema';

@@ -238,6 +238,7 @@ def build_and_store_universes(
     start_month: str,
     end_month: str,
     label: str = "default",
+    max_companies: int = 0,
 ) -> Generator[dict, None, None]:
     """Build month-by-month universes and store in universe_snapshot table.
 
@@ -248,13 +249,15 @@ def build_and_store_universes(
         start_month: "YYYY-MM" start (inclusive)
         end_month: "YYYY-MM" end (inclusive)
         label: Label for this universe build.
+        max_companies: Stop loading after finding this many companies with data (0 = all).
 
     Yields SSE events with progress and results.
     """
     total = len(companies)
+    limit_label = f" (limit: {max_companies})" if max_companies > 0 else ""
 
     # Step 1: Load all cached financials
-    yield {"type": "progress", "message": f"Loading cached financials for {total} companies..."}
+    yield {"type": "progress", "message": f"Loading cached financials for {total} companies{limit_label}..."}
 
     company_annuals: dict[int, dict] = {}
     company_info: dict[int, dict] = {}
@@ -283,6 +286,13 @@ def build_and_store_universes(
             "message": f"  Loading financials: {i + 1}/{total} checked, {loaded} found, {missed} missing",
         }
 
+        if max_companies > 0 and loaded >= max_companies:
+            yield {
+                "type": "progress",
+                "message": f"  Reached limit of {max_companies} companies — stopping load.",
+            }
+            break
+
     yield {
         "type": "progress",
         "message": f"Loaded financials for {loaded}/{total} companies ({missed} missing cached data).",
@@ -308,17 +318,19 @@ def build_and_store_universes(
 
         prefix = f"  [{mi + 1}/{n_months}] {month_key}"
 
-        # Evaluate and save in chunks of 50 — single updating line
-        batch_size = 50
-        batch: list[dict] = []
+        # Phase 1: Evaluate all companies
+        rows: list[dict] = []
         passing_count = 0
-        evaluated = 0
-        saved = 0
         cid_list = list(company_annuals.items())
 
-        for cid, annuals in cid_list:
+        yield {
+            "type": "progress_update",
+            "message": f"{prefix}: evaluating 0/{n_companies}...",
+        }
+
+        for idx, (cid, annuals) in enumerate(cid_list):
             cr = evaluate_criteria(annuals, cid, as_of_year=as_of)
-            batch.append({
+            rows.append({
                 "label": label,
                 "target_month": month_key,
                 "company_id": cid,
@@ -329,28 +341,27 @@ def build_and_store_universes(
             })
             if cr.passes:
                 passing_count += 1
-            evaluated += 1
+            yield {
+                "type": "progress_update",
+                "message": f"{prefix}: {passing_count} pass — evaluated {idx + 1}/{n_companies}",
+            }
 
-            if len(batch) >= batch_size:
-                supabase.table("universe_snapshot").upsert(
-                    batch, on_conflict="label,target_month,company_id"
-                ).execute()
-                saved += len(batch)
-                batch = []
-                yield {
-                    "type": "progress_update",
-                    "message": f"{prefix}: {passing_count} pass — {saved}/{n_companies} saved",
-                }
-
-        # Flush remaining
-        if batch:
+        # Phase 2: Save to Supabase in small batches
+        batch_size = 10
+        saved = 0
+        for i in range(0, len(rows), batch_size):
+            batch = rows[i:i + batch_size]
+            yield {
+                "type": "progress_update",
+                "message": f"{prefix}: {passing_count} pass — writing to DB {saved}/{n_companies}...",
+            }
             supabase.table("universe_snapshot").upsert(
                 batch, on_conflict="label,target_month,company_id"
             ).execute()
             saved += len(batch)
             yield {
                 "type": "progress_update",
-                "message": f"{prefix}: {passing_count} pass — {saved}/{n_companies} saved",
+                "message": f"{prefix}: {passing_count} pass — written {saved}/{n_companies} to DB",
             }
 
         monthly_summary.append({
@@ -363,7 +374,7 @@ def build_and_store_universes(
         # Final line for this month — append so it stays in the log
         yield {
             "type": "progress",
-            "message": f"{prefix}: {passing_count}/{n_rows} pass — done",
+            "message": f"{prefix}: {passing_count}/{n_companies} pass — done",
         }
 
     yield {
