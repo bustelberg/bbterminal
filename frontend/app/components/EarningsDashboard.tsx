@@ -321,7 +321,7 @@ function RefreshButton({ label, running, onClick }: { label: string; running: bo
   );
 }
 
-function LogPanel({ logs, logEndRef, running }: { logs: { type: string; message: string }[]; logEndRef: React.RefObject<HTMLDivElement | null>; running: boolean }) {
+function LogPanel({ logs, logEndRef, running, onClose }: { logs: { type: string; message: string }[]; logEndRef: React.RefObject<HTMLDivElement | null>; running: boolean; onClose?: () => void }) {
   if (logs.length === 0) return null;
   const isDone = !running;
   return (
@@ -331,6 +331,11 @@ function LogPanel({ logs, logEndRef, running }: { logs: { type: string; message:
           ? <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
           : <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />}
         <span className="text-gray-500 text-xs font-medium">{isDone ? 'Refresh Complete' : 'Refresh Progress'}</span>
+        <button onClick={onClose} className="ml-auto text-gray-500 hover:text-gray-300 transition-colors" aria-label="Close">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+            <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+          </svg>
+        </button>
       </div>
       <div className="max-h-[5.5rem] overflow-y-auto p-3 font-mono text-xs">
       {logs.map((l, i) => (
@@ -1171,7 +1176,7 @@ export default function EarningsDashboard() {
             {selected.company_name || selected.primary_ticker} — {selected.primary_ticker}.{selected.primary_exchange}
           </div>
 
-          <LogPanel logs={sse.logs} logEndRef={sse.logEndRef} running={sse.running} />
+          <LogPanel logs={sse.logs} logEndRef={sse.logEndRef} running={sse.running} onClose={sse.clearLogs} />
 
           {/* Snapshot Stats */}
           <section className="bg-[#151821] rounded-xl border border-indigo-500/20 p-5 space-y-4">

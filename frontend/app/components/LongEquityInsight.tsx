@@ -326,17 +326,30 @@ export default function LongEquityInsight({ snapshots: initialSnapshots }: { sna
     return (
       <div className="p-8">
         {ingestLog.length > 0 ? (
-          <div className="bg-[#151821] border border-gray-800/40 rounded-xl p-4 max-h-96 overflow-y-auto text-sm space-y-0.5">
-            {ingestLog.map((entry, i) => (
-              <div key={i} className={
-                entry.type === 'error' ? 'text-rose-400'
-                : entry.type === 'done' ? 'text-emerald-400'
-                : 'text-gray-400'
-              }>
-                {entry.message || '\u00a0'}
-              </div>
-            ))}
-            <div ref={logEndRef} />
+          <div className="bg-[#0b0d13] border border-gray-800/40 rounded-lg overflow-hidden max-h-96">
+            <div className="px-3 py-1.5 border-b border-gray-800/40 flex items-center gap-2">
+              {ingesting
+                ? <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                : <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+              <span className="text-gray-500 text-xs font-medium">{ingesting ? 'Ingest Progress' : 'Ingest Complete'}</span>
+              <button onClick={() => setIngestLog([])} className="ml-auto text-gray-500 hover:text-gray-300 transition-colors" aria-label="Close">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                  <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                </svg>
+              </button>
+            </div>
+            <div className="overflow-y-auto p-3 font-mono text-xs" style={{ maxHeight: 'calc(24rem - 2rem)' }}>
+              {ingestLog.map((entry, i) => (
+                <div key={i} className={
+                  entry.type === 'error' ? 'text-rose-400'
+                  : entry.type === 'done' ? 'text-emerald-400'
+                  : 'text-gray-400'
+                }>
+                  {entry.message || '\u00a0'}
+                </div>
+              ))}
+              <div ref={logEndRef} />
+            </div>
           </div>
         ) : (
           <p className="text-sm text-gray-500">
@@ -405,17 +418,30 @@ export default function LongEquityInsight({ snapshots: initialSnapshots }: { sna
       {/* Content */}
       <div className="flex-1 overflow-auto px-8 py-5">
         {ingestLog.length > 0 && (
-          <div className="bg-[#151821] border border-gray-800/40 rounded-xl p-4 max-h-52 overflow-y-auto text-sm space-y-0.5 mb-5">
-            {ingestLog.map((entry, i) => (
-              <div key={i} className={
-                entry.type === 'error' ? 'text-rose-400'
-                : entry.type === 'done' ? 'text-emerald-400'
-                : 'text-gray-500'
-              }>
-                {entry.message}
-              </div>
-            ))}
-            <div ref={logEndRef} />
+          <div className="bg-[#0b0d13] border border-gray-800/40 rounded-lg overflow-hidden mb-5">
+            <div className="px-3 py-1.5 border-b border-gray-800/40 flex items-center gap-2">
+              {ingesting
+                ? <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                : <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+              <span className="text-gray-500 text-xs font-medium">{ingesting ? 'Ingest Progress' : 'Ingest Complete'}</span>
+              <button onClick={() => setIngestLog([])} className="ml-auto text-gray-500 hover:text-gray-300 transition-colors" aria-label="Close">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                  <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                </svg>
+              </button>
+            </div>
+            <div className="max-h-48 overflow-y-auto p-3 font-mono text-xs">
+              {ingestLog.map((entry, i) => (
+                <div key={i} className={
+                  entry.type === 'error' ? 'text-rose-400'
+                  : entry.type === 'done' ? 'text-emerald-400'
+                  : 'text-gray-400'
+                }>
+                  {entry.message}
+                </div>
+              ))}
+              <div ref={logEndRef} />
+            </div>
           </div>
         )}
 

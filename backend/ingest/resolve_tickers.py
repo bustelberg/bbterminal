@@ -101,7 +101,7 @@ def detect_unknown_tickers(
         fill_path = Path(__file__).resolve().parent / "fill_ticker.json"
 
     def _norm(t: str) -> str:
-        return t.upper().replace("-", ".")
+        return t.upper().replace("-", ".").replace(" ", ".")
 
     known: set[str] = set()
     if fill_path.exists():

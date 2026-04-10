@@ -96,6 +96,71 @@ def fix_company_primary_keys(supabase: Client, corrections: list[dict]) -> int:
     return fixed
 
 
+import logging
+
+_logger = logging.getLogger(__name__)
+
+
+def merge_duplicate_companies(supabase: Client) -> list[str]:
+    """Find companies with the same (company_name, primary_exchange) and merge them.
+
+    Keeps the company with the lowest company_id, reassigns metric_data and
+    portfolio_weight rows, then deletes the duplicate.
+    Returns list of log messages describing what was merged.
+    """
+    logs: list[str] = []
+    resp = supabase.table("company").select("company_id,company_name,primary_ticker,primary_exchange").limit(10000).execute()
+    companies = resp.data or []
+
+    # Group by (normalized name, exchange)
+    from collections import defaultdict
+    groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    for c in companies:
+        name = (c.get("company_name") or "").strip().lower()
+        exchange = (c.get("primary_exchange") or "").strip().upper()
+        if name:
+            groups[(name, exchange)].append(c)
+
+    for key, group in groups.items():
+        if len(group) < 2:
+            continue
+
+        # Keep the one with the lowest company_id
+        group.sort(key=lambda c: c["company_id"])
+        keep = group[0]
+        for dup in group[1:]:
+            keep_id = keep["company_id"]
+            dup_id = dup["company_id"]
+            msg = f"Merging duplicate: {dup['primary_ticker']} (id={dup_id}) into {keep['primary_ticker']} (id={keep_id}) — both \"{keep.get('company_name')}\""
+            logs.append(msg)
+            _logger.info(msg)
+
+            try:
+                # Reassign metric_data (skip rows that would conflict)
+                supabase.rpc("merge_company_data", {
+                    "p_from_id": dup_id,
+                    "p_to_id": keep_id,
+                }).execute()
+            except Exception:
+                # Fallback: delete conflicting metric_data then update the rest
+                try:
+                    supabase.table("metric_data").delete().eq("company_id", dup_id).execute()
+                except Exception as e2:
+                    logs.append(f"  Warning: could not clean metric_data for id={dup_id}: {e2}")
+
+            try:
+                supabase.table("portfolio_weight").delete().eq("company_id", dup_id).execute()
+            except Exception:
+                pass
+
+            try:
+                supabase.table("company").delete().eq("company_id", dup_id).execute()
+            except Exception as e:
+                logs.append(f"  Warning: could not delete duplicate company id={dup_id}: {e}")
+
+    return logs
+
+
 def load_prepared_into_supabase(prepared: PreparedForSchema, supabase: Client) -> LoadResult:
     """
     Load a PreparedForSchema into Supabase.

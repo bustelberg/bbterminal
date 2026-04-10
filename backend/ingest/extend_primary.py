@@ -14,10 +14,10 @@ def _norm_str(x: object | None) -> str | None:
 
 
 def _norm_ticker(t: str) -> str:
-    """Normalize a ticker for case-insensitive, dash-tolerant matching.
-    Treats NOVO-B and NOVO.B as the same ticker.
+    """Normalize a ticker for case-insensitive matching.
+    Treats NOVO-B, NOVO.B, and NOVO B as the same ticker.
     """
-    return t.upper().replace("-", ".")
+    return t.upper().replace("-", ".").replace(" ", ".")
 
 
 def load_fill_df(fill_path: Path) -> pd.DataFrame:
@@ -142,10 +142,14 @@ def enrich_flattened_df_with_primary_listing(
     df["exchange"] = (
         df["exchange_fill"].combine_first(df["exchange"]).fillna(default_exchange).astype("string")
     )
+    # Normalize raw ticker so GIB-A, GIB.A, GIB A all resolve to the same fallback
+    _ticker_normalized = df["ticker"].map(
+        lambda x: _norm_ticker(_norm_str(x)) if _norm_str(x) else x
+    )
     df["primary_ticker"] = (
         df["primary_ticker_fill"]
         .combine_first(df["primary_ticker"])
-        .combine_first(df["ticker"])
+        .combine_first(_ticker_normalized)
         .astype("string")
     )
     df["primary_exchange"] = (

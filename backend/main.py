@@ -23,6 +23,7 @@ from ingest.load_into_supabase import (
     get_ticker_overrides,
     save_ticker_overrides,
     fix_company_primary_keys,
+    merge_duplicate_companies,
 )
 from ingest.resolve_tickers import detect_unknown_tickers, resolve_via_openfigi
 from ingest.earnings import fetch_financials, fetch_analyst_estimates, fetch_indicators
@@ -292,6 +293,21 @@ async def _ingest_long_equity_stream():
                 yield event("info", "  No records needed fixing.")
         except Exception as e:
             yield event("info", f"  Fix step failed (non-critical): {e}")
+
+    # ------------------------------------------------------------------ #
+    # Merge duplicate companies (same name + exchange, different ticker)
+    # ------------------------------------------------------------------ #
+    yield event("info", "")
+    yield event("info", "Checking for duplicate companies...")
+    try:
+        merge_logs = await asyncio.to_thread(merge_duplicate_companies, supabase)
+        if merge_logs:
+            for msg in merge_logs:
+                yield event("info", f"  {msg}")
+        else:
+            yield event("info", "  No duplicates found.")
+    except Exception as e:
+        yield event("info", f"  Dedup step failed (non-critical): {e}")
 
     yield event("info", "")
     yield event("done", (
