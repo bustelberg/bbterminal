@@ -27,6 +27,7 @@ from ingest.load_into_supabase import (
 from ingest.resolve_tickers import detect_unknown_tickers, resolve_via_openfigi
 from ingest.earnings import fetch_financials, fetch_analyst_estimates, fetch_indicators
 from ingest.prices import ensure_prices_for_company, ensure_volume_for_company, PriceResult, _fetch_price_from_api, _parse_price_series
+from ingest.api_usage import track_api_call, get_usage
 from momentum.data import load_universe, load_all_prices, load_all_volumes
 from momentum.signals import PRICE_SIGNAL_DEFS
 from momentum.backtest import BacktestConfig, run_backtest
@@ -40,13 +41,17 @@ supabase = create_client(
 
 app = FastAPI()
 
+_cors_origins = [
+    "http://localhost:3000",
+    "https://bbterminal.vercel.app",
+    "https://bbterminal-api.vercel.app",
+]
+if os.environ.get("RAILWAY_PUBLIC_DOMAIN"):
+    _cors_origins.append(f"https://{os.environ['RAILWAY_PUBLIC_DOMAIN']}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://bbterminal.vercel.app",
-        "https://bbterminal-api.vercel.app",
-    ],
+    allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -725,13 +730,17 @@ def _get_company_or_404(company_id: int) -> dict:
 
 async def _earnings_refresh_stream(company_id: int, sources: list[str], force: bool):
     """SSE stream for earnings data refresh."""
-    def event(msg_type: str, message: str) -> str:
-        return f"data: {json.dumps({'type': msg_type, 'message': message})}\n\n"
+    import queue as _queue
+
+    def event(msg_type: str, message: str, **extra) -> str:
+        payload = {"type": msg_type, "message": message, **extra}
+        return f"data: {json.dumps(payload)}\n\n"
 
     company = _get_company_or_404(company_id)
     ticker = company["primary_ticker"]
     exchange = company["primary_exchange"]
     name = company.get("company_name") or f"{ticker}.{exchange}"
+    region = "usa" if exchange.upper() in {"NYSE", "NASDAQ", "AMEX"} else "europe"
 
     yield event("info", f"Refreshing earnings data for {name} ({ticker}.{exchange})")
 
@@ -740,44 +749,76 @@ async def _earnings_refresh_stream(company_id: int, sources: list[str], force: b
         yield event("info", f"--- {source.upper()} ---")
 
         try:
+            # Use a queue so on_log callbacks stream to SSE in real-time
+            log_q: _queue.Queue[str | None] = _queue.Queue()
+
+            def on_log(msg: str):
+                log_q.put(msg)
+
+            async def drain_queue():
+                """Yield SSE events for any queued log messages."""
+                events = []
+                while not log_q.empty():
+                    try:
+                        msg = log_q.get_nowait()
+                        if msg is not None:
+                            events.append(event("info", f"  {msg}"))
+                    except _queue.Empty:
+                        break
+                return events
+
             if source == "financials":
-                r = await asyncio.to_thread(
-                    fetch_financials, supabase, company_id, ticker, exchange,
-                    force_refresh=force,
-                )
+                task = asyncio.get_event_loop().run_in_executor(
+                    None, lambda: fetch_financials(
+                        supabase, company_id, ticker, exchange,
+                        force_refresh=force, on_log=on_log,
+                    ))
             elif source == "analyst_estimates":
-                r = await asyncio.to_thread(
-                    fetch_analyst_estimates, supabase, company_id, ticker, exchange,
-                    force_refresh=force,
-                )
+                task = asyncio.get_event_loop().run_in_executor(
+                    None, lambda: fetch_analyst_estimates(
+                        supabase, company_id, ticker, exchange,
+                        force_refresh=force, on_log=on_log,
+                    ))
             elif source == "indicators":
-                r = await asyncio.to_thread(
-                    fetch_indicators, supabase, company_id, ticker, exchange,
-                    force_refresh=force,
-                )
+                task = asyncio.get_event_loop().run_in_executor(
+                    None, lambda: fetch_indicators(
+                        supabase, company_id, ticker, exchange,
+                        force_refresh=force, on_log=on_log,
+                    ))
             elif source == "prices":
-                pr = await asyncio.to_thread(
-                    ensure_prices_for_company, supabase, company_id, ticker, exchange,
-                    force_refresh=force,
-                )
-                for log_line in pr.logs:
-                    yield event("info", f"  {log_line}")
-                if pr.error:
-                    yield event("error", f"  Error: {pr.error}")
-                else:
-                    yield event("info", f"  Result: {pr.rows_loaded} rows loaded, {pr.total_prices} total prices")
-                continue
+                task = asyncio.get_event_loop().run_in_executor(
+                    None, lambda: ensure_prices_for_company(
+                        supabase, company_id, ticker, exchange,
+                        force_refresh=force, on_log=on_log,
+                    ))
             else:
                 yield event("error", f"Unknown source: {source}")
                 continue
 
-            for log_line in r.logs:
-                yield event("info", f"  {log_line}")
+            # Poll the queue while the task runs, yielding SSE events in real-time
+            while not task.done():
+                await asyncio.sleep(0.15)
+                for evt in await drain_queue():
+                    yield evt
+            # Drain remaining messages after task completes
+            for evt in await drain_queue():
+                yield evt
 
-            if r.error:
-                yield event("error", f"  Error: {r.error}")
+            r = task.result()
+
+            if source == "prices":
+                if r.error:
+                    yield event("error", f"  Error: {r.error}")
+                else:
+                    yield event("info", f"  Result: {r.rows_loaded} rows loaded, {r.total_prices} total prices")
             else:
-                yield event("info", f"  Result: {r.rows_loaded} rows loaded, {r.metrics_found} metrics")
+                if r.error:
+                    yield event("error", f"  Error: {r.error}")
+                else:
+                    yield event("info", f"  Result: {r.rows_loaded} rows loaded, {r.metrics_found} metrics")
+
+            if r.api_calls > 0:
+                yield event("api_calls", f"{r.api_calls} API call(s)", region=region, count=r.api_calls)
 
         except Exception as e:
             yield event("error", f"  {source} failed: {e}")
@@ -1343,6 +1384,7 @@ async def create_benchmark(req: CreateBenchmarkRequest):
 
     # Fetch prices from GuruFocus (ETFs are US-listed, no exchange prefix needed)
     data, log, status = await asyncio.to_thread(_fetch_price_from_api, ticker, "NYSE")
+    await asyncio.to_thread(track_api_call, supabase, "NYSE")
     if data is None:
         raise HTTPException(502, f"Failed to fetch prices for {ticker}: {log}")
 
@@ -1390,6 +1432,7 @@ async def refresh_benchmark(benchmark_id: int):
     ticker = bm.data[0]["ticker"]
 
     data, log, status = await asyncio.to_thread(_fetch_price_from_api, ticker, "NYSE")
+    await asyncio.to_thread(track_api_call, supabase, "NYSE")
     if data is None:
         raise HTTPException(502, f"Failed to fetch prices: {log}")
 
@@ -1451,3 +1494,9 @@ async def get_benchmark_prices(benchmark_id: int, start_date: str = "", end_date
         offset += page_size
 
     return rows
+
+
+@app.get("/api/usage")
+async def api_usage():
+    """Get GuruFocus API usage for the current month."""
+    return await asyncio.to_thread(get_usage, supabase)

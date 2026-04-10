@@ -6,6 +6,8 @@ import {
   ReferenceLine, CartesianGrid, Legend,
 } from 'recharts';
 
+import ApiUsageBadge, { type ApiUsageBadgeHandle } from './ApiUsageBadge';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 type Company = {
@@ -173,10 +175,12 @@ function fmtPctPoints(v: number | null): string {
 // SSE log reader
 // ---------------------------------------------------------------------------
 
-function useSSERefresh() {
+function useSSERefresh(onApiCalls?: (region: string, count: number) => void) {
   const [logs, setLogs] = useState<{ type: string; message: string }[]>([]);
   const [running, setRunning] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
+  const onApiCallsRef = useRef(onApiCalls);
+  onApiCallsRef.current = onApiCalls;
 
   const start = useCallback((url: string, onDone?: () => void) => {
     setLogs([]);
@@ -202,6 +206,9 @@ function useSSERefresh() {
           if (!line.startsWith('data: ')) continue;
           try {
             const parsed = JSON.parse(line.slice(6));
+            if (parsed.type === 'api_calls' && onApiCallsRef.current) {
+              onApiCallsRef.current(parsed.region, parsed.count);
+            }
             setLogs((prev) => [...prev, parsed]);
             if (parsed.type === 'done') {
               setRunning(false);
@@ -219,10 +226,15 @@ function useSSERefresh() {
   }, []);
 
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = logEndRef.current;
+    if (el?.parentElement) {
+      el.parentElement.scrollTop = el.parentElement.scrollHeight;
+    }
   }, [logs]);
 
-  return { logs, running, start, logEndRef };
+  const clearLogs = useCallback(() => setLogs([]), []);
+
+  return { logs, running, start, logEndRef, clearLogs };
 }
 
 // ---------------------------------------------------------------------------
@@ -309,16 +321,25 @@ function RefreshButton({ label, running, onClick }: { label: string; running: bo
   );
 }
 
-function LogPanel({ logs, logEndRef }: { logs: { type: string; message: string }[]; logEndRef: React.RefObject<HTMLDivElement | null> }) {
+function LogPanel({ logs, logEndRef, running }: { logs: { type: string; message: string }[]; logEndRef: React.RefObject<HTMLDivElement | null>; running: boolean }) {
   if (logs.length === 0) return null;
+  const isDone = !running;
   return (
-    <div className="max-h-[5.5rem] overflow-y-auto bg-[#0b0d13] border border-gray-800/40 rounded-lg p-3 font-mono text-xs">
+    <div className="bg-[#0b0d13] border border-gray-800/40 rounded-lg overflow-hidden">
+      <div className="px-3 py-1.5 border-b border-gray-800/40 flex items-center gap-2">
+        {isDone
+          ? <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+          : <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />}
+        <span className="text-gray-500 text-xs font-medium">{isDone ? 'Refresh Complete' : 'Refresh Progress'}</span>
+      </div>
+      <div className="max-h-[5.5rem] overflow-y-auto p-3 font-mono text-xs">
       {logs.map((l, i) => (
         <div key={i} className={l.type === 'error' ? 'text-rose-400' : l.type === 'done' ? 'text-emerald-400' : 'text-gray-400'}>
           {l.message}
         </div>
       ))}
       <div ref={logEndRef} />
+      </div>
     </div>
   );
 }
@@ -328,10 +349,15 @@ function InfoTip({ text }: { text: string }) {
   const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const iconRef = useRef<HTMLSpanElement>(null);
 
+  const tipWidth = 224; // w-56
+  const margin = 8;
+
   const handleEnter = () => {
     if (iconRef.current) {
       const rect = iconRef.current.getBoundingClientRect();
-      setPos({ top: rect.top - 8, left: rect.left + rect.width / 2 });
+      const centerX = rect.left + rect.width / 2;
+      const clampedLeft = Math.max(margin + tipWidth / 2, Math.min(centerX, window.innerWidth - margin - tipWidth / 2));
+      setPos({ top: rect.top - 8, left: clampedLeft });
     }
     setShow(true);
   };
@@ -348,6 +374,20 @@ function InfoTip({ text }: { text: string }) {
         </span>
       )}
     </span>
+  );
+}
+
+function SectionLoader({ label }: { label: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-10 gap-3">
+      <div className="flex items-center gap-2">
+        <svg className="animate-spin h-4 w-4 text-indigo-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        </svg>
+        <span className="text-gray-400 text-sm">Loading {label}...</span>
+      </div>
+    </div>
   );
 }
 
@@ -699,16 +739,13 @@ function RelativeGrowthChart({ metrics }: { metrics: MetricRow[] }) {
 // ---------------------------------------------------------------------------
 
 function FCFShareChart({ metrics }: { metrics: MetricRow[] }) {
-  const { data, cagr, startDate, baseVal } = useMemo(() => {
+  const { data, cagr } = useMemo(() => {
     const series = annualSeries(metrics, MC.FCF_PS);
-    const indexed = indexTo100(series);
-    if (indexed.length === 0) return { data: [], cagr: null, startDate: null, baseVal: null };
+    if (series.length === 0) return { data: [], cagr: null };
     const positiveSeries = series.filter((s) => s.value > 0);
     return {
-      data: indexed,
+      data: series,
       cagr: computeCAGR(positiveSeries),
-      startDate: indexed[0].date,
-      baseVal: indexed[0].raw,
     };
   }, [metrics]);
 
@@ -716,21 +753,21 @@ function FCFShareChart({ metrics }: { metrics: MetricRow[] }) {
     return <div className="text-gray-500 text-sm py-8 text-center">No FCF/share data. Refresh to load.</div>;
   }
 
+  const hasNegative = data.some((d) => d.value < 0);
+
   return (
     <>
-      <div className="text-gray-500 text-xs mb-2 flex items-center gap-1 flex-wrap">Indexed to 100 <InfoTip text="Free Cash Flow per share growth over time, indexed to 100 at the first positive data point. Log scale shows the consistency of compounding. Steeper = faster FCF growth." /></div>
+      <div className="text-gray-500 text-xs mb-2 flex items-center gap-1 flex-wrap">
+        FCF per share (raw values) <InfoTip text="Free Cash Flow per share over time. Negative values are shaded red. CAGR is computed from positive values only." />
+      </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1 mb-2">
         <div className="flex items-center gap-1">
-          <div className="text-gray-500 text-[11px]">CAGR</div>
+          <div className="text-gray-500 text-[11px]">CAGR (positive only)</div>
           <div className="text-white font-mono text-xs">{fmtPct(cagr)}</div>
         </div>
         <div className="flex items-center gap-1">
-          <div className="text-gray-500 text-[11px]">Start</div>
-          <div className="text-white font-mono text-xs">{startDate ? startDate.slice(0, 4) : '—'}</div>
-        </div>
-        <div className="flex items-center gap-1">
-          <div className="text-gray-500 text-[11px]">Base</div>
-          <div className="text-white font-mono text-xs">{baseVal != null ? fmtNum(baseVal, 2) : '—'}</div>
+          <div className="text-gray-500 text-[11px]">Latest</div>
+          <div className="text-white font-mono text-xs">{fmtNum(data[data.length - 1].value, 2)}</div>
         </div>
       </div>
       <ResponsiveContainer width="100%" height={280}>
@@ -738,20 +775,29 @@ function FCFShareChart({ metrics }: { metrics: MetricRow[] }) {
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2330" />
           <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickFormatter={(v: string) => v.slice(0, 4)} />
           <YAxis
-            scale="log"
-            domain={['auto', 'auto']}
             tick={{ fontSize: 11, fill: '#6b7280' }}
-            tickFormatter={(v: number) => v.toFixed(0)}
+            tickFormatter={(v: number) => v.toFixed(1)}
           />
+          {hasNegative && <ReferenceLine y={0} stroke="#6b7280" strokeDasharray="3 3" />}
           <Tooltip
             contentStyle={tooltipStyle}
             labelStyle={{ color: '#9ca3af' }}
-            formatter={(v, name) => {
-              if (name === 'value') return [`${Number(v).toFixed(1)}`, 'Indexed'];
-              return [`${Number(v).toFixed(2)}`, 'Raw'];
+            formatter={(v) => [Number(v).toFixed(2), 'FCF/share']}
+          />
+          <Line
+            type="monotone"
+            dataKey="value"
+            name="FCF/share"
+            stroke="#818cf8"
+            strokeWidth={2}
+            dot={(props: any) => {
+              const { cx, cy, payload } = props;
+              if (payload.value < 0) {
+                return <circle cx={cx} cy={cy} r={3} fill="#f87171" stroke="#f87171" />;
+              }
+              return <circle cx={cx} cy={cy} r={0} fill="none" stroke="none" />;
             }}
           />
-          <Line type="monotone" dataKey="value" name="FCF/share (indexed)" stroke="#818cf8" strokeWidth={2} dot={false} />
         </LineChart>
       </ResponsiveContainer>
     </>
@@ -1068,7 +1114,11 @@ export default function EarningsDashboard() {
     [metrics, startYear],
   );
 
-  const sse = useSSERefresh();
+  const usageBadgeRef = useRef<ApiUsageBadgeHandle>(null);
+
+  const sse = useSSERefresh((region, count) => {
+    usageBadgeRef.current?.addSessionCalls(region, count);
+  });
 
   useEffect(() => {
     fetch(`${API_URL}/api/companies`)
@@ -1087,18 +1137,22 @@ export default function EarningsDashboard() {
       .finally(() => setLoadingMetrics(false));
   }, [selected]);
 
-  useEffect(() => { loadMetrics(); }, [loadMetrics]);
+  useEffect(() => { sse.clearLogs(); loadMetrics(); }, [loadMetrics]);
 
   const refresh = (source: string) => {
     if (!selected) return;
     const endpoint = source === 'all' ? 'refresh-all' : `refresh/${source}`;
-    sse.start(`${API_URL}/api/earnings/${selected.company_id}/${endpoint}?force=true`, loadMetrics);
+    sse.start(`${API_URL}/api/earnings/${selected.company_id}/${endpoint}?force=true`, () => {
+      loadMetrics();
+      usageBadgeRef.current?.refresh();
+    });
   };
 
   return (
     <div className="px-8 py-5 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-white">Earnings Dashboard</h1>
+        <ApiUsageBadge ref={usageBadgeRef} />
       </div>
 
       {/* Company picker */}
@@ -1115,10 +1169,9 @@ export default function EarningsDashboard() {
         <>
           <div className="text-gray-400 text-sm">
             {selected.company_name || selected.primary_ticker} — {selected.primary_ticker}.{selected.primary_exchange}
-            {loadingMetrics && <span className="ml-2 text-gray-600">Loading metrics...</span>}
           </div>
 
-          <LogPanel logs={sse.logs} logEndRef={sse.logEndRef} />
+          <LogPanel logs={sse.logs} logEndRef={sse.logEndRef} running={sse.running} />
 
           {/* Snapshot Stats */}
           <section className="bg-[#151821] rounded-xl border border-indigo-500/20 p-5 space-y-4">
@@ -1126,7 +1179,7 @@ export default function EarningsDashboard() {
               <h2 className="text-white font-medium">Snapshot Stats</h2>
               <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('indicators')} />
             </div>
-            <SnapshotStats metrics={metrics} />
+            {loadingMetrics ? <SectionLoader label="snapshot stats" /> : <SnapshotStats metrics={metrics} />}
           </section>
 
           {/* Charts container */}
@@ -1164,28 +1217,28 @@ export default function EarningsDashboard() {
               {/* FCF Yield */}
               <div className="bg-[#0f1117] rounded-lg border border-indigo-500/20 p-4 space-y-2 overflow-hidden min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-white text-sm font-medium flex items-center gap-1.5 truncate">Forward P/E <InfoTip text="Forward Price-to-Earnings ratio over time. Shows how much investors pay per dollar of expected earnings. Compare to the period average (red dashed) to spot relative cheapness or richness." /></h3>
+                  <h3 className="text-white text-sm font-medium flex items-center gap-1.5"><span className="truncate">Forward P/E</span> <InfoTip text="Forward Price-to-Earnings ratio over time. Shows how much investors pay per dollar of expected earnings. Compare to the period average (red dashed) to spot relative cheapness or richness." /></h3>
                   <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('indicators')} />
                 </div>
-                <ForwardPEChart metrics={chartMetrics} />
+                {loadingMetrics ? <SectionLoader label="Forward P/E" /> : <ForwardPEChart metrics={chartMetrics} />}
               </div>
 
               {/* Relative Growth */}
               <div className="bg-[#0f1117] rounded-lg border border-indigo-500/20 p-4 space-y-2 overflow-hidden min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-white text-sm font-medium flex items-center gap-1.5 truncate">Relative Growth (log) <InfoTip text="Tracks whether the share price is growing in line with Owner Earnings (EPS + Dividends). On a log scale, parallel lines mean the valuation multiple is stable. Divergence signals re-rating." /></h3>
+                  <h3 className="text-white text-sm font-medium flex items-center gap-1.5"><span className="truncate">Relative Growth (log)</span> <InfoTip text="Tracks whether the share price is growing in line with Owner Earnings (EPS + Dividends). On a log scale, parallel lines mean the valuation multiple is stable. Divergence signals re-rating." /></h3>
                   <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('prices')} />
                 </div>
-                <RelativeGrowthChart metrics={chartMetrics} />
+                {loadingMetrics ? <SectionLoader label="Relative Growth" /> : <RelativeGrowthChart metrics={chartMetrics} />}
               </div>
 
               {/* FCF/share Growth */}
               <div className="bg-[#0f1117] rounded-lg border border-indigo-500/20 p-4 space-y-2 overflow-hidden min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-white text-sm font-medium flex items-center gap-1.5 truncate">FCF/share Growth (log) <InfoTip text="Free Cash Flow per share growth on a log scale. A straight line on log scale indicates consistent compounding. Dips may signal cyclicality or one-off events." /></h3>
+                  <h3 className="text-white text-sm font-medium flex items-center gap-1.5"><span className="truncate">FCF/share Growth</span> <InfoTip text="Free Cash Flow per share over time. Shows the trajectory of cash generation. Negative values are highlighted with red dots." /></h3>
                   <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('financials')} />
                 </div>
-                <FCFShareChart metrics={chartMetrics} />
+                {loadingMetrics ? <SectionLoader label="FCF/share" /> : <FCFShareChart metrics={chartMetrics} />}
               </div>
             </div>
           </section>
@@ -1193,13 +1246,13 @@ export default function EarningsDashboard() {
           {/* EGM Calculator */}
           <section className="bg-[#151821] rounded-xl border border-indigo-500/20 p-5 space-y-4">
             <h2 className="text-white font-medium flex items-center gap-1.5">Expected Return (EGM) <InfoTip text="Earnings Growth Multiple — the projected year-over-year EPS growth from the current fiscal year to the next (FY1 estimate). Compares analyst expectations to the stock's actual recent EPS growth rate." /></h2>
-            <EGMCalculator metrics={metrics} />
+            {loadingMetrics ? <SectionLoader label="EGM calculator" /> : <EGMCalculator metrics={metrics} />}
           </section>
 
           {/* Reverse DCF */}
           <section className="bg-[#151821] rounded-xl border border-indigo-500/20 p-5 space-y-4">
             <h2 className="text-white font-medium flex items-center gap-1.5">Reverse DCF <InfoTip text="Reverse Discounted Cash Flow — instead of estimating a fair value, it solves for the FCF growth rate the market is currently pricing in. If implied growth exceeds historic growth, the market expects acceleration (or the stock may be overvalued)." /></h2>
-            <ReverseDCF metrics={metrics} />
+            {loadingMetrics ? <SectionLoader label="Reverse DCF" /> : <ReverseDCF metrics={metrics} />}
           </section>
         </>
       )}

@@ -25,6 +25,7 @@ from urllib.request import Request, urlopen
 from supabase import Client
 
 from ingest.staleness import is_cache_fresh
+from ingest.api_usage import track_api_call
 
 _BUCKET = "gurufocus-raw"
 _CUTOFF = date(2015, 1, 1)
@@ -63,6 +64,7 @@ class EarningsResult:
     logs: list[str] = field(default_factory=list)
     error: str | None = None
     is_forbidden: bool = False  # True if 403 / unsubscribed region
+    api_calls: int = 0  # Number of GuruFocus API requests made
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +172,7 @@ def _api_request_curl(url: str, timeout: int = 30) -> ApiResult:
             return ApiResult(None, f"API HTTP {status_code} body={body[:200]} ({masked_url})", status_code)
         if not body:
             return ApiResult(None, f"API empty response ({masked_url})", status_code)
-        return ApiResult(json.loads(body), "API OK", status_code)
+        return ApiResult(json.loads(body), f"API OK ({masked_url})", status_code)
     except subprocess.TimeoutExpired:
         return ApiResult(None, f"API timeout after {timeout}s ({masked_url})")
     except json.JSONDecodeError as e:
@@ -192,7 +194,7 @@ def _api_request_urllib(url: str, timeout: int = 30) -> ApiResult:
             raw = resp.read().decode("utf-8", errors="replace")
             if not raw:
                 return ApiResult(None, f"API empty response ({masked_url})", resp.status)
-            return ApiResult(json.loads(raw), "API OK", resp.status)
+            return ApiResult(json.loads(raw), f"API OK ({masked_url})", resp.status)
     except HTTPError as e:
         body = ""
         try:
@@ -216,6 +218,13 @@ def _api_request(url: str, timeout: int = 30) -> ApiResult:
     if _HAS_CURL:
         return _api_request_curl(url, timeout)
     return _api_request_urllib(url, timeout)
+
+
+def _mask_url(url: str) -> str:
+    api_key = os.environ.get("GURUFOCUS_API_KEY", "")
+    if api_key:
+        return url.replace(api_key, api_key[:4] + "***")
+    return url
 
 
 def _build_api_url(path: str, query: dict[str, str] | None = None) -> str:
@@ -397,7 +406,13 @@ def fetch_financials(
     exchange: str,
     *,
     force_refresh: bool = False,
+    on_log: callable = None,
 ) -> EarningsResult:
+    def _log(msg: str):
+        result.logs.append(msg)
+        if on_log:
+            on_log(msg)
+
     result = EarningsResult(source="financials")
     _ensure_bucket(supabase)
     path = _storage_path(ticker, exchange, "financials")
@@ -414,24 +429,27 @@ def fetch_financials(
             if fresh:
                 need_api = False
                 result.cache_status = "cache_hit"
-                result.logs.append(f"Cache fresh ({reason})")
+                _log(f"Cache fresh ({reason})")
             else:
-                result.logs.append(f"Cache stale ({reason}), refreshing from API")
+                _log(f"Cache stale ({reason}), refreshing from API")
 
     # Fetch from API if needed
     if need_api:
         url = _build_api_url(f"stock/{quote(symbol, safe=':')}/financials", {"order": "desc"})
+        _log(f"Calling {_mask_url(url)} ...")
         api = _api_request(url)
-        result.logs.append(api.log)
+        track_api_call(supabase, exchange)
+        result.api_calls += 1
+        _log(api.log)
         if api.is_forbidden:
             result.cache_status = "forbidden"
             result.is_forbidden = True
             result.error = f"403 unsubscribed region for {symbol}"
-            result.logs.append(f"Forbidden — exchange {exchange} not in subscription")
+            _log(f"Forbidden — exchange {exchange} not in subscription")
             return result
         if api.data is None:
             if cached is not None:
-                result.logs.append("API failed, using stale cache")
+                _log("API failed, using stale cache")
             else:
                 result.cache_status = "api_error"
                 result.error = api.log
@@ -440,14 +458,14 @@ def fetch_financials(
             cached = api.data
             result.cache_status = "api_fresh"
             _upload_to_storage(supabase, path, api.data)
-            result.logs.append("Cached to storage")
+            _log("Cached to storage")
 
     # Parse and load into DB (always, even on cache hit)
     rows = _parse_financials(cached, company_id)
     result.metrics_found = len(set(r["metric_code"] for r in rows))
-    result.logs.append(f"Parsed {len(rows)} rows, {result.metrics_found} metrics")
+    _log(f"Parsed {len(rows)} rows, {result.metrics_found} metrics")
     result.rows_loaded = _upsert_metric_rows(supabase, rows)
-    result.logs.append(f"Loaded {result.rows_loaded} rows into DB")
+    _log(f"Loaded {result.rows_loaded} rows into DB")
     return result
 
 
@@ -496,7 +514,13 @@ def fetch_analyst_estimates(
     exchange: str,
     *,
     force_refresh: bool = False,
+    on_log: callable = None,
 ) -> EarningsResult:
+    def _log(msg: str):
+        result.logs.append(msg)
+        if on_log:
+            on_log(msg)
+
     result = EarningsResult(source="analyst_estimates")
     _ensure_bucket(supabase)
     path = _storage_path(ticker, exchange, "analyst_estimate")
@@ -512,23 +536,26 @@ def fetch_analyst_estimates(
             if fresh:
                 need_api = False
                 result.cache_status = "cache_hit"
-                result.logs.append(f"Cache fresh ({reason})")
+                _log(f"Cache fresh ({reason})")
             else:
-                result.logs.append(f"Cache stale ({reason}), refreshing from API")
+                _log(f"Cache stale ({reason}), refreshing from API")
 
     if need_api:
         url = _build_api_url(f"stock/{quote(symbol, safe=':')}/analyst_estimate")
+        _log(f"Calling {_mask_url(url)} ...")
         api = _api_request(url)
-        result.logs.append(api.log)
+        track_api_call(supabase, exchange)
+        result.api_calls += 1
+        _log(api.log)
         if api.is_forbidden:
             result.cache_status = "forbidden"
             result.is_forbidden = True
             result.error = f"403 unsubscribed region for {symbol}"
-            result.logs.append(f"Forbidden — exchange {exchange} not in subscription")
+            _log(f"Forbidden — exchange {exchange} not in subscription")
             return result
         if api.data is None:
             if cached is not None:
-                result.logs.append("API failed, using stale cache")
+                _log("API failed, using stale cache")
             else:
                 result.cache_status = "api_error"
                 result.error = api.log
@@ -537,14 +564,14 @@ def fetch_analyst_estimates(
             cached = api.data
             result.cache_status = "api_fresh"
             _upload_to_storage(supabase, path, api.data)
-            result.logs.append("Cached to storage")
+            _log("Cached to storage")
 
     # Always load into DB
     rows = _parse_analyst_estimates(cached, company_id)
     result.metrics_found = len(set(r["metric_code"] for r in rows))
-    result.logs.append(f"Parsed {len(rows)} rows, {result.metrics_found} metrics")
+    _log(f"Parsed {len(rows)} rows, {result.metrics_found} metrics")
     result.rows_loaded = _upsert_metric_rows(supabase, rows)
-    result.logs.append(f"Loaded {result.rows_loaded} rows into DB")
+    _log(f"Loaded {result.rows_loaded} rows into DB")
     return result
 
 
@@ -663,7 +690,13 @@ def fetch_indicators(
     *,
     force_refresh: bool = False,
     indicator_keys: list[str] | None = None,
+    on_log: callable = None,
 ) -> EarningsResult:
+    def _log(msg: str):
+        result.logs.append(msg)
+        if on_log:
+            on_log(msg)
+
     keys = indicator_keys or INDICATOR_KEYS
     result = EarningsResult(source="indicators")
     _ensure_bucket(supabase)
@@ -683,25 +716,28 @@ def fetch_indicators(
                 fresh, reason = is_cache_fresh(dates) if dates else (False, "no dates parsed")
                 if fresh:
                     need_api = False
-                    result.logs.append(f"{key}: cache fresh ({reason})")
+                    _log(f"{key}: cache fresh ({reason})")
                 else:
-                    result.logs.append(f"{key}: cache stale ({reason})")
+                    _log(f"{key}: cache stale ({reason})")
 
         if need_api:
             url = _build_api_url(
                 f"stock/{quote(symbol, safe=':')}/{quote(key, safe='')}",
                 {"type": "quarterly"},
             )
+            _log(f"{key}: calling {_mask_url(url)} ...")
             api = _api_request(url)
-            result.logs.append(f"{key}: {api.log}")
+            track_api_call(supabase, exchange)
+            result.api_calls += 1
+            _log(f"{key}: {api.log}")
             if api.is_forbidden:
                 result.is_forbidden = True
-                result.logs.append(f"{key}: Forbidden — exchange {exchange} not in subscription")
+                _log(f"{key}: Forbidden — exchange {exchange} not in subscription")
                 # No point trying more indicators for this exchange
                 break
             if api.data is None:
                 if cached is not None:
-                    result.logs.append(f"{key}: API failed, using stale cache")
+                    _log(f"{key}: API failed, using stale cache")
                 else:
                     continue
             else:
@@ -711,11 +747,11 @@ def fetch_indicators(
         # Always parse and load into DB
         rows = _parse_single_indicator(cached, key, company_id)
         all_rows.extend(rows)
-        result.logs.append(f"{key}: {len(rows)} rows parsed")
+        _log(f"{key}: {len(rows)} rows parsed")
 
     result.cache_status = "mixed"
     result.metrics_found = len(set(r["metric_code"] for r in all_rows))
-    result.logs.append(f"Total: {len(all_rows)} rows, {result.metrics_found} metrics")
+    _log(f"Total: {len(all_rows)} rows, {result.metrics_found} metrics")
     result.rows_loaded = _upsert_metric_rows(supabase, all_rows)
-    result.logs.append(f"Loaded {result.rows_loaded} rows into DB")
+    _log(f"Loaded {result.rows_loaded} rows into DB")
     return result

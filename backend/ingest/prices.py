@@ -18,6 +18,7 @@ from urllib.request import Request, urlopen
 from supabase import Client
 
 from ingest.staleness import is_cache_fresh
+from ingest.api_usage import track_api_call
 
 _BUCKET = "gurufocus-raw"
 _PRICE_CUTOFF = date(2015, 1, 1)
@@ -40,6 +41,7 @@ class PriceResult:
     error: str | None = None
     is_forbidden: bool = False  # True if 403 / unsubscribed region
     is_delisted: bool = False   # True if 403 / delisted stock
+    api_calls: int = 0  # Number of GuruFocus API requests made
 
 
 def _build_symbol(ticker: str, exchange: str) -> str:
@@ -125,7 +127,7 @@ def _fetch_indicator_from_api(ticker: str, exchange: str, indicator: str = "pric
                 return None, f"API error for {symbol}: curl exit {result.returncode} ({masked_url})", status
             if not body:
                 return None, f"API returned empty response for {symbol} ({masked_url})", status
-            return json.loads(body), f"API OK for {symbol}", status
+            return json.loads(body), f"API OK for {symbol} ({masked_url})", status
         except Exception as e:
             return None, f"API error for {symbol}: {type(e).__name__}: {e}", None
     else:
@@ -135,7 +137,7 @@ def _fetch_indicator_from_api(ticker: str, exchange: str, indicator: str = "pric
                 raw = resp.read().decode("utf-8", errors="replace")
                 if not raw:
                     return None, f"API returned empty response for {symbol} ({masked_url})", resp.status
-                return json.loads(raw), f"API OK for {symbol}", resp.status
+                return json.loads(raw), f"API OK for {symbol} ({masked_url})", resp.status
         except HTTPError as e:
             body = ""
             try:
@@ -281,6 +283,8 @@ def ensure_volume_for_company(
 
     # 2. Fetch from API
     data, api_log, http_status = _fetch_indicator_from_api(ticker, exchange, "volume")
+    track_api_call(supabase, exchange)
+    result.api_calls += 1
     result.logs.append(api_log)
 
     if data is None:
@@ -309,6 +313,13 @@ def ensure_volume_for_company(
     return result
 
 
+def _mask_url(url: str) -> str:
+    api_key = os.environ.get("GURUFOCUS_API_KEY", "")
+    if api_key:
+        return url.replace(api_key, api_key[:4] + "***")
+    return url
+
+
 def ensure_prices_for_company(
     supabase: Client,
     company_id: int,
@@ -317,6 +328,7 @@ def ensure_prices_for_company(
     *,
     force_refresh: bool = False,
     data_cutoff: date | None = None,
+    on_log: callable = None,
 ) -> PriceResult:
     """Full pipeline: fetch -> cache -> load. Returns detailed result.
 
@@ -325,6 +337,11 @@ def ensure_prices_for_company(
                      today. When the cache covers up to this date, skip the API
                      fetch entirely. Data newer than this date is ignored.
     """
+    def _log(msg: str):
+        result.logs.append(msg)
+        if on_log:
+            on_log(msg)
+
     result = PriceResult()
     _ensure_bucket(supabase)
     path = _storage_path(ticker, exchange)
@@ -341,19 +358,27 @@ def ensure_prices_for_company(
                 if fresh:
                     result.source = "cache"
                     result.total_prices = len(parsed)
-                    result.logs.append(f"cache fresh ({reason})")
+                    _log(f"cache fresh ({reason})")
                     result.rows_loaded = load_prices_into_db(supabase, company_id, parsed)
                     return result
                 else:
-                    result.logs.append(f"cache stale ({reason}), refreshing from API")
+                    _log(f"cache stale ({reason}), refreshing from API")
             else:
-                result.logs.append(f"cache exists but parsed 0 prices from it")
+                _log(f"cache exists but parsed 0 prices from it")
         else:
-            result.logs.append(f"no cache at {path}")
+            _log(f"no cache at {path}")
 
     # 2. Fetch from API
+    base_url = os.environ.get("GURUFOCUS_BASE_URL", "").strip().rstrip("/")
+    if base_url.endswith("/data"):
+        base_url = base_url[: -len("/data")]
+    api_key = os.environ.get("GURUFOCUS_API_KEY", "")
+    raw_url = f"{base_url}/public/user/{api_key}/stock/{quote(symbol, safe=':')}/price"
+    _log(f"Calling {_mask_url(raw_url)} ...")
     data, api_log, http_status = _fetch_price_from_api(ticker, exchange)
-    result.logs.append(api_log)
+    track_api_call(supabase, exchange)
+    result.api_calls += 1
+    _log(api_log)
 
     # Detect unsubscribed region (check body, not just status code —
     # a bare 403 can mean a specific ticker is restricted/delisted)
@@ -361,7 +386,7 @@ def ensure_prices_for_company(
         result.source = "forbidden"
         result.is_forbidden = True
         result.error = f"403 unsubscribed region for {symbol}"
-        result.logs.append(f"Forbidden — exchange {exchange} not in subscription")
+        _log(f"Forbidden — exchange {exchange} not in subscription")
         return result
 
     # Detect delisted stocks (403 with "Delisted stocks" in body)
@@ -369,7 +394,7 @@ def ensure_prices_for_company(
         result.source = "delisted"
         result.is_delisted = True
         result.error = f"delisted: {symbol}"
-        result.logs.append(f"Delisted — {symbol}")
+        _log(f"Delisted — {symbol}")
         return result
 
     if data is None:
@@ -379,12 +404,12 @@ def ensure_prices_for_company(
             parsed = _parse_price_series(cached)
             result.source = "stale_cache"
             result.total_prices = len(parsed)
-            result.logs.append(f"using stale cache ({len(parsed)} prices)")
+            _log(f"using stale cache ({len(parsed)} prices)")
             result.rows_loaded = load_prices_into_db(supabase, company_id, parsed)
         else:
             result.source = "none"
             result.error = "no prices available (API failed, no cache)"
-            result.logs.append("no prices available at all")
+            _log("no prices available at all")
         return result
 
     # 3. Parse API response
@@ -392,21 +417,21 @@ def ensure_prices_for_company(
     if not parsed:
         # Log what the API actually returned for debugging
         data_preview = str(data)[:200]
-        result.logs.append(f"API returned data but parsed 0 prices. Data preview: {data_preview}")
+        _log(f"API returned data but parsed 0 prices. Data preview: {data_preview}")
         result.source = "none"
         result.error = "API returned unparseable data"
         return result
 
-    result.logs.append(f"parsed {len(parsed)} prices from API (range {min(d for d,_ in parsed)} to {max(d for d,_ in parsed)})")
+    _log(f"parsed {len(parsed)} prices from API (range {min(d for d,_ in parsed)} to {max(d for d,_ in parsed)})")
 
     # 4. Cache to storage
     _upload_to_storage(supabase, path, data)
-    result.logs.append("cached to storage")
+    _log("cached to storage")
 
     # 5. Load into DB
     result.source = "api"
     result.total_prices = len(parsed)
     result.rows_loaded = load_prices_into_db(supabase, company_id, parsed)
-    result.logs.append(f"loaded {result.rows_loaded} rows into DB (>= {_PRICE_CUTOFF})")
+    _log(f"loaded {result.rows_loaded} rows into DB (>= {_PRICE_CUTOFF})")
 
     return result

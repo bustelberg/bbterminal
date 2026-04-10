@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { Fragment, useState, useEffect, useMemo } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Legend,
 } from 'recharts';
+
+import ApiUsageBadge from './ApiUsageBadge';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -432,6 +434,8 @@ export default function MomentumBacktester() {
             Price momentum portfolio — equal-weight, monthly rebalancing, sector-filtered
           </p>
         </div>
+        <div className="flex items-center gap-3">
+          <ApiUsageBadge />
         {savedRuns.length > 0 && (
           <div className="flex items-center gap-2">
             <select
@@ -459,6 +463,7 @@ export default function MomentumBacktester() {
             )}
           </div>
         )}
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto px-8 py-5 space-y-5">
@@ -781,9 +786,8 @@ export default function MomentumBacktester() {
                   </thead>
                   <tbody>
                     {result.monthly_records.map((r) => (
-                      <>
+                      <Fragment key={r.date}>
                         <tr
-                          key={r.date}
                           className="border-b border-gray-800/20 hover:bg-white/[0.02] cursor-pointer transition-colors"
                           onClick={() => setExpandedMonth(expandedMonth === r.date ? null : r.date)}
                         >
@@ -844,7 +848,7 @@ export default function MomentumBacktester() {
                             </td>
                           </tr>
                         )}
-                      </>
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>
