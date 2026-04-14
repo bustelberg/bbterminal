@@ -170,9 +170,33 @@ def load_prepared_into_supabase(prepared: PreparedForSchema, supabase: Client) -
     # 1. COMPANY
     # ------------------------------------------------------------------ #
     company_rows = _df_to_rows(prepared.company)
+    # Add source tag for new companies
+    for row in company_rows:
+        row["source"] = ["longequity"]
     company_inserted = _upsert_batched(
         supabase, "company", company_rows, on_conflict="primary_ticker,primary_exchange"
     )
+
+    # Ensure 'longequity' source tag on all companies that were just ingested
+    # (upsert with ignore_duplicates won't update existing rows)
+    for row in company_rows:
+        try:
+            existing = (
+                supabase.table("company")
+                .select("company_id, source")
+                .eq("primary_ticker", row["primary_ticker"])
+                .eq("primary_exchange", row["primary_exchange"])
+                .limit(1)
+                .execute()
+            )
+            if existing.data:
+                current_source = existing.data[0].get("source") or []
+                if "longequity" not in current_source:
+                    supabase.table("company").update(
+                        {"source": current_source + ["longequity"]}
+                    ).eq("company_id", existing.data[0]["company_id"]).execute()
+        except Exception:
+            pass  # Best-effort source tagging
 
     # Fetch company_id lookup map
     all_companies = (

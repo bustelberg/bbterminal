@@ -10,6 +10,7 @@ const navItems = [
   { href: '/earnings', label: 'Earnings Dashboard' },
   { href: '/momentum', label: 'Momentum' },
   { href: '/universe', label: 'Universe' },
+  { href: '/universe_index', label: 'Index Universe' },
   { href: '/airs-portfolio', label: 'AIRS Portfolio' },
   { href: '/benchmarks', label: 'Benchmarks' },
   { href: '/companies', label: 'Companies' },
@@ -82,7 +83,7 @@ export default function Sidebar() {
             key={href}
             href={href}
             className={`block px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              pathname.startsWith(href)
+              pathname === href || (pathname.startsWith(href + '/') && href !== '/')
                 ? 'bg-indigo-600/15 text-indigo-400'
                 : 'text-gray-400 hover:text-white hover:bg-white/5'
             }`}

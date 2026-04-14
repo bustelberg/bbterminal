@@ -12,6 +12,7 @@ type Company = {
   longequity_ticker: string | null;
   country: string | null;
   sector: string | null;
+  source: string[];
 };
 
 type SortField = 'company_name' | 'primary_ticker' | 'primary_exchange' | 'country' | 'sector';
@@ -163,6 +164,7 @@ export default function CompanyManager() {
   const [filterExchange, setFilterExchange] = useState('');
   const [filterCountry, setFilterCountry] = useState('');
   const [filterSector, setFilterSector] = useState('');
+  const [filterSource, setFilterSource] = useState('');
   const [filterDupes, setFilterDupes] = useState(false);
   const [sortField, setSortField] = useState<SortField>('company_name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
@@ -198,6 +200,11 @@ export default function CompanyManager() {
     return [...s].sort();
   }, [companies]);
 
+  const sourceOptions = useMemo(() => {
+    const s = new Set(companies.flatMap((c) => c.source ?? []).filter(Boolean));
+    return [...s].sort();
+  }, [companies]);
+
   // Detect duplicate company names (case-insensitive)
   const duplicateNames = useMemo(() => {
     const counts = new Map<string, number>();
@@ -227,6 +234,7 @@ export default function CompanyManager() {
     if (filterExchange) list = list.filter((c) => c.primary_exchange === filterExchange);
     if (filterCountry) list = list.filter((c) => c.country === filterCountry);
     if (filterSector) list = list.filter((c) => c.sector === filterSector);
+    if (filterSource) list = list.filter((c) => (c.source ?? []).includes(filterSource));
     if (filterDupes) {
       const nameCounts = new Map<string, number>();
       for (const c of companies) {
@@ -245,7 +253,7 @@ export default function CompanyManager() {
       const cmp = av.localeCompare(bv, undefined, { sensitivity: 'base' });
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [companies, search, filterExchange, filterCountry, filterSector, filterDupes, sortField, sortDir]);
+  }, [companies, search, filterExchange, filterCountry, filterSector, filterSource, filterDupes, sortField, sortDir]);
 
   function handleSort(field: SortField) {
     if (sortField === field) {
@@ -365,6 +373,14 @@ export default function CompanyManager() {
           <option value="">All sectors</option>
           {sectorOptions.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
+        <select
+          value={filterSource}
+          onChange={(e) => setFilterSource(e.target.value)}
+          className="bg-[#151821] border border-gray-800/60 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
+        >
+          <option value="">All sources</option>
+          {sourceOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
         <button
           onClick={() => setFilterDupes(!filterDupes)}
           className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -375,9 +391,9 @@ export default function CompanyManager() {
         >
           Duplicates
         </button>
-        {(search || filterExchange || filterCountry || filterSector || filterDupes) && (
+        {(search || filterExchange || filterCountry || filterSector || filterSource || filterDupes) && (
           <button
-            onClick={() => { setSearch(''); setFilterExchange(''); setFilterCountry(''); setFilterSector(''); setFilterDupes(false); }}
+            onClick={() => { setSearch(''); setFilterExchange(''); setFilterCountry(''); setFilterSector(''); setFilterSource(''); setFilterDupes(false); }}
             className="text-sm text-gray-500 hover:text-white transition-colors"
           >
             Clear filters
@@ -419,6 +435,7 @@ export default function CompanyManager() {
                 <th className="px-3 py-3 text-left text-xs font-medium w-24">LE Ticker</th>
                 <th className={`${thCls} w-32`} onClick={() => handleSort('country')}>Country{sortIcon('country')}</th>
                 <th className={`${thCls} w-32`} onClick={() => handleSort('sector')}>Sector{sortIcon('sector')}</th>
+                <th className="px-3 py-3 text-left text-xs font-medium w-24">Source</th>
                 <th className="px-3 py-3 text-left text-xs font-medium w-28">Actions</th>
               </tr>
             </thead>
@@ -468,6 +485,18 @@ export default function CompanyManager() {
                     <td className="px-3 py-2.5 text-gray-500 text-xs">{c.longequity_ticker ?? '—'}</td>
                     <td className="px-3 py-2.5 text-gray-400">{c.country ?? '—'}</td>
                     <td className="px-3 py-2.5 text-gray-400">{c.sector ?? '—'}</td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex gap-1 flex-wrap">
+                        {(c.source ?? []).map(s => (
+                          <span key={s} className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                            s === 'longequity' ? 'bg-indigo-500/15 text-indigo-400' :
+                            s === 'sp500' ? 'bg-emerald-500/15 text-emerald-400' :
+                            'bg-gray-500/15 text-gray-400'
+                          }`}>{s}</span>
+                        ))}
+                        {(!c.source || c.source.length === 0) && <span className="text-gray-600 text-xs">—</span>}
+                      </div>
+                    </td>
                     <td className="px-3 py-2.5">
                       <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
