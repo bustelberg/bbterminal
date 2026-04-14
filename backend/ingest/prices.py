@@ -21,7 +21,7 @@ from ingest.staleness import is_cache_fresh
 from ingest.api_usage import track_api_call
 
 _BUCKET = "gurufocus-raw"
-_PRICE_CUTOFF = date(2015, 1, 1)
+_PRICE_CUTOFF = date(1998, 1, 1)
 
 US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX"}
 

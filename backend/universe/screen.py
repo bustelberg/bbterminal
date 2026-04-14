@@ -256,13 +256,15 @@ def build_and_store_universes(
     total = len(companies)
     limit_label = f" (limit: {max_companies})" if max_companies > 0 else ""
 
-    # Step 1: Load all cached financials
-    yield {"type": "progress", "message": f"Loading cached financials for {total} companies{limit_label}..."}
+    # Step 1: Load financials (cache first, then API fallback)
+    yield {"type": "progress", "message": f"Loading financials for {total} companies{limit_label}..."}
 
     company_annuals: dict[int, dict] = {}
     company_info: dict[int, dict] = {}
     loaded = 0
     missed = 0
+    api_calls = 0
+    forbidden_exchanges: set[str] = set()
 
     for i, company in enumerate(companies):
         cid = company["company_id"]
@@ -270,7 +272,42 @@ def build_and_store_universes(
         exchange = company["primary_exchange"]
         company_info[cid] = company
 
+        # Skip exchanges we know are unsubscribed
+        if exchange.upper() in forbidden_exchanges:
+            missed += 1
+            yield {
+                "type": "progress_update",
+                "message": f"  Loading financials: {i + 1}/{total} checked, {loaded} loaded, {missed} skipped ({api_calls} API calls)",
+            }
+            continue
+
+        # Try cache first
         data = _fetch_financials_cached(supabase, ticker, exchange)
+
+        # Fetch from API if not cached
+        if data is None:
+            data, log = _fetch_financials_api(supabase, ticker, exchange)
+            api_calls += 1
+
+            if data is None:
+                if "unsubscribed region" in log.lower():
+                    forbidden_exchanges.add(exchange.upper())
+                    yield {
+                        "type": "progress",
+                        "message": f"  {ticker}: unsubscribed exchange {exchange} — skipping all {exchange} companies",
+                    }
+                elif "delisted" in log.lower() or "don't have authorization" in log.lower():
+                    pass  # silently skip delisted
+                missed += 1
+                time.sleep(0.3)
+                yield {
+                    "type": "progress_update",
+                    "message": f"  Loading financials: {i + 1}/{total} checked, {loaded} loaded, {missed} skipped ({api_calls} API calls)",
+                }
+                continue
+
+            time.sleep(0.3)
+
         if data:
             annuals = _get_annuals(data)
             if annuals:
@@ -283,7 +320,7 @@ def build_and_store_universes(
 
         yield {
             "type": "progress_update",
-            "message": f"  Loading financials: {i + 1}/{total} checked, {loaded} found, {missed} missing",
+            "message": f"  Loading financials: {i + 1}/{total} checked, {loaded} loaded, {missed} skipped ({api_calls} API calls)",
         }
 
         if max_companies > 0 and loaded >= max_companies:
@@ -295,7 +332,7 @@ def build_and_store_universes(
 
     yield {
         "type": "progress",
-        "message": f"Loaded financials for {loaded}/{total} companies ({missed} missing cached data).",
+        "message": f"Loaded financials for {loaded}/{total} companies ({missed} skipped, {api_calls} API calls).",
     }
 
     # Step 2: Generate month list

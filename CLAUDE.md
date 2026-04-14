@@ -12,17 +12,76 @@ A financial data terminal for wealth management. Analyses stocks using data from
 
 ## Running locally
 
+### Prerequisites
+
+- Docker Desktop (for local Supabase)
+- Node.js + npm (for frontend)
+- Python + uv (for backend)
+
+### 1. Start local Supabase
+
 ```bash
-# Backend
+npx supabase start
+```
+
+This starts all Supabase services locally. First run pulls Docker images and may take a few minutes.
+
+| Service | URL |
+|---------|-----|
+| Studio (DB GUI) | http://127.0.0.1:54323/project/default |
+| REST API | http://127.0.0.1:54321/rest/v1 |
+| Database | `postgresql://postgres:postgres@127.0.0.1:54322/postgres` |
+| Storage | http://127.0.0.1:54321/storage/v1 |
+| Mailpit (email testing) | http://127.0.0.1:54324 |
+
+### 2. Configure environment variables
+
+Create `backend/.env.local` (overrides `backend/.env` for local dev):
+```env
+SUPABASE_URL=http://127.0.0.1:54321
+SUPABASE_SERVICE_KEY=<secret key from `npx supabase status`>
+```
+
+Create `frontend/.env.local` (overrides any `.env` for local dev):
+```env
+NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<publishable key from `npx supabase status`>
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_ALLOWED_EMAILS=<your email>
+```
+
+Run `npx supabase status` to get the local keys. Both `.env.local` files are gitignored.
+
+### 3. Start the app
+
+```bash
+# Terminal 1 — Backend
 cd backend
 uv run uvicorn main:app --reload --port 8000
 
-# Frontend
+# Terminal 2 — Frontend
 cd frontend
 npm run dev
 ```
 
 Frontend runs on `http://localhost:3000`, backend on `http://localhost:8000`.
+
+### Useful Supabase CLI commands
+
+```bash
+npx supabase status                # Show all local URLs and keys
+npx supabase db reset              # Wipe local DB, re-run migrations + seed
+npx supabase migration new <name>  # Create a new migration file
+npx supabase db diff               # Generate migration from local schema changes
+npx supabase db push               # Push migrations to linked prod project
+npx supabase stop                  # Stop all local containers
+```
+
+### Local vs. production
+
+The backend loads `backend/.env` first (prod defaults), then `backend/.env.local` with `override=True` (local overrides). When `.env.local` doesn't exist (e.g. on Railway), only `.env` / environment variables are used.
+
+The frontend follows Next.js convention: `.env.local` overrides `.env`. Vercel uses env vars from its dashboard, so `.env.local` only affects local dev.
 
 ---
 
@@ -73,8 +132,8 @@ Frontend runs on `http://localhost:3000`, backend on `http://localhost:8000`.
 - `GET /api/benchmarks/{id}/prices` — Get monthly benchmark prices
 - `GET /api/earnings` — Earnings dashboard data
 
-**Environment variables** (`.env`):
-- `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`
+**Environment variables** (`.env`, overridden by `.env.local` if present):
+- `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` — Supabase connection (prod in `.env`, local in `.env.local`)
 - `GURUFOCUS_BASE_URL`, `GURUFOCUS_API_KEY`
 - `BROKER_USERNAME`, `BROKER_PASSWORD` — AirSPMS credentials for Playwright scanner
 
@@ -153,7 +212,7 @@ Modern fintech dark theme. Key principles:
 - AIRS portfolio data is parsed server-side but cached client-side in localStorage (no DB storage)
 - Company deletion cascades: removes metric_data and portfolio_weight rows first
 - GuruFocus API subscription covers USA + Europe regions only
-- Price/volume data cutoff: `2015-01-01` — no data before this date is stored
+- Price/volume data cutoff: `1998-01-01` — no data before this date is stored
 - Supabase `.in_()` queries batched in chunks of 50 to avoid Cloudflare 502 errors
 - GuruFocus raw API responses cached in Supabase Storage bucket `gurufocus-raw` as JSON files
 - Storage paths: `{EXCHANGE}_{TICKER}/indicator__price.json` and `indicator__volume.json`

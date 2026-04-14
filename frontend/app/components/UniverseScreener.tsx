@@ -72,12 +72,17 @@ export default function UniverseScreener() {
   const [compareSortAsc, setCompareSortAsc] = useState(false);
   const [compareFilter, setCompareFilter] = useState<'all' | 'changed' | 'improved' | 'declined' | 'added' | 'removed'>('all');
   const [dragOverSlot, setDragOverSlot] = useState<'a' | 'b' | null>(null);
+  const [companyCount, setCompanyCount] = useState<number | null>(null);
 
   useEffect(() => {
     fetch(`${API_URL}/api/universe/criteria`)
       .then(r => r.json())
       .then(setCriteria)
       .catch(() => {});
+    fetch(`${API_URL}/api/companies`)
+      .then(r => r.json())
+      .then((data: unknown[]) => setCompanyCount(data.length))
+      .catch(() => setCompanyCount(0));
     loadLabels();
   }, []);
 
@@ -241,7 +246,7 @@ export default function UniverseScreener() {
   const runCompare = async (monthA: string, monthB: string) => {
     if (!selectedLabel) return;
     setLoadingCompare(true);
-    setCompareFilter('all');
+    setCompareFilter('changed');
     try {
       const [resA, resB] = await Promise.all([
         fetch(`${API_URL}/api/universe/months/${monthA}?label=${encodeURIComponent(selectedLabel)}`).then(r => r.json()),
@@ -374,6 +379,30 @@ export default function UniverseScreener() {
   // Helper to find month info for compare slots
   const monthInfo = (m: string | null) => storedMonths.find(x => x.month === m);
 
+  if (companyCount === 0 && labels.length === 0) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="shrink-0 px-8 py-5 border-b border-gray-800/40">
+          <h1 className="text-white text-lg font-semibold">Universe Screener</h1>
+          <p className="text-gray-500 text-sm mt-0.5">
+            Build labeled monthly universes from LongEquity quality criteria
+          </p>
+        </div>
+        <div className="flex-1 flex items-center justify-center px-8">
+          <div className="bg-[#151821] rounded-xl border border-gray-800/40 p-8 max-w-lg text-center space-y-4">
+            <div className="text-gray-500 text-sm">No companies found in the database</div>
+            <p className="text-gray-400 text-xs leading-relaxed">
+              The universe screener needs company data to work. Load companies first by running the LongEquity ingest pipeline from the{' '}
+              <a href="/longequity" className="text-indigo-400 hover:text-indigo-300 transition-colors">LongEquity Insight</a> page,
+              or add companies manually from the{' '}
+              <a href="/companies" className="text-indigo-400 hover:text-indigo-300 transition-colors">Companies</a> page.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -418,9 +447,9 @@ export default function UniverseScreener() {
               <label className="text-gray-400 text-xs">Max Co.</label>
               <input
                 type="number"
-                min={1}
+                min={0}
                 value={maxCompanies}
-                onChange={e => setMaxCompanies(Math.max(1, parseInt(e.target.value) || 1))}
+                onChange={e => setMaxCompanies(Math.max(0, parseInt(e.target.value) || 0))}
                 className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none w-20"
               />
             </div>
@@ -557,12 +586,13 @@ export default function UniverseScreener() {
                   }`}>
                     {m.passing}/{m.total}
                   </div>
-                  <button
+                  <span
+                    role="button"
                     onClick={e => deleteMonth(m.month, e)}
-                    className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500/80 text-white text-[10px] leading-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-rose-500"
+                    className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500/80 text-white text-[10px] leading-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-rose-500 cursor-pointer"
                   >
                     x
-                  </button>
+                  </span>
                 </button>
               ))}
             </div>
@@ -737,7 +767,11 @@ export default function UniverseScreener() {
                   </tbody>
                 </table>
                 {sortedCompare.length === 0 && (
-                  <div className="p-6 text-center text-gray-500 text-sm">No companies match the current filter.</div>
+                  <div className="p-6 text-center text-gray-500 text-sm">
+                    {compareFilter === 'changed' && compareStats.changed === 0
+                      ? 'No differences between these two months.'
+                      : 'No companies match the current filter.'}
+                  </div>
                 )}
               </div>
             )}

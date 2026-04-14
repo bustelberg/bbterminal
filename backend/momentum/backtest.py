@@ -51,6 +51,16 @@ class MonthlyRecord:
     holdings: list[MonthlyHolding]
     portfolio_return_pct: float | None
     cumulative_return_pct: float
+    empty_reason: str | None = None
+
+
+@dataclass
+class DrawdownPeriod:
+    """A peak-to-trough drawdown period."""
+    drawdown_pct: float
+    peak_date: str      # YYYY-MM
+    trough_date: str    # YYYY-MM
+    recovery_date: str | None  # YYYY-MM or None if not yet recovered
 
 
 @dataclass
@@ -62,6 +72,7 @@ class BacktestSummary:
     avg_monthly_turnover_pct: float
     total_months: int
     avg_holdings: float
+    top_drawdowns: list[DrawdownPeriod] = field(default_factory=list)
 
 
 @dataclass
@@ -89,6 +100,7 @@ class BacktestResult:
                     ],
                     "portfolio_return_pct": r.portfolio_return_pct,
                     "cumulative_return_pct": r.cumulative_return_pct,
+                    **({"empty_reason": r.empty_reason} if r.empty_reason else {}),
                 }
                 for r in self.monthly_records
             ],
@@ -100,6 +112,15 @@ class BacktestResult:
                 "avg_monthly_turnover_pct": self.summary.avg_monthly_turnover_pct,
                 "total_months": self.summary.total_months,
                 "avg_holdings": self.summary.avg_holdings,
+                "top_drawdowns": [
+                    {
+                        "drawdown_pct": dd.drawdown_pct,
+                        "peak_date": dd.peak_date,
+                        "trough_date": dd.trough_date,
+                        "recovery_date": dd.recovery_date,
+                    }
+                    for dd in self.summary.top_drawdowns
+                ],
             },
         }
 
@@ -157,6 +178,85 @@ def _build_volume_index(volumes_df: pd.DataFrame) -> dict[int, pd.Series]:
     return result
 
 
+def _find_drawdown_periods(values: list[tuple[str, float]]) -> list[DrawdownPeriod]:
+    """Find all drawdown periods from a list of (date, portfolio_value) tuples.
+
+    A drawdown starts when value drops below a peak and ends when the value
+    recovers back to the peak level (or at the end of the series).
+    """
+    if len(values) < 2:
+        return []
+
+    periods: list[DrawdownPeriod] = []
+    peak_val = values[0][1]
+    peak_date = values[0][0]
+    trough_val = peak_val
+    trough_date = peak_date
+    in_drawdown = False
+
+    for dt, val in values[1:]:
+        if val >= peak_val:
+            # Recovered or new high
+            if in_drawdown:
+                dd_pct = round((trough_val / peak_val - 1) * 100, 2)
+                periods.append(DrawdownPeriod(
+                    drawdown_pct=dd_pct,
+                    peak_date=peak_date,
+                    trough_date=trough_date,
+                    recovery_date=dt,
+                ))
+                in_drawdown = False
+            peak_val = val
+            peak_date = dt
+            trough_val = val
+            trough_date = dt
+        else:
+            in_drawdown = True
+            if val < trough_val:
+                trough_val = val
+                trough_date = dt
+
+    # Handle ongoing drawdown at end of series
+    if in_drawdown:
+        dd_pct = round((trough_val / peak_val - 1) * 100, 2)
+        periods.append(DrawdownPeriod(
+            drawdown_pct=dd_pct,
+            peak_date=peak_date,
+            trough_date=trough_date,
+            recovery_date=None,
+        ))
+
+    return periods
+
+
+def _pick_top_n_non_overlapping(periods: list[DrawdownPeriod], n: int) -> list[DrawdownPeriod]:
+    """Pick the top N drawdowns by magnitude, excluding overlapping periods.
+
+    A period overlaps if its peak-to-recovery range intersects with any
+    already-selected period's peak-to-recovery range.
+    """
+    # Sort by drawdown magnitude (most negative first)
+    sorted_periods = sorted(periods, key=lambda p: p.drawdown_pct)
+    selected: list[DrawdownPeriod] = []
+
+    for p in sorted_periods:
+        if len(selected) >= n:
+            break
+        # Check overlap with already selected
+        p_end = p.recovery_date or "9999-99"
+        overlaps = False
+        for s in selected:
+            s_end = s.recovery_date or "9999-99"
+            # Two ranges [p.peak, p_end] and [s.peak, s_end] overlap if:
+            if p.peak_date <= s_end and p_end >= s.peak_date:
+                overlaps = True
+                break
+        if not overlaps:
+            selected.append(p)
+
+    return selected
+
+
 def run_backtest(
     config: BacktestConfig,
     prices_df: pd.DataFrame,
@@ -211,11 +311,18 @@ def run_backtest(
             month_key = month_date.isoformat()[:7]
             eligible_ids = monthly_eligible.get(month_key, set())
             if not eligible_ids:
+                snap_min = min(monthly_eligible.keys())
+                snap_max = max(monthly_eligible.keys())
+                if month_key < snap_min or month_key > snap_max:
+                    reason = f"Month is outside universe snapshot range ({snap_min} to {snap_max})"
+                else:
+                    reason = "All companies in the universe snapshot failed screening criteria for this month (0 passing)"
                 monthly_records.append(MonthlyRecord(
                     date=month_date.isoformat()[:7],
                     holdings=[],
                     portfolio_return_pct=None,
                     cumulative_return_pct=round(cumulative, 2),
+                    empty_reason=reason,
                 ))
                 continue
             month_universe_df = universe_df[
@@ -229,11 +336,20 @@ def run_backtest(
             volume_index=volume_index,
         )
         if signals_df.empty:
+            reason = f"No companies had enough price data (need >= 20 data points before {month_date.strftime('%b %Y')})"
+            if send_event:
+                send_event(
+                    "progress",
+                    month=month_date.isoformat()[:7],
+                    pct=pct,
+                    message=f"{month_date.strftime('%b %Y')}: 0 holdings — {reason}",
+                )
             monthly_records.append(MonthlyRecord(
                 date=month_date.isoformat()[:7],
                 holdings=[],
                 portfolio_return_pct=None,
                 cumulative_return_pct=round(cumulative, 2),
+                empty_reason=reason,
             ))
             continue
 
@@ -247,11 +363,22 @@ def run_backtest(
         )
 
         if selected.empty:
+            n_signals = len(signals_df)
+            sectors = signals_df["sector"].nunique() if "sector" in signals_df.columns else 0
+            reason = f"{n_signals} companies had signals across {sectors} sectors but none passed selection (top_n_sectors={config.top_n_sectors}, top_n_per_sector={config.top_n_per_sector})"
+            if send_event:
+                send_event(
+                    "progress",
+                    month=month_date.isoformat()[:7],
+                    pct=pct,
+                    message=f"{month_date.strftime('%b %Y')}: 0 holdings — {reason}",
+                )
             monthly_records.append(MonthlyRecord(
                 date=month_date.isoformat()[:7],
                 holdings=[],
                 portfolio_return_pct=None,
                 cumulative_return_pct=round(cumulative, 2),
+                empty_reason=reason,
             ))
             continue
 
@@ -327,14 +454,12 @@ def run_backtest(
     n_years = len(all_monthly_returns) / 12 if all_monthly_returns else 0
     annualized = round((cumulative_factor ** (1 / n_years) - 1) * 100, 2) if n_years > 0 else 0
 
-    # Max drawdown (from portfolio value, not percentage points)
-    peak_value = 1.0
-    max_dd = 0.0
-    for r in monthly_records:
-        current_value = 1 + r.cumulative_return_pct / 100
-        peak_value = max(peak_value, current_value)
-        dd = (current_value / peak_value - 1) * 100 if peak_value > 0 else 0
-        max_dd = min(max_dd, dd)
+    # Identify all drawdown periods (peak-to-trough-to-recovery)
+    values = [(r.date, 1 + r.cumulative_return_pct / 100) for r in monthly_records]
+    all_drawdown_periods = _find_drawdown_periods(values)
+    # Pick top 3 non-overlapping
+    top_drawdowns = _pick_top_n_non_overlapping(all_drawdown_periods, 3)
+    max_dd = top_drawdowns[0].drawdown_pct if top_drawdowns else 0.0
 
     # Sharpe (annualized, using monthly returns)
     sharpe = None
@@ -353,6 +478,7 @@ def run_backtest(
         avg_monthly_turnover_pct=round(float(np.mean(turnover_values)), 2) if turnover_values else 0,
         total_months=len(all_monthly_returns),
         avg_holdings=round(float(np.mean(holdings_counts)), 1) if holdings_counts else 0,
+        top_drawdowns=top_drawdowns,
     )
 
     if send_event:

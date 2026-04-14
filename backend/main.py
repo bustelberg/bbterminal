@@ -35,7 +35,8 @@ from momentum.backtest import BacktestConfig, run_backtest
 from universe.screen import screen_universe, build_and_store_universes, validate_vs_longequity
 from universe.criteria import CRITERIA_NAMES, CRITERIA_DESCRIPTIONS, CRITERIA_MIN_YEARS
 
-load_dotenv()
+load_dotenv()                              # .env (prod defaults)
+load_dotenv(".env.local", override=True)   # .env.local (local overrides, if present)
 
 supabase = create_client(
     os.environ["SUPABASE_URL"],
@@ -943,7 +944,7 @@ async def get_earnings_metrics(company_id: int):
             .select("metric_code,target_date,numeric_value,is_prediction")
             .eq("company_id", company_id)
             .eq("source_code", "gurufocus")
-            .gte("target_date", "2015-01-01")
+            .gte("target_date", "1998-01-01")
             .in_("metric_code", non_price_codes)
             .order("target_date")
             .limit(5000)
@@ -961,7 +962,7 @@ async def get_earnings_metrics(company_id: int):
                 .eq("company_id", company_id)
                 .eq("source_code", "gurufocus")
                 .eq("metric_code", "close_price")
-                .gte("target_date", "2015-01-01")
+                .gte("target_date", "1998-01-01")
                 .order("target_date")
                 .range(offset, offset + page_size - 1)
                 .execute()
@@ -979,7 +980,7 @@ async def get_earnings_metrics(company_id: int):
             .eq("company_id", company_id)
             .eq("source_code", "gurufocus")
             .eq("is_prediction", True)
-            .gte("target_date", "2015-01-01")
+            .gte("target_date", "1998-01-01")
             .like("metric_code", "annual_%")
             .order("target_date")
             .limit(2000)
@@ -1073,17 +1074,18 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             def _load_snapshot():
                 rows = []
                 offset = 0
+                page_size = 1000
                 while True:
                     resp = supabase.table("universe_snapshot").select(
                         "target_month, company_id"
                     ).eq("label", req.universe_label).eq(
                         "passes", True
-                    ).range(offset, offset + 999).execute()
+                    ).order("target_month").order("company_id").range(offset, offset + page_size - 1).execute()
                     batch = resp.data or []
                     rows.extend(batch)
-                    if len(batch) < 1000:
+                    if len(batch) < page_size:
                         break
-                    offset += 1000
+                    offset += page_size
                 result: dict[str, set[int]] = {}
                 for r in rows:
                     m = r["target_month"]
@@ -1265,25 +1267,48 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         n_vol = volumes_df["company_id"].nunique() if not volumes_df.empty else 0
         yield _emit({"type": "progress", "pct": 67, "message": f"Loaded {len(volumes_df):,} volume records for {n_vol} companies"})
 
-        # Run backtest with progress callback
-        events: list[dict] = []
+        # Run backtest with progress callback via queue for real-time streaming
+        import queue as _queue
+        progress_queue: _queue.Queue = _queue.Queue()
+        backtest_result_holder: list = []
+        backtest_error_holder: list = []
 
         def send_event(event_type: str, **kwargs):
-            events.append({"type": event_type, **kwargs})
+            progress_queue.put({"type": event_type, **kwargs})
+
+        def _run_backtest():
+            try:
+                r = run_backtest(config, prices_df, universe_df, send_event,
+                    volumes_df=volumes_df,
+                    monthly_eligible=monthly_eligible,
+                )
+                backtest_result_holder.append(r)
+            except Exception as e:
+                backtest_error_holder.append(e)
+            finally:
+                progress_queue.put(None)  # sentinel
 
         yield _emit({"type": "progress", "pct": 68, "message": "Running backtest computation..."})
         yield _keepalive()
-        result = await asyncio.to_thread(
-            run_backtest, config, prices_df, universe_df, send_event,
-            volumes_df=volumes_df,
-            monthly_eligible=monthly_eligible,
-        )
 
-        # Stream collected progress events
-        for evt in events:
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(None, _run_backtest)
+
+        # Stream progress events in real-time as the backtest runs
+        while True:
+            try:
+                evt = await asyncio.to_thread(progress_queue.get, timeout=0.2)
+            except Exception:
+                continue
+            if evt is None:
+                break
             if evt["type"] == "progress":
-                scaled_pct = 65 + round(evt.get("pct", 0) * 0.30)
+                scaled_pct = 68 + round(evt.get("pct", 0) * 0.30)
                 yield _emit({"type": "progress", "pct": scaled_pct, "message": evt.get("message", "")})
+
+        if backtest_error_holder:
+            raise backtest_error_holder[0]
+        result = backtest_result_holder[0]
 
         # Build universe snapshot for saving
         universe_snapshot = [
@@ -1456,8 +1481,8 @@ async def create_benchmark(req: CreateBenchmarkRequest):
         raise HTTPException(500, "Failed to create benchmark")
     benchmark_id = resp.data[0]["benchmark_id"]
 
-    # Load prices (honour the same 2015-01-01 cutoff as company prices)
-    _BM_CUTOFF = date(2015, 1, 1)
+    # Load prices (honour the same cutoff as company prices)
+    _BM_CUTOFF = date(1998, 1, 1)
     rows = [
         {"benchmark_id": benchmark_id, "target_date": d.isoformat(), "price": p}
         for d, p in parsed
@@ -1496,7 +1521,7 @@ async def refresh_benchmark(benchmark_id: int):
     if not parsed:
         raise HTTPException(502, f"No prices parsed for {ticker}")
 
-    _BM_CUTOFF = date(2015, 1, 1)
+    _BM_CUTOFF = date(1998, 1, 1)
     rows = [
         {"benchmark_id": benchmark_id, "target_date": d.isoformat(), "price": p}
         for d, p in parsed

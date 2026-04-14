@@ -3,7 +3,7 @@
 import { Fragment, useState, useEffect, useMemo } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  CartesianGrid, Legend,
+  CartesianGrid, Legend, ReferenceArea,
 } from 'recharts';
 
 import ApiUsageBadge from './ApiUsageBadge';
@@ -38,6 +38,14 @@ type MonthlyRecord = {
   holdings: Holding[];
   portfolio_return_pct: number | null;
   cumulative_return_pct: number;
+  empty_reason?: string;
+};
+
+type DrawdownPeriod = {
+  drawdown_pct: number;
+  peak_date: string;
+  trough_date: string;
+  recovery_date: string | null;
 };
 
 type Summary = {
@@ -48,6 +56,7 @@ type Summary = {
   avg_monthly_turnover_pct: number;
   total_months: number;
   avg_holdings: number;
+  top_drawdowns?: DrawdownPeriod[];
 };
 
 type BacktestResult = {
@@ -261,6 +270,74 @@ export default function MomentumBacktester() {
 
     return { cumReturns, totalReturn, annualized, maxDd, sharpe };
   }, [result, benchmarkPrices]);
+
+  // Compute top 3 non-overlapping drawdowns (client-side, works for saved backtests too)
+  const topDrawdowns: DrawdownPeriod[] = useMemo(() => {
+    if (!result) return [];
+    // Use server-provided data if available
+    if (result.summary.top_drawdowns && result.summary.top_drawdowns.length > 0) {
+      return result.summary.top_drawdowns;
+    }
+    // Otherwise compute from monthly records
+    const records = result.monthly_records;
+    if (records.length < 2) return [];
+
+    // Find all drawdown periods
+    const periods: DrawdownPeriod[] = [];
+    let peakVal = 1 + records[0].cumulative_return_pct / 100;
+    let peakDate = records[0].date;
+    let troughVal = peakVal;
+    let troughDate = peakDate;
+    let inDrawdown = false;
+
+    for (let i = 1; i < records.length; i++) {
+      const val = 1 + records[i].cumulative_return_pct / 100;
+      const dt = records[i].date;
+      if (val >= peakVal) {
+        if (inDrawdown) {
+          periods.push({
+            drawdown_pct: Math.round((troughVal / peakVal - 1) * 10000) / 100,
+            peak_date: peakDate,
+            trough_date: troughDate,
+            recovery_date: dt,
+          });
+          inDrawdown = false;
+        }
+        peakVal = val;
+        peakDate = dt;
+        troughVal = val;
+        troughDate = dt;
+      } else {
+        inDrawdown = true;
+        if (val < troughVal) {
+          troughVal = val;
+          troughDate = dt;
+        }
+      }
+    }
+    if (inDrawdown) {
+      periods.push({
+        drawdown_pct: Math.round((troughVal / peakVal - 1) * 10000) / 100,
+        peak_date: peakDate,
+        trough_date: troughDate,
+        recovery_date: null,
+      });
+    }
+
+    // Pick top 3 non-overlapping
+    const sorted = [...periods].sort((a, b) => a.drawdown_pct - b.drawdown_pct);
+    const selected: DrawdownPeriod[] = [];
+    for (const p of sorted) {
+      if (selected.length >= 3) break;
+      const pEnd = p.recovery_date ?? '9999-99';
+      const overlaps = selected.some(s => {
+        const sEnd = s.recovery_date ?? '9999-99';
+        return p.peak_date <= sEnd && pEnd >= s.peak_date;
+      });
+      if (!overlaps) selected.push(p);
+    }
+    return selected;
+  }, [result]);
 
   // Chart data — prepend a 0% origin so both lines start from the same point
   const chartData = useMemo(() => {
@@ -741,6 +818,25 @@ export default function MomentumBacktester() {
                   )}
                 </tbody>
               </table>
+              {(topDrawdowns).length > 0 && (
+                <div className="px-4 py-3 border-t border-gray-800/40">
+                  <div className="text-xs text-gray-500 font-medium mb-2">Top Drawdowns</div>
+                  <div className="grid grid-cols-3 gap-3">
+                    {(topDrawdowns).map((dd, i) => (
+                      <div key={i} className="bg-[#0f1117] rounded-lg px-3 py-2">
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className={`w-2 h-2 rounded-full ${i === 0 ? 'bg-rose-400' : i === 1 ? 'bg-rose-400/60' : 'bg-rose-400/30'}`} />
+                          <span className="text-rose-400 font-mono text-sm font-medium">{dd.drawdown_pct.toFixed(1)}%</span>
+                        </div>
+                        <div className="text-[10px] text-gray-500 font-mono">
+                          {dd.peak_date} to {dd.trough_date}
+                          {dd.recovery_date ? ` (recovered ${dd.recovery_date})` : ' (ongoing)'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Equity Curve */}
@@ -784,6 +880,18 @@ export default function MomentumBacktester() {
                       wrapperStyle={{ fontSize: 12, color: '#9ca3af' }}
                     />
                   )}
+                  {(topDrawdowns).map((dd, i) => {
+                    const colors = ['rgba(244,63,94,0.12)', 'rgba(244,63,94,0.07)', 'rgba(244,63,94,0.04)'];
+                    return (
+                      <ReferenceArea
+                        key={`dd-${i}`}
+                        x1={dd.peak_date}
+                        x2={dd.recovery_date ?? displayChartData[displayChartData.length - 1]?.date}
+                        fill={colors[i] ?? colors[2]}
+                        strokeOpacity={0}
+                      />
+                    );
+                  })}
                   <Line
                     type="monotone"
                     dataKey="cumReturn"
@@ -884,6 +992,15 @@ export default function MomentumBacktester() {
                                     ))}
                                 </tbody>
                               </table>
+                            </td>
+                          </tr>
+                        )}
+                        {expandedMonth === r.date && r.holdings.length === 0 && (
+                          <tr key={`${r.date}-empty`}>
+                            <td colSpan={4} className="bg-[#0f1117] px-5 py-4">
+                              <div className="text-xs text-gray-500">
+                                {r.empty_reason || 'No holdings for this month (unknown reason)'}
+                              </div>
                             </td>
                           </tr>
                         )}
