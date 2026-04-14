@@ -94,11 +94,13 @@ def _month_key(d: date) -> str:
 # Public API
 # ---------------------------------------------------------------------------
 
-def scrape_sp500() -> tuple[set[str], list[dict]]:
+def scrape_sp500() -> tuple[set[str], list[dict], dict[str, dict]]:
     """Scrape Wikipedia for current constituents and historical changes.
 
-    Returns (current_tickers, changes) where changes is a list of
-    {"date": date, "added": str|None, "removed": str|None} sorted newest-first.
+    Returns (current_tickers, changes, company_info) where:
+    - changes is a list of {"date": date, "added": str|None, "removed": str|None}
+    - company_info is {ticker: {"name": str, "sector": str, "country": str}}
+      extracted from the current constituents table (headquarters → country).
     """
     resp = requests.get(_WIKI_URL, headers={"User-Agent": "bbterminal/1.0"})
     resp.raise_for_status()
@@ -109,11 +111,21 @@ def scrape_sp500() -> tuple[set[str], list[dict]]:
     if len(parser.tables) < 2:
         raise ValueError("Expected at least 2 wikitable tables on the Wikipedia page")
 
-    # Table 1: current constituents — ticker is column 0
+    # Table 1: current constituents
+    # Columns: Symbol, Security, GICS Sector, GICS Sub-Industry, Headquarters Location, ...
     current: set[str] = set()
+    company_info: dict[str, dict] = {}
     for row in parser.tables[0]["rows"]:
         if row:
-            current.add(row[0].strip())
+            ticker = row[0].strip()
+            current.add(ticker)
+            name = row[1].strip() if len(row) > 1 else ""
+            sector = row[2].strip() if len(row) > 2 else ""
+            hq = row[4].strip() if len(row) > 4 else ""
+            # Extract country from headquarters (e.g. "Cupertino, California" → "United States")
+            # Wikipedia HQ is typically "City, State" for US companies
+            country = "United States" if hq else ""
+            company_info[ticker] = {"name": name, "sector": sector, "country": country}
 
     # Table 2: changes — Date | Added Ticker | Added Name | Removed Ticker | Removed Name | Reason
     changes: list[dict] = []
@@ -128,7 +140,7 @@ def scrape_sp500() -> tuple[set[str], list[dict]]:
         changes.append({"date": d, "added": added, "removed": removed})
 
     changes.sort(key=lambda c: c["date"], reverse=True)
-    return current, changes
+    return current, changes, company_info
 
 
 def reconstruct_monthly_holdings(
@@ -207,42 +219,64 @@ def resolve_and_create_companies(
     supabase: Client,
     tickers: set[str],
     on_progress: Callable[[str], None] | None = None,
+    company_info: dict[str, dict] | None = None,
 ) -> dict[str, int]:
     """Resolve S&P 500 tickers via OpenFIGI and create missing company records.
 
+    If company_info is provided ({ticker: {name, sector, country}}), it will be
+    used to fill in empty company_name, sector, and country fields — existing
+    values (e.g. from LongEquity) are never overwritten.
+
     Returns ticker → company_id mapping for all resolved tickers.
     """
+    wiki_info = company_info or {}
     emit = on_progress or (lambda _: None)
 
     # Load existing US companies
     existing: dict[str, int] = {}
-    _source_cache: dict[int, list[str]] = {}  # company_id → current source
+    _company_cache: dict[int, dict] = {}  # company_id → full row
     for exchange in ("NYSE", "NASDAQ", "AMEX"):
-        resp = supabase.table("company").select("company_id, primary_ticker, source").eq("primary_exchange", exchange).execute()
+        resp = supabase.table("company").select(
+            "company_id, primary_ticker, source, company_name, sector, country"
+        ).eq("primary_exchange", exchange).execute()
         for row in resp.data:
             existing[row["primary_ticker"]] = row["company_id"]
-            _source_cache[row["company_id"]] = row.get("source") or []
+            _company_cache[row["company_id"]] = row
 
     already_matched = {t for t in tickers if t in existing}
     to_resolve = sorted(tickers - already_matched)
 
     emit(f"Company lookup: {len(already_matched)} already in DB, {len(to_resolve)} need resolution")
 
-    # Tag already-matched companies with 'sp500' source
+    # Tag already-matched companies with 'sp500' source + fill empty fields from Wikipedia
     tagged = 0
+    enriched = 0
     for t in already_matched:
         cid = existing[t]
-        src = _source_cache.get(cid, [])
+        cached = _company_cache.get(cid, {})
+        src = cached.get("source") or []
+        updates: dict = {}
         if "sp500" not in src:
+            updates["source"] = src + ["sp500"]
+        # Fill empty fields from Wikipedia info (never overwrite existing values)
+        info = wiki_info.get(t, {})
+        if info.get("name") and not cached.get("company_name"):
+            updates["company_name"] = info["name"]
+        if info.get("sector") and not cached.get("sector"):
+            updates["sector"] = info["sector"]
+        if info.get("country") and not cached.get("country"):
+            updates["country"] = info["country"]
+        if updates:
             try:
-                supabase.table("company").update(
-                    {"source": src + ["sp500"]}
-                ).eq("company_id", cid).execute()
-                tagged += 1
+                supabase.table("company").update(updates).eq("company_id", cid).execute()
+                if "source" in updates:
+                    tagged += 1
+                if any(k in updates for k in ("company_name", "sector", "country")):
+                    enriched += 1
             except Exception:
                 pass
-    if tagged:
-        emit(f"Tagged {tagged} existing companies with 'sp500' source")
+    if tagged or enriched:
+        emit(f"Updated {tagged} source tags, enriched {enriched} companies with Wikipedia data")
 
     if not to_resolve:
         return existing
@@ -356,11 +390,14 @@ def resolve_and_create_companies(
                     pass
             continue
 
-        # Create new company record
+        # Create new company record, using Wikipedia info if available
+        info = wiki_info.get(r["ticker"], {})
         row = {
             "primary_ticker": pt,
             "primary_exchange": pe,
-            "company_name": None,
+            "company_name": info.get("name") or None,
+            "sector": info.get("sector") or None,
+            "country": info.get("country") or None,
             "source": ["sp500"],
         }
         try:

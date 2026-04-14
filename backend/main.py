@@ -1865,7 +1865,7 @@ async def index_universe_import_sp500():
 
         try:
             emit("Scraping S&P 500 from Wikipedia...")
-            current, changes = scrape_sp500()
+            current, changes, wiki_company_info = scrape_sp500()
             emit(f"Found {len(current)} current tickers, {len(changes)} historical changes")
 
             emit("Reconstructing monthly holdings (2000-01 onwards)...")
@@ -1878,7 +1878,9 @@ async def index_universe_import_sp500():
                 all_tickers |= t
             emit(f"Resolving {len(all_tickers)} unique tickers...")
 
-            company_lookup = resolve_and_create_companies(supabase, all_tickers, on_progress=emit)
+            company_lookup = resolve_and_create_companies(
+                supabase, all_tickers, on_progress=emit, company_info=wiki_company_info,
+            )
 
             emit("Storing in database...")
             stats = store_index_membership(
