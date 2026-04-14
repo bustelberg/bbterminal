@@ -97,6 +97,65 @@ type BenchmarkPrice = {
 
 const fmtPct = (v: number | null) => (v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}%` : '—');
 
+/** Compute top N non-overlapping drawdown periods from (date, value) pairs. */
+function computeTopDrawdowns(values: { date: string; value: number }[], n: number = 3): DrawdownPeriod[] {
+  if (values.length < 2) return [];
+
+  const periods: DrawdownPeriod[] = [];
+  let peakVal = values[0].value;
+  let peakDate = values[0].date;
+  let troughVal = peakVal;
+  let troughDate = peakDate;
+  let inDrawdown = false;
+
+  for (let i = 1; i < values.length; i++) {
+    const { date: dt, value: val } = values[i];
+    if (val >= peakVal) {
+      if (inDrawdown) {
+        periods.push({
+          drawdown_pct: Math.round((troughVal / peakVal - 1) * 10000) / 100,
+          peak_date: peakDate,
+          trough_date: troughDate,
+          recovery_date: dt,
+        });
+        inDrawdown = false;
+      }
+      peakVal = val;
+      peakDate = dt;
+      troughVal = val;
+      troughDate = dt;
+    } else {
+      inDrawdown = true;
+      if (val < troughVal) {
+        troughVal = val;
+        troughDate = dt;
+      }
+    }
+  }
+  if (inDrawdown) {
+    periods.push({
+      drawdown_pct: Math.round((troughVal / peakVal - 1) * 10000) / 100,
+      peak_date: peakDate,
+      trough_date: troughDate,
+      recovery_date: null,
+    });
+  }
+
+  // Pick top N non-overlapping
+  const sorted = [...periods].sort((a, b) => a.drawdown_pct - b.drawdown_pct);
+  const selected: DrawdownPeriod[] = [];
+  for (const p of sorted) {
+    if (selected.length >= n) break;
+    const pEnd = p.recovery_date ?? '9999-99';
+    const overlaps = selected.some(s => {
+      const sEnd = s.recovery_date ?? '9999-99';
+      return p.peak_date <= sEnd && pEnd >= s.peak_date;
+    });
+    if (!overlaps) selected.push(p);
+  }
+  return selected;
+}
+
 const tooltipStyle = {
   contentStyle: { background: '#1a1d27', border: '1px solid rgba(75,85,99,0.4)', borderRadius: 8, fontSize: 13 },
   labelStyle: { color: '#9ca3af' },
@@ -142,6 +201,7 @@ export default function MomentumBacktester() {
   const [selectedBenchmarkId, setSelectedBenchmarkId] = useState<number | null>(null);
   const [benchmarkPrices, setBenchmarkPrices] = useState<BenchmarkPrice[]>([]);
   const [logScale, setLogScale] = useState(false);
+  const [hoveredDrawdown, setHoveredDrawdown] = useState<number | null>(null);
 
   // Universe label state
   const [universeLabels, setUniverseLabels] = useState<{ label: string; start_month: string; end_month: string; month_count: number; avg_passing: number }[]>([]);
@@ -274,70 +334,27 @@ export default function MomentumBacktester() {
   // Compute top 3 non-overlapping drawdowns (client-side, works for saved backtests too)
   const topDrawdowns: DrawdownPeriod[] = useMemo(() => {
     if (!result) return [];
-    // Use server-provided data if available
     if (result.summary.top_drawdowns && result.summary.top_drawdowns.length > 0) {
       return result.summary.top_drawdowns;
     }
-    // Otherwise compute from monthly records
-    const records = result.monthly_records;
-    if (records.length < 2) return [];
-
-    // Find all drawdown periods
-    const periods: DrawdownPeriod[] = [];
-    let peakVal = 1 + records[0].cumulative_return_pct / 100;
-    let peakDate = records[0].date;
-    let troughVal = peakVal;
-    let troughDate = peakDate;
-    let inDrawdown = false;
-
-    for (let i = 1; i < records.length; i++) {
-      const val = 1 + records[i].cumulative_return_pct / 100;
-      const dt = records[i].date;
-      if (val >= peakVal) {
-        if (inDrawdown) {
-          periods.push({
-            drawdown_pct: Math.round((troughVal / peakVal - 1) * 10000) / 100,
-            peak_date: peakDate,
-            trough_date: troughDate,
-            recovery_date: dt,
-          });
-          inDrawdown = false;
-        }
-        peakVal = val;
-        peakDate = dt;
-        troughVal = val;
-        troughDate = dt;
-      } else {
-        inDrawdown = true;
-        if (val < troughVal) {
-          troughVal = val;
-          troughDate = dt;
-        }
-      }
-    }
-    if (inDrawdown) {
-      periods.push({
-        drawdown_pct: Math.round((troughVal / peakVal - 1) * 10000) / 100,
-        peak_date: peakDate,
-        trough_date: troughDate,
-        recovery_date: null,
-      });
-    }
-
-    // Pick top 3 non-overlapping
-    const sorted = [...periods].sort((a, b) => a.drawdown_pct - b.drawdown_pct);
-    const selected: DrawdownPeriod[] = [];
-    for (const p of sorted) {
-      if (selected.length >= 3) break;
-      const pEnd = p.recovery_date ?? '9999-99';
-      const overlaps = selected.some(s => {
-        const sEnd = s.recovery_date ?? '9999-99';
-        return p.peak_date <= sEnd && pEnd >= s.peak_date;
-      });
-      if (!overlaps) selected.push(p);
-    }
-    return selected;
+    const values = result.monthly_records.map(r => ({
+      date: r.date,
+      value: 1 + r.cumulative_return_pct / 100,
+    }));
+    return computeTopDrawdowns(values, 3);
   }, [result]);
+
+  // Compute top 3 drawdowns for benchmark
+  const benchmarkDrawdowns: DrawdownPeriod[] = useMemo(() => {
+    if (!benchmarkReturns || !result) return [];
+    const values = result.monthly_records
+      .filter(r => benchmarkReturns.cumReturns[r.date] != null)
+      .map(r => ({
+        date: r.date,
+        value: 1 + benchmarkReturns.cumReturns[r.date] / 100,
+      }));
+    return computeTopDrawdowns(values, 3);
+  }, [benchmarkReturns, result]);
 
   // Chart data — prepend a 0% origin so both lines start from the same point
   const chartData = useMemo(() => {
@@ -364,6 +381,19 @@ export default function MomentumBacktester() {
       benchmark: p.benchmark != null ? Math.log(1 + p.benchmark / 100) * 100 : null,
     }));
   }, [chartData, logScale]);
+
+  // Y-axis domain for chart — used by ReferenceArea to span full height
+  const chartYDomain = useMemo<[number, number]>(() => {
+    if (!displayChartData.length) return [-100, 100];
+    let min = Infinity, max = -Infinity;
+    for (const p of displayChartData) {
+      if (p.cumReturn != null) { min = Math.min(min, p.cumReturn); max = Math.max(max, p.cumReturn); }
+      if (p.benchmark != null) { min = Math.min(min, p.benchmark); max = Math.max(max, p.benchmark); }
+    }
+    // Add padding for nice spacing
+    const pad = Math.max((max - min) * 0.05, 5);
+    return [Math.floor(min - pad), Math.ceil(max + pad)];
+  }, [displayChartData]);
 
   // Run backtest
   const runBacktest = async () => {
@@ -818,23 +848,48 @@ export default function MomentumBacktester() {
                   )}
                 </tbody>
               </table>
-              {(topDrawdowns).length > 0 && (
-                <div className="px-4 py-3 border-t border-gray-800/40">
-                  <div className="text-xs text-gray-500 font-medium mb-2">Top Drawdowns</div>
-                  <div className="grid grid-cols-3 gap-3">
-                    {(topDrawdowns).map((dd, i) => (
-                      <div key={i} className="bg-[#0f1117] rounded-lg px-3 py-2">
-                        <div className="flex items-center gap-2 mb-1">
-                          <div className={`w-2 h-2 rounded-full ${i === 0 ? 'bg-rose-400' : i === 1 ? 'bg-rose-400/60' : 'bg-rose-400/30'}`} />
-                          <span className="text-rose-400 font-mono text-sm font-medium">{dd.drawdown_pct.toFixed(1)}%</span>
-                        </div>
-                        <div className="text-[10px] text-gray-500 font-mono">
-                          {dd.peak_date} to {dd.trough_date}
-                          {dd.recovery_date ? ` (recovered ${dd.recovery_date})` : ' (ongoing)'}
-                        </div>
+              {(topDrawdowns.length > 0 || benchmarkDrawdowns.length > 0) && (
+                <div className="px-4 py-3 border-t border-gray-800/40 space-y-3">
+                  {topDrawdowns.length > 0 && (
+                    <div>
+                      <div className="text-xs text-gray-500 font-medium mb-2">Strategy — Top Drawdowns</div>
+                      <div className="grid grid-cols-3 gap-3">
+                        {topDrawdowns.map((dd, i) => (
+                          <div key={i} className="bg-[#0f1117] rounded-lg px-3 py-2">
+                            <div className="flex items-center gap-2 mb-1">
+                              <div className={`w-2 h-2 rounded-full ${i === 0 ? 'bg-rose-400' : i === 1 ? 'bg-rose-400/60' : 'bg-rose-400/30'}`} />
+                              <span className="text-rose-400 font-mono text-sm font-medium">{dd.drawdown_pct.toFixed(1)}%</span>
+                            </div>
+                            <div className="text-[10px] text-gray-500 font-mono">
+                              {dd.peak_date} to {dd.trough_date}
+                              {dd.recovery_date ? ` (recovered ${dd.recovery_date})` : ' (ongoing)'}
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  )}
+                  {benchmarkDrawdowns.length > 0 && (
+                    <div>
+                      <div className="text-xs text-gray-500 font-medium mb-2">
+                        {benchmarkOptions.find((b) => b.benchmark_id === selectedBenchmarkId)?.ticker ?? 'Benchmark'} — Top Drawdowns
+                      </div>
+                      <div className="grid grid-cols-3 gap-3">
+                        {benchmarkDrawdowns.map((dd, i) => (
+                          <div key={i} className="bg-[#0f1117] rounded-lg px-3 py-2">
+                            <div className="flex items-center gap-2 mb-1">
+                              <div className={`w-2 h-2 rounded-full ${i === 0 ? 'bg-amber-400' : i === 1 ? 'bg-amber-400/60' : 'bg-amber-400/30'}`} />
+                              <span className="text-amber-400 font-mono text-sm font-medium">{dd.drawdown_pct.toFixed(1)}%</span>
+                            </div>
+                            <div className="text-[10px] text-gray-500 font-mono">
+                              {dd.peak_date} to {dd.trough_date}
+                              {dd.recovery_date ? ` (recovered ${dd.recovery_date})` : ' (ongoing)'}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -866,6 +921,7 @@ export default function MomentumBacktester() {
                     tick={{ fill: '#6b7280', fontSize: 11 }}
                     tickLine={false}
                     tickFormatter={(v: number) => `${v}%`}
+                    domain={chartYDomain}
                   />
                   <Tooltip
                     {...tooltipStyle}
@@ -881,13 +937,34 @@ export default function MomentumBacktester() {
                     />
                   )}
                   {(topDrawdowns).map((dd, i) => {
-                    const colors = ['rgba(244,63,94,0.12)', 'rgba(244,63,94,0.07)', 'rgba(244,63,94,0.04)'];
+                    const base = [0.25, 0.15, 0.10];
+                    const hovered = hoveredDrawdown === i;
+                    const opacity = hovered ? (base[i] ?? 0.10) + 0.15 : (base[i] ?? 0.10);
                     return (
                       <ReferenceArea
                         key={`dd-${i}`}
                         x1={dd.peak_date}
                         x2={dd.recovery_date ?? displayChartData[displayChartData.length - 1]?.date}
-                        fill={colors[i] ?? colors[2]}
+                        y1={chartYDomain[0]}
+                        y2={chartYDomain[1]}
+                        fill={`rgba(244,63,94,${opacity})`}
+                        strokeOpacity={0}
+                        style={{ cursor: 'pointer' }}
+                        onMouseEnter={() => setHoveredDrawdown(i)}
+                        onMouseLeave={() => setHoveredDrawdown(null)}
+                      />
+                    );
+                  })}
+                  {benchmarkDrawdowns.map((dd, i) => {
+                    const base = [0.12, 0.08, 0.05];
+                    return (
+                      <ReferenceArea
+                        key={`bdd-${i}`}
+                        x1={dd.peak_date}
+                        x2={dd.recovery_date ?? displayChartData[displayChartData.length - 1]?.date}
+                        y1={chartYDomain[0]}
+                        y2={chartYDomain[1]}
+                        fill={`rgba(245,158,11,${base[i] ?? 0.05})`}
                         strokeOpacity={0}
                       />
                     );
