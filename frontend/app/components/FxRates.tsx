@@ -41,28 +41,35 @@ function FxHistoryChart({ currency, history, loading, onClose }: {
   loading: boolean;
   onClose: () => void;
 }) {
+  const [inverted, setInverted] = useState(false);
+
   // Downsample for chart performance — weekly points
   const chartData = useMemo(() => {
-    if (history.length <= 500) return history;
-    const step = Math.max(1, Math.floor(history.length / 500));
-    const sampled = history.filter((_, i) => i % step === 0);
-    // Always include the last point
-    if (sampled[sampled.length - 1] !== history[history.length - 1]) {
-      sampled.push(history[history.length - 1]);
-    }
-    return sampled;
-  }, [history]);
+    const src = history.length <= 500
+      ? history
+      : (() => {
+          const step = Math.max(1, Math.floor(history.length / 500));
+          const sampled = history.filter((_, i) => i % step === 0);
+          if (sampled[sampled.length - 1] !== history[history.length - 1]) {
+            sampled.push(history[history.length - 1]);
+          }
+          return sampled;
+        })();
+    if (!inverted) return src;
+    return src.map(h => ({ date: h.date, rate: 1 / h.rate }));
+  }, [history, inverted]);
 
   const stats = useMemo(() => {
     if (history.length === 0) return null;
-    const rates = history.map(h => h.rate);
-    return {
-      latest: history[history.length - 1],
-      first: history[0],
-      min: Math.min(...rates),
-      max: Math.max(...rates),
-    };
-  }, [history]);
+    const rates = history.map(h => inverted ? 1 / h.rate : h.rate);
+    const latest = inverted
+      ? { date: history[history.length - 1].date, rate: 1 / history[history.length - 1].rate }
+      : history[history.length - 1];
+    const first = inverted
+      ? { date: history[0].date, rate: 1 / history[0].rate }
+      : history[0];
+    return { latest, first, min: Math.min(...rates), max: Math.max(...rates) };
+  }, [history, inverted]);
 
   // Y-axis domain with ~5% padding
   const yDomain = useMemo(() => {
@@ -75,11 +82,27 @@ function FxHistoryChart({ currency, history, loading, onClose }: {
   // Determine decimal places based on rate magnitude
   const decimals = stats && stats.latest.rate < 10 ? 4 : stats && stats.latest.rate < 1000 ? 2 : 0;
 
+  const label = inverted ? `EUR/${currency}` : `${currency}/EUR`;
+  const description = inverted
+    ? `EUR per 1 ${currency}`
+    : `${currency} per 1 EUR`;
+
   return (
     <div className="bg-[#151821] rounded-xl border border-gray-800/40 p-5">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-medium text-white">{currency}/EUR History (from 2000)</h2>
-        <button onClick={onClose} className="text-xs text-gray-500 hover:text-gray-300">close</button>
+        <div className="flex items-center gap-3">
+          <h2 className="text-sm font-medium text-white">{label} History (from 2000)</h2>
+          <span className="text-xs text-gray-500">{description}</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setInverted(!inverted)}
+            className="px-2.5 py-1 rounded-md text-xs border transition-colors bg-[#0f1117] border-gray-700 text-gray-300 hover:border-indigo-500 hover:text-indigo-400"
+          >
+            Flip
+          </button>
+          <button onClick={onClose} className="text-xs text-gray-500 hover:text-gray-300">close</button>
+        </div>
       </div>
       {loading ? (
         <p className="text-gray-400 text-sm">Loading history...</p>
@@ -139,8 +162,8 @@ function FxHistoryChart({ currency, history, loading, onClose }: {
                   fontSize: 12,
                 }}
                 labelStyle={{ color: '#9ca3af' }}
-                formatter={(value) => [Number(value).toFixed(decimals), `${currency}/EUR`]}
-                labelFormatter={(label) => String(label)}
+                formatter={(value) => [Number(value).toFixed(decimals), label]}
+                labelFormatter={(l) => String(l)}
               />
               <Area
                 type="monotone"

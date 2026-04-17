@@ -2220,3 +2220,159 @@ async def fx_history(currency: str, start_date: str | None = None):
     currency = currency.upper()
     rates = await asyncio.to_thread(fetch_history, currency, start_date)
     return {"currency": currency, "rates": rates, "count": len(rates)}
+
+
+# ---------------------------------------------------------------------------
+# Indicators (GuruFocus fetch + cache + DB)
+# ---------------------------------------------------------------------------
+
+class IndicatorRequest(BaseModel):
+    exchange: str
+    ticker: str
+    indicator: str = "price"
+    force_refresh: bool = False
+
+
+@app.post("/api/indicators/fetch")
+async def indicators_fetch(req: IndicatorRequest):
+    """Fetch an indicator from GuruFocus, cache in storage, store in DB.
+
+    Looks up or creates a company row, fetches indicator data (from cache
+    or API), stores raw JSON in Supabase Storage, and upserts parsed
+    time-series into metric_data.
+    """
+    from ingest.prices import (
+        _build_symbol, _storage_path, _ensure_bucket,
+        _fetch_from_storage, _upload_to_storage,
+        _fetch_indicator_from_api, _parse_price_series,
+        _PRICE_CUTOFF,
+    )
+    from ingest.api_usage import track_api_call
+
+    exchange = req.exchange.upper()
+    ticker = req.ticker.upper()
+    indicator = req.indicator.lower()
+
+    def work():
+        symbol = _build_symbol(ticker, exchange)
+        path = _storage_path(ticker, exchange, indicator)
+        logs = []
+
+        # 1. Find or create company
+        existing = supabase.table("company").select("company_id").eq(
+            "primary_ticker", ticker
+        ).eq("primary_exchange", exchange).execute()
+
+        if existing.data:
+            company_id = existing.data[0]["company_id"]
+            logs.append(f"Found company {symbol} (id={company_id})")
+        else:
+            created = supabase.table("company").insert({
+                "primary_ticker": ticker,
+                "primary_exchange": exchange,
+                "company_name": symbol,
+                "source": ["indicators_page"],
+            }).execute()
+            company_id = created.data[0]["company_id"]
+            logs.append(f"Created company {symbol} (id={company_id})")
+
+        # 2. Check cache
+        _ensure_bucket(supabase)
+        cached = None
+        if not req.force_refresh:
+            cached = _fetch_from_storage(supabase, path)
+            if cached is not None:
+                logs.append(f"Found cached data at {path}")
+
+        # 3. Fetch from API if needed
+        api_data = None
+        if cached is None or req.force_refresh:
+            data, api_log, http_status = _fetch_indicator_from_api(ticker, exchange, indicator)
+            track_api_call(supabase, exchange)
+            logs.append(api_log)
+            if data is not None:
+                _upload_to_storage(supabase, path, data)
+                logs.append(f"Cached raw response to {path}")
+                api_data = data
+            elif cached is not None:
+                logs.append("API failed, falling back to stale cache")
+                api_data = cached
+            else:
+                return {
+                    "success": False,
+                    "symbol": symbol,
+                    "error": f"No data available for {symbol}/{indicator}",
+                    "logs": logs,
+                }
+        else:
+            api_data = cached
+
+        # 4. Parse time series
+        parsed = _parse_price_series(api_data)
+        logs.append(f"Parsed {len(parsed)} data points")
+
+        if not parsed:
+            return {
+                "success": False,
+                "symbol": symbol,
+                "error": "Parsed 0 data points from response",
+                "logs": logs,
+                "raw_preview": str(api_data)[:500],
+            }
+
+        # 5. Map indicator name to metric_code
+        metric_code_map = {
+            "price": "close_price",
+            "volume": "volume",
+        }
+        metric_code = metric_code_map.get(indicator, indicator)
+
+        # 6. Upsert into metric_data
+        rows = [
+            {
+                "company_id": company_id,
+                "metric_code": metric_code,
+                "source_code": "gurufocus",
+                "target_date": d.isoformat(),
+                "numeric_value": v,
+            }
+            for d, v in parsed
+            if d >= _PRICE_CUTOFF
+        ]
+        total_loaded = 0
+        batch_size = 500
+        for i in range(0, len(rows), batch_size):
+            batch = rows[i : i + batch_size]
+            resp = supabase.table("metric_data").upsert(
+                batch,
+                on_conflict="company_id,metric_code,source_code,target_date",
+                ignore_duplicates=False,
+            ).execute()
+            total_loaded += len(resp.data)
+
+        logs.append(f"Loaded {total_loaded} rows into metric_data (metric_code={metric_code})")
+
+        # 7. Return summary + sample data
+        sorted_parsed = sorted(parsed, key=lambda x: x[0])
+        date_range = {
+            "first": sorted_parsed[0][0].isoformat(),
+            "last": sorted_parsed[-1][0].isoformat(),
+        }
+        # Return last 30 data points for display
+        recent = [{"date": d.isoformat(), "value": v} for d, v in sorted_parsed[-30:]]
+
+        return {
+            "success": True,
+            "symbol": symbol,
+            "company_id": company_id,
+            "indicator": indicator,
+            "metric_code": metric_code,
+            "total_points": len(parsed),
+            "rows_loaded": total_loaded,
+            "date_range": date_range,
+            "source": "cache" if cached is not None and not req.force_refresh else "api",
+            "recent": recent,
+            "logs": logs,
+        }
+
+    return await asyncio.to_thread(work)
