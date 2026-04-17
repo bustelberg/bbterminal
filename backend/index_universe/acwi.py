@@ -110,10 +110,10 @@ _ISHARES_TO_GF: dict[str, str] = {
     "Istanbul Stock Exchange": "IST",
     # Americas
     "Toronto Stock Exchange": "TSX",
-    "Bolsa Mexicana De Valores": "BMV",
+    "Bolsa Mexicana De Valores": "MEX",
     "XBSP": "BSP",
     "Santiago Stock Exchange": "SGO",
-    "Bolsa De Valores De Colombia": "BVC",
+    "Bolsa De Valores De Colombia": "BOG",
     # Asia-Pacific
     "Tokyo Stock Exchange": "TSE",
     "Hong Kong Exchanges And Clearing Ltd": "HKSE",

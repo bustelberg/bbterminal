@@ -12,6 +12,7 @@ const navItems = [
   { href: '/universe', label: 'Universe' },
   { href: '/universe_index', label: 'Index Universe' },
   { href: '/acwi', label: 'ACWI Universe' },
+  { href: '/fx-rates', label: 'FX Rates' },
   { href: '/airs-portfolio', label: 'AIRS Portfolio' },
   { href: '/benchmarks', label: 'Benchmarks' },
   { href: '/companies', label: 'Companies' },

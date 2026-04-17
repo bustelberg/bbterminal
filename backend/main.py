@@ -39,6 +39,7 @@ from index_universe.sp500 import (
     resolve_and_create_companies, store_index_membership,
     check_gurufocus_availability, load_changes,
 )
+from fx_rates import fetch_all_latest, fetch_history, get_coverage_info
 from index_universe.acwi import (
     load_acwi_holdings, get_msci_announcements,
     fetch_announcement_detail_cached, fetch_bulk_details,
@@ -2194,3 +2195,28 @@ async def acwi_fetch_all_details():
             yield f"data: {msg}\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+# ---------------------------------------------------------------------------
+# FX Rates (ECB)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/fx/coverage")
+async def fx_coverage():
+    """Compare ACWI currencies against ECB FX rate availability."""
+    return await asyncio.to_thread(get_coverage_info)
+
+
+@app.get("/api/fx/latest")
+async def fx_latest():
+    """Get latest daily rates for all currencies vs EUR (ECB + pegged + TWD)."""
+    rates = await asyncio.to_thread(fetch_all_latest)
+    return {"rates": rates, "count": len(rates)}
+
+
+@app.get("/api/fx/history/{currency}")
+async def fx_history(currency: str, start_date: str | None = None):
+    """Get daily historical FX rates for a currency vs EUR."""
+    currency = currency.upper()
+    rates = await asyncio.to_thread(fetch_history, currency, start_date)
+    return {"currency": currency, "rates": rates, "count": len(rates)}

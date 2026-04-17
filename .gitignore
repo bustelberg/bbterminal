@@ -216,7 +216,7 @@ __marimo__/
 .env.local
 .env
 backend/.venv/
-frontend/.next/
+.next/
 frontend/node_modules/
 .vercel
 **/playground/**
