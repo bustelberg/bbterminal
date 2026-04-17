@@ -1,5 +1,9 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
+
+# MSCI announcements cache
+backend/index_universe/msci_announcements_cache.json
+backend/index_universe/msci_details_cache.json
 *.py[codz]
 *$py.class
 

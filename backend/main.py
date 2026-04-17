@@ -39,6 +39,11 @@ from index_universe.sp500 import (
     resolve_and_create_companies, store_index_membership,
     check_gurufocus_availability, load_changes,
 )
+from index_universe.acwi import (
+    load_acwi_holdings, get_msci_announcements,
+    fetch_announcement_detail_cached, fetch_bulk_details,
+    _load_detail_cache, fetch_announcement_detail, _save_detail_cache,
+)
 
 load_dotenv()                              # .env (prod defaults)
 load_dotenv(".env.local", override=True)   # .env.local (local overrides, if present)
@@ -2071,3 +2076,110 @@ async def index_universe_delete(index_name: str):
         lambda: supabase.table("index_membership").delete().eq("index_name", index_name).neq("ticker", "").execute()
     )
     return {"ok": True}
+
+
+@app.get("/api/acwi/holdings")
+async def acwi_holdings():
+    """Return parsed ACWI ETF holdings from the local XLS file."""
+    holdings, as_of = await asyncio.to_thread(load_acwi_holdings)
+    return {"holdings": holdings, "count": len(holdings), "as_of": as_of}
+
+
+@app.get("/api/acwi/announcements")
+async def acwi_announcements(refresh: bool = False):
+    """Get MSCI index announcements (cached locally, 24h TTL)."""
+    rows = await asyncio.to_thread(get_msci_announcements, refresh)
+    return {"announcements": rows, "count": len(rows)}
+
+
+@app.get("/api/acwi/announcement-detail")
+async def acwi_announcement_detail(url: str):
+    """Fetch detail (STANDARD action + EFFECTIVE DATE) from an individual MSCI announcement."""
+    detail = await asyncio.to_thread(fetch_announcement_detail_cached, url)
+    return detail
+
+
+@app.post("/api/acwi/announcement-details-bulk")
+async def acwi_announcement_details_bulk(body: dict):
+    """Fetch details for multiple announcement URLs. Body: {"urls": [...]}."""
+    urls = body.get("urls", [])
+    results = await asyncio.to_thread(fetch_bulk_details, urls)
+    return {"details": results}
+
+
+@app.get("/api/acwi/fetch-all-details")
+async def acwi_fetch_all_details():
+    """SSE stream: fetch details for all constituent changes not yet cached."""
+    import queue, threading
+
+    def _emit(obj: dict) -> str:
+        return json.dumps(obj, default=str)
+
+    q: queue.Queue[str | None] = queue.Queue()
+
+    def worker():
+        try:
+            anns = get_msci_announcements()
+            constituent = [a for a in anns if a.get("is_constituent_change") and a.get("href")]
+            cache = _load_detail_cache()
+
+            to_fetch = [a for a in constituent if a["href"] not in cache]
+            total = len(to_fetch)
+            already_cached = len(constituent) - total
+
+            q.put(_emit({"type": "progress", "message": f"{already_cached} cached, {total} to fetch", "fetched": 0, "total": total}))
+
+            if total == 0:
+                q.put(_emit({"type": "done", "message": "All details already cached", "fetched": 0, "total": 0, "errors": 0, "cached": already_cached}))
+                q.put(None)
+                return
+
+            fetched = 0
+            errors = 0
+            error_list: list[dict] = []
+            for a in to_fetch:
+                try:
+                    detail = fetch_announcement_detail(a["href"])
+                except Exception as e:
+                    detail = {"standard": None, "effective_date": None, "error": str(e)}
+                    errors += 1
+                    error_list.append({"title": a.get("title", ""), "href": a["href"], "error": str(e)})
+                cache[a["href"]] = detail
+                fetched += 1
+
+                if fetched % 10 == 0 or fetched == total:
+                    _save_detail_cache(cache)
+                    q.put(_emit({
+                        "type": "progress",
+                        "message": f"Fetched {fetched}/{total}" + (f" ({errors} errors)" if errors else ""),
+                        "fetched": fetched,
+                        "total": total,
+                        "pct": round(fetched / total * 100),
+                        "errors": errors,
+                    }))
+
+            _save_detail_cache(cache)
+            q.put(_emit({
+                "type": "done",
+                "message": f"Done. Fetched {fetched}, {errors} errors, {already_cached} were cached",
+                "fetched": fetched,
+                "total": total,
+                "errors": errors,
+                "cached": already_cached,
+                "error_list": error_list[:50],  # cap to avoid huge payload
+            }))
+        except Exception as e:
+            q.put(_emit({"type": "error", "message": str(e)}))
+        q.put(None)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    async def generate():
+        yield ": keepalive\n\n"
+        while True:
+            msg = await asyncio.to_thread(q.get)
+            if msg is None:
+                break
+            yield f"data: {msg}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
