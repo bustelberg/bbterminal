@@ -18,6 +18,7 @@ type Holding = {
   Exchange: string;
   Currency: string;
   'FX Rate': string;
+  gurufocus_url: string | null;
 };
 
 type Detail = {
@@ -34,6 +35,19 @@ type Announcement = {
   is_constituent_change: boolean;
   is_other_country_coded: boolean;
   detail?: Detail;
+};
+
+type NetAddition = {
+  title: string;
+  company_name: string;
+  country: string;
+  date: string;
+  effective_date: string | null;
+  href: string;
+  matched: boolean;
+  matched_ticker: string | null;
+  matched_name: string | null;
+  match_method: string;
 };
 
 export default function AcwiUniverse() {
@@ -65,6 +79,25 @@ export default function AcwiUniverse() {
     errors: number;
     errorList: { title: string; href: string; error: string }[];
   } | null>(null);
+  // Net additions
+  const [netAdditions, setNetAdditions] = useState<NetAddition[]>([]);
+  const [netAdditionsLoading, setNetAdditionsLoading] = useState(false);
+  const [netAdditionsStats, setNetAdditionsStats] = useState<{ total: number; matched: number } | null>(null);
+  const [netAdditionsSearch, setNetAdditionsSearch] = useState('');
+
+  const loadNetAdditions = useCallback(async () => {
+    setNetAdditionsLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/api/acwi/net-additions`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setNetAdditions(data.net_additions);
+      setNetAdditionsStats({ total: data.total, matched: data.matched });
+    } catch {
+      // silently fail — net additions are non-critical
+    }
+    setNetAdditionsLoading(false);
+  }, []);
 
   const loadAnnouncements = useCallback(async () => {
     try {
@@ -127,6 +160,7 @@ export default function AcwiUniverse() {
             });
             es.close();
             loadAnnouncements();
+            loadNetAdditions();
           } else if (data.type === 'error') {
             setFetchProgress(null);
             setFetching(false);
@@ -144,10 +178,14 @@ export default function AcwiUniverse() {
           setFetchSummary({ message: 'Connection lost — partial results may have been cached', errors: -1, errorList: [] });
           es.close();
           loadAnnouncements();
+          loadNetAdditions();
         };
+      } else {
+        // All details already cached — load net additions immediately
+        loadNetAdditions();
       }
     })();
-  }, [loadAnnouncements]);
+  }, [loadAnnouncements, loadNetAdditions]);
 
   const fetchDetail = useCallback(async (href: string) => {
     setManualDetails(prev => ({ ...prev, [href]: { standard: null, effective_date: null, loading: true } }));
@@ -449,6 +487,95 @@ export default function AcwiUniverse() {
             </div>
           )}
 
+          {/* Net Additions — added but never subsequently deleted */}
+          {(netAdditions.length > 0 || netAdditionsLoading) && (
+            <div className="bg-[#151821] rounded-xl border border-gray-800/40">
+              <div className="px-5 py-4 border-b border-gray-800/40 flex items-center gap-4">
+                <div className="flex-1">
+                  <h2 className="text-sm font-medium text-gray-300">
+                    Net Additions
+                    {netAdditionsStats && (
+                      <span className="text-gray-500 font-normal ml-2">
+                        ({netAdditionsStats.total} total, {netAdditionsStats.matched} matched)
+                      </span>
+                    )}
+                    {(netAdditionsLoading || fetching) && <span className="text-gray-500 font-normal ml-2 animate-pulse">loading...</span>}
+                  </h2>
+                  <p className="text-gray-500 text-xs mt-0.5">
+                    Companies added to MSCI Standard Index and not subsequently deleted, matched against current ACWI holdings
+                  </p>
+                </div>
+                <input
+                  type="text"
+                  placeholder="Search..."
+                  value={netAdditionsSearch}
+                  onChange={e => setNetAdditionsSearch(e.target.value)}
+                  className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none w-56"
+                />
+              </div>
+              {netAdditions.length > 0 && (() => {
+                const q = netAdditionsSearch.toLowerCase();
+                const filtered = q
+                  ? netAdditions.filter(item =>
+                      item.company_name.toLowerCase().includes(q) ||
+                      item.country.toLowerCase().includes(q) ||
+                      (item.matched_ticker ?? '').toLowerCase().includes(q) ||
+                      (item.matched_name ?? '').toLowerCase().includes(q)
+                    )
+                  : netAdditions;
+                return (
+                <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-[#151821] z-10">
+                      <tr className="text-gray-400 text-xs uppercase tracking-wider">
+                        <th className="text-left px-3 py-1.5 font-medium w-10">#</th>
+                        <th className="text-left px-3 py-1.5 font-medium w-14">CC</th>
+                        <th className="text-left px-3 py-1.5 font-medium">Announcement</th>
+                        <th className="text-left px-3 py-1.5 font-medium w-28">Added</th>
+                        <th className="text-left px-3 py-1.5 font-medium w-16 text-center">Match</th>
+                        <th className="text-left px-3 py-1.5 font-medium w-20">Ticker</th>
+                        <th className="text-left px-3 py-1.5 font-medium">Matched Holding</th>
+                        <th className="text-left px-3 py-1.5 font-medium w-20">Method</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800/30">
+                      {filtered.map((item, i) => (
+                        <tr key={item.href} className="hover:bg-white/[0.02]">
+                          <td className="px-3 py-2 text-gray-500 font-mono text-xs">{i + 1}</td>
+                          <td className="px-3 py-2 text-gray-400 font-mono text-xs">{item.country}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            <a
+                              href={item.href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-indigo-400 hover:text-indigo-300 transition-colors"
+                            >
+                              {item.company_name}
+                            </a>
+                          </td>
+                          <td className="px-3 py-2 text-gray-400 font-mono text-xs whitespace-nowrap">{item.date}</td>
+                          <td className="px-3 py-2 text-center">
+                            {item.matched ? (
+                              <span className="text-emerald-400">&#10003;</span>
+                            ) : (
+                              <span className="text-rose-400">&#10007;</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-gray-200 font-mono text-xs">{item.matched_ticker ?? ''}</td>
+                          <td className="px-3 py-2 text-gray-300 text-xs whitespace-nowrap">
+                            {item.matched_name ?? ''}
+                          </td>
+                          <td className="px-3 py-2 text-gray-500 font-mono text-xs">{item.match_method}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                );
+              })()}
+            </div>
+          )}
+
           {/* MSCI Announcements */}
           <div className="bg-[#151821] rounded-xl border border-gray-800/40">
             <div className="px-5 py-4 border-b border-gray-800/40 flex items-center gap-4">
@@ -628,13 +755,14 @@ export default function AcwiUniverse() {
                     <th className="text-left px-3 py-2.5 font-medium">#</th>
                     <th className="text-left px-3 py-2.5 font-medium">Ticker</th>
                     <th className="text-left px-3 py-2.5 font-medium">Name</th>
+                    <th className="text-left px-3 py-2.5 font-medium">GuruFocus</th>
                     <th className="text-left px-3 py-2.5 font-medium">Sector</th>
                     <th className="text-left px-3 py-2.5 font-medium">Location</th>
-                    <th className="text-right px-3 py-2.5 font-medium">Weight</th>
-                    <th className="text-right px-3 py-2.5 font-medium">Market Value</th>
                     <th className="text-right px-3 py-2.5 font-medium">Price</th>
                     <th className="text-left px-3 py-2.5 font-medium">Exchange</th>
                     <th className="text-left px-3 py-2.5 font-medium">Currency</th>
+                    <th className="text-right px-3 py-2.5 font-medium">Weight</th>
+                    <th className="text-right px-3 py-2.5 font-medium">Market Value</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800/30">
@@ -643,13 +771,27 @@ export default function AcwiUniverse() {
                       <td className="px-3 py-2.5 text-gray-500 font-mono text-xs">{i + 1}</td>
                       <td className="px-3 py-2.5 text-white font-mono font-medium">{h.Ticker}</td>
                       <td className="px-3 py-2.5 text-gray-200 max-w-[200px] truncate">{h.Name}</td>
+                      <td className="px-3 py-2.5 text-xs">
+                        {h.gurufocus_url ? (
+                          <a
+                            href={h.gurufocus_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-indigo-400 hover:text-indigo-300 transition-colors"
+                          >
+                            link
+                          </a>
+                        ) : (
+                          <span className="text-gray-600">—</span>
+                        )}
+                      </td>
                       <td className="px-3 py-2.5 text-gray-400">{h.Sector}</td>
                       <td className="px-3 py-2.5 text-gray-400">{h.Location}</td>
-                      <td className="px-3 py-2.5 text-gray-300 font-mono text-right">{fmtNum(h['Weight (%)'])}%</td>
-                      <td className="px-3 py-2.5 text-gray-300 font-mono text-right">{fmtMv(h['Market Value'])}</td>
                       <td className="px-3 py-2.5 text-gray-300 font-mono text-right">{fmtNum(h.Price)}</td>
                       <td className="px-3 py-2.5 text-gray-400 text-xs">{h.Exchange}</td>
                       <td className="px-3 py-2.5 text-gray-400 font-mono text-xs">{h.Currency}</td>
+                      <td className="px-3 py-2.5 text-gray-300 font-mono text-right">{fmtNum(h['Weight (%)'])}%</td>
+                      <td className="px-3 py-2.5 text-gray-300 font-mono text-right">{fmtMv(h['Market Value'])}</td>
                     </tr>
                   ))}
                 </tbody>

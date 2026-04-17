@@ -43,6 +43,7 @@ from index_universe.acwi import (
     load_acwi_holdings, get_msci_announcements,
     fetch_announcement_detail_cached, fetch_bulk_details,
     _load_detail_cache, fetch_announcement_detail, _save_detail_cache,
+    compute_net_additions, gurufocus_url,
 )
 
 load_dotenv()                              # .env (prod defaults)
@@ -2082,6 +2083,8 @@ async def index_universe_delete(index_name: str):
 async def acwi_holdings():
     """Return parsed ACWI ETF holdings from the local XLS file."""
     holdings, as_of = await asyncio.to_thread(load_acwi_holdings)
+    for h in holdings:
+        h["gurufocus_url"] = gurufocus_url(h.get("Ticker", ""), h.get("Exchange", ""))
     return {"holdings": holdings, "count": len(holdings), "as_of": as_of}
 
 
@@ -2105,6 +2108,14 @@ async def acwi_announcement_details_bulk(body: dict):
     urls = body.get("urls", [])
     results = await asyncio.to_thread(fetch_bulk_details, urls)
     return {"details": results}
+
+
+@app.get("/api/acwi/net-additions")
+async def acwi_net_additions():
+    """Compute net additions matched against current holdings."""
+    results = await asyncio.to_thread(compute_net_additions)
+    matched = sum(1 for r in results if r["matched"])
+    return {"net_additions": results, "total": len(results), "matched": matched}
 
 
 @app.get("/api/acwi/fetch-all-details")

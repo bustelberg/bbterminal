@@ -15,4 +15,5 @@ dependencies = [
     "uvicorn[standard]>=0.42.0",
     "xlrd>=2.0.2",
     "lxml>=6.0.4",
+    "anthropic>=0.96.0",
 ]
