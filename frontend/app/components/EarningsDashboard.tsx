@@ -12,8 +12,8 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 type Company = {
   company_id: number;
-  primary_ticker: string;
-  primary_exchange: string;
+  gurufocus_ticker: string;
+  gurufocus_exchange: string;
   company_name: string | null;
   country: string | null;
 };
@@ -260,7 +260,7 @@ function CompanyPicker({
     return companies.filter(
       (c) =>
         (c.company_name || '').toLowerCase().includes(q) ||
-        c.primary_ticker.toLowerCase().includes(q)
+        c.gurufocus_ticker.toLowerCase().includes(q)
     ).slice(0, 50);
   }, [query, companies]);
 
@@ -279,7 +279,7 @@ function CompanyPicker({
         value={query}
         onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
-        placeholder={selected ? `${selected.company_name || selected.primary_ticker}` : 'Search company or ticker...'}
+        placeholder={selected ? `${selected.company_name || selected.gurufocus_ticker}` : 'Search company or ticker...'}
         className="w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2.5 text-white placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
       />
       {open && filtered.length > 0 && (
@@ -294,9 +294,9 @@ function CompanyPicker({
               }}
               className="w-full px-3 py-2 text-left hover:bg-white/[0.04] transition-colors flex items-center gap-3"
             >
-              <span className="font-mono text-indigo-400 text-sm">{c.primary_ticker}</span>
+              <span className="font-mono text-indigo-400 text-sm">{c.gurufocus_ticker}</span>
               <span className="text-gray-300 text-sm truncate">{c.company_name || '—'}</span>
-              <span className="text-gray-600 text-xs ml-auto">{c.primary_exchange}</span>
+              <span className="text-gray-600 text-xs ml-auto">{c.gurufocus_exchange}</span>
             </button>
           ))}
         </div>
@@ -1173,7 +1173,7 @@ export default function EarningsDashboard() {
       {selected && (
         <>
           <div className="text-gray-400 text-sm">
-            {selected.company_name || selected.primary_ticker} — {selected.primary_ticker}.{selected.primary_exchange}
+            {selected.company_name || selected.gurufocus_ticker} — {selected.gurufocus_ticker}.{selected.gurufocus_exchange}
           </div>
 
           <LogPanel logs={sse.logs} logEndRef={sse.logEndRef} running={sse.running} onClose={sse.clearLogs} />

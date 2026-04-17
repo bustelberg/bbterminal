@@ -8,8 +8,8 @@
     "ticker": "NOVO.B",
     "country": "Denmark",
     "exchange": "OCSE",
-    "primary_exchange": "OCSE",
-    "primary_ticker": "NOVO B"
+    "gurufocus_exchange": "OCSE",
+    "gurufocus_ticker": "NOVO B"
   },
   {
     "ticker": "IDXX",
@@ -52,8 +52,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "Likely OTC/foreign listing; verify primary Japan exchange",
-    "primary_ticker": "6920",
-    "primary_exchange": "TSE"
+    "gurufocus_ticker": "6920",
+    "gurufocus_exchange": "TSE"
   },
   {
     "ticker": "MOUR",
@@ -211,8 +211,8 @@
     "exchange": "OCSE",
     "alert": true,
     "note": "Likely OTC/foreign listing; verify primary Japan exchange",
-    "primary_ticker": "AMBU B",
-    "primary_exchange": "OCSE"
+    "gurufocus_ticker": "AMBU B",
+    "gurufocus_exchange": "OCSE"
   },
   {
     "ticker": "SGN",
@@ -260,8 +260,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "Likely OTC/foreign listing; verify primary Japan exchange",
-    "primary_ticker": "8035",
-    "primary_exchange": "TSE"
+    "gurufocus_ticker": "8035",
+    "gurufocus_exchange": "TSE"
   },
   {
     "ticker": "LR",
@@ -279,8 +279,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "ADR/OTC ticker; primary listing is Japan",
-    "primary_ticker": "7974",
-    "primary_exchange": "TSE"
+    "gurufocus_ticker": "7974",
+    "gurufocus_exchange": "TSE"
   },
   {
     "ticker": "CSGP",
@@ -361,8 +361,8 @@
     "ticker": "MMC",
     "country": "USA",
     "exchange": "NYSE",
-    "primary_exchange": "NYSE",
-    "primary_ticker": "MRSH"
+    "gurufocus_exchange": "NYSE",
+    "gurufocus_ticker": "MRSH"
   },
   {
     "ticker": "MONC",
@@ -415,8 +415,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "ADR/OTC ticker; verify primary Japan exchange",
-    "primary_exchange": "TSE",
-    "primary_ticker": "5713"
+    "gurufocus_exchange": "TSE",
+    "gurufocus_ticker": "5713"
   },
   {
     "ticker": "KAOCF",
@@ -424,8 +424,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "Likely OTC/foreign listing; verify primary Japan exchange",
-    "primary_exchange": "TSE",
-    "primary_ticker": "4452"
+    "gurufocus_exchange": "TSE",
+    "gurufocus_ticker": "4452"
   },
   {
     "ticker": "DIE",
@@ -441,8 +441,8 @@
     "ticker": "NZYM.B",
     "country": "Denmark",
     "exchange": "OCSE",
-    "primary_ticker": "NSIS B",
-    "primary_exchange": "OCSE"
+    "gurufocus_ticker": "NSIS B",
+    "gurufocus_exchange": "OCSE"
   },
   {
     "ticker": "TXN",
@@ -540,8 +540,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "ADR/OTC ticker; verify primary Japan exchange",
-    "primary_exchange": "TSE",
-    "primary_ticker": "6146"
+    "gurufocus_exchange": "TSE",
+    "gurufocus_ticker": "6146"
   },
   {
     "ticker": "UI",
@@ -621,8 +621,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "ADR/OTC ticker; verify primary Japan exchange",
-    "primary_exchange": "TSE",
-    "primary_ticker": "8031"
+    "gurufocus_exchange": "TSE",
+    "gurufocus_ticker": "8031"
   },
   {
     "ticker": "MCO",
@@ -645,8 +645,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "ADR/OTC ticker; verify primary Japan exchange",
-    "primary_exchange": "TSE",
-    "primary_ticker": "6857"
+    "gurufocus_exchange": "TSE",
+    "gurufocus_ticker": "6857"
   },
   {
     "ticker": "LOGN",
@@ -704,8 +704,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "Likely OTC/foreign listing; primary is KRX",
-    "primary_exchange": "XKRX",
-    "primary_ticker": "005930"
+    "gurufocus_exchange": "XKRX",
+    "gurufocus_ticker": "005930"
   },
   {
     "ticker": "CNR",
@@ -783,8 +783,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "ADR/OTC ticker; verify primary Japan exchange",
-    "primary_exchange": "TSE",
-    "primary_ticker": "6954"
+    "gurufocus_exchange": "TSE",
+    "gurufocus_ticker": "6954"
   },
   {
     "ticker": "TSM",
@@ -812,8 +812,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "ADR/OTC ticker; primary likely HKEX",
-    "primary_exchange": "HKSE",
-    "primary_ticker": "01093"
+    "gurufocus_exchange": "HKSE",
+    "gurufocus_ticker": "01093"
   },
   {
     "ticker": "KPG",
@@ -851,8 +851,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "Likely OTC/foreign listing; verify primary Japan exchange",
-    "primary_exchange": "TSE",
-    "primary_ticker": "6532"
+    "gurufocus_exchange": "TSE",
+    "gurufocus_ticker": "6532"
   },
   {
     "ticker": "FDS",
@@ -890,8 +890,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "ADR/OTC ticker; primary likely HKEX",
-    "primary_exchange": "HKSE",
-    "primary_ticker": "02020"
+    "gurufocus_exchange": "HKSE",
+    "gurufocus_ticker": "02020"
   },
   {
     "ticker": "ITP",
@@ -964,8 +964,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "ADR/OTC ticker; primary is HKEX:0700",
-    "primary_exchange": "HKSE",
-    "primary_ticker": "00700"
+    "gurufocus_exchange": "HKSE",
+    "gurufocus_ticker": "00700"
   },
   {
     "ticker": "DHR",
@@ -1073,8 +1073,8 @@
     "exchange": "NASDAQ",
     "alert": true,
     "note": "NTES is US-listed ADS; primary is HKEX:9999",
-    "primary_exchange": "HKSE",
-    "primary_ticker": "09999"
+    "gurufocus_exchange": "HKSE",
+    "gurufocus_ticker": "09999"
   },
   {
     "ticker": "FTNT",
@@ -1144,8 +1144,8 @@
     "exchange": "LSE",
     "alert": true,
     "note": "Ticker equals exchange acronym; verify",
-    "primary_exchange": "LSE",
-    "primary_ticker": "LSEG"
+    "gurufocus_exchange": "LSE",
+    "gurufocus_ticker": "LSEG"
   },
   {
     "ticker": "SPX",
@@ -1180,8 +1180,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "ADR/OTC ticker; primary is HKEX:2331",
-    "primary_exchange": "HKSE",
-    "primary_ticker": "02331"
+    "gurufocus_exchange": "HKSE",
+    "gurufocus_ticker": "02331"
   },
   {
     "ticker": "TDG",
@@ -1231,15 +1231,15 @@
     "exchange": "OTC",
     "alert": true,
     "note": "ADR/OTC ticker; verify primary Japan exchange",
-    "primary_exchange": "TSE",
-    "primary_ticker": "9697"
+    "gurufocus_exchange": "TSE",
+    "gurufocus_ticker": "9697"
   },
   {
     "ticker": "ADDT.B",
     "country": "Sweden",
     "exchange": "OSTO",
-    "primary_exchange": "OSTO",
-    "primary_ticker": "ADDT B"
+    "gurufocus_exchange": "OSTO",
+    "gurufocus_ticker": "ADDT B"
   },
   {
     "ticker": "VRSK",
@@ -1334,8 +1334,8 @@
     "exchange": "WAR",
     "alert": true,
     "note": "Previously known as LiveChat Software",
-    "primary_exchange": "WAR",
-    "primary_ticker": "TXT"
+    "gurufocus_exchange": "WAR",
+    "gurufocus_ticker": "TXT"
   },
   {
     "ticker": "OBIIF",
@@ -1343,8 +1343,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "Likely OTC/foreign listing; verify primary Japan exchange",
-    "primary_exchange": "TSE",
-    "primary_ticker": "4684"
+    "gurufocus_exchange": "TSE",
+    "gurufocus_ticker": "4684"
   },
   {
     "ticker": "CDNS",
@@ -1367,8 +1367,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "Likely OTC/foreign listing; verify primary Japan exchange",
-    "primary_exchange": "TSE",
-    "primary_ticker": "3038"
+    "gurufocus_exchange": "TSE",
+    "gurufocus_ticker": "3038"
   },
   {
     "ticker": "BEAN",
@@ -1525,8 +1525,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "Likely OTC/foreign listing; verify primary Japan exchange",
-    "primary_exchange": "TSE",
-    "primary_ticker": "3769"
+    "gurufocus_exchange": "TSE",
+    "gurufocus_ticker": "3769"
   },
   {
     "ticker": "AZN",
@@ -1544,8 +1544,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "ADR/OTC ticker; primary is HKEX:0388",
-    "primary_exchange": "HKSE",
-    "primary_ticker": "00388"
+    "gurufocus_exchange": "HKSE",
+    "gurufocus_ticker": "00388"
   },
   {
     "ticker": "IVSO",
@@ -1623,8 +1623,8 @@
     "ticker": "LIFCO.B",
     "country": "Sweden",
     "exchange": "OSTO",
-    "primary_exchange": "OSTO",
-    "primary_ticker": "LIFCO B"
+    "gurufocus_exchange": "OSTO",
+    "gurufocus_ticker": "LIFCO B"
   },
   {
     "ticker": "HOCPY",
@@ -1632,8 +1632,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "ADR/OTC ticker; verify primary Japan exchange",
-    "primary_exchange": "TSE",
-    "primary_ticker": "7741"
+    "gurufocus_exchange": "TSE",
+    "gurufocus_ticker": "7741"
   },
   {
     "ticker": "IT",
@@ -1649,8 +1649,8 @@
     "ticker": "ASSA.B",
     "country": "Sweden",
     "exchange": "OSTO",
-    "primary_exchange": "OSTO",
-    "primary_ticker": "ASSA B"
+    "gurufocus_exchange": "OSTO",
+    "gurufocus_ticker": "ASSA B"
   },
   {
     "ticker": "MPWR",
@@ -1661,8 +1661,8 @@
     "ticker": "LATO.B",
     "country": "Sweden",
     "exchange": "OSTO",
-    "primary_exchange": "OSTO",
-    "primary_ticker": "LATO B"
+    "gurufocus_exchange": "OSTO",
+    "gurufocus_ticker": "LATO B"
   },
   {
     "ticker": "ADI",
@@ -1710,8 +1710,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "OTC/foreign listing; primary is TSX Venture",
-    "primary_exchange": "TSXV",
-    "primary_ticker": "LMN"
+    "gurufocus_exchange": "TSXV",
+    "gurufocus_ticker": "LMN"
   },
   {
     "ticker": "XTB",
@@ -1751,8 +1751,8 @@
     "exchange": "XAMS",
     "alert": true,
     "note": "TOI may be ambiguous; verify listing",
-    "primary_exchange": "TSXV",
-    "primary_ticker": "TOI"
+    "gurufocus_exchange": "TSXV",
+    "gurufocus_ticker": "TOI"
   },
   {
     "ticker": "TRI",
@@ -1827,8 +1827,8 @@
     "exchange": "TSE",
     "alert": true,
     "note": "Numeric tickerâ€”verify company mapping",
-    "primary_exchange": "TSE",
-    "primary_ticker": "5344"
+    "gurufocus_exchange": "TSE",
+    "gurufocus_ticker": "5344"
   },
   {
     "ticker": "GWW",
@@ -1841,8 +1841,8 @@
     "exchange": "OTC",
     "alert": true,
     "note": "Likely OTC/foreign listing; verify primary Japan exchange",
-    "primary_exchange": "TSE",
-    "primary_ticker": "6861"
+    "gurufocus_exchange": "TSE",
+    "gurufocus_ticker": "6861"
   },
   {
     "ticker": "REL",
@@ -1858,8 +1858,8 @@
     "ticker": "BIOG.B",
     "country": "Sweden",
     "exchange": "OSTO",
-    "primary_exchange": "OSTO",
-    "primary_ticker": "BIOG B"
+    "gurufocus_exchange": "OSTO",
+    "gurufocus_ticker": "BIOG B"
   },
   {
     "ticker": "CTZ",
@@ -1929,8 +1929,8 @@
     "ticker": "NTEK.B",
     "country": "Sweden",
     "exchange": "OSTO",
-    "primary_exchange": "OSTO",
-    "primary_ticker": "NTEK B"
+    "gurufocus_exchange": "OSTO",
+    "gurufocus_ticker": "NTEK B"
   },
   {
     "ticker": "PI",
@@ -1978,8 +1978,8 @@
     "exchange": "KRX",
     "alert": true,
     "note": "Numeric tickerâ€”verify company mapping",
-    "primary_exchange": "XKRX",
-    "primary_ticker": "000660"
+    "gurufocus_exchange": "XKRX",
+    "gurufocus_ticker": "000660"
   },
   {
     "ticker": "5930",
@@ -1987,8 +1987,8 @@
     "exchange": "KRX",
     "alert": true,
     "note": "Numeric tickerâ€”verify company mapping",
-    "primary_exchange": "XKRX",
-    "primary_ticker": "005930"
+    "gurufocus_exchange": "XKRX",
+    "gurufocus_ticker": "005930"
   },
   {
     "ticker": "SGSN",
@@ -2021,70 +2021,70 @@
     "exchange": "TSXV",
     "alert": true,
     "note": "Ticker-country combo unusual; Alibaba ADR is typically NYSE:BABA and HKEX:9988. Verify intended listing.",
-    "primary_exchange": "NYSE",
-    "primary_ticker": "BABA"
+    "gurufocus_exchange": "NYSE",
+    "gurufocus_ticker": "BABA"
   },
   {
     "ticker": "ROG",
     "country": "Switzerland",
     "exchange": "XSWX",
-    "primary_exchange": "XSWX",
-    "primary_ticker": "ROP"
+    "gurufocus_exchange": "XSWX",
+    "gurufocus_ticker": "ROP"
   },
   {
     "ticker": "HEXA.B",
     "country": "Sweden",
     "exchange": "OSTO",
-    "primary_exchange": "OSTO",
-    "primary_ticker": "HEXA B"
+    "gurufocus_exchange": "OSTO",
+    "gurufocus_ticker": "HEXA B"
   },
   {
     "ticker": "LAGR.B",
     "country": "Sweden",
     "exchange": "OSTO",
-    "primary_exchange": "OSTO",
-    "primary_ticker": "LAGR B"
+    "gurufocus_exchange": "OSTO",
+    "gurufocus_ticker": "LAGR B"
   },
   {
     "ticker": "NIBE.B",
     "country": "Sweden",
     "exchange": "OSTO",
-    "primary_exchange": "OSTO",
-    "primary_ticker": "NIBE B"
+    "gurufocus_exchange": "OSTO",
+    "gurufocus_ticker": "NIBE B"
   },
   {
     "ticker": "SECT.B",
     "country": "Sweden",
     "exchange": "OSTO",
-    "primary_exchange": "OSTO",
-    "primary_ticker": "SECT B"
+    "gurufocus_exchange": "OSTO",
+    "gurufocus_ticker": "SECT B"
   },
   {
     "ticker": "VIT.B",
     "country": "Sweden",
     "exchange": "OSTO",
-    "primary_exchange": "OSTO",
-    "primary_ticker": "VIT B"
+    "gurufocus_exchange": "OSTO",
+    "gurufocus_ticker": "VIT B"
   },
   {
     "ticker": "INVE.A",
     "country": "Sweden",
     "exchange": "OSTO",
-    "primary_exchange": "OSTO",
-    "primary_ticker": "INVE B"
+    "gurufocus_exchange": "OSTO",
+    "gurufocus_ticker": "INVE B"
   },
   {
     "ticker": "ATCO.A",
     "country": "Sweden",
     "exchange": "OSTO",
-    "primary_exchange": "OSTO",
-    "primary_ticker": "ATCO A"
+    "gurufocus_exchange": "OSTO",
+    "gurufocus_ticker": "ATCO A"
   },
   {
     "ticker": "TOELY",
     "country": "Japan",
     "exchange": "TSE",
-    "primary_ticker": "8035",
-    "primary_exchange": "TSE"
+    "gurufocus_ticker": "8035",
+    "gurufocus_exchange": "TSE"
   }
 ]

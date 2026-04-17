@@ -224,23 +224,29 @@ def resolve_and_create_companies(
     """Resolve S&P 500 tickers via OpenFIGI and create missing company records.
 
     If company_info is provided ({ticker: {name, sector, country}}), it will be
-    used to fill in empty company_name, sector, and country fields — existing
-    values (e.g. from LongEquity) are never overwritten.
+    used to fill in empty company_name fields — existing values are never overwritten.
 
     Returns ticker → company_id mapping for all resolved tickers.
     """
     wiki_info = company_info or {}
     emit = on_progress or (lambda _: None)
 
+    # Load exchange_id map for US exchanges
+    exch_resp = supabase.table("gurufocus_exchange").select("exchange_id, exchange_code").execute()
+    exchange_id_map = {r["exchange_code"]: r["exchange_id"] for r in (exch_resp.data or [])}
+
     # Load existing US companies
     existing: dict[str, int] = {}
-    _company_cache: dict[int, dict] = {}  # company_id → full row
-    for exchange in ("NYSE", "NASDAQ", "AMEX"):
+    _company_cache: dict[int, dict] = {}
+    for exchange in ("NYSE", "NASDAQ"):
+        eid = exchange_id_map.get(exchange)
+        if eid is None:
+            continue
         resp = supabase.table("company").select(
-            "company_id, primary_ticker, source, company_name, sector, country"
-        ).eq("primary_exchange", exchange).execute()
+            "company_id, gurufocus_ticker, company_name"
+        ).eq("exchange_id", eid).execute()
         for row in resp.data:
-            existing[row["primary_ticker"]] = row["company_id"]
+            existing[row["gurufocus_ticker"]] = row["company_id"]
             _company_cache[row["company_id"]] = row
 
     already_matched = {t for t in tickers if t in existing}
@@ -248,31 +254,31 @@ def resolve_and_create_companies(
 
     emit(f"Company lookup: {len(already_matched)} already in DB, {len(to_resolve)} need resolution")
 
-    # Tag already-matched companies with 'sp500' source + fill empty fields from Wikipedia
+    # Tag already-matched companies with 'sp500' source via company_source table
     tagged = 0
     enriched = 0
     for t in already_matched:
         cid = existing[t]
         cached = _company_cache.get(cid, {})
-        src = cached.get("source") or []
-        updates: dict = {}
-        if "sp500" not in src:
-            updates["source"] = src + ["sp500"]
-        # Fill empty fields from Wikipedia info (never overwrite existing values)
+        # Ensure company_source row exists for sp500
+        try:
+            supabase.table("company_source").upsert(
+                {"company_id": cid, "source_code": "sp500"},
+                on_conflict="company_id,source_code",
+                ignore_duplicates=True,
+            ).execute()
+            tagged += 1
+        except Exception:
+            pass
+        # Fill empty company_name from Wikipedia info
         info = wiki_info.get(t, {})
+        updates: dict = {}
         if info.get("name") and not cached.get("company_name"):
             updates["company_name"] = info["name"]
-        if info.get("sector") and not cached.get("sector"):
-            updates["sector"] = info["sector"]
-        if info.get("country") and not cached.get("country"):
-            updates["country"] = info["country"]
         if updates:
             try:
                 supabase.table("company").update(updates).eq("company_id", cid).execute()
-                if "source" in updates:
-                    tagged += 1
-                if any(k in updates for k in ("company_name", "sector", "country")):
-                    enriched += 1
+                enriched += 1
             except Exception:
                 pass
     if tagged or enriched:
@@ -316,13 +322,10 @@ def resolve_and_create_companies(
 
         for u, item in zip(batch, items):
             if "data" not in item or not item["data"]:
-                # S&P 500 ticker not found on US exchange — likely delisted.
-                # Default to NYSE rather than searching globally (which would
-                # match unrelated foreign companies reusing the same ticker).
                 resolved.append({
                     "ticker": u["ticker"],
-                    "primary_ticker": u["ticker"],
-                    "primary_exchange": "NYSE",
+                    "gurufocus_ticker": u["ticker"],
+                    "gurufocus_exchange": "NYSE",
                 })
                 continue
 
@@ -330,29 +333,28 @@ def resolve_and_create_companies(
             if not match:
                 resolved.append({
                     "ticker": u["ticker"],
-                    "primary_ticker": u["ticker"],
-                    "primary_exchange": "NYSE",
+                    "gurufocus_ticker": u["ticker"],
+                    "gurufocus_exchange": "NYSE",
                 })
                 continue
 
             # Only accept US exchange matches for S&P 500 tickers
             exchcode = match.get("exchCode", "")
             if exchcode not in _US_EXCHCODES:
-                # Foreign match — ignore, default to NYSE
                 resolved.append({
                     "ticker": u["ticker"],
-                    "primary_ticker": u["ticker"],
-                    "primary_exchange": "NYSE",
+                    "gurufocus_ticker": u["ticker"],
+                    "gurufocus_exchange": "NYSE",
                 })
                 continue
 
             exchange = _exchcode_to_exchange(exchcode)
             raw_ticker = match.get("ticker") or u["ticker"]
-            primary_ticker = _normalize_ticker_for_gurufocus(raw_ticker, exchange)
+            gf_ticker = _normalize_ticker_for_gurufocus(raw_ticker, exchange)
             resolved.append({
                 "ticker": u["ticker"],
-                "primary_ticker": primary_ticker,
-                "primary_exchange": exchange,
+                "gurufocus_ticker": gf_ticker,
+                "gurufocus_exchange": exchange,
             })
 
         done = min(i + batch_size, total)
@@ -362,53 +364,54 @@ def resolve_and_create_companies(
     created = 0
     already_existed = 0
     for j, r in enumerate(resolved):
-        pt = r["primary_ticker"]
-        pe = r["primary_exchange"]
+        gt = r["gurufocus_ticker"]
+        ge = r["gurufocus_exchange"]
+        eid = exchange_id_map.get(ge)
 
         # Check if already exists (might match under different raw ticker)
-        check = (
-            supabase.table("company")
-            .select("company_id, source")
-            .eq("primary_ticker", pt)
-            .eq("primary_exchange", pe)
-            .limit(1)
-            .execute()
-        )
+        query = supabase.table("company").select("company_id").eq("gurufocus_ticker", gt)
+        if eid is not None:
+            query = query.eq("exchange_id", eid)
+        check = query.limit(1).execute()
+
         if check.data:
             cid = check.data[0]["company_id"]
             existing[r["ticker"]] = cid
-            existing[pt] = cid
+            existing[gt] = cid
             already_existed += 1
-            # Ensure 'sp500' in source array
-            current_source = check.data[0].get("source") or []
-            if "sp500" not in current_source:
-                try:
-                    supabase.table("company").update(
-                        {"source": current_source + ["sp500"]}
-                    ).eq("company_id", cid).execute()
-                except Exception:
-                    pass
+            # Ensure company_source row
+            try:
+                supabase.table("company_source").upsert(
+                    {"company_id": cid, "source_code": "sp500"},
+                    on_conflict="company_id,source_code",
+                    ignore_duplicates=True,
+                ).execute()
+            except Exception:
+                pass
             continue
 
         # Create new company record, using Wikipedia info if available
         info = wiki_info.get(r["ticker"], {})
         row = {
-            "primary_ticker": pt,
-            "primary_exchange": pe,
+            "gurufocus_ticker": gt,
+            "exchange_id": eid,
             "company_name": info.get("name") or None,
-            "sector": info.get("sector") or None,
-            "country": info.get("country") or None,
-            "source": ["sp500"],
         }
         try:
             ins = supabase.table("company").insert(row).execute()
             if ins.data:
                 cid = ins.data[0]["company_id"]
                 existing[r["ticker"]] = cid
-                existing[pt] = cid
+                existing[gt] = cid
                 created += 1
+                # Add company_source
+                supabase.table("company_source").upsert(
+                    {"company_id": cid, "source_code": "sp500"},
+                    on_conflict="company_id,source_code",
+                    ignore_duplicates=True,
+                ).execute()
         except Exception as e:
-            log.warning("Failed to create company %s/%s: %s", pt, pe, e)
+            log.warning("Failed to create company %s/%s: %s", gt, ge, e)
 
         if (j + 1) % 50 == 0:
             emit(f"Creating companies: {j + 1}/{len(resolved)} ({created} new, {already_existed} existing)")
@@ -427,14 +430,27 @@ def store_index_membership(
 ) -> dict:
     """Store monthly holdings and changes in the database.
 
-    Deletes existing data for the index and batch-inserts rows.
+    Uses universe + universe_membership tables. Deletes existing data
+    for the universe and batch-inserts rows.
     Returns summary stats.
     """
     emit = on_progress or (lambda _: None)
 
-    # Delete existing rows for this index
-    emit(f"Clearing existing {index_name} data...")
-    supabase.table("index_membership").delete().eq("index_name", index_name).neq("ticker", "").execute()
+    # Ensure universe exists
+    emit(f"Setting up universe '{index_name}'...")
+    u_resp = supabase.table("universe").select("universe_id").eq("label", index_name).limit(1).execute()
+    if u_resp.data:
+        universe_id = u_resp.data[0]["universe_id"]
+        # Clear existing membership rows
+        emit(f"Clearing existing {index_name} membership data...")
+        # Delete in batches by month to avoid timeout
+        months_resp = supabase.table("universe_membership").select("target_month").eq("universe_id", universe_id).limit(100000).execute()
+        existing_months = set(r["target_month"] for r in (months_resp.data or []))
+        for m in existing_months:
+            supabase.table("universe_membership").delete().eq("universe_id", universe_id).eq("target_month", m).execute()
+    else:
+        resp = supabase.table("universe").insert({"label": index_name, "description": f"{index_name} index"}).execute()
+        universe_id = resp.data[0]["universe_id"]
 
     # Collect all unique tickers for stats
     all_tickers: set[str] = set()
@@ -452,14 +468,19 @@ def store_index_membership(
 
     for i, month in enumerate(months):
         for ticker in sorted(monthly_holdings[month]):
+            cid = company_lookup.get(ticker)
+            if cid is None:
+                continue  # Can't store without a company_id (FK constraint)
             batch.append({
-                "index_name": index_name,
+                "universe_id": universe_id,
                 "target_month": month,
-                "ticker": ticker,
-                "company_id": company_lookup.get(ticker),
+                "company_id": cid,
+                "universe_ticker": ticker,
             })
             if len(batch) >= batch_size:
-                supabase.table("index_membership").upsert(batch).execute()
+                supabase.table("universe_membership").upsert(
+                    batch, on_conflict="universe_id,company_id,target_month"
+                ).execute()
                 total_rows += len(batch)
                 batch = []
 
@@ -467,7 +488,9 @@ def store_index_membership(
             emit(f"Storing months: {i + 1}/{len(months)} ({total_rows + len(batch)} rows)")
 
     if batch:
-        supabase.table("index_membership").upsert(batch).execute()
+        supabase.table("universe_membership").upsert(
+            batch, on_conflict="universe_id,company_id,target_month"
+        ).execute()
         total_rows += len(batch)
 
     # Store changes as a JSON blob in the first row's metadata (or a separate approach)
@@ -521,10 +544,15 @@ def check_gurufocus_availability(
 
     # Build ticker → exchange lookup from company table
     ticker_exchange: dict[str, str] = {}
-    for exchange in ("NYSE", "NASDAQ", "AMEX"):
-        resp = supabase.table("company").select("primary_ticker, primary_exchange").eq("primary_exchange", exchange).execute()
+    exch_resp = supabase.table("gurufocus_exchange").select("exchange_id, exchange_code").execute()
+    eid_to_code = {r["exchange_id"]: r["exchange_code"] for r in (exch_resp.data or [])}
+    for exchange in ("NYSE", "NASDAQ"):
+        eid = next((eid for eid, code in eid_to_code.items() if code == exchange), None)
+        if eid is None:
+            continue
+        resp = supabase.table("company").select("gurufocus_ticker, exchange_id").eq("exchange_id", eid).execute()
         for row in resp.data:
-            ticker_exchange[row["primary_ticker"]] = row["primary_exchange"]
+            ticker_exchange[row["gurufocus_ticker"]] = exchange
 
     emit(f"Loaded {len(ticker_exchange)} company exchange mappings")
 

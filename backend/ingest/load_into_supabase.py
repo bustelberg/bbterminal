@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 
 import pandas as pd
@@ -9,6 +10,7 @@ from supabase import Client
 from .transformation import PreparedForSchema
 
 _BATCH_SIZE = 500
+_logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -41,13 +43,18 @@ def _upsert_batched(
     return inserted
 
 
+def _get_exchange_id_map(supabase: Client) -> dict[str, int]:
+    """Fetch exchange_code → exchange_id mapping from gurufocus_exchange table."""
+    resp = supabase.table("gurufocus_exchange").select("exchange_id,exchange_code").limit(1000).execute()
+    return {r["exchange_code"]: r["exchange_id"] for r in (resp.data or [])}
+
 
 def get_ticker_overrides(supabase: Client) -> list[dict]:
     """
     Fetch all rows from the ticker_override table.
-    Returns list of {ticker, primary_ticker, primary_exchange, source}.
+    Returns list of {ticker, gurufocus_ticker, gurufocus_exchange, source}.
     """
-    resp = supabase.table("ticker_override").select("ticker,primary_ticker,primary_exchange,source").limit(10000).execute()
+    resp = supabase.table("ticker_override").select("ticker,gurufocus_ticker,gurufocus_exchange,source").limit(10000).execute()
     return resp.data or []
 
 
@@ -61,8 +68,8 @@ def save_ticker_overrides(supabase: Client, overrides: list[dict]) -> int:
     rows = [
         {
             "ticker": o["ticker"],
-            "primary_ticker": o["primary_ticker"],
-            "primary_exchange": o["primary_exchange"],
+            "gurufocus_ticker": o["gurufocus_ticker"],
+            "gurufocus_exchange": o["gurufocus_exchange"],
             "source": o.get("source", "openfigi"),
         }
         for o in overrides
@@ -73,21 +80,25 @@ def save_ticker_overrides(supabase: Client, overrides: list[dict]) -> int:
 
 def fix_company_primary_keys(supabase: Client, corrections: list[dict]) -> int:
     """
-    For each correction {ticker, primary_ticker, primary_exchange}, update any company
-    row that was loaded with the fallback primary_exchange='UNKNOWN' for that ticker.
+    For each correction {ticker, gurufocus_ticker, gurufocus_exchange}, update any company
+    row that was loaded with exchange_id=NULL (unknown exchange) for that ticker.
     Returns total rows updated.
     """
+    exchange_map = _get_exchange_id_map(supabase)
     fixed = 0
     for c in corrections:
+        new_exchange_id = exchange_map.get(c["gurufocus_exchange"])
+        if new_exchange_id is None:
+            continue
         try:
             resp = (
                 supabase.table("company")
                 .update({
-                    "primary_ticker": c["primary_ticker"],
-                    "primary_exchange": c["primary_exchange"],
+                    "gurufocus_ticker": c["gurufocus_ticker"],
+                    "exchange_id": new_exchange_id,
                 })
-                .eq("longequity_ticker", c["ticker"])
-                .eq("primary_exchange", "UNKNOWN")
+                .eq("gurufocus_ticker", c["ticker"])
+                .is_("exchange_id", "null")
                 .execute()
             )
             fixed += len(resp.data)
@@ -96,53 +107,44 @@ def fix_company_primary_keys(supabase: Client, corrections: list[dict]) -> int:
     return fixed
 
 
-import logging
-
-_logger = logging.getLogger(__name__)
-
-
 def merge_duplicate_companies(supabase: Client) -> list[str]:
-    """Find companies with the same (company_name, primary_exchange) and merge them.
+    """Find companies with the same (company_name, exchange_id) and merge them.
 
     Keeps the company with the lowest company_id, reassigns metric_data and
     portfolio_weight rows, then deletes the duplicate.
     Returns list of log messages describing what was merged.
     """
     logs: list[str] = []
-    resp = supabase.table("company").select("company_id,company_name,primary_ticker,primary_exchange").limit(10000).execute()
+    resp = supabase.table("company").select("company_id,company_name,gurufocus_ticker,exchange_id").limit(10000).execute()
     companies = resp.data or []
 
-    # Group by (normalized name, exchange)
     from collections import defaultdict
-    groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    groups: dict[tuple[str, int | None], list[dict]] = defaultdict(list)
     for c in companies:
         name = (c.get("company_name") or "").strip().lower()
-        exchange = (c.get("primary_exchange") or "").strip().upper()
+        exchange_id = c.get("exchange_id")
         if name:
-            groups[(name, exchange)].append(c)
+            groups[(name, exchange_id)].append(c)
 
     for key, group in groups.items():
         if len(group) < 2:
             continue
 
-        # Keep the one with the lowest company_id
         group.sort(key=lambda c: c["company_id"])
         keep = group[0]
         for dup in group[1:]:
             keep_id = keep["company_id"]
             dup_id = dup["company_id"]
-            msg = f"Merging duplicate: {dup['primary_ticker']} (id={dup_id}) into {keep['primary_ticker']} (id={keep_id}) — both \"{keep.get('company_name')}\""
+            msg = f"Merging duplicate: {dup['gurufocus_ticker']} (id={dup_id}) into {keep['gurufocus_ticker']} (id={keep_id}) — both \"{keep.get('company_name')}\""
             logs.append(msg)
             _logger.info(msg)
 
             try:
-                # Reassign metric_data (skip rows that would conflict)
                 supabase.rpc("merge_company_data", {
                     "p_from_id": dup_id,
                     "p_to_id": keep_id,
                 }).execute()
             except Exception:
-                # Fallback: delete conflicting metric_data then update the rest
                 try:
                     supabase.table("metric_data").delete().eq("company_id", dup_id).execute()
                 except Exception as e2:
@@ -154,6 +156,16 @@ def merge_duplicate_companies(supabase: Client) -> list[str]:
                 pass
 
             try:
+                supabase.table("company_source").delete().eq("company_id", dup_id).execute()
+            except Exception:
+                pass
+
+            try:
+                supabase.table("universe_membership").delete().eq("company_id", dup_id).execute()
+            except Exception:
+                pass
+
+            try:
                 supabase.table("company").delete().eq("company_id", dup_id).execute()
             except Exception as e:
                 logs.append(f"  Warning: could not delete duplicate company id={dup_id}: {e}")
@@ -161,68 +173,124 @@ def merge_duplicate_companies(supabase: Client) -> list[str]:
     return logs
 
 
-def load_prepared_into_supabase(prepared: PreparedForSchema, supabase: Client) -> LoadResult:
+def _ensure_company_source(supabase: Client, company_id: int, source_code: str) -> None:
+    """Insert a company_source row if it doesn't already exist."""
+    try:
+        supabase.table("company_source").upsert(
+            {"company_id": company_id, "source_code": source_code},
+            on_conflict="company_id,source_code",
+            ignore_duplicates=True,
+        ).execute()
+    except Exception:
+        pass
+
+
+def load_prepared_into_supabase(
+    prepared: PreparedForSchema,
+    supabase: Client,
+    *,
+    universe_label: str | None = None,
+) -> LoadResult:
     """
     Load a PreparedForSchema into Supabase.
-    Upserts companies, then resolves company_ids and upserts metric_data.
+    Upserts companies (with exchange_id resolution), tags company_source,
+    creates universe_membership rows, then upserts metric_data.
     """
+    exchange_map = _get_exchange_id_map(supabase)
+
     # ------------------------------------------------------------------ #
     # 1. COMPANY
     # ------------------------------------------------------------------ #
     company_rows = _df_to_rows(prepared.company)
-    # Add source tag for new companies
+
+    # Resolve gurufocus_exchange → exchange_id for each company row
     for row in company_rows:
-        row["source"] = ["longequity"]
+        gf_exchange = row.pop("gurufocus_exchange", None)
+        row["exchange_id"] = exchange_map.get(gf_exchange) if gf_exchange else None
+        # Remove fields that don't belong on the company table
+        row.pop("universe_ticker", None)
+        row.pop("sector", None)
+        row.pop("country", None)
+
     company_inserted = _upsert_batched(
-        supabase, "company", company_rows, on_conflict="primary_ticker,primary_exchange"
+        supabase, "company", company_rows, on_conflict="gurufocus_ticker,exchange_id"
     )
 
-    # Ensure 'longequity' source tag on all companies that were just ingested
-    # (upsert with ignore_duplicates won't update existing rows)
-    for row in company_rows:
-        try:
-            existing = (
-                supabase.table("company")
-                .select("company_id, source")
-                .eq("primary_ticker", row["primary_ticker"])
-                .eq("primary_exchange", row["primary_exchange"])
-                .limit(1)
-                .execute()
-            )
-            if existing.data:
-                current_source = existing.data[0].get("source") or []
-                if "longequity" not in current_source:
-                    supabase.table("company").update(
-                        {"source": current_source + ["longequity"]}
-                    ).eq("company_id", existing.data[0]["company_id"]).execute()
-        except Exception:
-            pass  # Best-effort source tagging
-
-    # Fetch company_id lookup map
+    # Fetch company_id lookup map: (gurufocus_ticker, exchange_id) → company_id
     all_companies = (
         supabase.table("company")
-        .select("company_id,primary_ticker,primary_exchange")
+        .select("company_id,gurufocus_ticker,exchange_id")
         .limit(10000)
         .execute()
     )
-    company_id_map: dict[tuple[str, str], int] = {
-        (r["primary_ticker"], r["primary_exchange"]): r["company_id"]
+    company_id_map: dict[tuple[str, int | None], int] = {
+        (r["gurufocus_ticker"], r["exchange_id"]): r["company_id"]
         for r in all_companies.data
     }
 
+    # Tag company_source for all ingested companies
+    source_code = prepared.source_code
+    for row in company_rows:
+        cid = company_id_map.get((row["gurufocus_ticker"], row["exchange_id"]))
+        if cid is not None:
+            _ensure_company_source(supabase, cid, source_code)
+
     # ------------------------------------------------------------------ #
-    # 2. METRIC_DATA
+    # 2. UNIVERSE MEMBERSHIP (if universe_label provided)
     # ------------------------------------------------------------------ #
+    if universe_label:
+        # Ensure universe exists
+        existing = supabase.table("universe").select("universe_id").eq("label", universe_label).limit(1).execute()
+        if existing.data:
+            universe_id = existing.data[0]["universe_id"]
+        else:
+            resp = supabase.table("universe").insert({"label": universe_label}).execute()
+            universe_id = resp.data[0]["universe_id"]
+
+        target_month = str(prepared.target_date)[:7]  # "YYYY-MM"
+
+        # Build membership rows from the original prepared.company DataFrame
+        # which still has universe_ticker and sector
+        orig_company_rows = _df_to_rows(prepared.company)
+        membership_rows = []
+        for row in orig_company_rows:
+            gf_ticker = row.get("gurufocus_ticker")
+            gf_exchange = row.get("gurufocus_exchange")
+            eid = exchange_map.get(gf_exchange) if gf_exchange else None
+            cid = company_id_map.get((gf_ticker, eid))
+            if cid is None:
+                continue
+            membership_rows.append({
+                "universe_id": universe_id,
+                "company_id": cid,
+                "target_month": target_month,
+                "universe_ticker": row.get("universe_ticker"),
+                "sector": row.get("sector"),
+            })
+
+        if membership_rows:
+            _upsert_batched(
+                supabase, "universe_membership", membership_rows,
+                on_conflict="universe_id,company_id,target_month",
+            )
+
+    # ------------------------------------------------------------------ #
+    # 3. METRIC_DATA
+    # ------------------------------------------------------------------ #
+    # Build a reverse lookup: gurufocus_exchange code → exchange_id so we can
+    # resolve metric_data rows which carry (gurufocus_ticker, gurufocus_exchange)
     md_rows: list[dict] = []
     for _, row in prepared.metric_data.iterrows():
-        cid = company_id_map.get((row["primary_ticker"], row["primary_exchange"]))
+        gf_ticker = row["gurufocus_ticker"]
+        gf_exchange = row["gurufocus_exchange"]
+        eid = exchange_map.get(gf_exchange)
+        cid = company_id_map.get((gf_ticker, eid))
         if cid is None:
             continue
 
         nv = row.get("numeric_value")
         tv = row.get("text_value")
 
-        # Skip if both values are null
         has_numeric = nv is not None and not (isinstance(nv, float) and pd.isna(nv))
         has_text = tv is not None and str(tv) not in ("", "<NA>", "None") and not (isinstance(tv, float) and pd.isna(tv))
         if not has_numeric and not has_text:

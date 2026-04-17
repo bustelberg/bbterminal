@@ -45,6 +45,7 @@ from index_universe.acwi import (
     fetch_announcement_detail_cached, fetch_bulk_details,
     _load_detail_cache, fetch_announcement_detail, _save_detail_cache,
     compute_net_additions, gurufocus_url,
+    gurufocus_exchange, gurufocus_exchange_for_db,
 )
 
 load_dotenv()                              # .env (prod defaults)
@@ -280,7 +281,10 @@ async def _ingest_long_equity_stream():
         # Load
         yield event("info", "  Loading into Supabase...")
         try:
-            result = await asyncio.to_thread(load_prepared_into_supabase, prepared, supabase)
+            result = await asyncio.to_thread(
+                load_prepared_into_supabase, prepared, supabase,
+                universe_label="longequity",
+            )
         except Exception as e:
             yield event("error", f"  Load failed: {e}")
             continue
@@ -294,8 +298,8 @@ async def _ingest_long_equity_stream():
         ))
 
     # ------------------------------------------------------------------ #
-    # Fix company rows that were loaded with primary_exchange='UNKNOWN'
-    # in previous runs (before Phase 3 existed)
+    # Fix company rows that were loaded with exchange_id=NULL
+    # in previous runs (before ticker resolution existed)
     # ------------------------------------------------------------------ #
     if all_new_resolutions:
         yield event("info", "")
@@ -363,10 +367,16 @@ def get_longequity_companies(target_date: str):
     # Fetch all companies upfront (small table ~400 rows)
     all_companies_resp = (
         supabase.table("company")
-        .select("company_id,primary_ticker,primary_exchange,country,company_name,longequity_ticker")
+        .select("company_id,gurufocus_ticker,exchange_id,company_name,gurufocus_exchange:gurufocus_exchange(exchange_code,country:country(country_name))")
         .limit(10000)
         .execute()
     )
+    # Flatten nested joins
+    for c in (all_companies_resp.data or []):
+        exch_info = c.pop("gurufocus_exchange", None) or {}
+        country_info = exch_info.pop("country", None) or {}
+        c["gurufocus_exchange"] = exch_info.get("exchange_code")
+        c["country"] = country_info.get("country_name")
     all_companies: dict[int, dict] = {
         c["company_id"]: c for c in (all_companies_resp.data or [])
     }
@@ -653,55 +663,68 @@ async def parse_portfolio(file: UploadFile = File(...)):
 
 @app.get("/api/companies/field-options")
 async def get_company_field_options():
-    resp = (
-        supabase.table("company")
-        .select("primary_exchange,country,sector")
-        .limit(10000)
-        .execute()
-    )
-    rows = resp.data or []
-    exchanges = sorted({r["primary_exchange"] for r in rows if r.get("primary_exchange")})
-    countries = sorted({r["country"] for r in rows if r.get("country") and r["country"].strip()})
-    sectors = sorted({r["sector"] for r in rows if r.get("sector") and r["sector"].strip()})
+    # Exchanges from gurufocus_exchange table
+    exch_resp = supabase.table("gurufocus_exchange").select("exchange_code").limit(1000).execute()
+    exchanges = sorted({r["exchange_code"] for r in (exch_resp.data or [])})
+    # Countries from country table
+    country_resp = supabase.table("country").select("country_name").limit(1000).execute()
+    countries = sorted({r["country_name"] for r in (country_resp.data or [])})
+    # Sectors from universe_membership
+    sector_resp = supabase.table("universe_membership").select("sector").limit(10000).execute()
+    sectors = sorted({r["sector"] for r in (sector_resp.data or []) if r.get("sector") and r["sector"].strip()})
     return {"exchanges": exchanges, "countries": countries, "sectors": sectors}
 
 
 class CreateCompanyRequest(BaseModel):
     company_name: str
-    primary_ticker: str
-    primary_exchange: str
-    country: str = ""
-    sector: str = ""
+    gurufocus_ticker: str
+    gurufocus_exchange: str  # exchange_code, resolved to exchange_id
 
 
 class UpdateCompanyRequest(BaseModel):
     company_name: str | None = None
-    primary_ticker: str | None = None
-    primary_exchange: str | None = None
-    country: str | None = None
-    sector: str | None = None
+    gurufocus_ticker: str | None = None
+    gurufocus_exchange: str | None = None  # exchange_code
+
+
+def _resolve_exchange_id(exchange_code: str) -> int | None:
+    """Look up exchange_id from an exchange_code."""
+    resp = (
+        supabase.table("gurufocus_exchange")
+        .select("exchange_id")
+        .eq("exchange_code", exchange_code.upper())
+        .limit(1)
+        .execute()
+    )
+    return resp.data[0]["exchange_id"] if resp.data else None
 
 
 @app.get("/api/companies")
 async def list_companies():
     resp = (
         supabase.table("company")
-        .select("company_id,company_name,primary_ticker,primary_exchange,longequity_ticker,country,sector,source")
+        .select("company_id,company_name,gurufocus_ticker,exchange_id,gurufocus_exchange:gurufocus_exchange(exchange_code,country:country(country_name))")
         .order("company_name")
         .limit(10000)
         .execute()
     )
-    return resp.data or []
+    # Flatten the nested exchange join
+    rows = resp.data or []
+    for r in rows:
+        exch_info = r.pop("gurufocus_exchange", None) or {}
+        country_info = exch_info.pop("country", None) or {}
+        r["gurufocus_exchange"] = exch_info.get("exchange_code")
+        r["country"] = country_info.get("country_name")
+    return rows
 
 
 @app.post("/api/companies")
 async def create_company(req: CreateCompanyRequest):
+    exchange_id = _resolve_exchange_id(req.gurufocus_exchange)
     row = {
         "company_name": req.company_name,
-        "primary_ticker": req.primary_ticker.upper(),
-        "primary_exchange": req.primary_exchange.upper(),
-        "country": req.country or None,
-        "sector": req.sector or None,
+        "gurufocus_ticker": req.gurufocus_ticker.upper(),
+        "exchange_id": exchange_id,
     }
     resp = supabase.table("company").insert(row).execute()
     if not resp.data:
@@ -714,14 +737,11 @@ async def update_company(company_id: int, req: UpdateCompanyRequest):
     updates = {}
     if req.company_name is not None:
         updates["company_name"] = req.company_name
-    if req.primary_ticker is not None:
-        updates["primary_ticker"] = req.primary_ticker.upper()
-    if req.primary_exchange is not None:
-        updates["primary_exchange"] = req.primary_exchange.upper()
-    if req.country is not None:
-        updates["country"] = req.country or None
-    if req.sector is not None:
-        updates["sector"] = req.sector or None
+    if req.gurufocus_ticker is not None:
+        updates["gurufocus_ticker"] = req.gurufocus_ticker.upper()
+    if req.gurufocus_exchange is not None:
+        exchange_id = _resolve_exchange_id(req.gurufocus_exchange)
+        updates["exchange_id"] = exchange_id
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
     resp = (
@@ -740,6 +760,8 @@ async def delete_company(company_id: int):
     # Cascade: delete referencing rows first
     supabase.table("portfolio_weight").delete().eq("company_id", company_id).execute()
     supabase.table("metric_data").delete().eq("company_id", company_id).execute()
+    supabase.table("company_source").delete().eq("company_id", company_id).execute()
+    supabase.table("universe_membership").delete().eq("company_id", company_id).execute()
     supabase.table("company").delete().eq("company_id", company_id).execute()
     return {"ok": True}
 
@@ -749,14 +771,18 @@ async def delete_company(company_id: int):
 def _get_company_or_404(company_id: int) -> dict:
     resp = (
         supabase.table("company")
-        .select("company_id,primary_ticker,primary_exchange,company_name")
+        .select("company_id,gurufocus_ticker,exchange_id,company_name,gurufocus_exchange:gurufocus_exchange(exchange_code,is_us)")
         .eq("company_id", company_id)
         .limit(1)
         .execute()
     )
     if not resp.data:
         raise HTTPException(status_code=404, detail="Company not found")
-    return resp.data[0]
+    row = resp.data[0]
+    exch_info = row.pop("gurufocus_exchange", None) or {}
+    row["gurufocus_exchange"] = exch_info.get("exchange_code")
+    row["is_us"] = exch_info.get("is_us", False)
+    return row
 
 
 async def _earnings_refresh_stream(company_id: int, sources: list[str], force: bool):
@@ -768,10 +794,10 @@ async def _earnings_refresh_stream(company_id: int, sources: list[str], force: b
         return f"data: {json.dumps(payload)}\n\n"
 
     company = _get_company_or_404(company_id)
-    ticker = company["primary_ticker"]
-    exchange = company["primary_exchange"]
+    ticker = company["gurufocus_ticker"]
+    exchange = company["gurufocus_exchange"] or "UNKNOWN"
     name = company.get("company_name") or f"{ticker}.{exchange}"
-    region = "usa" if exchange.upper() in {"NYSE", "NASDAQ", "AMEX"} else "europe"
+    region = "usa" if company.get("is_us", False) else "europe"
 
     yield event("info", f"Refreshing earnings data for {name} ({ticker}.{exchange})")
 
@@ -1059,8 +1085,8 @@ class BacktestRequest(BaseModel):
     top_n_per_sector: int = 6
     skip_price_fetch: bool = False  # skips both price and volume fetch
     max_companies: int = 0  # 0 = all, otherwise limit universe (alphabetical)
-    universe_label: str | None = None  # if set, use universe_snapshot for per-month filtering
-    index_universe: str | None = None  # if set, use index_membership for per-month filtering (e.g. "SP500")
+    universe_label: str | None = None  # if set, use universe_membership for per-month filtering
+    index_universe: str | None = None  # if set, use universe_membership for per-month filtering (e.g. "SP500")
 
 
 async def _momentum_backtest_stream(req: BacktestRequest):
@@ -1079,21 +1105,26 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             return
         yield _emit({"type": "progress", "pct": 5, "message": f"Found {len(universe_df)} companies"})
 
-        # Load universe snapshot if a label is specified
+        # Load universe membership if a label is specified
         monthly_eligible: dict[str, set[int]] | None = None
         if req.universe_label:
-            yield _emit({"type": "progress", "pct": 6, "message": f"Loading universe snapshot '{req.universe_label}'..."})
+            yield _emit({"type": "progress", "pct": 6, "message": f"Loading universe '{req.universe_label}'..."})
 
-            def _load_snapshot():
+            def _load_universe_membership():
+                # Get universe_id
+                u_resp = supabase.table("universe").select("universe_id").eq("label", req.universe_label).limit(1).execute()
+                if not u_resp.data:
+                    return {}
+                universe_id = u_resp.data[0]["universe_id"]
                 rows = []
                 offset = 0
                 page_size = 1000
                 while True:
-                    resp = supabase.table("universe_snapshot").select(
+                    resp = supabase.table("universe_membership").select(
                         "target_month, company_id"
-                    ).eq("label", req.universe_label).eq(
-                        "passes", True
-                    ).order("target_month").order("company_id").range(offset, offset + page_size - 1).execute()
+                    ).eq("universe_id", universe_id).order(
+                        "target_month"
+                    ).order("company_id").range(offset, offset + page_size - 1).execute()
                     batch = resp.data or []
                     rows.extend(batch)
                     if len(batch) < page_size:
@@ -1107,28 +1138,32 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                     result[m].add(r["company_id"])
                 return result
 
-            monthly_eligible = await asyncio.to_thread(_load_snapshot)
+            monthly_eligible = await asyncio.to_thread(_load_universe_membership)
             n_months = len(monthly_eligible)
             if n_months == 0:
-                yield _emit({"type": "error", "message": f"No universe snapshot data for label '{req.universe_label}'"})
+                yield _emit({"type": "error", "message": f"No universe data for label '{req.universe_label}'"})
                 return
             avg_pass = sum(len(v) for v in monthly_eligible.values()) // n_months
-            yield _emit({"type": "progress", "pct": 7, "message": f"Universe snapshot: {n_months} months, ~{avg_pass} passing/month"})
+            yield _emit({"type": "progress", "pct": 7, "message": f"Universe: {n_months} months, ~{avg_pass} companies/month"})
 
-        # Load index universe if specified (e.g. SP500 from index_membership)
+        # Load index universe if specified (e.g. SP500 — stored as a universe label)
         if req.index_universe and monthly_eligible is None:
             yield _emit({"type": "progress", "pct": 6, "message": f"Loading index universe '{req.index_universe}'..."})
 
             def _load_index_universe():
+                # Index universes are now stored as regular universes
+                u_resp = supabase.table("universe").select("universe_id").eq("label", req.index_universe).limit(1).execute()
+                if not u_resp.data:
+                    return {}
+                universe_id = u_resp.data[0]["universe_id"]
                 rows: list[dict] = []
                 offset = 0
                 page_size = 1000
                 while True:
                     resp = (
-                        supabase.table("index_membership")
+                        supabase.table("universe_membership")
                         .select("target_month, company_id")
-                        .eq("index_name", req.index_universe)
-                        .not_.is_("company_id", "null")
+                        .eq("universe_id", universe_id)
                         .order("target_month")
                         .range(offset, offset + page_size - 1)
                         .execute()
@@ -1179,8 +1214,8 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             yield _emit({"type": "progress", "pct": 5, "message": f"Ensuring price & volume data for {total_companies} companies (cutoff: {data_cutoff})..."})
             for idx, (_, row) in enumerate(universe_df.iterrows()):
                 pct = 5 + round((idx / total_companies) * 55)
-                ticker = row["primary_ticker"]
-                exchange = row["primary_exchange"]
+                ticker = row["gurufocus_ticker"]
+                exchange = row["gurufocus_exchange"] or "UNKNOWN"
                 symbol = f"{exchange}:{ticker}"
 
                 # Skip companies on blocked exchanges
@@ -1275,7 +1310,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
 
         # Optionally limit universe size (alphabetical by ticker) — applied after exclusions
         if req.max_companies > 0 and len(universe_df) > req.max_companies:
-            universe_df = universe_df.sort_values("primary_ticker").head(req.max_companies).reset_index(drop=True)
+            universe_df = universe_df.sort_values("gurufocus_ticker").head(req.max_companies).reset_index(drop=True)
             yield _emit({"type": "progress", "pct": 61, "message": f"Limited to {len(universe_df)} companies (alphabetical)"})
 
         company_ids = universe_df["company_id"].tolist()
@@ -1366,8 +1401,8 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         universe_snapshot = [
             {
                 "company_id": int(row["company_id"]),
-                "ticker": str(row["primary_ticker"]),
-                "exchange": str(row["primary_exchange"]),
+                "ticker": str(row["gurufocus_ticker"]),
+                "exchange": str(row.get("gurufocus_exchange", "")),
                 "company_name": str(row.get("company_name", "")),
                 "sector": str(row.get("sector", "")),
             }
@@ -1407,9 +1442,11 @@ async def save_backtest(req: SaveBacktestRequest):
     row = {
         "name": req.name.strip(),
         "config": req.config,
-        "summary": req.summary,
-        "monthly_records": req.monthly_records,
-        "universe": req.universe,
+        "result": {
+            "summary": req.summary,
+            "monthly_records": req.monthly_records,
+            "universe": req.universe,
+        },
     }
     resp = await asyncio.to_thread(
         lambda: supabase.table("backtest_run").insert(row).execute()
@@ -1424,11 +1461,16 @@ async def list_backtests():
     """List saved backtests (metadata only, no monthly_records)."""
     resp = await asyncio.to_thread(
         lambda: supabase.table("backtest_run")
-        .select("run_id, name, created_at, config, summary")
+        .select("run_id, name, created_at, config, result")
         .order("created_at", desc=True)
         .execute()
     )
-    return resp.data
+    # Extract summary from result for backward compatibility
+    rows = resp.data or []
+    for r in rows:
+        result = r.get("result") or {}
+        r["summary"] = result.get("summary")
+    return rows
 
 
 @app.get("/api/momentum/backtests/{run_id}")
@@ -1669,9 +1711,15 @@ async def universe_screen(body: ScreenRequest = ScreenRequest()):
     def _run(q: queue.Queue):
         # Get all companies
         resp = supabase.table("company").select(
-            "company_id, primary_ticker, primary_exchange, company_name, sector, country"
+            "company_id, gurufocus_ticker, exchange_id, company_name, gurufocus_exchange:gurufocus_exchange(exchange_code, country:country(country_name))"
         ).limit(10000).execute()
-        companies = resp.data or []
+        companies = []
+        for c in (resp.data or []):
+            exch_info = c.pop("gurufocus_exchange", None) or {}
+            country_info = exch_info.pop("country", None) or {}
+            c["gurufocus_exchange"] = exch_info.get("exchange_code")
+            c["country"] = country_info.get("country_name")
+            companies.append(c)
         label = f" as of {as_of}" if as_of else ""
         q.put(json.dumps({"type": "progress", "message": f"Found {len(companies)} companies to screen{label}."}))
 
@@ -1723,9 +1771,15 @@ async def universe_build(body: BuildUniverseRequest):
 
     def _run(q: queue.Queue):
         resp = supabase.table("company").select(
-            "company_id, primary_ticker, primary_exchange, company_name, sector, country"
+            "company_id, gurufocus_ticker, exchange_id, company_name, gurufocus_exchange:gurufocus_exchange(exchange_code, country:country(country_name))"
         ).limit(10000).execute()
-        companies = resp.data or []
+        companies = []
+        for c in (resp.data or []):
+            exch_info = c.pop("gurufocus_exchange", None) or {}
+            country_info = exch_info.pop("country", None) or {}
+            c["gurufocus_exchange"] = exch_info.get("exchange_code")
+            c["country"] = country_info.get("country_name")
+            companies.append(c)
 
         for event in build_and_store_universes(supabase, companies, start, end, label=lbl, max_companies=max_co):
             q.put(json.dumps(event))
@@ -1759,7 +1813,7 @@ async def universe_build(body: BuildUniverseRequest):
 async def universe_labels():
     """List all universe labels with date ranges and counts."""
     def _run():
-        resp = supabase.rpc("universe_labels").execute()
+        resp = supabase.table("universe").select("universe_id, label, description, created_at").order("label").execute()
         return resp.data or []
     return await asyncio.to_thread(_run)
 
@@ -1768,49 +1822,65 @@ async def universe_labels():
 async def universe_months(label: str = "default"):
     """List stored universe months with counts for a label."""
     def _run():
-        resp = supabase.rpc("universe_month_counts", {"p_label": label}).execute()
-        return resp.data or []
+        # Get universe_id for this label
+        u_resp = supabase.table("universe").select("universe_id").eq("label", label).limit(1).execute()
+        if not u_resp.data:
+            return []
+        universe_id = u_resp.data[0]["universe_id"]
+        # Get distinct months with counts
+        resp = supabase.table("universe_membership").select("target_month").eq("universe_id", universe_id).limit(10000).execute()
+        rows = resp.data or []
+        from collections import Counter
+        counts = Counter(r["target_month"] for r in rows)
+        return [{"target_month": m, "count": c} for m, c in sorted(counts.items())]
 
     return await asyncio.to_thread(_run)
 
 
 @app.get("/api/universe/months/{month}")
 async def universe_month_detail(month: str, label: str = "default"):
-    """Get all companies for a specific month with scores."""
+    """Get all companies for a specific month in a universe."""
     def _run():
-        resp = supabase.table("universe_snapshot").select(
-            "company_id, total_score, scores, details, passes"
-        ).eq("label", label).eq("target_month", month).limit(10000).execute()
-        snapshot_rows = resp.data or []
+        # Get universe_id
+        u_resp = supabase.table("universe").select("universe_id").eq("label", label).limit(1).execute()
+        if not u_resp.data:
+            return []
+        universe_id = u_resp.data[0]["universe_id"]
 
-        if not snapshot_rows:
+        resp = supabase.table("universe_membership").select(
+            "company_id, universe_ticker, sector"
+        ).eq("universe_id", universe_id).eq("target_month", month).limit(10000).execute()
+        membership_rows = resp.data or []
+
+        if not membership_rows:
             return []
 
         # Get company info
-        cids = [r["company_id"] for r in snapshot_rows]
+        cids = [r["company_id"] for r in membership_rows]
         company_map: dict[int, dict] = {}
         for i in range(0, len(cids), 50):
             batch = cids[i:i + 50]
             cr = supabase.table("company").select(
-                "company_id, primary_ticker, primary_exchange, company_name, sector, country"
+                "company_id, gurufocus_ticker, company_name, gurufocus_exchange:gurufocus_exchange(exchange_code, country:country(country_name))"
             ).in_("company_id", batch).execute()
             for c in (cr.data or []):
+                exch_info = c.pop("gurufocus_exchange", None) or {}
+                country_info = exch_info.pop("country", None) or {}
+                c["gurufocus_exchange"] = exch_info.get("exchange_code")
+                c["country"] = country_info.get("country_name")
                 company_map[c["company_id"]] = c
 
         result = []
-        for r in snapshot_rows:
+        for r in membership_rows:
             info = company_map.get(r["company_id"], {})
             result.append({
                 "company_id": r["company_id"],
-                "ticker": info.get("primary_ticker", ""),
-                "exchange": info.get("primary_exchange", ""),
+                "ticker": info.get("gurufocus_ticker", ""),
+                "exchange": info.get("gurufocus_exchange", ""),
                 "company_name": info.get("company_name", ""),
-                "sector": info.get("sector", ""),
+                "sector": r.get("sector", ""),
                 "country": info.get("country", ""),
-                "total_score": r["total_score"],
-                "scores": r["scores"],
-                "details": r["details"],
-                "passes": r["passes"],
+                "universe_ticker": r.get("universe_ticker", ""),
             })
         return result
 
@@ -1819,10 +1889,14 @@ async def universe_month_detail(month: str, label: str = "default"):
 
 @app.delete("/api/universe/months/{month}")
 async def universe_delete_month(month: str, label: str = "default"):
-    """Delete a specific month's universe snapshot."""
+    """Delete a specific month's universe membership."""
     def _run():
-        supabase.table("universe_snapshot").delete().eq(
-            "label", label
+        u_resp = supabase.table("universe").select("universe_id").eq("label", label).limit(1).execute()
+        if not u_resp.data:
+            return {"deleted": month}
+        universe_id = u_resp.data[0]["universe_id"]
+        supabase.table("universe_membership").delete().eq(
+            "universe_id", universe_id
         ).eq("target_month", month).execute()
         return {"deleted": month}
     return await asyncio.to_thread(_run)
@@ -1830,9 +1904,9 @@ async def universe_delete_month(month: str, label: str = "default"):
 
 @app.delete("/api/universe/labels/{label}")
 async def universe_delete_label(label: str):
-    """Delete all months for a specific universe label."""
+    """Delete a universe and all its memberships (cascade)."""
     def _run():
-        supabase.table("universe_snapshot").delete().eq("label", label).execute()
+        supabase.table("universe").delete().eq("label", label).execute()
         return {"deleted": label}
     return await asyncio.to_thread(_run)
 
@@ -1842,9 +1916,15 @@ async def universe_validate():
     """Compare current screening results against LongEquity snapshots."""
     def _run():
         resp = supabase.table("company").select(
-            "company_id, primary_ticker, primary_exchange, company_name, sector, country"
+            "company_id, gurufocus_ticker, exchange_id, company_name, gurufocus_exchange:gurufocus_exchange(exchange_code, country:country(country_name))"
         ).limit(10000).execute()
-        companies = resp.data or []
+        companies = []
+        for c in (resp.data or []):
+            exch_info = c.pop("gurufocus_exchange", None) or {}
+            country_info = exch_info.pop("country", None) or {}
+            c["gurufocus_exchange"] = exch_info.get("exchange_code")
+            c["country"] = country_info.get("country_name")
+            companies.append(c)
 
         results = []
         for event in screen_universe(supabase, companies):
@@ -1937,19 +2017,25 @@ async def index_universe_import_sp500():
 @app.get("/api/index-universe/indexes")
 async def index_universe_list():
     """List all stored index universes."""
-    resp = await asyncio.to_thread(
-        lambda: supabase.rpc("index_membership_indexes").execute()
-    )
-    return resp.data or []
+    def _run():
+        resp = supabase.table("universe").select("universe_id, label, description, created_at").order("label").execute()
+        return resp.data or []
+    return await asyncio.to_thread(_run)
 
 
 @app.get("/api/index-universe/months")
 async def index_universe_months(index: str = "SP500"):
     """List months for a given index with ticker counts."""
-    resp = await asyncio.to_thread(
-        lambda: supabase.rpc("index_membership_months", {"p_index": index}).execute()
-    )
-    return resp.data or []
+    def _run():
+        u_resp = supabase.table("universe").select("universe_id").eq("label", index).limit(1).execute()
+        if not u_resp.data:
+            return []
+        universe_id = u_resp.data[0]["universe_id"]
+        resp = supabase.table("universe_membership").select("target_month").eq("universe_id", universe_id).limit(100000).execute()
+        from collections import Counter
+        counts = Counter(r["target_month"] for r in (resp.data or []))
+        return [{"target_month": m, "count": c} for m, c in sorted(counts.items())]
+    return await asyncio.to_thread(_run)
 
 
 def _enrich_tickers(rows: list[dict]) -> list[dict]:
@@ -1958,11 +2044,14 @@ def _enrich_tickers(rows: list[dict]) -> list[dict]:
     company_info: dict[int, dict] = {}
     for i in range(0, len(company_ids), 50):
         chunk = company_ids[i : i + 50]
-        resp = supabase.table("company").select("company_id, company_name, primary_exchange").in_("company_id", chunk).execute()
+        resp = supabase.table("company").select(
+            "company_id, company_name, gurufocus_exchange:gurufocus_exchange(exchange_code)"
+        ).in_("company_id", chunk).execute()
         for c in resp.data or []:
+            exch_info = c.get("gurufocus_exchange") or {}
             company_info[c["company_id"]] = {
                 "company_name": c.get("company_name") or "",
-                "exchange": c.get("primary_exchange") or "",
+                "exchange": exch_info.get("exchange_code") or "",
             }
 
     result = []
@@ -1986,14 +2075,21 @@ async def index_universe_tickers(index: str = "SP500", month: str = ""):
         raise HTTPException(400, "month query param required")
 
     def _run():
+        u_resp = supabase.table("universe").select("universe_id").eq("label", index).limit(1).execute()
+        if not u_resp.data:
+            return []
+        universe_id = u_resp.data[0]["universe_id"]
         rows = (
-            supabase.table("index_membership")
-            .select("ticker, company_id")
-            .eq("index_name", index)
+            supabase.table("universe_membership")
+            .select("universe_ticker, company_id")
+            .eq("universe_id", universe_id)
             .eq("target_month", month)
-            .order("ticker")
+            .order("universe_ticker")
             .execute()
         ).data or []
+        # Map universe_ticker -> ticker for _enrich_tickers compatibility
+        for r in rows:
+            r["ticker"] = r.pop("universe_ticker", "")
         return _enrich_tickers(rows)
 
     return await asyncio.to_thread(_run)
@@ -2003,10 +2099,21 @@ async def index_universe_tickers(index: str = "SP500", month: str = ""):
 async def index_universe_cumulative(index: str = "SP500"):
     """Get all unique tickers across all months for an index, with company + GF info."""
     def _run():
-        rows = supabase.rpc(
-            "index_membership_cumulative", {"p_index": index}
-        ).execute().data or []
-        return _enrich_tickers(rows)
+        u_resp = supabase.table("universe").select("universe_id").eq("label", index).limit(1).execute()
+        if not u_resp.data:
+            return []
+        universe_id = u_resp.data[0]["universe_id"]
+        # Get all distinct (universe_ticker, company_id) pairs
+        resp = supabase.table("universe_membership").select(
+            "universe_ticker, company_id"
+        ).eq("universe_id", universe_id).limit(100000).execute()
+        # Deduplicate by ticker
+        seen: dict[str, dict] = {}
+        for r in (resp.data or []):
+            t = r.get("universe_ticker")
+            if t and t not in seen:
+                seen[t] = {"ticker": t, "company_id": r["company_id"]}
+        return _enrich_tickers(list(seen.values()))
 
     return await asyncio.to_thread(_run)
 
@@ -2023,15 +2130,23 @@ async def index_universe_check_gf(index: str = "SP500"):
         try:
             # Collect all unique tickers for this index
             emit(f"Loading tickers for {index}...")
+            u_resp = supabase.table("universe").select("universe_id").eq("label", index).limit(1).execute()
+            if not u_resp.data:
+                q.put(json.dumps({"type": "error", "message": f"Universe '{index}' not found"}))
+                q.put(None)
+                return
+            universe_id = u_resp.data[0]["universe_id"]
             all_tickers: set[str] = set()
             resp = (
-                supabase.table("index_membership")
-                .select("ticker")
-                .eq("index_name", index)
+                supabase.table("universe_membership")
+                .select("universe_ticker")
+                .eq("universe_id", universe_id)
+                .limit(100000)
                 .execute()
             )
             for r in resp.data or []:
-                all_tickers.add(r["ticker"])
+                if r.get("universe_ticker"):
+                    all_tickers.add(r["universe_ticker"])
 
             emit(f"Found {len(all_tickers)} unique tickers across all months")
 
@@ -2073,9 +2188,9 @@ async def index_universe_changes(index: str = "SP500"):
 
 @app.delete("/api/index-universe/indexes/{index_name}")
 async def index_universe_delete(index_name: str):
-    """Delete all data for an index."""
+    """Delete all data for an index (deletes the universe and cascades memberships)."""
     await asyncio.to_thread(
-        lambda: supabase.table("index_membership").delete().eq("index_name", index_name).neq("ticker", "").execute()
+        lambda: supabase.table("universe").delete().eq("label", index_name).execute()
     )
     return {"ok": True}
 
@@ -2083,10 +2198,28 @@ async def index_universe_delete(index_name: str):
 @app.get("/api/acwi/holdings")
 async def acwi_holdings():
     """Return parsed ACWI ETF holdings from the local XLS file."""
-    holdings, as_of = await asyncio.to_thread(load_acwi_holdings)
-    for h in holdings:
-        h["gurufocus_url"] = gurufocus_url(h.get("Ticker", ""), h.get("Exchange", ""))
-    return {"holdings": holdings, "count": len(holdings), "as_of": as_of}
+    def work():
+        holdings, as_of = load_acwi_holdings()
+
+        # Load exchange→currency from gurufocus_exchange table
+        try:
+            rows = supabase.table("gurufocus_exchange").select("exchange_code,currency_code").execute()
+            db_currencies = {r["exchange_code"]: r["currency_code"] for r in (rows.data or [])}
+        except Exception:
+            db_currencies = {}
+
+        for h in holdings:
+            exch = h.get("Exchange", "")
+            h["gurufocus_url"] = gurufocus_url(h.get("Ticker", ""), exch)
+            gf_code = gurufocus_exchange(exch)
+            h["gf_exchange"] = gf_code if gf_code else None
+            # Look up currency from DB using the exchange code
+            db_code = gurufocus_exchange_for_db(exch)
+            h["gf_currency"] = db_currencies.get(db_code) if db_code else None
+
+        return {"holdings": holdings, "count": len(holdings), "as_of": as_of}
+
+    return await asyncio.to_thread(work)
 
 
 @app.get("/api/acwi/announcements")
@@ -2259,19 +2392,22 @@ async def indicators_fetch(req: IndicatorRequest):
         logs = []
 
         # 1. Find or create company
+        # Look up exchange_id
+        exch_resp = supabase.table("gurufocus_exchange").select("exchange_id").eq("exchange_code", exchange).limit(1).execute()
+        exchange_id = exch_resp.data[0]["exchange_id"] if exch_resp.data else None
+
         existing = supabase.table("company").select("company_id").eq(
-            "primary_ticker", ticker
-        ).eq("primary_exchange", exchange).execute()
+            "gurufocus_ticker", ticker
+        ).eq("exchange_id", exchange_id).execute()
 
         if existing.data:
             company_id = existing.data[0]["company_id"]
             logs.append(f"Found company {symbol} (id={company_id})")
         else:
             created = supabase.table("company").insert({
-                "primary_ticker": ticker,
-                "primary_exchange": exchange,
+                "gurufocus_ticker": ticker,
+                "exchange_id": exchange_id,
                 "company_name": symbol,
-                "source": ["indicators_page"],
             }).execute()
             company_id = created.data[0]["company_id"]
             logs.append(f"Created company {symbol} (id={company_id})")
@@ -2373,6 +2509,123 @@ async def indicators_fetch(req: IndicatorRequest):
             "source": "cache" if cached is not None and not req.force_refresh else "api",
             "recent": recent,
             "logs": logs,
+        }
+
+    return await asyncio.to_thread(work)
+
+
+@app.get("/api/gurufocus/exchanges")
+async def gurufocus_exchanges(force_refresh: bool = False):
+    """Fetch the list of supported GuruFocus exchanges. Cached in Supabase Storage."""
+    from ingest.prices import (
+        _ensure_bucket, _fetch_from_storage, _upload_to_storage,
+        _BUCKET, _USER_AGENT,
+    )
+
+    def work():
+        path = "meta/exchange_list.json"
+        _ensure_bucket(supabase)
+
+        # Check cache
+        if not force_refresh:
+            cached = _fetch_from_storage(supabase, path)
+            if cached is not None:
+                return {"exchanges": cached, "source": "cache"}
+
+        # Fetch from API
+        base_url = os.environ.get("GURUFOCUS_BASE_URL", "").strip().rstrip("/")
+        if base_url.endswith("/data"):
+            base_url = base_url[: -len("/data")]
+        api_key = os.environ.get("GURUFOCUS_API_KEY", "")
+        if not base_url or not api_key:
+            raise HTTPException(status_code=500, detail="GURUFOCUS env vars not set")
+
+        import requests as req
+        url = f"{base_url}/public/user/{api_key}/exchange_list"
+        resp = req.get(url, timeout=30, headers={"User-Agent": _USER_AGENT})
+        resp.raise_for_status()
+        data = resp.json()
+
+        # Cache raw response
+        _upload_to_storage(supabase, path, data)
+
+        return {"exchanges": data, "source": "api"}
+
+    return await asyncio.to_thread(work)
+
+
+@app.get("/api/gurufocus/exchange-currencies")
+async def gurufocus_exchange_currencies(force_refresh: bool = False):
+    """Fetch exchange→currency mapping by joining exchange_list and country_currency
+    from GuruFocus. Caches raw responses in storage, stores mapping in DB."""
+    from ingest.prices import (
+        _ensure_bucket, _fetch_from_storage, _upload_to_storage,
+        _USER_AGENT,
+    )
+
+    def work():
+        _ensure_bucket(supabase)
+        import requests as req
+
+        base_url = os.environ.get("GURUFOCUS_BASE_URL", "").strip().rstrip("/")
+        if base_url.endswith("/data"):
+            base_url = base_url[: -len("/data")]
+        api_key = os.environ.get("GURUFOCUS_API_KEY", "")
+        if not base_url or not api_key:
+            raise HTTPException(status_code=500, detail="GURUFOCUS env vars not set")
+
+        # 1. Get exchange_list (country -> [codes])
+        exch_path = "meta/exchange_list.json"
+        exchanges = None
+        if not force_refresh:
+            exchanges = _fetch_from_storage(supabase, exch_path)
+        if exchanges is None:
+            r = req.get(
+                f"{base_url}/public/user/{api_key}/exchange_list",
+                timeout=30, headers={"User-Agent": _USER_AGENT},
+            )
+            r.raise_for_status()
+            exchanges = r.json()
+            _upload_to_storage(supabase, exch_path, exchanges)
+
+        # 2. Get country_currency ([{country, country_ISO, currency}])
+        curr_path = "meta/country_currency.json"
+        currencies_raw = None
+        if not force_refresh:
+            currencies_raw = _fetch_from_storage(supabase, curr_path)
+        if currencies_raw is None:
+            r = req.get(
+                f"{base_url}/public/user/{api_key}/country_currency",
+                timeout=30, headers={"User-Agent": _USER_AGENT},
+            )
+            r.raise_for_status()
+            currencies_raw = r.json()
+            _upload_to_storage(supabase, curr_path, currencies_raw)
+
+        # 3. Join: exchange_code -> {country, currency}
+        country_to_currency = {c["country"]: c["currency"] for c in currencies_raw}
+        mapping = []
+        unmapped = []
+        for country, codes in exchanges.items():
+            curr = country_to_currency.get(country)
+            if curr:
+                for code in codes:
+                    mapping.append({
+                        "exchange_code": code,
+                        "country": country,
+                        "currency": curr,
+                        "source": "gurufocus",
+                    })
+            else:
+                unmapped.append({"country": country, "codes": codes})
+
+        # 4. Return mapping (exchange_currency table was dropped;
+        #    gurufocus_exchange table now holds exchange→currency mapping)
+        return {
+            "mapping": mapping,
+            "total": len(mapping),
+            "unmapped": unmapped,
+            "source": "cache" if not force_refresh else "api",
         }
 
     return await asyncio.to_thread(work)

@@ -7,11 +7,10 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 type Company = {
   company_id: number;
-  primary_ticker: string;
-  primary_exchange: string;
+  gurufocus_ticker: string;
+  gurufocus_exchange: string;
   country: string | null;
   company_name: string | null;
-  longequity_ticker: string | null;
 };
 
 type SnapshotData = {
@@ -77,10 +76,9 @@ const REGION_ORDER: Region[] = ['USA', 'EU', 'Non-EU'];
 
 function CompanyRow({ c }: { c: Company }) {
   return (
-    <div className="grid grid-cols-[6rem_6rem_5rem_7rem_1fr] gap-x-3 py-1.5 pl-4 text-sm hover:bg-white/[0.02] rounded-lg transition-colors">
-      <span className="text-gray-500 truncate text-xs">{c.longequity_ticker ?? '—'}</span>
-      <span className="text-white font-medium truncate">{c.primary_ticker}</span>
-      <span className="text-gray-500 truncate text-xs">{c.primary_exchange}</span>
+    <div className="grid grid-cols-[6rem_5rem_7rem_1fr] gap-x-3 py-1.5 pl-4 text-sm hover:bg-white/[0.02] rounded-lg transition-colors">
+      <span className="text-white font-medium truncate">{c.gurufocus_ticker}</span>
+      <span className="text-gray-500 truncate text-xs">{c.gurufocus_exchange}</span>
       <span className="text-gray-500 truncate text-xs">{c.country?.trim() ?? '—'}</span>
       <span className="text-gray-400 truncate">{c.company_name ?? '—'}</span>
     </div>
@@ -89,9 +87,8 @@ function CompanyRow({ c }: { c: Company }) {
 
 function CompanyTableHeader() {
   return (
-    <div className="grid grid-cols-[6rem_6rem_5rem_7rem_1fr] gap-x-3 py-1.5 pl-4 text-xs font-medium text-gray-500 border-b border-gray-800/40 mb-0.5">
-      <span>LE Ticker</span>
-      <span>Primary</span>
+    <div className="grid grid-cols-[6rem_5rem_7rem_1fr] gap-x-3 py-1.5 pl-4 text-xs font-medium text-gray-500 border-b border-gray-800/40 mb-0.5">
+      <span>Ticker</span>
       <span>Exchange</span>
       <span>Country</span>
       <span>Name</span>
@@ -181,13 +178,13 @@ function escapeCsv(value: string | null | undefined): string {
 }
 
 function downloadCsv(companies: Company[], targetDate: string): void {
-  const header = ['longequity_ticker', 'primary_ticker', 'primary_exchange', 'country', 'name'];
+  const header = ['gurufocus_ticker', 'gurufocus_exchange', 'country', 'name'];
   const rows = companies
     .slice()
-    .sort((a, b) => (a.longequity_ticker ?? '').localeCompare(b.longequity_ticker ?? ''))
+    .sort((a, b) => a.gurufocus_ticker.localeCompare(b.gurufocus_ticker))
     .map((c) => [
-      escapeCsv(c.longequity_ticker), escapeCsv(c.primary_ticker),
-      escapeCsv(c.primary_exchange), escapeCsv(c.country), escapeCsv(c.company_name),
+      escapeCsv(c.gurufocus_ticker),
+      escapeCsv(c.gurufocus_exchange), escapeCsv(c.country), escapeCsv(c.company_name),
     ].join(','));
 
   const csv = [header.join(','), ...rows].join('\n');
@@ -309,14 +306,14 @@ export default function LongEquityInsight({ snapshots: initialSnapshots }: { sna
     if (!data) return null;
     const regions: Record<Region, Record<string, Company[]>> = { USA: {}, EU: {}, 'Non-EU': {} };
     for (const c of data.companies) {
-      const region = getRegion(c.primary_exchange);
-      const country = getListingCountry(c.primary_exchange);
+      const region = getRegion(c.gurufocus_exchange);
+      const country = getListingCountry(c.gurufocus_exchange);
       if (!regions[region][country]) regions[region][country] = [];
       regions[region][country].push(c);
     }
     for (const region of REGION_ORDER) {
       for (const country of Object.keys(regions[region])) {
-        regions[region][country].sort((a, b) => a.primary_ticker.localeCompare(b.primary_ticker));
+        regions[region][country].sort((a, b) => a.gurufocus_ticker.localeCompare(b.gurufocus_ticker));
       }
     }
     return regions;

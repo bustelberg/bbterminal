@@ -57,46 +57,43 @@ def prepare_flattened_for_schema(
     as_of_ts = _normalize_as_of_date(as_of_date)
     target_date_val = as_of_ts.date()
 
-    required = {"ticker", "company", "country", "primary_ticker", "primary_exchange"}
+    required = {"ticker", "company", "country", "gurufocus_ticker", "gurufocus_exchange"}
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
 
-    for c in ["ticker", "company", "country", "primary_ticker", "primary_exchange"]:
+    for c in ["ticker", "company", "country", "gurufocus_ticker", "gurufocus_exchange"]:
         df[c] = _to_text_series(df[c])
 
-    for c in ["primary_ticker", "primary_exchange"]:
+    for c in ["gurufocus_ticker", "gurufocus_exchange"]:
         if df[c].isna().any():
             raise ValueError(f"Found NULL values in required column '{c}'.")
         if (df[c].astype("string").str.strip() == "").any():
             raise ValueError(f"Found empty values in required column '{c}'.")
 
-    if "sector" in df.columns:
-        df["sector"] = _to_text_series(df["sector"])
-
-    # Company dimension
+    # Company dimension — sector and universe_ticker are stored per-universe,
+    # not on the company row.  We still carry them through the pipeline so
+    # the caller (load_into_supabase) can create universe_membership rows.
     company_dict: dict = {
-        "longequity_ticker": df["ticker"],
-        "primary_ticker": df["primary_ticker"],
-        "primary_exchange": df["primary_exchange"],
+        "universe_ticker": df["ticker"],
+        "gurufocus_ticker": df["gurufocus_ticker"],
+        "gurufocus_exchange": df["gurufocus_exchange"],
         "country": df["country"],
         "company_name": df["company"],
     }
     if "sector" in df.columns:
-        company_dict["sector"] = df["sector"]
+        company_dict["sector"] = _to_text_series(df["sector"])
 
     company = pd.DataFrame(company_dict)
-    company = company.dropna(subset=["primary_ticker", "primary_exchange"])
-    company = company.drop_duplicates(subset=["primary_ticker", "primary_exchange"]).reset_index(drop=True)
+    company = company.dropna(subset=["gurufocus_ticker", "gurufocus_exchange"])
+    company = company.drop_duplicates(subset=["gurufocus_ticker", "gurufocus_exchange"]).reset_index(drop=True)
 
-    company_cols = ["longequity_ticker", "primary_ticker", "primary_exchange", "country", "company_name"]
-    if "sector" in company.columns:
-        company_cols.append("sector")
+    company_cols = list(company.columns)
     for col in company_cols:
         company[col] = company[col].astype("string")
 
     # Identify metric columns
-    non_metric_cols = {"ticker", "company", "country", "primary_ticker", "primary_exchange"}
+    non_metric_cols = {"ticker", "company", "country", "gurufocus_ticker", "gurufocus_exchange"}
     if "sector" in df.columns:
         non_metric_cols.add("sector")
     metric_cols = [c for c in df.columns if c not in non_metric_cols]
@@ -105,8 +102,8 @@ def prepare_flattened_for_schema(
     metric_type_map = {col: _infer_value_type(df[col]) for col in metric_cols}
 
     # Melt to long form
-    long = df[["primary_ticker", "primary_exchange"] + metric_cols].melt(
-        id_vars=["primary_ticker", "primary_exchange"],
+    long = df[["gurufocus_ticker", "gurufocus_exchange"] + metric_cols].melt(
+        id_vars=["gurufocus_ticker", "gurufocus_exchange"],
         var_name="metric_code",
         value_name="raw_value",
     )
@@ -129,18 +126,13 @@ def prepare_flattened_for_schema(
     long["is_prediction"] = False
 
     # Deduplicate
-    pk = ["primary_ticker", "primary_exchange", "metric_code", "source_code", "target_date"]
+    pk = ["gurufocus_ticker", "gurufocus_exchange", "metric_code", "source_code", "target_date"]
     long = long.drop_duplicates(subset=pk).reset_index(drop=True)
 
     metric_data = long[[
-        "primary_ticker", "primary_exchange", "metric_code",
+        "gurufocus_ticker", "gurufocus_exchange", "metric_code",
         "source_code", "target_date", "numeric_value", "text_value", "is_prediction",
     ]]
-
-    base_company_cols = ["longequity_ticker", "primary_ticker", "primary_exchange", "country", "company_name"]
-    if "sector" in company.columns:
-        base_company_cols.append("sector")
-    company = company[base_company_cols]
 
     return PreparedForSchema(
         company=company,

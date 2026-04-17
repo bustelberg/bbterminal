@@ -83,7 +83,7 @@ def screen_universe(
     Yields SSE-style event dicts as it progresses.
 
     Args:
-        companies: List of {company_id, primary_ticker, primary_exchange, company_name, ...}
+        companies: List of {company_id, gurufocus_ticker, gurufocus_exchange, company_name, ...}
         as_of_year: Evaluate criteria as of this year (YYYY-MM format, e.g. "2025-12").
                     If None, uses latest available data.
         force_refresh: If True, always fetch from API even if cached.
@@ -104,8 +104,8 @@ def screen_universe(
 
     for i, company in enumerate(companies):
         cid = company["company_id"]
-        ticker = company["primary_ticker"]
-        exchange = company["primary_exchange"]
+        ticker = company["gurufocus_ticker"]
+        exchange = company.get("gurufocus_exchange") or "UNKNOWN"
         name = company.get("company_name", ticker)
 
         # Skip exchanges we already know are forbidden
@@ -268,8 +268,8 @@ def build_and_store_universes(
 
     for i, company in enumerate(companies):
         cid = company["company_id"]
-        ticker = company["primary_ticker"]
-        exchange = company["primary_exchange"]
+        ticker = company["gurufocus_ticker"]
+        exchange = company.get("gurufocus_exchange") or "UNKNOWN"
         company_info[cid] = company
 
         # Skip exchanges we know are unsubscribed

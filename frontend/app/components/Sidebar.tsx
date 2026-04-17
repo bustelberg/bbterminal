@@ -14,7 +14,7 @@ const navItems = [
   { href: '/acwi', label: 'ACWI Universe' },
   { href: '/fx-rates', label: 'FX Rates' },
   { href: '/airs-portfolio', label: 'AIRS Portfolio' },
-  { href: '/indicators', label: 'Indicators' },
+  { href: '/request_gurufocus', label: 'Request GuruFocus' },
   { href: '/benchmarks', label: 'Benchmarks' },
   { href: '/companies', label: 'Companies' },
 ];

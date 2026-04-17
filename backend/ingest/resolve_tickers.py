@@ -9,7 +9,7 @@ import requests
 _OPENFIGI_URL = "https://api.openfigi.com/v3/mapping"
 _BATCH_SIZE = 100
 
-# OpenFIGI exchCode → our primary_exchange label.
+# OpenFIGI exchCode → our gurufocus_exchange code.
 # Unknown codes are kept as-is (still better than UNKNOWN).
 _EXCHCODE_MAP: dict[str, str] = {
     # OpenFIGI exchCode → GuruFocus exchange name
@@ -172,7 +172,7 @@ _COUNTRY_TO_EXCHCODE: dict[str, str] = {
 def resolve_via_openfigi(unknowns: list[dict]) -> list[dict]:
     """
     Resolve unknown tickers via the OpenFIGI API.
-    Returns list of {ticker, primary_ticker, primary_exchange, source} for each resolved ticker.
+    Returns list of {ticker, gurufocus_ticker, gurufocus_exchange, source} for each resolved ticker.
     Unresolvable tickers are silently skipped.
     Set OPENFIGI_API_KEY env var for higher rate limits (optional).
     """
@@ -225,11 +225,11 @@ def resolve_via_openfigi(unknowns: list[dict]) -> list[dict]:
                 continue
             exchange = _exchcode_to_exchange(match.get("exchCode"))
             raw_ticker = match.get("ticker") or u["ticker"]
-            primary_ticker = _normalize_ticker_for_gurufocus(raw_ticker, exchange)
+            gf_ticker = _normalize_ticker_for_gurufocus(raw_ticker, exchange)
             resolved.append({
                 "ticker": u["ticker"],
-                "primary_ticker": primary_ticker,
-                "primary_exchange": exchange,
+                "gurufocus_ticker": gf_ticker,
+                "gurufocus_exchange": exchange,
                 "source": "openfigi",
             })
 

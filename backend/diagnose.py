@@ -321,9 +321,12 @@ def check_db_data(sb, ticker: str, exchange: str):
 
     # Find company_id
     try:
+        # Look up exchange_id first
+        exch_resp = sb.table("gurufocus_exchange").select("exchange_id").eq("exchange_code", exchange.upper()).limit(1).execute()
+        eid = exch_resp.data[0]["exchange_id"] if exch_resp.data else None
         resp = sb.table("company").select("company_id, company_name").eq(
-            "primary_ticker", ticker.upper()
-        ).eq("primary_exchange", exchange.upper()).execute()
+            "gurufocus_ticker", ticker.upper()
+        ).eq("exchange_id", eid).execute()
         if not resp.data:
             warn(f"Company {ticker}.{exchange} not found in database")
             return

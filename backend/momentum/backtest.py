@@ -416,7 +416,7 @@ def run_backtest(
 
             holdings.append(MonthlyHolding(
                 company_id=cid,
-                ticker=str(row.get("primary_ticker", "")),
+                ticker=str(row.get("gurufocus_ticker", "")),
                 company_name=str(row.get("company_name", "")),
                 sector=str(row["sector"]),
                 score=round(float(row["momentum_score"]), 2),

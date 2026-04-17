@@ -30,21 +30,31 @@ def _query_with_retry(query_fn, description: str = "query"):
                 raise
 
 
-def load_universe(supabase: Client) -> pd.DataFrame:
-    """Load all companies with sector info.
+def load_universe(
+    supabase: Client,
+    *,
+    universe_label: str | None = None,
+    target_month: str | None = None,
+) -> pd.DataFrame:
+    """Load companies for backtesting.
+
+    If universe_label and target_month are given, loads from universe_membership
+    for that specific universe/month (with sector from the membership row).
+    Otherwise loads all companies joined with their exchange info.
 
     Returns DataFrame with columns:
-        company_id, company_name, primary_ticker, primary_exchange, sector, country
+        company_id, company_name, gurufocus_ticker, gurufocus_exchange, sector, country
     """
     rows: list[dict] = []
     page_size = 1000
     offset = 0
 
+    # Load companies with exchange info
     while True:
         resp = _query_with_retry(
             lambda o=offset: (
                 supabase.table("company")
-                .select("company_id, company_name, primary_ticker, primary_exchange, sector, country")
+                .select("company_id, company_name, gurufocus_ticker, exchange_id, gurufocus_exchange:gurufocus_exchange(exchange_code, country:country(country_name))")
                 .range(o, o + page_size - 1)
                 .execute()
             ),
@@ -59,12 +69,60 @@ def load_universe(supabase: Client) -> pd.DataFrame:
 
     if not rows:
         return pd.DataFrame(
-            columns=["company_id", "company_name", "primary_ticker", "primary_exchange", "sector", "country"]
+            columns=["company_id", "company_name", "gurufocus_ticker", "gurufocus_exchange", "sector", "country"]
         )
 
-    df = pd.DataFrame(rows)
-    # Drop companies without a sector (can't do sector-level selection)
-    df = df.dropna(subset=["sector"]).reset_index(drop=True)
+    # Flatten the nested exchange/country join
+    flat_rows = []
+    for r in rows:
+        exchange_info = r.get("gurufocus_exchange") or {}
+        country_info = exchange_info.get("country") or {}
+        flat_rows.append({
+            "company_id": r["company_id"],
+            "company_name": r["company_name"],
+            "gurufocus_ticker": r["gurufocus_ticker"],
+            "gurufocus_exchange": exchange_info.get("exchange_code"),
+            "country": country_info.get("country_name"),
+        })
+
+    df = pd.DataFrame(flat_rows)
+
+    # If a universe is specified, join with universe_membership for sector
+    if universe_label and target_month:
+        # Get universe_id
+        u_resp = supabase.table("universe").select("universe_id").eq("label", universe_label).limit(1).execute()
+        if u_resp.data:
+            universe_id = u_resp.data[0]["universe_id"]
+            # Load membership rows
+            m_rows: list[dict] = []
+            m_offset = 0
+            while True:
+                m_resp = _query_with_retry(
+                    lambda o=m_offset: (
+                        supabase.table("universe_membership")
+                        .select("company_id, sector, universe_ticker")
+                        .eq("universe_id", universe_id)
+                        .eq("target_month", target_month)
+                        .range(o, o + page_size - 1)
+                        .execute()
+                    ),
+                    description="load_universe_membership",
+                )
+                if not m_resp.data:
+                    break
+                m_rows.extend(m_resp.data)
+                if len(m_resp.data) < page_size:
+                    break
+                m_offset += page_size
+
+            if m_rows:
+                membership_df = pd.DataFrame(m_rows)
+                df = df.merge(membership_df[["company_id", "sector"]], on="company_id", how="inner")
+                df = df.dropna(subset=["sector"]).reset_index(drop=True)
+                return df
+
+    # Fallback: no sector info available, return without sector filtering
+    df["sector"] = None
     return df
 
 

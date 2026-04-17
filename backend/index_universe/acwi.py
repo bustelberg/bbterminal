@@ -145,6 +145,49 @@ _ISHARES_TO_GF: dict[str, str] = {
     "Standard-Classica-Forts": "MCX",
 }
 
+# Map URL-style GF codes to exchange_list API codes (for DB currency lookup)
+_GF_URL_TO_API: dict[str, str] = {
+    "BDP": "BUD",
+    "EGX": "CAI",
+    "GTSM": "ROCO",
+    "IDX": "ISX",
+    "ISE": "DUB",
+    "KLSE": "XKLS",
+    "KSE": "KUW",
+    "MCX": "MIC",
+    "PRA": "XPRA",
+    "PSE": "PHS",
+    "QSE": "DSMD",
+    "SET": "BKK",
+    "SGO": "XSGO",
+    "TADAWUL": "SAU",
+    "TASE": "XTAE",
+    "TWSE": "TPE",
+}
+
+
+def gurufocus_exchange(exchange: str) -> str | None:
+    """Return the GuruFocus exchange code for an iShares exchange name.
+
+    Returns empty string for US exchanges (no prefix needed), None if unknown.
+    """
+    return _ISHARES_TO_GF.get(exchange)
+
+
+def gurufocus_exchange_for_db(exchange: str) -> str | None:
+    """Return the exchange_currency DB code for an iShares exchange name.
+
+    Maps through _ISHARES_TO_GF first, then converts URL codes to API codes.
+    """
+    gf = _ISHARES_TO_GF.get(exchange)
+    if gf is None:
+        return None
+    if gf == "":
+        # US exchanges — use NAS/NYSE from the API
+        us_map = {"NYSE": "NYSE", "NASDAQ": "NAS", "Cboe BZX": "NAS"}
+        return us_map.get(exchange, "NYSE")
+    return _GF_URL_TO_API.get(gf, gf)
+
 
 def gurufocus_url(ticker: str, exchange: str) -> str | None:
     """Build a GuruFocus summary URL for a holding.

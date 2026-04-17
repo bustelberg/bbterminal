@@ -19,6 +19,8 @@ type Holding = {
   Currency: string;
   'FX Rate': string;
   gurufocus_url: string | null;
+  gf_exchange: string | null;
+  gf_currency: string | null;
 };
 
 type Detail = {
@@ -780,7 +782,9 @@ export default function AcwiUniverse() {
                       ['Location', 'Location', 'left'],
                       ['Price', 'Price', 'right'],
                       ['Exchange', 'Exchange', 'left'],
+                      ['gf_exchange', 'GF Exchange', 'left'],
                       ['Currency', 'Currency', 'left'],
+                      ['gf_currency', 'GF Currency', 'left'],
                       ['Weight (%)', 'Weight', 'right'],
                       ['Market Value', 'Market Value', 'right'],
                     ] as const).map(([key, label, align]) => (
@@ -828,7 +832,9 @@ export default function AcwiUniverse() {
                       <td className="px-3 py-2.5 text-gray-400">{h.Location}</td>
                       <td className="px-3 py-2.5 text-gray-300 font-mono text-right">{fmtNum(h.Price)}</td>
                       <td className="px-3 py-2.5 text-gray-400 text-xs">{h.Exchange}</td>
+                      <td className="px-3 py-2.5 text-indigo-400 font-mono text-xs">{h.gf_exchange ?? <span className="text-gray-600">-</span>}</td>
                       <td className="px-3 py-2.5 text-gray-400 font-mono text-xs">{h.Currency}</td>
+                      <td className="px-3 py-2.5 text-indigo-400 font-mono text-xs">{h.gf_currency ?? <span className="text-gray-600">-</span>}</td>
                       <td className="px-3 py-2.5 text-gray-300 font-mono text-right">{fmtNum(h['Weight (%)'])}%</td>
                       <td className="px-3 py-2.5 text-gray-300 font-mono text-right">{fmtMv(h['Market Value'])}</td>
                     </tr>

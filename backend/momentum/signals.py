@@ -236,7 +236,7 @@ def compute_price_signals(
     signals_df = pd.DataFrame(results)
     # Merge sector from universe
     signals_df = signals_df.merge(
-        universe_df[["company_id", "sector", "company_name", "primary_ticker"]],
+        universe_df[["company_id", "sector", "company_name", "gurufocus_ticker"]],
         on="company_id",
         how="left",
     )
