@@ -57,6 +57,8 @@ export default function AcwiUniverse() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
+  const [sortCol, setSortCol] = useState<string | null>(null);
+  const [sortAsc, setSortAsc] = useState(true);
 
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [annLoading, setAnnLoading] = useState(true);
@@ -205,16 +207,33 @@ export default function AcwiUniverse() {
   }, [manualDetails]);
 
   const filtered = useMemo(() => {
-    if (!filter) return holdings;
-    const q = filter.toLowerCase();
-    return holdings.filter(
-      h =>
-        h.Ticker.toLowerCase().includes(q) ||
-        h.Name.toLowerCase().includes(q) ||
-        h.Sector.toLowerCase().includes(q) ||
-        h.Location.toLowerCase().includes(q)
-    );
-  }, [holdings, filter]);
+    let result = holdings;
+    if (filter) {
+      const q = filter.toLowerCase();
+      result = result.filter(
+        h =>
+          h.Ticker.toLowerCase().includes(q) ||
+          h.Name.toLowerCase().includes(q) ||
+          h.Sector.toLowerCase().includes(q) ||
+          h.Location.toLowerCase().includes(q)
+      );
+    }
+    if (sortCol) {
+      const numericCols = new Set(['Weight (%)', 'Market Value', 'Price', 'Quantity', 'FX Rate']);
+      const isNumeric = numericCols.has(sortCol);
+      result = [...result].sort((a, b) => {
+        const av = (a as Record<string, string>)[sortCol] ?? '';
+        const bv = (b as Record<string, string>)[sortCol] ?? '';
+        if (isNumeric) {
+          const na = parseFloat(av) || 0;
+          const nb = parseFloat(bv) || 0;
+          return sortAsc ? na - nb : nb - na;
+        }
+        return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+      });
+    }
+    return result;
+  }, [holdings, filter, sortCol, sortAsc]);
 
   const sectorBreakdown = useMemo(() => {
     const map: Record<string, { count: number; weight: number }> = {};
@@ -750,19 +769,39 @@ export default function AcwiUniverse() {
             </div>
             <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
               <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-[#151821]">
+                <thead className="sticky top-0 bg-[#151821] z-10">
                   <tr className="text-gray-400 text-xs uppercase tracking-wider">
                     <th className="text-left px-3 py-2.5 font-medium">#</th>
-                    <th className="text-left px-3 py-2.5 font-medium">Ticker</th>
-                    <th className="text-left px-3 py-2.5 font-medium">Name</th>
-                    <th className="text-left px-3 py-2.5 font-medium">GuruFocus</th>
-                    <th className="text-left px-3 py-2.5 font-medium">Sector</th>
-                    <th className="text-left px-3 py-2.5 font-medium">Location</th>
-                    <th className="text-right px-3 py-2.5 font-medium">Price</th>
-                    <th className="text-left px-3 py-2.5 font-medium">Exchange</th>
-                    <th className="text-left px-3 py-2.5 font-medium">Currency</th>
-                    <th className="text-right px-3 py-2.5 font-medium">Weight</th>
-                    <th className="text-right px-3 py-2.5 font-medium">Market Value</th>
+                    {([
+                      ['Ticker', 'Ticker', 'left'],
+                      ['Name', 'Name', 'left'],
+                      [null, 'GuruFocus', 'left'],
+                      ['Sector', 'Sector', 'left'],
+                      ['Location', 'Location', 'left'],
+                      ['Price', 'Price', 'right'],
+                      ['Exchange', 'Exchange', 'left'],
+                      ['Currency', 'Currency', 'left'],
+                      ['Weight (%)', 'Weight', 'right'],
+                      ['Market Value', 'Market Value', 'right'],
+                    ] as const).map(([key, label, align]) => (
+                      <th
+                        key={label}
+                        className={`text-${align} px-3 py-2.5 font-medium ${key ? 'cursor-pointer select-none hover:text-gray-200 transition-colors' : ''}`}
+                        onClick={key ? () => {
+                          if (sortCol === key) {
+                            setSortAsc(!sortAsc);
+                          } else {
+                            setSortCol(key);
+                            setSortAsc(true);
+                          }
+                        } : undefined}
+                      >
+                        {label}
+                        {key && sortCol === key && (
+                          <span className="ml-1 text-indigo-400">{sortAsc ? '\u25B2' : '\u25BC'}</span>
+                        )}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800/30">

@@ -103,7 +103,7 @@ _ISHARES_TO_GF: dict[str, str] = {
     "Nasdaq Omx Helsinki Ltd.": "OHEL",
     "Warsaw Stock Exchange/Equities/Main Market": "WAR",
     "Wiener Boerse Ag": "XPRA",
-    "Athens Exchange S.A. Cash Market": "ATSE",
+    "Athens Exchange S.A. Cash Market": "ATH",
     "Irish Stock Exchange - All Market": "ISE",
     "Budapest Stock Exchange": "BDP",
     "Prague Stock Exchange": "PRA",
@@ -158,11 +158,16 @@ def gurufocus_url(ticker: str, exchange: str) -> str | None:
     if gf_prefix is None:
         return None  # unknown exchange
 
+    # HKSE tickers must be zero-padded to 5 digits
+    t = ticker
+    if gf_prefix == "HKSE" and t.isdigit():
+        t = t.zfill(5)
+
     if gf_prefix == "":
         # US stock — no prefix
-        symbol = ticker
+        symbol = t
     else:
-        symbol = f"{gf_prefix}:{ticker}"
+        symbol = f"{gf_prefix}:{t}"
 
     return f"https://www.gurufocus.com/stock/{symbol}/summary"
 
