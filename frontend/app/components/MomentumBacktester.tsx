@@ -1,12 +1,19 @@
 'use client';
 
-import { Fragment, useState, useEffect, useMemo } from 'react';
+import { Fragment, useState, useEffect, useMemo, useRef } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Legend, ReferenceArea,
 } from 'recharts';
 
 import ApiUsageBadge from './ApiUsageBadge';
+import {
+  momentumStore,
+  startBacktest,
+  cancelBacktest,
+  type DrawdownPeriod,
+  type Summary,
+} from '../../lib/stores/momentum';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -20,56 +27,6 @@ type SignalDef = {
   description: string;
   default_weight: number;
   group?: string;
-};
-
-type Holding = {
-  company_id: number;
-  ticker: string;
-  company_name: string;
-  sector: string;
-  score: number;
-  category_scores: Record<string, number | null>;
-  weight: number;
-  forward_return_pct: number | null;
-};
-
-type MonthlyRecord = {
-  date: string;
-  holdings: Holding[];
-  portfolio_return_pct: number | null;
-  cumulative_return_pct: number;
-  empty_reason?: string;
-};
-
-type DrawdownPeriod = {
-  drawdown_pct: number;
-  peak_date: string;
-  trough_date: string;
-  recovery_date: string | null;
-};
-
-type Summary = {
-  total_return_pct: number;
-  annualized_return_pct: number;
-  max_drawdown_pct: number;
-  sharpe_ratio: number | null;
-  avg_monthly_turnover_pct: number;
-  total_months: number;
-  avg_holdings: number;
-  top_drawdowns?: DrawdownPeriod[];
-};
-
-type BacktestResult = {
-  monthly_records: MonthlyRecord[];
-  summary: Summary;
-};
-
-type UniverseEntry = {
-  company_id: number;
-  ticker: string;
-  exchange: string;
-  company_name: string;
-  sector: string;
 };
 
 type SavedRun = {
@@ -96,6 +53,101 @@ type BenchmarkPrice = {
 // ---------------------------------------------------------------------------
 
 const fmtPct = (v: number | null) => (v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}%` : '—');
+
+const fmtPrice = (v: number | null | undefined) => {
+  if (v == null) return '—';
+  const d = Math.abs(v) >= 1000 ? 0 : Math.abs(v) >= 10 ? 2 : 4;
+  return v.toFixed(d);
+};
+
+function guruFocusUrl(ticker: string, exchange: string): string {
+  const USA = new Set(['NYSE', 'NASDAQ', 'US', 'AMEX']);
+  const t = ticker.toUpperCase();
+  const e = exchange.toUpperCase();
+  if (!e || USA.has(e)) return `https://www.gurufocus.com/stock/${t}/summary`;
+  return `https://www.gurufocus.com/stock/${e}:${t}/summary`;
+}
+
+const EXCHANGE_NAMES: Record<string, string> = {
+  NYSE: 'New York Stock Exchange',
+  NAS: 'NASDAQ',
+  NASDAQ: 'NASDAQ',
+  AMEX: 'NYSE American',
+  OTCPK: 'OTC Markets Pink',
+  OTCBB: 'OTC Bulletin Board',
+  LSE: 'London Stock Exchange',
+  XETR: 'Xetra (Deutsche Börse)',
+  XETRA: 'Xetra (Deutsche Börse)',
+  FRA: 'Frankfurt Stock Exchange',
+  GER: 'Deutsche Börse',
+  EPA: 'Euronext Paris',
+  XPAR: 'Euronext Paris',
+  AMS: 'Euronext Amsterdam',
+  XAMS: 'Euronext Amsterdam',
+  BRU: 'Euronext Brussels',
+  XBRU: 'Euronext Brussels',
+  LIS: 'Euronext Lisbon',
+  XLIS: 'Euronext Lisbon',
+  MIL: 'Borsa Italiana (Milan)',
+  BIT: 'Borsa Italiana (Milan)',
+  MCE: 'Bolsa de Madrid',
+  BME: 'Bolsa de Madrid',
+  SWX: 'SIX Swiss Exchange',
+  SIX: 'SIX Swiss Exchange',
+  VIE: 'Vienna Stock Exchange',
+  WBO: 'Vienna Stock Exchange',
+  WAR: 'Warsaw Stock Exchange',
+  WSE: 'Warsaw Stock Exchange',
+  IST: 'Borsa Istanbul',
+  XIST: 'Borsa Istanbul',
+  HEL: 'Nasdaq Helsinki',
+  CPH: 'Nasdaq Copenhagen',
+  STO: 'Nasdaq Stockholm',
+  OSL: 'Oslo Stock Exchange',
+  ICE: 'Nasdaq Iceland',
+  DUB: 'Euronext Dublin',
+  ATH: 'Athens Stock Exchange',
+  BUD: 'Budapest Stock Exchange',
+  PRA: 'Prague Stock Exchange',
+  BUC: 'Bucharest Stock Exchange',
+  MOEX: 'Moscow Exchange',
+  TSX: 'Toronto Stock Exchange',
+  TSXV: 'TSX Venture Exchange',
+  CVE: 'TSX Venture Exchange',
+  CNSX: 'Canadian Securities Exchange',
+  MEX: 'Bolsa Mexicana de Valores',
+  BCBA: 'Buenos Aires Stock Exchange',
+  BVMF: 'B3 (São Paulo)',
+  SAO: 'B3 (São Paulo)',
+  TSE: 'Tokyo Stock Exchange',
+  HKSE: 'Hong Kong Stock Exchange',
+  SHSE: 'Shanghai Stock Exchange',
+  SSE: 'Shanghai Stock Exchange',
+  SZSE: 'Shenzhen Stock Exchange',
+  TPE: 'Taiwan Stock Exchange',
+  TWSE: 'Taiwan Stock Exchange',
+  ROCO: 'Taipei Exchange',
+  XKRX: 'Korea Exchange',
+  KRX: 'Korea Exchange',
+  NSE: 'National Stock Exchange of India',
+  BSE: 'Bombay Stock Exchange',
+  SGX: 'Singapore Exchange',
+  XKLS: 'Bursa Malaysia',
+  KLSE: 'Bursa Malaysia',
+  BKK: 'Stock Exchange of Thailand',
+  SET: 'Stock Exchange of Thailand',
+  PHS: 'Philippine Stock Exchange',
+  IDX: 'Indonesia Stock Exchange',
+  ASX: 'Australian Securities Exchange',
+  NZSE: 'New Zealand Exchange',
+  NZX: 'New Zealand Exchange',
+  JSE: 'Johannesburg Stock Exchange',
+  TASE: 'Tel Aviv Stock Exchange',
+  SAU: 'Saudi Stock Exchange (Tadawul)',
+  DFM: 'Dubai Financial Market',
+  ADX: 'Abu Dhabi Securities Exchange',
+  QSE: 'Qatar Stock Exchange',
+};
 
 /** Compute top N non-overlapping drawdown periods from (date, value) pairs. */
 function computeTopDrawdowns(values: { date: string; value: number }[], n: number = 3): DrawdownPeriod[] {
@@ -162,6 +214,50 @@ const tooltipStyle = {
   itemStyle: { color: '#e5e7eb' },
 };
 
+function CellInfoTip({ children }: { children: React.ReactNode }) {
+  const [show, setShow] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const iconRef = useRef<HTMLSpanElement>(null);
+  const tipWidth = 220;
+  const margin = 8;
+
+  const handleEnter = () => {
+    if (iconRef.current) {
+      const rect = iconRef.current.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const clampedLeft = Math.max(
+        margin + tipWidth / 2,
+        Math.min(centerX, window.innerWidth - margin - tipWidth / 2),
+      );
+      setPos({ top: rect.bottom + 6, left: clampedLeft });
+    }
+    setShow(true);
+  };
+
+  return (
+    <span
+      className="relative inline-block align-middle"
+      onMouseEnter={handleEnter}
+      onMouseLeave={() => setShow(false)}
+    >
+      <span
+        ref={iconRef}
+        className="inline-flex items-center justify-center w-3 h-3 ml-1 rounded-full border border-gray-700 text-gray-500 text-[8px] leading-none hover:border-indigo-400 hover:text-indigo-400 transition-colors cursor-help align-middle"
+      >
+        i
+      </span>
+      {show && (
+        <span
+          className="fixed px-3 py-2 bg-[#1e2130] border border-gray-700 rounded-lg text-[11px] text-gray-300 leading-relaxed z-[9999] shadow-xl pointer-events-none"
+          style={{ top: pos.top, left: pos.left, width: tipWidth, transform: 'translate(-50%, 0)' }}
+        >
+          {children}
+        </span>
+      )}
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -182,19 +278,38 @@ export default function MomentumBacktester() {
   const [skipPriceFetch, setSkipPriceFetch] = useState(false);
   const [maxCompanies, setMaxCompanies] = useState(0);
 
-  // State
-  const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState<{ pct: number; message: string }[]>([]);
-  const [result, setResult] = useState<BacktestResult | null>(null);
-  const [universe, setUniverse] = useState<UniverseEntry[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  // Backtest run state lives in a module-scoped store so the SSE stream
+  // keeps running when the user navigates away from /momentum.
+  const running = momentumStore.use((s) => s.running);
+  const progress = momentumStore.use((s) => s.progress);
+  const result = momentumStore.use((s) => s.result);
+  const universe = momentumStore.use((s) => s.universe);
+  const error = momentumStore.use((s) => s.error);
+  const warnings = momentumStore.use((s) => s.warnings);
+  const infos = momentumStore.use((s) => s.infos);
+  const loadedRunId = momentumStore.use((s) => s.loadedRunId);
+
+  const exchangeByCompany = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const u of universe) m.set(u.company_id, u.exchange);
+    return m;
+  }, [universe]);
+
+  const progressLogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = progressLogRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [progress]);
+
+  // Purely local UI state — safe to reset on navigation
+  const [showWarnings, setShowWarnings] = useState(true);
+  const [showInfos, setShowInfos] = useState(false);
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
 
   // Save/load state
   const [savedRuns, setSavedRuns] = useState<SavedRun[]>([]);
   const [saveName, setSaveName] = useState('');
   const [saving, setSaving] = useState(false);
-  const [loadedRunId, setLoadedRunId] = useState<number | null>(null);
 
   // Benchmark state
   const [benchmarkOptions, setBenchmarkOptions] = useState<BenchmarkOption[]>([]);
@@ -202,12 +317,17 @@ export default function MomentumBacktester() {
   const [benchmarkPrices, setBenchmarkPrices] = useState<BenchmarkPrice[]>([]);
   const [logScale, setLogScale] = useState(false);
   const [hoveredDrawdown, setHoveredDrawdown] = useState<number | null>(null);
+  const [customFromMonth, setCustomFromMonth] = useState('');
+  const [savedDropdownOpen, setSavedDropdownOpen] = useState(false);
+  const savedDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Universe label state
-  const [universeLabels, setUniverseLabels] = useState<{ label: string; start_month: string; end_month: string; month_count: number; avg_passing: number }[]>([]);
+  // Universe selection state — all universes live in the same table and are served
+  // by /api/index-universe/indexes with enriched metadata.
   const [indexUniverses, setIndexUniverses] = useState<{ index_name: string; start_month: string; end_month: string; month_count: number; total_unique_tickers: number }[]>([]);
-  const [selectedUniverseLabel, setSelectedUniverseLabel] = useState<string>('');
   const [selectedIndexUniverse, setSelectedIndexUniverse] = useState<string>('');
+  const [universesLoading, setUniversesLoading] = useState(true);
+  const [universesError, setUniversesError] = useState<string | null>(null);
+  const [universesElapsed, setUniversesElapsed] = useState(0);
 
   // Load signal definitions + saved runs
   useEffect(() => {
@@ -231,42 +351,48 @@ export default function MomentumBacktester() {
       .then((r) => r.json())
       .then((data) => setBenchmarkOptions(data))
       .catch(() => {});
-    fetch(`${API_URL}/api/universe/labels`)
-      .then((r) => r.json())
-      .then((data) => setUniverseLabels(data))
-      .catch(() => {});
+    const universesStart = Date.now();
+    const tick = setInterval(() => setUniversesElapsed(Math.round((Date.now() - universesStart) / 1000)), 500);
+    setUniversesLoading(true);
+    setUniversesError(null);
     fetch(`${API_URL}/api/index-universe/indexes`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`${r.status}`);
+        return r.json();
+      })
       .then((data) => setIndexUniverses(data))
-      .catch(() => {});
+      .catch((e) => setUniversesError(e instanceof Error ? e.message : String(e)))
+      .finally(() => {
+        clearInterval(tick);
+        setUniversesLoading(false);
+      });
+    return () => clearInterval(tick);
   }, []);
 
   // When universe selection changes, auto-set start/end dates from the range
   const handleUniverseChange = (value: string) => {
-    if (value.startsWith('index:')) {
-      const indexName = value.slice(6);
-      setSelectedIndexUniverse(indexName);
-      setSelectedUniverseLabel('');
-      const entry = indexUniverses.find(i => i.index_name === indexName);
+    setSelectedIndexUniverse(value);
+    if (value) {
+      const entry = indexUniverses.find(i => i.index_name === value);
       if (entry) {
         setStartDate(entry.start_month);
         setEndDate(entry.end_month);
       }
-    } else if (value) {
-      setSelectedUniverseLabel(value);
-      setSelectedIndexUniverse('');
-      const entry = universeLabels.find(l => l.label === value);
-      if (entry) {
-        setStartDate(entry.start_month);
-        setEndDate(entry.end_month);
-      }
-    } else {
-      setSelectedUniverseLabel('');
-      setSelectedIndexUniverse('');
     }
   };
 
-  const universeDropdownValue = selectedIndexUniverse ? `index:${selectedIndexUniverse}` : selectedUniverseLabel;
+  const universeDropdownValue = selectedIndexUniverse;
+
+  useEffect(() => {
+    if (!savedDropdownOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (savedDropdownRef.current && !savedDropdownRef.current.contains(e.target as Node)) {
+        setSavedDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [savedDropdownOpen]);
 
   const loadSavedRuns = () => {
     fetch(`${API_URL}/api/momentum/backtests`)
@@ -283,8 +409,14 @@ export default function MomentumBacktester() {
     }
     const dates = result.monthly_records.map((r) => r.date);
     if (dates.length === 0) return;
+    // Extend end-date one month past the last record so the final forward-return
+    // pair is available — strategy records hold return month[i] → month[i+1].
+    const last = dates[dates.length - 1];
+    const [ly, lm] = last.split('-').map(Number);
+    const nm = lm === 12 ? 1 : lm + 1;
+    const ny = lm === 12 ? ly + 1 : ly;
     const sd = `${dates[0]}-01`;
-    const ed = `${dates[dates.length - 1]}-28`;
+    const ed = `${ny}-${String(nm).padStart(2, '0')}-28`;
     fetch(`${API_URL}/api/benchmarks/${selectedBenchmarkId}/prices?start_date=${sd}&end_date=${ed}`)
       .then((r) => r.json())
       .then((data) => setBenchmarkPrices(data))
@@ -314,9 +446,17 @@ export default function MomentumBacktester() {
     let cumFactor = 1.0;
     const monthlyRets: number[] = [];
 
+    const nextMonth = (ym: string) => {
+      const [y, m] = ym.split('-').map(Number);
+      const nm = m === 12 ? 1 : m + 1;
+      const ny = m === 12 ? y + 1 : y;
+      return `${ny}-${String(nm).padStart(2, '0')}`;
+    };
+
     for (let i = 0; i < months.length; i++) {
       const p0 = priceByMonth.get(months[i]);
-      const p1 = i < months.length - 1 ? priceByMonth.get(months[i + 1]) : null;
+      const nextKey = i < months.length - 1 ? months[i + 1] : nextMonth(months[i]);
+      const p1 = priceByMonth.get(nextKey);
       if (p0 && p1 && p0 > 0) {
         const ret = (p1 / p0 - 1) * 100;
         monthlyRets.push(ret);
@@ -377,6 +517,72 @@ export default function MomentumBacktester() {
     return computeTopDrawdowns(values, 3);
   }, [benchmarkReturns, result]);
 
+  // Yearly performance breakdown — for each calendar year, compound return
+  // from end of prior year (or 0% at start) to last record in that year.
+  const yearlyBreakdown = useMemo(() => {
+    if (!result || result.monthly_records.length === 0) return [];
+
+    const lastByYear = new Map<string, { stratCum: number; benchCum: number | null }>();
+    for (const r of result.monthly_records) {
+      const y = r.date.slice(0, 4);
+      const benchCum = benchmarkReturns?.cumReturns[r.date] ?? null;
+      lastByYear.set(y, { stratCum: r.cumulative_return_pct, benchCum });
+    }
+
+    const years = Array.from(lastByYear.keys()).sort();
+    const rows: { year: string; strategy: number; benchmark: number | null }[] = [];
+    let prevStrat = 0;
+    let prevBench = 0;
+    let hasPrevBench = false;
+
+    for (const y of years) {
+      const rec = lastByYear.get(y)!;
+      const stratRet = ((1 + rec.stratCum / 100) / (1 + prevStrat / 100) - 1) * 100;
+      let benchRet: number | null = null;
+      if (rec.benchCum != null) {
+        const startBench = hasPrevBench ? prevBench : 0;
+        benchRet = ((1 + rec.benchCum / 100) / (1 + startBench / 100) - 1) * 100;
+        prevBench = rec.benchCum;
+        hasPrevBench = true;
+      }
+      rows.push({ year: y, strategy: stratRet, benchmark: benchRet });
+      prevStrat = rec.stratCum;
+    }
+    return rows;
+  }, [result, benchmarkReturns]);
+
+  // Cumulative return from customFromMonth through end of backtest.
+  const customRangeReturn = useMemo(() => {
+    if (!result || !customFromMonth || result.monthly_records.length === 0) return null;
+
+    const records = result.monthly_records;
+    const last = records[records.length - 1];
+
+    let stratStart = 0;
+    for (const r of records) {
+      if (r.date < customFromMonth) stratStart = r.cumulative_return_pct;
+      else break;
+    }
+    const stratRet = ((1 + last.cumulative_return_pct / 100) / (1 + stratStart / 100) - 1) * 100;
+
+    let benchRet: number | null = null;
+    if (benchmarkReturns) {
+      let benchStart = 0;
+      let benchEnd: number | null = null;
+      for (const r of records) {
+        const v = benchmarkReturns.cumReturns[r.date];
+        if (v == null) continue;
+        if (r.date < customFromMonth) benchStart = v;
+        benchEnd = v;
+      }
+      if (benchEnd != null) {
+        benchRet = ((1 + benchEnd / 100) / (1 + benchStart / 100) - 1) * 100;
+      }
+    }
+
+    return { strategy: stratRet, benchmark: benchRet, fromDate: customFromMonth, toDate: last.date };
+  }, [result, benchmarkReturns, customFromMonth]);
+
   // Chart data — prepend a 0% origin so both lines start from the same point
   const chartData = useMemo(() => {
     if (!result) return [];
@@ -416,95 +622,22 @@ export default function MomentumBacktester() {
     return [Math.floor(min - pad), Math.ceil(max + pad)];
   }, [displayChartData]);
 
-  // Run backtest
-  const runBacktest = async () => {
-    setRunning(true);
-    setProgress([]);
-    setResult(null);
-    setUniverse([]);
-    setError(null);
+  // Run backtest — delegates to the module-scoped momentumStore, which owns
+  // the fetch/reader loop so it survives navigation away from /momentum.
+  const runBacktest = () => {
     setExpandedMonth(null);
-    setLoadedRunId(null);
-
-    try {
-      const resp = await fetch(`${API_URL}/api/momentum/backtest`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          start_date: `${startDate}-01`,
-          end_date: `${endDate}-01`,
-          signal_weights: weights,
-          category_weights: categoryWeights,
-          top_n_sectors: topSectors,
-          top_n_per_sector: topPerSector,
-          skip_price_fetch: skipPriceFetch,
-          max_companies: maxCompanies,
-          universe_label: selectedUniverseLabel || null,
-          index_universe: selectedIndexUniverse || null,
-        }),
-      });
-
-      if (!resp.ok || !resp.body) {
-        setError(`Request failed: ${resp.status}`);
-        setRunning(false);
-        return;
-      }
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let receivedDone = false;
-      let receivedResult = false;
-      let lastEventTime = Date.now();
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        lastEventTime = Date.now();
-        buffer += decoder.decode(value, { stream: true });
-
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.type === 'progress') {
-              setProgress((prev) => [...prev, { pct: data.pct, message: data.message }]);
-            } else if (data.type === 'result') {
-              setResult(data.data);
-              receivedResult = true;
-              if (data.universe) setUniverse(data.universe);
-            } else if (data.type === 'done') {
-              receivedDone = true;
-              setRunning(false);
-            } else if (data.type === 'error') {
-              setError(data.message);
-              setRunning(false);
-            } else if (data.type === 'keepalive') {
-              // ignore, just keeps connection alive
-            }
-          } catch (parseErr) {
-            console.warn('SSE parse error:', line, parseErr);
-          }
-        }
-      }
-      // Stream ended — if we never got a 'done' event, something went wrong
-      if (!receivedDone) {
-        if (receivedResult) {
-          // Got result but stream cut before 'done' — still usable
-          setRunning(false);
-        } else {
-          const elapsed = Math.round((Date.now() - lastEventTime) / 1000);
-          setError(`Stream disconnected unexpectedly (last event ${elapsed}s ago). This can happen due to proxy timeouts — try again with "Skip data fetch" checked if prices are already loaded.`);
-          setRunning(false);
-        }
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unknown error');
-      setRunning(false);
-    }
+    return startBacktest({
+      start_date: `${startDate}-01`,
+      end_date: `${endDate}-01`,
+      signal_weights: weights,
+      category_weights: categoryWeights,
+      top_n_sectors: topSectors,
+      top_n_per_sector: topPerSector,
+      skip_price_fetch: skipPriceFetch,
+      max_companies: maxCompanies,
+      universe_label: null,
+      index_universe: selectedIndexUniverse || null,
+    });
   };
 
   const saveBacktest = async () => {
@@ -523,7 +656,7 @@ export default function MomentumBacktester() {
             category_weights: categoryWeights,
             top_n_sectors: topSectors,
             top_n_per_sector: topPerSector,
-            universe_label: selectedUniverseLabel || null,
+            universe_label: null,
             index_universe: selectedIndexUniverse || null,
           },
           summary: result.summary,
@@ -534,7 +667,7 @@ export default function MomentumBacktester() {
       if (resp.ok) {
         const saved = await resp.json();
         setSaveName('');
-        setLoadedRunId(saved.run_id);
+        momentumStore.set({ loadedRunId: saved.run_id });
         loadSavedRuns();
       }
     } catch {}
@@ -555,27 +688,60 @@ export default function MomentumBacktester() {
       if (cfg.category_weights) setCategoryWeights(cfg.category_weights);
       if (cfg.top_n_sectors) setTopSectors(cfg.top_n_sectors);
       if (cfg.top_n_per_sector) setTopPerSector(cfg.top_n_per_sector);
-      setSelectedUniverseLabel(cfg.universe_label ?? '');
-      setSelectedIndexUniverse(cfg.index_universe ?? '');
+      // Legacy saved runs may have used universe_label; both hit the same table now.
+      setSelectedIndexUniverse(cfg.index_universe ?? cfg.universe_label ?? '');
 
-      // Restore result
-      setResult({ monthly_records: data.monthly_records, summary: data.summary });
-      setUniverse(data.universe ?? []);
-      setLoadedRunId(runId);
-      setError(null);
-      setProgress([]);
+      // Restore result — saved runs store the payload under `result`.
+      const saved = data.result ?? data;
+      momentumStore.set({
+        result: {
+          monthly_records: saved.monthly_records ?? [],
+          summary: saved.summary ?? {
+            total_return_pct: 0,
+            annualized_return_pct: 0,
+            max_drawdown_pct: 0,
+            sharpe_ratio: null,
+            avg_monthly_turnover_pct: 0,
+            total_months: 0,
+            avg_holdings: 0,
+            top_drawdowns: [],
+          },
+        },
+        universe: saved.universe ?? [],
+        loadedRunId: runId,
+        error: null,
+        warnings: [],
+        infos: [],
+        progress: [],
+      });
       setExpandedMonth(null);
     } catch {
-      setError('Failed to load backtest');
+      momentumStore.set({ error: 'Failed to load backtest' });
     }
   };
 
   const deleteBacktest = async (runId: number) => {
     try {
       await fetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' });
-      if (loadedRunId === runId) setLoadedRunId(null);
+      if (loadedRunId === runId) momentumStore.set({ loadedRunId: null });
       loadSavedRuns();
     } catch {}
+  };
+
+  const renameBacktest = async (runId: number, currentName: string) => {
+    const next = prompt('New name for this backtest:', currentName);
+    if (!next || next.trim() === '' || next === currentName) return;
+    try {
+      const resp = await fetch(`${API_URL}/api/momentum/backtests/${runId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: next.trim() }),
+      });
+      if (!resp.ok) throw new Error(String(resp.status));
+      loadSavedRuns();
+    } catch (e) {
+      alert(`Rename failed: ${e instanceof Error ? e.message : e}`);
+    }
   };
 
   return (
@@ -591,29 +757,65 @@ export default function MomentumBacktester() {
         <div className="flex items-center gap-3">
           <ApiUsageBadge />
         {savedRuns.length > 0 && (
-          <div className="flex items-center gap-2">
-            <select
-              value={loadedRunId ?? ''}
-              onChange={(e) => {
-                const id = Number(e.target.value);
-                if (id) loadBacktest(id);
-              }}
-              className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
+          <div className="relative" ref={savedDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setSavedDropdownOpen((o) => !o)}
+              className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white flex items-center gap-2 hover:border-indigo-500 focus:outline-none focus:border-indigo-500 transition-colors min-w-[220px]"
             >
-              <option value="">Load saved backtest...</option>
-              {savedRuns.map((r) => (
-                <option key={r.run_id} value={r.run_id}>
-                  {r.name} ({new Date(r.created_at).toLocaleDateString()})
-                </option>
-              ))}
-            </select>
-            {loadedRunId && (
-              <button
-                onClick={() => { if (confirm('Delete this saved backtest?')) deleteBacktest(loadedRunId); }}
-                className="px-2.5 py-1.5 rounded-lg text-xs text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-              >
-                Delete
-              </button>
+              <span className="truncate">
+                {loadedRunId
+                  ? savedRuns.find((r) => r.run_id === loadedRunId)?.name ?? 'Load saved backtest...'
+                  : 'Load saved backtest...'}
+              </span>
+              <svg className={`w-3.5 h-3.5 text-gray-500 ml-auto transition-transform ${savedDropdownOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+              </svg>
+            </button>
+            {savedDropdownOpen && (
+              <div className="absolute right-0 mt-1 w-80 bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-96 overflow-auto">
+                {savedRuns.map((r) => {
+                  const isActive = r.run_id === loadedRunId;
+                  return (
+                    <div
+                      key={r.run_id}
+                      className={`group flex items-center gap-2 px-3 py-2 border-b border-gray-800/40 last:border-b-0 hover:bg-white/[0.03] transition-colors ${isActive ? 'bg-indigo-500/10' : ''}`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => { loadBacktest(r.run_id); setSavedDropdownOpen(false); }}
+                        className="flex-1 text-left min-w-0"
+                      >
+                        <div className={`text-sm truncate ${isActive ? 'text-indigo-300' : 'text-gray-200'}`}>{r.name}</div>
+                        <div className="text-[10px] text-gray-500 font-mono">{new Date(r.created_at).toLocaleDateString()}</div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); renameBacktest(r.run_id, r.name); }}
+                        className="p-1.5 rounded text-gray-500 hover:text-indigo-400 hover:bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Rename"
+                      >
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                          <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm(`Delete "${r.name}"?`)) deleteBacktest(r.run_id);
+                        }}
+                        className="p-1.5 rounded text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Delete"
+                      >
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         )}
@@ -626,23 +828,39 @@ export default function MomentumBacktester() {
           <div className="flex flex-wrap items-end gap-5 mb-5">
             {/* Universe Label */}
             <div>
-              <label className="text-gray-500 text-xs block mb-1">Universe</label>
+              <label className="text-gray-500 text-xs mb-1 flex items-center gap-2">
+                <span>Universe</span>
+                {universesLoading && (
+                  <span className="flex items-center gap-1.5 text-indigo-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                    <span className="text-[10px]">loading stats from DB… {universesElapsed}s</span>
+                  </span>
+                )}
+                {!universesLoading && !universesError && indexUniverses.length > 0 && (
+                  <span className="text-[10px] text-gray-600">{indexUniverses.length} loaded</span>
+                )}
+                {universesError && (
+                  <span className="text-[10px] text-rose-400">failed: {universesError}</span>
+                )}
+              </label>
               <select
                 value={universeDropdownValue}
                 onChange={(e) => handleUniverseChange(e.target.value)}
-                className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                disabled={universesLoading}
+                className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none disabled:opacity-60 disabled:cursor-wait"
               >
-                <option value="">All companies</option>
-                {indexUniverses.map(i => (
-                  <option key={`index:${i.index_name}`} value={`index:${i.index_name}`}>
-                    {i.index_name} ({i.start_month} – {i.end_month}, {i.total_unique_tickers} tickers)
-                  </option>
-                ))}
-                {universeLabels.map(l => (
-                  <option key={l.label} value={l.label}>
-                    {l.label} ({l.start_month} – {l.end_month}, ~{l.avg_passing}/mo)
-                  </option>
-                ))}
+                {universesLoading ? (
+                  <option value="">Loading universes… ({universesElapsed}s)</option>
+                ) : (
+                  <>
+                    <option value="">All companies</option>
+                    {indexUniverses.map(i => (
+                      <option key={i.index_name} value={i.index_name}>
+                        {i.index_name} ({i.start_month} – {i.end_month}, {i.total_unique_tickers} tickers)
+                      </option>
+                    ))}
+                  </>
+                )}
               </select>
             </div>
             {/* Date Range */}
@@ -715,6 +933,14 @@ export default function MomentumBacktester() {
             >
               {running ? 'Running...' : 'Run Backtest'}
             </button>
+            {running && (
+              <button
+                onClick={cancelBacktest}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+              >
+                Cancel
+              </button>
+            )}
           </div>
 
           {/* Signal Weights */}
@@ -795,7 +1021,7 @@ export default function MomentumBacktester() {
               </div>
               <span className="text-gray-400 text-xs font-mono">{progress[progress.length - 1]?.pct ?? 0}%</span>
             </div>
-            <div className="max-h-32 overflow-auto space-y-0.5">
+            <div ref={progressLogRef} className="max-h-32 overflow-auto space-y-0.5">
               {progress.map((p, i) => (
                 <div key={i} className="text-gray-500 text-xs">{p.message}</div>
               ))}
@@ -807,6 +1033,64 @@ export default function MomentumBacktester() {
         {error && (
           <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg p-4 text-rose-400 text-sm">
             {error}
+          </div>
+        )}
+
+        {/* Notifications — warnings on top (critical), info below (expected) */}
+        {(warnings.length > 0 || infos.length > 0) && (
+          <div className="bg-[#151821] border border-gray-800/40 rounded-lg overflow-hidden divide-y divide-gray-800/40">
+            {warnings.length > 0 && (
+              <div className="bg-amber-500/10">
+                <button
+                  type="button"
+                  onClick={() => setShowWarnings((v) => !v)}
+                  className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-amber-500/5 transition-colors"
+                >
+                  <span className="text-amber-300 text-sm font-medium">
+                    {warnings.length} warning{warnings.length === 1 ? '' : 's'}
+                  </span>
+                  <span className="text-amber-400/70 text-xs font-mono">{showWarnings ? '▾' : '▸'}</span>
+                </button>
+                {showWarnings && (
+                  <ul className="max-h-64 overflow-auto border-t border-amber-500/20 divide-y divide-amber-500/10">
+                    {warnings.map((w, i) => (
+                      <li key={i} className="px-4 py-2 text-xs text-amber-200 flex gap-2">
+                        <span className="uppercase text-[10px] tracking-wider font-mono text-amber-400/70 shrink-0 w-16">
+                          {w.scope}
+                        </span>
+                        <span className="break-words">{w.message}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+            {infos.length > 0 && (
+              <div className="bg-sky-500/10">
+                <button
+                  type="button"
+                  onClick={() => setShowInfos((v) => !v)}
+                  className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-sky-500/5 transition-colors"
+                >
+                  <span className="text-sky-300 text-sm font-medium">
+                    {infos.length} note{infos.length === 1 ? '' : 's'}
+                  </span>
+                  <span className="text-sky-400/70 text-xs font-mono">{showInfos ? '▾' : '▸'}</span>
+                </button>
+                {showInfos && (
+                  <ul className="max-h-64 overflow-auto border-t border-sky-500/20 divide-y divide-sky-500/10">
+                    {infos.map((n, i) => (
+                      <li key={i} className="px-4 py-2 text-xs text-sky-200 flex gap-2">
+                        <span className="uppercase text-[10px] tracking-wider font-mono text-sky-400/70 shrink-0 w-16">
+                          {n.scope}
+                        </span>
+                        <span className="break-words">{n.message}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -922,6 +1206,94 @@ export default function MomentumBacktester() {
                 </div>
               )}
             </div>
+
+            {/* Yearly Performance + Custom Range */}
+            {yearlyBreakdown.length > 0 && (
+              <div className="bg-[#151821] rounded-xl border border-gray-800/40 overflow-hidden">
+                <div className="px-5 py-3 border-b border-gray-800/40">
+                  <h3 className="text-white text-sm font-medium">Yearly Performance</h3>
+                </div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-800/40 text-gray-500 text-xs">
+                      <th className="px-5 py-2.5 text-left font-medium">Year</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Strategy</th>
+                      {benchmarkReturns && (
+                        <>
+                          <th className="px-3 py-2.5 text-right font-medium">
+                            {benchmarkOptions.find((b) => b.benchmark_id === selectedBenchmarkId)?.ticker ?? 'Benchmark'}
+                          </th>
+                          <th className="px-5 py-2.5 text-right font-medium">Diff</th>
+                        </>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {yearlyBreakdown.map((row) => {
+                      const diff = row.benchmark != null ? row.strategy - row.benchmark : null;
+                      return (
+                        <tr key={row.year} className="border-b border-gray-800/20 hover:bg-white/[0.02]">
+                          <td className="px-5 py-2 text-gray-200 font-mono">{row.year}</td>
+                          <td className={`px-3 py-2 text-right font-mono ${row.strategy >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {fmtPct(row.strategy)}
+                          </td>
+                          {benchmarkReturns && (
+                            <>
+                              <td className={`px-3 py-2 text-right font-mono ${row.benchmark != null ? (row.benchmark >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
+                                {row.benchmark != null ? fmtPct(row.benchmark) : '—'}
+                              </td>
+                              <td className={`px-5 py-2 text-right font-mono ${diff != null ? (diff >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
+                                {diff != null ? fmtPct(diff) : '—'}
+                              </td>
+                            </>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div className="px-5 py-3 border-t border-gray-800/40 flex items-center gap-4 flex-wrap">
+                  <label className="text-xs text-gray-400 font-medium">From month:</label>
+                  <input
+                    type="month"
+                    value={customFromMonth}
+                    min={result.monthly_records[0]?.date}
+                    max={result.monthly_records[result.monthly_records.length - 1]?.date}
+                    onChange={(e) => setCustomFromMonth(e.target.value)}
+                    className="bg-[#0f1117] border border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                  />
+                  {customFromMonth && (
+                    <button
+                      onClick={() => setCustomFromMonth('')}
+                      className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                    >
+                      clear
+                    </button>
+                  )}
+                  {customRangeReturn ? (
+                    <div className="flex items-center gap-4 text-xs ml-auto">
+                      <span className="text-gray-500 font-mono">{customRangeReturn.fromDate} → {customRangeReturn.toDate}</span>
+                      <span className="text-gray-400">
+                        Strategy:{' '}
+                        <span className={`font-mono ${customRangeReturn.strategy >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {fmtPct(customRangeReturn.strategy)}
+                        </span>
+                      </span>
+                      {customRangeReturn.benchmark != null && (
+                        <span className="text-gray-400">
+                          {benchmarkOptions.find((b) => b.benchmark_id === selectedBenchmarkId)?.ticker ?? 'Benchmark'}:{' '}
+                          <span className={`font-mono ${customRangeReturn.benchmark >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {fmtPct(customRangeReturn.benchmark)}
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-gray-500">Cumulative return from picked month through end of backtest.</span>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Equity Curve */}
             <div className="bg-[#151821] rounded-xl border border-gray-800/40 p-5">
@@ -1071,7 +1443,11 @@ export default function MomentumBacktester() {
                                       </th>
                                     ))}
                                     <th className="text-right py-1 font-medium">Total</th>
-                                    <th className="text-right py-1 font-medium">Return</th>
+                                    <th className="text-right py-1 font-medium pl-4">Start (local)</th>
+                                    <th className="text-right py-1 font-medium">End (local)</th>
+                                    <th className="text-right py-1 font-medium pl-4">Start (€)</th>
+                                    <th className="text-right py-1 font-medium">End (€)</th>
+                                    <th className="text-right py-1 font-medium pl-4">Return</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -1080,22 +1456,113 @@ export default function MomentumBacktester() {
                                       const sec = a.sector.localeCompare(b.sector);
                                       return sec !== 0 ? sec : b.score - a.score;
                                     })
-                                    .map((h) => (
-                                      <tr key={h.company_id} className="border-t border-gray-800/20">
-                                        <td className="py-1.5 text-indigo-400 font-mono">{h.ticker}</td>
-                                        <td className="py-1.5 text-gray-300 truncate max-w-[200px]">{h.company_name}</td>
-                                        <td className="py-1.5 text-gray-500">{h.sector}</td>
-                                        {categories.map((cat) => (
-                                          <td key={cat} className="text-right py-1.5 text-gray-400 font-mono">
-                                            {h.category_scores?.[cat] != null ? h.category_scores[cat]!.toFixed(0) : '—'}
+                                    .map((h) => {
+                                      const exch = exchangeByCompany.get(h.company_id) ?? '';
+                                      const href = guruFocusUrl(h.ticker, exch);
+                                      return (
+                                        <tr key={h.company_id} className="border-t border-gray-800/20">
+                                          <td className="py-1.5 font-mono whitespace-nowrap">
+                                            <a
+                                              href={href}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="text-indigo-400 hover:text-indigo-300 hover:underline"
+                                            >
+                                              {h.ticker}
+                                            </a>
+                                            {exch && (
+                                              <span
+                                                className="ml-1 text-[10px] text-gray-500"
+                                                title={EXCHANGE_NAMES[exch.toUpperCase()] ?? exch}
+                                              >
+                                                ({exch})
+                                              </span>
+                                            )}
                                           </td>
-                                        ))}
-                                        <td className="text-right py-1.5 text-white font-mono font-medium">{h.score.toFixed(1)}</td>
-                                        <td className={`text-right py-1.5 font-mono ${h.forward_return_pct != null ? (h.forward_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
-                                          {fmtPct(h.forward_return_pct)}
-                                        </td>
-                                      </tr>
-                                    ))}
+                                          <td className="py-1.5 truncate max-w-[200px]">
+                                            <a
+                                              href={href}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="text-gray-300 hover:text-indigo-300 hover:underline"
+                                            >
+                                              {h.company_name}
+                                            </a>
+                                          </td>
+                                          <td className="py-1.5 text-gray-500">{h.sector}</td>
+                                          {categories.map((cat) => (
+                                            <td key={cat} className="text-right py-1.5 text-gray-400 font-mono">
+                                              {h.category_scores?.[cat] != null ? h.category_scores[cat]!.toFixed(0) : '—'}
+                                            </td>
+                                          ))}
+                                          <td className="text-right py-1.5 text-white font-mono font-medium">{h.score.toFixed(1)}</td>
+                                          <td className="text-right py-1.5 text-gray-400 font-mono pl-4">
+                                            {fmtPrice(h.entry_price_local)}
+                                            {h.currency && <span className="text-gray-600 text-[10px] ml-1">{h.currency}</span>}
+                                            {h.entry_date && (
+                                              <CellInfoTip>
+                                                <div className="text-gray-400">Trading date</div>
+                                                <div className="font-mono text-gray-200">{h.entry_date}</div>
+                                              </CellInfoTip>
+                                            )}
+                                          </td>
+                                          <td className="text-right py-1.5 text-gray-400 font-mono">
+                                            {fmtPrice(h.exit_price_local)}
+                                            {h.exit_date && (
+                                              <CellInfoTip>
+                                                <div className="text-gray-400">Trading date</div>
+                                                <div className="font-mono text-gray-200">{h.exit_date}</div>
+                                              </CellInfoTip>
+                                            )}
+                                          </td>
+                                          <td className="text-right py-1.5 text-gray-400 font-mono pl-4">
+                                            {fmtPrice(h.entry_price_eur)}
+                                            {(h.entry_date || (h.entry_price_eur != null && h.entry_price_local)) && (
+                                              <CellInfoTip>
+                                                {h.entry_date && (
+                                                  <>
+                                                    <div className="text-gray-400">Trading date</div>
+                                                    <div className="font-mono text-gray-200 mb-1">{h.entry_date}</div>
+                                                  </>
+                                                )}
+                                                {h.entry_price_eur != null && h.entry_price_local && h.entry_price_local > 0 && (
+                                                  <>
+                                                    <div className="text-gray-400">FX rate</div>
+                                                    <div className="font-mono text-gray-200">
+                                                      1 {h.currency ?? 'LCL'} = {(h.entry_price_eur / h.entry_price_local).toFixed(4)} EUR
+                                                    </div>
+                                                  </>
+                                                )}
+                                              </CellInfoTip>
+                                            )}
+                                          </td>
+                                          <td className="text-right py-1.5 text-gray-400 font-mono">
+                                            {fmtPrice(h.exit_price_eur)}
+                                            {(h.exit_date || (h.exit_price_eur != null && h.exit_price_local)) && (
+                                              <CellInfoTip>
+                                                {h.exit_date && (
+                                                  <>
+                                                    <div className="text-gray-400">Trading date</div>
+                                                    <div className="font-mono text-gray-200 mb-1">{h.exit_date}</div>
+                                                  </>
+                                                )}
+                                                {h.exit_price_eur != null && h.exit_price_local && h.exit_price_local > 0 && (
+                                                  <>
+                                                    <div className="text-gray-400">FX rate</div>
+                                                    <div className="font-mono text-gray-200">
+                                                      1 {h.currency ?? 'LCL'} = {(h.exit_price_eur / h.exit_price_local).toFixed(4)} EUR
+                                                    </div>
+                                                  </>
+                                                )}
+                                              </CellInfoTip>
+                                            )}
+                                          </td>
+                                          <td className={`text-right py-1.5 font-mono pl-4 ${h.forward_return_pct != null ? (h.forward_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
+                                            {fmtPct(h.forward_return_pct)}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
                                 </tbody>
                               </table>
                             </td>

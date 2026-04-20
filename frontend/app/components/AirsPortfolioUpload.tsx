@@ -2,30 +2,16 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 
+import {
+  airsScanStore,
+  startAirsScan,
+  INITIAL_STEPS,
+  type ScanSteps,
+  type StepStatus,
+  type Portfolio,
+} from '../../lib/stores/airsScan';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
-
-type StepStatus = 'idle' | 'in_progress' | 'done' | 'error';
-
-type ScanSteps = {
-  login: { status: StepStatus; message: string };
-  navigate: { status: StepStatus; message: string };
-  scrape: { status: StepStatus; message: string };
-  ytd: { status: StepStatus; message: string };
-};
-
-const INITIAL_STEPS: ScanSteps = {
-  login: { status: 'idle', message: 'Log in to broker' },
-  navigate: { status: 'idle', message: 'Navigate to portfolios' },
-  scrape: { status: 'idle', message: 'Read portfolio table' },
-  ytd: { status: 'idle', message: 'Load YTD returns' },
-};
-
-type Portfolio = {
-  portefeuille: string;
-  depotbank: string;
-  client: string;
-  naam: string;
-};
 
 type PerfRow = {
   periode: string;
@@ -161,10 +147,19 @@ function PortfolioDetailView({ detail, onBack }: { detail: PortfolioDetail; onBa
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 export default function AirsPortfolioUpload() {
-  const [scanning, setScanning] = useState(false);
-  const [steps, setSteps] = useState<ScanSteps | null>(null);
-  const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  // Scan-driven state lives in a module-scoped store so the SSE stream keeps
+  // running when the user navigates away from /airs-portfolio.
+  const scanning = airsScanStore.use((s) => s.scanning);
+  const steps = airsScanStore.use((s) => s.steps);
+  const portfoliosFromStore = airsScanStore.use((s) => s.portfolios);
+  const error = airsScanStore.use((s) => s.error);
+  const portfolios = portfoliosFromStore ?? [];
+  const setPortfolios = (next: Portfolio[]) => airsScanStore.set({ portfolios: next });
+  const setError = (next: string | null) => airsScanStore.set({ error: next });
+  const setSteps = (updater: (prev: ScanSteps | null) => ScanSteps | null) => {
+    airsScanStore.set((s) => ({ steps: updater(s.steps) }));
+  };
+
   const [loading, setLoading] = useState<string | null>(null);
   const [detail, setDetail] = useState<PortfolioDetail | null>(null);
   const [ytdMap, setYtdMap] = useState<Record<string, YtdState>>({});
@@ -259,37 +254,13 @@ export default function AirsPortfolioUpload() {
 
   function startScan() {
     abortRef.current = true;
-    setScanning(true);
-    setSteps({ ...INITIAL_STEPS });
-    setError(null);
     setDetail(null);
-
-    const eventSource = new EventSource(`${API_URL}/api/airs/scan`);
-    eventSource.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'progress') {
-        const step = data.step as keyof ScanSteps;
-        if (step in INITIAL_STEPS) {
-          setSteps((prev) => prev ? { ...prev, [step]: { status: data.status, message: data.message } } : prev);
-        }
-      } else if (data.type === 'portfolios') {
-        setPortfolios(data.data);
+    startAirsScan({
+      onPortfolios: (list) => {
         setYtdMap({});
-        loadYtdReturns(data.data, true);
-      } else if (data.type === 'done') {
-        setScanning(false);
-        eventSource.close();
-      } else if (data.type === 'error') {
-        setError(data.message);
-        setScanning(false);
-        eventSource.close();
-      }
-    };
-    eventSource.onerror = () => {
-      setError('Connection lost');
-      setScanning(false);
-      eventSource.close();
-    };
+        loadYtdReturns(list, true);
+      },
+    });
   }
 
   async function openPortfolio(name: string) {

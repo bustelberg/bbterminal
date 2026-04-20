@@ -54,11 +54,20 @@ def _storage_path(ticker: str, exchange: str, indicator: str = "price") -> str:
     return f"{exchange.upper()}_{ticker.upper()}/indicator__{indicator}.json"
 
 
+_BUCKET_READY = False
+
+
 def _ensure_bucket(supabase: Client) -> None:
+    """Idempotent bucket creation. Guarded so it fires at most once per process —
+    previous version fired an HTTP call on every price/volume fetch."""
+    global _BUCKET_READY
+    if _BUCKET_READY:
+        return
     try:
         supabase.storage.create_bucket(_BUCKET, options={"public": False})
     except Exception:
         pass
+    _BUCKET_READY = True
 
 
 def _fetch_from_storage(supabase: Client, path: str) -> list | None:
@@ -192,22 +201,46 @@ def _parse_price_series(data: list | dict) -> list[tuple[date, float]]:
     return results
 
 
-def load_prices_into_db(
+def _db_max_date(supabase: Client, company_id: int, metric_code: str) -> date | None:
+    """Return the latest target_date already stored for this company/metric, or None."""
+    try:
+        resp = (
+            supabase.table("metric_data")
+            .select("target_date")
+            .eq("company_id", company_id)
+            .eq("metric_code", metric_code)
+            .eq("source_code", "gurufocus")
+            .order("target_date", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if resp.data and resp.data[0].get("target_date"):
+            return date.fromisoformat(resp.data[0]["target_date"])
+    except Exception:
+        pass
+    return None
+
+
+def _upsert_metric_rows(
     supabase: Client,
     company_id: int,
-    prices: list[tuple[date, float]],
+    metric_code: str,
+    pairs: list[tuple[date, float]],
 ) -> int:
-    """Upsert price data into metric_data. Only loads dates >= 2023-01-01."""
+    """Upsert only rows newer than what's already in the DB. Skips the whole
+    write when the DB already has everything the cache does — otherwise a
+    fresh cache would still trigger ~15 redundant upsert round-trips."""
+    existing_max = _db_max_date(supabase, company_id, metric_code)
     rows = [
         {
             "company_id": company_id,
-            "metric_code": "close_price",
+            "metric_code": metric_code,
             "source_code": "gurufocus",
             "target_date": d.isoformat(),
-            "numeric_value": p,
+            "numeric_value": v,
         }
-        for d, p in prices
-        if d >= _PRICE_CUTOFF
+        for d, v in pairs
+        if d >= _PRICE_CUTOFF and (existing_max is None or d > existing_max)
     ]
     if not rows:
         return 0
@@ -221,6 +254,14 @@ def load_prices_into_db(
         ).execute()
         total += len(resp.data)
     return total
+
+
+def load_prices_into_db(
+    supabase: Client,
+    company_id: int,
+    prices: list[tuple[date, float]],
+) -> int:
+    return _upsert_metric_rows(supabase, company_id, "close_price", prices)
 
 
 def load_volume_into_db(
@@ -228,30 +269,7 @@ def load_volume_into_db(
     company_id: int,
     volumes: list[tuple[date, float]],
 ) -> int:
-    """Upsert volume data into metric_data. Only loads dates >= 2015-01-01."""
-    rows = [
-        {
-            "company_id": company_id,
-            "metric_code": "volume",
-            "source_code": "gurufocus",
-            "target_date": d.isoformat(),
-            "numeric_value": v,
-        }
-        for d, v in volumes
-        if d >= _PRICE_CUTOFF
-    ]
-    if not rows:
-        return 0
-
-    batch_size = 500
-    total = 0
-    for i in range(0, len(rows), batch_size):
-        batch = rows[i : i + batch_size]
-        resp = supabase.table("metric_data").upsert(
-            batch, on_conflict="company_id,metric_code,source_code,target_date", ignore_duplicates=False
-        ).execute()
-        total += len(resp.data)
-    return total
+    return _upsert_metric_rows(supabase, company_id, "volume", volumes)
 
 
 def ensure_volume_for_company(
@@ -267,6 +285,16 @@ def ensure_volume_for_company(
     _ensure_bucket(supabase)
     path = _storage_path(ticker, exchange, "volume")
     symbol = _build_symbol(ticker, exchange)
+
+    # Fast path: if the DB's latest row is already fresh we skip Storage
+    # entirely. Without this, cache hits still pay for a multi-hundred-KB JSON
+    # download + full reparse per company before discovering nothing to write.
+    db_max = _db_max_date(supabase, company_id, "volume")
+    if db_max is not None:
+        fresh, _reason = is_cache_fresh([db_max], today=data_cutoff)
+        if fresh:
+            result.source = "cache"
+            return result
 
     # 1. Check cache
     cached = _fetch_from_storage(supabase, path)
@@ -346,6 +374,18 @@ def ensure_prices_for_company(
     _ensure_bucket(supabase)
     path = _storage_path(ticker, exchange)
     symbol = _build_symbol(ticker, exchange)
+
+    # Fast path: if the DB's latest row is already fresh we skip Storage
+    # entirely. Without this, cache hits still pay for a multi-hundred-KB JSON
+    # download + full reparse per company before discovering nothing to write.
+    if not force_refresh:
+        db_max = _db_max_date(supabase, company_id, "close_price")
+        if db_max is not None:
+            fresh, reason = is_cache_fresh([db_max], today=data_cutoff)
+            if fresh:
+                result.source = "cache"
+                _log(f"DB fresh ({reason}) — skipping Storage")
+                return result
 
     # 1. Check cache
     if not force_refresh:

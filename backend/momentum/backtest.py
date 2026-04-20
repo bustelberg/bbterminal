@@ -43,6 +43,13 @@ class MonthlyHolding:
     category_scores: dict[str, float | None]  # e.g. {"price": 72.5, "volume": 45.1}
     weight: float
     forward_return_pct: float | None
+    currency: str | None = None
+    entry_price_local: float | None = None
+    exit_price_local: float | None = None
+    entry_price_eur: float | None = None
+    exit_price_eur: float | None = None
+    entry_date: str | None = None
+    exit_date: str | None = None
 
 
 @dataclass
@@ -95,6 +102,13 @@ class BacktestResult:
                             "category_scores": h.category_scores,
                             "weight": round(h.weight, 4),
                             "forward_return_pct": h.forward_return_pct,
+                            "currency": h.currency,
+                            "entry_price_local": h.entry_price_local,
+                            "exit_price_local": h.exit_price_local,
+                            "entry_price_eur": h.entry_price_eur,
+                            "exit_price_eur": h.exit_price_eur,
+                            "entry_date": h.entry_date,
+                            "exit_date": h.exit_date,
                         }
                         for h in r.holdings
                     ],
@@ -161,6 +175,14 @@ def _price_on_or_after(series: pd.Series, target: pd.Timestamp) -> float | None:
     if subset.empty:
         return None
     return float(subset.iloc[0])
+
+
+def _date_on_or_after(series: pd.Series, target: pd.Timestamp) -> str | None:
+    """Get the actual trading date of the first price on or after target."""
+    idx = series.index[series.index >= target]
+    if len(idx) == 0:
+        return None
+    return idx[0].strftime("%Y-%m-%d")
 
 
 def _build_volume_index(volumes_df: pd.DataFrame) -> dict[int, pd.Series]:
@@ -264,7 +286,9 @@ def run_backtest(
     send_event: Callable[..., Any] | None = None,
     *,
     volumes_df: pd.DataFrame | None = None,
-    monthly_eligible: dict[str, set[int]] | None = None,
+    monthly_eligible: dict[str, dict[int, str | None]] | None = None,
+    prices_local_df: pd.DataFrame | None = None,
+    company_currency: dict[int, str | None] | None = None,
 ) -> BacktestResult:
     """Run the monthly momentum backtest.
 
@@ -283,6 +307,11 @@ def run_backtest(
 
     # Build price index once — eliminates repeated DataFrame filtering
     price_index = _build_price_index(prices_df)
+    local_price_index = (
+        _build_price_index(prices_local_df)
+        if prices_local_df is not None and not prices_local_df.empty
+        else None
+    )
     volume_index = _build_volume_index(volumes_df) if volumes_df is not None and not volumes_df.empty else None
 
     monthly_records: list[MonthlyRecord] = []
@@ -309,7 +338,8 @@ def run_backtest(
         month_universe_df = universe_df
         if monthly_eligible is not None:
             month_key = month_date.isoformat()[:7]
-            eligible_ids = monthly_eligible.get(month_key, set())
+            sector_map = monthly_eligible.get(month_key) or {}
+            eligible_ids = set(sector_map.keys())
             if not eligible_ids:
                 snap_min = min(monthly_eligible.keys())
                 snap_max = max(monthly_eligible.keys())
@@ -317,6 +347,12 @@ def run_backtest(
                     reason = f"Month is outside universe snapshot range ({snap_min} to {snap_max})"
                 else:
                     reason = "All companies in the universe snapshot failed screening criteria for this month (0 passing)"
+                if send_event:
+                    send_event(
+                        "warning",
+                        scope="universe",
+                        message=f"{month_date.strftime('%b %Y')}: {reason}",
+                    )
                 monthly_records.append(MonthlyRecord(
                     date=month_date.isoformat()[:7],
                     holdings=[],
@@ -327,7 +363,11 @@ def run_backtest(
                 continue
             month_universe_df = universe_df[
                 universe_df["company_id"].isin(eligible_ids)
-            ].reset_index(drop=True)
+            ].copy().reset_index(drop=True)
+            # Attach per-month sector from the universe_membership snapshot.
+            # `load_universe` left sector=None on the base df; without this
+            # merge, sector-based selection would find 0 sectors.
+            month_universe_df["sector"] = month_universe_df["company_id"].map(sector_map)
 
         # Compute signals as of this month
         signals_df = compute_price_signals(
@@ -343,6 +383,11 @@ def run_backtest(
                     month=month_date.isoformat()[:7],
                     pct=pct,
                     message=f"{month_date.strftime('%b %Y')}: 0 holdings — {reason}",
+                )
+                send_event(
+                    "warning",
+                    scope="backtest",
+                    message=f"{month_date.strftime('%b %Y')}: {reason}",
                 )
             monthly_records.append(MonthlyRecord(
                 date=month_date.isoformat()[:7],
@@ -372,6 +417,11 @@ def run_backtest(
                     month=month_date.isoformat()[:7],
                     pct=pct,
                     message=f"{month_date.strftime('%b %Y')}: 0 holdings — {reason}",
+                )
+                send_event(
+                    "warning",
+                    scope="backtest",
+                    message=f"{month_date.strftime('%b %Y')}: {reason}",
                 )
             monthly_records.append(MonthlyRecord(
                 date=month_date.isoformat()[:7],
@@ -405,6 +455,15 @@ def run_backtest(
                 fwd_return = round((exit_price / entry_price - 1) * 100, 2)
                 returns.append(fwd_return)
 
+            local_series = local_price_index.get(cid) if local_price_index is not None else None
+            entry_local = _price_on_or_after(local_series, entry_ts) if local_series is not None else None
+            exit_local = _price_on_or_after(local_series, exit_ts) if local_series is not None else None
+
+            # Actual trading dates (prefer local series, fall back to EUR series).
+            date_series = local_series if local_series is not None else series
+            entry_dt = _date_on_or_after(date_series, entry_ts) if date_series is not None else None
+            exit_dt = _date_on_or_after(date_series, exit_ts) if date_series is not None else None
+
             # Extract per-category scores
             cat_scores: dict[str, float | None] = {}
             for cat in _get_category_keys():
@@ -423,6 +482,13 @@ def run_backtest(
                 category_scores=cat_scores,
                 weight=weight,
                 forward_return_pct=fwd_return,
+                currency=(company_currency or {}).get(cid),
+                entry_price_local=round(entry_local, 4) if entry_local is not None else None,
+                exit_price_local=round(exit_local, 4) if exit_local is not None else None,
+                entry_price_eur=round(entry_price, 4) if entry_price is not None else None,
+                exit_price_eur=round(exit_price, 4) if exit_price is not None else None,
+                entry_date=entry_dt,
+                exit_date=exit_dt,
             ))
 
         # Portfolio return = equal-weighted average of individual returns

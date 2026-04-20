@@ -1,7 +1,9 @@
 import asyncio
+import functools
 import json
 import os
 import re
+import time
 from datetime import date
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Header
@@ -27,9 +29,13 @@ from ingest.load_into_supabase import (
 )
 from ingest.resolve_tickers import detect_unknown_tickers, resolve_via_openfigi
 from ingest.earnings import fetch_financials, fetch_analyst_estimates, fetch_indicators
-from ingest.prices import ensure_prices_for_company, ensure_volume_for_company, PriceResult, _fetch_price_from_api, _parse_price_series
+from ingest.prices import ensure_prices_for_company, ensure_volume_for_company, PriceResult, _fetch_price_from_api, _parse_price_series, _ensure_bucket
 from ingest.api_usage import track_api_call, get_usage
-from momentum.data import load_universe, load_all_prices, load_all_volumes
+from momentum.data import (
+    load_universe, load_all_prices, load_all_volumes,
+    load_company_currency, load_fx_rates, convert_prices_to_eur,
+    sync_fx_rates_to_db,
+)
 from momentum.signals import PRICE_SIGNAL_DEFS
 from momentum.backtest import BacktestConfig, run_backtest
 from universe.screen import screen_universe, build_and_store_universes, validate_vs_longequity
@@ -46,6 +52,8 @@ from index_universe.acwi import (
     _load_detail_cache, fetch_announcement_detail, _save_detail_cache,
     compute_net_additions, gurufocus_url,
     gurufocus_exchange, gurufocus_exchange_for_db,
+    reconstruct_monthly_holdings as reconstruct_acwi_monthly_holdings,
+    feasible_holdings_for_db as acwi_feasible_holdings_for_db,
 )
 
 load_dotenv()                              # .env (prod defaults)
@@ -337,9 +345,41 @@ async def _ingest_long_equity_stream():
 
 
 def _get_db_longequity_months() -> set[str]:
-    """Return set of 'YYYY-MM' strings already loaded in metric_data for longequity."""
-    resp = supabase.rpc("get_distinct_dates", {"p_source_code": "longequity"}).execute()
-    return {str(row["target_date"])[:7] for row in (resp.data or [])}
+    """Return months that are fully loaded for longequity.
+
+    A month counts as "done" only if it has BOTH metric_data rows AND
+    universe_membership rows. Early ingests populated metric_data before the
+    universe_membership write path existed, so relying on metric_data alone
+    silently skips months that still need their universe rows.
+    """
+    md_resp = supabase.rpc("get_distinct_dates", {"p_source_code": "longequity"}).execute()
+    metric_months = {str(row["target_date"])[:7] for row in (md_resp.data or [])}
+
+    u_resp = supabase.table("universe").select("universe_id").eq("label", "longequity").limit(1).execute()
+    if not u_resp.data:
+        return set()
+    universe_id = u_resp.data[0]["universe_id"]
+
+    membership_months: set[str] = set()
+    offset = 0
+    page_size = 1000
+    while True:
+        resp = (
+            supabase.table("universe_membership")
+            .select("target_month")
+            .eq("universe_id", universe_id)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        batch = resp.data or []
+        for r in batch:
+            if r.get("target_month"):
+                membership_months.add(r["target_month"])
+        if len(batch) < page_size:
+            break
+        offset += page_size
+
+    return metric_months & membership_months
 
 
 @app.get("/api/longequity/latest-available")
@@ -1121,7 +1161,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                 page_size = 1000
                 while True:
                     resp = supabase.table("universe_membership").select(
-                        "target_month, company_id"
+                        "target_month, company_id, sector"
                     ).eq("universe_id", universe_id).order(
                         "target_month"
                     ).order("company_id").range(offset, offset + page_size - 1).execute()
@@ -1130,12 +1170,12 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                     if len(batch) < page_size:
                         break
                     offset += page_size
-                result: dict[str, set[int]] = {}
+                result: dict[str, dict[int, str | None]] = {}
                 for r in rows:
                     m = r["target_month"]
                     if m not in result:
-                        result[m] = set()
-                    result[m].add(r["company_id"])
+                        result[m] = {}
+                    result[m][r["company_id"]] = r.get("sector")
                 return result
 
             monthly_eligible = await asyncio.to_thread(_load_universe_membership)
@@ -1145,6 +1185,17 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                 return
             avg_pass = sum(len(v) for v in monthly_eligible.values()) // n_months
             yield _emit({"type": "progress", "pct": 7, "message": f"Universe: {n_months} months, ~{avg_pass} companies/month"})
+
+            # Diagnose missing sector data: if no membership row has a sector
+            # value, sector-based selection will silently pick zero companies.
+            # Fail loudly so the user knows to re-save the universe.
+            total_sec = sum(
+                1 for month_map in monthly_eligible.values()
+                for s in month_map.values() if s
+            )
+            if total_sec == 0:
+                yield _emit({"type": "error", "message": f"Universe '{req.universe_label}' has no sector data in universe_membership — re-save this universe from its source page so sectors are populated."})
+                return
 
         # Load index universe if specified (e.g. SP500 — stored as a universe label)
         if req.index_universe and monthly_eligible is None:
@@ -1162,7 +1213,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                 while True:
                     resp = (
                         supabase.table("universe_membership")
-                        .select("target_month, company_id")
+                        .select("target_month, company_id, sector")
                         .eq("universe_id", universe_id)
                         .order("target_month")
                         .range(offset, offset + page_size - 1)
@@ -1173,12 +1224,12 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                     if len(batch) < page_size:
                         break
                     offset += page_size
-                result: dict[str, set[int]] = {}
+                result: dict[str, dict[int, str | None]] = {}
                 for r in rows:
                     m = r["target_month"]
                     if m not in result:
-                        result[m] = set()
-                    result[m].add(r["company_id"])
+                        result[m] = {}
+                    result[m][r["company_id"]] = r.get("sector")
                 return result
 
             monthly_eligible = await asyncio.to_thread(_load_index_universe)
@@ -1188,6 +1239,21 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                 return
             avg_co = sum(len(v) for v in monthly_eligible.values()) // n_months
             yield _emit({"type": "progress", "pct": 7, "message": f"Index universe: {n_months} months, ~{avg_co} companies/month"})
+
+            total_sec = sum(
+                1 for month_map in monthly_eligible.values()
+                for s in month_map.values() if s
+            )
+            if total_sec == 0:
+                yield _emit({"type": "error", "message": f"Index universe '{req.index_universe}' has no sector data — re-save this universe from its source page so sectors are populated."})
+                return
+
+        # Also fail cleanly when no universe was selected at all — the
+        # scoring pipeline requires per-company sectors, and `load_universe`
+        # leaves them all None in that fallback.
+        if monthly_eligible is None and (req.top_n_sectors or 0) > 0:
+            yield _emit({"type": "error", "message": "No universe selected. Sector-based selection requires a universe (or index universe) with stored sector data."})
+            return
 
         config = BacktestConfig.from_dict({
             "start_date": req.start_date,
@@ -1205,65 +1271,143 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         if req.skip_price_fetch:
             yield _emit({"type": "progress", "pct": 60, "message": "Skipping data fetch (using existing DB prices & volumes)"})
         else:
-            # Ensure price data exists for every company (fetch from GuruFocus if missing)
+            # If max_companies is set, pre-trim the universe alphabetically so we
+            # only fetch what we need. (Parallel fetch makes the old "stop at
+            # ok_count" optimization hard to preserve.)
+            if req.max_companies > 0 and len(universe_df) > req.max_companies:
+                universe_df = universe_df.sort_values("gurufocus_ticker").head(req.max_companies).reset_index(drop=True)
+
             total_companies = len(universe_df)
+            concurrency = int(os.environ.get("BACKTEST_FETCH_CONCURRENCY", "16"))
             blocked_exchanges: set[str] = set()
             skipped_count = 0
             ok_count = 0
-            max_ok = req.max_companies if req.max_companies > 0 else 0  # 0 = unlimited
-            yield _emit({"type": "progress", "pct": 5, "message": f"Ensuring price & volume data for {total_companies} companies (cutoff: {data_cutoff})..."})
-            for idx, (_, row) in enumerate(universe_df.iterrows()):
-                pct = 5 + round((idx / total_companies) * 55)
-                ticker = row["gurufocus_ticker"]
-                exchange = row["gurufocus_exchange"] or "UNKNOWN"
-                symbol = f"{exchange}:{ticker}"
+            fetch_start_ts = time.monotonic()
 
-                # Skip companies on blocked exchanges
-                if exchange in blocked_exchanges:
-                    skipped_count += 1
-                    excluded_ids.add(int(row["company_id"]))
-                    continue
+            # Warm the storage bucket once before launching tasks — otherwise the
+            # first N workers would race and each fire a bucket-create HTTP call.
+            await asyncio.to_thread(_ensure_bucket, supabase)
 
-                yield _emit({"type": "progress", "pct": pct, "message": f"Data: {symbol} ({idx + 1}/{total_companies})"})
-                try:
-                    cid = int(row["company_id"])
-                    yield _keepalive()
-                    pr = await asyncio.to_thread(
-                        ensure_prices_for_company,
-                        supabase, cid, ticker, exchange,
-                        data_cutoff=data_cutoff,
-                    )
-                    # Also fetch volume (non-blocking on failure)
-                    vr = None
+            # Each company task submits 2 blocking HTTP calls in parallel (price +
+            # volume), so the executor needs 2 slots per concurrent task or the
+            # second call queues behind the first and inflates wall-clock timings.
+            from concurrent.futures import ThreadPoolExecutor
+            pool_size = concurrency * 2 + 4
+            executor = ThreadPoolExecutor(max_workers=pool_size, thread_name_prefix="fetch")
+            loop = asyncio.get_event_loop()
+
+            yield _emit({"type": "progress", "pct": 5, "message": f"Ensuring price & volume data for {total_companies} companies (cutoff: {data_cutoff}, concurrency: {concurrency}, pool: {pool_size})..."})
+            yield _keepalive()
+
+            result_queue: asyncio.Queue = asyncio.Queue()
+            sema = asyncio.Semaphore(concurrency)
+            inflight = {"count": 0, "peak": 0}
+
+            async def _fetch_one(row_cid: int, row_ticker: str, row_exchange: str):
+                sym = f"{row_exchange}:{row_ticker}"
+                if row_exchange in blocked_exchanges:
+                    await result_queue.put({"cid": row_cid, "symbol": sym, "exchange": row_exchange, "status": "skipped_blocked"})
+                    return
+                async with sema:
+                    if row_exchange in blocked_exchanges:
+                        await result_queue.put({"cid": row_cid, "symbol": sym, "exchange": row_exchange, "status": "skipped_blocked"})
+                        return
+                    inflight["count"] += 1
+                    if inflight["count"] > inflight["peak"]:
+                        inflight["peak"] = inflight["count"]
+                    task_start = time.monotonic()
                     try:
-                        yield _keepalive()
-                        vr = await asyncio.to_thread(
-                            ensure_volume_for_company,
-                            supabase, cid, ticker, exchange,
-                            data_cutoff=data_cutoff,
+                        # Run price + volume concurrently inside one company task
+                        pr_fut = loop.run_in_executor(
+                            executor,
+                            functools.partial(
+                                ensure_prices_for_company,
+                                supabase, row_cid, row_ticker, row_exchange,
+                                data_cutoff=data_cutoff,
+                            ),
                         )
-                    except Exception as ve:
-                        vr = PriceResult()
-                        vr.source = "error"
-                        vr.error = str(ve)
+                        vr_fut = loop.run_in_executor(
+                            executor,
+                            functools.partial(
+                                ensure_volume_for_company,
+                                supabase, row_cid, row_ticker, row_exchange,
+                                data_cutoff=data_cutoff,
+                            ),
+                        )
+                        pr_res, vr_res = await asyncio.gather(pr_fut, vr_fut, return_exceptions=True)
+                        if isinstance(pr_res, BaseException):
+                            raise pr_res
+                        pr = pr_res
+                        if isinstance(vr_res, BaseException):
+                            vr = PriceResult()
+                            vr.source = "error"
+                            vr.error = str(vr_res)
+                        else:
+                            vr = vr_res
+                        elapsed_ms = int((time.monotonic() - task_start) * 1000)
+                        await result_queue.put({"cid": row_cid, "symbol": sym, "exchange": row_exchange, "pr": pr, "vr": vr, "status": "ok", "ms": elapsed_ms})
+                    except Exception as e:
+                        elapsed_ms = int((time.monotonic() - task_start) * 1000)
+                        await result_queue.put({"cid": row_cid, "symbol": sym, "exchange": row_exchange, "error": str(e), "status": "error", "ms": elapsed_ms})
+                    finally:
+                        inflight["count"] -= 1
+
+            tasks = [
+                asyncio.create_task(_fetch_one(
+                    int(row["company_id"]),
+                    row["gurufocus_ticker"],
+                    row["gurufocus_exchange"] or "UNKNOWN",
+                ))
+                for _, row in universe_df.iterrows()
+            ]
+
+            async def _sentinel():
+                await asyncio.gather(*tasks, return_exceptions=True)
+                await result_queue.put(None)
+
+            sentinel_task = asyncio.create_task(_sentinel())
+
+            done_count = 0
+            try:
+                while True:
+                    evt = await result_queue.get()
+                    if evt is None:
+                        break
+                    done_count += 1
+                    pct = 5 + round((done_count / max(1, total_companies)) * 55)
+                    status = evt["status"]
+                    cid = evt["cid"]
+                    symbol = evt["symbol"]
+                    exchange = evt["exchange"]
+
+                    if status == "skipped_blocked":
+                        skipped_count += 1
+                        excluded_ids.add(cid)
+                        continue
+                    if status == "error":
+                        excluded_ids.add(cid)
+                        yield _emit({"type": "warning", "scope": "fetch", "symbol": symbol, "message": f"{symbol}: fetch failed — {evt['error']}"})
+                        continue
+
+                    pr = evt["pr"]
+                    vr = evt["vr"]
+
                     if pr.is_forbidden:
                         blocked_exchanges.add(exchange)
                         excluded_ids.add(cid)
-                        yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: unsubscribed region — skipping all {exchange} companies"})
+                        yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: unsubscribed region — future {exchange} calls will be skipped"})
                     elif pr.is_delisted:
                         excluded_ids.add(cid)
-                        # Remove delisted companies from DB
                         await asyncio.to_thread(
-                            lambda: (
-                                supabase.table("metric_data").delete().eq("company_id", cid).execute(),
-                                supabase.table("portfolio_weight").delete().eq("company_id", cid).execute(),
-                                supabase.table("company").delete().eq("company_id", cid).execute(),
+                            lambda c=cid: (
+                                supabase.table("metric_data").delete().eq("company_id", c).execute(),
+                                supabase.table("portfolio_weight").delete().eq("company_id", c).execute(),
+                                supabase.table("company").delete().eq("company_id", c).execute(),
                             )
                         )
                         yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: DELISTED — removed from database"})
                     else:
                         ok_count += 1
-                        # Build price detail
                         parts: list[str] = []
                         if pr.source == "cache":
                             parts.append(f"price: cache ({pr.rows_loaded})")
@@ -1272,10 +1416,9 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                         elif pr.source == "stale_cache":
                             parts.append(f"price: stale cache ({pr.rows_loaded})")
                         elif pr.source == "none":
-                            parts.append(f"price: none")
+                            parts.append("price: none")
                         else:
                             parts.append(f"price: {pr.source}")
-                        # Build volume detail
                         if vr:
                             if vr.source == "cache":
                                 parts.append(f"vol: cache ({vr.rows_loaded})")
@@ -1289,19 +1432,22 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                                 parts.append(f"vol: none ({vr.error or 'unknown'})")
                         else:
                             parts.append("vol: failed")
-                        yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: {' | '.join(parts)}"})
-                        # Stop once we have enough valid companies
-                        if max_ok and ok_count >= max_ok:
-                            # Mark remaining companies as excluded
-                            remaining_ids = set(universe_df["company_id"].iloc[idx + 1:].astype(int))
-                            excluded_ids.update(remaining_ids - {cid for cid in excluded_ids})
-                            yield _emit({"type": "progress", "pct": 60, "message": f"Reached {ok_count} valid companies — stopping data fetch"})
-                            break
-                except Exception as e:
-                    yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: error — {e}"})
+                        ms = evt.get("ms", 0)
+                        peak = inflight["peak"]
+                        yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol} ({done_count}/{total_companies}, {ms}ms, peak:{peak}): {' | '.join(parts)}"})
+            finally:
+                # Make sure the sentinel task completes before we leave this block
+                try:
+                    await sentinel_task
+                except Exception:
+                    pass
+                executor.shutdown(wait=False)
+
+            total_elapsed = time.monotonic() - fetch_start_ts
+            yield _emit({"type": "progress", "pct": 60, "message": f"Fetch complete in {total_elapsed:.1f}s (peak concurrency: {inflight['peak']}/{concurrency})"})
 
             if blocked_exchanges:
-                yield _emit({"type": "progress", "pct": 60, "message": f"Blocked exchanges (unsubscribed): {', '.join(sorted(blocked_exchanges))} — {skipped_count} companies skipped"})
+                yield _emit({"type": "warning", "scope": "fetch", "message": f"Blocked exchanges (unsubscribed): {', '.join(sorted(blocked_exchanges))} — {skipped_count} companies skipped"})
 
         # Remove excluded companies (blocked exchanges, delisted) from universe
         if excluded_ids:
@@ -1345,6 +1491,150 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         n_companies_with_prices = prices_df["company_id"].nunique()
         yield _emit({"type": "progress", "pct": 65, "message": f"Loaded {len(prices_df):,} prices for {n_companies_with_prices} companies"})
 
+        # ------------------------------------------------------------------ #
+        # FX conversion: convert local-currency prices to EUR so signals and
+        # returns are expressed in a single currency for a EUR-based investor.
+        # Momentum ratios are scale-invariant so signals are unaffected, but
+        # forward returns change with FX drift (e.g. JPY weakness vs EUR).
+        # ------------------------------------------------------------------ #
+        yield _emit({"type": "progress", "pct": 65, "message": "Resolving trading currency per company..."})
+        yield _keepalive()
+        company_currency = await asyncio.to_thread(
+            load_company_currency, supabase, company_ids,
+        )
+        currencies_needed = sorted({c for c in company_currency.values() if c})
+        yield _emit({"type": "progress", "pct": 65, "message": f"Found {len(currencies_needed)} distinct currencies: {', '.join(currencies_needed)}"})
+
+        # Sync fx_rate table from ECB for every currency in range. This is
+        # idempotent and cheap — it only fetches what's missing past the
+        # highest existing rate_date per currency.
+        yield _emit({"type": "progress", "pct": 65, "message": f"Syncing FX rates from ECB (through {price_end})..."})
+        yield _keepalive()
+        fx_sync = await asyncio.to_thread(
+            sync_fx_rates_to_db, supabase, currencies_needed, price_start, price_end,
+        )
+        synced_codes = sorted(c for c, s in fx_sync.items() if s.get("status") == "synced")
+        cached_codes = sorted(c for c, s in fx_sync.items() if s.get("status") == "cached")
+        failed_codes = sorted(c for c, s in fx_sync.items() if s.get("status") == "error")
+        nodata_codes = sorted(c for c, s in fx_sync.items() if s.get("status") == "no_data")
+        total_rows = sum(s.get("rows", 0) for s in fx_sync.values())
+        yield _emit({
+            "type": "progress",
+            "pct": 65,
+            "message": (
+                f"FX sync done: {len(synced_codes)} updated ({total_rows:,} rows), "
+                f"{len(cached_codes)} already current, "
+                f"{len(failed_codes)} failed, {len(nodata_codes)} no_data"
+            ),
+        })
+        if failed_codes:
+            for code in failed_codes:
+                err = fx_sync[code].get("error", "unknown")
+                yield _emit({"type": "warning", "scope": "fx", "message": f"FX sync failed for {code}: {err}"})
+        if nodata_codes:
+            yield _emit({
+                "type": "warning",
+                "scope": "fx",
+                "message": f"No FX data returned for: {', '.join(nodata_codes)} (ECB may not cover these)",
+            })
+
+        yield _emit({"type": "progress", "pct": 65, "message": f"Loading FX rates ({price_start} to {price_end}) for {len(currencies_needed)} currencies..."})
+        yield _keepalive()
+        fx_rates = await asyncio.to_thread(
+            load_fx_rates, supabase, currencies_needed, price_start, price_end,
+        )
+        loaded_codes = [c for c, s in fx_rates.items() if s is not None and not s.empty]
+        missing_codes = sorted(set(currencies_needed) - set(loaded_codes))
+        yield _emit({"type": "progress", "pct": 65, "message": f"FX rates loaded for {len(loaded_codes)} currencies"})
+        if missing_codes:
+            yield _emit({
+                "type": "warning",
+                "scope": "fx",
+                "message": f"No FX history for: {', '.join(missing_codes)} — companies on those currencies will be dropped",
+            })
+
+        yield _emit({"type": "progress", "pct": 65, "message": f"Converting {len(prices_df):,} price rows to EUR..."})
+        yield _keepalive()
+        prices_local_df = prices_df
+        prices_df, fx_stats = await asyncio.to_thread(
+            convert_prices_to_eur, prices_df, company_currency, fx_rates,
+        )
+        yield _emit({
+            "type": "progress",
+            "pct": 65,
+            "message": (
+                f"FX done: {fx_stats['converted_rows']:,} rows converted "
+                f"({', '.join(fx_stats['converted_currencies']) or 'none'}), "
+                f"{fx_stats['passthrough_rows']:,} already EUR, "
+                f"{fx_stats['dropped_no_currency']:,} dropped (no currency), "
+                f"{fx_stats['dropped_no_fx']:,} dropped (no FX rate)"
+            ),
+        })
+        if fx_stats["missing_currencies"]:
+            yield _emit({
+                "type": "warning",
+                "scope": "fx",
+                "message": f"Currencies with no FX series in date range: {', '.join(fx_stats['missing_currencies'])}",
+            })
+
+        if prices_df.empty:
+            yield _emit({"type": "error", "message": "No price data left after FX conversion."})
+            return
+
+        # Audit price coverage: flag universe companies with zero or sparse price rows
+        _price_counts = prices_df.groupby("company_id").size().to_dict() if not prices_df.empty else {}
+        _universe_symbol = {
+            int(r["company_id"]): f"{r.get('gurufocus_exchange') or '?'}:{r['gurufocus_ticker']}"
+            for _, r in universe_df.iterrows()
+        }
+        _no_price = [cid for cid in company_ids if _price_counts.get(int(cid), 0) == 0]
+        _sparse_price = [cid for cid in company_ids if 0 < _price_counts.get(int(cid), 0) < 20]
+
+        # Group no-price companies by exchange. An exchange where every
+        # universe company has zero price rows is almost certainly
+        # unsubscribed on GuruFocus (or fully blocked) — surface it
+        # separately from one-off gaps so the user can tell the difference.
+        _universe_exchange = {
+            int(r["company_id"]): r.get("gurufocus_exchange") or "UNKNOWN"
+            for _, r in universe_df.iterrows()
+        }
+        _exchange_totals: dict[str, int] = {}
+        _exchange_no_price: dict[str, int] = {}
+        for cid in company_ids:
+            exch = _universe_exchange.get(int(cid), "UNKNOWN")
+            _exchange_totals[exch] = _exchange_totals.get(exch, 0) + 1
+            if _price_counts.get(int(cid), 0) == 0:
+                _exchange_no_price[exch] = _exchange_no_price.get(exch, 0) + 1
+        _unsubscribed_exchanges = sorted(
+            exch for exch, no_price in _exchange_no_price.items()
+            if _exchange_totals.get(exch, 0) > 0 and no_price == _exchange_totals[exch]
+        )
+        if _unsubscribed_exchanges:
+            parts = [f"{exch}({_exchange_no_price[exch]})" for exch in _unsubscribed_exchanges]
+            total_unsub = sum(_exchange_no_price[e] for e in _unsubscribed_exchanges)
+            yield _emit({
+                "type": "info",
+                "scope": "prices",
+                "message": f"Unsubscribed/blocked exchanges (expected to have no data): {', '.join(parts)} — {total_unsub} companies",
+            })
+
+        # Remaining no-price cases: exchanges where some companies have
+        # data but specific tickers don't — true one-off gaps.
+        _no_price_gap = [
+            cid for cid in _no_price
+            if _universe_exchange.get(int(cid), "UNKNOWN") not in _unsubscribed_exchanges
+        ]
+        if _no_price_gap:
+            sample = ", ".join(_universe_symbol.get(int(c), str(c)) for c in _no_price_gap[:10])
+            more = f" (+{len(_no_price_gap) - 10} more)" if len(_no_price_gap) > 10 else ""
+            yield _emit({"type": "warning", "scope": "prices", "message": f"{len(_no_price_gap)} companies on subscribed exchanges have NO price data: {sample}{more}"})
+        if _sparse_price:
+            sample = ", ".join(
+                f"{_universe_symbol.get(int(c), c)}({_price_counts.get(int(c), 0)})" for c in _sparse_price[:10]
+            )
+            more = f" (+{len(_sparse_price) - 10} more)" if len(_sparse_price) > 10 else ""
+            yield _emit({"type": "warning", "scope": "prices", "message": f"{len(_sparse_price)} companies have < 20 price rows (insufficient for signals): {sample}{more}"})
+
         # Load volumes from DB
         yield _emit({"type": "progress", "pct": 66, "message": "Loading volumes from DB..."})
         yield _keepalive()
@@ -1353,6 +1643,27 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         )
         n_vol = volumes_df["company_id"].nunique() if not volumes_df.empty else 0
         yield _emit({"type": "progress", "pct": 67, "message": f"Loaded {len(volumes_df):,} volume records for {n_vol} companies"})
+
+        # Audit volume coverage. Companies on unsubscribed exchanges (already
+        # flagged in the prices info message) are expected to have no volume
+        # either, so filter them out of the warning set to avoid noise.
+        _vol_counts = volumes_df.groupby("company_id").size().to_dict() if not volumes_df.empty else {}
+        _no_vol_all = [cid for cid in company_ids if _vol_counts.get(int(cid), 0) == 0]
+        _sparse_vol = [cid for cid in company_ids if 0 < _vol_counts.get(int(cid), 0) < 20]
+        _no_vol_gap = [
+            cid for cid in _no_vol_all
+            if _universe_exchange.get(int(cid), "UNKNOWN") not in _unsubscribed_exchanges
+        ]
+        if _no_vol_gap:
+            sample = ", ".join(_universe_symbol.get(int(c), str(c)) for c in _no_vol_gap[:10])
+            more = f" (+{len(_no_vol_gap) - 10} more)" if len(_no_vol_gap) > 10 else ""
+            yield _emit({"type": "warning", "scope": "volumes", "message": f"{len(_no_vol_gap)} companies on subscribed exchanges have NO volume data — volume signals will be skipped for them: {sample}{more}"})
+        if _sparse_vol:
+            sample = ", ".join(
+                f"{_universe_symbol.get(int(c), c)}({_vol_counts.get(int(c), 0)})" for c in _sparse_vol[:10]
+            )
+            more = f" (+{len(_sparse_vol) - 10} more)" if len(_sparse_vol) > 10 else ""
+            yield _emit({"type": "warning", "scope": "volumes", "message": f"{len(_sparse_vol)} companies have < 20 volume rows: {sample}{more}"})
 
         # Run backtest with progress callback via queue for real-time streaming
         import queue as _queue
@@ -1368,6 +1679,8 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                 r = run_backtest(config, prices_df, universe_df, send_event,
                     volumes_df=volumes_df,
                     monthly_eligible=monthly_eligible,
+                    prices_local_df=prices_local_df,
+                    company_currency=company_currency,
                 )
                 backtest_result_holder.append(r)
             except Exception as e:
@@ -1392,6 +1705,8 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             if evt["type"] == "progress":
                 scaled_pct = 68 + round(evt.get("pct", 0) * 0.30)
                 yield _emit({"type": "progress", "pct": scaled_pct, "message": evt.get("message", "")})
+            elif evt["type"] == "warning":
+                yield _emit({"type": "warning", "scope": evt.get("scope", "backtest"), "message": evt.get("message", "")})
 
         if backtest_error_holder:
             raise backtest_error_holder[0]
@@ -1499,6 +1814,27 @@ async def delete_backtest(run_id: int):
     if not resp.data:
         raise HTTPException(404, "Backtest not found")
     return {"ok": True}
+
+
+class RenameBacktestRequest(BaseModel):
+    name: str
+
+
+@app.patch("/api/momentum/backtests/{run_id}")
+async def rename_backtest(run_id: int, req: RenameBacktestRequest):
+    """Rename a saved backtest run."""
+    new_name = req.name.strip()
+    if not new_name:
+        raise HTTPException(400, "Name cannot be empty")
+    resp = await asyncio.to_thread(
+        lambda: supabase.table("backtest_run")
+        .update({"name": new_name})
+        .eq("run_id", run_id)
+        .execute()
+    )
+    if not resp.data:
+        raise HTTPException(404, "Backtest not found")
+    return resp.data[0]
 
 
 # ─── Benchmarks ───────────────────────────────────────────────────────────────
@@ -1811,10 +2147,72 @@ async def universe_build(body: BuildUniverseRequest):
 
 @app.get("/api/universe/labels")
 async def universe_labels():
-    """List all universe labels with date ranges and counts."""
+    """List all universe labels with rich stats derived from universe_membership."""
     def _run():
-        resp = supabase.table("universe").select("universe_id, label, description, created_at").order("label").execute()
-        return resp.data or []
+        u_resp = (
+            supabase.table("universe")
+            .select("universe_id, label, description, created_at")
+            .order("label")
+            .execute()
+        )
+        universes = u_resp.data or []
+        from collections import Counter
+
+        result = []
+        for u in universes:
+            uid = u["universe_id"]
+            rows: list[dict] = []
+            offset = 0
+            page_size = 1000
+            while True:
+                m_resp = (
+                    supabase.table("universe_membership")
+                    .select("target_month, company_id, universe_ticker, sector")
+                    .eq("universe_id", uid)
+                    .range(offset, offset + page_size - 1)
+                    .execute()
+                )
+                batch = m_resp.data or []
+                rows.extend(batch)
+                if len(batch) < page_size:
+                    break
+                offset += page_size
+
+            months_sorted = sorted({r["target_month"] for r in rows if r.get("target_month")})
+            per_month_counter = Counter(r["target_month"] for r in rows if r.get("target_month"))
+            sector_counter = Counter(
+                (r.get("sector") or "(unknown)") for r in rows
+            )
+            unique_companies = len({r["company_id"] for r in rows if r.get("company_id")})
+            unique_tickers = len({r["universe_ticker"] for r in rows if r.get("universe_ticker")})
+            month_count = len(months_sorted)
+            avg_per_month = round(len(rows) / month_count, 1) if month_count else 0
+
+            result.append({
+                "universe_id": uid,
+                "label": u["label"],
+                "description": u.get("description"),
+                "created_at": u.get("created_at"),
+                "start_month": months_sorted[0] if months_sorted else None,
+                "end_month": months_sorted[-1] if months_sorted else None,
+                "month_count": month_count,
+                "total_rows": len(rows),
+                "unique_companies": unique_companies,
+                "unique_tickers": unique_tickers,
+                "avg_per_month": avg_per_month,
+                "first_month_count": per_month_counter.get(months_sorted[0], 0) if months_sorted else 0,
+                "last_month_count": per_month_counter.get(months_sorted[-1], 0) if months_sorted else 0,
+                "monthly_counts": [
+                    {"month": m, "count": per_month_counter[m]} for m in months_sorted
+                ],
+                "sectors": [
+                    {"sector": s, "count": c}
+                    for s, c in sorted(sector_counter.items(), key=lambda x: -x[1])
+                ],
+            })
+
+        return result
+
     return await asyncio.to_thread(_run)
 
 
@@ -1908,6 +2306,40 @@ async def universe_delete_label(label: str):
     def _run():
         supabase.table("universe").delete().eq("label", label).execute()
         return {"deleted": label}
+    return await asyncio.to_thread(_run)
+
+
+class UniverseRenameRequest(BaseModel):
+    new_label: str
+
+
+@app.put("/api/universe/labels/{label}")
+async def universe_rename_label(label: str, req: UniverseRenameRequest):
+    """Rename a universe label."""
+    def _run():
+        new_label = (req.new_label or "").strip()
+        if not new_label:
+            raise HTTPException(status_code=400, detail="new_label is required")
+        existing = supabase.table("universe").select("universe_id").eq("label", new_label).limit(1).execute()
+        if existing.data:
+            raise HTTPException(status_code=409, detail=f"Label '{new_label}' already exists")
+        supabase.table("universe").update({"label": new_label}).eq("label", label).execute()
+        return {"old_label": label, "new_label": new_label}
+    return await asyncio.to_thread(_run)
+
+
+@app.delete("/api/universe/labels")
+async def universe_delete_all():
+    """Delete ALL universes and their memberships (cascade)."""
+    def _run():
+        resp = supabase.table("universe").select("universe_id").limit(100000).execute()
+        ids = [r["universe_id"] for r in (resp.data or [])]
+        if not ids:
+            return {"deleted": 0}
+        for i in range(0, len(ids), 50):
+            batch = ids[i:i + 50]
+            supabase.table("universe").delete().in_("universe_id", batch).execute()
+        return {"deleted": len(ids)}
     return await asyncio.to_thread(_run)
 
 
@@ -2016,10 +2448,30 @@ async def index_universe_import_sp500():
 
 @app.get("/api/index-universe/indexes")
 async def index_universe_list():
-    """List all stored index universes."""
+    """List all stored index universes with month range and unique ticker counts.
+    Aggregates are precomputed by the universe_stats view — querying membership
+    rows directly and counting in Python ran ~70s for SP500 + ACWI."""
     def _run():
-        resp = supabase.table("universe").select("universe_id, label, description, created_at").order("label").execute()
-        return resp.data or []
+        resp = (
+            supabase.table("universe_stats")
+            .select("*")
+            .order("label")
+            .execute()
+        )
+        result = []
+        for r in (resp.data or []):
+            if not r.get("start_month"):
+                continue  # skip empty universes
+            result.append({
+                "index_name": r["label"],
+                "description": r.get("description"),
+                "created_at": r.get("created_at"),
+                "start_month": r.get("start_month"),
+                "end_month": r.get("end_month"),
+                "month_count": r.get("month_count") or 0,
+                "total_unique_tickers": r.get("total_unique_tickers") or 0,
+            })
+        return result
     return await asyncio.to_thread(_run)
 
 
@@ -2250,6 +2702,169 @@ async def acwi_net_additions():
     results = await asyncio.to_thread(compute_net_additions)
     matched = sum(1 for r in results if r["matched"])
     return {"net_additions": results, "total": len(results), "matched": matched}
+
+
+class AcwiSaveUniverseRequest(BaseModel):
+    name: str = "ACWI"
+    start_date: str
+    end_date: str
+
+
+@app.post("/api/acwi/save-universe")
+async def acwi_save_universe(req: AcwiSaveUniverseRequest):
+    """SSE stream: reconstruct monthly ACWI feasible-universe holdings and save as a universe.
+
+    The saved universe can be selected in the momentum backtester via `index_universe`.
+    """
+    import queue as _queue, threading
+
+    def _run(q: _queue.Queue):
+        def emit(message: str, pct: int | None = None):
+            payload = {"type": "progress", "message": message}
+            if pct is not None:
+                payload["pct"] = pct
+            q.put(json.dumps(payload))
+
+        try:
+            emit("Loading feasible ACWI holdings from iShares XLS...", 3)
+            feasible = acwi_feasible_holdings_for_db()
+            emit(f"Found {len(feasible)} feasible holdings", 5)
+
+            # Load exchange_id map: exchange_code -> exchange_id
+            exch_resp = supabase.table("gurufocus_exchange").select("exchange_id, exchange_code").execute()
+            exch_id_map = {r["exchange_code"]: r["exchange_id"] for r in (exch_resp.data or [])}
+
+            # Bulk-load existing company rows for all exchanges we care about (single query)
+            needed_exchanges = {fh["db_exchange"] for fh in feasible}
+            needed_eids = [exch_id_map[e] for e in needed_exchanges if e in exch_id_map]
+            existing_by_key: dict[tuple[int, str], int] = {}
+            if needed_eids:
+                offset = 0
+                page_size = 1000
+                while True:
+                    c_resp = (
+                        supabase.table("company")
+                        .select("company_id, gurufocus_ticker, exchange_id")
+                        .in_("exchange_id", needed_eids)
+                        .range(offset, offset + page_size - 1)
+                        .execute()
+                    )
+                    batch = c_resp.data or []
+                    for c in batch:
+                        if c.get("gurufocus_ticker") and c.get("exchange_id") is not None:
+                            existing_by_key[(c["exchange_id"], c["gurufocus_ticker"])] = c["company_id"]
+                    if len(batch) < page_size:
+                        break
+                    offset += page_size
+            emit(f"Loaded {len(existing_by_key)} existing company rows across {len(needed_eids)} exchanges", 10)
+
+            company_lookup: dict[str, int] = {}
+            sector_lookup: dict[str, str] = {
+                fh["symbol"]: fh["sector"] for fh in feasible if fh.get("sector")
+            }
+            created = 0
+            already = 0
+            skipped = 0
+            unknown_exchanges: set[str] = set()
+            for idx, fh in enumerate(feasible):
+                eid = exch_id_map.get(fh["db_exchange"])
+                if eid is None:
+                    skipped += 1
+                    unknown_exchanges.add(fh["db_exchange"])
+                    continue
+                key = (eid, fh["gf_ticker"])
+                cid = existing_by_key.get(key)
+                if cid is not None:
+                    company_lookup[fh["symbol"]] = cid
+                    already += 1
+                else:
+                    try:
+                        ins = supabase.table("company").insert({
+                            "gurufocus_ticker": fh["gf_ticker"],
+                            "exchange_id": eid,
+                            "company_name": fh["company_name"] or None,
+                        }).execute()
+                        if ins.data:
+                            cid = ins.data[0]["company_id"]
+                            existing_by_key[key] = cid
+                            company_lookup[fh["symbol"]] = cid
+                            created += 1
+                    except Exception as e:
+                        skipped += 1
+                        emit(f"  failed to create {fh['symbol']} ({fh['company_name']}): {e}", None)
+                        continue
+                    # Tag with 'acwi' source
+                    try:
+                        supabase.table("company_source").upsert(
+                            {"company_id": cid, "source_code": "acwi"},
+                            on_conflict="company_id,source_code",
+                            ignore_duplicates=True,
+                        ).execute()
+                    except Exception:
+                        pass
+
+                if (idx + 1) % 200 == 0 or idx == len(feasible) - 1:
+                    pct = 10 + round((idx + 1) / len(feasible) * 30)
+                    emit(f"Companies: {created} created, {already} existing, {skipped} skipped ({idx + 1}/{len(feasible)})", pct)
+
+            if unknown_exchanges:
+                emit(f"Unknown exchanges (missing from gurufocus_exchange): {sorted(unknown_exchanges)}", None)
+            emit(f"Company sync done: {created} new, {already} existing, {skipped} skipped", 42)
+
+            emit(f"Reconstructing monthly holdings {req.start_date}..{req.end_date}...", 45)
+            monthly, stats = reconstruct_acwi_monthly_holdings(req.start_date, req.end_date)
+            emit(
+                f"Built {stats['months']} months: {stats['feasible_count']} feasible tickers "
+                f"({stats['with_addition']} with matched addition, {stats['grandfathered']} grandfathered)",
+                55,
+            )
+
+            emit(f"Writing universe '{req.name}' to database...", 60)
+            store_stats = store_index_membership(
+                supabase, req.name, monthly, [], company_lookup,
+                on_progress=lambda m: emit(m, None),
+                sector_lookup=sector_lookup,
+            )
+
+            q.put(json.dumps({
+                "type": "done",
+                "message": (
+                    f"Saved '{req.name}': {store_stats['months']} months, "
+                    f"{store_stats['total_rows']} rows, "
+                    f"{store_stats['matched_companies']}/{store_stats['unique_tickers']} tickers matched "
+                    f"({created} new companies created, {already} existing)"
+                ),
+                "stats": {
+                    "name": req.name,
+                    "months": store_stats["months"],
+                    "total_rows": store_stats["total_rows"],
+                    "unique_tickers": store_stats["unique_tickers"],
+                    "matched_companies": store_stats["matched_companies"],
+                    "companies_created": created,
+                    "companies_existing": already,
+                    "companies_skipped": skipped,
+                    "feasible_count": stats["feasible_count"],
+                    "grandfathered": stats["grandfathered"],
+                    "with_addition": stats["with_addition"],
+                },
+            }))
+        except Exception as e:
+            import traceback
+            q.put(json.dumps({"type": "error", "message": f"{e}\n{traceback.format_exc()}"}))
+        q.put(None)
+
+    q: _queue.Queue = _queue.Queue()
+    threading.Thread(target=_run, args=(q,), daemon=True).start()
+
+    async def generate():
+        yield ": keepalive\n\n"
+        while True:
+            msg = await asyncio.to_thread(q.get)
+            if msg is None:
+                break
+            yield f"data: {msg}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @app.get("/api/acwi/fetch-all-details")

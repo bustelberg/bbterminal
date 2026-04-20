@@ -1,74 +1,24 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 
-type LogEntry = {
-  type: 'info' | 'done' | 'error'
-  message: string
-}
+import { ingestStore, startIngest } from '../../lib/stores/ingest'
 
 export default function IngestButton() {
-  const [running, setRunning] = useState(false)
-  const [logs, setLogs] = useState<LogEntry[]>([])
-  const [finished, setFinished] = useState(false)
+  const running = ingestStore.use((s) => s.running)
+  const logs = ingestStore.use((s) => s.log)
+  const finished = ingestStore.use((s) => s.finished)
   const logEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const el = logEndRef.current?.parentElement
+    if (el) el.scrollTop = el.scrollHeight
   }, [logs])
-
-  const handleClick = async () => {
-    setRunning(true)
-    setFinished(false)
-    setLogs([])
-
-    try {
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/ingest/long-equity`,
-        { method: 'POST' }
-      )
-
-      if (!response.ok || !response.body) {
-        throw new Error(`Request failed with status ${response.status}`)
-      }
-
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() ?? ''
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          try {
-            const entry = JSON.parse(line.slice(6)) as LogEntry
-            setLogs((prev) => [...prev, entry])
-            if (entry.type === 'done') setFinished(true)
-          } catch {
-            // ignore malformed SSE lines
-          }
-        }
-      }
-    } catch (err) {
-      setLogs((prev) => [
-        ...prev,
-        { type: 'error', message: String(err) },
-      ])
-    } finally {
-      setRunning(false)
-    }
-  }
 
   return (
     <div className="mt-8 max-w-2xl">
       <button
-        onClick={handleClick}
+        onClick={() => startIngest()}
         disabled={running}
         className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >

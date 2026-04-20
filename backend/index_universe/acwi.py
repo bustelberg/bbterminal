@@ -104,23 +104,23 @@ _ISHARES_TO_GF: dict[str, str] = {
     "Warsaw Stock Exchange/Equities/Main Market": "WAR",
     "Wiener Boerse Ag": "XPRA",
     "Athens Exchange S.A. Cash Market": "ATH",
-    "Irish Stock Exchange - All Market": "ISE",
-    "Budapest Stock Exchange": "BDP",
-    "Prague Stock Exchange": "PRA",
+    "Irish Stock Exchange - All Market": "DUB",
+    "Budapest Stock Exchange": "BUD",
+    "Prague Stock Exchange": "XPRA",
     "Istanbul Stock Exchange": "IST",
     # Americas
     "Toronto Stock Exchange": "TSX",
     "Bolsa Mexicana De Valores": "MEX",
     "XBSP": "BSP",
-    "Santiago Stock Exchange": "SGO",
+    "Santiago Stock Exchange": "XSGO",
     "Bolsa De Valores De Colombia": "BOG",
     # Asia-Pacific
     "Tokyo Stock Exchange": "TSE",
     "Hong Kong Exchanges And Clearing Ltd": "HKSE",
-    "Shanghai Stock Exchange": "SSE",
+    "Shanghai Stock Exchange": "SHSE",
     "Shenzhen Stock Exchange": "SZSE",
-    "Taiwan Stock Exchange": "TWSE",
-    "Gretai Securities Market": "GTSM",
+    "Taiwan Stock Exchange": "TPE",
+    "Gretai Securities Market": "ROCO",
     "Korea Exchange (Stock Market)": "XKRX",
     "Korea Exchange (Kosdaq)": "XKRX",
     "National Stock Exchange Of India": "NSE",
@@ -128,41 +128,27 @@ _ISHARES_TO_GF: dict[str, str] = {
     "Asx - All Markets": "ASX",
     "New Zealand Exchange Ltd": "NZSE",
     "Singapore Exchange": "SGX",
-    "Bursa Malaysia": "KLSE",
-    "Indonesia Stock Exchange": "IDX",
-    "Stock Exchange Of Thailand": "SET",
-    "Philippine Stock Exchange Inc.": "PSE",
+    "Bursa Malaysia": "XKLS",
+    "Indonesia Stock Exchange": "ISX",
+    "Stock Exchange Of Thailand": "BKK",
+    "Philippine Stock Exchange Inc.": "PHS",
     # Middle East / Africa
-    "Saudi Stock Exchange": "TADAWUL",
+    "Saudi Stock Exchange": "SAU",
     "Abu Dhabi Securities Exchange": "ADX",
     "Dubai Financial Market": "DFM",
-    "Qatar Exchange": "QSE",
-    "Kuwait Stock Exchange": "KSE",
+    "Qatar Exchange": "DSMD",
+    "Kuwait Stock Exchange": "KUW",
     "Tel Aviv Stock Exchange": "TASE",
     "Johannesburg Stock Exchange": "JSE",
-    "Egyptian Exchange": "EGX",
+    "Egyptian Exchange": "CAI",
     # Russia
     "Standard-Classica-Forts": "MCX",
 }
 
 # Map URL-style GF codes to exchange_list API codes (for DB currency lookup)
 _GF_URL_TO_API: dict[str, str] = {
-    "BDP": "BUD",
-    "EGX": "CAI",
-    "GTSM": "ROCO",
-    "IDX": "ISX",
-    "ISE": "DUB",
-    "KLSE": "XKLS",
-    "KSE": "KUW",
     "MCX": "MIC",
-    "PRA": "XPRA",
-    "PSE": "PHS",
-    "QSE": "DSMD",
-    "SET": "BKK",
-    "SGO": "XSGO",
-    "TADAWUL": "SAU",
     "TASE": "XTAE",
-    "TWSE": "TPE",
 }
 
 
@@ -189,6 +175,40 @@ def gurufocus_exchange_for_db(exchange: str) -> str | None:
     return _GF_URL_TO_API.get(gf, gf)
 
 
+_GF_TICKER_OVERRIDES_FILE = os.path.join(os.path.dirname(__file__), "gf_ticker_overrides.json")
+_GF_TICKER_OVERRIDES_CACHE: dict[str, dict[str, str]] | None = None
+
+
+def _load_gf_ticker_overrides() -> dict[str, dict[str, str]]:
+    """Load {gf_exchange_prefix: {ishares_ticker: gurufocus_ticker}} map."""
+    global _GF_TICKER_OVERRIDES_CACHE
+    if _GF_TICKER_OVERRIDES_CACHE is not None:
+        return _GF_TICKER_OVERRIDES_CACHE
+    try:
+        if os.path.exists(_GF_TICKER_OVERRIDES_FILE):
+            with open(_GF_TICKER_OVERRIDES_FILE, "r", encoding="utf-8") as f:
+                _GF_TICKER_OVERRIDES_CACHE = json.load(f)
+        else:
+            _GF_TICKER_OVERRIDES_CACHE = {}
+    except Exception:
+        _GF_TICKER_OVERRIDES_CACHE = {}
+    return _GF_TICKER_OVERRIDES_CACHE
+
+
+def _normalize_gf_ticker(ticker: str, gf_prefix: str) -> str:
+    """Apply exchange-specific ticker normalizations used by GuruFocus."""
+    t = _load_gf_ticker_overrides().get(gf_prefix, {}).get(ticker, ticker)
+    if gf_prefix == "HKSE" and t.isdigit():
+        t = t.zfill(5)
+    if gf_prefix == "IST" and t.endswith(".E"):
+        t = t[:-2]
+    if gf_prefix == "BKK" and t.endswith(".R"):
+        t = t[:-2]
+    if gf_prefix == "XSGO":
+        t = t.replace(".", "-")
+    return t
+
+
 def gurufocus_url(ticker: str, exchange: str) -> str | None:
     """Build a GuruFocus summary URL for a holding.
 
@@ -199,20 +219,43 @@ def gurufocus_url(ticker: str, exchange: str) -> str | None:
 
     gf_prefix = _ISHARES_TO_GF.get(exchange)
     if gf_prefix is None:
-        return None  # unknown exchange
+        return None
 
-    # HKSE tickers must be zero-padded to 5 digits
-    t = ticker
-    if gf_prefix == "HKSE" and t.isdigit():
-        t = t.zfill(5)
-
-    if gf_prefix == "":
-        # US stock — no prefix
-        symbol = t
-    else:
-        symbol = f"{gf_prefix}:{t}"
-
+    t = _normalize_gf_ticker(ticker, gf_prefix)
+    symbol = t if gf_prefix == "" else f"{gf_prefix}:{t}"
     return f"https://www.gurufocus.com/stock/{symbol}/summary"
+
+
+def gurufocus_ticker_normalized(ticker: str, exchange: str) -> tuple[str, str] | None:
+    """Return (db_exchange_code, gf_ticker) for an iShares (ticker, exchange).
+
+    Uses the DB-API exchange code (e.g. NYSE/NAS for US, HKSE/TSE/etc abroad)
+    so it can be matched against the `company` table.
+    Returns None if the exchange is unknown or ticker is empty.
+    """
+    if not ticker or ticker == "--":
+        return None
+    gf_prefix = _ISHARES_TO_GF.get(exchange)
+    if gf_prefix is None:
+        return None
+    t = _normalize_gf_ticker(ticker, gf_prefix)
+    db_exchange = gurufocus_exchange_for_db(exchange)
+    if db_exchange is None:
+        return None
+    return (db_exchange, t)
+
+
+# GuruFocus exchange prefixes considered "feasible" (USA + Europe + Asia, ex-Russia/AU/NZ).
+# Mirror of the frontend's FEASIBLE_GF_EXCHANGES set. Empty string = US.
+FEASIBLE_GF_EXCHANGES = frozenset([
+    "",  # US (NYSE, NASDAQ, Cboe BZX)
+    # Europe
+    "LSE", "XTER", "XPAR", "XAMS", "XBRU", "XLIS", "MIL", "XMAD", "XSWX",
+    "OSTO", "OCSE", "OSL", "OHEL", "WAR", "XPRA", "ATH", "DUB", "BUD", "IST",
+    # Asia
+    "TSE", "HKSE", "SHSE", "SZSE", "TPE", "ROCO", "XKRX",
+    "NSE", "BSE", "SGX", "XKLS", "ISX", "BKK", "PHS",
+])
 
 
 # ---------------------------------------------------------------------------
@@ -739,3 +782,117 @@ def compute_net_additions() -> list[dict]:
     results.sort(key=lambda x: _parse_dt(x["date"]), reverse=True)
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# Historical ACWI universe reconstruction
+# ---------------------------------------------------------------------------
+
+def _parse_effective_date(s: str):
+    """Parse 'April 10, 2026' style dates. Returns a date or None."""
+    from datetime import datetime as _dt
+    if not s:
+        return None
+    for fmt in ("%B %d, %Y", "%b %d, %Y", "%Y-%m-%d"):
+        try:
+            return _dt.strptime(s.strip(), fmt).date()
+        except Exception:
+            continue
+    return None
+
+
+def feasible_holdings_for_db() -> list[dict]:
+    """Return feasible ACWI holdings with DB-facing fields.
+
+    Each dict: {db_exchange, gf_ticker, company_name, sector, symbol, ishares_ticker, ishares_exchange}.
+    symbol is "EXCH:TICK" used as the universe_ticker and lookup key.
+    """
+    holdings, _ = load_acwi_holdings()
+    result: list[dict] = []
+    for h in holdings:
+        gf = _ISHARES_TO_GF.get(h["Exchange"])
+        if gf is None or gf not in FEASIBLE_GF_EXCHANGES:
+            continue
+        norm = gurufocus_ticker_normalized(h["Ticker"], h["Exchange"])
+        if norm is None:
+            continue
+        db_exch, gf_tick = norm
+        sector = (h.get("Sector") or "").strip() or None
+        result.append({
+            "db_exchange": db_exch,
+            "gf_ticker": gf_tick,
+            "company_name": h.get("Name", ""),
+            "sector": sector,
+            "symbol": f"{db_exch}:{gf_tick}",
+            "ishares_ticker": h["Ticker"],
+            "ishares_exchange": h["Exchange"],
+        })
+    return result
+
+
+def reconstruct_monthly_holdings(start_date: str, end_date: str) -> tuple[dict[str, set[str]], dict]:
+    """Reconstruct monthly feasible-universe ACWI holdings.
+
+    For each month M in [start_date, end_date], a feasible holding is included
+    iff its earliest matched MSCI addition has effective_date < M. Holdings
+    without any matched addition ("grandfathered") are included in every month.
+
+    Returns (monthly, stats) where:
+    - monthly: {"YYYY-MM": set of "EXCH:TICKER" symbols (pure ticker for US)}
+    - stats: {"feasible_count", "with_addition", "grandfathered", "months"}
+    """
+    from datetime import date as _date
+
+    holdings, _ = load_acwi_holdings()
+    additions = compute_net_additions()
+
+    # Filter to feasible holdings and build ishares_ticker -> "EXCH:TICK" symbol
+    feasible_by_ticker: dict[str, str] = {}
+    for h in holdings:
+        gf = _ISHARES_TO_GF.get(h["Exchange"])
+        if gf is None or gf not in FEASIBLE_GF_EXCHANGES:
+            continue
+        norm = gurufocus_ticker_normalized(h["Ticker"], h["Exchange"])
+        if norm is None:
+            continue
+        db_exch, gf_tick = norm
+        symbol = f"{db_exch}:{gf_tick}"
+        feasible_by_ticker[h["Ticker"]] = symbol
+
+    # Earliest effective_date per iShares ticker (only for feasible holdings)
+    earliest: dict[str, _date] = {}
+    for na in additions:
+        if not na.get("matched"):
+            continue
+        t = na.get("matched_ticker")
+        eff = na.get("effective_date")
+        if not t or not eff or t not in feasible_by_ticker:
+            continue
+        d = _parse_effective_date(eff)
+        if d is None:
+            continue
+        if t not in earliest or d < earliest[t]:
+            earliest[t] = d
+
+    start = _date.fromisoformat(start_date)
+    end = _date.fromisoformat(end_date)
+    cursor = _date(start.year, start.month, 1)
+    end_m = _date(end.year, end.month, 1)
+
+    monthly: dict[str, set[str]] = {}
+    while cursor <= end_m:
+        month_key = f"{cursor.year:04d}-{cursor.month:02d}"
+        included = {
+            symbol for t, symbol in feasible_by_ticker.items()
+            if (d := earliest.get(t)) is None or d < cursor
+        }
+        monthly[month_key] = included
+        cursor = _date(cursor.year + 1, 1, 1) if cursor.month == 12 else _date(cursor.year, cursor.month + 1, 1)
+
+    stats = {
+        "feasible_count": len(feasible_by_ticker),
+        "with_addition": len(earliest),
+        "grandfathered": len(feasible_by_ticker) - len(earliest),
+        "months": len(monthly),
+    }
+    return monthly, stats

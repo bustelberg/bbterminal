@@ -2,7 +2,25 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 
+import {
+  acwiFetchStore,
+  startAcwiFetchDetails,
+  acwiSaveStore,
+  startAcwiSave,
+} from '../../lib/stores/acwi';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+
+// GuruFocus exchange prefixes considered "feasible" (USA + Europe + Asia, ex-Russia).
+// US stocks are identified separately by gf_exchange === null (empty prefix).
+const FEASIBLE_GF_EXCHANGES = new Set([
+  // Europe
+  'LSE', 'XTER', 'XPAR', 'XAMS', 'XBRU', 'XLIS', 'MIL', 'XMAD', 'XSWX',
+  'OSTO', 'OCSE', 'OSL', 'OHEL', 'WAR', 'XPRA', 'ATH', 'DUB', 'BUD', 'IST',
+  // Asia
+  'TSE', 'HKSE', 'SHSE', 'SZSE', 'TPE', 'ROCO', 'XKRX',
+  'NSE', 'BSE', 'SGX', 'XKLS', 'ISX', 'BKK', 'PHS',
+]);
 
 type Holding = {
   Ticker: string;
@@ -61,6 +79,17 @@ export default function AcwiUniverse() {
   const [filter, setFilter] = useState('');
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortAsc, setSortAsc] = useState(true);
+  const [feasibleFilter, setFeasibleFilter] = useState('');
+  const [onePerExchange, setOnePerExchange] = useState(false);
+  const [histStart, setHistStart] = useState('2002-01-01');
+  const [histEnd, setHistEnd] = useState(`${new Date().getFullYear()}-01-01`);
+  const [timelineSearch, setTimelineSearch] = useState('');
+  const [universeName, setUniverseName] = useState('ACWI');
+  // Save-universe state lives in a module-scoped store so the SSE stream keeps
+  // running when the user navigates away.
+  const saving = acwiSaveStore.use((s) => s.saving);
+  const saveProgress = acwiSaveStore.use((s) => s.progress);
+  const saveResult = acwiSaveStore.use((s) => s.result);
 
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [annLoading, setAnnLoading] = useState(true);
@@ -69,20 +98,11 @@ export default function AcwiUniverse() {
   const [annSearch, setAnnSearch] = useState('');
   // Manual detail fetches (keyed by href)
   const [manualDetails, setManualDetails] = useState<Record<string, Detail>>({});
-  // SSE fetch progress
-  const [fetchProgress, setFetchProgress] = useState<{
-    message: string;
-    fetched: number;
-    total: number;
-    pct: number;
-    errors: number;
-  } | null>(null);
-  const [fetching, setFetching] = useState(false);
-  const [fetchSummary, setFetchSummary] = useState<{
-    message: string;
-    errors: number;
-    errorList: { title: string; href: string; error: string }[];
-  } | null>(null);
+  // fetch-all-details state lives in a module-scoped store so the SSE stream
+  // keeps running when the user navigates away.
+  const fetchProgress = acwiFetchStore.use((s) => s.progress);
+  const fetching = acwiFetchStore.use((s) => s.fetching);
+  const fetchSummary = acwiFetchStore.use((s) => s.summary);
   // Net additions
   const [netAdditions, setNetAdditions] = useState<NetAddition[]>([]);
   const [netAdditionsLoading, setNetAdditionsLoading] = useState(false);
@@ -138,52 +158,13 @@ export default function AcwiUniverse() {
       const needsFetch = anns.some(
         (a: Announcement) => a.is_constituent_change && a.href && !a.detail
       );
-      if (needsFetch) {
-        // Auto-trigger SSE fetch for uncached details
-        setFetching(true);
-        setFetchSummary(null);
-        setFetchProgress({ message: 'Starting...', fetched: 0, total: 0, pct: 0, errors: 0 });
-        const es = new EventSource(`${API_URL}/api/acwi/fetch-all-details`);
-        es.onmessage = (event) => {
-          const data = JSON.parse(event.data);
-          if (data.type === 'progress') {
-            setFetchProgress({
-              message: data.message,
-              fetched: data.fetched ?? 0,
-              total: data.total ?? 0,
-              pct: data.pct ?? 0,
-              errors: data.errors ?? 0,
-            });
-          } else if (data.type === 'done') {
-            setFetchProgress(null);
-            setFetching(false);
-            setFetchSummary({
-              message: data.message,
-              errors: data.errors ?? 0,
-              errorList: data.error_list ?? [],
-            });
-            es.close();
-            loadAnnouncements();
-            loadNetAdditions();
-          } else if (data.type === 'error') {
-            setFetchProgress(null);
-            setFetching(false);
-            setFetchSummary({
-              message: `Error: ${data.message}`,
-              errors: 1,
-              errorList: [],
-            });
-            es.close();
-          }
-        };
-        es.onerror = () => {
-          setFetchProgress(null);
-          setFetching(false);
-          setFetchSummary({ message: 'Connection lost — partial results may have been cached', errors: -1, errorList: [] });
-          es.close();
+      if (needsFetch && !acwiFetchStore.get().fetching) {
+        // Auto-trigger SSE fetch for uncached details — store owns the stream
+        // so it keeps running when the user navigates away.
+        startAcwiFetchDetails(() => {
           loadAnnouncements();
           loadNetAdditions();
-        };
+        });
       } else {
         // All details already cached — load net additions immediately
         loadNetAdditions();
@@ -236,6 +217,139 @@ export default function AcwiUniverse() {
     }
     return result;
   }, [holdings, filter, sortCol, sortAsc]);
+
+  const feasibleHoldings = useMemo(() => {
+    return holdings.filter(h =>
+      h.gf_exchange === null || FEASIBLE_GF_EXCHANGES.has(h.gf_exchange)
+    );
+  }, [holdings]);
+
+  const feasibleDisplay = useMemo(() => {
+    let result = feasibleHoldings;
+    if (feasibleFilter) {
+      const q = feasibleFilter.toLowerCase();
+      result = result.filter(
+        h =>
+          h.Ticker.toLowerCase().includes(q) ||
+          h.Name.toLowerCase().includes(q) ||
+          h.Sector.toLowerCase().includes(q) ||
+          h.Location.toLowerCase().includes(q) ||
+          (h.gf_exchange ?? '').toLowerCase().includes(q)
+      );
+    }
+    if (onePerExchange) {
+      const seen = new Set<string>();
+      const deduped: Holding[] = [];
+      for (const h of result) {
+        const key = h.gf_exchange ?? 'US';
+        if (seen.has(key)) continue;
+        seen.add(key);
+        deduped.push(h);
+      }
+      result = deduped.sort((a, b) =>
+        (a.gf_exchange ?? 'US').localeCompare(b.gf_exchange ?? 'US')
+      );
+    }
+    return result;
+  }, [feasibleHoldings, feasibleFilter, onePerExchange]);
+
+  const historicalUniverse = useMemo(() => {
+    if (!feasibleHoldings.length) return [];
+
+    // Map of current feasible tickers for fast lookup
+    const feasibleTickers = new Set(feasibleHoldings.map(h => h.Ticker));
+
+    // Earliest effective date per ticker — if added multiple times, only the first addition counts
+    const earliestByTicker = new Map<string, number>();
+    for (const na of netAdditions) {
+      if (!na.matched || !na.matched_ticker || !na.effective_date) continue;
+      if (!feasibleTickers.has(na.matched_ticker)) continue;
+      const d = new Date(na.effective_date).getTime();
+      if (isNaN(d)) continue;
+      const prev = earliestByTicker.get(na.matched_ticker);
+      if (prev === undefined || d < prev) earliestByTicker.set(na.matched_ticker, d);
+    }
+    const effDates = Array.from(earliestByTicker.values()).sort((a, b) => a - b);
+
+    const start = new Date(histStart);
+    const end = new Date(histEnd);
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) return [];
+
+    const total = feasibleHoldings.length;
+    const months: { date: string; count: number; removed: number }[] = [];
+    const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+    const endMs = new Date(end.getFullYear(), end.getMonth(), 1).getTime();
+
+    while (cursor.getTime() <= endMs) {
+      const asOf = cursor.getTime();
+      // Binary search: count of effDates >= asOf → "not yet in the index on this date"
+      let lo = 0, hi = effDates.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (effDates[mid] < asOf) lo = mid + 1;
+        else hi = mid;
+      }
+      const removed = effDates.length - lo;
+      const iso = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-01`;
+      months.push({ date: iso, count: total - removed, removed });
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+    return months;
+  }, [feasibleHoldings, netAdditions, histStart, histEnd]);
+
+  const saveUniverse = useCallback(() => {
+    if (saving) return;
+    const name = universeName.trim() || 'ACWI';
+    return startAcwiSave({ name, start_date: histStart, end_date: histEnd });
+  }, [saving, universeName, histStart, histEnd]);
+
+  const additionTimeline = useMemo(() => {
+    if (!feasibleHoldings.length) return [];
+    const tickerToHolding = new Map<string, Holding>();
+    for (const h of feasibleHoldings) tickerToHolding.set(h.Ticker, h);
+
+    const rows = netAdditions
+      .filter(na => na.matched && na.matched_ticker && na.effective_date && tickerToHolding.has(na.matched_ticker))
+      .map(na => {
+        const h = tickerToHolding.get(na.matched_ticker!)!;
+        const ts = new Date(na.effective_date!).getTime();
+        return {
+          effective_date: na.effective_date!,
+          ts: isNaN(ts) ? 0 : ts,
+          ticker: na.matched_ticker!,
+          name: h.Name,
+          country: h.Location,
+          cc: na.country,
+          sector: h.Sector,
+          gf_exchange: h.gf_exchange,
+          gurufocus_url: h.gurufocus_url,
+          href: na.href,
+        };
+      });
+
+    // Dedupe by ticker, keep the earliest effective_date (first-time addition)
+    const firstByTicker = new Map<string, typeof rows[number]>();
+    for (const r of rows) {
+      const prev = firstByTicker.get(r.ticker);
+      if (!prev || r.ts < prev.ts) firstByTicker.set(r.ticker, r);
+    }
+
+    return Array.from(firstByTicker.values()).sort((a, b) => b.ts - a.ts);
+  }, [feasibleHoldings, netAdditions]);
+
+  const filteredTimeline = useMemo(() => {
+    if (!timelineSearch) return additionTimeline;
+    const q = timelineSearch.toLowerCase();
+    return additionTimeline.filter(r =>
+      r.ticker.toLowerCase().includes(q) ||
+      r.name.toLowerCase().includes(q) ||
+      r.country.toLowerCase().includes(q) ||
+      r.cc.toLowerCase().includes(q) ||
+      r.sector.toLowerCase().includes(q) ||
+      (r.gf_exchange ?? '').toLowerCase().includes(q) ||
+      r.effective_date.toLowerCase().includes(q)
+    );
+  }, [additionTimeline, timelineSearch]);
 
   const sectorBreakdown = useMemo(() => {
     const map: Record<string, { count: number; weight: number }> = {};
@@ -370,7 +484,7 @@ export default function AcwiUniverse() {
               {fetchSummary.errors > 0 ? '⚠' : '✓'} {fetchSummary.message}
             </span>
             <button
-              onClick={() => setFetchSummary(null)}
+              onClick={() => acwiFetchStore.set({ summary: null })}
               className="text-gray-500 hover:text-gray-300 text-xs"
             >
               dismiss
@@ -837,6 +951,282 @@ export default function AcwiUniverse() {
                       <td className="px-3 py-2.5 text-indigo-400 font-mono text-xs">{h.gf_currency ?? <span className="text-gray-600">-</span>}</td>
                       <td className="px-3 py-2.5 text-gray-300 font-mono text-right">{fmtNum(h['Weight (%)'])}%</td>
                       <td className="px-3 py-2.5 text-gray-300 font-mono text-right">{fmtMv(h['Market Value'])}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Feasible ACWI Universe */}
+          <div className="bg-[#151821] rounded-xl border border-gray-800/40">
+            <div className="px-5 py-4 border-b border-gray-800/40 flex items-center gap-4">
+              <div>
+                <h2 className="text-sm font-medium text-gray-300">
+                  Feasible ACWI Universe
+                  <span className="text-gray-500 font-normal ml-2">
+                    ({feasibleDisplay.length.toLocaleString()}
+                    {' of '}{feasibleHoldings.length.toLocaleString()})
+                  </span>
+                </h2>
+                <p className="text-gray-500 text-xs mt-0.5">
+                  USA, Europe, and Asia (excluding Russia).
+                  {onePerExchange && ' One representative per GuruFocus exchange — click GuruFocus links to manually verify URL mappings.'}
+                </p>
+              </div>
+              <input
+                type="text"
+                placeholder="Filter by ticker, name, sector, country, gf exchange..."
+                value={feasibleFilter}
+                onChange={e => setFeasibleFilter(e.target.value)}
+                className="ml-auto bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200 placeholder-gray-500 w-72 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+              />
+              <button
+                onClick={() => setOnePerExchange(v => !v)}
+                className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
+                  onePerExchange
+                    ? 'bg-indigo-600/20 border-indigo-500/40 text-indigo-400'
+                    : 'bg-transparent border-gray-700 text-gray-400 hover:bg-white/5'
+                }`}
+              >
+                {onePerExchange ? '1 per exchange' : 'All feasible'}
+              </button>
+            </div>
+            <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-[#151821] z-10">
+                  <tr className="text-gray-400 text-xs uppercase tracking-wider">
+                    <th className="text-left px-3 py-2.5 font-medium">#</th>
+                    <th className="text-left px-3 py-2.5 font-medium">Ticker</th>
+                    <th className="text-left px-3 py-2.5 font-medium">Name</th>
+                    <th className="text-left px-3 py-2.5 font-medium">GuruFocus</th>
+                    <th className="text-left px-3 py-2.5 font-medium">Sector</th>
+                    <th className="text-left px-3 py-2.5 font-medium">Location</th>
+                    <th className="text-right px-3 py-2.5 font-medium">Price</th>
+                    <th className="text-left px-3 py-2.5 font-medium">Exchange</th>
+                    <th className="text-left px-3 py-2.5 font-medium">GF Exchange</th>
+                    <th className="text-left px-3 py-2.5 font-medium">Currency</th>
+                    <th className="text-left px-3 py-2.5 font-medium">GF Currency</th>
+                    <th className="text-right px-3 py-2.5 font-medium">Weight</th>
+                    <th className="text-right px-3 py-2.5 font-medium">Market Value</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800/30">
+                  {feasibleDisplay.map((h, i) => (
+                    <tr key={`feasible-${h.Ticker}-${h.Exchange}-${i}`} className="hover:bg-white/[0.02]">
+                      <td className="px-3 py-2.5 text-gray-500 font-mono text-xs">{i + 1}</td>
+                      <td className="px-3 py-2.5 text-white font-mono font-medium">{h.Ticker}</td>
+                      <td className="px-3 py-2.5 text-gray-200 max-w-[200px] truncate">{h.Name}</td>
+                      <td className="px-3 py-2.5 text-xs">
+                        {h.gurufocus_url ? (
+                          <a
+                            href={h.gurufocus_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-indigo-400 hover:text-indigo-300 transition-colors"
+                          >
+                            link
+                          </a>
+                        ) : (
+                          <span className="text-gray-600">&mdash;</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-gray-400">{h.Sector}</td>
+                      <td className="px-3 py-2.5 text-gray-400">{h.Location}</td>
+                      <td className="px-3 py-2.5 text-gray-300 font-mono text-right">{fmtNum(h.Price)}</td>
+                      <td className="px-3 py-2.5 text-gray-400 text-xs">{h.Exchange}</td>
+                      <td className="px-3 py-2.5 text-indigo-400 font-mono text-xs">{h.gf_exchange ?? <span className="text-gray-600">US</span>}</td>
+                      <td className="px-3 py-2.5 text-gray-400 font-mono text-xs">{h.Currency}</td>
+                      <td className="px-3 py-2.5 text-indigo-400 font-mono text-xs">{h.gf_currency ?? <span className="text-gray-600">-</span>}</td>
+                      <td className="px-3 py-2.5 text-gray-300 font-mono text-right">{fmtNum(h['Weight (%)'])}%</td>
+                      <td className="px-3 py-2.5 text-gray-300 font-mono text-right">{fmtMv(h['Market Value'])}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Historical ACWI Universe */}
+          <div className="bg-[#151821] rounded-xl border border-gray-800/40">
+            <div className="px-5 py-4 border-b border-gray-800/40 flex items-center gap-4 flex-wrap">
+              <div>
+                <h2 className="text-sm font-medium text-gray-300">
+                  Historical ACWI Universe
+                  <span className="text-gray-500 font-normal ml-2">
+                    ({historicalUniverse.length} monthly snapshots)
+                  </span>
+                </h2>
+                <p className="text-gray-500 text-xs mt-0.5">
+                  Monthly feasible-universe snapshots. A holding is included on date D only if it was part of the index before D
+                  (derived from current holdings minus matched MSCI additions with effective_date &ge; D). Survivorship-biased &mdash; only handles additions, not deletions.
+                </p>
+              </div>
+              <div className="ml-auto flex items-center gap-2 text-xs text-gray-400 flex-wrap">
+                <label>Start</label>
+                <input
+                  type="date"
+                  value={histStart}
+                  onChange={e => setHistStart(e.target.value)}
+                  className="bg-[#0f1117] border border-gray-700 rounded-lg px-2 py-1.5 text-sm text-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                />
+                <label>End</label>
+                <input
+                  type="date"
+                  value={histEnd}
+                  onChange={e => setHistEnd(e.target.value)}
+                  className="bg-[#0f1117] border border-gray-700 rounded-lg px-2 py-1.5 text-sm text-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                />
+                <div className="h-5 w-px bg-gray-700 mx-1" />
+                <label>Name</label>
+                <input
+                  type="text"
+                  value={universeName}
+                  onChange={e => setUniverseName(e.target.value)}
+                  placeholder="ACWI"
+                  disabled={saving}
+                  className="bg-[#0f1117] border border-gray-700 rounded-lg px-2 py-1.5 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none w-24"
+                />
+                <button
+                  onClick={saveUniverse}
+                  disabled={saving || !historicalUniverse.length}
+                  className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-xs px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  {saving ? 'Saving…' : 'Save to Database'}
+                </button>
+              </div>
+            </div>
+            {(saveProgress.length > 0 || saveResult) && (
+              <div className="px-5 py-3 border-b border-gray-800/40 space-y-1.5 text-xs">
+                {saveProgress.slice(-6).map((m, i) => (
+                  <div key={i} className="text-gray-400 flex gap-2">
+                    <span className={saving && i === saveProgress.length - 1 ? 'text-indigo-400 animate-pulse' : 'text-gray-600'}>
+                      {saving && i === saveProgress.length - 1 ? '●' : '✓'}
+                    </span>
+                    <span>{m}</span>
+                  </div>
+                ))}
+                {saveResult && (
+                  <div className={`flex items-start gap-2 ${saveResult.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    <span>{saveResult.ok ? '✓' : '✗'}</span>
+                    <span className="flex-1">
+                      {saveResult.message}
+                      {saveResult.ok && (
+                        <span className="text-gray-500">
+                          {' '}— select &ldquo;{universeName.trim() || 'ACWI'}&rdquo; as Index Universe in /momentum to use it.
+                        </span>
+                      )}
+                    </span>
+                    <button
+                      onClick={() => acwiSaveStore.set({ result: null, progress: [] })}
+                      className="text-gray-500 hover:text-gray-300"
+                    >
+                      dismiss
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-[#151821] z-10">
+                  <tr className="text-gray-400 text-xs uppercase tracking-wider">
+                    <th className="text-left px-3 py-2.5 font-medium w-10">#</th>
+                    <th className="text-left px-3 py-2.5 font-medium">Date</th>
+                    <th className="text-right px-3 py-2.5 font-medium">Universe Count</th>
+                    <th className="text-right px-3 py-2.5 font-medium">Excluded (not yet added)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800/30">
+                  {historicalUniverse.map((m, i) => (
+                    <tr key={m.date} className="hover:bg-white/[0.02]">
+                      <td className="px-3 py-2 text-gray-500 font-mono text-xs">{i + 1}</td>
+                      <td className="px-3 py-2 text-gray-200 font-mono text-xs">{m.date}</td>
+                      <td className="px-3 py-2 text-gray-300 font-mono text-right">{m.count.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-gray-400 font-mono text-right">{m.removed.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Addition Timeline */}
+          <div className="bg-[#151821] rounded-xl border border-gray-800/40">
+            <div className="px-5 py-4 border-b border-gray-800/40 flex items-center gap-4">
+              <div>
+                <h2 className="text-sm font-medium text-gray-300">
+                  Addition Timeline
+                  <span className="text-gray-500 font-normal ml-2">
+                    ({filteredTimeline.length.toLocaleString()}
+                    {timelineSearch ? ` of ${additionTimeline.length.toLocaleString()}` : ''})
+                  </span>
+                </h2>
+                <p className="text-gray-500 text-xs mt-0.5">
+                  Matched MSCI additions in the feasible universe, sorted by effective date (most recent first).
+                </p>
+              </div>
+              <input
+                type="text"
+                placeholder="Search by ticker, name, country, sector, exchange, date..."
+                value={timelineSearch}
+                onChange={e => setTimelineSearch(e.target.value)}
+                className="ml-auto bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200 placeholder-gray-500 w-80 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+              />
+            </div>
+            <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-[#151821] z-10">
+                  <tr className="text-gray-400 text-xs uppercase tracking-wider">
+                    <th className="text-left px-3 py-2.5 font-medium w-10">#</th>
+                    <th className="text-left px-3 py-2.5 font-medium w-40">Effective Date</th>
+                    <th className="text-left px-3 py-2.5 font-medium w-24">Ticker</th>
+                    <th className="text-left px-3 py-2.5 font-medium">Name</th>
+                    <th className="text-left px-3 py-2.5 font-medium w-16">GF</th>
+                    <th className="text-left px-3 py-2.5 font-medium">Sector</th>
+                    <th className="text-left px-3 py-2.5 font-medium">Country</th>
+                    <th className="text-left px-3 py-2.5 font-medium w-20">GF Exch</th>
+                    <th className="text-left px-3 py-2.5 font-medium w-20">Announcement</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800/30">
+                  {filteredTimeline.map((r, i) => (
+                    <tr key={`${r.ticker}-${r.effective_date}-${i}`} className="hover:bg-white/[0.02]">
+                      <td className="px-3 py-2 text-gray-500 font-mono text-xs">{i + 1}</td>
+                      <td className="px-3 py-2 text-gray-200 font-mono text-xs whitespace-nowrap">{r.effective_date}</td>
+                      <td className="px-3 py-2 text-white font-mono font-medium">{r.ticker}</td>
+                      <td className="px-3 py-2 text-gray-200 max-w-[280px] truncate">{r.name}</td>
+                      <td className="px-3 py-2 text-xs">
+                        {r.gurufocus_url ? (
+                          <a
+                            href={r.gurufocus_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-indigo-400 hover:text-indigo-300 transition-colors"
+                          >
+                            link
+                          </a>
+                        ) : (
+                          <span className="text-gray-600">&mdash;</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-gray-400 text-xs">{r.sector}</td>
+                      <td className="px-3 py-2 text-gray-400 text-xs">{r.country}</td>
+                      <td className="px-3 py-2 text-indigo-400 font-mono text-xs">{r.gf_exchange ?? <span className="text-gray-600">US</span>}</td>
+                      <td className="px-3 py-2 text-xs">
+                        {r.href ? (
+                          <a
+                            href={r.href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-indigo-400 hover:text-indigo-300 transition-colors"
+                          >
+                            link
+                          </a>
+                        ) : (
+                          <span className="text-gray-600">&mdash;</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

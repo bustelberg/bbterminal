@@ -7,6 +7,11 @@ import {
 } from 'recharts';
 
 import ApiUsageBadge, { type ApiUsageBadgeHandle } from './ApiUsageBadge';
+import {
+  earningsRefreshStore,
+  startEarningsRefresh,
+  clearEarningsLogs,
+} from '../../lib/stores/earnings';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -172,58 +177,18 @@ function fmtPctPoints(v: number | null): string {
 }
 
 // ---------------------------------------------------------------------------
-// SSE log reader
+// SSE log reader — thin hook over the module-scoped earningsRefreshStore so
+// streams keep running while the user navigates away from this page.
 // ---------------------------------------------------------------------------
 
 function useSSERefresh(onApiCalls?: (region: string, count: number) => void) {
-  const [logs, setLogs] = useState<{ type: string; message: string }[]>([]);
-  const [running, setRunning] = useState(false);
+  const logs = earningsRefreshStore.use((s) => s.logs);
+  const running = earningsRefreshStore.use((s) => s.running);
   const logEndRef = useRef<HTMLDivElement>(null);
-  const onApiCallsRef = useRef(onApiCalls);
-  onApiCallsRef.current = onApiCalls;
 
-  const start = useCallback((url: string, onDone?: () => void) => {
-    setLogs([]);
-    setRunning(true);
-
-    fetch(url, { method: 'POST' }).then(async (res) => {
-      if (!res.ok || !res.body) {
-        setLogs([{ type: 'error', message: `HTTP ${res.status}` }]);
-        setRunning(false);
-        return;
-      }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const parsed = JSON.parse(line.slice(6));
-            if (parsed.type === 'api_calls' && onApiCallsRef.current) {
-              onApiCallsRef.current(parsed.region, parsed.count);
-            }
-            setLogs((prev) => [...prev, parsed]);
-            if (parsed.type === 'done') {
-              setRunning(false);
-              onDone?.();
-            }
-          } catch { /* skip */ }
-        }
-      }
-      setRunning(false);
-      onDone?.();
-    }).catch((err) => {
-      setLogs((prev) => [...prev, { type: 'error', message: String(err) }]);
-      setRunning(false);
-    });
-  }, []);
+  const start = (url: string, onDone?: () => void) => {
+    startEarningsRefresh(url, { onApiCalls, onDone });
+  };
 
   useEffect(() => {
     const el = logEndRef.current;
@@ -232,9 +197,7 @@ function useSSERefresh(onApiCalls?: (region: string, count: number) => void) {
     }
   }, [logs]);
 
-  const clearLogs = useCallback(() => setLogs([]), []);
-
-  return { logs, running, start, logEndRef, clearLogs };
+  return { logs, running, start, logEndRef, clearLogs: clearEarningsLogs };
 }
 
 // ---------------------------------------------------------------------------

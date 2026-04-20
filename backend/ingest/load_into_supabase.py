@@ -268,6 +268,16 @@ def load_prepared_into_supabase(
                 "sector": row.get("sector"),
             })
 
+        # Clear any existing rows for this (universe, target_month) before
+        # writing fresh ones. Re-ingesting a month can produce a different
+        # company_id for the same universe_ticker (e.g. when exchange_id
+        # resolution changes between runs). Without this delete, stale rows
+        # linger because the PK is (universe_id, company_id, target_month) —
+        # a new cid doesn't conflict with the old one, so counts inflate.
+        supabase.table("universe_membership").delete().eq(
+            "universe_id", universe_id
+        ).eq("target_month", target_month).execute()
+
         if membership_rows:
             _upsert_batched(
                 supabase, "universe_membership", membership_rows,

@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import type { Snapshot } from '../longequity/page';
 
+import { ingestStore, startIngest } from '../../lib/stores/ingest';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 type Company = {
@@ -207,8 +209,11 @@ export default function LongEquityInsight({ snapshots: initialSnapshots }: { sna
 
   const [latestAvailable, setLatestAvailable] = useState<string | null>(null);
   const [loadingAvailable, setLoadingAvailable] = useState(true);
-  const [ingesting, setIngesting] = useState(false);
-  const [ingestLog, setIngestLog] = useState<{ type: string; message: string }[]>([]);
+  // Ingest state lives in the module-scoped ingestStore so the pipeline keeps
+  // running when the user navigates away from /longequity.
+  const ingesting = ingestStore.use((s) => s.running);
+  const ingestLog = ingestStore.use((s) => s.log);
+  const setIngestLog = (next: typeof ingestLog) => ingestStore.set({ log: next });
   const logEndRef = useRef<HTMLDivElement>(null);
   const didAutoIngest = useRef(false);
 
@@ -249,47 +254,12 @@ export default function LongEquityInsight({ snapshots: initialSnapshots }: { sna
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = logEndRef.current?.parentElement;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [ingestLog]);
 
-  const ingestingRef = useRef(false);
-
-  async function runIngest() {
-    if (ingestingRef.current) return;
-    ingestingRef.current = true;
-    setIngesting(true);
-    setIngestLog([]);
-    try {
-      const res = await fetch(`${API_URL}/api/ingest/long-equity`, { method: 'POST' });
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop() ?? '';
-        for (const part of parts) {
-          for (const line of part.split('\n')) {
-            if (line.startsWith('data: ')) {
-              try {
-                const event = JSON.parse(line.slice(6));
-                setIngestLog((prev) => [...prev, event]);
-                if (event.type === 'done' || event.type === 'error') {
-                  setIngesting(false);
-                  refreshSnapshots();
-                }
-              } catch {}
-            }
-          }
-        }
-      }
-    } catch (e) {
-      setIngestLog((prev) => [...prev, { type: 'error', message: String(e) }]);
-    }
-    setIngesting(false);
-    ingestingRef.current = false;
+  function runIngest() {
+    return startIngest(() => refreshSnapshots());
   }
 
   useEffect(() => {

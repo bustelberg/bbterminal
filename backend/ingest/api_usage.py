@@ -19,6 +19,11 @@ from supabase import Client
 logger = logging.getLogger(__name__)
 
 US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX"}
+ASIA_EXCHANGES = {
+    "TSE", "HKSE", "SHSE", "SSE", "SZSE", "TPE", "TWSE", "ROCO",
+    "XKRX", "NSE", "BSE", "SGX", "XKLS", "ISX", "BKK", "PHS",
+    "ASX", "NZSE", "JSE",
+}
 
 # GuruFocus resets usage at midnight EST (UTC-5)
 _EST = timezone(timedelta(hours=-5))
@@ -30,7 +35,12 @@ def _current_month_est() -> str:
 
 
 def _region_for_exchange(exchange: str) -> str:
-    return "usa" if exchange.upper() in US_EXCHANGES else "europe"
+    e = exchange.upper()
+    if e in US_EXCHANGES:
+        return "usa"
+    if e in ASIA_EXCHANGES:
+        return "asia"
+    return "europe"
 
 
 def track_api_call(supabase: Client, exchange: str, count: int = 1) -> None:
@@ -69,7 +79,7 @@ def track_api_call(supabase: Client, exchange: str, count: int = 1) -> None:
 
 
 def get_usage(supabase: Client) -> dict:
-    """Return current month's usage: {usa: N, europe: N}."""
+    """Return current month's usage: {usa: N, europe: N, asia: N}."""
     month = _current_month_est()
     try:
         resp = (
@@ -78,10 +88,10 @@ def get_usage(supabase: Client) -> dict:
             .eq("month", month)
             .execute()
         )
-        result = {"usa": 0, "europe": 0, "month": month}
+        result = {"usa": 0, "europe": 0, "asia": 0, "month": month}
         for row in resp.data or []:
             if row["region"] in result:
                 result[row["region"]] = row["request_count"]
         return result
     except Exception:
-        return {"usa": 0, "europe": 0, "month": month}
+        return {"usa": 0, "europe": 0, "asia": 0, "month": month}

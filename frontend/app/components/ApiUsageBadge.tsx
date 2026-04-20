@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useImperativeHandle, useRef, forwardR
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 const LIMIT = 20000;
 
-type Usage = { usa: number; europe: number; month: string };
+type Usage = { usa: number; europe: number; asia: number; month: string };
 
 export type ApiUsageBadgeHandle = {
   addSessionCalls: (region: string, count: number) => void;
@@ -47,7 +47,7 @@ function ApiInfoTip() {
 
 const ApiUsageBadge = forwardRef<ApiUsageBadgeHandle>(function ApiUsageBadge(_props, ref) {
   const [usage, setUsage] = useState<Usage | null>(null);
-  const [session, setSession] = useState({ usa: 0, europe: 0 });
+  const [session, setSession] = useState({ usa: 0, europe: 0, asia: 0 });
 
   const fetchUsage = useCallback(() => {
     fetch(`${API_URL}/api/usage`)
@@ -76,6 +76,7 @@ const ApiUsageBadge = forwardRef<ApiUsageBadgeHandle>(function ApiUsageBadge(_pr
 
   const usaPct = (usage.usa / LIMIT) * 100;
   const eurPct = (usage.europe / LIMIT) * 100;
+  const asiaPct = ((usage.asia ?? 0) / LIMIT) * 100;
 
   const barColor = (pct: number) =>
     pct >= 90 ? 'bg-rose-500' : pct >= 70 ? 'bg-amber-500' : 'bg-indigo-500';
@@ -99,6 +100,14 @@ const ApiUsageBadge = forwardRef<ApiUsageBadgeHandle>(function ApiUsageBadge(_pr
         </div>
         <span className="text-gray-400 font-mono">{usage.europe.toLocaleString()}/{(LIMIT / 1000)}k</span>
         {session.europe > 0 && <span className="text-indigo-400 font-mono">+{session.europe}</span>}
+      </div>
+      <div className="flex items-center gap-1.5">
+        <span className="text-gray-400">Asia</span>
+        <div className="w-20 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+          <div className={`h-full rounded-full transition-all ${barColor(asiaPct)}`} style={{ width: `${Math.min(asiaPct, 100)}%` }} />
+        </div>
+        <span className="text-gray-400 font-mono">{(usage.asia ?? 0).toLocaleString()}/{(LIMIT / 1000)}k</span>
+        {session.asia > 0 && <span className="text-indigo-400 font-mono">+{session.asia}</span>}
       </div>
     </div>
   );

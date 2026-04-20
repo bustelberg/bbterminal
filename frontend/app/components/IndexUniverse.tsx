@@ -1,6 +1,14 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import {
+  sp500ImportStore,
+  startSp500Import,
+  clearSp500ImportLogs,
+  sp500GfCheckStore,
+  startSp500GfCheck,
+  clearSp500GfCheck,
+} from '../../lib/stores/sp500';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -20,19 +28,11 @@ type TickerEntry = {
   gurufocus_url: string;
 };
 type ChangeEntry = { date: string; month: string; added: string | null; removed: string | null };
-type GFResult = {
-  available: string[];
-  missing: string[];
-  total: number;
-  available_count: number;
-  missing_count: number;
-  coverage_pct: number;
-};
 
 export default function IndexUniverse() {
-  // SSE / progress
-  const [running, setRunning] = useState(false);
-  const [logs, setLogs] = useState<string[]>([]);
+  // SSE / progress (persisted in module store)
+  const running = sp500ImportStore.use((s) => s.running);
+  const logs = sp500ImportStore.use((s) => s.logs);
   const logRef = useRef<HTMLDivElement>(null);
 
   // Indexes
@@ -57,10 +57,10 @@ export default function IndexUniverse() {
   const [loadingCumulative, setLoadingCumulative] = useState(false);
   const [cumulativeFilter, setCumulativeFilter] = useState('');
 
-  // GuruFocus check
-  const [checkingGF, setCheckingGF] = useState(false);
-  const [gfLogs, setGfLogs] = useState<string[]>([]);
-  const [gfResult, setGfResult] = useState<GFResult | null>(null);
+  // GuruFocus check (persisted in module store)
+  const checkingGF = sp500GfCheckStore.use((s) => s.checkingGF);
+  const gfLogs = sp500GfCheckStore.use((s) => s.gfLogs);
+  const gfResult = sp500GfCheckStore.use((s) => s.gfResult);
   const [showMissing, setShowMissing] = useState(false);
   const gfLogRef = useRef<HTMLDivElement>(null);
 
@@ -113,7 +113,7 @@ export default function IndexUniverse() {
     setSelectedIndex(idx);
     setSelectedMonth(null);
     setTickers([]);
-    setGfResult(null);
+    clearSp500GfCheck();
     setChanges([]);
     setCumulative([]);
     loadMonths(idx);
@@ -132,72 +132,20 @@ export default function IndexUniverse() {
       .catch(() => setLoadingMonth(false));
   };
 
-  // SSE reader helper
-  const readSSE = (
-    url: string,
-    method: string,
-    onProgress: (msg: string) => void,
-    onDone: (evt: Record<string, unknown>) => void,
-    onFinish: () => void,
-  ) => {
-    fetch(url, { method }).then(res => {
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      function read() {
-        reader.read().then(({ done, value }) => {
-          if (done) { onFinish(); return; }
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            try {
-              const evt = JSON.parse(line.slice(6));
-              if (evt.type === 'progress') onProgress(evt.message);
-              else if (evt.type === 'done') { onProgress(evt.message || 'Done'); onDone(evt); }
-              else if (evt.type === 'error') onProgress(`ERROR: ${evt.message}`);
-            } catch {}
-          }
-          read();
-        });
-      }
-      read();
-    }).catch(() => onFinish());
-  };
-
   // Import S&P 500
   const runImport = () => {
-    setRunning(true);
-    setLogs([]);
-    readSSE(
-      `${API_URL}/api/index-universe/import-sp500`,
-      'POST',
-      msg => setLogs(prev => [...prev, msg]),
-      () => {
-        loadIndexes();
-        setSelectedIndex('SP500');
-        loadMonths('SP500');
-        loadChanges('SP500');
-      },
-      () => setRunning(false),
-    );
+    startSp500Import(() => {
+      loadIndexes();
+      setSelectedIndex('SP500');
+      loadMonths('SP500');
+      loadChanges('SP500');
+    });
   };
 
   // Check GuruFocus coverage
   const runGFCheck = () => {
     if (!selectedIndex) return;
-    setCheckingGF(true);
-    setGfLogs([]);
-    setGfResult(null);
-    readSSE(
-      `${API_URL}/api/index-universe/check-gurufocus?index=${encodeURIComponent(selectedIndex)}`,
-      'POST',
-      msg => setGfLogs(prev => [...prev, msg]),
-      evt => { if (evt.data) setGfResult(evt.data as GFResult); },
-      () => setCheckingGF(false),
-    );
+    startSp500GfCheck(selectedIndex);
   };
 
   // Delete index
@@ -212,7 +160,7 @@ export default function IndexUniverse() {
           setSelectedMonth(null);
           setTickers([]);
           setChanges([]);
-          setGfResult(null);
+          clearSp500GfCheck();
         }
       });
   };
@@ -270,7 +218,7 @@ export default function IndexUniverse() {
                 {running && <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />}
               </div>
               {!running && (
-                <button onClick={() => setLogs([])} className="text-xs text-gray-500 hover:text-gray-300">Clear</button>
+                <button onClick={clearSp500ImportLogs} className="text-xs text-gray-500 hover:text-gray-300">Clear</button>
               )}
             </div>
             <div ref={logRef} className="px-5 py-3 max-h-48 overflow-y-auto font-mono text-xs text-gray-400 space-y-0.5">

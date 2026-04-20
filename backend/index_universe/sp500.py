@@ -427,6 +427,7 @@ def store_index_membership(
     changes: list[dict],
     company_lookup: dict[str, int],
     on_progress: Callable[[str], None] | None = None,
+    sector_lookup: dict[str, str] | None = None,
 ) -> dict:
     """Store monthly holdings and changes in the database.
 
@@ -441,13 +442,12 @@ def store_index_membership(
     u_resp = supabase.table("universe").select("universe_id").eq("label", index_name).limit(1).execute()
     if u_resp.data:
         universe_id = u_resp.data[0]["universe_id"]
-        # Clear existing membership rows
+        # Clear existing membership rows in a single statement. The previous
+        # "read all target_months then delete per month" approach silently lost
+        # months when the SELECT hit PostgREST's max-rows cap, leaving orphan
+        # rows from older saves that showed up as fluctuating monthly counts.
         emit(f"Clearing existing {index_name} membership data...")
-        # Delete in batches by month to avoid timeout
-        months_resp = supabase.table("universe_membership").select("target_month").eq("universe_id", universe_id).limit(100000).execute()
-        existing_months = set(r["target_month"] for r in (months_resp.data or []))
-        for m in existing_months:
-            supabase.table("universe_membership").delete().eq("universe_id", universe_id).eq("target_month", m).execute()
+        supabase.table("universe_membership").delete().eq("universe_id", universe_id).execute()
     else:
         resp = supabase.table("universe").insert({"label": index_name, "description": f"{index_name} index"}).execute()
         universe_id = resp.data[0]["universe_id"]
@@ -471,12 +471,17 @@ def store_index_membership(
             cid = company_lookup.get(ticker)
             if cid is None:
                 continue  # Can't store without a company_id (FK constraint)
-            batch.append({
+            row: dict = {
                 "universe_id": universe_id,
                 "target_month": month,
                 "company_id": cid,
                 "universe_ticker": ticker,
-            })
+            }
+            if sector_lookup:
+                sec = sector_lookup.get(ticker)
+                if sec:
+                    row["sector"] = sec
+            batch.append(row)
             if len(batch) >= batch_size:
                 supabase.table("universe_membership").upsert(
                     batch, on_conflict="universe_id,company_id,target_month"
