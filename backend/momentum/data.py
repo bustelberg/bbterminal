@@ -279,9 +279,18 @@ def sync_fx_rates_to_db(
         # Fetch from ECB starting the day after what we have, or from start_date
         # if the table is empty for this currency. ECB is free and daily, so
         # re-fetching a wide window is cheap.
+        from datetime import date as _date, timedelta as _timedelta
+        today = _date.today()
         if existing_max:
-            from datetime import date as _date, timedelta as _timedelta
             next_day = _date.fromisoformat(str(existing_max)) + _timedelta(days=1)
+            # ECB rejects startPeriod strictly in the future with a 400. If we
+            # already have data up through today, there's nothing to ask for —
+            # treat the local cache as current.
+            if next_day > today:
+                status[code] = {"status": "cached", "rows": 0, "max_date": str(existing_max)}
+                if on_progress:
+                    on_progress(code, status[code])
+                continue
             fetch_start = next_day.isoformat()
         else:
             fetch_start = start_date.isoformat()
@@ -295,11 +304,17 @@ def sync_fx_rates_to_db(
             continue
 
         if not rates:
-            status[code] = {
-                "status": "no_data",
-                "rows": 0,
-                "max_date": str(existing_max) if existing_max else None,
-            }
+            # Truly missing only when we have nothing in the DB at all.
+            # Otherwise ECB just hasn't published new rates yet (weekends,
+            # holidays, or a few-day publishing lag) — existing data is fine.
+            if existing_max is None:
+                status[code] = {"status": "no_data", "rows": 0, "max_date": None}
+            else:
+                status[code] = {
+                    "status": "cached",
+                    "rows": 0,
+                    "max_date": str(existing_max),
+                }
             if on_progress:
                 on_progress(code, status[code])
             continue

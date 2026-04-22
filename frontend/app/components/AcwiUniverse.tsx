@@ -9,6 +9,7 @@ import {
   startAcwiSave,
 } from '../../lib/stores/acwi';
 import DatePartsPicker from './DatePartsPicker';
+import ProgressTimeline from './ProgressTimeline';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -455,26 +456,17 @@ export default function AcwiUniverse() {
 
       {/* Fetch progress bar */}
       {fetchProgress && (
-        <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-lg px-4 py-3 text-sm space-y-2">
-          <div className="flex items-center gap-3 text-indigo-400">
-            <span className="animate-pulse">●</span>
-            <span>Fetching announcement details: {fetchProgress.message}</span>
-          </div>
-          {fetchProgress.total > 0 && (
-            <div className="flex items-center gap-3">
-              <div className="flex-1 h-1.5 rounded-full bg-gray-800 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-indigo-500 transition-all duration-300"
-                  style={{ width: `${fetchProgress.pct}%` }}
-                />
-              </div>
-              <span className="text-gray-400 font-mono text-xs w-12 text-right">{fetchProgress.pct}%</span>
-            </div>
-          )}
-          {fetchProgress.errors > 0 && (
-            <div className="text-rose-400 text-xs">{fetchProgress.errors} error{fetchProgress.errors !== 1 ? 's' : ''} so far</div>
-          )}
-        </div>
+        <ProgressTimeline
+          steps={[]}
+          log={[
+            `Fetching announcement details: ${fetchProgress.message}`,
+            ...(fetchProgress.errors > 0 ? [`${fetchProgress.errors} error${fetchProgress.errors !== 1 ? 's' : ''} so far`] : []),
+          ]}
+          pct={fetchProgress.total > 0 ? fetchProgress.pct : 0}
+          running={fetching}
+          defaultLogOpen
+          title="Fetch progress"
+        />
       )}
 
       {/* Fetch summary (persists after completion) */}
@@ -1098,34 +1090,17 @@ export default function AcwiUniverse() {
               </div>
             </div>
             {(saveProgress.length > 0 || saveResult) && (
-              <div className="px-5 py-3 border-b border-gray-800/40 space-y-1.5 text-xs">
-                {saveProgress.slice(-6).map((m, i) => (
-                  <div key={i} className="text-gray-400 flex gap-2">
-                    <span className={saving && i === saveProgress.length - 1 ? 'text-indigo-400 animate-pulse' : 'text-gray-600'}>
-                      {saving && i === saveProgress.length - 1 ? '●' : '✓'}
-                    </span>
-                    <span>{m}</span>
-                  </div>
-                ))}
-                {saveResult && (
-                  <div className={`flex items-start gap-2 ${saveResult.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    <span>{saveResult.ok ? '✓' : '✗'}</span>
-                    <span className="flex-1">
-                      {saveResult.message}
-                      {saveResult.ok && (
-                        <span className="text-gray-500">
-                          {' '}— select &ldquo;{universeName.trim() || 'ACWI'}&rdquo; as Index Universe in /momentum to use it.
-                        </span>
-                      )}
-                    </span>
-                    <button
-                      onClick={() => acwiSaveStore.set({ result: null, progress: [] })}
-                      className="text-gray-500 hover:text-gray-300"
-                    >
-                      dismiss
-                    </button>
-                  </div>
-                )}
+              <div className="px-5 py-3 border-b border-gray-800/40">
+                <ProgressTimeline
+                  steps={[]}
+                  log={saveProgress}
+                  doneSummary={saveResult?.ok ? `${saveResult.message} — select "${universeName.trim() || 'ACWI'}" as Index Universe in /momentum to use it.` : null}
+                  errorMessage={saveResult && !saveResult.ok ? saveResult.message : null}
+                  running={saving}
+                  defaultLogOpen
+                  title="Save progress"
+                  onDismiss={() => acwiSaveStore.set({ result: null, progress: [] })}
+                />
               </div>
             )}
             <div className="overflow-x-auto max-h-[500px] overflow-y-auto">

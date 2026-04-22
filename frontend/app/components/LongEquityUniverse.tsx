@@ -5,6 +5,7 @@ import type { Snapshot } from '../longequity-universe/page';
 
 import { ingestStore, startIngest } from '../../lib/stores/ingest';
 import DatePartsPicker from './DatePartsPicker';
+import ProgressTimeline, { type StepDef, type StepState } from './ProgressTimeline';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -200,22 +201,12 @@ function downloadCsv(companies: Company[], targetDate: string): void {
   URL.revokeObjectURL(url);
 }
 
-type SaveStepStatus = 'pending' | 'in_progress' | 'done' | 'error';
-type SaveStep = { step: string; label: string; status: SaveStepStatus; message: string };
-
-const SAVE_STEPS: { step: string; label: string }[] = [
-  { step: 'load', label: 'Load LongEquity memberships' },
-  { step: 'build', label: 'Build cumulative set' },
-  { step: 'target', label: 'Prepare target universe' },
-  { step: 'insert', label: 'Insert membership rows' },
+const SAVE_STEPS: StepDef[] = [
+  { key: 'load', label: 'Load LongEquity memberships' },
+  { key: 'build', label: 'Build cumulative set' },
+  { key: 'target', label: 'Prepare target universe' },
+  { key: 'insert', label: 'Insert membership rows' },
 ];
-
-function StepIcon({ status }: { status: SaveStepStatus }) {
-  if (status === 'done') return <span className="text-emerald-400">✓</span>;
-  if (status === 'in_progress') return <span className="text-indigo-400 animate-pulse">●</span>;
-  if (status === 'error') return <span className="text-rose-400">✗</span>;
-  return <span className="text-gray-600">○</span>;
-}
 
 export default function LongEquityUniverse() {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
@@ -230,7 +221,6 @@ export default function LongEquityUniverse() {
   const ingesting = ingestStore.use((s) => s.running);
   const ingestLog = ingestStore.use((s) => s.log);
   const setIngestLog = (next: typeof ingestLog) => ingestStore.set({ log: next });
-  const logEndRef = useRef<HTMLDivElement>(null);
   const didAutoIngest = useRef(false);
 
   // Save-as-universe state
@@ -242,11 +232,10 @@ export default function LongEquityUniverse() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
   });
   const [saving, setSaving] = useState(false);
-  const [saveStepMap, setSaveStepMap] = useState<Record<string, SaveStep>>({});
+  const [saveStepMap, setSaveStepMap] = useState<Record<string, StepState>>({});
   const [saveLog, setSaveLog] = useState<string[]>([]);
   const [saveSummary, setSaveSummary] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const saveLogEndRef = useRef<HTMLDivElement>(null);
 
   async function refreshSnapshots() {
     try {
@@ -311,16 +300,6 @@ export default function LongEquityUniverse() {
     }
     if (shouldIngest) { didAutoIngest.current = true; runIngest(); }
   }, [snapshotsLoading, latestData, snapshots]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    const el = logEndRef.current?.parentElement;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [ingestLog]);
-
-  useEffect(() => {
-    const el = saveLogEndRef.current?.parentElement;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [saveLog]);
 
   function runIngest() {
     return startIngest(() => refreshSnapshots());
@@ -393,11 +372,10 @@ export default function LongEquityUniverse() {
             let j: { type?: string; step?: string; status?: string; message?: string };
             try { j = JSON.parse(payload); } catch { continue; }
             if (j.type === 'progress' && j.step) {
-              const status = (j.status as SaveStepStatus) ?? 'in_progress';
-              const label = SAVE_STEPS.find(s => s.step === j.step)?.label ?? j.step;
+              const status = (j.status as StepState['status']) ?? 'in_progress';
               setSaveStepMap(prev => ({
                 ...prev,
-                [j.step as string]: { step: j.step as string, label, status, message: j.message ?? '' },
+                [j.step as string]: { status, message: j.message ?? '' },
               }));
               setSaveLog(prev => [...prev, `${j.step}: ${j.message ?? ''}`]);
             } else if (j.type === 'done') {
@@ -512,84 +490,33 @@ export default function LongEquityUniverse() {
             />
           </div>
 
-          {/* Step progress */}
-          {(saving || Object.keys(saveStepMap).length > 0) && (
-            <div className="space-y-1.5 text-sm">
-              {SAVE_STEPS.map(({ step, label }) => {
-                const s = saveStepMap[step];
-                const status: SaveStepStatus = s?.status ?? 'pending';
-                return (
-                  <div key={step} className="flex items-start gap-2">
-                    <div className="w-4 text-center shrink-0 pt-0.5">
-                      <StepIcon status={status} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className={`${status === 'pending' ? 'text-gray-500' : 'text-gray-200'}`}>{label}</div>
-                      {s?.message && (
-                        <div className="text-xs text-gray-500 font-mono truncate">{s.message}</div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Verbose log */}
-          {saveLog.length > 0 && (
-            <details className="bg-[#0b0d13] border border-gray-800/40 rounded-lg overflow-hidden">
-              <summary className="cursor-pointer px-3 py-1.5 text-xs text-gray-500 hover:text-gray-300 select-none">
-                Verbose log ({saveLog.length} lines)
-              </summary>
-              <div className="max-h-48 overflow-y-auto p-3 font-mono text-xs space-y-0.5">
-                {saveLog.map((line, i) => (
-                  <div key={i} className="text-gray-400">{line}</div>
-                ))}
-                <div ref={saveLogEndRef} />
-              </div>
-            </details>
-          )}
-
-          {saveSummary && (
-            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2 text-sm text-emerald-400">
-              {saveSummary}
-            </div>
-          )}
-          {saveError && (
-            <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2 text-sm text-rose-400 whitespace-pre-wrap">
-              {saveError}
-            </div>
-          )}
+          <ProgressTimeline
+            steps={SAVE_STEPS}
+            state={saveStepMap}
+            log={saveLog}
+            doneSummary={saveSummary}
+            errorMessage={saveError}
+            running={saving}
+          />
         </div>
 
         {/* Ingest progress (shared store) */}
-        {ingestLog.length > 0 && (
-          <div className="bg-[#0b0d13] border border-gray-800/40 rounded-lg overflow-hidden">
-            <div className="px-3 py-1.5 border-b border-gray-800/40 flex items-center gap-2">
-              {ingesting
-                ? <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-                : <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
-              <span className="text-gray-500 text-xs font-medium">{ingesting ? 'Ingest Progress' : 'Ingest Complete'}</span>
-              <button onClick={() => setIngestLog([])} className="ml-auto text-gray-500 hover:text-gray-300 transition-colors" aria-label="Close">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                  <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-                </svg>
-              </button>
-            </div>
-            <div className="max-h-48 overflow-y-auto p-3 font-mono text-xs">
-              {ingestLog.map((entry, i) => (
-                <div key={i} className={
-                  entry.type === 'error' ? 'text-rose-400'
-                  : entry.type === 'done' ? 'text-emerald-400'
-                  : 'text-gray-400'
-                }>
-                  {entry.message}
-                </div>
-              ))}
-              <div ref={logEndRef} />
-            </div>
-          </div>
-        )}
+        {ingestLog.length > 0 && (() => {
+          const lastDone = [...ingestLog].reverse().find(e => e.type === 'done');
+          const lastError = [...ingestLog].reverse().find(e => e.type === 'error');
+          return (
+            <ProgressTimeline
+              steps={[]}
+              log={ingestLog.filter(e => e.message).map(e => e.message)}
+              doneSummary={!ingesting ? lastDone?.message ?? null : null}
+              errorMessage={lastError?.message ?? null}
+              running={ingesting}
+              defaultLogOpen
+              title={ingesting ? 'Ingest progress' : 'Ingest complete'}
+              onDismiss={() => setIngestLog([])}
+            />
+          );
+        })()}
 
         {snapshotsLoading ? (
           <div>

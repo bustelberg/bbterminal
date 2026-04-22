@@ -6,6 +6,7 @@ import {
   CartesianGrid,
 } from 'recharts';
 import { dialog } from '../../lib/dialog';
+import ProgressTimeline, { type StepDef, type StepState } from './ProgressTimeline';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -546,10 +547,7 @@ type TightenPanelProps = {
   onCreated: () => void;
 };
 
-type DeriveStepStatus = 'pending' | 'in_progress' | 'done' | 'error';
-type DeriveStep = { step: string; status: DeriveStepStatus; message: string };
-
-const DERIVE_STEPS: { key: string; label: string }[] = [
+const DERIVE_STEPS: StepDef[] = [
   { key: 'validate', label: 'Validate inputs' },
   { key: 'load_base', label: 'Load base memberships' },
   { key: 'precompute', label: 'Precompute derived metrics' },
@@ -573,7 +571,7 @@ function TightenPanel({ base, specs, defaults, onClose, onCreated }: TightenPane
   };
   const [preview, setPreview] = useState<Preview | null>(null);
   const [errMsg, setErrMsg] = useState<string | null>(null);
-  const [stepMap, setStepMap] = useState<Record<string, DeriveStep>>({});
+  const [stepMap, setStepMap] = useState<Record<string, StepState>>({});
   const [detailLog, setDetailLog] = useState<string[]>([]);
   const [doneSummary, setDoneSummary] = useState<string | null>(null);
 
@@ -655,10 +653,10 @@ function TightenPanel({ base, specs, defaults, onClose, onCreated }: TightenPane
             let j: { type?: string; step?: string; status?: string; message?: string; data?: unknown };
             try { j = JSON.parse(payload); } catch { continue; }
             if (j.type === 'progress' && j.step) {
-              const status = (j.status as DeriveStepStatus) ?? 'in_progress';
+              const status = (j.status as StepState['status']) ?? 'in_progress';
               setStepMap(prev => ({
                 ...prev,
-                [j.step as string]: { step: j.step as string, status, message: j.message ?? '' },
+                [j.step as string]: { status, message: j.message ?? '' },
               }));
               setDetailLog(prev => [...prev, `${j.step}: ${j.message ?? ''}`]);
             } else if (j.type === 'done') {
@@ -811,54 +809,15 @@ function TightenPanel({ base, specs, defaults, onClose, onCreated }: TightenPane
         </div>
       )}
 
-      {(creating || Object.keys(stepMap).length > 0 || doneSummary) && (
-        <div className="bg-[#0f1117] border border-gray-800 rounded-lg p-3 space-y-2">
-          <div className="space-y-1">
-            {DERIVE_STEPS.map(s => {
-              const st = stepMap[s.key];
-              const status = st?.status ?? 'pending';
-              return (
-                <div key={s.key} className="flex items-start gap-2 text-xs">
-                  <StepIcon status={status} />
-                  <span className={
-                    status === 'done' ? 'text-gray-400'
-                    : status === 'in_progress' ? 'text-gray-200'
-                    : status === 'error' ? 'text-rose-400'
-                    : 'text-gray-600'
-                  }>
-                    <span className="font-medium">{s.label}</span>
-                    {st?.message && <span className="text-gray-500"> — {st.message}</span>}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-          {doneSummary && (
-            <div className="text-xs text-emerald-400 font-medium pt-1 border-t border-gray-800/60">
-              {doneSummary}
-            </div>
-          )}
-          {detailLog.length > 0 && (
-            <details>
-              <summary className="text-gray-500 text-xs cursor-pointer hover:text-gray-300">
-                Verbose log ({detailLog.length} events)
-              </summary>
-              <div className="mt-2 max-h-48 overflow-auto text-[11px] font-mono text-gray-400 space-y-0.5">
-                {detailLog.map((l, i) => <div key={i}>{l}</div>)}
-              </div>
-            </details>
-          )}
-        </div>
-      )}
+      <ProgressTimeline
+        steps={DERIVE_STEPS}
+        state={stepMap}
+        log={detailLog}
+        doneSummary={doneSummary}
+        running={creating}
+      />
     </div>
   );
-}
-
-function StepIcon({ status }: { status: DeriveStepStatus }) {
-  if (status === 'done') return <span className="text-emerald-400 mt-0.5">&#10003;</span>;
-  if (status === 'in_progress') return <span className="text-indigo-400 animate-pulse mt-0.5">&#9679;</span>;
-  if (status === 'error') return <span className="text-rose-400 mt-0.5">&#10007;</span>;
-  return <span className="text-gray-600 mt-0.5">&#9675;</span>;
 }
 
 function deepCloneConfig(c: FilterConfig): FilterConfig {

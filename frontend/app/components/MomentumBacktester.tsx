@@ -8,11 +8,13 @@ import {
 
 import ApiUsageBadge from './ApiUsageBadge';
 import { dialog } from '../../lib/dialog';
+import ProgressTimeline from './ProgressTimeline';
 import {
   momentumStore,
   startBacktest,
   cancelBacktest,
   type DrawdownPeriod,
+  type MonthlyRecord,
   type Summary,
 } from '../../lib/stores/momentum';
 
@@ -48,6 +50,24 @@ type BenchmarkPrice = {
   target_date: string;
   price: number;
 };
+
+// Comparison series — strategies and benchmarks shown side by side on the chart.
+// `active` is implicit (derived from the live `result`) and is NOT stored here.
+type ComparisonItem =
+  | { id: string; kind: 'saved'; runId: number; label: string; monthly: MonthlyRecord[] }
+  | { id: string; kind: 'benchmark'; benchmarkId: number; label: string; prices: BenchmarkPrice[] };
+
+// Palette for series lines (index 0 = active strategy).
+const SERIES_COLORS = [
+  '#818cf8', // indigo
+  '#f59e0b', // amber
+  '#34d399', // emerald
+  '#f472b6', // pink
+  '#60a5fa', // sky
+  '#a78bfa', // violet
+  '#fb7185', // rose
+  '#22d3ee', // cyan
+];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -305,12 +325,6 @@ export default function MomentumBacktester() {
     return m;
   }, [universe]);
 
-  const progressLogRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = progressLogRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [progress]);
-
   // Purely local UI state — safe to reset on navigation
   const [showWarnings, setShowWarnings] = useState(true);
   const [showInfos, setShowInfos] = useState(false);
@@ -321,10 +335,11 @@ export default function MomentumBacktester() {
   const [saveName, setSaveName] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Benchmark state
+  // Benchmark options (for "add series" dropdown) + unified comparison list.
   const [benchmarkOptions, setBenchmarkOptions] = useState<BenchmarkOption[]>([]);
-  const [selectedBenchmarkId, setSelectedBenchmarkId] = useState<number | null>(null);
-  const [benchmarkPrices, setBenchmarkPrices] = useState<BenchmarkPrice[]>([]);
+  const [comparisons, setComparisons] = useState<ComparisonItem[]>([]);
+  const [addSeriesOpen, setAddSeriesOpen] = useState(false);
+  const addSeriesRef = useRef<HTMLDivElement>(null);
   const [logScale, setLogScale] = useState(false);
   const [hoveredDrawdown, setHoveredDrawdown] = useState<number | null>(null);
   const [customFromMonth, setCustomFromMonth] = useState('');
@@ -379,14 +394,16 @@ export default function MomentumBacktester() {
     return () => clearInterval(tick);
   }, []);
 
-  // When universe selection changes, auto-set start/end dates from the range
+  // When universe selection changes, auto-set start/end dates from the range.
+  // Some universes store start/end as YYYY-MM-DD instead of YYYY-MM — slice so
+  // the <input type="month"> can accept the value.
   const handleUniverseChange = (value: string) => {
     setSelectedIndexUniverse(value);
     if (value) {
       const entry = indexUniverses.find(i => i.index_name === value);
       if (entry) {
-        setStartDate(entry.start_month);
-        setEndDate(entry.end_month);
+        setStartDate(entry.start_month.slice(0, 7));
+        setEndDate(entry.end_month.slice(0, 7));
       }
     }
   };
@@ -411,226 +428,378 @@ export default function MomentumBacktester() {
       .catch(() => {});
   };
 
-  // Fetch benchmark prices when selection or date range changes
+  // Close "add series" dropdown on outside click
   useEffect(() => {
-    if (!selectedBenchmarkId || !result) {
-      setBenchmarkPrices([]);
-      return;
-    }
-    const dates = result.monthly_records.map((r) => r.date);
-    if (dates.length === 0) return;
-    // Extend end-date one month past the last record so the final forward-return
-    // pair is available — strategy records hold return month[i] → month[i+1].
-    const last = dates[dates.length - 1];
-    const [ly, lm] = last.split('-').map(Number);
-    const nm = lm === 12 ? 1 : lm + 1;
-    const ny = lm === 12 ? ly + 1 : ly;
-    const sd = `${dates[0]}-01`;
-    const ed = `${ny}-${String(nm).padStart(2, '0')}-28`;
-    fetch(`${API_URL}/api/benchmarks/${selectedBenchmarkId}/prices?start_date=${sd}&end_date=${ed}`)
-      .then((r) => r.json())
-      .then((data) => setBenchmarkPrices(data))
-      .catch(() => setBenchmarkPrices([]));
-  }, [selectedBenchmarkId, result]);
-
-  // Compute benchmark monthly returns aligned to backtest months
-  const benchmarkReturns = useMemo(() => {
-    if (!result || benchmarkPrices.length === 0) return null;
-
-    const months = result.monthly_records.map((r) => r.date);
-    const priceByMonth = new Map<string, number>();
-
-    // For each month, find the first available price on or after the 1st
-    for (const bp of benchmarkPrices) {
-      const month = bp.target_date.slice(0, 7);
-      if (!priceByMonth.has(month)) {
-        priceByMonth.set(month, bp.price);
+    if (!addSeriesOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (addSeriesRef.current && !addSeriesRef.current.contains(e.target as Node)) {
+        setAddSeriesOpen(false);
       }
-    }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [addSeriesOpen]);
 
-    // Compute cumulative return aligned with the strategy:
-    // The strategy record for month[i] includes the forward return earned
-    // during that month (price change month[i] → month[i+1]).
-    // So benchmark cumReturns[month[i]] should also include that same period's return.
-    const cumReturns: Record<string, number> = {};
-    let cumFactor = 1.0;
-    const monthlyRets: number[] = [];
+  // Helpers to add/remove comparison series
+  const addSavedSeries = async (runId: number) => {
+    if (comparisons.some((c) => c.kind === 'saved' && c.runId === runId)) return;
+    try {
+      const resp = await fetch(`${API_URL}/api/momentum/backtests/${runId}`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const saved = data.result ?? data;
+      const monthly: MonthlyRecord[] = saved.monthly_records ?? [];
+      const label = data.name ?? `Backtest ${runId}`;
+      setComparisons((prev) => [...prev, { id: `saved:${runId}`, kind: 'saved', runId, label, monthly }]);
+    } catch {}
+  };
 
-    const nextMonth = (ym: string) => {
-      const [y, m] = ym.split('-').map(Number);
-      const nm = m === 12 ? 1 : m + 1;
-      const ny = m === 12 ? y + 1 : y;
-      return `${ny}-${String(nm).padStart(2, '0')}`;
+  const addBenchmarkSeries = async (benchmarkId: number) => {
+    if (comparisons.some((c) => c.kind === 'benchmark' && c.benchmarkId === benchmarkId)) return;
+    const opt = benchmarkOptions.find((b) => b.benchmark_id === benchmarkId);
+    const label = opt ? opt.ticker : `Benchmark ${benchmarkId}`;
+    // Widen fetch window so any later series can still overlap.
+    try {
+      const resp = await fetch(
+        `${API_URL}/api/benchmarks/${benchmarkId}/prices?start_date=1990-01-01&end_date=2099-12-31`,
+      );
+      if (!resp.ok) return;
+      const prices: BenchmarkPrice[] = await resp.json();
+      setComparisons((prev) => [
+        ...prev,
+        { id: `bench:${benchmarkId}`, kind: 'benchmark', benchmarkId, label, prices },
+      ]);
+    } catch {}
+  };
+
+  const removeSeries = (id: string) => {
+    setComparisons((prev) => prev.filter((c) => c.id !== id));
+  };
+
+  // Resolve every series into a (YYYY-MM → growth factor) map, rebased to 1.0
+  // at the series' first observed month. The factor embeds the forward return
+  // earned during each month, so factor[month[i]] == cumProduct of returns
+  // through month[i] (consistent with strategy `cumulative_return_pct`).
+  type ResolvedSeries = {
+    id: string;
+    label: string;
+    color: string;
+    kind: 'active' | 'saved' | 'benchmark';
+    removable: boolean;
+    factorByMonth: Map<string, number>;
+    months: string[]; // sorted
+  };
+
+  const resolvedSeries = useMemo<ResolvedSeries[]>(() => {
+    const out: ResolvedSeries[] = [];
+    let colorIdx = 0;
+    const nextColor = () => SERIES_COLORS[colorIdx++ % SERIES_COLORS.length];
+
+    const fromMonthly = (monthly: MonthlyRecord[]): { map: Map<string, number>; months: string[] } => {
+      const map = new Map<string, number>();
+      const months: string[] = [];
+      for (const r of monthly) {
+        const factor = 1 + r.cumulative_return_pct / 100;
+        map.set(r.date, factor);
+        months.push(r.date);
+      }
+      return { map, months };
     };
 
-    for (let i = 0; i < months.length; i++) {
-      const p0 = priceByMonth.get(months[i]);
-      const nextKey = i < months.length - 1 ? months[i + 1] : nextMonth(months[i]);
-      const p1 = priceByMonth.get(nextKey);
-      if (p0 && p1 && p0 > 0) {
-        const ret = (p1 / p0 - 1) * 100;
-        monthlyRets.push(ret);
-        cumFactor *= (1 + ret / 100);
+    const fromPrices = (prices: BenchmarkPrice[]): { map: Map<string, number>; months: string[] } => {
+      // Pick first price per month.
+      const firstByMonth = new Map<string, number>();
+      for (const p of prices) {
+        const ym = p.target_date.slice(0, 7);
+        if (!firstByMonth.has(ym)) firstByMonth.set(ym, p.price);
       }
-      cumReturns[months[i]] = (cumFactor - 1) * 100;
+      const months = Array.from(firstByMonth.keys()).sort();
+      if (months.length === 0) return { map: new Map(), months: [] };
+      const map = new Map<string, number>();
+      const p0 = firstByMonth.get(months[0])!;
+      // Shift index so each month's "factor" reflects return through end of month
+      // (same convention as strategy records: cumReturn at month[i] includes
+      // the price change month[i] → month[i+1]).
+      for (let i = 0; i < months.length - 1; i++) {
+        const pn = firstByMonth.get(months[i + 1])!;
+        map.set(months[i], pn / p0);
+      }
+      // Last month: no forward price available — leave out.
+      return { map, months: months.slice(0, -1) };
+    };
+
+    if (result) {
+      const { map, months } = fromMonthly(result.monthly_records);
+      const activeName = loadedRunId != null
+        ? savedRuns.find((r) => r.run_id === loadedRunId)?.name
+        : undefined;
+      out.push({
+        id: 'active',
+        label: activeName || 'Strategy',
+        color: nextColor(),
+        kind: 'active',
+        removable: false,
+        factorByMonth: map,
+        months,
+      });
     }
 
-    // Summary stats
-    const totalReturn = (cumFactor - 1) * 100;
-    const years = monthlyRets.length / 12;
-    const annualized = years > 0 ? (Math.pow(cumFactor, 1 / years) - 1) * 100 : 0;
+    for (const c of comparisons) {
+      if (c.kind === 'saved') {
+        const { map, months } = fromMonthly(c.monthly);
+        out.push({
+          id: c.id,
+          label: c.label,
+          color: nextColor(),
+          kind: 'saved',
+          removable: true,
+          factorByMonth: map,
+          months,
+        });
+      } else {
+        const { map, months } = fromPrices(c.prices);
+        out.push({
+          id: c.id,
+          label: c.label,
+          color: nextColor(),
+          kind: 'benchmark',
+          removable: true,
+          factorByMonth: map,
+          months,
+        });
+      }
+    }
+    return out;
+  }, [result, comparisons, loadedRunId, savedRuns]);
 
-    // Max drawdown
-    let peak = 1.0;
-    let maxDd = 0;
-    let factor = 1.0;
-    for (const ret of monthlyRets) {
-      factor *= (1 + ret / 100);
-      peak = Math.max(peak, factor);
-      const dd = ((factor / peak) - 1) * 100;
-      maxDd = Math.min(maxDd, dd);
+  // Determine the [maxStart, minEnd] alignment window over all series and
+  // compute per-series aligned points + summary stats, rebased so each series
+  // starts at 0% on windowStart.
+  type SeriesPoint = { date: string; cumReturnPct: number | null };
+  type SeriesStats = {
+    totalReturn: number;
+    annualized: number;
+    maxDd: number;
+    sharpe: number | null;
+    months: number;
+  };
+  type AlignedSeries = ResolvedSeries & {
+    points: SeriesPoint[];
+    stats: SeriesStats;
+    topDrawdowns: DrawdownPeriod[];
+  };
+
+  const alignedSeries = useMemo<{ series: AlignedSeries[]; windowStart: string | null; windowEnd: string | null; allMonths: string[] }>(() => {
+    if (resolvedSeries.length === 0) return { series: [], windowStart: null, windowEnd: null, allMonths: [] };
+
+    let maxStart = '';
+    let minEnd = '9999-99';
+    for (const s of resolvedSeries) {
+      if (s.months.length === 0) continue;
+      const first = s.months[0];
+      const last = s.months[s.months.length - 1];
+      if (first > maxStart) maxStart = first;
+      if (last < minEnd) minEnd = last;
+    }
+    if (!maxStart || minEnd === '9999-99' || maxStart > minEnd) {
+      return { series: [], windowStart: null, windowEnd: null, allMonths: [] };
     }
 
-    // Sharpe
-    let sharpe: number | null = null;
-    if (monthlyRets.length >= 12) {
-      const mean = monthlyRets.reduce((a, b) => a + b, 0) / monthlyRets.length;
-      const std = Math.sqrt(monthlyRets.reduce((a, b) => a + (b - mean) ** 2, 0) / monthlyRets.length);
-      if (std > 0) sharpe = (mean / std) * Math.sqrt(12);
+    // Union of all months each series has within [maxStart, minEnd]. If one
+    // series lacks a given month, that series reports null for it.
+    const monthSet = new Set<string>();
+    for (const s of resolvedSeries) {
+      for (const m of s.months) {
+        if (m >= maxStart && m <= minEnd) monthSet.add(m);
+      }
     }
+    const allMonths = Array.from(monthSet).sort();
 
-    return { cumReturns, totalReturn, annualized, maxDd, sharpe };
-  }, [result, benchmarkPrices]);
+    const series: AlignedSeries[] = resolvedSeries.map((s) => {
+      const baseFactor = s.factorByMonth.get(maxStart);
+      const points: SeriesPoint[] = allMonths.map((m) => {
+        const f = s.factorByMonth.get(m);
+        if (f == null || baseFactor == null) return { date: m, cumReturnPct: null };
+        return { date: m, cumReturnPct: (f / baseFactor - 1) * 100 };
+      });
 
-  // Compute top 3 non-overlapping drawdowns (client-side, works for saved backtests too)
-  const topDrawdowns: DrawdownPeriod[] = useMemo(() => {
-    if (!result) return [];
-    if (result.summary.top_drawdowns && result.summary.top_drawdowns.length > 0) {
-      return result.summary.top_drawdowns;
-    }
-    const values = result.monthly_records.map(r => ({
-      date: r.date,
-      value: 1 + r.cumulative_return_pct / 100,
-    }));
-    return computeTopDrawdowns(values, 3);
-  }, [result]);
+      // Monthly rebased returns for stats.
+      const monthlyRets: number[] = [];
+      let prev: number | null = null;
+      for (const p of points) {
+        if (p.cumReturnPct == null) continue;
+        const factor = 1 + p.cumReturnPct / 100;
+        if (prev != null && prev > 0) monthlyRets.push((factor / prev - 1) * 100);
+        prev = factor;
+      }
+      const lastNonNull = [...points].reverse().find((p) => p.cumReturnPct != null);
+      const totalReturn = lastNonNull?.cumReturnPct ?? 0;
+      const years = monthlyRets.length / 12;
+      const cumFactor = 1 + totalReturn / 100;
+      const annualized = years > 0 ? (Math.pow(cumFactor, 1 / years) - 1) * 100 : 0;
 
-  // Compute top 3 drawdowns for benchmark
-  const benchmarkDrawdowns: DrawdownPeriod[] = useMemo(() => {
-    if (!benchmarkReturns || !result) return [];
-    const values = result.monthly_records
-      .filter(r => benchmarkReturns.cumReturns[r.date] != null)
-      .map(r => ({
-        date: r.date,
-        value: 1 + benchmarkReturns.cumReturns[r.date] / 100,
-      }));
-    return computeTopDrawdowns(values, 3);
-  }, [benchmarkReturns, result]);
+      let peak = 1.0, maxDd = 0, factor = 1.0;
+      for (const r of monthlyRets) {
+        factor *= (1 + r / 100);
+        peak = Math.max(peak, factor);
+        const dd = (factor / peak - 1) * 100;
+        maxDd = Math.min(maxDd, dd);
+      }
 
-  // Yearly performance breakdown — for each calendar year, compound return
-  // from end of prior year (or 0% at start) to last record in that year.
+      let sharpe: number | null = null;
+      if (monthlyRets.length >= 12) {
+        const mean = monthlyRets.reduce((a, b) => a + b, 0) / monthlyRets.length;
+        const std = Math.sqrt(monthlyRets.reduce((a, b) => a + (b - mean) ** 2, 0) / monthlyRets.length);
+        if (std > 0) sharpe = (mean / std) * Math.sqrt(12);
+      }
+
+      const ddValues = points
+        .filter((p) => p.cumReturnPct != null)
+        .map((p) => ({ date: p.date, value: 1 + (p.cumReturnPct as number) / 100 }));
+      const topDrawdowns = computeTopDrawdowns(ddValues, 3);
+
+      return {
+        ...s,
+        points,
+        stats: { totalReturn, annualized, maxDd, sharpe, months: monthlyRets.length },
+        topDrawdowns,
+      };
+    });
+
+    return { series, windowStart: maxStart, windowEnd: minEnd, allMonths };
+  }, [resolvedSeries]);
+
+  // Yearly performance breakdown — per-series compound return for each calendar year.
   const yearlyBreakdown = useMemo(() => {
-    if (!result || result.monthly_records.length === 0) return [];
+    const { series } = alignedSeries;
+    if (series.length === 0) return { years: [] as string[], bySeries: {} as Record<string, Record<string, number | null>> };
 
-    const lastByYear = new Map<string, { stratCum: number; benchCum: number | null }>();
-    for (const r of result.monthly_records) {
-      const y = r.date.slice(0, 4);
-      const benchCum = benchmarkReturns?.cumReturns[r.date] ?? null;
-      lastByYear.set(y, { stratCum: r.cumulative_return_pct, benchCum });
+    const yearsSet = new Set<string>();
+    const bySeries: Record<string, Record<string, number | null>> = {};
+
+    for (const s of series) {
+      const lastByYear = new Map<string, number>();
+      for (const p of s.points) {
+        if (p.cumReturnPct == null) continue;
+        const y = p.date.slice(0, 4);
+        lastByYear.set(y, p.cumReturnPct);
+      }
+      const ys = Array.from(lastByYear.keys()).sort();
+      let prev = 0;
+      const rowMap: Record<string, number | null> = {};
+      for (const y of ys) {
+        const cum = lastByYear.get(y)!;
+        rowMap[y] = ((1 + cum / 100) / (1 + prev / 100) - 1) * 100;
+        prev = cum;
+        yearsSet.add(y);
+      }
+      bySeries[s.id] = rowMap;
     }
 
-    const years = Array.from(lastByYear.keys()).sort();
-    const rows: { year: string; strategy: number; benchmark: number | null }[] = [];
-    let prevStrat = 0;
-    let prevBench = 0;
-    let hasPrevBench = false;
+    const years = Array.from(yearsSet).sort();
+    // Backfill missing years with null so the column count matches.
+    for (const s of series) {
+      for (const y of years) if (!(y in bySeries[s.id])) bySeries[s.id][y] = null;
+    }
+    return { years, bySeries };
+  }, [alignedSeries]);
 
-    for (const y of years) {
-      const rec = lastByYear.get(y)!;
-      const stratRet = ((1 + rec.stratCum / 100) / (1 + prevStrat / 100) - 1) * 100;
-      let benchRet: number | null = null;
-      if (rec.benchCum != null) {
-        const startBench = hasPrevBench ? prevBench : 0;
-        benchRet = ((1 + rec.benchCum / 100) / (1 + startBench / 100) - 1) * 100;
-        prevBench = rec.benchCum;
-        hasPrevBench = true;
+  // Cumulative return from customFromMonth through end of aligned window, per series.
+  const customRangeReturn = useMemo(() => {
+    const { series } = alignedSeries;
+    if (!customFromMonth || series.length === 0) return null;
+    const last = series[0].points[series[0].points.length - 1];
+    if (!last) return null;
+    const perSeries = series.map((s) => {
+      let start: number | null = null;
+      let end: number | null = null;
+      for (const p of s.points) {
+        if (p.cumReturnPct == null) continue;
+        if (p.date < customFromMonth) start = p.cumReturnPct;
+        end = p.cumReturnPct;
       }
-      rows.push({ year: y, strategy: stratRet, benchmark: benchRet });
-      prevStrat = rec.stratCum;
+      if (end == null) return { id: s.id, label: s.label, color: s.color, ret: null };
+      const s0 = start ?? 0;
+      return { id: s.id, label: s.label, color: s.color, ret: ((1 + end / 100) / (1 + s0 / 100) - 1) * 100 };
+    });
+    return { perSeries, fromDate: customFromMonth, toDate: last.date };
+  }, [alignedSeries, customFromMonth]);
+
+  // Chart data — wide-format per month, one key per series id, plus a 0%
+  // origin row so every line starts from the same reference point.
+  const chartData = useMemo(() => {
+    const { series, allMonths, windowStart } = alignedSeries;
+    if (series.length === 0 || allMonths.length === 0) return [];
+
+    const rows: Record<string, string | number | null>[] = [];
+    if (windowStart) {
+      const origin: Record<string, string | number | null> = { date: `${windowStart} (start)` };
+      for (const s of series) origin[s.id] = 0;
+      rows.push(origin);
+    }
+    for (const m of allMonths) {
+      const row: Record<string, string | number | null> = { date: m };
+      for (const s of series) {
+        const pt = s.points.find((p) => p.date === m);
+        row[s.id] = pt?.cumReturnPct ?? null;
+      }
+      rows.push(row);
     }
     return rows;
-  }, [result, benchmarkReturns]);
+  }, [alignedSeries]);
 
-  // Cumulative return from customFromMonth through end of backtest.
-  const customRangeReturn = useMemo(() => {
-    if (!result || !customFromMonth || result.monthly_records.length === 0) return null;
-
-    const records = result.monthly_records;
-    const last = records[records.length - 1];
-
-    let stratStart = 0;
-    for (const r of records) {
-      if (r.date < customFromMonth) stratStart = r.cumulative_return_pct;
-      else break;
-    }
-    const stratRet = ((1 + last.cumulative_return_pct / 100) / (1 + stratStart / 100) - 1) * 100;
-
-    let benchRet: number | null = null;
-    if (benchmarkReturns) {
-      let benchStart = 0;
-      let benchEnd: number | null = null;
-      for (const r of records) {
-        const v = benchmarkReturns.cumReturns[r.date];
-        if (v == null) continue;
-        if (r.date < customFromMonth) benchStart = v;
-        benchEnd = v;
+  // One-way turnover per month: % of current holdings that weren't held last month.
+  // First month has no prior portfolio → null.
+  const turnoverByDate = useMemo<Record<string, number | null>>(() => {
+    const map: Record<string, number | null> = {};
+    if (!result) return map;
+    let prevIds: Set<number> | null = null;
+    for (const r of result.monthly_records) {
+      const currIds = new Set(r.holdings.map(h => h.company_id));
+      if (prevIds === null || currIds.size === 0) {
+        map[r.date] = null;
+      } else {
+        let added = 0;
+        for (const id of currIds) if (!prevIds.has(id)) added += 1;
+        map[r.date] = (added / currIds.size) * 100;
       }
-      if (benchEnd != null) {
-        benchRet = ((1 + benchEnd / 100) / (1 + benchStart / 100) - 1) * 100;
-      }
+      prevIds = currIds;
     }
+    return map;
+  }, [result]);
 
-    return { strategy: stratRet, benchmark: benchRet, fromDate: customFromMonth, toDate: last.date };
-  }, [result, benchmarkReturns, customFromMonth]);
-
-  // Chart data — prepend a 0% origin so both lines start from the same point
-  const chartData = useMemo(() => {
-    if (!result) return [];
-    const firstDate = result.monthly_records[0]?.date;
-    const origin = firstDate
-      ? { date: `${firstDate} (start)`, cumReturn: 0, monthReturn: null, benchmark: selectedBenchmarkId ? 0 : null }
-      : null;
-    const points = result.monthly_records.map((r) => ({
-      date: r.date,
-      cumReturn: r.cumulative_return_pct,
-      monthReturn: r.portfolio_return_pct,
-      benchmark: benchmarkReturns?.cumReturns[r.date] ?? null,
-    }));
-    return origin ? [origin, ...points] : points;
-  }, [result, benchmarkReturns, selectedBenchmarkId]);
-
-  // Log-scale chart data: ln(1 + cumReturn/100) * 100
+  // Log-scale chart data: ln(1 + cumReturn/100) * 100 applied to every series key.
   const displayChartData = useMemo(() => {
     if (!logScale) return chartData;
-    return chartData.map((p) => ({
-      ...p,
-      cumReturn: p.cumReturn != null ? Math.log(1 + p.cumReturn / 100) * 100 : null,
-      benchmark: p.benchmark != null ? Math.log(1 + p.benchmark / 100) * 100 : null,
-    }));
-  }, [chartData, logScale]);
+    const seriesIds = alignedSeries.series.map((s) => s.id);
+    return chartData.map((p) => {
+      const out: Record<string, string | number | null> = { date: p.date as string };
+      for (const id of seriesIds) {
+        const v = p[id];
+        out[id] = typeof v === 'number' ? Math.log(1 + v / 100) * 100 : null;
+      }
+      return out;
+    });
+  }, [chartData, logScale, alignedSeries]);
 
   // Y-axis domain for chart — used by ReferenceArea to span full height
   const chartYDomain = useMemo<[number, number]>(() => {
     if (!displayChartData.length) return [-100, 100];
+    const seriesIds = alignedSeries.series.map((s) => s.id);
     let min = Infinity, max = -Infinity;
     for (const p of displayChartData) {
-      if (p.cumReturn != null) { min = Math.min(min, p.cumReturn); max = Math.max(max, p.cumReturn); }
-      if (p.benchmark != null) { min = Math.min(min, p.benchmark); max = Math.max(max, p.benchmark); }
+      for (const id of seriesIds) {
+        const v = p[id];
+        if (typeof v === 'number') {
+          if (v < min) min = v;
+          if (v > max) max = v;
+        }
+      }
     }
-    // Add padding for nice spacing
+    if (min === Infinity || max === -Infinity) return [-100, 100];
     const pad = Math.max((max - min) * 0.05, 5);
     return [Math.floor(min - pad), Math.ceil(max + pad)];
-  }, [displayChartData]);
+  }, [displayChartData, alignedSeries]);
 
   // Run backtest — delegates to the module-scoped momentumStore, which owns
   // the fetch/reader loop so it survives navigation away from /momentum.
@@ -873,7 +1042,7 @@ export default function MomentumBacktester() {
                     <option value="">All companies</option>
                     {indexUniverses.map(i => (
                       <option key={i.index_name} value={i.index_name}>
-                        {i.index_name} ({i.start_month} – {i.end_month}, {i.total_unique_tickers} tickers)
+                        {i.index_name} ({i.start_month.slice(0, 7)} – {i.end_month.slice(0, 7)}, {i.total_unique_tickers} tickers)
                       </option>
                     ))}
                   </>
@@ -1027,30 +1196,16 @@ export default function MomentumBacktester() {
         </div>
 
         {/* Progress */}
-        {running && progress.length > 0 && (
-          <div className="bg-[#151821] rounded-xl border border-gray-800/40 p-4">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="h-1.5 flex-1 bg-gray-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-indigo-500 rounded-full transition-all duration-300"
-                  style={{ width: `${progress[progress.length - 1]?.pct ?? 0}%` }}
-                />
-              </div>
-              <span className="text-gray-400 text-xs font-mono">{progress[progress.length - 1]?.pct ?? 0}%</span>
-            </div>
-            <div ref={progressLogRef} className="max-h-32 overflow-auto space-y-0.5">
-              {progress.map((p, i) => (
-                <div key={i} className="text-gray-500 text-xs">{p.message}</div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Error */}
-        {error && (
-          <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg p-4 text-rose-400 text-sm">
-            {error}
-          </div>
+        {(running || error || progress.length > 0) && (
+          <ProgressTimeline
+            steps={[]}
+            log={progress.map(p => p.message)}
+            pct={progress[progress.length - 1]?.pct ?? 0}
+            errorMessage={error}
+            running={running}
+            defaultLogOpen
+            title="Backtest progress"
+          />
         )}
 
         {/* Notifications — warnings on top (critical), info below (expected) */}
@@ -1114,26 +1269,97 @@ export default function MomentumBacktester() {
         {/* Results */}
         {result && (
           <>
-            {/* Benchmark selector */}
-            <div className="flex items-center gap-3">
-              <label className="text-gray-400 text-sm">Compare against</label>
-              <select
-                value={selectedBenchmarkId ?? ''}
-                onChange={(e) => setSelectedBenchmarkId(e.target.value ? Number(e.target.value) : null)}
-                className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-              >
-                <option value="">No benchmark</option>
-                {benchmarkOptions.map((b) => (
-                  <option key={b.benchmark_id} value={b.benchmark_id}>{b.ticker} — {b.name}</option>
+            {/* Comparison panel — active strategy + any added backtests/benchmarks */}
+            <div className="bg-[#151821] rounded-xl border border-gray-800/40 px-4 py-3">
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="text-gray-400 text-sm mr-1">Comparison</span>
+                {alignedSeries.series.map((s) => (
+                  <span
+                    key={s.id}
+                    className="inline-flex items-center gap-2 bg-[#0f1117] border border-gray-800 rounded-full pl-2 pr-1 py-1 text-xs"
+                  >
+                    <span className="inline-block w-2 h-2 rounded-full" style={{ background: s.color }} />
+                    <span className="text-gray-200">{s.label}</span>
+                    {s.removable && (
+                      <button
+                        type="button"
+                        onClick={() => removeSeries(s.id)}
+                        className="ml-0.5 w-4 h-4 rounded-full text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors flex items-center justify-center"
+                        title="Remove from comparison"
+                      >
+                        <svg className="w-2.5 h-2.5" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                        </svg>
+                      </button>
+                    )}
+                  </span>
                 ))}
-              </select>
-              {selectedBenchmarkId && (
-                <span className="text-gray-500 text-xs">
-                  {benchmarkPrices.length > 0
-                    ? `${benchmarkPrices.length} daily prices loaded (${benchmarkPrices[0]?.target_date} → ${benchmarkPrices[benchmarkPrices.length - 1]?.target_date})`
-                    : 'Loading prices…'}
-                </span>
-              )}
+                <div className="relative" ref={addSeriesRef}>
+                  <button
+                    type="button"
+                    onClick={() => setAddSeriesOpen((o) => !o)}
+                    className="inline-flex items-center gap-1 text-xs text-indigo-300 hover:text-indigo-200 border border-indigo-500/40 hover:border-indigo-400/60 bg-indigo-500/10 hover:bg-indigo-500/20 rounded-full px-3 py-1 transition-colors"
+                  >
+                    + Add series
+                  </button>
+                  {addSeriesOpen && (
+                    <div className="absolute left-0 mt-1 w-72 bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-80 overflow-auto">
+                      {benchmarkOptions.length > 0 && (
+                        <div>
+                          <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-500 border-b border-gray-800/60">Benchmarks</div>
+                          {benchmarkOptions.map((b) => {
+                            const already = comparisons.some((c) => c.kind === 'benchmark' && c.benchmarkId === b.benchmark_id);
+                            return (
+                              <button
+                                key={b.benchmark_id}
+                                type="button"
+                                disabled={already}
+                                onClick={() => { addBenchmarkSeries(b.benchmark_id); setAddSeriesOpen(false); }}
+                                className="w-full text-left px-3 py-2 text-xs hover:bg-white/[0.03] disabled:opacity-40 disabled:cursor-not-allowed text-gray-200 flex items-center gap-2"
+                              >
+                                <span className="font-mono text-amber-300">{b.ticker}</span>
+                                <span className="text-gray-500 truncate">{b.name}</span>
+                                {already && <span className="ml-auto text-[10px] text-gray-600">added</span>}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {savedRuns.length > 0 && (
+                        <div>
+                          <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-500 border-t border-b border-gray-800/60">Saved Backtests</div>
+                          {savedRuns.map((r) => {
+                            const already = comparisons.some((c) => c.kind === 'saved' && c.runId === r.run_id);
+                            const isLoaded = r.run_id === loadedRunId;
+                            return (
+                              <button
+                                key={r.run_id}
+                                type="button"
+                                disabled={already || isLoaded}
+                                onClick={() => { addSavedSeries(r.run_id); setAddSeriesOpen(false); }}
+                                className="w-full text-left px-3 py-2 text-xs hover:bg-white/[0.03] disabled:opacity-40 disabled:cursor-not-allowed text-gray-200 flex items-center gap-2"
+                                title={isLoaded ? 'Currently loaded as the active strategy' : undefined}
+                              >
+                                <span className="truncate">{r.name}</span>
+                                {isLoaded && <span className="ml-auto text-[10px] text-gray-600">active</span>}
+                                {!isLoaded && already && <span className="ml-auto text-[10px] text-gray-600">added</span>}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {benchmarkOptions.length === 0 && savedRuns.length === 0 && (
+                        <div className="px-3 py-4 text-xs text-gray-500">No benchmarks or saved backtests available.</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {alignedSeries.windowStart && alignedSeries.windowEnd && alignedSeries.series.length > 1 && (
+                  <span className="text-[11px] text-gray-500 font-mono ml-auto">
+                    aligned {alignedSeries.windowStart} → {alignedSeries.windowEnd}
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* Summary Stats */}
@@ -1146,136 +1372,112 @@ export default function MomentumBacktester() {
                     <th className="px-3 py-2.5 text-right font-medium">Annualized</th>
                     <th className="px-3 py-2.5 text-right font-medium">Max Drawdown</th>
                     <th className="px-3 py-2.5 text-right font-medium">Sharpe</th>
-                    <th className="px-3 py-2.5 text-right font-medium">Turnover</th>
                     <th className="px-3 py-2.5 text-right font-medium">Months</th>
-                    <th className="px-4 py-2.5 text-right font-medium">Avg Holdings</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr className="border-b border-gray-800/30">
-                    <td className="px-4 py-2.5 text-gray-200 font-medium">Strategy</td>
-                    <td className={`px-3 py-2.5 text-right font-mono ${result.summary.total_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(result.summary.total_return_pct)}</td>
-                    <td className={`px-3 py-2.5 text-right font-mono ${result.summary.annualized_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(result.summary.annualized_return_pct)}</td>
-                    <td className="px-3 py-2.5 text-right font-mono text-rose-400">{fmtPct(result.summary.max_drawdown_pct)}</td>
-                    <td className="px-3 py-2.5 text-right font-mono text-white">{result.summary.sharpe_ratio != null ? result.summary.sharpe_ratio.toFixed(2) : '—'}</td>
-                    <td className="px-3 py-2.5 text-right font-mono text-gray-300">{fmtPct(result.summary.avg_monthly_turnover_pct)}</td>
-                    <td className="px-3 py-2.5 text-right font-mono text-gray-300">{result.summary.total_months}</td>
-                    <td className="px-4 py-2.5 text-right font-mono text-gray-300">{result.summary.avg_holdings.toFixed(1)}</td>
-                  </tr>
-                  {benchmarkReturns && (
-                    <tr className="border-b border-gray-800/30 bg-white/[0.01]">
-                      <td className="px-4 py-2.5 text-amber-400 font-medium">
-                        {benchmarkOptions.find((b) => b.benchmark_id === selectedBenchmarkId)?.ticker ?? 'Benchmark'}
+                  {alignedSeries.series.map((s) => (
+                    <tr key={s.id} className="border-b border-gray-800/30">
+                      <td className="px-4 py-2.5 font-medium flex items-center gap-2">
+                        <span className="inline-block w-2 h-2 rounded-full" style={{ background: s.color }} />
+                        <span className="text-gray-200">{s.label}</span>
                       </td>
-                      <td className={`px-3 py-2.5 text-right font-mono ${benchmarkReturns.totalReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(benchmarkReturns.totalReturn)}</td>
-                      <td className={`px-3 py-2.5 text-right font-mono ${benchmarkReturns.annualized >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(benchmarkReturns.annualized)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-rose-400">{fmtPct(benchmarkReturns.maxDd)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-white">{benchmarkReturns.sharpe != null ? benchmarkReturns.sharpe.toFixed(2) : '—'}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-gray-600">—</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-gray-300">{result.summary.total_months}</td>
-                      <td className="px-4 py-2.5 text-right font-mono text-gray-600">—</td>
+                      <td className={`px-3 py-2.5 text-right font-mono ${s.stats.totalReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(s.stats.totalReturn)}</td>
+                      <td className={`px-3 py-2.5 text-right font-mono ${s.stats.annualized >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(s.stats.annualized)}</td>
+                      <td className="px-3 py-2.5 text-right font-mono text-rose-400">{fmtPct(s.stats.maxDd)}</td>
+                      <td className="px-3 py-2.5 text-right font-mono text-white">{s.stats.sharpe != null ? s.stats.sharpe.toFixed(2) : '—'}</td>
+                      <td className="px-3 py-2.5 text-right font-mono text-gray-300">{s.stats.months}</td>
                     </tr>
-                  )}
+                  ))}
                 </tbody>
               </table>
-              {(topDrawdowns.length > 0 || benchmarkDrawdowns.length > 0) && (
+              {/* Active strategy — raw (non-aligned) metrics, including turnover + holdings */}
+              <div className="px-4 py-3 border-t border-gray-800/40 text-xs text-gray-500 flex flex-wrap gap-x-6 gap-y-1">
+                <span>Strategy (full range): <span className="font-mono text-gray-300">Turnover {fmtPct(result.summary.avg_monthly_turnover_pct)}</span></span>
+                <span><span className="font-mono text-gray-300">Avg Holdings {result.summary.avg_holdings.toFixed(1)}</span></span>
+                <span><span className="font-mono text-gray-300">Months {result.summary.total_months}</span></span>
+              </div>
+              {alignedSeries.series.some((s) => s.topDrawdowns.length > 0) && (
                 <div className="px-4 py-3 border-t border-gray-800/40 space-y-3">
-                  {topDrawdowns.length > 0 && (
-                    <div>
-                      <div className="text-xs text-gray-500 font-medium mb-2">Strategy — Top Drawdowns</div>
-                      <div className="grid grid-cols-3 gap-3">
-                        {topDrawdowns.map((dd, i) => (
-                          <div key={i} className="bg-[#0f1117] rounded-lg px-3 py-2">
-                            <div className="flex items-center gap-2 mb-1">
-                              <div className={`w-2 h-2 rounded-full ${i === 0 ? 'bg-rose-400' : i === 1 ? 'bg-rose-400/60' : 'bg-rose-400/30'}`} />
-                              <span className="text-rose-400 font-mono text-sm font-medium">{dd.drawdown_pct.toFixed(1)}%</span>
-                            </div>
-                            <div className="text-[10px] text-gray-500 font-mono">
-                              {dd.peak_date} to {dd.trough_date}
-                              {dd.recovery_date ? ` (recovered ${dd.recovery_date})` : ' (ongoing)'}
-                            </div>
-                          </div>
-                        ))}
+                  {alignedSeries.series.map((s) => (
+                    s.topDrawdowns.length > 0 && (
+                      <div key={s.id}>
+                        <div className="text-xs font-medium mb-2 flex items-center gap-2">
+                          <span className="inline-block w-2 h-2 rounded-full" style={{ background: s.color }} />
+                          <span className="text-gray-400">{s.label} — Top Drawdowns</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-3">
+                          {s.topDrawdowns.map((dd, i) => {
+                            const alpha = [1.0, 0.6, 0.3][i] ?? 0.3;
+                            return (
+                              <div key={i} className="bg-[#0f1117] rounded-lg px-3 py-2">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <div className="w-2 h-2 rounded-full" style={{ background: s.color, opacity: alpha }} />
+                                  <span className="font-mono text-sm font-medium" style={{ color: s.color }}>{dd.drawdown_pct.toFixed(1)}%</span>
+                                </div>
+                                <div className="text-[10px] text-gray-500 font-mono">
+                                  {dd.peak_date} to {dd.trough_date}
+                                  {dd.recovery_date ? ` (recovered ${dd.recovery_date})` : ' (ongoing)'}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                  {benchmarkDrawdowns.length > 0 && (
-                    <div>
-                      <div className="text-xs text-gray-500 font-medium mb-2">
-                        {benchmarkOptions.find((b) => b.benchmark_id === selectedBenchmarkId)?.ticker ?? 'Benchmark'} — Top Drawdowns
-                      </div>
-                      <div className="grid grid-cols-3 gap-3">
-                        {benchmarkDrawdowns.map((dd, i) => (
-                          <div key={i} className="bg-[#0f1117] rounded-lg px-3 py-2">
-                            <div className="flex items-center gap-2 mb-1">
-                              <div className={`w-2 h-2 rounded-full ${i === 0 ? 'bg-amber-400' : i === 1 ? 'bg-amber-400/60' : 'bg-amber-400/30'}`} />
-                              <span className="text-amber-400 font-mono text-sm font-medium">{dd.drawdown_pct.toFixed(1)}%</span>
-                            </div>
-                            <div className="text-[10px] text-gray-500 font-mono">
-                              {dd.peak_date} to {dd.trough_date}
-                              {dd.recovery_date ? ` (recovered ${dd.recovery_date})` : ' (ongoing)'}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                    )
+                  ))}
                 </div>
               )}
             </div>
 
             {/* Yearly Performance + Custom Range */}
-            {yearlyBreakdown.length > 0 && (
+            {yearlyBreakdown.years.length > 0 && (
               <div className="bg-[#151821] rounded-xl border border-gray-800/40 overflow-hidden">
                 <div className="px-5 py-3 border-b border-gray-800/40">
                   <h3 className="text-white text-sm font-medium">Yearly Performance</h3>
                 </div>
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-800/40 text-gray-500 text-xs">
-                      <th className="px-5 py-2.5 text-left font-medium">Year</th>
-                      <th className="px-3 py-2.5 text-right font-medium">Strategy</th>
-                      {benchmarkReturns && (
-                        <>
-                          <th className="px-3 py-2.5 text-right font-medium">
-                            {benchmarkOptions.find((b) => b.benchmark_id === selectedBenchmarkId)?.ticker ?? 'Benchmark'}
+                <div className="overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-800/40 text-gray-500 text-xs">
+                        <th className="px-5 py-2.5 text-left font-medium">Year</th>
+                        {alignedSeries.series.map((s) => (
+                          <th key={s.id} className="px-3 py-2.5 text-right font-medium">
+                            <span className="inline-flex items-center gap-1.5">
+                              <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: s.color }} />
+                              <span className="truncate max-w-[140px]">{s.label}</span>
+                            </span>
                           </th>
-                          <th className="px-5 py-2.5 text-right font-medium">Diff</th>
-                        </>
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {yearlyBreakdown.map((row) => {
-                      const diff = row.benchmark != null ? row.strategy - row.benchmark : null;
-                      return (
-                        <tr key={row.year} className="border-b border-gray-800/20 hover:bg-white/[0.02]">
-                          <td className="px-5 py-2 text-gray-200 font-mono">{row.year}</td>
-                          <td className={`px-3 py-2 text-right font-mono ${row.strategy >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {fmtPct(row.strategy)}
-                          </td>
-                          {benchmarkReturns && (
-                            <>
-                              <td className={`px-3 py-2 text-right font-mono ${row.benchmark != null ? (row.benchmark >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
-                                {row.benchmark != null ? fmtPct(row.benchmark) : '—'}
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {yearlyBreakdown.years.map((y) => (
+                        <tr key={y} className="border-b border-gray-800/20 hover:bg-white/[0.02]">
+                          <td className="px-5 py-2 text-gray-200 font-mono">{y}</td>
+                          {alignedSeries.series.map((s) => {
+                            const v = yearlyBreakdown.bySeries[s.id]?.[y];
+                            return (
+                              <td
+                                key={s.id}
+                                className={`px-3 py-2 text-right font-mono ${v != null ? (v >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}
+                              >
+                                {v != null ? fmtPct(v) : '—'}
                               </td>
-                              <td className={`px-5 py-2 text-right font-mono ${diff != null ? (diff >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
-                                {diff != null ? fmtPct(diff) : '—'}
-                              </td>
-                            </>
-                          )}
+                            );
+                          })}
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
                 <div className="px-5 py-3 border-t border-gray-800/40 flex items-center gap-4 flex-wrap">
                   <label className="text-xs text-gray-400 font-medium">From month:</label>
                   <input
                     type="month"
                     value={customFromMonth}
-                    min={result.monthly_records[0]?.date}
-                    max={result.monthly_records[result.monthly_records.length - 1]?.date}
+                    min={alignedSeries.windowStart ?? undefined}
+                    max={alignedSeries.windowEnd ?? undefined}
                     onChange={(e) => setCustomFromMonth(e.target.value)}
                     className="bg-[#0f1117] border border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
                   />
@@ -1288,25 +1490,24 @@ export default function MomentumBacktester() {
                     </button>
                   )}
                   {customRangeReturn ? (
-                    <div className="flex items-center gap-4 text-xs ml-auto">
+                    <div className="flex items-center gap-4 text-xs ml-auto flex-wrap">
                       <span className="text-gray-500 font-mono">{customRangeReturn.fromDate} → {customRangeReturn.toDate}</span>
-                      <span className="text-gray-400">
-                        Strategy:{' '}
-                        <span className={`font-mono ${customRangeReturn.strategy >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {fmtPct(customRangeReturn.strategy)}
+                      {customRangeReturn.perSeries.map((s) => (
+                        <span key={s.id} className="text-gray-400 inline-flex items-center gap-1.5">
+                          <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: s.color }} />
+                          {s.label}:{' '}
+                          {s.ret != null ? (
+                            <span className={`font-mono ${s.ret >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {fmtPct(s.ret)}
+                            </span>
+                          ) : (
+                            <span className="font-mono text-gray-600">—</span>
+                          )}
                         </span>
-                      </span>
-                      {customRangeReturn.benchmark != null && (
-                        <span className="text-gray-400">
-                          {benchmarkOptions.find((b) => b.benchmark_id === selectedBenchmarkId)?.ticker ?? 'Benchmark'}:{' '}
-                          <span className={`font-mono ${customRangeReturn.benchmark >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {fmtPct(customRangeReturn.benchmark)}
-                          </span>
-                        </span>
-                      )}
+                      ))}
                     </div>
                   ) : (
-                    <span className="text-xs text-gray-500">Cumulative return from picked month through end of backtest.</span>
+                    <span className="text-xs text-gray-500">Cumulative return from picked month through end of aligned window.</span>
                   )}
                 </div>
               </div>
@@ -1345,16 +1546,21 @@ export default function MomentumBacktester() {
                     {...tooltipStyle}
                     formatter={(value, name) => {
                       const v = Number(value);
-                      const label = name === 'cumReturn' ? 'Strategy' : name === 'benchmark' ? (benchmarkOptions.find((b) => b.benchmark_id === selectedBenchmarkId)?.ticker ?? 'Benchmark') : String(name);
-                      return [`${v >= 0 ? '+' : ''}${v.toFixed(2)}%`, label];
+                      const s = alignedSeries.series.find((x) => x.id === name);
+                      return [`${v >= 0 ? '+' : ''}${v.toFixed(2)}%`, s?.label ?? String(name)];
                     }}
                   />
-                  {benchmarkReturns && (
+                  {alignedSeries.series.length > 1 && (
                     <Legend
                       wrapperStyle={{ fontSize: 12, color: '#9ca3af' }}
+                      formatter={(value) => {
+                        const s = alignedSeries.series.find((x) => x.id === value);
+                        return s?.label ?? String(value);
+                      }}
                     />
                   )}
-                  {(topDrawdowns).map((dd, i) => {
+                  {/* Drawdown overlays: only for the active strategy (first series) */}
+                  {alignedSeries.series[0]?.topDrawdowns.map((dd, i) => {
                     const base = [0.25, 0.15, 0.10];
                     const hovered = hoveredDrawdown === i;
                     const opacity = hovered ? (base[i] ?? 0.10) + 0.15 : (base[i] ?? 0.10);
@@ -1362,7 +1568,7 @@ export default function MomentumBacktester() {
                       <ReferenceArea
                         key={`dd-${i}`}
                         x1={dd.peak_date}
-                        x2={dd.recovery_date ?? displayChartData[displayChartData.length - 1]?.date}
+                        x2={dd.recovery_date ?? (displayChartData[displayChartData.length - 1]?.date as string | undefined)}
                         y1={chartYDomain[0]}
                         y2={chartYDomain[1]}
                         fill={`rgba(244,63,94,${opacity})`}
@@ -1373,40 +1579,19 @@ export default function MomentumBacktester() {
                       />
                     );
                   })}
-                  {benchmarkDrawdowns.map((dd, i) => {
-                    const base = [0.12, 0.08, 0.05];
-                    return (
-                      <ReferenceArea
-                        key={`bdd-${i}`}
-                        x1={dd.peak_date}
-                        x2={dd.recovery_date ?? displayChartData[displayChartData.length - 1]?.date}
-                        y1={chartYDomain[0]}
-                        y2={chartYDomain[1]}
-                        fill={`rgba(245,158,11,${base[i] ?? 0.05})`}
-                        strokeOpacity={0}
-                      />
-                    );
-                  })}
-                  <Line
-                    type="monotone"
-                    dataKey="cumReturn"
-                    stroke="#818cf8"
-                    strokeWidth={2}
-                    dot={false}
-                    name="Strategy"
-                  />
-                  {benchmarkReturns && (
+                  {alignedSeries.series.map((s, i) => (
                     <Line
+                      key={s.id}
                       type="monotone"
-                      dataKey="benchmark"
-                      stroke="#f59e0b"
-                      strokeWidth={1.5}
-                      strokeDasharray="4 3"
+                      dataKey={s.id}
+                      stroke={s.color}
+                      strokeWidth={i === 0 ? 2 : 1.5}
+                      strokeDasharray={i === 0 ? undefined : '4 3'}
                       dot={false}
-                      name={benchmarkOptions.find((b) => b.benchmark_id === selectedBenchmarkId)?.ticker ?? 'Benchmark'}
+                      name={s.id}
                       connectNulls
                     />
-                  )}
+                  ))}
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -1423,6 +1608,7 @@ export default function MomentumBacktester() {
                       <th className="text-left px-5 py-2.5 font-medium">Month</th>
                       <th className="text-right px-3 py-2.5 font-medium">Holdings</th>
                       <th className="text-right px-3 py-2.5 font-medium">Return</th>
+                      <th className="text-right px-3 py-2.5 font-medium" title="% of current holdings not held last month">Turnover</th>
                       <th className="text-right px-5 py-2.5 font-medium">Cumulative</th>
                     </tr>
                   </thead>
@@ -1441,13 +1627,16 @@ export default function MomentumBacktester() {
                           <td className={`text-right px-3 py-2.5 font-mono ${r.portfolio_return_pct != null ? (r.portfolio_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
                             {fmtPct(r.portfolio_return_pct)}
                           </td>
+                          <td className="text-right px-3 py-2.5 font-mono text-gray-400">
+                            {turnoverByDate[r.date] != null ? `${turnoverByDate[r.date]!.toFixed(1)}%` : '—'}
+                          </td>
                           <td className={`text-right px-5 py-2.5 font-mono ${r.cumulative_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                             {fmtPct(r.cumulative_return_pct)}
                           </td>
                         </tr>
                         {expandedMonth === r.date && r.holdings.length > 0 && (
                           <tr key={`${r.date}-detail`}>
-                            <td colSpan={4} className="bg-[#0f1117] px-5 py-3">
+                            <td colSpan={5} className="bg-[#0f1117] px-5 py-3">
                               <table className="w-full text-xs">
                                 <thead>
                                   <tr className="text-gray-600">

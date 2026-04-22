@@ -10,6 +10,14 @@ import {
   type StepStatus,
   type Portfolio,
 } from '../../lib/stores/airsScan';
+import ProgressTimeline, { type StepDef, type StepState } from './ProgressTimeline';
+
+const AIRS_STEPS: StepDef[] = [
+  { key: 'login', label: 'Log in to AirSPMS' },
+  { key: 'navigate', label: 'Navigate to portfolio list' },
+  { key: 'scrape', label: 'Scrape portfolios' },
+  { key: 'ytd', label: 'Load YTD returns' },
+];
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -281,13 +289,6 @@ export default function AirsPortfolioUpload() {
     }
   }
 
-  function statusIcon(status: StepStatus) {
-    if (status === 'done') return <span className="text-emerald-400">&#10003;</span>;
-    if (status === 'in_progress') return <span className="text-indigo-400 animate-pulse">&#9679;</span>;
-    if (status === 'error') return <span className="text-rose-400">&#10007;</span>;
-    return <span className="text-gray-500">&#9675;</span>;
-  }
-
   function renderYtd(name: string) {
     const state = ytdMap[name];
     if (!state) return { ytd: <span className="text-gray-600">—</span>, asOf: <span className="text-gray-600">—</span> };
@@ -393,19 +394,18 @@ export default function AirsPortfolioUpload() {
       <div className="flex-1 overflow-auto px-8 py-6 space-y-6">
         {/* Progress steps (fixed 4-step display) */}
         {steps && (
-          <div className="bg-[#151821] rounded-xl border border-gray-800/40 px-5 py-4">
-            <h2 className="text-sm font-medium text-gray-400 mb-3">Progress</h2>
-            <div className="space-y-1.5">
-              {(Object.entries(steps) as [string, { status: StepStatus; message: string }][]).map(([key, step]) => (
-                <div key={key} className="flex items-center gap-2.5 text-sm">
-                  {statusIcon(step.status)}
-                  <span className={step.status === 'done' ? 'text-gray-400' : step.status === 'error' ? 'text-rose-400' : step.status === 'in_progress' ? 'text-gray-200' : 'text-gray-600'}>
-                    {step.message}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
+          <ProgressTimeline
+            steps={AIRS_STEPS}
+            state={Object.fromEntries(
+              (Object.entries(steps) as [string, { status: StepStatus; message: string }][]).map(([k, v]) => [
+                k,
+                { status: v.status === 'idle' ? 'pending' : v.status, message: v.message } as StepState,
+              ])
+            )}
+            running={scanning}
+            errorMessage={error}
+            title="Scanner Progress"
+          />
         )}
 
         {/* Portfolio table */}

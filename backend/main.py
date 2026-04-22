@@ -515,10 +515,13 @@ async def longequity_save_universe(req: LongEquitySaveUniverseRequest):
                 q.put(json.dumps({"type": "error", "message": "end_date must be >= start_date"}))
                 return
 
+            # Universe rows elsewhere key target_month as "YYYY-MM" (see
+            # universe/screen.py). Match that convention so the backtest
+            # loader (which does month_date.isoformat()[:7]) actually hits.
             month_list: list[str] = []
             cur = start_d
             while cur <= end_d:
-                month_list.append(cur.isoformat())
+                month_list.append(cur.strftime("%Y-%m"))
                 # advance one month
                 if cur.month == 12:
                     cur = cur.replace(year=cur.year + 1, month=1)
@@ -1407,7 +1410,13 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                     offset += page_size
                 result: dict[str, dict[int, str | None]] = {}
                 for r in rows:
-                    m = r["target_month"]
+                    # Normalize to "YYYY-MM" — the backtest loop keys on
+                    # month_date.isoformat()[:7] so any stored "YYYY-MM-DD"
+                    # value (e.g. from an older longequity_cumulative build)
+                    # would otherwise never match.
+                    m = (r.get("target_month") or "")[:7]
+                    if not m:
+                        continue
                     if m not in result:
                         result[m] = {}
                     result[m][r["company_id"]] = r.get("sector")
@@ -1461,7 +1470,13 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                     offset += page_size
                 result: dict[str, dict[int, str | None]] = {}
                 for r in rows:
-                    m = r["target_month"]
+                    # Normalize to "YYYY-MM" — the backtest loop keys on
+                    # month_date.isoformat()[:7] so any stored "YYYY-MM-DD"
+                    # value (e.g. from an older longequity_cumulative build)
+                    # would otherwise never match.
+                    m = (r.get("target_month") or "")[:7]
+                    if not m:
+                        continue
                     if m not in result:
                         result[m] = {}
                     result[m][r["company_id"]] = r.get("sector")
@@ -1767,10 +1782,30 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                 err = fx_sync[code].get("error", "unknown")
                 yield _emit({"type": "warning", "scope": "fx", "message": f"FX sync failed for {code}: {err}"})
         if nodata_codes:
+            _ccy_names = {
+                "AED": "UAE Dirham", "ARS": "Argentine Peso", "AUD": "Australian Dollar",
+                "BRL": "Brazilian Real", "CAD": "Canadian Dollar", "CHF": "Swiss Franc",
+                "CLP": "Chilean Peso", "CNY": "Chinese Yuan", "COP": "Colombian Peso",
+                "CZK": "Czech Koruna", "DKK": "Danish Krone", "EGP": "Egyptian Pound",
+                "EUR": "Euro", "GBP": "British Pound", "GBX": "British Penny",
+                "HKD": "Hong Kong Dollar", "HUF": "Hungarian Forint", "IDR": "Indonesian Rupiah",
+                "ILS": "Israeli Shekel", "INR": "Indian Rupee", "ISK": "Icelandic Krona",
+                "JPY": "Japanese Yen", "KRW": "South Korean Won", "MXN": "Mexican Peso",
+                "MYR": "Malaysian Ringgit", "NOK": "Norwegian Krone", "NZD": "New Zealand Dollar",
+                "PEN": "Peruvian Sol", "PHP": "Philippine Peso", "PKR": "Pakistani Rupee",
+                "PLN": "Polish Zloty", "QAR": "Qatari Riyal", "RON": "Romanian Leu",
+                "RUB": "Russian Ruble", "SAR": "Saudi Riyal", "SEK": "Swedish Krona",
+                "SGD": "Singapore Dollar", "THB": "Thai Baht", "TRY": "Turkish Lira",
+                "TWD": "Taiwan Dollar", "USD": "US Dollar", "VND": "Vietnamese Dong",
+                "ZAR": "South African Rand",
+            }
+            labeled = ", ".join(
+                f"{c} ({_ccy_names[c]})" if c in _ccy_names else c for c in nodata_codes
+            )
             yield _emit({
                 "type": "warning",
                 "scope": "fx",
-                "message": f"No FX data returned for: {', '.join(nodata_codes)} (ECB may not cover these)",
+                "message": f"No FX data returned for: {labeled} (ECB may not cover these)",
             })
 
         yield _emit({"type": "progress", "pct": 65, "message": f"Loading FX rates ({price_start} to {price_end}) for {len(currencies_needed)} currencies..."})
@@ -1822,6 +1857,14 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             int(r["company_id"]): f"{r.get('gurufocus_exchange') or '?'}:{r['gurufocus_ticker']}"
             for _, r in universe_df.iterrows()
         }
+        _universe_name = {
+            int(r["company_id"]): r.get("company_name") or ""
+            for _, r in universe_df.iterrows()
+        }
+        def _label(cid: int) -> str:
+            sym = _universe_symbol.get(int(cid), str(cid))
+            name = _universe_name.get(int(cid), "")
+            return f"{sym} ({name})" if name else sym
         _no_price = [cid for cid in company_ids if _price_counts.get(int(cid), 0) == 0]
         _sparse_price = [cid for cid in company_ids if 0 < _price_counts.get(int(cid), 0) < 20]
 
@@ -1860,12 +1903,12 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             if _universe_exchange.get(int(cid), "UNKNOWN") not in _unsubscribed_exchanges
         ]
         if _no_price_gap:
-            sample = ", ".join(_universe_symbol.get(int(c), str(c)) for c in _no_price_gap[:10])
+            sample = ", ".join(_label(int(c)) for c in _no_price_gap[:10])
             more = f" (+{len(_no_price_gap) - 10} more)" if len(_no_price_gap) > 10 else ""
             yield _emit({"type": "warning", "scope": "prices", "message": f"{len(_no_price_gap)} companies on subscribed exchanges have NO price data: {sample}{more}"})
         if _sparse_price:
             sample = ", ".join(
-                f"{_universe_symbol.get(int(c), c)}({_price_counts.get(int(c), 0)})" for c in _sparse_price[:10]
+                f"{_label(int(c))}[{_price_counts.get(int(c), 0)} rows]" for c in _sparse_price[:10]
             )
             more = f" (+{len(_sparse_price) - 10} more)" if len(_sparse_price) > 10 else ""
             yield _emit({"type": "warning", "scope": "prices", "message": f"{len(_sparse_price)} companies have < 20 price rows (insufficient for signals): {sample}{more}"})
@@ -1890,12 +1933,12 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             if _universe_exchange.get(int(cid), "UNKNOWN") not in _unsubscribed_exchanges
         ]
         if _no_vol_gap:
-            sample = ", ".join(_universe_symbol.get(int(c), str(c)) for c in _no_vol_gap[:10])
+            sample = ", ".join(_label(int(c)) for c in _no_vol_gap[:10])
             more = f" (+{len(_no_vol_gap) - 10} more)" if len(_no_vol_gap) > 10 else ""
             yield _emit({"type": "warning", "scope": "volumes", "message": f"{len(_no_vol_gap)} companies on subscribed exchanges have NO volume data — volume signals will be skipped for them: {sample}{more}"})
         if _sparse_vol:
             sample = ", ".join(
-                f"{_universe_symbol.get(int(c), c)}({_vol_counts.get(int(c), 0)})" for c in _sparse_vol[:10]
+                f"{_label(int(c))}[{_vol_counts.get(int(c), 0)} rows]" for c in _sparse_vol[:10]
             )
             more = f" (+{len(_sparse_vol) - 10} more)" if len(_sparse_vol) > 10 else ""
             yield _emit({"type": "warning", "scope": "volumes", "message": f"{len(_sparse_vol)} companies have < 20 volume rows: {sample}{more}"})
@@ -1938,7 +1981,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             if evt is None:
                 break
             if evt["type"] == "progress":
-                scaled_pct = 68 + round(evt.get("pct", 0) * 0.30)
+                scaled_pct = 68 + round(evt.get("pct", 0) * 0.32)
                 yield _emit({"type": "progress", "pct": scaled_pct, "message": evt.get("message", "")})
             elif evt["type"] == "warning":
                 yield _emit({"type": "warning", "scope": evt.get("scope", "backtest"), "message": evt.get("message", "")})

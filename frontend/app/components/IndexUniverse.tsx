@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { dialog } from '../../lib/dialog';
+import ProgressTimeline from './ProgressTimeline';
 import {
   sp500ImportStore,
   startSp500Import,
@@ -34,7 +35,6 @@ export default function IndexUniverse() {
   // SSE / progress (persisted in module store)
   const running = sp500ImportStore.use((s) => s.running);
   const logs = sp500ImportStore.use((s) => s.logs);
-  const logRef = useRef<HTMLDivElement>(null);
 
   // Indexes
   const [indexes, setIndexes] = useState<IndexEntry[]>([]);
@@ -63,15 +63,6 @@ export default function IndexUniverse() {
   const gfLogs = sp500GfCheckStore.use((s) => s.gfLogs);
   const gfResult = sp500GfCheckStore.use((s) => s.gfResult);
   const [showMissing, setShowMissing] = useState(false);
-  const gfLogRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll logs
-  useEffect(() => {
-    logRef.current?.scrollTo(0, logRef.current.scrollHeight);
-  }, [logs]);
-  useEffect(() => {
-    gfLogRef.current?.scrollTo(0, gfLogRef.current.scrollHeight);
-  }, [gfLogs]);
 
   // Load indexes on mount
   const loadIndexes = useCallback(() => {
@@ -212,20 +203,14 @@ export default function IndexUniverse() {
       <div className="flex-1 overflow-auto px-8 py-6 space-y-6">
         {/* Progress log */}
         {logs.length > 0 && (
-          <div className="bg-[#151821] rounded-xl border border-gray-800/40">
-            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-800/40">
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-medium text-white">Import Progress</h3>
-                {running && <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />}
-              </div>
-              {!running && (
-                <button onClick={clearSp500ImportLogs} className="text-xs text-gray-500 hover:text-gray-300">Clear</button>
-              )}
-            </div>
-            <div ref={logRef} className="px-5 py-3 max-h-48 overflow-y-auto font-mono text-xs text-gray-400 space-y-0.5">
-              {logs.map((l, i) => <div key={i}>{l}</div>)}
-            </div>
-          </div>
+          <ProgressTimeline
+            steps={[]}
+            log={logs}
+            running={running}
+            defaultLogOpen
+            title="Import Progress"
+            onDismiss={!running ? clearSp500ImportLogs : undefined}
+          />
         )}
 
         {/* Stored Indexes */}
@@ -363,9 +348,12 @@ export default function IndexUniverse() {
                     </div>
                     <div className="p-5 space-y-4">
                       {gfLogs.length > 0 && !gfResult && (
-                        <div ref={gfLogRef} className="max-h-32 overflow-y-auto font-mono text-xs text-gray-400 space-y-0.5">
-                          {gfLogs.map((l, i) => <div key={i}>{l}</div>)}
-                        </div>
+                        <ProgressTimeline
+                          steps={[]}
+                          log={gfLogs}
+                          running={checkingGF}
+                          defaultLogOpen
+                        />
                       )}
                       {gfResult && (
                         <div className="space-y-4">
