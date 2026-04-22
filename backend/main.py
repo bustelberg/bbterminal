@@ -2147,68 +2147,54 @@ async def universe_build(body: BuildUniverseRequest):
 
 @app.get("/api/universe/labels")
 async def universe_labels():
-    """List all universe labels with rich stats derived from universe_membership."""
+    """List all universes with stats. Aggregation runs in Postgres via the
+    `universe_full_stats` RPC so the endpoint is two round trips regardless of
+    universe size."""
     def _run():
-        u_resp = (
+        u_rows = (
             supabase.table("universe")
-            .select("universe_id, label, description, created_at")
+            .select("universe_id, label, description, created_at, parent_universe_id, filter_config")
             .order("label")
             .execute()
+            .data or []
         )
-        universes = u_resp.data or []
-        from collections import Counter
+        stats_rows = supabase.rpc("universe_full_stats").execute().data or []
+        stats_by_id: dict[int, dict] = {r["universe_id"]: r for r in stats_rows}
+
+        label_by_id = {u["universe_id"]: u["label"] for u in u_rows}
 
         result = []
-        for u in universes:
+        for u in u_rows:
             uid = u["universe_id"]
-            rows: list[dict] = []
-            offset = 0
-            page_size = 1000
-            while True:
-                m_resp = (
-                    supabase.table("universe_membership")
-                    .select("target_month, company_id, universe_ticker, sector")
-                    .eq("universe_id", uid)
-                    .range(offset, offset + page_size - 1)
-                    .execute()
-                )
-                batch = m_resp.data or []
-                rows.extend(batch)
-                if len(batch) < page_size:
-                    break
-                offset += page_size
+            s = stats_by_id.get(uid, {})
+            monthly = s.get("monthly_counts") or []
+            sectors = s.get("sector_counts") or []
 
-            months_sorted = sorted({r["target_month"] for r in rows if r.get("target_month")})
-            per_month_counter = Counter(r["target_month"] for r in rows if r.get("target_month"))
-            sector_counter = Counter(
-                (r.get("sector") or "(unknown)") for r in rows
-            )
-            unique_companies = len({r["company_id"] for r in rows if r.get("company_id")})
-            unique_tickers = len({r["universe_ticker"] for r in rows if r.get("universe_ticker")})
-            month_count = len(months_sorted)
-            avg_per_month = round(len(rows) / month_count, 1) if month_count else 0
+            total_rows = s.get("total_rows", 0)
+            month_count = s.get("month_count", 0)
+            avg_per_month = round(total_rows / month_count, 1) if month_count else 0
 
+            parent_id = u.get("parent_universe_id")
             result.append({
                 "universe_id": uid,
                 "label": u["label"],
                 "description": u.get("description"),
                 "created_at": u.get("created_at"),
-                "start_month": months_sorted[0] if months_sorted else None,
-                "end_month": months_sorted[-1] if months_sorted else None,
+                "parent_universe_id": parent_id,
+                "parent_label": label_by_id.get(parent_id) if parent_id else None,
+                "filter_config": u.get("filter_config"),
+                "is_derived": parent_id is not None,
+                "start_month": s.get("start_month"),
+                "end_month": s.get("end_month"),
                 "month_count": month_count,
-                "total_rows": len(rows),
-                "unique_companies": unique_companies,
-                "unique_tickers": unique_tickers,
+                "total_rows": total_rows,
+                "unique_companies": s.get("unique_companies", 0),
+                "unique_tickers": s.get("unique_tickers", 0),
                 "avg_per_month": avg_per_month,
-                "first_month_count": per_month_counter.get(months_sorted[0], 0) if months_sorted else 0,
-                "last_month_count": per_month_counter.get(months_sorted[-1], 0) if months_sorted else 0,
-                "monthly_counts": [
-                    {"month": m, "count": per_month_counter[m]} for m in months_sorted
-                ],
-                "sectors": [
-                    {"sector": s, "count": c}
-                    for s, c in sorted(sector_counter.items(), key=lambda x: -x[1])
-                ],
+                "first_month_count": monthly[0]["count"] if monthly else 0,
+                "last_month_count": monthly[-1]["count"] if monthly else 0,
+                "monthly_counts": monthly,
+                "sectors": sectors,
             })
 
         return result
@@ -2341,6 +2327,541 @@ async def universe_delete_all():
             supabase.table("universe").delete().in_("universe_id", batch).execute()
         return {"deleted": len(ids)}
     return await asyncio.to_thread(_run)
+
+
+# ---------------------------------------------------------------------------
+# Derived universes (tightened base universes via quality-metric thresholds)
+# ---------------------------------------------------------------------------
+
+def _cutoff_for_target_month(target_month: str) -> date:
+    """Latest fiscal-year-end date to consider for a given target month.
+
+    Matches the existing convention in screen.py: for target month 'YYYY-MM'
+    we use the previous calendar year's FY data. Here we express that as a
+    cutoff date of (YYYY-1)-12-31.
+    """
+    year = int(target_month[:4])
+    return date(year - 1, 12, 31)
+
+
+def _load_derived_metrics(
+    company_ids: list[int],
+    metric_codes: list[str],
+) -> dict[int, list[tuple[date, dict[str, float]]]]:
+    """Fetch derived metric rows for the given companies+codes.
+
+    Returns {company_id -> [(fy_end_date, {code: value}), ...]}, sorted by date asc.
+    Batched in chunks of 50 company_ids (Cloudflare 502 avoidance).
+    """
+    out: dict[int, dict[str, dict[str, float]]] = {}  # cid -> {iso_date -> {code -> value}}
+    for i in range(0, len(company_ids), 50):
+        batch = company_ids[i:i + 50]
+        resp = (
+            supabase.table("metric_data")
+            .select("company_id, metric_code, target_date, numeric_value")
+            .in_("company_id", batch)
+            .eq("source_code", "derived")
+            .in_("metric_code", metric_codes)
+            .limit(100000)
+            .execute()
+        )
+        for row in (resp.data or []):
+            cid = row["company_id"]
+            d = row["target_date"]
+            code = row["metric_code"]
+            v = row["numeric_value"]
+            if v is None:
+                continue
+            out.setdefault(cid, {}).setdefault(d, {})[code] = float(v)
+
+    result: dict[int, list[tuple[date, dict[str, float]]]] = {}
+    for cid, by_date in out.items():
+        rows = []
+        for iso, metrics in by_date.items():
+            try:
+                rows.append((date.fromisoformat(iso), metrics))
+            except ValueError:
+                continue
+        rows.sort(key=lambda x: x[0])
+        result[cid] = rows
+    return result
+
+
+def _applicable_metrics(
+    rows: list[tuple[date, dict[str, float]]],
+    cutoff: date,
+) -> dict[str, float]:
+    """Return a merged view of all derived metric values as of `cutoff`.
+
+    Walks FYs in ascending order and overlays each, so later FYs overwrite
+    earlier ones. Any code we've ever seen up to the cutoff is returned —
+    this matters because a given FY entry may not include every metric.
+    """
+    merged: dict[str, float] = {}
+    for d, metrics in rows:
+        if d > cutoff:
+            break
+        merged.update(metrics)
+    return merged
+
+
+class DeriveUniverseRequest(BaseModel):
+    base_universe_id: int
+    label: str | None = None  # required for non-preview
+    description: str | None = None
+    filter_config: dict
+
+
+@app.get("/api/universe/derived-metrics/criteria")
+async def universe_derived_criteria():
+    """Return criterion specs + default filter_config for the /universe UI."""
+    from universe.derived_metrics import CRITERIA_SPECS, default_filter_config
+
+    specs = []
+    for s in CRITERIA_SPECS:
+        entry: dict = {
+            "key": s.key,
+            "label": s.label,
+            "default_threshold": s.default_threshold,
+            "default_enabled": s.default_enabled,
+        }
+        if s.components is not None:
+            entry["components"] = [
+                {"label": label, "code": code, "default": default}
+                for label, code, default in s.components
+            ]
+        else:
+            entry["metric"] = s.metric
+            entry["op"] = s.op
+        specs.append(entry)
+    return {"specs": specs, "default_filter_config": default_filter_config()}
+
+
+@app.get("/api/universe/derived-metrics/status")
+async def universe_derived_status():
+    """How many companies have at least one derived metric row stored."""
+    def _run():
+        resp = (
+            supabase.table("metric_data")
+            .select("company_id", count="exact")
+            .eq("source_code", "derived")
+            .limit(1)
+            .execute()
+        )
+        total_rows = resp.count or 0
+
+        # Distinct companies: pull company_ids in pages (Supabase has no DISTINCT here)
+        seen: set[int] = set()
+        offset = 0
+        page = 1000
+        while True:
+            r = (
+                supabase.table("metric_data")
+                .select("company_id")
+                .eq("source_code", "derived")
+                .range(offset, offset + page - 1)
+                .execute()
+            )
+            batch = r.data or []
+            for row in batch:
+                seen.add(row["company_id"])
+            if len(batch) < page:
+                break
+            offset += page
+        return {"companies_with_derived_metrics": len(seen), "total_rows": total_rows}
+
+    return await asyncio.to_thread(_run)
+
+
+class RecomputeRequest(BaseModel):
+    universe_ids: list[int] | None = None  # None = all companies in any universe
+
+
+@app.post("/api/universe/derived-metrics/recompute")
+async def universe_derived_recompute(body: RecomputeRequest = RecomputeRequest()):
+    """Recompute derived metric values from cached GuruFocus annuals. SSE stream."""
+    import queue
+    from universe.derived_metrics import precompute_for_companies
+
+    def _collect_companies() -> list[dict]:
+        # Scope: companies that appear in at least one universe_membership row.
+        # If universe_ids is given, restrict to those.
+        cid_set: set[int] = set()
+        offset = 0
+        page = 1000
+        q = supabase.table("universe_membership").select("company_id")
+        if body.universe_ids:
+            q = q.in_("universe_id", body.universe_ids)
+        while True:
+            r = q.range(offset, offset + page - 1).execute()
+            batch = r.data or []
+            for row in batch:
+                if row.get("company_id"):
+                    cid_set.add(row["company_id"])
+            if len(batch) < page:
+                break
+            offset += page
+
+        ids = sorted(cid_set)
+        if not ids:
+            return []
+
+        # Hydrate ticker + exchange
+        companies: list[dict] = []
+        for i in range(0, len(ids), 50):
+            batch = ids[i:i + 50]
+            r = supabase.table("company").select(
+                "company_id, gurufocus_ticker, company_name, "
+                "gurufocus_exchange:gurufocus_exchange(exchange_code)"
+            ).in_("company_id", batch).execute()
+            for c in (r.data or []):
+                exch = c.pop("gurufocus_exchange", None) or {}
+                c["gurufocus_exchange"] = exch.get("exchange_code")
+                companies.append(c)
+        return companies
+
+    def _run(q: "queue.Queue"):
+        companies = _collect_companies()
+        q.put(json.dumps({
+            "type": "progress",
+            "message": f"Found {len(companies)} companies across selected universes.",
+        }))
+        for event in precompute_for_companies(supabase, companies):
+            q.put(json.dumps(event))
+        q.put(None)
+
+    async def generate():
+        yield ": keepalive\n\n"
+        qq: "queue.Queue" = queue.Queue()
+        loop = asyncio.get_event_loop()
+        task = loop.run_in_executor(None, _run, qq)
+        while True:
+            try:
+                msg = await asyncio.to_thread(qq.get, timeout=0.15)
+            except Exception:
+                if task.done():
+                    while not qq.empty():
+                        m = qq.get_nowait()
+                        if m is not None:
+                            yield f"data: {m}\n\n"
+                    break
+                continue
+            if msg is None:
+                break
+            yield f"data: {msg}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@app.post("/api/universe/derive/preview")
+async def universe_derive_preview(body: DeriveUniverseRequest):
+    """Count how many companies per month would survive the filter. No writes."""
+    from universe.derived_metrics import company_passes, required_metric_codes
+
+    def _run():
+        base_resp = supabase.table("universe").select(
+            "universe_id, label"
+        ).eq("universe_id", body.base_universe_id).limit(1).execute()
+        if not base_resp.data:
+            raise HTTPException(status_code=404, detail="base universe not found")
+
+        # Load all memberships of the base
+        rows: list[dict] = []
+        offset = 0
+        page = 1000
+        while True:
+            r = (
+                supabase.table("universe_membership")
+                .select("target_month, company_id")
+                .eq("universe_id", body.base_universe_id)
+                .range(offset, offset + page - 1)
+                .execute()
+            )
+            batch = r.data or []
+            rows.extend(batch)
+            if len(batch) < page:
+                break
+            offset += page
+
+        if not rows:
+            return {"monthly_counts": [], "base_rows": 0, "passed_rows": 0, "missing_metrics": 0}
+
+        codes = required_metric_codes(body.filter_config)
+        cids = sorted({r["company_id"] for r in rows})
+
+        if not codes:
+            # Nothing enabled → filter is a no-op, every base row passes.
+            by_month: dict[str, int] = {}
+            for r in rows:
+                by_month[r["target_month"]] = by_month.get(r["target_month"], 0) + 1
+            return {
+                "monthly_counts": [
+                    {"month": m, "count": c} for m, c in sorted(by_month.items())
+                ],
+                "base_rows": len(rows),
+                "passed_rows": len(rows),
+                "missing_metrics": 0,
+                "base_label": base_resp.data[0]["label"],
+            }
+
+        metrics_by_cid = _load_derived_metrics(cids, codes)
+
+        missing = 0
+        pass_by_month: dict[str, int] = {}
+        base_by_month: dict[str, int] = {}
+        for row in rows:
+            m = row["target_month"]
+            cid = row["company_id"]
+            base_by_month[m] = base_by_month.get(m, 0) + 1
+            fy_rows = metrics_by_cid.get(cid, [])
+            if not fy_rows:
+                missing += 1
+                continue
+            cutoff = _cutoff_for_target_month(m)
+            applicable = _applicable_metrics(fy_rows, cutoff)
+            if company_passes(body.filter_config, applicable):
+                pass_by_month[m] = pass_by_month.get(m, 0) + 1
+
+        months_sorted = sorted(base_by_month.keys())
+        return {
+            "monthly_counts": [
+                {"month": m, "count": pass_by_month.get(m, 0), "base_count": base_by_month[m]}
+                for m in months_sorted
+            ],
+            "base_rows": len(rows),
+            "passed_rows": sum(pass_by_month.values()),
+            "missing_metrics": missing,
+            "base_label": base_resp.data[0]["label"],
+        }
+
+    return await asyncio.to_thread(_run)
+
+
+@app.post("/api/universe/derive")
+async def universe_derive_create(body: DeriveUniverseRequest):
+    """Create a new derived universe (SSE: precompute derived metrics → filter → insert)."""
+    import queue
+    from universe.derived_metrics import (
+        company_passes,
+        required_metric_codes,
+        precompute_for_companies,
+    )
+
+    def _run(q: "queue.Queue"):
+        def emit(step: str, status: str, message: str, **extra):
+            q.put(json.dumps({
+                "type": "progress", "step": step, "status": status, "message": message, **extra,
+            }))
+
+        try:
+            label = (body.label or "").strip()
+            if not label:
+                q.put(json.dumps({"type": "error", "message": "label is required"}))
+                return
+
+            emit("validate", "in_progress", "Validating inputs...")
+            base_resp = supabase.table("universe").select(
+                "universe_id, label"
+            ).eq("universe_id", body.base_universe_id).limit(1).execute()
+            if not base_resp.data:
+                q.put(json.dumps({"type": "error", "message": "base universe not found"}))
+                return
+            base_label = base_resp.data[0]["label"]
+
+            dup = supabase.table("universe").select("universe_id").eq("label", label).limit(1).execute()
+            if dup.data:
+                q.put(json.dumps({"type": "error", "message": f"label '{label}' already exists"}))
+                return
+            emit("validate", "done", f"Base: {base_label} → new label: {label}")
+
+            # --- Load base memberships -------------------------------------------------
+            emit("load_base", "in_progress", f"Loading memberships from {base_label}...")
+            rows: list[dict] = []
+            offset = 0
+            page = 1000
+            while True:
+                r = (
+                    supabase.table("universe_membership")
+                    .select("target_month, company_id, universe_ticker, sector")
+                    .eq("universe_id", body.base_universe_id)
+                    .range(offset, offset + page - 1)
+                    .execute()
+                )
+                batch = r.data or []
+                rows.extend(batch)
+                if len(batch) < page:
+                    break
+                offset += page
+            months = sorted({r["target_month"] for r in rows if r.get("target_month")})
+            cids = sorted({r["company_id"] for r in rows})
+            emit(
+                "load_base", "done",
+                f"Loaded {len(rows):,} memberships across {len(months)} months, {len(cids)} companies.",
+            )
+
+            # --- Precompute derived metrics for the base companies ---------------------
+            codes = required_metric_codes(body.filter_config)
+            if codes and cids:
+                emit(
+                    "precompute", "in_progress",
+                    f"Precomputing derived metrics for {len(cids)} companies...",
+                )
+                companies: list[dict] = []
+                for i in range(0, len(cids), 50):
+                    batch = cids[i:i + 50]
+                    r = supabase.table("company").select(
+                        "company_id, gurufocus_ticker, company_name, "
+                        "gurufocus_exchange:gurufocus_exchange(exchange_code)"
+                    ).in_("company_id", batch).execute()
+                    for c in (r.data or []):
+                        exch = c.pop("gurufocus_exchange", None) or {}
+                        c["gurufocus_exchange"] = exch.get("exchange_code")
+                        companies.append(c)
+
+                last_done_summary = ""
+                for ev in precompute_for_companies(supabase, companies):
+                    etype = ev.get("type")
+                    msg = ev.get("message", "")
+                    if etype == "progress_update":
+                        emit("precompute", "in_progress", msg)
+                    elif etype == "done":
+                        last_done_summary = msg
+                emit("precompute", "done", last_done_summary or "Derived metrics up to date.")
+            else:
+                emit("precompute", "done", "No filters enabled; skipping precompute.")
+
+            # --- Load metrics and apply filter ----------------------------------------
+            emit("filter", "in_progress", f"Applying filter to {len(rows):,} rows...")
+            metrics_by_cid = _load_derived_metrics(cids, codes) if codes else {}
+
+            kept: list[dict] = []
+            missing = 0
+            for row in rows:
+                cid = row["company_id"]
+                if not codes:
+                    kept.append(row)
+                    continue
+                fy_rows = metrics_by_cid.get(cid, [])
+                if not fy_rows:
+                    missing += 1
+                    continue
+                cutoff = _cutoff_for_target_month(row["target_month"])
+                applicable = _applicable_metrics(fy_rows, cutoff)
+                if company_passes(body.filter_config, applicable):
+                    kept.append(row)
+            emit(
+                "filter", "done",
+                f"{len(kept):,} / {len(rows):,} rows pass"
+                + (f" ({missing:,} excluded for missing metrics)." if missing else "."),
+            )
+
+            if not kept:
+                q.put(json.dumps({
+                    "type": "error",
+                    "message": "Filter matches zero rows — adjust thresholds or precompute metrics.",
+                }))
+                return
+
+            # --- Create universe row --------------------------------------------------
+            emit("create", "in_progress", "Creating universe row...")
+            created = supabase.table("universe").insert({
+                "label": label,
+                "description": body.description,
+                "parent_universe_id": body.base_universe_id,
+                "filter_config": body.filter_config,
+            }).execute()
+            new_id = created.data[0]["universe_id"]
+            emit("create", "done", f"Universe created (id={new_id}).")
+
+            # --- Insert memberships in batches ----------------------------------------
+            payload = [
+                {
+                    "universe_id": new_id,
+                    "company_id": r["company_id"],
+                    "target_month": r["target_month"],
+                    "universe_ticker": r.get("universe_ticker"),
+                    "sector": r.get("sector"),
+                }
+                for r in kept
+            ]
+            import time as _time
+            from universe.derived_metrics import _fmt_duration as _fmt_dur
+            batch_size = 500
+            total_inserted = 0
+            total_batches = (len(payload) + batch_size - 1) // batch_size
+            insert_started = _time.monotonic()
+            emit(
+                "insert", "in_progress",
+                f"Inserting {len(payload):,} rows in {total_batches} batches...",
+            )
+            for bi, i in enumerate(range(0, len(payload), batch_size), start=1):
+                chunk = payload[i:i + batch_size]
+                elapsed = _time.monotonic() - insert_started
+                rate = (bi - 1) / elapsed if elapsed > 0 and bi > 1 else 0
+                remaining = (total_batches - bi + 1) / rate if rate > 0 else 0
+                emit(
+                    "insert", "in_progress",
+                    f"Starting batch {bi}/{total_batches} ({len(chunk):,} rows) · "
+                    f"{_fmt_dur(elapsed)} elapsed · ~{_fmt_dur(remaining)} left",
+                )
+                try:
+                    resp = supabase.table("universe_membership").insert(chunk).execute()
+                    total_inserted += len(resp.data or [])
+                except Exception as batch_exc:
+                    emit(
+                        "insert", "in_progress",
+                        f"Batch {bi}/{total_batches} failed: {batch_exc}. Retrying once...",
+                    )
+                    resp = supabase.table("universe_membership").insert(chunk).execute()
+                    total_inserted += len(resp.data or [])
+                elapsed = _time.monotonic() - insert_started
+                rate = bi / elapsed if elapsed > 0 else 0
+                remaining = (total_batches - bi) / rate if rate > 0 else 0
+                emit(
+                    "insert", "in_progress",
+                    f"Batch {bi}/{total_batches} done · {total_inserted:,}/{len(payload):,} rows · "
+                    f"{_fmt_dur(elapsed)} elapsed · ~{_fmt_dur(remaining)} left",
+                )
+            emit("insert", "done", f"Inserted {total_inserted:,} rows in {_fmt_dur(_time.monotonic() - insert_started)}.")
+
+            q.put(json.dumps({
+                "type": "done",
+                "message": f"Created '{label}' from {base_label} with {total_inserted:,} rows.",
+                "data": {
+                    "universe_id": new_id,
+                    "label": label,
+                    "rows_inserted": total_inserted,
+                    "base_universe_id": body.base_universe_id,
+                    "base_label": base_label,
+                },
+            }))
+        except Exception as exc:
+            logger.exception("universe/derive failed")
+            q.put(json.dumps({"type": "error", "message": str(exc)}))
+        finally:
+            q.put(None)
+
+    async def generate():
+        yield ": keepalive\n\n"
+        qq: "queue.Queue" = queue.Queue()
+        loop = asyncio.get_event_loop()
+        task = loop.run_in_executor(None, _run, qq)
+        while True:
+            try:
+                msg = await asyncio.to_thread(qq.get, timeout=0.15)
+            except Exception:
+                if task.done():
+                    while not qq.empty():
+                        m = qq.get_nowait()
+                        if m is not None:
+                            yield f"data: {m}\n\n"
+                    break
+                continue
+            if msg is None:
+                break
+            yield f"data: {msg}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @app.get("/api/universe/validate")
@@ -2979,6 +3500,8 @@ class IndicatorRequest(BaseModel):
     ticker: str
     indicator: str = "price"
     force_refresh: bool = False
+    from_date: str | None = None
+    to_date: str | None = None
 
 
 @app.post("/api/indicators/fetch")
@@ -3109,8 +3632,25 @@ async def indicators_fetch(req: IndicatorRequest):
             "first": sorted_parsed[0][0].isoformat(),
             "last": sorted_parsed[-1][0].isoformat(),
         }
-        # Return last 30 data points for display
-        recent = [{"date": d.isoformat(), "value": v} for d, v in sorted_parsed[-30:]]
+        # If from_date/to_date provided, return the full filtered window;
+        # otherwise fall back to the last 30 data points.
+        def _parse_iso(s: str | None):
+            if not s:
+                return None
+            try:
+                return date.fromisoformat(s)
+            except ValueError:
+                return None
+        frm = _parse_iso(req.from_date)
+        to = _parse_iso(req.to_date)
+        if frm or to:
+            window = [
+                (d, v) for d, v in sorted_parsed
+                if (frm is None or d >= frm) and (to is None or d <= to)
+            ]
+            recent = [{"date": d.isoformat(), "value": v} for d, v in window]
+        else:
+            recent = [{"date": d.isoformat(), "value": v} for d, v in sorted_parsed[-30:]]
 
         return {
             "success": True,

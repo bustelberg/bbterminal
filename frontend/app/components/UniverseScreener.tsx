@@ -10,13 +10,34 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 type CriterionDef = { key: string; label: string; description?: string; min_years?: number };
 
+type ComponentSpec = { label: string; code: string; default: number };
+type DerivedCriterionSpec = {
+  key: string;
+  label: string;
+  default_threshold: number;
+  default_enabled: boolean;
+  metric?: string;
+  op?: string;
+  components?: ComponentSpec[];
+};
+type FilterConfigEntry = {
+  enabled: boolean;
+  threshold?: number;
+  components?: Record<string, number>;
+};
+type FilterConfig = Record<string, FilterConfigEntry>;
+
 type SectorCount = { sector: string; count: number };
-type MonthlyCount = { month: string; count: number };
+type MonthlyCount = { month: string; count: number; base_count?: number };
 type UniverseRow = {
   universe_id: number;
   label: string;
   description: string | null;
   created_at: string;
+  parent_universe_id: number | null;
+  parent_label: string | null;
+  filter_config: FilterConfig | null;
+  is_derived: boolean;
   start_month: string | null;
   end_month: string | null;
   month_count: number;
@@ -41,6 +62,10 @@ export default function UniverseScreener() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [tighteningId, setTighteningId] = useState<number | null>(null);
+
+  const [derivedSpecs, setDerivedSpecs] = useState<DerivedCriterionSpec[]>([]);
+  const [defaultConfig, setDefaultConfig] = useState<FilterConfig>({});
 
   const loadUniverses = useCallback(async () => {
     setLoading(true);
@@ -61,6 +86,13 @@ export default function UniverseScreener() {
     fetch(`${API_URL}/api/universe/criteria`)
       .then(r => r.json())
       .then(setCriteria)
+      .catch(() => {});
+    fetch(`${API_URL}/api/universe/derived-metrics/criteria`)
+      .then(r => r.json())
+      .then(d => {
+        setDerivedSpecs(d.specs || []);
+        setDefaultConfig(d.default_filter_config || {});
+      })
       .catch(() => {});
     loadUniverses();
   }, [loadUniverses]);
@@ -130,6 +162,23 @@ export default function UniverseScreener() {
       setBusyLabel(null);
     }
   };
+
+  // Group base universes (with their derived children inline beneath them)
+  const grouped = useMemo(() => {
+    const baseRows = universes.filter(u => !u.is_derived);
+    const childrenByParent = new Map<number, UniverseRow[]>();
+    for (const u of universes) {
+      if (u.is_derived && u.parent_universe_id != null) {
+        const arr = childrenByParent.get(u.parent_universe_id) ?? [];
+        arr.push(u);
+        childrenByParent.set(u.parent_universe_id, arr);
+      }
+    }
+    const orphans = universes.filter(
+      u => u.is_derived && (u.parent_universe_id == null || !baseRows.some(b => b.universe_id === u.parent_universe_id))
+    );
+    return { baseRows, childrenByParent, orphans };
+  }, [universes]);
 
   return (
     <div className="h-full flex flex-col bg-[#0f1117]">
@@ -202,24 +251,86 @@ export default function UniverseScreener() {
           </div>
         ) : (
           <div className="space-y-3">
-            {universes.map(u => (
-              <UniverseCard
-                key={u.universe_id}
-                u={u}
-                expanded={expandedId === u.universe_id}
-                onToggle={() => setExpandedId(expandedId === u.universe_id ? null : u.universe_id)}
-                renamingId={renamingId}
-                renameValue={renameValue}
-                setRenameValue={setRenameValue}
-                startRename={startRename}
-                cancelRename={cancelRename}
-                saveRename={saveRename}
-                confirmDelete={confirmDelete}
-                setConfirmDelete={setConfirmDelete}
-                deleteOne={deleteOne}
-                busyLabel={busyLabel}
-              />
-            ))}
+            {grouped.baseRows.map(u => {
+              const children = grouped.childrenByParent.get(u.universe_id) ?? [];
+              return (
+                <div key={u.universe_id} className="space-y-2">
+                  <UniverseCard
+                    u={u}
+                    expanded={expandedId === u.universe_id}
+                    onToggle={() => setExpandedId(expandedId === u.universe_id ? null : u.universe_id)}
+                    renamingId={renamingId}
+                    renameValue={renameValue}
+                    setRenameValue={setRenameValue}
+                    startRename={startRename}
+                    cancelRename={cancelRename}
+                    saveRename={saveRename}
+                    confirmDelete={confirmDelete}
+                    setConfirmDelete={setConfirmDelete}
+                    deleteOne={deleteOne}
+                    busyLabel={busyLabel}
+                    onTighten={() => setTighteningId(tighteningId === u.universe_id ? null : u.universe_id)}
+                    tightening={tighteningId === u.universe_id}
+                  />
+                  {tighteningId === u.universe_id && derivedSpecs.length > 0 && (
+                    <TightenPanel
+                      base={u}
+                      specs={derivedSpecs}
+                      defaults={defaultConfig}
+                      onClose={() => setTighteningId(null)}
+                      onCreated={async () => {
+                        setTighteningId(null);
+                        await loadUniverses();
+                      }}
+                    />
+                  )}
+                  {children.map(child => (
+                    <div key={child.universe_id} className="ml-6">
+                      <UniverseCard
+                        u={child}
+                        expanded={expandedId === child.universe_id}
+                        onToggle={() => setExpandedId(expandedId === child.universe_id ? null : child.universe_id)}
+                        renamingId={renamingId}
+                        renameValue={renameValue}
+                        setRenameValue={setRenameValue}
+                        startRename={startRename}
+                        cancelRename={cancelRename}
+                        saveRename={saveRename}
+                        confirmDelete={confirmDelete}
+                        setConfirmDelete={setConfirmDelete}
+                        deleteOne={deleteOne}
+                        busyLabel={busyLabel}
+                        derivedSpecs={derivedSpecs}
+                      />
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+            {grouped.orphans.length > 0 && (
+              <div className="pt-2">
+                <div className="text-xs text-gray-500 mb-2">Derived universes with no matching parent</div>
+                {grouped.orphans.map(u => (
+                  <UniverseCard
+                    key={u.universe_id}
+                    u={u}
+                    expanded={expandedId === u.universe_id}
+                    onToggle={() => setExpandedId(expandedId === u.universe_id ? null : u.universe_id)}
+                    renamingId={renamingId}
+                    renameValue={renameValue}
+                    setRenameValue={setRenameValue}
+                    startRename={startRename}
+                    cancelRename={cancelRename}
+                    saveRename={saveRename}
+                    confirmDelete={confirmDelete}
+                    setConfirmDelete={setConfirmDelete}
+                    deleteOne={deleteOne}
+                    busyLabel={busyLabel}
+                    derivedSpecs={derivedSpecs}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -241,12 +352,16 @@ type UniverseCardProps = {
   setConfirmDelete: (label: string | null) => void;
   deleteOne: (label: string) => void;
   busyLabel: string | null;
+  onTighten?: () => void;
+  tightening?: boolean;
+  derivedSpecs?: DerivedCriterionSpec[];
 };
 
 function UniverseCard({
   u, expanded, onToggle,
   renamingId, renameValue, setRenameValue, startRename, cancelRename, saveRename,
   confirmDelete, setConfirmDelete, deleteOne, busyLabel,
+  onTighten, tightening, derivedSpecs,
 }: UniverseCardProps) {
   const isRenaming = renamingId === u.universe_id;
   const isConfirming = confirmDelete === u.label;
@@ -257,8 +372,12 @@ function UniverseCard({
     ? (u.start_month === u.end_month ? u.start_month : `${u.start_month} → ${u.end_month}`)
     : '—';
 
+  const filterPills = u.is_derived && u.filter_config
+    ? buildFilterPills(u.filter_config, derivedSpecs ?? [])
+    : [];
+
   return (
-    <div className="bg-[#151821] rounded-xl border border-gray-800/40 overflow-hidden">
+    <div className={`rounded-xl border overflow-hidden ${u.is_derived ? 'bg-[#131726] border-indigo-900/30' : 'bg-[#151821] border-gray-800/40'}`}>
       <div className="flex items-start justify-between gap-3 px-5 py-4">
         <div className="flex items-start gap-3 min-w-0 flex-1">
           <button
@@ -285,11 +404,29 @@ function UniverseCard({
               ) : (
                 <h3 className="text-white text-base font-semibold">{u.label}</h3>
               )}
+              {u.is_derived ? (
+                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                  Derived{u.parent_label ? ` · from ${u.parent_label}` : ''}
+                </span>
+              ) : (
+                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-gray-700/40 text-gray-300 border border-gray-700/60">
+                  Base
+                </span>
+              )}
               <span className="text-gray-500 text-xs font-mono">id:{u.universe_id}</span>
               <span className="text-gray-500 text-xs">created {createdLabel}</span>
             </div>
             {u.description && (
               <p className="text-gray-400 text-xs mt-1">{u.description}</p>
+            )}
+            {filterPills.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {filterPills.map((p, i) => (
+                  <span key={i} className="text-[11px] px-1.5 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 font-mono">
+                    {p}
+                  </span>
+                ))}
+              </div>
             )}
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mt-3">
               <Stat label="Months" value={u.month_count} />
@@ -339,6 +476,14 @@ function UniverseCard({
             </>
           ) : (
             <>
+              {onTighten && (
+                <button
+                  onClick={onTighten}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${tightening ? 'bg-indigo-600 text-white' : 'text-indigo-300 hover:text-indigo-200 hover:bg-indigo-500/10'}`}
+                >
+                  {tightening ? 'Close' : 'Tighten'}
+                </button>
+              )}
               <button
                 onClick={() => startRename(u)}
                 className="px-2.5 py-1 rounded-lg text-xs font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
@@ -364,6 +509,364 @@ function UniverseCard({
       )}
     </div>
   );
+}
+
+function buildFilterPills(cfg: FilterConfig, specs: DerivedCriterionSpec[]): string[] {
+  const out: string[] = [];
+  for (const spec of specs) {
+    const entry = cfg[spec.key];
+    if (!entry || !entry.enabled) continue;
+    if (spec.components) {
+      const parts = spec.components.map(c => {
+        const v = entry.components?.[c.code] ?? c.default;
+        return `${shortLabel(c.label)}≤${v}`;
+      });
+      out.push(`${spec.label}: ${parts.join(', ')}`);
+    } else {
+      const v = entry.threshold ?? spec.default_threshold;
+      out.push(`${spec.label} ${spec.op ?? '>='} ${v}`);
+    }
+  }
+  return out;
+}
+
+function shortLabel(s: string): string {
+  return s.replace(/\s*\(max\)\s*/i, '').trim();
+}
+
+type TightenPanelProps = {
+  base: UniverseRow;
+  specs: DerivedCriterionSpec[];
+  defaults: FilterConfig;
+  onClose: () => void;
+  onCreated: () => void;
+};
+
+type DeriveStepStatus = 'pending' | 'in_progress' | 'done' | 'error';
+type DeriveStep = { step: string; status: DeriveStepStatus; message: string };
+
+const DERIVE_STEPS: { key: string; label: string }[] = [
+  { key: 'validate', label: 'Validate inputs' },
+  { key: 'load_base', label: 'Load base memberships' },
+  { key: 'precompute', label: 'Precompute derived metrics' },
+  { key: 'filter', label: 'Apply filter' },
+  { key: 'create', label: 'Create universe row' },
+  { key: 'insert', label: 'Insert memberships' },
+];
+
+function TightenPanel({ base, specs, defaults, onClose, onCreated }: TightenPanelProps) {
+  const [config, setConfig] = useState<FilterConfig>(() => deepCloneConfig(defaults));
+  const [label, setLabel] = useState(`${base.label} (tight)`);
+  const [description, setDescription] = useState('');
+  const [previewing, setPreviewing] = useState(false);
+  const [creating, setCreating] = useState(false);
+  type Preview = {
+    monthly_counts: MonthlyCount[];
+    base_rows: number;
+    passed_rows: number;
+    missing_metrics: number;
+    base_label: string;
+  };
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
+  const [stepMap, setStepMap] = useState<Record<string, DeriveStep>>({});
+  const [detailLog, setDetailLog] = useState<string[]>([]);
+  const [doneSummary, setDoneSummary] = useState<string | null>(null);
+
+  const updateEntry = (key: string, patch: Partial<FilterConfigEntry>) => {
+    setConfig(prev => ({ ...prev, [key]: { ...prev[key], ...patch } }));
+    setPreview(null);
+  };
+
+  const updateComponent = (key: string, code: string, value: number) => {
+    setConfig(prev => {
+      const entry = prev[key] ?? { enabled: false, components: {} };
+      return {
+        ...prev,
+        [key]: {
+          ...entry,
+          components: { ...(entry.components ?? {}), [code]: value },
+        },
+      };
+    });
+    setPreview(null);
+  };
+
+  const runPreview = async () => {
+    setPreviewing(true);
+    setErrMsg(null);
+    try {
+      const r = await fetch(`${API_URL}/api/universe/derive/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base_universe_id: base.universe_id, filter_config: config }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      setPreview(await r.json());
+    } catch (e) {
+      setErrMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
+  const create = async () => {
+    if (!label.trim()) {
+      setErrMsg('Label is required');
+      return;
+    }
+    setCreating(true);
+    setErrMsg(null);
+    setStepMap({});
+    setDetailLog([]);
+    setDoneSummary(null);
+    try {
+      const resp = await fetch(`${API_URL}/api/universe/derive`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          base_universe_id: base.universe_id,
+          label: label.trim(),
+          description: description.trim() || null,
+          filter_config: config,
+        }),
+      });
+      if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`);
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      let succeeded = false;
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const chunks = buf.split('\n\n');
+        buf = chunks.pop() ?? '';
+        for (const chunk of chunks) {
+          for (const line of chunk.split('\n')) {
+            if (!line.startsWith('data:')) continue;
+            const payload = line.slice(5).trim();
+            if (!payload) continue;
+            let j: { type?: string; step?: string; status?: string; message?: string; data?: unknown };
+            try { j = JSON.parse(payload); } catch { continue; }
+            if (j.type === 'progress' && j.step) {
+              const status = (j.status as DeriveStepStatus) ?? 'in_progress';
+              setStepMap(prev => ({
+                ...prev,
+                [j.step as string]: { step: j.step as string, status, message: j.message ?? '' },
+              }));
+              setDetailLog(prev => [...prev, `${j.step}: ${j.message ?? ''}`]);
+            } else if (j.type === 'done') {
+              succeeded = true;
+              setDoneSummary(j.message ?? 'Done.');
+            } else if (j.type === 'error') {
+              setErrMsg(j.message ?? 'Failed');
+            }
+          }
+        }
+      }
+      if (succeeded) {
+        setTimeout(() => onCreated(), 800);
+      }
+    } catch (e) {
+      setErrMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div className="ml-6 bg-[#131726] border border-indigo-900/40 rounded-xl px-5 py-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-white text-sm font-medium">Tighten {base.label}</h3>
+        <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-xs">Close</button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <label className="text-gray-500 text-[11px] uppercase tracking-wider">New universe label</label>
+          <input
+            value={label}
+            onChange={e => setLabel(e.target.value)}
+            className="mt-1 w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+          />
+        </div>
+        <div>
+          <label className="text-gray-500 text-[11px] uppercase tracking-wider">Description (optional)</label>
+          <input
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            className="mt-1 w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        {specs.map(spec => {
+          const entry = config[spec.key] ?? { enabled: false };
+          return (
+            <div key={spec.key} className="bg-[#0f1117] border border-gray-800 rounded-lg px-3 py-2">
+              <label className="flex items-center gap-2 text-sm text-gray-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!!entry.enabled}
+                  onChange={e => updateEntry(spec.key, { enabled: e.target.checked })}
+                  className="accent-indigo-500"
+                />
+                <span className="font-medium">{spec.label}</span>
+                {!spec.components && spec.op && (
+                  <span className="text-gray-500 text-xs font-mono">{spec.op}</span>
+                )}
+              </label>
+              {entry.enabled && (
+                <div className="mt-2 pl-6 space-y-2">
+                  {spec.components ? (
+                    spec.components.map(c => {
+                      const v = entry.components?.[c.code] ?? c.default;
+                      return (
+                        <div key={c.code} className="flex items-center gap-2 text-xs">
+                          <span className="text-gray-400 flex-1">{c.label}</span>
+                          <input
+                            type="number"
+                            step="0.5"
+                            value={v}
+                            onChange={e => updateComponent(spec.key, c.code, parseFloat(e.target.value))}
+                            className="w-24 bg-[#0f1117] border border-gray-700 rounded px-2 py-1 text-right font-mono text-white focus:border-indigo-500 outline-none"
+                          />
+                          <span className="text-gray-500 w-4">%</span>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="text-gray-400 flex-1">Threshold</span>
+                      <input
+                        type="number"
+                        step="0.5"
+                        value={entry.threshold ?? spec.default_threshold}
+                        onChange={e => updateEntry(spec.key, { threshold: parseFloat(e.target.value) })}
+                        className="w-24 bg-[#0f1117] border border-gray-700 rounded px-2 py-1 text-right font-mono text-white focus:border-indigo-500 outline-none"
+                      />
+                      <span className="text-gray-500 w-4">%</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          onClick={runPreview}
+          disabled={previewing}
+          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 text-white transition-colors disabled:opacity-50"
+        >
+          {previewing ? 'Previewing...' : 'Preview'}
+        </button>
+        <button
+          onClick={create}
+          disabled={creating}
+          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50"
+        >
+          {creating ? 'Creating...' : 'Save derived universe'}
+        </button>
+        {errMsg && <span className="text-rose-400 text-xs">{errMsg}</span>}
+      </div>
+
+      {preview && (
+        <div className="bg-[#0f1117] border border-gray-800 rounded-lg p-3 space-y-2">
+          <div className="text-xs text-gray-400">
+            <span className="font-mono text-white">{preview.passed_rows.toLocaleString()}</span>
+            {' / '}
+            <span className="font-mono">{preview.base_rows.toLocaleString()}</span>
+            {' rows pass'}
+            {preview.missing_metrics > 0 && (
+              <span className="text-amber-400">
+                {' '} · {preview.missing_metrics.toLocaleString()} excluded for missing metrics
+              </span>
+            )}
+          </div>
+          {preview.monthly_counts.length > 0 && (
+            <details>
+              <summary className="text-gray-500 text-xs cursor-pointer hover:text-gray-300">
+                Monthly counts ({preview.monthly_counts.length} months)
+              </summary>
+              <div className="mt-2 max-h-40 overflow-auto text-xs font-mono text-gray-400 grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1">
+                {preview.monthly_counts.map(m => (
+                  <div key={m.month} className="flex justify-between">
+                    <span>{m.month}</span>
+                    <span className="text-gray-500">{m.count}{m.base_count != null && ` / ${m.base_count}`}</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+      )}
+
+      {(creating || Object.keys(stepMap).length > 0 || doneSummary) && (
+        <div className="bg-[#0f1117] border border-gray-800 rounded-lg p-3 space-y-2">
+          <div className="space-y-1">
+            {DERIVE_STEPS.map(s => {
+              const st = stepMap[s.key];
+              const status = st?.status ?? 'pending';
+              return (
+                <div key={s.key} className="flex items-start gap-2 text-xs">
+                  <StepIcon status={status} />
+                  <span className={
+                    status === 'done' ? 'text-gray-400'
+                    : status === 'in_progress' ? 'text-gray-200'
+                    : status === 'error' ? 'text-rose-400'
+                    : 'text-gray-600'
+                  }>
+                    <span className="font-medium">{s.label}</span>
+                    {st?.message && <span className="text-gray-500"> — {st.message}</span>}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          {doneSummary && (
+            <div className="text-xs text-emerald-400 font-medium pt-1 border-t border-gray-800/60">
+              {doneSummary}
+            </div>
+          )}
+          {detailLog.length > 0 && (
+            <details>
+              <summary className="text-gray-500 text-xs cursor-pointer hover:text-gray-300">
+                Verbose log ({detailLog.length} events)
+              </summary>
+              <div className="mt-2 max-h-48 overflow-auto text-[11px] font-mono text-gray-400 space-y-0.5">
+                {detailLog.map((l, i) => <div key={i}>{l}</div>)}
+              </div>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StepIcon({ status }: { status: DeriveStepStatus }) {
+  if (status === 'done') return <span className="text-emerald-400 mt-0.5">&#10003;</span>;
+  if (status === 'in_progress') return <span className="text-indigo-400 animate-pulse mt-0.5">&#9679;</span>;
+  if (status === 'error') return <span className="text-rose-400 mt-0.5">&#10007;</span>;
+  return <span className="text-gray-600 mt-0.5">&#9675;</span>;
+}
+
+function deepCloneConfig(c: FilterConfig): FilterConfig {
+  const out: FilterConfig = {};
+  for (const [k, v] of Object.entries(c)) {
+    out[k] = {
+      enabled: v.enabled,
+      ...(v.threshold != null ? { threshold: v.threshold } : {}),
+      ...(v.components ? { components: { ...v.components } } : {}),
+    };
+  }
+  return out;
 }
 
 function Stat({ label, value, mono }: { label: string; value: string | number; mono?: boolean }) {

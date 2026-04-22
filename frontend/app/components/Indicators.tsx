@@ -5,8 +5,11 @@ import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid,
 } from 'recharts';
+import DatePartsPicker from './DatePartsPicker';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+
+const US_EXCHANGES = new Set(['NYSE', 'NASDAQ', 'AMEX']);
 
 type DataPoint = { date: string; value: number };
 
@@ -31,6 +34,8 @@ export default function Indicators() {
   const [ticker, setTicker] = useState('2330');
   const [indicator, setIndicator] = useState('price');
   const [forceRefresh, setForceRefresh] = useState(false);
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<FetchResult | null>(null);
   const [showLogs, setShowLogs] = useState(false);
@@ -81,6 +86,8 @@ export default function Indicators() {
           ticker,
           indicator,
           force_refresh: forceRefresh,
+          from_date: fromDate || null,
+          to_date: toDate || null,
         }),
       });
       const data = await res.json();
@@ -146,6 +153,26 @@ export default function Indicators() {
               <option value="volume">volume</option>
             </select>
           </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">From</label>
+            <DatePartsPicker
+              value={fromDate}
+              onChange={setFromDate}
+              minYear={1990}
+              maxYear={new Date().getFullYear()}
+              allowEmpty
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">To</label>
+            <DatePartsPicker
+              value={toDate}
+              onChange={setToDate}
+              minYear={1990}
+              maxYear={new Date().getFullYear() + 1}
+              allowEmpty
+            />
+          </div>
           <div className="flex items-center gap-2">
             <input
               type="checkbox"
@@ -165,7 +192,10 @@ export default function Indicators() {
           </button>
         </div>
         <p className="text-xs text-gray-500 mt-3">
-          GuruFocus URL: <span className="font-mono text-gray-400">https://www.gurufocus.com/stock/{exchange}:{ticker}/summary</span>
+          GuruFocus URL: <span className="font-mono text-gray-400">https://www.gurufocus.com/stock/{US_EXCHANGES.has(exchange.trim().toUpperCase()) ? ticker : `${exchange}:${ticker}`}/summary</span>
+          {!fromDate && !toDate && (
+            <span className="ml-3 text-gray-600">Tip: set From/To to see the full series per date.</span>
+          )}
         </p>
       </div>
 
@@ -264,6 +294,44 @@ export default function Indicators() {
                   />
                 </AreaChart>
               </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* Date → value table */}
+          {result.success && chartData.length > 0 && (
+            <div className="bg-[#151821] rounded-xl border border-gray-800/40">
+              <div className="px-5 py-3 border-b border-gray-800/40 flex items-center justify-between">
+                <h2 className="text-sm font-medium text-white">
+                  Values per date <span className="text-gray-500 font-normal">({chartData.length.toLocaleString()} rows)</span>
+                </h2>
+                <span className="text-xs text-gray-500">
+                  {fromDate || toDate ? 'Filtered window' : 'Last 30 trading days (set From/To to widen)'}
+                </span>
+              </div>
+              <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-[#151821] z-10">
+                    <tr className="text-gray-400 text-xs uppercase tracking-wider">
+                      <th className="text-left px-4 py-2 font-medium w-12">#</th>
+                      <th className="text-left px-4 py-2 font-medium">Date</th>
+                      <th className="text-right px-4 py-2 font-medium">{indicator === 'volume' ? 'Volume' : 'Price'}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800/30">
+                    {[...chartData].reverse().map((d, i) => (
+                      <tr key={d.date} className="hover:bg-white/[0.02]">
+                        <td className="px-4 py-1.5 text-gray-500 font-mono text-xs">{i + 1}</td>
+                        <td className="px-4 py-1.5 text-gray-200 font-mono text-xs">{d.date}</td>
+                        <td className="px-4 py-1.5 text-gray-200 font-mono text-right">
+                          {indicator === 'volume'
+                            ? d.value.toLocaleString(undefined, { maximumFractionDigits: 0 })
+                            : d.value.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 

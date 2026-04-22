@@ -8,6 +8,7 @@ import {
   acwiSaveStore,
   startAcwiSave,
 } from '../../lib/stores/acwi';
+import DatePartsPicker from './DatePartsPicker';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -1064,18 +1065,18 @@ export default function AcwiUniverse() {
               </div>
               <div className="ml-auto flex items-center gap-2 text-xs text-gray-400 flex-wrap">
                 <label>Start</label>
-                <input
-                  type="date"
+                <DatePartsPicker
                   value={histStart}
-                  onChange={e => setHistStart(e.target.value)}
-                  className="bg-[#0f1117] border border-gray-700 rounded-lg px-2 py-1.5 text-sm text-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                  onChange={setHistStart}
+                  minYear={1990}
+                  maxYear={new Date().getFullYear()}
                 />
                 <label>End</label>
-                <input
-                  type="date"
+                <DatePartsPicker
                   value={histEnd}
-                  onChange={e => setHistEnd(e.target.value)}
-                  className="bg-[#0f1117] border border-gray-700 rounded-lg px-2 py-1.5 text-sm text-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                  onChange={setHistEnd}
+                  minYear={1990}
+                  maxYear={new Date().getFullYear() + 1}
                 />
                 <div className="h-5 w-px bg-gray-700 mx-1" />
                 <label>Name</label>

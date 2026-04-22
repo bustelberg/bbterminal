@@ -234,9 +234,18 @@ function CellInfoTip({ children }: { children: React.ReactNode }) {
     setShow(true);
   };
 
+  // Close on any scroll so the fixed-positioned tooltip doesn't float over
+  // the sticky header after its anchor row has scrolled away.
+  useEffect(() => {
+    if (!show) return;
+    const close = () => setShow(false);
+    window.addEventListener('scroll', close, true);
+    return () => window.removeEventListener('scroll', close, true);
+  }, [show]);
+
   return (
     <span
-      className="relative inline-block align-middle"
+      className="inline-block align-middle"
       onMouseEnter={handleEnter}
       onMouseLeave={() => setShow(false)}
     >
@@ -1401,7 +1410,7 @@ export default function MomentumBacktester() {
               </div>
               <div className="max-h-[500px] overflow-auto">
                 <table className="w-full text-sm">
-                  <thead className="sticky top-0 bg-[#151821]">
+                  <thead className="sticky top-0 bg-[#151821] z-20">
                     <tr className="text-gray-500 text-xs border-b border-gray-800/40">
                       <th className="text-left px-5 py-2.5 font-medium">Month</th>
                       <th className="text-right px-3 py-2.5 font-medium">Holdings</th>
