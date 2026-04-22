@@ -7,6 +7,7 @@ import {
 } from 'recharts';
 
 import ApiUsageBadge from './ApiUsageBadge';
+import { dialog } from '../../lib/dialog';
 import {
   momentumStore,
   startBacktest,
@@ -730,15 +731,20 @@ export default function MomentumBacktester() {
   };
 
   const deleteBacktest = async (runId: number) => {
+    setSavedRuns(prev => prev.filter(r => r.run_id !== runId));
+    if (loadedRunId === runId) momentumStore.set({ loadedRunId: null });
     try {
       await fetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' });
-      if (loadedRunId === runId) momentumStore.set({ loadedRunId: null });
+    } catch {
       loadSavedRuns();
-    } catch {}
+    }
   };
 
   const renameBacktest = async (runId: number, currentName: string) => {
-    const next = prompt('New name for this backtest:', currentName);
+    const next = await dialog.prompt('New name for this backtest:', {
+      title: 'Rename backtest',
+      defaultValue: currentName,
+    });
     if (!next || next.trim() === '' || next === currentName) return;
     try {
       const resp = await fetch(`${API_URL}/api/momentum/backtests/${runId}`, {
@@ -749,7 +755,7 @@ export default function MomentumBacktester() {
       if (!resp.ok) throw new Error(String(resp.status));
       loadSavedRuns();
     } catch (e) {
-      alert(`Rename failed: ${e instanceof Error ? e.message : e}`);
+      dialog.alert(`Rename failed: ${e instanceof Error ? e.message : e}`, { title: 'Rename failed' });
     }
   };
 
@@ -810,9 +816,11 @@ export default function MomentumBacktester() {
                       </button>
                       <button
                         type="button"
-                        onClick={(e) => {
+                        onClick={async (e) => {
                           e.stopPropagation();
-                          if (confirm(`Delete "${r.name}"?`)) deleteBacktest(r.run_id);
+                          if (await dialog.confirm(`Delete "${r.name}"?`, { destructive: true, confirmLabel: 'Delete' })) {
+                            deleteBacktest(r.run_id);
+                          }
                         }}
                         className="p-1.5 rounded text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
                         title="Delete"

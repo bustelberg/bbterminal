@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { dialog } from '../../lib/dialog';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -262,7 +263,7 @@ export default function CompanyManager() {
   }
 
   async function handleDelete(id: number, name: string) {
-    if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+    if (!(await dialog.confirm(`Delete "${name}"? This cannot be undone.`, { destructive: true, confirmLabel: 'Delete' }))) return;
     setError(null);
     try {
       const res = await fetch(`${API_URL}/api/companies/${id}`, { method: 'DELETE' });

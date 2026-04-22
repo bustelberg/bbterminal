@@ -32,7 +32,7 @@ export default function SetPasswordPage() {
       setError(error.message)
       setLoading(false)
     } else {
-      router.push('/longequity')
+      router.push('/longequity-universe')
       router.refresh()
     }
   }

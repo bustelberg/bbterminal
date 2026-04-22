@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { dialog } from '../../lib/dialog';
 import {
   sp500ImportStore,
   startSp500Import,
@@ -149,8 +150,8 @@ export default function IndexUniverse() {
   };
 
   // Delete index
-  const deleteIndex = (idx: string) => {
-    if (!confirm(`Delete all data for ${idx}?`)) return;
+  const deleteIndex = async (idx: string) => {
+    if (!(await dialog.confirm(`Delete all data for ${idx}?`, { destructive: true, confirmLabel: 'Delete' }))) return;
     fetch(`${API_URL}/api/index-universe/indexes/${encodeURIComponent(idx)}`, { method: 'DELETE' })
       .then(() => {
         loadIndexes();

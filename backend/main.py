@@ -463,6 +463,241 @@ async def ingest_long_equity():
     )
 
 
+class LongEquitySaveUniverseRequest(BaseModel):
+    name: str = "longequity_cumulative"
+    description: str | None = None
+    start_date: str = "2002-01-01"
+    end_date: str | None = None  # defaults to first day of current month
+
+
+@app.post("/api/longequity/save-universe")
+async def longequity_save_universe(req: LongEquitySaveUniverseRequest):
+    """SSE stream: save a constant-per-month universe spanning a date range.
+
+    Every month from start_date to end_date contains the same set of companies:
+    the union of every company that has ever appeared in any LongEquity
+    snapshot. Sector and universe_ticker are carried forward from the most
+    recent snapshot in which each company appeared.
+    """
+    import queue as _queue, threading
+
+    def _run(q: _queue.Queue):
+        def emit(step: str, status: str, message: str):
+            q.put(json.dumps({
+                "type": "progress", "step": step, "status": status, "message": message,
+            }))
+
+        try:
+            label = (req.name or "").strip()
+            if not label:
+                q.put(json.dumps({"type": "error", "message": "name is required"}))
+                return
+
+            # --- Resolve date range -------------------------------------------
+            from datetime import date as _date, timedelta as _timedelta
+            try:
+                start_d = _date.fromisoformat(req.start_date)
+            except Exception:
+                q.put(json.dumps({"type": "error", "message": f"invalid start_date: {req.start_date!r}"}))
+                return
+            if req.end_date:
+                try:
+                    end_d = _date.fromisoformat(req.end_date)
+                except Exception:
+                    q.put(json.dumps({"type": "error", "message": f"invalid end_date: {req.end_date!r}"}))
+                    return
+            else:
+                today = _date.today()
+                end_d = today.replace(day=1)
+            start_d = start_d.replace(day=1)
+            end_d = end_d.replace(day=1)
+            if end_d < start_d:
+                q.put(json.dumps({"type": "error", "message": "end_date must be >= start_date"}))
+                return
+
+            month_list: list[str] = []
+            cur = start_d
+            while cur <= end_d:
+                month_list.append(cur.isoformat())
+                # advance one month
+                if cur.month == 12:
+                    cur = cur.replace(year=cur.year + 1, month=1)
+                else:
+                    cur = cur.replace(month=cur.month + 1)
+
+            # --- Load source memberships from the 'longequity' universe -------
+            emit("load", "in_progress", "Locating 'longequity' source universe...")
+            u_resp = supabase.table("universe").select("universe_id").eq("label", "longequity").limit(1).execute()
+            if not u_resp.data:
+                q.put(json.dumps({"type": "error", "message": "'longequity' universe not found — run ingest first."}))
+                return
+            source_uid = u_resp.data[0]["universe_id"]
+
+            rows: list[dict] = []
+            offset = 0
+            page = 1000
+            while True:
+                r = (
+                    supabase.table("universe_membership")
+                    .select("company_id, target_month, universe_ticker, sector")
+                    .eq("universe_id", source_uid)
+                    .range(offset, offset + page - 1)
+                    .execute()
+                )
+                batch = r.data or []
+                rows.extend(batch)
+                if len(batch) < page:
+                    break
+                offset += page
+
+            source_months = sorted({r["target_month"] for r in rows if r.get("target_month")})
+            if not source_months:
+                q.put(json.dumps({"type": "error", "message": "no LongEquity snapshots found"}))
+                return
+            unique_companies = len({r["company_id"] for r in rows})
+            emit(
+                "load", "done",
+                f"Loaded {len(rows):,} memberships across {len(source_months)} source months "
+                f"({unique_companies} distinct companies).",
+            )
+
+            # --- Build constant union set + latest-known ticker/sector --------
+            emit("build", "in_progress", "Building union set across all snapshots...")
+            # Walk rows in ascending month order so the latest snapshot's
+            # ticker/sector wins for each company.
+            latest_info: dict[int, dict] = {}
+            union_set: set[int] = set()
+            for r in sorted(rows, key=lambda r: r.get("target_month") or ""):
+                cid = r["company_id"]
+                union_set.add(cid)
+                latest_info[cid] = {
+                    "universe_ticker": r.get("universe_ticker"),
+                    "sector": r.get("sector"),
+                }
+
+            # --- Prepare target universe --------------------------------------
+            emit("target", "in_progress", f"Preparing target universe '{label}'...")
+            t_resp = supabase.table("universe").select("universe_id").eq("label", label).limit(1).execute()
+            if t_resp.data:
+                target_uid = t_resp.data[0]["universe_id"]
+                # PostgREST may cap the number of rows affected by a single delete.
+                # Loop until count reads zero so we never re-insert on top of stragglers.
+                deleted_total = 0
+                for _attempt in range(20):
+                    supabase.table("universe_membership").delete().eq("universe_id", target_uid).execute()
+                    remaining_resp = (
+                        supabase.table("universe_membership")
+                        .select("company_id", count="exact", head=True)
+                        .eq("universe_id", target_uid)
+                        .execute()
+                    )
+                    remaining = remaining_resp.count or 0
+                    if remaining == 0:
+                        break
+                    emit(
+                        "target", "in_progress",
+                        f"Still {remaining:,} rows after delete; looping...",
+                    )
+                    deleted_total += 1
+                emit("target", "done", f"Cleared existing rows in '{label}' (id={target_uid}).")
+            else:
+                c_resp = supabase.table("universe").insert({
+                    "label": label,
+                    "description": req.description or "Cumulative LongEquity universe",
+                }).execute()
+                target_uid = c_resp.data[0]["universe_id"]
+                emit("target", "done", f"Created new universe '{label}' (id={target_uid}).")
+
+            # Replicate the union set across every month in [start_date, end_date].
+            payload: list[dict] = []
+            for m in month_list:
+                for cid in union_set:
+                    info = latest_info.get(cid, {})
+                    payload.append({
+                        "universe_id": target_uid,
+                        "company_id": cid,
+                        "target_month": m,
+                        "universe_ticker": info.get("universe_ticker"),
+                        "sector": info.get("sector"),
+                    })
+            emit(
+                "build", "done",
+                f"Prepared {len(payload):,} rows = {len(union_set)} companies × {len(month_list)} months "
+                f"({month_list[0]} → {month_list[-1]}).",
+            )
+
+            # --- Insert in batches --------------------------------------------
+            import time as _time
+            from universe.derived_metrics import _fmt_duration as _fmt_dur
+            batch_size = 500
+            total_batches = (len(payload) + batch_size - 1) // batch_size
+            started = _time.monotonic()
+            total_inserted = 0
+            emit(
+                "insert", "in_progress",
+                f"Inserting {len(payload):,} rows in {total_batches} batches...",
+            )
+            for bi, i in enumerate(range(0, len(payload), batch_size), start=1):
+                chunk = payload[i:i + batch_size]
+                elapsed = _time.monotonic() - started
+                rate = (bi - 1) / elapsed if elapsed > 0 and bi > 1 else 0
+                remaining = (total_batches - bi + 1) / rate if rate > 0 else 0
+                emit(
+                    "insert", "in_progress",
+                    f"Starting batch {bi}/{total_batches} ({len(chunk):,} rows) · "
+                    f"{_fmt_dur(elapsed)} elapsed · ~{_fmt_dur(remaining)} left",
+                )
+                resp = supabase.table("universe_membership").insert(chunk).execute()
+                total_inserted += len(resp.data or [])
+                elapsed = _time.monotonic() - started
+                rate = bi / elapsed if elapsed > 0 else 0
+                remaining = (total_batches - bi) / rate if rate > 0 else 0
+                emit(
+                    "insert", "in_progress",
+                    f"Batch {bi}/{total_batches} done · {total_inserted:,}/{len(payload):,} rows · "
+                    f"{_fmt_dur(elapsed)} elapsed · ~{_fmt_dur(remaining)} left",
+                )
+            emit(
+                "insert", "done",
+                f"Inserted {total_inserted:,} rows in {_fmt_dur(_time.monotonic() - started)}.",
+            )
+
+            q.put(json.dumps({
+                "type": "done",
+                "message": (
+                    f"Saved '{label}': {total_inserted:,} rows across {len(month_list)} months "
+                    f"({len(union_set)} unique companies, {month_list[0]} → {month_list[-1]})."
+                ),
+                "data": {
+                    "universe_id": target_uid,
+                    "label": label,
+                    "months": len(month_list),
+                    "rows_inserted": total_inserted,
+                    "total_companies": len(union_set),
+                    "start_date": month_list[0],
+                    "end_date": month_list[-1],
+                },
+            }))
+        except Exception as e:
+            import traceback
+            q.put(json.dumps({"type": "error", "message": f"{e}\n{traceback.format_exc()}"}))
+        finally:
+            q.put(None)
+
+    q: _queue.Queue = _queue.Queue()
+    threading.Thread(target=_run, args=(q,), daemon=True).start()
+
+    async def generate():
+        yield ": keepalive\n\n"
+        while True:
+            msg = await asyncio.to_thread(q.get)
+            if msg is None:
+                break
+            yield f"data: {msg}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
 # ─────────────────────────── AIRS endpoints ──────────────────────────────────
 
 
@@ -2288,10 +2523,31 @@ async def universe_delete_month(month: str, label: str = "default"):
 
 @app.delete("/api/universe/labels/{label}")
 async def universe_delete_label(label: str):
-    """Delete a universe and all its memberships (cascade)."""
+    """Delete a universe and all its memberships.
+
+    If the target is a base universe, its derived children (tight variants)
+    are deleted first so callers don't leave orphaned universes behind — the
+    parent FK is ON DELETE SET NULL, not CASCADE.
+    """
     def _run():
-        supabase.table("universe").delete().eq("label", label).execute()
-        return {"deleted": label}
+        resp = supabase.table("universe").select("universe_id").eq("label", label).limit(1).execute()
+        if not resp.data:
+            return {"deleted": label, "children": []}
+        uid = resp.data[0]["universe_id"]
+
+        child_resp = (
+            supabase.table("universe")
+            .select("universe_id, label")
+            .eq("parent_universe_id", uid)
+            .execute()
+        )
+        children = child_resp.data or []
+        if children:
+            child_ids = [c["universe_id"] for c in children]
+            supabase.table("universe").delete().in_("universe_id", child_ids).execute()
+
+        supabase.table("universe").delete().eq("universe_id", uid).execute()
+        return {"deleted": label, "children": [c["label"] for c in children]}
     return await asyncio.to_thread(_run)
 
 
@@ -2774,16 +3030,31 @@ async def universe_derive_create(body: DeriveUniverseRequest):
             emit("create", "done", f"Universe created (id={new_id}).")
 
             # --- Insert memberships in batches ----------------------------------------
-            payload = [
-                {
+            # Dedup defensively on (company_id, target_month). The base universe
+            # may carry stale duplicate rows from prior runs; the universe_membership
+            # PK would reject them mid-insert otherwise.
+            seen_keys: set[tuple] = set()
+            payload: list[dict] = []
+            dropped_dupes = 0
+            for r in kept:
+                key = (r["company_id"], r["target_month"])
+                if key in seen_keys:
+                    dropped_dupes += 1
+                    continue
+                seen_keys.add(key)
+                payload.append({
                     "universe_id": new_id,
                     "company_id": r["company_id"],
                     "target_month": r["target_month"],
                     "universe_ticker": r.get("universe_ticker"),
                     "sector": r.get("sector"),
-                }
-                for r in kept
-            ]
+                })
+            if dropped_dupes:
+                emit(
+                    "filter", "done",
+                    f"{len(kept):,} rows passed filter; dropped {dropped_dupes:,} duplicate "
+                    f"(company_id, target_month) row(s) before insert.",
+                )
             import time as _time
             from universe.derived_metrics import _fmt_duration as _fmt_dur
             batch_size = 500

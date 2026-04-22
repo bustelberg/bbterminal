@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { dialog } from '../../lib/dialog';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -80,7 +81,7 @@ export default function BenchmarkManager() {
   };
 
   const handleDelete = async (id: number, ticker: string) => {
-    if (!confirm(`Delete benchmark "${ticker}"?`)) return;
+    if (!(await dialog.confirm(`Delete benchmark "${ticker}"?`, { destructive: true, confirmLabel: 'Delete' }))) return;
     setError(null);
     try {
       const res = await fetch(`${API_URL}/api/benchmarks/${id}`, { method: 'DELETE' });

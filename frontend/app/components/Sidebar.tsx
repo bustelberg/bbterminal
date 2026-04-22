@@ -4,12 +4,13 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { createClient } from '../../lib/supabase/client';
+import { dialog } from '../../lib/dialog';
 
 const navItems = [
-  { href: '/longequity', label: 'LongEquity Insight' },
   { href: '/earnings', label: 'Earnings Dashboard' },
   { href: '/momentum', label: 'Momentum' },
   { href: '/universe', label: 'Universe Overview' },
+  { href: '/longequity-universe', label: 'LongEquity Universe' },
   { href: '/universe_index', label: 'SP500 Universe' },
   { href: '/acwi', label: 'ACWI Universe' },
   { href: '/fx-rates', label: 'FX Rates' },
@@ -63,7 +64,7 @@ export default function Sidebar() {
       router.push('/login');
       router.refresh();
     } catch (err) {
-      alert(`Failed to delete account:\n${err instanceof Error ? err.message : err}`);
+      dialog.alert(`Failed to delete account:\n${err instanceof Error ? err.message : err}`, { title: 'Account deletion failed' });
     } finally {
       setDeleting(false);
       setShowDeleteConfirm(false);

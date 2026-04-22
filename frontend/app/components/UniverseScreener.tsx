@@ -5,6 +5,7 @@ import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid,
 } from 'recharts';
+import { dialog } from '../../lib/dialog';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -127,7 +128,7 @@ export default function UniverseScreener() {
       cancelRename();
       await loadUniverses();
     } catch (e) {
-      alert(`Rename failed: ${e instanceof Error ? e.message : e}`);
+      dialog.alert(`Rename failed: ${e instanceof Error ? e.message : e}`, { title: 'Rename failed' });
     } finally {
       setBusyLabel(null);
     }
@@ -140,10 +141,13 @@ export default function UniverseScreener() {
         method: 'DELETE',
       });
       if (!r.ok) throw new Error(`${r.status}`);
+      const data = await r.json().catch(() => ({}));
+      const childLabels: string[] = Array.isArray(data?.children) ? data.children : [];
+      const toRemove = new Set<string>([label, ...childLabels]);
       setConfirmDelete(null);
-      setUniverses(prev => prev.filter(u => u.label !== label));
+      setUniverses(prev => prev.filter(u => !toRemove.has(u.label)));
     } catch (e) {
-      alert(`Delete failed: ${e instanceof Error ? e.message : e}`);
+      dialog.alert(`Delete failed: ${e instanceof Error ? e.message : e}`, { title: 'Delete failed' });
     } finally {
       setBusyLabel(null);
     }
@@ -157,7 +161,7 @@ export default function UniverseScreener() {
       setConfirmDeleteAll(false);
       await loadUniverses();
     } catch (e) {
-      alert(`Delete all failed: ${e instanceof Error ? e.message : e}`);
+      dialog.alert(`Delete all failed: ${e instanceof Error ? e.message : e}`, { title: 'Delete all failed' });
     } finally {
       setBusyLabel(null);
     }

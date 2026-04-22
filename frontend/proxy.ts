@@ -39,7 +39,7 @@ export async function proxy(request: NextRequest) {
 
   if (user && pathname === '/login') {
     const url = request.nextUrl.clone()
-    url.pathname = '/longequity'
+    url.pathname = '/longequity-universe'
     return NextResponse.redirect(url)
   }
 
