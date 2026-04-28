@@ -902,7 +902,7 @@ function MonthlySparkline({ monthly }: { monthly: MonthlyCount[] }) {
               fontSize: 12,
             }}
             labelStyle={{ color: '#9ca3af' }}
-            formatter={(value: number) => [value.toLocaleString(), 'Companies']}
+            formatter={(value) => [Number(value ?? 0).toLocaleString(), 'Companies']}
             labelFormatter={(l) => String(l)}
           />
           <Area
