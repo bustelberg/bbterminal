@@ -13,6 +13,9 @@ import {
   momentumStore,
   startBacktest,
   cancelBacktest,
+  loadCurrentPicksSnapshots,
+  loadCurrentPicksSnapshot,
+  refreshCurrentPicksMTD,
   type DrawdownPeriod,
   type MonthlyRecord,
   type Summary,
@@ -307,12 +310,18 @@ export default function MomentumBacktester() {
   const [topPerSector, setTopPerSector] = useState(6);
   const [skipPriceFetch, setSkipPriceFetch] = useState(false);
   const [maxCompanies, setMaxCompanies] = useState(0);
+  const [selectionMode, setSelectionMode] = useState<'momentum' | 'random'>('momentum');
+  const [randomSeed, setRandomSeed] = useState<number>(42);
+  const [nTrials, setNTrials] = useState<number>(1);
 
   // Backtest run state lives in a module-scoped store so the SSE stream
   // keeps running when the user navigates away from /momentum.
   const running = momentumStore.use((s) => s.running);
   const progress = momentumStore.use((s) => s.progress);
   const result = momentumStore.use((s) => s.result);
+  const currentPortfolio = momentumStore.use((s) => s.currentPortfolio);
+  const currentPicksSnapshots = momentumStore.use((s) => s.currentPicksSnapshots);
+  const refreshingMTD = momentumStore.use((s) => s.refreshingMTD);
   const universe = momentumStore.use((s) => s.universe);
   const error = momentumStore.use((s) => s.error);
   const warnings = momentumStore.use((s) => s.warnings);
@@ -329,6 +338,7 @@ export default function MomentumBacktester() {
   const [showWarnings, setShowWarnings] = useState(true);
   const [showInfos, setShowInfos] = useState(false);
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
+  const [expandedDailyDate, setExpandedDailyDate] = useState<string | null>(null);
 
   // Save/load state
   const [savedRuns, setSavedRuns] = useState<SavedRun[]>([]);
@@ -372,6 +382,7 @@ export default function MomentumBacktester() {
       })
       .catch(() => {});
     loadSavedRuns();
+    loadCurrentPicksSnapshots();
     fetch(`${API_URL}/api/benchmarks`)
       .then((r) => r.json())
       .then((data) => setBenchmarkOptions(data))
@@ -816,7 +827,44 @@ export default function MomentumBacktester() {
       max_companies: maxCompanies,
       universe_label: null,
       index_universe: selectedIndexUniverse || null,
+      selection_mode: selectionMode,
+      random_seed: selectionMode === 'random' ? randomSeed : null,
+      n_trials: selectionMode === 'random' ? Math.max(1, nTrials) : 1,
     });
+  };
+
+  // "What is my strategy holding right now?" — load the most recent saved
+  // snapshot if one exists (instant), else trigger a fresh compute (slow).
+  // Random mode is unsupported here.
+  const showCurrentPicks = async () => {
+    if (currentPicksSnapshots.length > 0) {
+      await loadCurrentPicksSnapshot(currentPicksSnapshots[0].snapshot_id);
+    } else {
+      await recomputeCurrentPortfolio();
+    }
+  };
+
+  // Force a fresh full compute. Slow (signals + scoring + price fetch),
+  // but persists a new snapshot in the DB so future loads are instant.
+  const recomputeCurrentPortfolio = async () => {
+    await startBacktest({
+      start_date: `${startDate}-01`,
+      end_date: `${endDate}-01`,
+      signal_weights: weights,
+      category_weights: categoryWeights,
+      top_n_sectors: topSectors,
+      top_n_per_sector: topPerSector,
+      skip_price_fetch: skipPriceFetch,
+      max_companies: maxCompanies,
+      universe_label: null,
+      index_universe: selectedIndexUniverse || null,
+      selection_mode: 'momentum',
+      random_seed: null,
+      n_trials: 1,
+      mode: 'current_portfolio',
+    });
+    // Refresh the snapshot list so the new snapshot is available in the picker
+    loadCurrentPicksSnapshots();
   };
 
   const saveBacktest = async () => {
@@ -837,6 +885,9 @@ export default function MomentumBacktester() {
             top_n_per_sector: topPerSector,
             universe_label: null,
             index_universe: selectedIndexUniverse || null,
+            selection_mode: selectionMode,
+            random_seed: selectionMode === 'random' ? randomSeed : null,
+            n_trials: selectionMode === 'random' ? Math.max(1, nTrials) : 1,
           },
           summary: result.summary,
           monthly_records: result.monthly_records,
@@ -867,6 +918,9 @@ export default function MomentumBacktester() {
       if (cfg.category_weights) setCategoryWeights(cfg.category_weights);
       if (cfg.top_n_sectors) setTopSectors(cfg.top_n_sectors);
       if (cfg.top_n_per_sector) setTopPerSector(cfg.top_n_per_sector);
+      if (cfg.selection_mode === 'random' || cfg.selection_mode === 'momentum') setSelectionMode(cfg.selection_mode);
+      if (typeof cfg.random_seed === 'number') setRandomSeed(cfg.random_seed);
+      if (typeof cfg.n_trials === 'number') setNTrials(cfg.n_trials);
       // Legacy saved runs may have used universe_label; both hit the same table now.
       setSelectedIndexUniverse(cfg.index_universe ?? cfg.universe_label ?? '');
 
@@ -1103,6 +1157,44 @@ export default function MomentumBacktester() {
               />
               <span className="text-gray-600 text-xs ml-1">0 = all</span>
             </div>
+            <div>
+              <label className="text-gray-500 text-xs block mb-1">Strategy</label>
+              <select
+                value={selectionMode}
+                onChange={(e) => setSelectionMode(e.target.value as 'momentum' | 'random')}
+                className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                title="Random ignores all signal weights and picks sectors/stocks at random — use as a noise-floor baseline."
+              >
+                <option value="momentum">Momentum</option>
+                <option value="random">Random (baseline)</option>
+              </select>
+            </div>
+            {selectionMode === 'random' && (
+              <>
+                <div>
+                  <label className="text-gray-500 text-xs block mb-1">Seed</label>
+                  <input
+                    type="number"
+                    value={randomSeed}
+                    onChange={(e) => setRandomSeed(Number(e.target.value))}
+                    className="w-20 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                    title="Same seed reproduces the same random picks. With Trials > 1, trials use seed, seed+1, ..."
+                  />
+                </div>
+                <div>
+                  <label className="text-gray-500 text-xs block mb-1">Trials</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={nTrials}
+                    onChange={(e) => setNTrials(Number(e.target.value))}
+                    className="w-16 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                    title="Number of independent random trials. Summary shows mean ± std across trials."
+                  />
+                </div>
+              </>
+            )}
             <label className="flex items-center gap-2 cursor-pointer self-center pt-4">
               <input
                 type="checkbox"
@@ -1118,6 +1210,20 @@ export default function MomentumBacktester() {
               className="px-5 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {running ? 'Running...' : 'Run Backtest'}
+            </button>
+            <button
+              onClick={showCurrentPicks}
+              disabled={running || selectionMode === 'random'}
+              className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-700 text-gray-300 hover:bg-white/5 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title={
+                selectionMode === 'random'
+                  ? 'Current Picks is unavailable for random selection mode'
+                  : currentPicksSnapshots.length > 0
+                    ? `Load most recent snapshot (${currentPicksSnapshots[0].as_of_date}, ${currentPicksSnapshots[0].triggered_by})`
+                    : 'No saved snapshot yet — first click will run a full compute and save it'
+              }
+            >
+              Current Picks
             </button>
             {running && (
               <button
@@ -1266,6 +1372,319 @@ export default function MomentumBacktester() {
           </div>
         )}
 
+        {/* Current Portfolio (MTD) — shown above backtest results, independent */}
+        {currentPortfolio && (
+          <div className="bg-[#151821] rounded-xl border border-gray-800/40 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-800/40 flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
+                <div>
+                  <div className="text-sm font-medium text-white">Current Picks</div>
+                  <div className="text-xs text-gray-500">
+                    Rebalance as of <span className="font-mono text-gray-400">{currentPortfolio.as_of_date}</span>
+                    {currentPortfolio.latest_price_date && (
+                      <> · MTD through <span className="font-mono text-gray-400">{currentPortfolio.latest_price_date}</span></>
+                    )}
+                    {' · '}{currentPortfolio.holdings.length} holdings
+                  </div>
+                </div>
+                {/* Snapshot picker */}
+                {currentPicksSnapshots.length > 0 && (
+                  <select
+                    value={currentPortfolio.snapshot_id ?? ''}
+                    onChange={(e) => {
+                      const id = Number(e.target.value);
+                      if (id) loadCurrentPicksSnapshot(id);
+                    }}
+                    className="bg-[#0f1117] border border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                    title="Switch to a historic snapshot"
+                  >
+                    {currentPortfolio.snapshot_id == null && <option value="">(unsaved)</option>}
+                    {currentPicksSnapshots.map((s) => (
+                      <option key={s.snapshot_id} value={s.snapshot_id}>
+                        {s.created_at.slice(0, 16).replace('T', ' ')} · {s.triggered_by} · {s.as_of_date.slice(0, 7)}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {/* Refresh MTD button — only meaningful when a saved snapshot is loaded */}
+                {currentPortfolio.snapshot_id != null && (
+                  <button
+                    onClick={() => refreshCurrentPicksMTD(currentPortfolio.snapshot_id!)}
+                    disabled={refreshingMTD || running}
+                    className="px-2.5 py-1 rounded-lg text-xs font-medium border border-gray-700 text-gray-300 hover:bg-white/5 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+                    title="Refresh month-to-date returns using the latest available prices (does not re-run signals)"
+                  >
+                    <span className="text-emerald-400">✓</span>
+                    {refreshingMTD ? 'Refreshing…' : 'Refresh MTD'}
+                  </button>
+                )}
+                {/* Force a new full compute */}
+                <button
+                  onClick={recomputeCurrentPortfolio}
+                  disabled={running}
+                  className="px-2.5 py-1 rounded-lg text-xs font-medium border border-gray-700 text-gray-300 hover:bg-white/5 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Run the full strategy now and save a new snapshot (slow)"
+                >
+                  Recompute
+                </button>
+              </div>
+              {currentPortfolio.holdings.length > 0 && (() => {
+                const validReturns = currentPortfolio.holdings
+                  .map(h => h.forward_return_pct)
+                  .filter((r): r is number => r != null);
+                if (validReturns.length === 0) return null;
+                const portMTD = validReturns.reduce((a, b) => a + b, 0) / validReturns.length;
+                return (
+                  <div className="text-right">
+                    <div className="text-xs text-gray-500">Portfolio MTD (equal-weight)</div>
+                    <div className={`text-lg font-mono font-medium ${portMTD >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {portMTD >= 0 ? '+' : ''}{portMTD.toFixed(2)}%
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+            {currentPortfolio.holdings.length > 0 ? (
+              <div className="bg-[#0f1117] px-5 py-3">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-gray-600">
+                      <th className="text-left py-1 font-medium">Ticker</th>
+                      <th className="text-left py-1 font-medium">Company</th>
+                      <th className="text-left py-1 font-medium">Sector</th>
+                      {categories.map((cat) => (
+                        <th key={cat} className="text-right py-1 font-medium">
+                          {cat === 'price' ? 'Price' : cat === 'volume' ? 'Vol' : cat}
+                        </th>
+                      ))}
+                      <th className="text-right py-1 font-medium">Total</th>
+                      <th className="text-right py-1 font-medium pl-4">Start (local)</th>
+                      <th className="text-right py-1 font-medium">End (local)</th>
+                      <th className="text-right py-1 font-medium pl-4">Start (€)</th>
+                      <th className="text-right py-1 font-medium">End (€)</th>
+                      <th className="text-right py-1 font-medium pl-4">Return</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...currentPortfolio.holdings]
+                      .sort((a, b) => {
+                        const sec = a.sector.localeCompare(b.sector);
+                        return sec !== 0 ? sec : b.score - a.score;
+                      })
+                      .map((h) => {
+                        const exch = exchangeByCompany.get(h.company_id) ?? '';
+                        const href = guruFocusUrl(h.ticker, exch);
+                        return (
+                          <tr key={h.company_id} className="border-t border-gray-800/20">
+                            <td className="py-1.5 font-mono whitespace-nowrap">
+                              <a
+                                href={href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-indigo-400 hover:text-indigo-300 hover:underline"
+                              >
+                                {h.ticker}
+                              </a>
+                              {exch && (
+                                <span
+                                  className="ml-1 text-[10px] text-gray-500"
+                                  title={EXCHANGE_NAMES[exch.toUpperCase()] ?? exch}
+                                >
+                                  ({exch})
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-1.5 truncate max-w-[200px]">
+                              <a
+                                href={href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-gray-300 hover:text-indigo-300 hover:underline"
+                              >
+                                {h.company_name}
+                              </a>
+                            </td>
+                            <td className="py-1.5 text-gray-500">{h.sector}</td>
+                            {categories.map((cat) => (
+                              <td key={cat} className="text-right py-1.5 text-gray-400 font-mono">
+                                {h.category_scores?.[cat] != null ? h.category_scores[cat]!.toFixed(0) : '—'}
+                              </td>
+                            ))}
+                            <td className="text-right py-1.5 text-white font-mono font-medium">{h.score.toFixed(1)}</td>
+                            <td className="text-right py-1.5 text-gray-400 font-mono pl-4">
+                              {fmtPrice(h.entry_price_local)}
+                              {h.currency && <span className="text-gray-600 text-[10px] ml-1">{h.currency}</span>}
+                              {h.entry_date && (
+                                <CellInfoTip>
+                                  <div className="text-gray-400">Trading date</div>
+                                  <div className="font-mono text-gray-200">{h.entry_date}</div>
+                                </CellInfoTip>
+                              )}
+                            </td>
+                            <td className="text-right py-1.5 text-gray-400 font-mono">
+                              {fmtPrice(h.exit_price_local)}
+                              {h.exit_date && (
+                                <CellInfoTip>
+                                  <div className="text-gray-400">Trading date</div>
+                                  <div className="font-mono text-gray-200">{h.exit_date}</div>
+                                </CellInfoTip>
+                              )}
+                            </td>
+                            <td className="text-right py-1.5 text-gray-400 font-mono pl-4">
+                              {fmtPrice(h.entry_price_eur)}
+                              {(h.entry_date || (h.entry_price_eur != null && h.entry_price_local)) && (
+                                <CellInfoTip>
+                                  {h.entry_date && (
+                                    <>
+                                      <div className="text-gray-400">Trading date</div>
+                                      <div className="font-mono text-gray-200 mb-1">{h.entry_date}</div>
+                                    </>
+                                  )}
+                                  {h.entry_price_eur != null && h.entry_price_local && h.entry_price_local > 0 && (
+                                    <>
+                                      <div className="text-gray-400">FX rate</div>
+                                      <div className="font-mono text-gray-200">
+                                        1 {h.currency ?? 'LCL'} = {(h.entry_price_eur / h.entry_price_local).toFixed(4)} EUR
+                                      </div>
+                                    </>
+                                  )}
+                                </CellInfoTip>
+                              )}
+                            </td>
+                            <td className="text-right py-1.5 text-gray-400 font-mono">
+                              {fmtPrice(h.exit_price_eur)}
+                              {(h.exit_date || (h.exit_price_eur != null && h.exit_price_local)) && (
+                                <CellInfoTip>
+                                  {h.exit_date && (
+                                    <>
+                                      <div className="text-gray-400">Trading date</div>
+                                      <div className="font-mono text-gray-200 mb-1">{h.exit_date}</div>
+                                    </>
+                                  )}
+                                  {h.exit_price_eur != null && h.exit_price_local && h.exit_price_local > 0 && (
+                                    <>
+                                      <div className="text-gray-400">FX rate</div>
+                                      <div className="font-mono text-gray-200">
+                                        1 {h.currency ?? 'LCL'} = {(h.exit_price_eur / h.exit_price_local).toFixed(4)} EUR
+                                      </div>
+                                    </>
+                                  )}
+                                </CellInfoTip>
+                              )}
+                            </td>
+                            <td className={`text-right py-1.5 font-mono pl-4 ${h.forward_return_pct != null ? (h.forward_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
+                              {fmtPct(h.forward_return_pct)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="px-4 py-6 text-center text-sm text-gray-500">
+                No holdings selected for this month — universe or signals returned empty.
+              </div>
+            )}
+            {/* Daily picks — what the strategy WOULD have picked each trading
+                day this month. Click a row to see the holdings for that date. */}
+            {currentPortfolio.daily_picks && currentPortfolio.daily_picks.length > 0 && (
+              <div className="border-t border-gray-800/40">
+                <div className="px-4 py-3 border-b border-gray-800/40">
+                  <div className="text-sm font-medium text-white">Daily picks ({currentPortfolio.daily_picks.length} trading days)</div>
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    Hypothetical: what the strategy would pick if rebalancing on each day. Turnover compares to the previous day.
+                  </div>
+                </div>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-gray-800/40 text-gray-600">
+                      <th className="text-left px-4 py-1.5 font-medium">Date</th>
+                      <th className="text-right px-3 py-1.5 font-medium">Holdings</th>
+                      <th className="text-right px-3 py-1.5 font-medium">Turnover</th>
+                      <th className="text-right px-3 py-1.5 font-medium">%</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {currentPortfolio.daily_picks.map((dp) => (
+                      <Fragment key={dp.date}>
+                        <tr
+                          className="border-b border-gray-800/30 hover:bg-white/[0.02] cursor-pointer"
+                          onClick={() => setExpandedDailyDate(expandedDailyDate === dp.date ? null : dp.date)}
+                        >
+                          <td className="px-4 py-1.5 font-mono text-gray-200">
+                            <span className="text-gray-600 mr-2">{expandedDailyDate === dp.date ? '▾' : '▸'}</span>
+                            {dp.date}
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono text-gray-300">{dp.holdings.length}</td>
+                          <td className={`px-3 py-1.5 text-right font-mono ${dp.turnover_abs > 0 ? 'text-amber-400' : 'text-gray-600'}`}>
+                            {dp.turnover_abs > 0 ? dp.turnover_abs : '—'}
+                          </td>
+                          <td className={`px-3 py-1.5 text-right font-mono ${dp.turnover_pct > 0 ? 'text-amber-400' : 'text-gray-600'}`}>
+                            {dp.turnover_pct > 0 ? `${dp.turnover_pct.toFixed(2)}%` : '—'}
+                          </td>
+                        </tr>
+                        {expandedDailyDate === dp.date && (
+                          <tr>
+                            <td colSpan={4} className="bg-[#0f1117] px-5 py-3">
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="text-gray-600">
+                                    <th className="text-left py-1 font-medium">Ticker</th>
+                                    <th className="text-left py-1 font-medium">Company</th>
+                                    <th className="text-left py-1 font-medium">Sector</th>
+                                    <th className="text-right py-1 font-medium">Score</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {[...dp.holdings]
+                                    .sort((a, b) => {
+                                      const sec = a.sector.localeCompare(b.sector);
+                                      return sec !== 0 ? sec : b.score - a.score;
+                                    })
+                                    .map((h) => {
+                                      const exch = exchangeByCompany.get(h.company_id) ?? '';
+                                      const href = guruFocusUrl(h.ticker, exch);
+                                      return (
+                                        <tr key={h.company_id} className="border-t border-gray-800/20">
+                                          <td className="py-1.5 font-mono whitespace-nowrap">
+                                            <a
+                                              href={href}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="text-indigo-400 hover:text-indigo-300 hover:underline"
+                                            >
+                                              {h.ticker}
+                                            </a>
+                                            {exch && (
+                                              <span
+                                                className="ml-1 text-[10px] text-gray-500"
+                                                title={EXCHANGE_NAMES[exch.toUpperCase()] ?? exch}
+                                              >
+                                                ({exch})
+                                              </span>
+                                            )}
+                                          </td>
+                                          <td className="py-1.5 truncate max-w-[200px] text-gray-300">{h.company_name}</td>
+                                          <td className="py-1.5 text-gray-500">{h.sector}</td>
+                                          <td className="text-right py-1.5 text-white font-mono font-medium">{h.score.toFixed(1)}</td>
+                                        </tr>
+                                      );
+                                    })}
+                                </tbody>
+                              </table>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Results */}
         {result && (
           <>
@@ -1397,6 +1816,56 @@ export default function MomentumBacktester() {
                 <span><span className="font-mono text-gray-300">Avg Holdings {result.summary.avg_holdings.toFixed(1)}</span></span>
                 <span><span className="font-mono text-gray-300">Months {result.summary.total_months}</span></span>
               </div>
+              {/* Multi-trial cross-trial statistics — backend means ± std.
+                  These are the numbers to compare a momentum run against,
+                  NOT the per-series stats above (which derive from the mean
+                  equity curve and understate volatility). */}
+              {result.summary.n_trials != null && result.summary.n_trials > 1 && (
+                <div className="px-4 py-3 border-t border-gray-800/40">
+                  <div className="text-xs font-medium text-gray-400 mb-2">
+                    Cross-trial statistics ({result.summary.n_trials} random trials, mean ± std)
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+                    <div className="bg-[#0f1117] rounded-lg px-3 py-2">
+                      <div className="text-gray-500">Total Return</div>
+                      <div className="font-mono text-gray-200">
+                        {fmtPct(result.summary.total_return_pct)}
+                        <span className="text-gray-500"> ± {(result.summary.total_return_pct_std ?? 0).toFixed(2)}%</span>
+                      </div>
+                    </div>
+                    <div className="bg-[#0f1117] rounded-lg px-3 py-2">
+                      <div className="text-gray-500">Annualized</div>
+                      <div className="font-mono text-gray-200">
+                        {fmtPct(result.summary.annualized_return_pct)}
+                        <span className="text-gray-500"> ± {(result.summary.annualized_return_pct_std ?? 0).toFixed(2)}%</span>
+                      </div>
+                    </div>
+                    <div className="bg-[#0f1117] rounded-lg px-3 py-2">
+                      <div className="text-gray-500">Max Drawdown</div>
+                      <div className="font-mono text-gray-200">
+                        {fmtPct(result.summary.max_drawdown_pct)}
+                        <span className="text-gray-500"> ± {(result.summary.max_drawdown_pct_std ?? 0).toFixed(2)}%</span>
+                      </div>
+                    </div>
+                    <div className="bg-[#0f1117] rounded-lg px-3 py-2">
+                      <div className="text-gray-500">Sharpe</div>
+                      <div className="font-mono text-gray-200">
+                        {result.summary.sharpe_ratio != null ? result.summary.sharpe_ratio.toFixed(2) : '—'}
+                        {result.summary.sharpe_ratio_std != null && (
+                          <span className="text-gray-500"> ± {result.summary.sharpe_ratio_std.toFixed(2)}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="bg-[#0f1117] rounded-lg px-3 py-2">
+                      <div className="text-gray-500">Turnover</div>
+                      <div className="font-mono text-gray-200">
+                        {fmtPct(result.summary.avg_monthly_turnover_pct)}
+                        <span className="text-gray-500"> ± {(result.summary.avg_monthly_turnover_pct_std ?? 0).toFixed(2)}%</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
               {alignedSeries.series.some((s) => s.topDrawdowns.length > 0) && (
                 <div className="px-4 py-3 border-t border-gray-800/40 space-y-3">
                   {alignedSeries.series.map((s) => (

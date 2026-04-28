@@ -1,12 +1,12 @@
 # BBTerminal
 
-A financial data terminal for wealth management. Analyses stocks using data from LongEquity reports, enriched with price data from GuruFocus.
+A financial data terminal for wealth management. Analyses stocks using data from LongEquity reports and index universes (S&P 500, ACWI), enriched with price/volume data from GuruFocus. Includes a momentum portfolio backtester and a live "current picks" view.
 
 ## Architecture
 
-- **Frontend**: Next.js (App Router) deployed on Vercel (free tier) — `frontend/`
-- **Backend**: FastAPI (Python) with uv — `backend/` — planned migration to Railway ($5/mo)
-- **Database**: Supabase (Postgres, free tier) — schema in `supabase/migrations/`
+- **Frontend**: Next.js 16 (App Router) deployed on Vercel — `frontend/`
+- **Backend**: FastAPI (Python, `uv`) deployed on Railway — `backend/`
+- **Database**: Supabase (Postgres) — schema in `supabase/migrations/`
 - **Auth**: Supabase Auth (email/password)
 - **Two Supabase projects**: dev and prod. Dev has all data; prod needs migrations + data sync.
 
@@ -87,93 +87,153 @@ The frontend follows Next.js convention: `.env.local` overrides `.env`. Vercel u
 
 ## Backend (`backend/`)
 
-**Entry point**: `main.py` — FastAPI app with all API endpoints.
+**Entry point**: `main.py` — single FastAPI app with all API endpoints.
 
-**Key files**:
+**Top-level modules**:
 - `portfolio.py` — Parses AIRS Excel exports, computes YTD returns in EUR and local currency per holding
 - `airs_scanner.py` — Playwright browser automation: logs in to AirSPMS, scrapes portfolio data
-- `ingest/acquire.py` — Downloads LongEquity report files from remote storage
-- `ingest/flatten.py` — Flattens grouped Excel headers into a flat DataFrame
-- `ingest/extend_primary.py` — Enriches tickers with primary exchange info
-- `ingest/transformation.py` — Transforms flattened data into DB schema format
-- `ingest/load_into_supabase.py` — Loads prepared data into Supabase tables
-- `ingest/resolve_tickers.py` — Resolves unknown tickers via OpenFIGI
-- `ingest/prices.py` — Fetches daily closing prices AND volumes from GuruFocus API, caches in Supabase Storage
-- `momentum/` — Momentum backtester engine (see section below)
+- `fx_rates.py` — ECB/Yahoo FX rate fetchers + `fx_rate` table sync
+- `diagnose.py` — One-off diagnostic helpers
 - `playground/main.py` — **Ignore for now.** Standalone scratch file.
 
-### Momentum module (`backend/momentum/`)
+**`ingest/` — LongEquity + GuruFocus ingest pipeline**:
+- `acquire.py` — Downloads LongEquity report files from remote storage
+- `flatten.py` — Flattens grouped Excel headers into a flat DataFrame
+- `extend_primary.py` — Enriches tickers with primary exchange info
+- `transformation.py` — Transforms flattened data into DB schema format
+- `load_into_supabase.py` — Loads prepared data into Supabase tables
+- `resolve_tickers.py` — Resolves unknown tickers via OpenFIGI
+- `prices.py` — Fetches daily closing prices AND volumes from GuruFocus, caches in Supabase Storage. Includes `_retry_transient` for timeout/5xx resilience on Storage and `metric_data.upsert()` calls.
+- `staleness.py` — Cache freshness rules
+- `api_usage.py` — Tracks GuruFocus API call counts per region/month
 
-- `data.py` — Bulk data loaders: `load_universe()`, `load_all_prices()`, `load_all_volumes()`. Queries batched in chunks of 50 company IDs to avoid Cloudflare 502 on Supabase.
-- `signals.py` — Signal computation. 5 price signals (mom_12_1, mom_6m, volatility_adjusted_return_6m, drawdown_from_recent_high_pct, above_200ma) + 2 volume signals (vol_20d_vs_60d, vol_trend_3m). Each signal has a `"group"` field ("price" or "volume"). Uses pre-indexed `dict[int, pd.Series]` for O(1) lookups.
-- `scoring.py` — Category-based scoring: each category (price, volume) gets independent 0-100 min-max normalized score, then combined via adjustable category weights into final `momentum_score`.
-- `backtest.py` — Monthly rebalance loop: compute signals → score & select → equal-weight portfolio → forward 1-month returns → cumulative tracking. Streams progress via SSE.
+**`universe/` — Universe screening (criteria-driven)**:
+- `criteria.py` — Per-criterion definitions and metadata
+- `screen.py` — Apply criteria to companies, build/store derived universes
+- `derived_metrics.py` — Compute and store screening metrics in `metric_data` (source `derived`)
 
-**API endpoints**:
-- `GET /api/companies` — List all companies
-- `POST /api/companies` — Create company
-- `PUT /api/companies/{id}` — Update company
-- `DELETE /api/companies/{id}` — Delete company (cascades metric_data + portfolio_weight)
-- `POST /api/portfolios/parse` — Upload AIRS Excel, returns parsed holdings with YTD returns
-- `GET /api/longequity/snapshots` — List loaded LongEquity months
-- `GET /api/longequity/companies?target_date=` — Companies for a snapshot date
-- `POST /api/ingest/long-equity` — SSE stream: runs full ingest pipeline
-- `GET /api/airs/scan` — SSE stream: runs Playwright broker scan, returns portfolio list
-- `GET /api/companies/field-options` — Distinct exchanges/countries/sectors for dropdowns
-- `POST /api/momentum/backtest` — SSE stream: runs momentum backtest, streams progress + result
-- `GET /api/momentum/signals` — Returns signal definitions (keys, defaults, groups, categories)
-- `GET /api/momentum/backtests` — List saved backtest runs
-- `POST /api/momentum/backtests` — Save a backtest run
-- `DELETE /api/momentum/backtests/{id}` — Delete saved backtest
-- `GET /api/benchmarks` — List benchmarks with price date ranges
-- `POST /api/benchmarks` — Create benchmark (fetches prices from GuruFocus, cutoff 2015-01-01)
-- `PUT /api/benchmarks/{id}/refresh` — Refresh benchmark prices
-- `DELETE /api/benchmarks/{id}` — Delete benchmark
-- `GET /api/benchmarks/{id}/prices` — Get monthly benchmark prices
-- `GET /api/earnings` — Earnings dashboard data
+**`index_universe/` — Index reconstruction (S&P 500, ACWI)**:
+- `sp500.py` — Scrape Wikipedia S&P 500 history, reconstruct monthly memberships, OpenFIGI resolution
+- `acwi.py` — iShares ACWI fund holdings + MSCI announcement parsing
+- `discover_overrides.py` — One-off helper for ticker-name override discovery
+
+**`momentum/` — Momentum backtester engine**:
+- `data.py` — Bulk loaders: `load_universe()`, `load_all_prices()`, `load_all_volumes()`, FX conversion, currency lookups. Queries batched in chunks of 50 company IDs to avoid Cloudflare 502 on Supabase.
+- `signals.py` — Signal computation. 5 price signals (mom_12_1, mom_6m, volatility_adjusted_return_6m, drawdown_from_recent_high_pct, above_200ma) + 2 volume signals (vol_20d_vs_60d, vol_trend_3m). Each signal has a `"group"` field ("price" or "volume"). Pre-indexed `dict[int, pd.Series]` for O(1) lookups. **Strict `<` cutoff** on `as_of_date` so signals never see the close at which we'd enter the trade. **30-day staleness guard** filters companies whose last trade is too old.
+- `scoring.py` — Category-based scoring: each category (price, volume) gets independent 0-100 min-max normalized score, then combined via adjustable category weights into final `momentum_score`. Includes `random_select` for the random-baseline mode.
+- `backtest.py` — Three runners:
+  - `run_backtest` — monthly rebalance loop (signals → score & select → equal-weight → forward 1-month return → cumulative tracking)
+  - `run_multi_trial_backtest` — N independent random-selection runs with sequential seeds, aggregates mean ± std for headline stats
+  - `run_current_portfolio` — single-month "what would the strategy hold today" with month-to-date returns
+
+**`tests/`** — Pytest unit tests for momentum signals + scoring (`uv run pytest tests/`).
+
+**API endpoints** (selected — see `main.py` for the complete list):
+
+*Auth / system*
+- `GET /api/health`, `GET /api/hello`, `DELETE /api/auth/delete-account`
+- `GET /api/usage` — GuruFocus API usage counter
+
+*Companies*
+- `GET|POST|PUT|DELETE /api/companies` — CRUD (delete cascades `metric_data` + `portfolio_weight`)
+- `GET /api/companies/field-options` — Distinct exchanges/countries/sectors
+
+*LongEquity ingest*
+- `GET /api/longequity/snapshots` — List loaded months
+- `GET /api/longequity/companies?target_date=` — Companies for a snapshot
+- `GET /api/longequity/latest-available`
+- `POST /api/ingest/long-equity` — SSE: full ingest pipeline
+- `POST /api/longequity/save-universe`
+
+*Portfolios*
+- `POST /api/portfolios/parse` — Upload AIRS Excel, returns parsed holdings + YTD
+- `GET /api/airs/scan` — SSE: Playwright broker scan
+- `GET /api/airs/portfolios`, `GET /api/airs/portfolio/{name}`
+
+*Earnings*
+- `POST /api/earnings/{company_id}/refresh/{source}`, `POST /api/earnings/{company_id}/refresh-all`
+- `GET /api/earnings/{company_id}/metrics`, `GET /api/earnings/{company_id}/metric-codes`
+
+*Momentum*
+- `GET /api/momentum/signals` — Signal definitions
+- `POST /api/momentum/backtest` — SSE: runs backtest. Modes: standard backtest (`mode="backtest"`, default), random multi-trial (`selection_mode="random"`, `n_trials>1`), or current portfolio (`mode="current_portfolio"`).
+- `GET|POST|DELETE|PATCH /api/momentum/backtests[/{run_id}]` — Saved backtests CRUD + rename
+- `GET /api/momentum/current-picks` — List saved current-picks snapshots (most recent first)
+- `GET /api/momentum/current-picks/{id}` — Load one snapshot (full holdings)
+- `POST /api/momentum/current-picks/{id}/refresh-mtd` — MTD-only recompute on a stored snapshot's holdings (fast)
+- `POST /api/momentum/current-picks/cron` — Cron entry point. Requires `X-Cron-Secret` header. Forces `mode=current_portfolio`, persists with `triggered_by='auto'`. See Deployment / Cron section.
+
+*Universe (criteria-screened)*
+- `GET /api/universe/criteria`, `POST /api/universe/screen`, `POST /api/universe/build`
+- `GET /api/universe/labels`, `GET /api/universe/months`
+- `GET|DELETE /api/universe/months/{month}`, `PUT|DELETE /api/universe/labels/{label}`
+- `GET /api/universe/derived-metrics/{criteria,status}`, `POST /api/universe/derived-metrics/recompute`
+- `POST /api/universe/derive/preview`, `POST /api/universe/derive`
+- `GET /api/universe/validate`
+
+*Index universe (S&P 500, ACWI)*
+- `POST /api/index-universe/import-sp500`, `GET /api/index-universe/{indexes,months,tickers,cumulative,changes}`
+- `POST /api/index-universe/check-gurufocus`, `DELETE /api/index-universe/indexes/{index_name}`
+- `GET /api/acwi/{holdings,announcements,announcement-detail,net-additions,fetch-all-details}`
+- `POST /api/acwi/announcement-details-bulk`, `POST /api/acwi/save-universe`
+
+*Benchmarks*
+- `GET|POST /api/benchmarks`, `POST /api/benchmarks/{id}/refresh`, `DELETE /api/benchmarks/{id}`
+- `GET /api/benchmarks/{id}/prices`
+
+*FX + indicators*
+- `GET /api/fx/{coverage,latest,history/{currency}}`
+- `POST /api/indicators/fetch`
+- `GET /api/gurufocus/{exchanges,exchange-currencies}`
 
 **Environment variables** (`.env`, overridden by `.env.local` if present):
-- `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` — Supabase connection (prod in `.env`, local in `.env.local`)
+- `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`
 - `GURUFOCUS_BASE_URL`, `GURUFOCUS_API_KEY`
 - `BROKER_USERNAME`, `BROKER_PASSWORD` — AirSPMS credentials for Playwright scanner
+- `CRON_SECRET` — shared secret required by `POST /api/momentum/current-picks/cron`
 
 ---
 
 ## Frontend (`frontend/`)
 
-**Pages** (App Router):
+**Pages** (App Router, all client components):
 - `/` — Welcome page
-- `/longequity` — LongEquity Insight: monthly snapshots of stock universe, grouped by region/country
+- `/longequity-universe` — LongEquity Insight: monthly snapshots of stock universe, grouped by region/country
 - `/airs-portfolio` — AIRS Portfolio: broker scanner + drag & drop Excel uploads, YTD returns table
 - `/companies` — Company management: searchable/filterable table, inline edit, add/delete
-- `/momentum` — Momentum Portfolio Backtester
+- `/momentum` — Momentum Portfolio Backtester + Current Picks
 - `/benchmarks` — Benchmark management (create/refresh/delete index benchmarks)
 - `/earnings` — Earnings dashboard
+- `/universe` — Universe screener (criteria-driven)
+- `/universe_index` — Index universe (S&P 500, ACWI) management
+- `/acwi` — ACWI holdings / MSCI announcement explorer
+- `/fx-rates` — FX rate viewer + sync
+- `/request_gurufocus` — GuruFocus indicator fetch UI
 - `/login`, `/set-password` — Auth pages
 
 **Components** (`frontend/app/components/`):
 - `Sidebar.tsx` — Navigation sidebar with auth
-- `LongEquityInsight.tsx` — Snapshot viewer with region/country grouping, ingest pipeline UI
+- `LongEquityUniverse.tsx` — Snapshot viewer with region/country grouping, ingest pipeline UI
 - `AirsPortfolioUpload.tsx` — Portfolio scanner + list/detail views, drag & drop, localStorage cache
 - `CompanyManager.tsx` — Company CRUD table with inline editing
-- `IngestButton.tsx` — Ingest trigger button
-- `MomentumBacktester.tsx` — Momentum backtest UI: config panel with signal weight sliders (grouped by category), category weight sliders, equity curve chart (Recharts), benchmark comparison, summary stats, monthly portfolio table with per-category scores. Saved backtests CRUD.
+- `IngestButton.tsx`, `ProgressTimeline.tsx`, `DialogHost.tsx`, `DatePartsPicker.tsx`, `ApiUsageBadge.tsx` — Shared UI
+- `MomentumBacktester.tsx` — Momentum backtest UI: config panel with signal weight sliders (grouped by category), category weight sliders, equity curve chart (Recharts), benchmark comparison, summary stats, monthly portfolio table with per-category scores. Saved backtests CRUD. Strategy mode selector (Momentum / Random baseline) with trial count + seed. "Current Picks" button for live MTD portfolio view.
 - `BenchmarkManager.tsx` — Benchmark CRUD: add index tickers (e.g. SPY, ACWI), fetch prices, show date ranges
 - `EarningsDashboard.tsx` — Earnings data viewer
+- `UniverseScreener.tsx` — Criteria-driven universe screener
+- `IndexUniverse.tsx`, `AcwiUniverse.tsx` — Index universe explorers
+- `FxRates.tsx` — FX rate coverage / history
+- `Indicators.tsx` — GuruFocus indicator fetch trigger
+
+**Stores** (`frontend/lib/stores/`): Lightweight reactive store pattern (`createStore`). `momentum.ts` holds the SSE-driven backtest + current portfolio state.
 
 ---
 
 ## Database schema
 
-**Tables** (see `supabase/migrations/`):
-- `company` — Primary key `company_id`, unique on `(primary_ticker, primary_exchange)`
-- `metric_data` — Time-series data, PK `(company_id, metric_code, source_code, target_date)`. Stores both prices (`metric_code='close_price'`) and volumes (`metric_code='volume'`).
-- `portfolio` — Portfolio metadata, unique on `(portfolio_name, target_date)`
-- `portfolio_weight` — Portfolio holdings, PK `(portfolio_id, company_id)`
-- `ticker_override` — OpenFIGI ticker resolutions
-- `backtest_run` — Saved backtest configurations and results (see `20260409120000_backtest_runs.sql`)
-- `benchmark` — Benchmark index metadata (ticker, exchange, name) (see `20260409130000_benchmarks.sql`)
-- `benchmark_price` — Monthly benchmark prices (benchmark_id, target_date, price)
+See [`docs/schema.md`](docs/schema.md) for the full ERD and table descriptions.
+
+Key tables: `company`, `metric_data` (time-series for prices, volumes, derived metrics), `universe` + `universe_membership`, `backtest_run`, `benchmark` + `benchmark_price`, `gurufocus_exchange` + `country` + `currency` + `fx_rate`, `airs_performance`.
 
 ---
 
@@ -207,7 +267,7 @@ Modern fintech dark theme. Key principles:
 
 - All frontend components are client components (`'use client'`)
 - Backend uses `asyncio.to_thread()` for blocking Supabase calls
-- SSE (Server-Sent Events) for long-running operations (ingest pipeline, broker scanner, backtest)
+- SSE (Server-Sent Events) for long-running operations (ingest pipeline, broker scanner, backtest, current portfolio)
 - SSE keepalive comments (`: keepalive\n\n`) sent before long-running operations to prevent proxy timeouts
 - AIRS portfolio data is parsed server-side but cached client-side in localStorage (no DB storage)
 - Company deletion cascades: removes metric_data and portfolio_weight rows first
@@ -216,181 +276,39 @@ Modern fintech dark theme. Key principles:
 - Supabase `.in_()` queries batched in chunks of 50 to avoid Cloudflare 502 errors
 - GuruFocus raw API responses cached in Supabase Storage bucket `gurufocus-raw` as JSON files
 - Storage paths: `{EXCHANGE}_{TICKER}/indicator__price.json` and `indicator__volume.json`
-
-## Deployment
-
-- **Current**: Both frontend and backend deployed on Vercel. Backend SSE streams break on Vercel Hobby (10s function timeout).
-- **Planned**: Migrate backend to Railway ($5/mo) for long-running SSE streams. Keep frontend on Vercel free tier. Supabase stays on free tier.
-- **Railway migration**: Not yet done — next task. Will need `Procfile` or `Dockerfile`, env vars configured, and Vercel frontend pointed to Railway backend URL.
-
-## Known issues
-
-- Vercel Hobby 10s timeout cuts off backtest SSE streams in production. Workaround: SSE keepalive comments + frontend reconnect handling. Real fix: Railway backend.
-- Sidebar occasionally disappears after login — likely hydration/auth state timing issue. Hard refresh fixes it.
-- Universe for backtesting uses current company list retroactively (survivorship bias) since LongEquity snapshots only exist from Aug 2025.
+- **Momentum signal cutoff is strict `<`** (data must be from before `as_of_date`) so we never train on the bar we trade — see `signals.py`. Companies with last trade > 30 calendar days before `as_of_date` are filtered out (staleness guard).
+- **Momentum tests live in `backend/tests/`** — run with `uv run pytest tests/` from the backend dir.
+- Transient Supabase Storage / `metric_data.upsert` errors retry up to 3× with backoff via `_retry_transient` in `ingest/prices.py`.
 
 ---
 
-## Current Task: AIRS Broker Portfolio Scanner
+## Deployment
 
-### Goal
-Build a feature in the AIRS portfolio tab that triggers a Playwright browser automation on the backend, streams real-time progress to the frontend, and displays the discovered portfolios in a table. No database storage — everything is ephemeral.
+- **Frontend**: Vercel (free tier).
+- **Backend**: Railway. Long-running SSE streams (ingest, backtest, broker scan) work without timeout limits.
+- **Database**: Supabase (free tier).
 
-### Flow
+To deploy, push to `main` — both Vercel and Railway are wired to auto-deploy from the connected GitHub repo. For Railway, the backend service runs `uvicorn main:app` with env vars set in the Railway dashboard.
 
-```
-Frontend (AIRS tab)          Backend API              Playwright
-┌──────────────┐       ┌─────────────────┐      ┌──────────────┐
-│ "Start Scan" │──────>│ GET /api/airs/   │─────>│ Launch       │
-│   button     │       │   scan           │      │ Chromium     │
-│              │       │                  │      │              │
-│ Progress log │<──SSE─│ SSE stream       │<─────│ Step events  │
-│ (real-time)  │       │                  │      │              │
-│              │       │                  │      │              │
-│ Portfolio    │<──────│ Final payload    │<─────│ Table scrape │
-│ table        │       │ in SSE stream    │      │              │
-└──────────────┘       └─────────────────┘      └──────────────┘
-```
+### Cron: weekly current-picks snapshot
 
-### Backend: `GET /api/airs/scan`
+Railway Cron is configured to fire `POST /api/momentum/current-picks/cron` at **02:00 UTC every Monday** (= 03:00 Amsterdam in winter, 04:00 in summer — close enough to the requested 04:00 weekly cadence).
 
-Returns SSE stream (`Content-Type: text/event-stream`). Follow the same SSE pattern as `POST /api/ingest/long-equity`.
-
-**SSE event format** (each line is `data: {json}\n\n`):
-```json
-{"type": "progress", "step": "login", "status": "in_progress", "message": "Navigating to login page..."}
-{"type": "progress", "step": "login", "status": "done", "message": "Logged in successfully"}
-{"type": "progress", "step": "navigate", "status": "in_progress", "message": "Opening Rapportage menu..."}
-{"type": "progress", "step": "navigate", "status": "done", "message": "Navigated to portfolio selection"}
-{"type": "progress", "step": "scrape", "status": "in_progress", "message": "Reading portfolio table..."}
-{"type": "portfolios", "data": [{"portefeuille": "BUS_Neutraal_Dyn", "depotbank": "MPF", "client": "ALGBUS", "naam": "Bustelberg Neutraal Dyn MPF"}, ...]}
-{"type": "done", "message": "Scan complete. Found 22 portfolios."}
+The cron command:
+```bash
+curl -fsS -X POST "https://<backend>/api/momentum/current-picks/cron" \
+  -H "X-Cron-Secret: $CRON_SECRET" \
+  -H "Content-Type: application/json" \
+  -d @/app/cron-current-picks.json
 ```
 
-On error:
-```json
-{"type": "error", "message": "Login failed — check credentials"}
-```
+Where `cron-current-picks.json` holds the strategy config (same shape as `BacktestRequest`) — typically the user's preferred signal weights, sectors, top-N, and `index_universe`. The endpoint forces `mode=current_portfolio` regardless of body content. The resulting snapshot lands in `current_picks_snapshot` with `triggered_by='auto'`.
 
-**Playwright automation** (put in `backend/airs_scanner.py`):
+To change the strategy the cron uses, edit `cron-current-picks.json` (or whichever payload file Railway is configured to send). To pause the cron, disable it in Railway's service config.
 
-```python
-async def scan_portfolios(send_event):
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
+---
 
-        # Step 1: Login
-        await send_event("progress", step="login", status="in_progress", message="Navigating to login page...")
-        await page.goto("https://bustelberg.airspms.cloud/login.php")
-        await page.wait_for_load_state("domcontentloaded")
+## Known issues
 
-        await send_event("progress", step="login", status="in_progress", message="Entering credentials...")
-        await page.fill('input[type="text"]', BROKER_USERNAME)
-        await page.fill('input[type="password"]', BROKER_PASSWORD)
-        await page.click('input[type="submit"], button[type="submit"]')
-        await page.wait_for_load_state("networkidle")
-        await send_event("progress", step="login", status="done", message="Logged in successfully")
-
-        # Step 2: Navigate to Front-office
-        await send_event("progress", step="navigate", status="in_progress", message="Opening Rapportage menu...")
-        await page.hover('a[data-field="Rapportage"]')
-        await page.wait_for_timeout(500)
-
-        await send_event("progress", step="navigate", status="in_progress", message="Clicking Front-office...")
-        await page.click('a[data-field="Front-Office"]')
-        await page.wait_for_load_state("networkidle")
-        await send_event("progress", step="navigate", status="done", message="Navigated to portfolio selection")
-
-        # Step 3: Scrape portfolio table
-        await send_event("progress", step="scrape", status="in_progress", message="Reading portfolio table...")
-        await page.wait_for_selector('tr.list_dataregel', timeout=10000)
-
-        rows = await page.query_selector_all('tr.list_dataregel')
-        portfolios = []
-        for row in rows:
-            cells = await row.query_selector_all('td.listTableData')
-            if len(cells) >= 4:
-                portfolios.append({
-                    "portefeuille": (await cells[0].inner_text()).strip(),
-                    "depotbank": (await cells[1].inner_text()).strip(),
-                    "client": (await cells[2].inner_text()).strip(),
-                    "naam": (await cells[3].inner_text()).strip(),
-                })
-
-        await send_event("portfolios", data=portfolios)
-        await send_event("done", message=f"Scan complete. Found {len(portfolios)} portfolios.")
-        await browser.close()
-```
-
-**Credentials**: Read `BROKER_USERNAME` and `BROKER_PASSWORD` from `.env`. Never expose to frontend.
-
-**Dependency**: Add `playwright` to backend deps. Run `playwright install chromium` once.
-
-### Playwright selectors (from actual site HTML)
-
-| Element | Selector |
-|---------|----------|
-| Username field | `input[type="text"]` |
-| Password field | `input[type="password"]` |
-| Login submit | `input[type="submit"]` or `button[type="submit"]` |
-| Rapportage menu | `a[data-field="Rapportage"]` |
-| Front-office link | `a[data-field="Front-Office"]` |
-| Portfolio rows | `tr.list_dataregel` |
-| Portfolio cells | `td.listTableData` |
-| Radio buttons | `input[id="BUS_Neutraal_Dyn"]` (id = portfolio name) |
-
-### Frontend: AIRS portfolio tab
-
-**Location**: `AirsPortfolioUpload.tsx` — wipe current logic, replace with scanner UI.
-
-**UI layout**:
-```
-┌─────────────────────────────────────────────────────┐
-│ AIRS Portfolio Scanner                               │
-│                                                      │
-│ [Start Scan]                                         │
-│                                                      │
-│ ┌─ Progress ──────────────────────────────────────┐  │
-│ │ ✓ Navigating to login page...                   │  │
-│ │ ✓ Entering credentials...                       │  │
-│ │ ✓ Logged in successfully                        │  │
-│ │ ● Opening Rapportage menu...                    │  │
-│ │ ○ Reading portfolio table...                    │  │
-│ └─────────────────────────────────────────────────┘  │
-│                                                      │
-│ ┌─ Portfolios (22 found) ────────────────────────┐  │
-│ │ #  Portefeuille              Dp   Client  Naam  │  │
-│ │ 1  BUS_Neutraal_Dyn          MPF  ALGBUS  ...   │  │
-│ │ 2  BUS_Offensief_Dyn         MPF  ALGBUS  ...   │  │
-│ │ ...                                             │  │
-│ └─────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────┘
-```
-
-**Behavior**:
-1. User clicks "Start Scan" → button disables, shows spinner
-2. Progress log streams in via SSE with status icons:
-   - `○` pending (gray-500), `●` in progress (indigo-400, pulse), `✓` done (emerald-400), `✗` error (rose-400)
-3. When `type: "portfolios"` arrives → render table below progress
-4. When `type: "done"` arrives → re-enable button
-
-**SSE connection**:
-```javascript
-const eventSource = new EventSource(`${API_BASE}/api/airs/scan`);
-eventSource.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  if (data.type === 'progress') setProgress(prev => [...prev, data]);
-  else if (data.type === 'portfolios') setPortfolios(data.data);
-  else if (data.type === 'done') { setScanning(false); eventSource.close(); }
-  else if (data.type === 'error') { setError(data.message); setScanning(false); eventSource.close(); }
-};
-```
-
-**Style**: Follow the existing design system (dark theme, card containers, indigo accents). Match the SSE progress pattern from the LongEquity ingest UI.
-
-### What NOT to do
-- Do NOT store anything in Supabase yet
-- Do NOT persist portfolios — live scan every time
-- Do NOT send credentials from frontend — backend .env only
-- Do NOT use WebSockets — SSE matches existing patterns
+- Sidebar occasionally disappears after login — likely hydration/auth state timing issue. Hard refresh fixes it.
+- Universe for backtesting uses current company list retroactively (survivorship bias) when no `index_universe` (e.g. SP500, ACWI) is selected — LongEquity-derived snapshots only exist from Aug 2025 onward.

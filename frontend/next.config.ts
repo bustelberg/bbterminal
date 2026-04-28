@@ -3,7 +3,12 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   /* config options here */
-  reactCompiler: true,
+  // Temporarily disabled: the React Compiler mis-optimizes our custom store
+  // hook (`createStore().use()` wrapping useSyncExternalStore), producing
+  // "change in the order of Hooks" errors in unrelated components. Re-enable
+  // once https://github.com/facebook/react/issues for this pattern is fixed,
+  // or add 'use no memo' directives to the affected files.
+  reactCompiler: false,
   devIndicators: false,
   allowedDevOrigins: ['127.0.0.1'],
   turbopack: {

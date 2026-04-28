@@ -84,7 +84,10 @@ export default function AcwiUniverse() {
   const [feasibleFilter, setFeasibleFilter] = useState('');
   const [onePerExchange, setOnePerExchange] = useState(false);
   const [histStart, setHistStart] = useState('2002-01-01');
-  const [histEnd, setHistEnd] = useState(`${new Date().getFullYear()}-01-01`);
+  const [histEnd, setHistEnd] = useState(() => {
+    const t = new Date();
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-01`;
+  });
   const [timelineSearch, setTimelineSearch] = useState('');
   const [universeName, setUniverseName] = useState('ACWI');
   // Save-universe state lives in a module-scoped store so the SSE stream keeps

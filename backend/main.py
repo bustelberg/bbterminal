@@ -37,7 +37,9 @@ from momentum.data import (
     sync_fx_rates_to_db,
 )
 from momentum.signals import PRICE_SIGNAL_DEFS
-from momentum.backtest import BacktestConfig, run_backtest
+from momentum.backtest import (
+    BacktestConfig, run_backtest, run_multi_trial_backtest, run_current_portfolio,
+)
 from universe.screen import screen_universe, build_and_store_universes, validate_vs_longequity
 from universe.criteria import CRITERIA_NAMES, CRITERIA_DESCRIPTIONS, CRITERIA_MIN_YEARS
 from index_universe.sp500 import (
@@ -86,6 +88,25 @@ _MONTHS = {
     "may": 5, "june": 6, "july": 7, "august": 8,
     "september": 9, "october": 10, "november": 11, "december": 12,
 }
+
+
+def _save_current_picks_snapshot(payload: dict, config: dict, triggered_by: str) -> int:
+    """Insert a current_picks snapshot and return its snapshot_id.
+    Synchronous (call via asyncio.to_thread from async paths)."""
+    if triggered_by not in ("auto", "manual"):
+        raise ValueError(f"triggered_by must be 'auto' or 'manual', got {triggered_by!r}")
+    row = {
+        "triggered_by": triggered_by,
+        "as_of_date": payload["as_of_date"],
+        "latest_price_date": payload.get("latest_price_date"),
+        "config": config,
+        "holdings": payload["holdings"],
+        "daily_picks": payload.get("daily_picks") or [],
+    }
+    resp = supabase.table("current_picks_snapshot").insert(row).execute()
+    if not resp.data:
+        raise RuntimeError("insert returned no data")
+    return int(resp.data[0]["snapshot_id"])
 
 
 def _as_of_date_from_filename(filename: str) -> date:
@@ -1365,6 +1386,10 @@ class BacktestRequest(BaseModel):
     max_companies: int = 0  # 0 = all, otherwise limit universe (alphabetical)
     universe_label: str | None = None  # if set, use universe_membership for per-month filtering
     index_universe: str | None = None  # if set, use universe_membership for per-month filtering (e.g. "SP500")
+    selection_mode: str = "momentum"  # "momentum" or "random"
+    random_seed: int | None = None  # only used when selection_mode == "random"
+    n_trials: int = 1  # >1 only valid with selection_mode=="random"; aggregates mean ± std
+    mode: str = "backtest"  # "backtest" or "current_portfolio"
 
 
 async def _momentum_backtest_stream(req: BacktestRequest):
@@ -1374,6 +1399,15 @@ async def _momentum_backtest_stream(req: BacktestRequest):
 
     def _keepalive() -> str:
         return ": keepalive\n\n"
+
+    # current_portfolio mode runs against today only; coerce the date range
+    # so price loading covers ~14 months of history (12m momentum + buffer)
+    # without requiring the caller to pick the right window.
+    if req.mode == "current_portfolio":
+        from datetime import timedelta as _td
+        _today = date.today()
+        req.start_date = (_today - _td(days=14 * 31)).isoformat()
+        req.end_date = _today.isoformat()
 
     try:
         yield _emit({"type": "progress", "pct": 0, "message": "Loading universe..."})
@@ -1512,6 +1546,8 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             "category_weights": req.category_weights,
             "top_n_sectors": req.top_n_sectors,
             "top_n_per_sector": req.top_n_per_sector,
+            "selection_mode": req.selection_mode,
+            "random_seed": req.random_seed,
         })
 
         data_cutoff = date.fromisoformat(req.end_date)
@@ -1598,7 +1634,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                         await result_queue.put({"cid": row_cid, "symbol": sym, "exchange": row_exchange, "pr": pr, "vr": vr, "status": "ok", "ms": elapsed_ms})
                     except Exception as e:
                         elapsed_ms = int((time.monotonic() - task_start) * 1000)
-                        await result_queue.put({"cid": row_cid, "symbol": sym, "exchange": row_exchange, "error": str(e), "status": "error", "ms": elapsed_ms})
+                        await result_queue.put({"cid": row_cid, "symbol": sym, "exchange": row_exchange, "error": f"{type(e).__name__}: {e}", "status": "error", "ms": elapsed_ms})
                     finally:
                         inflight["count"] -= 1
 
@@ -1954,12 +1990,29 @@ async def _momentum_backtest_stream(req: BacktestRequest):
 
         def _run_backtest():
             try:
-                r = run_backtest(config, prices_df, universe_df, send_event,
-                    volumes_df=volumes_df,
-                    monthly_eligible=monthly_eligible,
-                    prices_local_df=prices_local_df,
-                    company_currency=company_currency,
-                )
+                if req.mode == "current_portfolio":
+                    r = run_current_portfolio(
+                        config, prices_df, universe_df, send_event,
+                        volumes_df=volumes_df,
+                        monthly_eligible=monthly_eligible,
+                        prices_local_df=prices_local_df,
+                        company_currency=company_currency,
+                    )
+                elif req.selection_mode == "random" and req.n_trials > 1:
+                    r = run_multi_trial_backtest(
+                        config, prices_df, universe_df, req.n_trials, send_event,
+                        volumes_df=volumes_df,
+                        monthly_eligible=monthly_eligible,
+                        prices_local_df=prices_local_df,
+                        company_currency=company_currency,
+                    )
+                else:
+                    r = run_backtest(config, prices_df, universe_df, send_event,
+                        volumes_df=volumes_df,
+                        monthly_eligible=monthly_eligible,
+                        prices_local_df=prices_local_df,
+                        company_currency=company_currency,
+                    )
                 backtest_result_holder.append(r)
             except Exception as e:
                 backtest_error_holder.append(e)
@@ -2002,8 +2055,25 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             for _, row in universe_df.iterrows()
         ]
 
-        yield _emit({"type": "result", "data": result.to_dict(), "universe": universe_snapshot})
-        yield _emit({"type": "done", "message": "Backtest complete"})
+        if req.mode == "current_portfolio":
+            payload = result.to_dict()
+            # Persist snapshot so subsequent loads are instant. We don't fail
+            # the SSE if the insert errors — the user still sees the result.
+            try:
+                snapshot_id = await asyncio.to_thread(
+                    _save_current_picks_snapshot,
+                    payload,
+                    req.model_dump(),
+                    "manual",
+                )
+                payload["snapshot_id"] = snapshot_id
+            except Exception as e:
+                yield _emit({"type": "warning", "scope": "snapshot", "message": f"Could not persist snapshot: {type(e).__name__}: {e}"})
+            yield _emit({"type": "current_portfolio", "data": payload, "universe": universe_snapshot})
+            yield _emit({"type": "done", "message": "Current portfolio computed"})
+        else:
+            yield _emit({"type": "result", "data": result.to_dict(), "universe": universe_snapshot})
+            yield _emit({"type": "done", "message": "Backtest complete"})
 
     except Exception as e:
         yield _emit({"type": "error", "message": str(e)})
@@ -2113,6 +2183,186 @@ async def rename_backtest(run_id: int, req: RenameBacktestRequest):
     if not resp.data:
         raise HTTPException(404, "Backtest not found")
     return resp.data[0]
+
+
+# ─── Current Picks snapshots ─────────────────────────────────────────────────
+
+
+@app.get("/api/momentum/current-picks")
+async def list_current_picks():
+    """List snapshots, most recent first. Excludes the heavy holdings JSONB."""
+    resp = await asyncio.to_thread(
+        lambda: supabase.table("current_picks_snapshot")
+        .select("snapshot_id, created_at, triggered_by, as_of_date, latest_price_date")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    rows = resp.data or []
+    # Add holdings_count via a separate aggregate query? Cheaper to skip and let
+    # the UI show only metadata; the count appears on the loaded snapshot.
+    return rows
+
+
+@app.get("/api/momentum/current-picks/{snapshot_id}")
+async def get_current_picks(snapshot_id: int):
+    """Load one full snapshot, including holdings."""
+    resp = await asyncio.to_thread(
+        lambda: supabase.table("current_picks_snapshot")
+        .select("*")
+        .eq("snapshot_id", snapshot_id)
+        .limit(1)
+        .execute()
+    )
+    if not resp.data:
+        raise HTTPException(404, "Snapshot not found")
+    return resp.data[0]
+
+
+def _refresh_mtd_for_holdings(holdings: list[dict]) -> tuple[list[dict], str | None]:
+    """Recompute MTD (forward_return_pct) for already-picked holdings using the
+    latest available prices. Returns (updated_holdings, latest_price_date)."""
+    company_ids = [int(h["company_id"]) for h in holdings if h.get("company_id") is not None]
+    if not company_ids:
+        return holdings, None
+
+    # Look back ~14 days from today — the latest close should always land
+    # inside that window even after long weekends / holidays.
+    from datetime import timedelta
+    today = date.today()
+    start = today - timedelta(days=14)
+
+    prices_local_df = load_all_prices(supabase, company_ids, start, today)
+    if prices_local_df.empty:
+        return holdings, None
+
+    company_currency = load_company_currency(supabase, company_ids)
+    currencies = sorted({c for c in company_currency.values() if c})
+    fx_rates = load_fx_rates(supabase, currencies, start, today) if currencies else {}
+    prices_eur_df, _ = convert_prices_to_eur(prices_local_df, company_currency, fx_rates)
+
+    # Index latest price per company
+    latest_eur: dict[int, tuple[date, float]] = {}
+    if not prices_eur_df.empty:
+        for cid, group in prices_eur_df.groupby("company_id"):
+            row = group.sort_values("target_date").iloc[-1]
+            latest_eur[int(cid)] = (row["target_date"], float(row["price"]))
+    latest_local: dict[int, tuple[date, float]] = {}
+    for cid, group in prices_local_df.groupby("company_id"):
+        row = group.sort_values("target_date").iloc[-1]
+        latest_local[int(cid)] = (row["target_date"], float(row["price"]))
+
+    overall_latest: date | None = None
+    updated: list[dict] = []
+    for h in holdings:
+        cid = int(h.get("company_id")) if h.get("company_id") is not None else None
+        new_h = dict(h)
+        if cid is not None and cid in latest_local:
+            ld, lp_local = latest_local[cid]
+            new_h["exit_price_local"] = round(lp_local, 4)
+            new_h["exit_date"] = ld.isoformat() if hasattr(ld, "isoformat") else str(ld)
+            if overall_latest is None or ld > overall_latest:
+                overall_latest = ld
+        if cid is not None and cid in latest_eur:
+            _, lp_eur = latest_eur[cid]
+            new_h["exit_price_eur"] = round(lp_eur, 4)
+            entry_eur = h.get("entry_price_eur")
+            if entry_eur and entry_eur > 0:
+                new_h["forward_return_pct"] = round((lp_eur / float(entry_eur) - 1) * 100, 2)
+        updated.append(new_h)
+
+    latest_iso = overall_latest.isoformat() if overall_latest else None
+    return updated, latest_iso
+
+
+@app.post("/api/momentum/current-picks/{snapshot_id}/refresh-mtd")
+async def refresh_current_picks_mtd(snapshot_id: int):
+    """Recompute MTD on a stored snapshot using the latest available prices.
+    Does NOT mutate the stored snapshot — this is a read-side recomputation."""
+    snap_resp = await asyncio.to_thread(
+        lambda: supabase.table("current_picks_snapshot")
+        .select("*")
+        .eq("snapshot_id", snapshot_id)
+        .limit(1)
+        .execute()
+    )
+    if not snap_resp.data:
+        raise HTTPException(404, "Snapshot not found")
+    snap = snap_resp.data[0]
+    holdings = snap.get("holdings") or []
+    updated, latest = await asyncio.to_thread(_refresh_mtd_for_holdings, holdings)
+    return {
+        "snapshot_id": snapshot_id,
+        "as_of_date": snap.get("as_of_date"),
+        "latest_price_date": latest,
+        "holdings": updated,
+    }
+
+
+@app.post("/api/momentum/current-picks/cron")
+async def cron_current_picks(req: BacktestRequest, x_cron_secret: str = Header(default="")):
+    """Cron entry point. Forces mode=current_portfolio, runs the full
+    compute, and persists with triggered_by='auto'.
+
+    Auth: requires the X-Cron-Secret header to match the CRON_SECRET env var.
+    """
+    expected = os.environ.get("CRON_SECRET", "")
+    if not expected:
+        raise HTTPException(500, "CRON_SECRET env var is not set on the server")
+    if x_cron_secret != expected:
+        raise HTTPException(401, "Invalid cron secret")
+
+    # Force the right mode regardless of what the caller sent.
+    req.mode = "current_portfolio"
+    if req.selection_mode == "random":
+        raise HTTPException(400, "Cron does not support random selection mode")
+
+    # Drain the SSE stream to completion, then persist + return JSON.
+    payload: dict | None = None
+    universe_snapshot: list = []
+    error_msg: str | None = None
+    async for chunk in _momentum_backtest_stream(req):
+        # Each chunk is "data: {json}\n\n" or ": keepalive\n\n"
+        if not chunk.startswith("data: "):
+            continue
+        try:
+            evt = json.loads(chunk[len("data: "):].strip())
+        except json.JSONDecodeError:
+            continue
+        if evt.get("type") == "current_portfolio":
+            payload = evt.get("data") or {}
+            universe_snapshot = evt.get("universe") or []
+        elif evt.get("type") == "error":
+            error_msg = evt.get("message") or "unknown error"
+
+    if error_msg:
+        raise HTTPException(500, error_msg)
+    if payload is None:
+        raise HTTPException(500, "Compute completed but no portfolio payload was produced")
+
+    # The SSE path already inserted a row with triggered_by='manual'. Replace
+    # that with an 'auto' row by upserting a fresh one and deleting the manual
+    # one we just created.
+    auto_id = None
+    try:
+        # The SSE path stored its snapshot_id on the payload; remove it first.
+        manual_id = payload.pop("snapshot_id", None)
+        auto_id = await asyncio.to_thread(
+            _save_current_picks_snapshot,
+            payload,
+            req.model_dump(),
+            "auto",
+        )
+        if manual_id is not None:
+            await asyncio.to_thread(
+                lambda: supabase.table("current_picks_snapshot")
+                .delete()
+                .eq("snapshot_id", manual_id)
+                .execute()
+            )
+    except Exception as e:
+        raise HTTPException(500, f"Cron compute succeeded but persist failed: {type(e).__name__}: {e}")
+
+    return {"snapshot_id": auto_id, "as_of_date": payload.get("as_of_date"), "holdings_count": len(payload.get("holdings", []))}
 
 
 # ─── Benchmarks ───────────────────────────────────────────────────────────────

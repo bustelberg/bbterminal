@@ -22,7 +22,10 @@ def _mom_return(series: pd.Series, n_months: int) -> float | None:
     past = series[series.index <= cutoff]
     if past.empty:
         return None
-    return round((float(series.iloc[-1]) / float(past.iloc[-1]) - 1) * 100, 2)
+    past_price = float(past.iloc[-1])
+    if past_price == 0:
+        return None
+    return round((float(series.iloc[-1]) / past_price - 1) * 100, 2)
 
 
 def _distance_from_ma_pct(series: pd.Series, window: int) -> float | None:
@@ -139,7 +142,9 @@ def _compute_single_company_signals(series: pd.Series) -> dict:
 
     mom_12_1 = None
     if not past_12m.empty and not series_skip_last.empty:
-        mom_12_1 = round((float(series_skip_last.iloc[-1]) / float(past_12m.iloc[-1]) - 1) * 100, 2)
+        past_12m_price = float(past_12m.iloc[-1])
+        if past_12m_price != 0:
+            mom_12_1 = round((float(series_skip_last.iloc[-1]) / past_12m_price - 1) * 100, 2)
 
     return {
         "mom_12_1": mom_12_1,
@@ -194,6 +199,10 @@ def compute_price_signals(
         Companies with insufficient data are excluded.
     """
     cutoff = pd.Timestamp(as_of_date)
+    # Reject companies whose last available price is older than this many days
+    # before the cutoff — otherwise signals get anchored to stale prices
+    # (delisted/halted/data-gap names) instead of current state.
+    max_staleness_days = 30
 
     results = []
 
@@ -202,21 +211,24 @@ def compute_price_signals(
             series = price_index.get(int(cid))
             if series is None or len(series) < 20:
                 continue
-            trimmed = series[series.index <= cutoff]
+            # Strict `<` so signals never see the close at which we'll enter the trade.
+            trimmed = series[series.index < cutoff]
             if len(trimmed) < 20:
+                continue
+            if (cutoff - trimmed.index[-1]).days > max_staleness_days:
                 continue
             signals = _compute_single_company_signals(trimmed)
             # Volume signals
             if volume_index is not None:
                 vol_series = volume_index.get(int(cid))
                 if vol_series is not None and len(vol_series) > 0:
-                    vol_trimmed = vol_series[vol_series.index <= cutoff]
+                    vol_trimmed = vol_series[vol_series.index < cutoff]
                     vol_signals = _compute_volume_signals(vol_trimmed)
                     signals.update(vol_signals)
             signals["company_id"] = cid
             results.append(signals)
     else:
-        available = prices_df[prices_df["target_date"] <= cutoff]
+        available = prices_df[prices_df["target_date"] < cutoff]
         for cid in universe_df["company_id"].unique():
             company_prices = available[available["company_id"] == cid]
             if company_prices.empty or len(company_prices) < 20:
@@ -226,6 +238,8 @@ def compute_price_signals(
                 index=pd.DatetimeIndex(company_prices["target_date"]),
                 dtype="float64",
             ).sort_index()
+            if (cutoff - series.index[-1]).days > max_staleness_days:
+                continue
             signals = _compute_single_company_signals(series)
             signals["company_id"] = cid
             results.append(signals)

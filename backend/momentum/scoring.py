@@ -148,3 +148,54 @@ def score_and_select(
     )
 
     return selected
+
+
+def random_select(
+    signals_df: pd.DataFrame,
+    *,
+    top_n_sectors: int = 4,
+    top_n_per_sector: int = 6,
+    rng: np.random.Generator,
+) -> pd.DataFrame:
+    """Random-baseline selector: pick random sectors and random companies.
+
+    Same shape and column contract as score_and_select, but momentum_score
+    and category scores are NaN — selection ignores signals entirely. Used
+    as a noise floor to isolate signal-driven alpha from structural effects
+    (sector diversification, equal-weight, monthly rebalance).
+    """
+    if signals_df.empty:
+        return pd.DataFrame()
+
+    df = signals_df.copy()
+    sectors = [s for s in df["sector"].dropna().unique().tolist() if s]
+    if not sectors:
+        return pd.DataFrame()
+
+    n_sectors = min(top_n_sectors, len(sectors))
+    chosen_sectors = rng.choice(sectors, size=n_sectors, replace=False).tolist()
+
+    parts = []
+    for sec in chosen_sectors:
+        in_sec = df[df["sector"] == sec]
+        n = min(top_n_per_sector, len(in_sec))
+        if n == 0:
+            continue
+        idx = rng.choice(in_sec.index.to_numpy(), size=n, replace=False)
+        parts.append(in_sec.loc[idx])
+
+    if not parts:
+        return pd.DataFrame()
+
+    selected = pd.concat(parts, ignore_index=True)
+
+    # Match score_and_select's output columns with NaN sentinels — the
+    # consumer in backtest.py guards on pd.notna for these.
+    for cat in _get_category_keys():
+        col = f"score_{cat}"
+        if col not in selected.columns:
+            selected[col] = np.nan
+    if "momentum_score" not in selected.columns:
+        selected["momentum_score"] = np.nan
+
+    return selected

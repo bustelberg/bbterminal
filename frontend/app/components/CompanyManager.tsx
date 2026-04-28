@@ -214,6 +214,22 @@ export default function CompanyManager() {
     });
   }, [companies, search, filterExchange, filterCountry, filterDupes, sortField, sortDir]);
 
+  // Count of companies that share a name with at least one other company.
+  // Click the badge in the header to filter the table to just these rows.
+  const duplicateCount = useMemo(() => {
+    const nameCounts = new Map<string, number>();
+    for (const c of companies) {
+      const name = (c.company_name ?? '').trim().toLowerCase();
+      if (name) nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+    }
+    let n = 0;
+    for (const c of companies) {
+      const name = (c.company_name ?? '').trim().toLowerCase();
+      if (name && (nameCounts.get(name) ?? 0) > 1) n++;
+    }
+    return n;
+  }, [companies]);
+
   function handleSort(field: SortField) {
     if (sortField === field) {
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
@@ -291,6 +307,20 @@ export default function CompanyManager() {
           <h1 className="text-lg font-semibold text-white">Companies</h1>
           <p className="text-xs text-gray-500 mt-0.5">
             {loading ? 'Loading...' : `${filtered.length} of ${companies.length} companies`}
+            {!loading && duplicateCount > 0 && (
+              <>
+                {' · '}
+                <button
+                  onClick={() => setFilterDupes(!filterDupes)}
+                  className={`underline-offset-2 hover:underline transition-colors ${
+                    filterDupes ? 'text-rose-400' : 'text-rose-400/80 hover:text-rose-400'
+                  }`}
+                  title={filterDupes ? 'Click to clear duplicates filter' : 'Click to show only duplicate entries'}
+                >
+                  {duplicateCount} duplicate{duplicateCount === 1 ? '' : 's'}
+                </button>
+              </>
+            )}
           </p>
         </div>
         <button

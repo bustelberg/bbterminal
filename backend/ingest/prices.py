@@ -57,6 +57,37 @@ def _storage_path(ticker: str, exchange: str, indicator: str = "price") -> str:
 _BUCKET_READY = False
 
 
+_MAX_RETRIES = 3
+_RETRY_DELAY = 2  # seconds; multiplied by attempt number
+
+
+def _is_transient_error(e: BaseException) -> bool:
+    """Heuristic: catch socket timeouts and HTTP 5xx / bad-gateway errors
+    coming from Supabase Storage and metric_data calls."""
+    name = type(e).__name__.lower()
+    err = str(e).lower()
+    if "timeout" in name or "timeout" in err or "timed out" in err:
+        return True
+    if "502" in err or "503" in err or "504" in err or "bad gateway" in err:
+        return True
+    if "connection" in err and ("reset" in err or "aborted" in err):
+        return True
+    return False
+
+
+def _retry_transient(fn, *, description: str, max_retries: int = _MAX_RETRIES):
+    """Run fn(), retrying on transient errors (timeouts, 5xx). Other
+    exceptions propagate immediately. Returns fn()'s value."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            return fn()
+        except Exception as e:
+            if _is_transient_error(e) and attempt < max_retries:
+                time.sleep(_RETRY_DELAY * attempt)
+                continue
+            raise
+
+
 def _ensure_bucket(supabase: Client) -> None:
     """Idempotent bucket creation. Guarded so it fires at most once per process —
     previous version fired an HTTP call on every price/volume fetch."""
@@ -72,7 +103,10 @@ def _ensure_bucket(supabase: Client) -> None:
 
 def _fetch_from_storage(supabase: Client, path: str) -> list | None:
     try:
-        raw = supabase.storage.from_(_BUCKET).download(path)
+        raw = _retry_transient(
+            lambda: supabase.storage.from_(_BUCKET).download(path),
+            description=f"storage.download({path})",
+        )
         return json.loads(raw)
     except Exception:
         return None
@@ -81,16 +115,22 @@ def _fetch_from_storage(supabase: Client, path: str) -> list | None:
 def _upload_to_storage(supabase: Client, path: str, data: list) -> None:
     content = json.dumps(data, ensure_ascii=False).encode("utf-8")
     try:
-        supabase.storage.from_(_BUCKET).upload(
-            path, content, file_options={"content-type": "application/json"}
+        _retry_transient(
+            lambda: supabase.storage.from_(_BUCKET).upload(
+                path, content, file_options={"content-type": "application/json"}
+            ),
+            description=f"storage.upload({path})",
         )
     except Exception as e:
         msg = str(e).lower()
         if "already exists" not in msg and "duplicate" not in msg and "409" not in msg:
             raise
         try:
-            supabase.storage.from_(_BUCKET).update(
-                path, content, file_options={"content-type": "application/json"}
+            _retry_transient(
+                lambda: supabase.storage.from_(_BUCKET).update(
+                    path, content, file_options={"content-type": "application/json"}
+                ),
+                description=f"storage.update({path})",
             )
         except Exception:
             pass
@@ -249,9 +289,12 @@ def _upsert_metric_rows(
     total = 0
     for i in range(0, len(rows), batch_size):
         batch = rows[i : i + batch_size]
-        resp = supabase.table("metric_data").upsert(
-            batch, on_conflict="company_id,metric_code,source_code,target_date", ignore_duplicates=False
-        ).execute()
+        resp = _retry_transient(
+            lambda b=batch: supabase.table("metric_data").upsert(
+                b, on_conflict="company_id,metric_code,source_code,target_date", ignore_duplicates=False
+            ).execute(),
+            description=f"metric_data.upsert(company={company_id}, {metric_code}, {len(batch)} rows)",
+        )
         total += len(resp.data)
     return total
 

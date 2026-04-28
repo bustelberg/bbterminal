@@ -45,11 +45,50 @@ export type Summary = {
   total_months: number;
   avg_holdings: number;
   top_drawdowns?: DrawdownPeriod[];
+  // Populated only for multi-trial random backtests; headline stats above
+  // are then means and these are the cross-trial std-devs.
+  n_trials?: number | null;
+  total_return_pct_std?: number | null;
+  annualized_return_pct_std?: number | null;
+  max_drawdown_pct_std?: number | null;
+  sharpe_ratio_std?: number | null;
+  avg_monthly_turnover_pct_std?: number | null;
 };
 
 export type BacktestResult = {
   monthly_records: MonthlyRecord[];
   summary: Summary;
+};
+
+export type DailyPickHolding = {
+  company_id: number;
+  ticker: string;
+  company_name: string;
+  sector: string;
+  score: number;
+};
+
+export type DailyPick = {
+  date: string;                   // YYYY-MM-DD
+  holdings: DailyPickHolding[];
+  turnover_abs: number;           // # stocks added (= removed for fixed-size) vs previous day
+  turnover_pct: number;           // turnover_abs / portfolio_size * 100
+};
+
+export type CurrentPortfolio = {
+  as_of_date: string;             // YYYY-MM-01 — start of current month
+  latest_price_date: string | null; // most recent observed price across holdings
+  holdings: Holding[];
+  daily_picks?: DailyPick[];      // per-trading-day hypothetical picks + turnover
+  snapshot_id?: number;           // present when loaded from DB (or persisted post-compute)
+};
+
+export type CurrentPicksSnapshotMeta = {
+  snapshot_id: number;
+  created_at: string;             // ISO timestamp
+  triggered_by: 'auto' | 'manual';
+  as_of_date: string;
+  latest_price_date: string | null;
 };
 
 export type UniverseEntry = {
@@ -68,6 +107,9 @@ export type MomentumState = {
   running: boolean;
   progress: ProgressEntry[];
   result: BacktestResult | null;
+  currentPortfolio: CurrentPortfolio | null;
+  currentPicksSnapshots: CurrentPicksSnapshotMeta[];
+  refreshingMTD: boolean;
   universe: UniverseEntry[];
   error: string | null;
   warnings: WarningEntry[];
@@ -86,12 +128,19 @@ export type BacktestStartConfig = {
   max_companies: number;
   universe_label: string | null;
   index_universe: string | null;
+  selection_mode: 'momentum' | 'random';
+  random_seed: number | null;
+  n_trials: number;
+  mode?: 'backtest' | 'current_portfolio';
 };
 
 export const momentumStore = createStore<MomentumState>({
   running: false,
   progress: [],
   result: null,
+  currentPortfolio: null,
+  currentPicksSnapshots: [],
+  refreshingMTD: false,
   universe: [],
   error: null,
   warnings: [],
@@ -109,7 +158,8 @@ export async function startBacktest(cfg: BacktestStartConfig): Promise<void> {
   momentumStore.set({
     running: true,
     progress: [],
-    result: null,
+    result: cfg.mode === 'current_portfolio' ? momentumStore.get().result : null,
+    currentPortfolio: cfg.mode === 'current_portfolio' ? null : momentumStore.get().currentPortfolio,
     universe: [],
     error: null,
     warnings: [],
@@ -135,7 +185,7 @@ export async function startBacktest(cfg: BacktestStartConfig): Promise<void> {
           pct?: number;
           message?: string;
           scope?: string;
-          data?: BacktestResult;
+          data?: BacktestResult | CurrentPortfolio;
           universe?: UniverseEntry[];
         };
         lastEventTime = Date.now();
@@ -153,7 +203,11 @@ export async function startBacktest(cfg: BacktestStartConfig): Promise<void> {
           }));
         } else if (data.type === 'result') {
           receivedResult = true;
-          momentumStore.set({ result: data.data ?? null });
+          momentumStore.set({ result: (data.data as BacktestResult) ?? null });
+          if (data.universe) momentumStore.set({ universe: data.universe });
+        } else if (data.type === 'current_portfolio') {
+          receivedResult = true;
+          momentumStore.set({ currentPortfolio: (data.data as CurrentPortfolio) ?? null });
           if (data.universe) momentumStore.set({ universe: data.universe });
         } else if (data.type === 'done') {
           receivedDone = true;
@@ -192,4 +246,67 @@ export function cancelBacktest(): void {
   abortController?.abort();
   abortController = null;
   momentumStore.set({ running: false });
+}
+
+// ─── Current Picks snapshots ─────────────────────────────────────────────
+
+export async function loadCurrentPicksSnapshots(): Promise<void> {
+  try {
+    const resp = await fetch(`${API_URL}/api/momentum/current-picks`);
+    if (!resp.ok) return;
+    const rows = (await resp.json()) as CurrentPicksSnapshotMeta[];
+    momentumStore.set({ currentPicksSnapshots: rows });
+  } catch {
+    // non-fatal — UI just won't show the snapshot picker
+  }
+}
+
+export async function loadCurrentPicksSnapshot(snapshotId: number): Promise<void> {
+  try {
+    const resp = await fetch(`${API_URL}/api/momentum/current-picks/${snapshotId}`);
+    if (!resp.ok) {
+      momentumStore.set({ error: `Failed to load snapshot ${snapshotId}` });
+      return;
+    }
+    const row = await resp.json();
+    momentumStore.set({
+      currentPortfolio: {
+        snapshot_id: row.snapshot_id,
+        as_of_date: row.as_of_date,
+        latest_price_date: row.latest_price_date,
+        holdings: row.holdings ?? [],
+        daily_picks: row.daily_picks ?? [],
+      },
+      error: null,
+    });
+  } catch (e) {
+    momentumStore.set({ error: e instanceof Error ? e.message : 'Failed to load snapshot' });
+  }
+}
+
+export async function refreshCurrentPicksMTD(snapshotId: number): Promise<void> {
+  momentumStore.set({ refreshingMTD: true, error: null });
+  try {
+    const resp = await fetch(`${API_URL}/api/momentum/current-picks/${snapshotId}/refresh-mtd`, { method: 'POST' });
+    if (!resp.ok) {
+      momentumStore.set({ error: `MTD refresh failed (${resp.status})`, refreshingMTD: false });
+      return;
+    }
+    const data = await resp.json();
+    const cur = momentumStore.get().currentPortfolio;
+    // Only update if the same snapshot is still loaded
+    if (cur && cur.snapshot_id === snapshotId) {
+      momentumStore.set({
+        currentPortfolio: {
+          ...cur,
+          latest_price_date: data.latest_price_date ?? cur.latest_price_date,
+          holdings: data.holdings ?? cur.holdings,
+        },
+      });
+    }
+  } catch (e) {
+    momentumStore.set({ error: e instanceof Error ? e.message : 'MTD refresh failed' });
+  } finally {
+    momentumStore.set({ refreshingMTD: false });
+  }
 }

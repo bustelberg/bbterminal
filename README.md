@@ -9,7 +9,7 @@ A full-stack app with a **Next.js** frontend, **FastAPI** backend, and **Supabas
 | Layer    | Tech                        | Deploy        |
 |----------|-----------------------------|---------------|
 | Frontend | Next.js 16 + Tailwind CSS   | Vercel        |
-| Backend  | FastAPI + uvicorn (Python)  | Vercel        |
+| Backend  | FastAPI + uvicorn (Python)  | Railway       |
 | Database | Supabase (Postgres + auth)  | Supabase      |
 
 ---
@@ -97,7 +97,7 @@ supabase migration new <migration-name>
 
 ## Deploy to Production
 
-Both frontend and backend deploy to **Vercel**. Push to `main` triggers automatic deployments if the Vercel GitHub integration is set up.
+The frontend deploys to **Vercel**, the backend to **Railway**. Both auto-deploy on push to `main` via their respective GitHub integrations.
 
 ### Push to prod via Git
 
@@ -107,15 +107,16 @@ git commit -m "your message"
 git push origin main
 ```
 
-### Manual deploy via Vercel CLI
+### Manual deploy
 
 ```bash
-# Install Vercel CLI if needed
+# Frontend (Vercel CLI)
 npm i -g vercel
-
-# Deploy frontend
 cd frontend && vercel --prod
 
-# Deploy backend
-cd backend && vercel --prod
+# Backend (Railway CLI)
+npm i -g @railway/cli
+cd backend && railway up
 ```
+
+Environment variables are managed in each platform's dashboard, not in `.env` files.

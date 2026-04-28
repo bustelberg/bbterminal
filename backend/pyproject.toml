@@ -17,3 +17,11 @@ dependencies = [
     "lxml>=6.0.4",
     "anthropic>=0.96.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
