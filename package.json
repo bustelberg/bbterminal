@@ -1,0 +1,27 @@
+{
+  "name": "bbterminal",
+  "version": "1.0.0",
+  "description": "A full-stack app with a **Next.js** frontend, **FastAPI** backend, and **Supabase** for auth/database.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bustelberg/bbterminal.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/bustelberg/bbterminal/issues"
+  },
+  "homepage": "https://github.com/bustelberg/bbterminal#readme",
+  "devDependencies": {
+    "supabase": "^2.95.5"
+  }
+}

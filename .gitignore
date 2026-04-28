@@ -222,3 +222,6 @@ frontend/node_modules/
 **/playground/**
 .claude/
 .env*.local
+
+
+/node_modules
