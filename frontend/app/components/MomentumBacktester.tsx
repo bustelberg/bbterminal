@@ -1779,16 +1779,19 @@ export default function MomentumBacktester() {
                                       Total<CellInfoTip>Weighted combination of the category scores. Selection ranks by this.</CellInfoTip>
                                     </th>
                                     <th className="text-right py-1 font-medium pl-4">
-                                      Start (local)<CellInfoTip>Entry price in local currency on (or just after) the first of the month.</CellInfoTip>
+                                      Start (local)<CellInfoTip>Entry price in local currency at this day&apos;s close — each day&apos;s pick is an independent 1-day portfolio.</CellInfoTip>
                                     </th>
                                     <th className="text-right py-1 font-medium">
-                                      End (local)<CellInfoTip>Latest available close in local currency at this day.</CellInfoTip>
+                                      End (local)<CellInfoTip>Exit price in local currency at the next trading day&apos;s close. Empty on the latest day (no next trading day yet).</CellInfoTip>
                                     </th>
                                     <th className="text-right py-1 font-medium pl-4">
                                       Start (€)<CellInfoTip>Entry price converted to EUR using the day&apos;s ECB FX rate.</CellInfoTip>
                                     </th>
                                     <th className="text-right py-1 font-medium">
-                                      End (€)<CellInfoTip>Exit price converted to EUR using the day&apos;s ECB FX rate.</CellInfoTip>
+                                      End (€)<CellInfoTip>Exit price converted to EUR using the next trading day&apos;s ECB FX rate.</CellInfoTip>
+                                    </th>
+                                    <th className="text-right py-1 font-medium pl-4">
+                                      Return<CellInfoTip>Per-stock 1-day return in EUR: (End € ÷ Start €) − 1. Empty on the latest day.</CellInfoTip>
                                     </th>
                                   </tr>
                                 </thead>
@@ -1862,6 +1865,9 @@ export default function MomentumBacktester() {
                                           </td>
                                           <td className="text-right py-1.5 text-gray-400 font-mono">
                                             {fmtPrice(h.exit_price_eur ?? null)}
+                                          </td>
+                                          <td className={`text-right py-1.5 font-mono pl-4 ${h.forward_return_pct != null ? (h.forward_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
+                                            {fmtPct(h.forward_return_pct ?? null)}
                                           </td>
                                         </tr>
                                       );

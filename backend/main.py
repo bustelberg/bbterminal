@@ -35,7 +35,7 @@ from ingest.api_usage import track_api_call, get_usage
 from momentum.data import (
     load_universe, load_all_prices, load_all_volumes,
     load_company_currency, load_fx_rates, convert_prices_to_eur,
-    sync_fx_rates_to_db,
+    sync_fx_rates_to_db, self_heal_missing_data,
 )
 from momentum.signals import PRICE_SIGNAL_DEFS
 from momentum.backtest import (
@@ -1864,20 +1864,49 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         yield _emit({"type": "progress", "pct": 62, "message": f"Loading prices from DB ({price_start} to {price_end}, starts early for 200-day MA)..."})
         yield _keepalive()
 
-        # Use a list to collect progress from the sync loader thread
-        load_progress: list[dict] = []
-        def _on_load_progress(rows_so_far: int, page_num: int):
-            load_progress.append({"rows": rows_so_far, "page": page_num})
+        # Stream load progress in real time. The loader runs chunks in
+        # parallel from worker threads; each thread calls on_progress as it
+        # finishes a page. We push those into a queue and drain it from the
+        # async generator while awaiting the load task.
+        import queue as _queue
+        prices_progress_q: _queue.Queue = _queue.Queue()
 
-        prices_df = await asyncio.to_thread(
+        def _on_prices_progress(rows_so_far: int, page_num: int):
+            prices_progress_q.put({"rows": rows_so_far, "page": page_num})
+
+        prices_task = asyncio.create_task(asyncio.to_thread(
             load_all_prices, supabase, company_ids, price_start, price_end,
-            on_progress=_on_load_progress,
-        )
+            on_progress=_on_prices_progress,
+        ))
 
-        # Stream the collected page progress
-        for lp in load_progress:
-            pct = 62 + min(3, round(lp["rows"] / max(1, len(load_progress) * 1000) * 3))
-            yield _emit({"type": "progress", "pct": pct, "message": f"  DB page {lp['page']}: {lp['rows']:,} rows loaded so far..."})
+        # Throttle: emit at most every PROGRESS_THROTTLE pages so the SSE
+        # stream isn't drowned in updates on very large loads.
+        PROGRESS_THROTTLE = 25
+        last_emitted_page = 0
+        while not prices_task.done():
+            drained = []
+            while True:
+                try:
+                    drained.append(prices_progress_q.get_nowait())
+                except _queue.Empty:
+                    break
+            if drained:
+                latest = drained[-1]
+                if latest["page"] - last_emitted_page >= PROGRESS_THROTTLE:
+                    last_emitted_page = latest["page"]
+                    yield _emit({"type": "progress", "pct": 63, "message": f"  Loaded {latest['rows']:,} price rows ({latest['page']} pages)..."})
+            await asyncio.sleep(0.1)
+        # Final drain after task completion
+        final_total = None
+        while True:
+            try:
+                final_total = prices_progress_q.get_nowait()
+            except _queue.Empty:
+                break
+        if final_total is not None and final_total["page"] != last_emitted_page:
+            yield _emit({"type": "progress", "pct": 64, "message": f"  Loaded {final_total['rows']:,} price rows ({final_total['page']} pages)..."})
+
+        prices_df = await prices_task
 
         if prices_df.empty:
             yield _emit({"type": "error", "message": "No price data found after ingestion."})
@@ -2058,12 +2087,45 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             more = f" (+{len(_sparse_price) - 10} more)" if len(_sparse_price) > 10 else ""
             yield _emit({"type": "warning", "scope": "prices", "message": f"{len(_sparse_price)} companies have < 20 price rows (insufficient for signals): {sample}{more}"})
 
-        # Load volumes from DB
+        # Load volumes from DB — same parallel-load + streamed-progress pattern
+        # as prices.
         yield _emit({"type": "progress", "pct": 66, "message": "Loading volumes from DB..."})
         yield _keepalive()
-        volumes_df = await asyncio.to_thread(
+
+        volumes_progress_q: _queue.Queue = _queue.Queue()
+
+        def _on_volumes_progress(rows_so_far: int, page_num: int):
+            volumes_progress_q.put({"rows": rows_so_far, "page": page_num})
+
+        volumes_task = asyncio.create_task(asyncio.to_thread(
             load_all_volumes, supabase, company_ids, price_start, price_end,
-        )
+            on_progress=_on_volumes_progress,
+        ))
+
+        last_emitted_vpage = 0
+        while not volumes_task.done():
+            drained = []
+            while True:
+                try:
+                    drained.append(volumes_progress_q.get_nowait())
+                except _queue.Empty:
+                    break
+            if drained:
+                latest = drained[-1]
+                if latest["page"] - last_emitted_vpage >= PROGRESS_THROTTLE:
+                    last_emitted_vpage = latest["page"]
+                    yield _emit({"type": "progress", "pct": 66, "message": f"  Loaded {latest['rows']:,} volume rows ({latest['page']} pages)..."})
+            await asyncio.sleep(0.1)
+        final_v = None
+        while True:
+            try:
+                final_v = volumes_progress_q.get_nowait()
+            except _queue.Empty:
+                break
+        if final_v is not None and final_v["page"] != last_emitted_vpage:
+            yield _emit({"type": "progress", "pct": 67, "message": f"  Loaded {final_v['rows']:,} volume rows ({final_v['page']} pages)..."})
+
+        volumes_df = await volumes_task
         n_vol = volumes_df["company_id"].nunique() if not volumes_df.empty else 0
         yield _emit({"type": "progress", "pct": 67, "message": f"Loaded {len(volumes_df):,} volume records for {n_vol} companies"})
 
@@ -2088,8 +2150,94 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             more = f" (+{len(_sparse_vol) - 10} more)" if len(_sparse_vol) > 10 else ""
             yield _emit({"type": "warning", "scope": "volumes", "message": f"{len(_sparse_vol)} companies have < 20 volume rows: {sample}{more}"})
 
+        # Self-heal: for any subscribed-exchange company missing prices or
+        # volumes, re-run the ingest pipeline (cache check → API fetch → DB
+        # load) and merge the recovered rows back into the in-memory frames.
+        # This is a no-op in steady state — the gap sets are empty when
+        # everything is already loaded — and only fires for genuinely missing
+        # data (empty Storage JSONs, failed prior loads, new tickers, etc.).
+        gap_cids = sorted(set(_no_price_gap) | set(_no_vol_gap))
+        if gap_cids:
+            yield _emit({"type": "progress", "pct": 67, "message": f"Self-heal: refetching missing data for {len(gap_cids)} companies on subscribed exchanges..."})
+            yield _keepalive()
+
+            ticker_lookup = {
+                int(r["company_id"]): str(r["gurufocus_ticker"])
+                for _, r in universe_df.iterrows()
+            }
+            exchange_lookup = {
+                int(r["company_id"]): str(r.get("gurufocus_exchange") or "")
+                for _, r in universe_df.iterrows()
+            }
+
+            heal_progress_q: _queue.Queue = _queue.Queue()
+
+            def _on_heal_progress(cid, status, msg):
+                heal_progress_q.put({"cid": cid, "status": status, "msg": msg})
+
+            heal_task = asyncio.create_task(asyncio.to_thread(
+                self_heal_missing_data,
+                supabase, gap_cids, ticker_lookup, exchange_lookup,
+                on_progress=_on_heal_progress,
+            ))
+
+            done_count = 0
+            while not heal_task.done():
+                drained = []
+                while True:
+                    try:
+                        drained.append(heal_progress_q.get_nowait())
+                    except _queue.Empty:
+                        break
+                if drained:
+                    done_count += len(drained)
+                    yield _emit({"type": "progress", "pct": 67, "message": f"  Self-heal: {done_count}/{len(gap_cids)} companies processed..."})
+                await asyncio.sleep(0.2)
+
+            heal_result = await heal_task
+            healed_cids = heal_result["healed_company_ids"]
+            heal_stats = heal_result["stats"]
+
+            heal_msg_parts = [
+                f"{heal_stats['prices_fetched']} price fetches",
+                f"{heal_stats['volumes_fetched']} volume fetches",
+            ]
+            if heal_stats["forbidden_exchanges"]:
+                heal_msg_parts.append(f"forbidden exchanges (skipped): {', '.join(heal_stats['forbidden_exchanges'])}")
+            if heal_stats["errors"]:
+                heal_msg_parts.append(f"{heal_stats['errors']} errors")
+            yield _emit({
+                "type": "info",
+                "scope": "self-heal",
+                "message": f"Self-heal complete: {' · '.join(heal_msg_parts)}.",
+            })
+
+            if healed_cids:
+                yield _emit({"type": "progress", "pct": 67, "message": f"Re-loading {len(healed_cids)} healed companies into memory..."})
+                yield _keepalive()
+                new_local = await asyncio.to_thread(
+                    load_all_prices, supabase, healed_cids, price_start, price_end,
+                )
+                if not new_local.empty:
+                    new_eur, _new_fx = await asyncio.to_thread(
+                        convert_prices_to_eur, new_local, company_currency, fx_rates,
+                    )
+                    prices_local_df = pd.concat(
+                        [prices_local_df, new_local], ignore_index=True
+                    ).sort_values(["company_id", "target_date"]).reset_index(drop=True)
+                    if not new_eur.empty:
+                        prices_df = pd.concat(
+                            [prices_df, new_eur], ignore_index=True
+                        ).sort_values(["company_id", "target_date"]).reset_index(drop=True)
+                new_volumes = await asyncio.to_thread(
+                    load_all_volumes, supabase, healed_cids, price_start, price_end,
+                )
+                if not new_volumes.empty:
+                    volumes_df = pd.concat(
+                        [volumes_df, new_volumes], ignore_index=True
+                    ).sort_values(["company_id", "target_date"]).reset_index(drop=True)
+
         # Run backtest with progress callback via queue for real-time streaming
-        import queue as _queue
         progress_queue: _queue.Queue = _queue.Queue()
         backtest_result_holder: list = []
         backtest_error_holder: list = []

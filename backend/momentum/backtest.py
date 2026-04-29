@@ -1060,10 +1060,11 @@ def run_current_portfolio(
         day_holdings: list[MonthlyHolding] = []
         today_ids: set[int] = set()
 
-        # Compute the prior day's next_day_return now that we have today's
-        # prices. This same number is also today's chain contribution to
-        # cumulative MTD under the pre-rebalance convention — we held the
-        # prior day's portfolio overnight and earned its close-to-close move.
+        # Each daily pick is its own 1-day portfolio: bought at THAT day's
+        # close, sold at the NEXT trading day's close. Per-stock exit prices
+        # and forward_return_pct are filled in on the next iteration once we
+        # have tomorrow's prices. The same backfill computes the prior day's
+        # next_day_return_pct (= chain-link contribution to cumulative MTD).
         prior_one_day_return: float | None = None
         if daily_picks and prev_d_ts is not None:
             prev_pick = daily_picks[-1]
@@ -1072,39 +1073,48 @@ def run_current_portfolio(
                 series = price_index.get(h.company_id)
                 if series is None:
                     continue
-                prev_pair = _price_on_or_before(series, prev_d_ts)
-                today_pair = _price_on_or_before(series, day_ts)
-                if (
-                    prev_pair is not None and today_pair is not None
-                    and prev_pair[0] > 0
-                ):
-                    forward_components.append(today_pair[0] / prev_pair[0] - 1)
+                today_eur_pair = _price_on_or_before(series, day_ts)
+                if today_eur_pair is None:
+                    continue
+                today_eur, _ = today_eur_pair
+
+                local_series = local_price_index.get(h.company_id) if local_price_index is not None else None
+                local_pair = _price_on_or_before(local_series, day_ts) if local_series is not None else None
+                today_local = local_pair[0] if local_pair is not None else None
+
+                date_series = local_series if local_series is not None else series
+                today_dt_pair = _price_on_or_before(date_series, day_ts) if date_series is not None else None
+                today_dt = today_dt_pair[1].strftime("%Y-%m-%d") if today_dt_pair is not None else None
+
+                # Mutate the previous day's holding object directly: it was
+                # appended to daily_picks with exit fields blank.
+                h.exit_price_eur = round(float(today_eur), 4)
+                h.exit_price_local = round(float(today_local), 4) if today_local is not None else None
+                h.exit_date = today_dt
+                if h.entry_price_eur and h.entry_price_eur > 0:
+                    ret = today_eur / h.entry_price_eur - 1
+                    h.forward_return_pct = round(ret * 100.0, 2)
+                    forward_components.append(ret)
             if forward_components:
                 prior_one_day_return = sum(forward_components) / len(forward_components)
                 prev_pick.next_day_return_pct = round(prior_one_day_return * 100.0, 2)
+
         for _, drow in daily_selected.iterrows():
             cid = int(drow["company_id"])
             today_ids.add(cid)
             score_val = drow.get("momentum_score")
 
             series = price_index.get(cid)
-            entry_price = _price_on_or_after(series, entry_ts) if series is not None else None
-            exit_pair = _price_on_or_before(series, day_ts) if series is not None else None
-            exit_price = exit_pair[0] if exit_pair is not None else None
-
-            mtd_return = None
-            if entry_price and exit_price and entry_price > 0:
-                mtd_return = round((exit_price / entry_price - 1) * 100, 2)
+            entry_pair = _price_on_or_before(series, day_ts) if series is not None else None
+            entry_price = entry_pair[0] if entry_pair is not None else None
 
             local_series = local_price_index.get(cid) if local_price_index is not None else None
-            entry_local = _price_on_or_after(local_series, entry_ts) if local_series is not None else None
-            exit_local_pair = _price_on_or_before(local_series, day_ts) if local_series is not None else None
-            exit_local = exit_local_pair[0] if exit_local_pair is not None else None
+            entry_local_pair = _price_on_or_before(local_series, day_ts) if local_series is not None else None
+            entry_local = entry_local_pair[0] if entry_local_pair is not None else None
 
             date_series = local_series if local_series is not None else series
-            entry_dt = _date_on_or_after(date_series, entry_ts) if date_series is not None else None
-            exit_dt_pair = _price_on_or_before(date_series, day_ts) if date_series is not None else None
-            exit_dt = exit_dt_pair[1].strftime("%Y-%m-%d") if exit_dt_pair is not None else None
+            entry_dt_pair = _price_on_or_before(date_series, day_ts) if date_series is not None else None
+            entry_dt = entry_dt_pair[1].strftime("%Y-%m-%d") if entry_dt_pair is not None else None
 
             cat_scores: dict[str, float | None] = {}
             for cat in _get_category_keys():
@@ -1122,14 +1132,17 @@ def run_current_portfolio(
                 score=round(float(score_val), 2) if pd.notna(score_val) else 0.0,
                 category_scores=cat_scores,
                 weight=day_weight,
-                forward_return_pct=mtd_return,
+                # Exit fields are intentionally None here. The next iteration
+                # backfills them once tomorrow's prices are available; the
+                # latest day in the panel keeps None (no next trading day yet).
+                forward_return_pct=None,
                 currency=(company_currency or {}).get(cid),
                 entry_price_local=round(entry_local, 4) if entry_local is not None else None,
-                exit_price_local=round(exit_local, 4) if exit_local is not None else None,
+                exit_price_local=None,
                 entry_price_eur=round(entry_price, 4) if entry_price is not None else None,
-                exit_price_eur=round(exit_price, 4) if exit_price is not None else None,
+                exit_price_eur=None,
                 entry_date=entry_dt,
-                exit_date=exit_dt,
+                exit_date=None,
             ))
 
         # Pre-rebalance chain link: today's contribution to cum MTD is the

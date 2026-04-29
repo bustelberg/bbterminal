@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
 import pandas as pd
@@ -12,6 +14,12 @@ _logger = logging.getLogger(__name__)
 
 _MAX_RETRIES = 3
 _RETRY_DELAY = 5  # seconds
+
+# Concurrent chunk loads cut wall time roughly linearly with the worker count
+# until either the supabase client's connection pool or the upstream rate
+# limit becomes the bottleneck. 8 is a comfortable default for local Supabase
+# and Cloudflare-fronted prod alike.
+_LOAD_PARALLELISM = 8
 
 
 def _query_with_retry(query_fn, description: str = "query"):
@@ -126,42 +134,46 @@ def load_universe(
     return df
 
 
-def load_all_prices(
+def _load_metric_chunks(
     supabase: Client,
     company_ids: list[int],
+    metric_code: str,
     start_date: date,
     end_date: date,
-    on_progress: callable = None,
-) -> pd.DataFrame:
-    """Bulk-load daily closing prices for all companies.
+    on_progress,
+    *,
+    description_prefix: str,
+) -> list[dict]:
+    """Bulk-load metric_data rows for the given (metric_code, company_ids,
+    date range), running chunk loads in parallel for ~N× wall-time speedup.
 
-    Batches company_ids into chunks of 50 to avoid Cloudflare 502 errors
-    from overly long query strings.
-
-    Args:
-        on_progress: Optional callback(rows_so_far, page_num) called after each page.
-
-    Returns DataFrame with columns: company_id, target_date, price
-    sorted by (company_id, target_date).
-    """
+    Returns the raw row list (un-deduped, unsorted). Chunks of 50 keep
+    .in_() URLs short enough for Cloudflare; chunks run on a small worker
+    pool so we get the benefit of overlapped network RTT without saturating
+    the connection pool or upstream rate limits."""
     if not company_ids:
-        return pd.DataFrame(columns=["company_id", "target_date", "price"])
+        return []
+
+    page_size = 1000
+    chunk_size = 50
+    chunks = [
+        company_ids[i : i + chunk_size]
+        for i in range(0, len(company_ids), chunk_size)
+    ]
 
     rows: list[dict] = []
-    page_size = 1000
-    page_num = 0
-    chunk_size = 50  # keep .in_() URL short enough for Cloudflare
+    rows_lock = threading.Lock()
+    page_counter = [0]
 
-    for chunk_start in range(0, len(company_ids), chunk_size):
-        chunk = company_ids[chunk_start : chunk_start + chunk_size]
+    def _load_chunk(chunk_idx_and_chunk: tuple[int, list[int]]) -> None:
+        chunk_idx, chunk = chunk_idx_and_chunk
         offset = 0
-
         while True:
             resp = _query_with_retry(
                 lambda o=offset, c=chunk: (
                     supabase.table("metric_data")
                     .select("company_id, target_date, numeric_value")
-                    .eq("metric_code", "close_price")
+                    .eq("metric_code", metric_code)
                     .eq("source_code", "gurufocus")
                     .in_("company_id", c)
                     .gte("target_date", start_date.isoformat())
@@ -171,17 +183,51 @@ def load_all_prices(
                     .range(o, o + page_size - 1)
                     .execute()
                 ),
-                description=f"load_all_prices chunk {chunk_start // chunk_size + 1}",
+                description=f"{description_prefix} chunk {chunk_idx + 1}",
             )
             if not resp.data:
                 break
-            rows.extend(resp.data)
-            page_num += 1
+            with rows_lock:
+                rows.extend(resp.data)
+                page_counter[0] += 1
+                page_num = page_counter[0]
+                total_so_far = len(rows)
             if on_progress:
-                on_progress(len(rows), page_num)
+                on_progress(total_so_far, page_num)
             if len(resp.data) < page_size:
                 break
             offset += page_size
+
+    with ThreadPoolExecutor(max_workers=_LOAD_PARALLELISM) as executor:
+        # `list(executor.map(...))` propagates exceptions from worker threads.
+        list(executor.map(_load_chunk, list(enumerate(chunks))))
+
+    return rows
+
+
+def load_all_prices(
+    supabase: Client,
+    company_ids: list[int],
+    start_date: date,
+    end_date: date,
+    on_progress: callable = None,
+) -> pd.DataFrame:
+    """Bulk-load daily closing prices for all companies.
+
+    Args:
+        on_progress: Optional callback(rows_so_far, page_num) called after
+            each page. Called from worker threads; must be thread-safe.
+
+    Returns DataFrame with columns: company_id, target_date, price
+    sorted by (company_id, target_date).
+    """
+    if not company_ids:
+        return pd.DataFrame(columns=["company_id", "target_date", "price"])
+
+    rows = _load_metric_chunks(
+        supabase, company_ids, "close_price", start_date, end_date,
+        on_progress, description_prefix="load_all_prices",
+    )
 
     if not rows:
         return pd.DataFrame(columns=["company_id", "target_date", "price"])
@@ -496,15 +542,131 @@ def convert_prices_to_eur(
     return out, stats
 
 
+def self_heal_missing_data(
+    supabase: Client,
+    company_ids: list[int],
+    ticker_lookup: dict[int, str],
+    exchange_lookup: dict[int, str],
+    *,
+    on_progress=None,
+) -> dict:
+    """For each company in `company_ids`, ensure both close_price and volume
+    are present in `metric_data` by re-running the ingest pipeline (Storage
+    cache check → GF API fetch → cache + DB load).
+
+    Use this on the small subset of universe companies that came back empty
+    from a bulk DB load — calling it on every company would be wasteful
+    (hundreds of redundant HEAD calls). The downstream `ensure_*` helpers
+    already short-circuit if the DB is fresh, so even a misuse just costs
+    extra DB round-trips, not API calls.
+
+    A 403/"unsubscribed region" response on any company causes the helper
+    to mark its exchange as forbidden and skip every subsequent company on
+    the same exchange (ingest already does the same thing in its own
+    pipeline). A 403 for a single bad ticker (delisted, wrong symbol) does
+    NOT taint the whole exchange.
+
+    `on_progress(cid, status, message)` is called from worker threads —
+    callbacks must be thread-safe.
+
+    Returns:
+        {"healed_company_ids": [...], "stats": {...}}
+        where "stats" includes processed/prices_fetched/volumes_fetched/
+        forbidden_exchanges/errors counts.
+    """
+    # Imported lazily to avoid making `data.py` always pay the ingest module's
+    # transitive imports (urllib, supabase storage helpers, etc.).
+    from ingest.prices import (  # noqa: PLC0415
+        ensure_prices_for_company, ensure_volume_for_company,
+    )
+
+    if not company_ids:
+        return {
+            "healed_company_ids": [],
+            "stats": {
+                "processed": 0, "prices_fetched": 0, "volumes_fetched": 0,
+                "forbidden_exchanges": [], "errors": 0,
+            },
+        }
+
+    forbidden_exchanges: set[str] = set()
+    healed: list[int] = []
+    stats = {
+        "processed": 0,
+        "prices_fetched": 0,
+        "volumes_fetched": 0,
+        "errors": 0,
+    }
+    lock = threading.Lock()
+
+    def _heal_one(cid: int) -> None:
+        ticker = ticker_lookup.get(cid)
+        exch = exchange_lookup.get(cid)
+        if not ticker or not exch:
+            with lock:
+                stats["errors"] += 1
+            if on_progress:
+                on_progress(cid, "skipped", "missing ticker/exchange")
+            return
+        with lock:
+            if exch in forbidden_exchanges:
+                if on_progress:
+                    on_progress(cid, "skipped", f"exchange {exch} known forbidden")
+                return
+        try:
+            r_p = ensure_prices_for_company(supabase, cid, ticker, exch)
+            if r_p.is_forbidden:
+                with lock:
+                    forbidden_exchanges.add(exch)
+                if on_progress:
+                    on_progress(cid, "forbidden", f"{exch}: unsubscribed")
+                return
+            r_v = ensure_volume_for_company(supabase, cid, ticker, exch)
+        except Exception as e:  # noqa: BLE001
+            with lock:
+                stats["errors"] += 1
+            if on_progress:
+                on_progress(cid, "error", str(e))
+            return
+        any_loaded = r_p.rows_loaded > 0 or r_v.rows_loaded > 0
+        with lock:
+            stats["processed"] += 1
+            if r_p.rows_loaded > 0:
+                stats["prices_fetched"] += 1
+            if r_v.rows_loaded > 0:
+                stats["volumes_fetched"] += 1
+            if any_loaded:
+                healed.append(cid)
+        if on_progress:
+            on_progress(
+                cid,
+                "ok" if any_loaded else "noop",
+                f"prices={r_p.source}({r_p.rows_loaded}) volumes={r_v.source}({r_v.rows_loaded})",
+            )
+
+    # Use fewer workers than the bulk load: each call hits the GF API,
+    # which is rate-limit-sensitive — overdoing parallelism risks 429s.
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        list(executor.map(_heal_one, company_ids))
+
+    return {
+        "healed_company_ids": sorted(healed),
+        "stats": {**stats, "forbidden_exchanges": sorted(forbidden_exchanges)},
+    }
+
+
 def load_all_volumes(
     supabase: Client,
     company_ids: list[int],
     start_date: date,
     end_date: date,
+    on_progress: callable = None,
 ) -> pd.DataFrame:
     """Bulk-load daily volume for all companies.
 
-    Same batching approach as load_all_prices.
+    Args:
+        on_progress: Optional callback(rows_so_far, page_num) called after
+            each page. Called from worker threads; must be thread-safe.
 
     Returns DataFrame with columns: company_id, target_date, volume
     sorted by (company_id, target_date).
@@ -512,37 +674,10 @@ def load_all_volumes(
     if not company_ids:
         return pd.DataFrame(columns=["company_id", "target_date", "volume"])
 
-    rows: list[dict] = []
-    page_size = 1000
-    chunk_size = 50
-
-    for chunk_start in range(0, len(company_ids), chunk_size):
-        chunk = company_ids[chunk_start : chunk_start + chunk_size]
-        offset = 0
-
-        while True:
-            resp = _query_with_retry(
-                lambda o=offset, c=chunk: (
-                    supabase.table("metric_data")
-                    .select("company_id, target_date, numeric_value")
-                    .eq("metric_code", "volume")
-                    .eq("source_code", "gurufocus")
-                    .in_("company_id", c)
-                    .gte("target_date", start_date.isoformat())
-                    .lte("target_date", end_date.isoformat())
-                    .order("company_id")
-                    .order("target_date")
-                    .range(o, o + page_size - 1)
-                    .execute()
-                ),
-                description=f"load_all_volumes chunk {chunk_start // chunk_size + 1}",
-            )
-            if not resp.data:
-                break
-            rows.extend(resp.data)
-            if len(resp.data) < page_size:
-                break
-            offset += page_size
+    rows = _load_metric_chunks(
+        supabase, company_ids, "volume", start_date, end_date,
+        on_progress, description_prefix="load_all_volumes",
+    )
 
     if not rows:
         return pd.DataFrame(columns=["company_id", "target_date", "volume"])

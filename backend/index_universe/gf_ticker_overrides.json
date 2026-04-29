@@ -1,4 +1,19 @@
 {
+  "": {
+    "BRKB": "BRK.B",
+    "HEIA": "HEI.A",
+    "PSTG": "P"
+  },
+  "SGX": {
+    "CICT": "C38U",
+    "CLAR": "A17U"
+  },
+  "XPRA": {
+    "BAAKOMB": "KOMB"
+  },
+  "OSTO": {
+    "VSURE": { "exchange": "FRA", "ticker": "6R9" }
+  },
   "XKLS": {
     "MAYBANK": "1155",
     "CIMB": "1023",

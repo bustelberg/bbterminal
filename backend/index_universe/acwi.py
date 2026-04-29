@@ -102,7 +102,7 @@ _ISHARES_TO_GF: dict[str, str] = {
     "Oslo Bors Asa": "OSL",
     "Nasdaq Omx Helsinki Ltd.": "OHEL",
     "Warsaw Stock Exchange/Equities/Main Market": "WAR",
-    "Wiener Boerse Ag": "XPRA",
+    "Wiener Boerse Ag": "WBO",
     "Athens Exchange S.A. Cash Market": "ATH",
     "Irish Stock Exchange - All Market": "DUB",
     "Budapest Stock Exchange": "BUD",
@@ -195,18 +195,41 @@ def _load_gf_ticker_overrides() -> dict[str, dict[str, str]]:
     return _GF_TICKER_OVERRIDES_CACHE
 
 
-def _normalize_gf_ticker(ticker: str, gf_prefix: str) -> str:
-    """Apply exchange-specific ticker normalizations used by GuruFocus."""
-    t = _load_gf_ticker_overrides().get(gf_prefix, {}).get(ticker, ticker)
-    if gf_prefix == "HKSE" and t.isdigit():
+def _resolve_ticker_override(ticker: str, gf_prefix: str) -> tuple[str | None, str]:
+    """Look up an override for (ticker, gf_prefix) in gf_ticker_overrides.json.
+
+    Returns (override_gf_prefix, ticker). `override_gf_prefix` is None if no
+    cross-exchange remap (the original gf_prefix should be used). Override
+    values may be either:
+      - a plain string (ticker rename, same exchange), or
+      - a dict {"exchange": "FRA", "ticker": "6R9"} (cross-exchange remap),
+        where missing fields fall back to the originals.
+    """
+    override = _load_gf_ticker_overrides().get(gf_prefix, {}).get(ticker)
+    if isinstance(override, dict):
+        return (override.get("exchange") or gf_prefix, override.get("ticker") or ticker)
+    if isinstance(override, str):
+        return (None, override)
+    return (None, ticker)
+
+
+def _normalize_gf_ticker(ticker: str, gf_prefix: str) -> tuple[str, str]:
+    """Apply ticker overrides + exchange-specific normalizations.
+
+    Returns (final_gf_prefix, normalized_ticker). The prefix may differ from
+    the input when an override remaps the listing to a different exchange.
+    """
+    new_prefix, t = _resolve_ticker_override(ticker, gf_prefix)
+    final_prefix = new_prefix if new_prefix is not None else gf_prefix
+    if final_prefix == "HKSE" and t.isdigit():
         t = t.zfill(5)
-    if gf_prefix == "IST" and t.endswith(".E"):
+    if final_prefix == "IST" and t.endswith(".E"):
         t = t[:-2]
-    if gf_prefix == "BKK" and t.endswith(".R"):
+    if final_prefix == "BKK" and t.endswith(".R"):
         t = t[:-2]
-    if gf_prefix == "XSGO":
+    if final_prefix == "XSGO":
         t = t.replace(".", "-")
-    return t
+    return (final_prefix, t)
 
 
 def gurufocus_url(ticker: str, exchange: str) -> str | None:
@@ -221,8 +244,8 @@ def gurufocus_url(ticker: str, exchange: str) -> str | None:
     if gf_prefix is None:
         return None
 
-    t = _normalize_gf_ticker(ticker, gf_prefix)
-    symbol = t if gf_prefix == "" else f"{gf_prefix}:{t}"
+    final_prefix, t = _normalize_gf_ticker(ticker, gf_prefix)
+    symbol = t if final_prefix == "" else f"{final_prefix}:{t}"
     return f"https://www.gurufocus.com/stock/{symbol}/summary"
 
 
@@ -230,7 +253,10 @@ def gurufocus_ticker_normalized(ticker: str, exchange: str) -> tuple[str, str] |
     """Return (db_exchange_code, gf_ticker) for an iShares (ticker, exchange).
 
     Uses the DB-API exchange code (e.g. NYSE/NAS for US, HKSE/TSE/etc abroad)
-    so it can be matched against the `company` table.
+    so it can be matched against the `company` table. Honors cross-exchange
+    overrides — when a stock's GF listing lives on a different exchange than
+    iShares reports (e.g. Verisure: OSTO → FRA), the returned db_exchange is
+    the override target, not the iShares-derived one.
     Returns None if the exchange is unknown or ticker is empty.
     """
     if not ticker or ticker == "--":
@@ -238,8 +264,14 @@ def gurufocus_ticker_normalized(ticker: str, exchange: str) -> tuple[str, str] |
     gf_prefix = _ISHARES_TO_GF.get(exchange)
     if gf_prefix is None:
         return None
-    t = _normalize_gf_ticker(ticker, gf_prefix)
-    db_exchange = gurufocus_exchange_for_db(exchange)
+    final_prefix, t = _normalize_gf_ticker(ticker, gf_prefix)
+    if final_prefix != gf_prefix:
+        # Override remapped to a different exchange — use the override prefix
+        # directly as the DB code (no _GF_URL_TO_API conversion since the
+        # override author chose the prefix deliberately).
+        db_exchange = _GF_URL_TO_API.get(final_prefix, final_prefix)
+    else:
+        db_exchange = gurufocus_exchange_for_db(exchange)
     if db_exchange is None:
         return None
     return (db_exchange, t)
