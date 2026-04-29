@@ -1474,20 +1474,45 @@ export default function MomentumBacktester() {
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="text-gray-600">
-                      <th className="text-left py-1 font-medium">Ticker</th>
-                      <th className="text-left py-1 font-medium">Company</th>
-                      <th className="text-left py-1 font-medium">Sector</th>
+                      <th className="text-left py-1 font-medium">
+                        Ticker<CellInfoTip>The stock&apos;s ticker on its primary exchange. Click to open in GuruFocus.</CellInfoTip>
+                      </th>
+                      <th className="text-left py-1 font-medium">
+                        Company<CellInfoTip>Issuer name. Click to open in GuruFocus.</CellInfoTip>
+                      </th>
+                      <th className="text-left py-1 font-medium">
+                        Sector<CellInfoTip>GICS sector. The strategy picks the top sectors by aggregate momentum, then the top stocks within each.</CellInfoTip>
+                      </th>
                       {categories.map((cat) => (
                         <th key={cat} className="text-right py-1 font-medium">
                           {cat === 'price' ? 'Price' : cat === 'volume' ? 'Vol' : cat}
+                          <CellInfoTip>
+                            {cat === 'price'
+                              ? 'Composite 0–100 score across the price-momentum signals (12-1 return, 6m return, vol-adj return, drawdown, above-200MA), min-max normalized within the universe at this date.'
+                              : cat === 'volume'
+                              ? 'Composite 0–100 score across the volume signals (Volume Surge, Volume Trend 3M), min-max normalized within the universe at this date.'
+                              : `${cat} category score, 0–100 normalized across the universe.`}
+                          </CellInfoTip>
                         </th>
                       ))}
-                      <th className="text-right py-1 font-medium">Total</th>
-                      <th className="text-right py-1 font-medium pl-4">Start (local)</th>
-                      <th className="text-right py-1 font-medium">End (local)</th>
-                      <th className="text-right py-1 font-medium pl-4">Start (€)</th>
-                      <th className="text-right py-1 font-medium">End (€)</th>
-                      <th className="text-right py-1 font-medium pl-4">Return</th>
+                      <th className="text-right py-1 font-medium">
+                        Total<CellInfoTip>Weighted combination of the category scores. Selection ranks by this number.</CellInfoTip>
+                      </th>
+                      <th className="text-right py-1 font-medium pl-4">
+                        Start (local)<CellInfoTip>Entry price in the stock&apos;s local currency on (or just after) the first of the month.</CellInfoTip>
+                      </th>
+                      <th className="text-right py-1 font-medium">
+                        End (local)<CellInfoTip>Latest available close in local currency through the row&apos;s reporting date.</CellInfoTip>
+                      </th>
+                      <th className="text-right py-1 font-medium pl-4">
+                        Start (€)<CellInfoTip>Entry price converted to EUR using the day&apos;s ECB FX rate.</CellInfoTip>
+                      </th>
+                      <th className="text-right py-1 font-medium">
+                        End (€)<CellInfoTip>Exit price converted to EUR using the day&apos;s ECB FX rate.</CellInfoTip>
+                      </th>
+                      <th className="text-right py-1 font-medium pl-4">
+                        Return<CellInfoTip>Per-stock month-to-date return in EUR: (End € ÷ Start €) − 1, assuming the position was held since month start.</CellInfoTip>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1620,15 +1645,24 @@ export default function MomentumBacktester() {
                 <div className="px-4 py-3 border-b border-gray-800/40">
                   <div className="text-sm font-medium text-white">Daily picks history</div>
                   <div className="text-xs text-gray-500 mt-0.5">
-                    Hypothetical: what the strategy would pick if rebalancing on each day. MTD return is start-of-month → that day; turnover is vs the previous day. Past months are read-only — only days already saved are shown.
+                    Hypothetical: what the strategy would pick if rebalancing on each day. <span className="text-gray-400">MTD (chain)</span> is the cumulative return through that day, chain-linked across rebalances. <span className="text-gray-400">Next day</span> is that day&apos;s portfolio held one trading day forward. Past months are read-only — only days already saved are shown.
                   </div>
                 </div>
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-gray-800/40 text-gray-600">
-                      <th className="text-left px-4 py-2 font-medium">Month</th>
-                      <th className="text-right px-3 py-2 font-medium">Days</th>
-                      <th className="text-right px-3 py-2 font-medium">Latest MTD</th>
+                      <th className="text-left px-4 py-2 font-medium">
+                        Month
+                        <CellInfoTip>Calendar month (YYYY-MM) for which daily picks are stored. Past months are read-only — only the days already saved are listed.</CellInfoTip>
+                      </th>
+                      <th className="text-right px-3 py-2 font-medium">
+                        Days
+                        <CellInfoTip>Number of trading days saved for this month.</CellInfoTip>
+                      </th>
+                      <th className="text-right px-3 py-2 font-medium">
+                        Latest MTD
+                        <CellInfoTip>Chain-linked cumulative MTD return through the latest stored day in this month.</CellInfoTip>
+                      </th>
                       <th className="text-right px-3 py-2 font-medium" colSpan={2} />
                     </tr>
                   </thead>
@@ -1663,11 +1697,30 @@ export default function MomentumBacktester() {
                                 <table className="w-full text-xs">
                                   <thead>
                                     <tr className="border-b border-gray-800/30 text-gray-600">
-                                      <th className="text-left px-5 py-1.5 font-medium">Date</th>
-                                      <th className="text-right px-3 py-1.5 font-medium">Holdings</th>
-                                      <th className="text-right px-3 py-1.5 font-medium">Return</th>
-                                      <th className="text-right px-3 py-1.5 font-medium">Turnover</th>
-                                      <th className="text-right px-3 py-1.5 font-medium">%</th>
+                                      <th className="text-left px-5 py-1.5 font-medium">
+                                        Date
+                                        <CellInfoTip>The trading day on which the strategy is evaluated. Picks shown are what the strategy would buy at this day&apos;s close.</CellInfoTip>
+                                      </th>
+                                      <th className="text-right px-3 py-1.5 font-medium">
+                                        Holdings
+                                        <CellInfoTip>Number of stocks in this day&apos;s portfolio (equal-weighted).</CellInfoTip>
+                                      </th>
+                                      <th className="text-right px-3 py-1.5 font-medium">
+                                        MTD (chain)
+                                        <CellInfoTip>Cumulative month-to-date return through this day, chain-linked across rebalances. Each day&apos;s contribution = the prior day&apos;s portfolio held one trading day forward. Daily returns are multiplied: (1+r₁)(1+r₂)…(1+rₙ) − 1.</CellInfoTip>
+                                      </th>
+                                      <th className="text-right px-3 py-1.5 font-medium">
+                                        Next day
+                                        <CellInfoTip>One-day forward return of THIS day&apos;s portfolio held to the next trading day&apos;s close. Empty on the latest day (no next trading day yet).</CellInfoTip>
+                                      </th>
+                                      <th className="text-right px-3 py-1.5 font-medium">
+                                        Turnover
+                                        <CellInfoTip>Number of stocks that differ from the previous day&apos;s portfolio. For a fixed-size portfolio this equals both stocks added and stocks removed.</CellInfoTip>
+                                      </th>
+                                      <th className="text-right px-3 py-1.5 font-medium">
+                                        %
+                                        <CellInfoTip>Turnover expressed as a percentage of portfolio size: turnover ÷ max(today, yesterday) × 100.</CellInfoTip>
+                                      </th>
                                     </tr>
                                   </thead>
                                   <tbody>
@@ -1685,6 +1738,9 @@ export default function MomentumBacktester() {
                           <td className={`px-3 py-1.5 text-right font-mono ${dp.portfolio_return_pct != null ? (dp.portfolio_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
                             {fmtPct(dp.portfolio_return_pct ?? null)}
                           </td>
+                          <td className={`px-3 py-1.5 text-right font-mono ${dp.next_day_return_pct != null ? (dp.next_day_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
+                            {fmtPct(dp.next_day_return_pct ?? null)}
+                          </td>
                           <td className={`px-3 py-1.5 text-right font-mono ${dp.turnover_abs > 0 ? 'text-amber-400' : 'text-gray-600'}`}>
                             {dp.turnover_abs > 0 ? dp.turnover_abs : '—'}
                           </td>
@@ -1694,24 +1750,46 @@ export default function MomentumBacktester() {
                         </tr>
                         {expandedDailyDate === dp.date && (
                           <tr>
-                            <td colSpan={5} className="bg-[#0f1117] px-5 py-3">
+                            <td colSpan={6} className="bg-[#0f1117] px-5 py-3">
                               <table className="w-full text-xs">
                                 <thead>
                                   <tr className="text-gray-600">
-                                    <th className="text-left py-1 font-medium">Ticker</th>
-                                    <th className="text-left py-1 font-medium">Company</th>
-                                    <th className="text-left py-1 font-medium">Sector</th>
+                                    <th className="text-left py-1 font-medium">
+                                      Ticker<CellInfoTip>The stock&apos;s ticker on its primary exchange. Click to open in GuruFocus.</CellInfoTip>
+                                    </th>
+                                    <th className="text-left py-1 font-medium">
+                                      Company<CellInfoTip>Issuer name. Click to open in GuruFocus.</CellInfoTip>
+                                    </th>
+                                    <th className="text-left py-1 font-medium">
+                                      Sector<CellInfoTip>GICS sector. Selection picks top sectors then top stocks within each.</CellInfoTip>
+                                    </th>
                                     {categories.map((cat) => (
                                       <th key={cat} className="text-right py-1 font-medium">
                                         {cat === 'price' ? 'Price' : cat === 'volume' ? 'Vol' : cat}
+                                        <CellInfoTip>
+                                          {cat === 'price'
+                                            ? 'Composite 0–100 score across the price-momentum signals, min-max normalized within the universe at this date.'
+                                            : cat === 'volume'
+                                            ? 'Composite 0–100 score across the volume signals, min-max normalized within the universe at this date.'
+                                            : `${cat} category score, 0–100 normalized across the universe.`}
+                                        </CellInfoTip>
                                       </th>
                                     ))}
-                                    <th className="text-right py-1 font-medium">Total</th>
-                                    <th className="text-right py-1 font-medium pl-4">Start (local)</th>
-                                    <th className="text-right py-1 font-medium">End (local)</th>
-                                    <th className="text-right py-1 font-medium pl-4">Start (€)</th>
-                                    <th className="text-right py-1 font-medium">End (€)</th>
-                                    <th className="text-right py-1 font-medium pl-4">Return</th>
+                                    <th className="text-right py-1 font-medium">
+                                      Total<CellInfoTip>Weighted combination of the category scores. Selection ranks by this.</CellInfoTip>
+                                    </th>
+                                    <th className="text-right py-1 font-medium pl-4">
+                                      Start (local)<CellInfoTip>Entry price in local currency on (or just after) the first of the month.</CellInfoTip>
+                                    </th>
+                                    <th className="text-right py-1 font-medium">
+                                      End (local)<CellInfoTip>Latest available close in local currency at this day.</CellInfoTip>
+                                    </th>
+                                    <th className="text-right py-1 font-medium pl-4">
+                                      Start (€)<CellInfoTip>Entry price converted to EUR using the day&apos;s ECB FX rate.</CellInfoTip>
+                                    </th>
+                                    <th className="text-right py-1 font-medium">
+                                      End (€)<CellInfoTip>Exit price converted to EUR using the day&apos;s ECB FX rate.</CellInfoTip>
+                                    </th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -1784,9 +1862,6 @@ export default function MomentumBacktester() {
                                           </td>
                                           <td className="text-right py-1.5 text-gray-400 font-mono">
                                             {fmtPrice(h.exit_price_eur ?? null)}
-                                          </td>
-                                          <td className={`text-right py-1.5 font-mono pl-4 ${h.forward_return_pct != null ? (h.forward_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
-                                            {fmtPct(h.forward_return_pct ?? null)}
                                           </td>
                                         </tr>
                                       );
@@ -1915,11 +1990,21 @@ export default function MomentumBacktester() {
                 <thead>
                   <tr className="border-b border-gray-800/40 text-gray-500 text-xs">
                     <th className="px-4 py-2.5 text-left font-medium"></th>
-                    <th className="px-3 py-2.5 text-right font-medium">Total Return</th>
-                    <th className="px-3 py-2.5 text-right font-medium">Annualized</th>
-                    <th className="px-3 py-2.5 text-right font-medium">Max Drawdown</th>
-                    <th className="px-3 py-2.5 text-right font-medium">Sharpe</th>
-                    <th className="px-3 py-2.5 text-right font-medium">Months</th>
+                    <th className="px-3 py-2.5 text-right font-medium">
+                      Total Return<CellInfoTip>Cumulative return over the entire backtest period: (1 + r₁)(1 + r₂)…(1 + rₙ) − 1.</CellInfoTip>
+                    </th>
+                    <th className="px-3 py-2.5 text-right font-medium">
+                      Annualized<CellInfoTip>Geometric annual return: (1 + total_return)^(1/years) − 1, where years = months ÷ 12.</CellInfoTip>
+                    </th>
+                    <th className="px-3 py-2.5 text-right font-medium">
+                      Max Drawdown<CellInfoTip>Largest peak-to-trough decline observed during the backtest, expressed as a negative percentage of the prior peak.</CellInfoTip>
+                    </th>
+                    <th className="px-3 py-2.5 text-right font-medium">
+                      Sharpe<CellInfoTip>Annualized Sharpe ratio of monthly returns (risk-free rate = 0): mean ÷ std × √12. Computed only when ≥12 months of returns are available.</CellInfoTip>
+                    </th>
+                    <th className="px-3 py-2.5 text-right font-medium">
+                      Months<CellInfoTip>Number of monthly rebalance periods in the backtest.</CellInfoTip>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2037,13 +2122,16 @@ export default function MomentumBacktester() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-gray-800/40 text-gray-500 text-xs">
-                        <th className="px-5 py-2.5 text-left font-medium">Year</th>
+                        <th className="px-5 py-2.5 text-left font-medium">
+                          Year<CellInfoTip>Calendar year. Each cell shows the series&apos; cumulative return across that year (Jan 1 → Dec 31, or partial for the latest year).</CellInfoTip>
+                        </th>
                         {alignedSeries.series.map((s) => (
                           <th key={s.id} className="px-3 py-2.5 text-right font-medium">
                             <span className="inline-flex items-center gap-1.5">
                               <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: s.color }} />
                               <span className="truncate max-w-[140px]">{s.label}</span>
                             </span>
+                            <CellInfoTip>Annual return for this series. Strategy returns chain-link the monthly portfolio returns; benchmark returns chain-link daily closes.</CellInfoTip>
                           </th>
                         ))}
                       </tr>
@@ -2202,11 +2290,21 @@ export default function MomentumBacktester() {
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 bg-[#151821] z-20">
                     <tr className="text-gray-500 text-xs border-b border-gray-800/40">
-                      <th className="text-left px-5 py-2.5 font-medium">Month</th>
-                      <th className="text-right px-3 py-2.5 font-medium">Holdings</th>
-                      <th className="text-right px-3 py-2.5 font-medium">Return</th>
-                      <th className="text-right px-3 py-2.5 font-medium" title="% of current holdings not held last month">Turnover</th>
-                      <th className="text-right px-5 py-2.5 font-medium">Cumulative</th>
+                      <th className="text-left px-5 py-2.5 font-medium">
+                        Month<CellInfoTip>The rebalance month (YYYY-MM). The strategy enters the month&apos;s portfolio at the first trading day and holds until the next first-of-month.</CellInfoTip>
+                      </th>
+                      <th className="text-right px-3 py-2.5 font-medium">
+                        Holdings<CellInfoTip>Number of stocks in the portfolio for this month (equal-weighted). Determined by top_n_sectors × top_n_per_sector, minus any failures.</CellInfoTip>
+                      </th>
+                      <th className="text-right px-3 py-2.5 font-medium">
+                        Return<CellInfoTip>Equal-weighted portfolio return for this month: mean of holdings&apos; (next-month-entry ÷ this-month-entry) − 1, in EUR.</CellInfoTip>
+                      </th>
+                      <th className="text-right px-3 py-2.5 font-medium">
+                        Turnover<CellInfoTip>Percentage of this month&apos;s holdings not held in the previous month. 0% means the strategy held the same portfolio; 100% means it replaced everything.</CellInfoTip>
+                      </th>
+                      <th className="text-right px-5 py-2.5 font-medium">
+                        Cumulative<CellInfoTip>Cumulative return through the end of this month, since the backtest start: chain-linked product of all prior monthly returns.</CellInfoTip>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2237,20 +2335,45 @@ export default function MomentumBacktester() {
                               <table className="w-full text-xs">
                                 <thead>
                                   <tr className="text-gray-600">
-                                    <th className="text-left py-1 font-medium">Ticker</th>
-                                    <th className="text-left py-1 font-medium">Company</th>
-                                    <th className="text-left py-1 font-medium">Sector</th>
+                                    <th className="text-left py-1 font-medium">
+                                      Ticker<CellInfoTip>The stock&apos;s ticker on its primary exchange. Click to open in GuruFocus.</CellInfoTip>
+                                    </th>
+                                    <th className="text-left py-1 font-medium">
+                                      Company<CellInfoTip>Issuer name. Click to open in GuruFocus.</CellInfoTip>
+                                    </th>
+                                    <th className="text-left py-1 font-medium">
+                                      Sector<CellInfoTip>GICS sector. Selection picks top sectors then top stocks within each.</CellInfoTip>
+                                    </th>
                                     {categories.map((cat) => (
                                       <th key={cat} className="text-right py-1 font-medium">
                                         {cat === 'price' ? 'Price' : cat === 'volume' ? 'Vol' : cat}
+                                        <CellInfoTip>
+                                          {cat === 'price'
+                                            ? 'Composite 0–100 score across the price-momentum signals, min-max normalized within the universe at this date.'
+                                            : cat === 'volume'
+                                            ? 'Composite 0–100 score across the volume signals, min-max normalized within the universe at this date.'
+                                            : `${cat} category score, 0–100 normalized across the universe.`}
+                                        </CellInfoTip>
                                       </th>
                                     ))}
-                                    <th className="text-right py-1 font-medium">Total</th>
-                                    <th className="text-right py-1 font-medium pl-4">Start (local)</th>
-                                    <th className="text-right py-1 font-medium">End (local)</th>
-                                    <th className="text-right py-1 font-medium pl-4">Start (€)</th>
-                                    <th className="text-right py-1 font-medium">End (€)</th>
-                                    <th className="text-right py-1 font-medium pl-4">Return</th>
+                                    <th className="text-right py-1 font-medium">
+                                      Total<CellInfoTip>Weighted combination of the category scores. Selection ranks by this.</CellInfoTip>
+                                    </th>
+                                    <th className="text-right py-1 font-medium pl-4">
+                                      Start (local)<CellInfoTip>Entry price in local currency at the first trading day of this month.</CellInfoTip>
+                                    </th>
+                                    <th className="text-right py-1 font-medium">
+                                      End (local)<CellInfoTip>Exit price in local currency at the first trading day of the next month.</CellInfoTip>
+                                    </th>
+                                    <th className="text-right py-1 font-medium pl-4">
+                                      Start (€)<CellInfoTip>Entry price converted to EUR using the day&apos;s ECB FX rate.</CellInfoTip>
+                                    </th>
+                                    <th className="text-right py-1 font-medium">
+                                      End (€)<CellInfoTip>Exit price converted to EUR using the day&apos;s ECB FX rate.</CellInfoTip>
+                                    </th>
+                                    <th className="text-right py-1 font-medium pl-4">
+                                      Return<CellInfoTip>Per-stock return in EUR over this month: (End € ÷ Start €) − 1.</CellInfoTip>
+                                    </th>
                                   </tr>
                                 </thead>
                                 <tbody>

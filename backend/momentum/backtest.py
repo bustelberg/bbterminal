@@ -102,13 +102,19 @@ class BacktestSummary:
 @dataclass
 class DailyPick:
     """One trading day's worth of hypothetical picks + turnover vs the previous
-    day. Each holding carries the start-of-month → that-day MTD return, so the
-    UI can render this list like the monthly backtest table."""
+    day. Two return numbers per day:
+      - portfolio_return_pct: chain-linked cumulative MTD through this day,
+        formed by multiplying each day's equal-weighted close-to-close return
+        across rebalances.
+      - next_day_return_pct: equal-weighted close-to-close return of *this*
+        day's portfolio held until the next trading day. NULL on the latest
+        day in the panel (no next day yet)."""
     date: str                              # YYYY-MM-DD
     holdings: list[MonthlyHolding]
     turnover_abs: int                      # number of holdings that differ from previous day
     turnover_pct: float                    # turnover_abs / max(len(today), len(prev)) * 100
-    portfolio_return_pct: float | None = None  # equal-weight mean of holdings' MTD returns
+    portfolio_return_pct: float | None = None
+    next_day_return_pct: float | None = None
 
 
 @dataclass
@@ -150,6 +156,7 @@ class CurrentPortfolio:
                     "turnover_abs": d.turnover_abs,
                     "turnover_pct": d.turnover_pct,
                     "portfolio_return_pct": d.portfolio_return_pct,
+                    "next_day_return_pct": d.next_day_return_pct,
                     "holdings": [
                         {
                             "company_id": h.company_id,
@@ -1012,6 +1019,15 @@ def run_current_portfolio(
     # and holdings construction.
     daily_picks: list[DailyPick] = []
     prev_ids: set[int] = set()
+    # Chain-linked cumulative MTD under the standard pre-rebalance convention:
+    # day d's contribution to cum return = the previous day's (pre-rebalance)
+    # portfolio held one trading day forward. Day 0 contributes 0% (we just
+    # entered). Concretely: today's chain contribution == previous day's
+    # next_day_return_pct (the same number, before % conversion). We
+    # accumulate that into `cum_factor` and expose `(cum_factor − 1) × 100`
+    # as `portfolio_return_pct` on each DailyPick.
+    cum_factor = 1.0
+    prev_d_ts: pd.Timestamp | None = None
     t_daily_loop_start = time.perf_counter()
     t_daily_signals_total = 0.0
     t_daily_select_total = 0.0
@@ -1043,7 +1059,29 @@ def run_current_portfolio(
         day_weight = 1.0 / len(daily_selected)
         day_holdings: list[MonthlyHolding] = []
         today_ids: set[int] = set()
-        day_returns: list[float] = []
+
+        # Compute the prior day's next_day_return now that we have today's
+        # prices. This same number is also today's chain contribution to
+        # cumulative MTD under the pre-rebalance convention — we held the
+        # prior day's portfolio overnight and earned its close-to-close move.
+        prior_one_day_return: float | None = None
+        if daily_picks and prev_d_ts is not None:
+            prev_pick = daily_picks[-1]
+            forward_components: list[float] = []
+            for h in prev_pick.holdings:
+                series = price_index.get(h.company_id)
+                if series is None:
+                    continue
+                prev_pair = _price_on_or_before(series, prev_d_ts)
+                today_pair = _price_on_or_before(series, day_ts)
+                if (
+                    prev_pair is not None and today_pair is not None
+                    and prev_pair[0] > 0
+                ):
+                    forward_components.append(today_pair[0] / prev_pair[0] - 1)
+            if forward_components:
+                prior_one_day_return = sum(forward_components) / len(forward_components)
+                prev_pick.next_day_return_pct = round(prior_one_day_return * 100.0, 2)
         for _, drow in daily_selected.iterrows():
             cid = int(drow["company_id"])
             today_ids.add(cid)
@@ -1057,7 +1095,6 @@ def run_current_portfolio(
             mtd_return = None
             if entry_price and exit_price and entry_price > 0:
                 mtd_return = round((exit_price / entry_price - 1) * 100, 2)
-                day_returns.append(mtd_return)
 
             local_series = local_price_index.get(cid) if local_price_index is not None else None
             entry_local = _price_on_or_after(local_series, entry_ts) if local_series is not None else None
@@ -1095,7 +1132,19 @@ def run_current_portfolio(
                 exit_date=exit_dt,
             ))
 
-        port_mtd = round(sum(day_returns) / len(day_returns), 2) if day_returns else None
+        # Pre-rebalance chain link: today's contribution to cum MTD is the
+        # PREVIOUS day's portfolio held one trading day forward (computed
+        # above as `prior_one_day_return`). Day 0 contributes 0% — we just
+        # entered. After day 0, port_mtd reads (cum_factor − 1) × 100,
+        # carrying the running cumulative return through rebalances.
+        if i == 0:
+            port_mtd = 0.0
+        elif prior_one_day_return is not None:
+            cum_factor *= (1.0 + prior_one_day_return)
+            port_mtd = round((cum_factor - 1.0) * 100.0, 2)
+        else:
+            # No valid prior-portfolio prices — leave cum unchanged, no return.
+            port_mtd = None
 
         # Turnover: max of (stocks added today, stocks removed today).
         # For a fixed-size portfolio with N swaps, both equal N — so the
@@ -1119,6 +1168,7 @@ def run_current_portfolio(
             portfolio_return_pct=port_mtd,
         ))
         prev_ids = today_ids
+        prev_d_ts = day_ts
         t_daily_holdings_total += time.perf_counter() - t_holdings
 
     t_daily_loop_elapsed = time.perf_counter() - t_daily_loop_start

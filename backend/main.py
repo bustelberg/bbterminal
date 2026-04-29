@@ -126,6 +126,7 @@ def _persist_daily_picks(strategy_hash: str, config: dict, daily_picks: list[dic
             "as_of_date": as_of,
             "holdings": dp.get("holdings") or [],
             "portfolio_return_pct": dp.get("portfolio_return_pct"),
+            "next_day_return_pct": dp.get("next_day_return_pct"),
             "turnover_abs": dp.get("turnover_abs", 0),
             "turnover_pct": dp.get("turnover_pct", 0),
             "config": config,
@@ -140,7 +141,7 @@ def _fetch_daily_picks_history(strategy_hash: str) -> list[dict]:
     """Return all stored daily picks for a strategy, sorted ascending by
     target_date. Shape matches the in-memory DailyPick.to_dict()."""
     resp = supabase.table("current_picks_day").select(
-        "target_date, holdings, portfolio_return_pct, turnover_abs, turnover_pct"
+        "target_date, holdings, portfolio_return_pct, next_day_return_pct, turnover_abs, turnover_pct"
     ).eq("strategy_hash", strategy_hash).order("target_date").execute()
     rows = resp.data or []
     return [
@@ -148,6 +149,7 @@ def _fetch_daily_picks_history(strategy_hash: str) -> list[dict]:
             "date": r["target_date"],
             "holdings": r.get("holdings") or [],
             "portfolio_return_pct": r.get("portfolio_return_pct"),
+            "next_day_return_pct": r.get("next_day_return_pct"),
             "turnover_abs": r.get("turnover_abs") or 0,
             "turnover_pct": float(r.get("turnover_pct") or 0),
         }

@@ -87,7 +87,8 @@ export type DailyPick = {
   holdings: DailyPickHolding[];
   turnover_abs: number;           // # stocks added (= removed for fixed-size) vs previous day
   turnover_pct: number;           // turnover_abs / portfolio_size * 100
-  portfolio_return_pct?: number | null;  // equal-weight mean MTD across this day's picks
+  portfolio_return_pct?: number | null;  // chain-linked cumulative MTD through this day
+  next_day_return_pct?: number | null;   // 1-day forward return of THIS day's portfolio (null on the latest day)
 };
 
 export type CurrentPortfolio = {
