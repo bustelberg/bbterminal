@@ -16,6 +16,8 @@ import {
   loadCurrentPicksSnapshots,
   loadCurrentPicksSnapshot,
   refreshCurrentPicksMTD,
+  type BacktestStartConfig,
+  type DailyPick,
   type DrawdownPeriod,
   type MonthlyRecord,
   type Summary,
@@ -334,11 +336,35 @@ export default function MomentumBacktester() {
     return m;
   }, [universe]);
 
+  // Group all stored daily picks by YYYY-MM. Falls back to daily_picks for
+  // legacy snapshots that predate daily_picks_history.
+  const dailyPicksByMonth = useMemo<Array<{ month: string; days: DailyPick[] }>>(() => {
+    if (!currentPortfolio) return [];
+    const source = currentPortfolio.daily_picks_history && currentPortfolio.daily_picks_history.length > 0
+      ? currentPortfolio.daily_picks_history
+      : currentPortfolio.daily_picks ?? [];
+    const groups = new Map<string, DailyPick[]>();
+    for (const dp of source) {
+      const month = dp.date.slice(0, 7);
+      const arr = groups.get(month);
+      if (arr) arr.push(dp);
+      else groups.set(month, [dp]);
+    }
+    // Sort months descending (most recent first); days within ascending.
+    return Array.from(groups.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([month, days]) => ({
+        month,
+        days: days.slice().sort((a, b) => a.date.localeCompare(b.date)),
+      }));
+  }, [currentPortfolio]);
+
   // Purely local UI state — safe to reset on navigation
   const [showWarnings, setShowWarnings] = useState(true);
   const [showInfos, setShowInfos] = useState(false);
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
   const [expandedDailyDate, setExpandedDailyDate] = useState<string | null>(null);
+  const [expandedHistoryMonth, setExpandedHistoryMonth] = useState<string | null>(null);
 
   // Save/load state
   const [savedRuns, setSavedRuns] = useState<SavedRun[]>([]);
@@ -833,37 +859,36 @@ export default function MomentumBacktester() {
     });
   };
 
-  // "What is my strategy holding right now?" — load the most recent saved
-  // snapshot if one exists (instant), else trigger a fresh compute (slow).
+  const _currentPortfolioConfig = (force: boolean): BacktestStartConfig => ({
+    start_date: `${startDate}-01`,
+    end_date: `${endDate}-01`,
+    signal_weights: weights,
+    category_weights: categoryWeights,
+    top_n_sectors: topSectors,
+    top_n_per_sector: topPerSector,
+    skip_price_fetch: skipPriceFetch,
+    max_companies: maxCompanies,
+    universe_label: null,
+    index_universe: selectedIndexUniverse || null,
+    selection_mode: 'momentum',
+    random_seed: null,
+    n_trials: 1,
+    mode: 'current_portfolio',
+    force_recompute: force,
+  });
+
+  // Hit the backend for "what is my strategy holding right now?". The backend
+  // serves from cache if (this strategy, this month) is already stored.
   // Random mode is unsupported here.
   const showCurrentPicks = async () => {
-    if (currentPicksSnapshots.length > 0) {
-      await loadCurrentPicksSnapshot(currentPicksSnapshots[0].snapshot_id);
-    } else {
-      await recomputeCurrentPortfolio();
-    }
+    await startBacktest(_currentPortfolioConfig(false));
+    loadCurrentPicksSnapshots();
   };
 
   // Force a fresh full compute. Slow (signals + scoring + price fetch),
   // but persists a new snapshot in the DB so future loads are instant.
   const recomputeCurrentPortfolio = async () => {
-    await startBacktest({
-      start_date: `${startDate}-01`,
-      end_date: `${endDate}-01`,
-      signal_weights: weights,
-      category_weights: categoryWeights,
-      top_n_sectors: topSectors,
-      top_n_per_sector: topPerSector,
-      skip_price_fetch: skipPriceFetch,
-      max_companies: maxCompanies,
-      universe_label: null,
-      index_universe: selectedIndexUniverse || null,
-      selection_mode: 'momentum',
-      random_seed: null,
-      n_trials: 1,
-      mode: 'current_portfolio',
-    });
-    // Refresh the snapshot list so the new snapshot is available in the picker
+    await startBacktest(_currentPortfolioConfig(true));
     loadCurrentPicksSnapshots();
   };
 
@@ -1586,28 +1611,68 @@ export default function MomentumBacktester() {
                 No holdings selected for this month — universe or signals returned empty.
               </div>
             )}
-            {/* Daily picks — what the strategy WOULD have picked each trading
-                day this month. Click a row to see the holdings for that date. */}
-            {currentPortfolio.daily_picks && currentPortfolio.daily_picks.length > 0 && (
+            {/* Daily picks history — months as buckets; expand a month to see
+                its stored days, expand a day to see full per-holding detail.
+                Current month days are computed on the fly (then cached). Past
+                months show only days already in the DB from prior computes. */}
+            {dailyPicksByMonth.length > 0 && (
               <div className="border-t border-gray-800/40">
                 <div className="px-4 py-3 border-b border-gray-800/40">
-                  <div className="text-sm font-medium text-white">Daily picks ({currentPortfolio.daily_picks.length} trading days)</div>
+                  <div className="text-sm font-medium text-white">Daily picks history</div>
                   <div className="text-xs text-gray-500 mt-0.5">
-                    Hypothetical: what the strategy would pick if rebalancing on each day. Turnover compares to the previous day.
+                    Hypothetical: what the strategy would pick if rebalancing on each day. MTD return is start-of-month → that day; turnover is vs the previous day. Past months are read-only — only days already saved are shown.
                   </div>
                 </div>
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-gray-800/40 text-gray-600">
-                      <th className="text-left px-4 py-1.5 font-medium">Date</th>
-                      <th className="text-right px-3 py-1.5 font-medium">Holdings</th>
-                      <th className="text-right px-3 py-1.5 font-medium">Turnover</th>
-                      <th className="text-right px-3 py-1.5 font-medium">%</th>
+                      <th className="text-left px-4 py-2 font-medium">Month</th>
+                      <th className="text-right px-3 py-2 font-medium">Days</th>
+                      <th className="text-right px-3 py-2 font-medium">Latest MTD</th>
+                      <th className="text-right px-3 py-2 font-medium" colSpan={2} />
                     </tr>
                   </thead>
                   <tbody>
-                    {currentPortfolio.daily_picks.map((dp) => (
-                      <Fragment key={dp.date}>
+                    {dailyPicksByMonth.map(({ month, days }) => {
+                      const latestDay = days[days.length - 1];
+                      const latestMTD = latestDay?.portfolio_return_pct ?? null;
+                      const isOpen = expandedHistoryMonth === month;
+                      const monthLabel = (() => {
+                        const [y, m] = month.split('-').map(Number);
+                        return new Date(y, m - 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                      })();
+                      return (
+                        <Fragment key={month}>
+                          <tr
+                            className="border-b border-gray-800/40 hover:bg-white/[0.02] cursor-pointer"
+                            onClick={() => setExpandedHistoryMonth(isOpen ? null : month)}
+                          >
+                            <td className="px-4 py-2 font-mono text-gray-200">
+                              <span className="text-gray-600 mr-2">{isOpen ? '▾' : '▸'}</span>
+                              {monthLabel}
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono text-gray-300">{days.length}</td>
+                            <td className={`px-3 py-2 text-right font-mono ${latestMTD != null ? (latestMTD >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
+                              {fmtPct(latestMTD)}
+                            </td>
+                            <td colSpan={2} />
+                          </tr>
+                          {isOpen && (
+                            <tr>
+                              <td colSpan={5} className="bg-[#0f1117] p-0">
+                                <table className="w-full text-xs">
+                                  <thead>
+                                    <tr className="border-b border-gray-800/30 text-gray-600">
+                                      <th className="text-left px-5 py-1.5 font-medium">Date</th>
+                                      <th className="text-right px-3 py-1.5 font-medium">Holdings</th>
+                                      <th className="text-right px-3 py-1.5 font-medium">Return</th>
+                                      <th className="text-right px-3 py-1.5 font-medium">Turnover</th>
+                                      <th className="text-right px-3 py-1.5 font-medium">%</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {days.map((dp) => (
+                                      <Fragment key={dp.date}>
                         <tr
                           className="border-b border-gray-800/30 hover:bg-white/[0.02] cursor-pointer"
                           onClick={() => setExpandedDailyDate(expandedDailyDate === dp.date ? null : dp.date)}
@@ -1617,6 +1682,9 @@ export default function MomentumBacktester() {
                             {dp.date}
                           </td>
                           <td className="px-3 py-1.5 text-right font-mono text-gray-300">{dp.holdings.length}</td>
+                          <td className={`px-3 py-1.5 text-right font-mono ${dp.portfolio_return_pct != null ? (dp.portfolio_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
+                            {fmtPct(dp.portfolio_return_pct ?? null)}
+                          </td>
                           <td className={`px-3 py-1.5 text-right font-mono ${dp.turnover_abs > 0 ? 'text-amber-400' : 'text-gray-600'}`}>
                             {dp.turnover_abs > 0 ? dp.turnover_abs : '—'}
                           </td>
@@ -1626,14 +1694,24 @@ export default function MomentumBacktester() {
                         </tr>
                         {expandedDailyDate === dp.date && (
                           <tr>
-                            <td colSpan={4} className="bg-[#0f1117] px-5 py-3">
+                            <td colSpan={5} className="bg-[#0f1117] px-5 py-3">
                               <table className="w-full text-xs">
                                 <thead>
                                   <tr className="text-gray-600">
                                     <th className="text-left py-1 font-medium">Ticker</th>
                                     <th className="text-left py-1 font-medium">Company</th>
                                     <th className="text-left py-1 font-medium">Sector</th>
-                                    <th className="text-right py-1 font-medium">Score</th>
+                                    {categories.map((cat) => (
+                                      <th key={cat} className="text-right py-1 font-medium">
+                                        {cat === 'price' ? 'Price' : cat === 'volume' ? 'Vol' : cat}
+                                      </th>
+                                    ))}
+                                    <th className="text-right py-1 font-medium">Total</th>
+                                    <th className="text-right py-1 font-medium pl-4">Start (local)</th>
+                                    <th className="text-right py-1 font-medium">End (local)</th>
+                                    <th className="text-right py-1 font-medium pl-4">Start (€)</th>
+                                    <th className="text-right py-1 font-medium">End (€)</th>
+                                    <th className="text-right py-1 font-medium pl-4">Return</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -1665,9 +1743,51 @@ export default function MomentumBacktester() {
                                               </span>
                                             )}
                                           </td>
-                                          <td className="py-1.5 truncate max-w-[200px] text-gray-300">{h.company_name}</td>
+                                          <td className="py-1.5 truncate max-w-[200px]">
+                                            <a
+                                              href={href}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="text-gray-300 hover:text-indigo-300 hover:underline"
+                                            >
+                                              {h.company_name}
+                                            </a>
+                                          </td>
                                           <td className="py-1.5 text-gray-500">{h.sector}</td>
+                                          {categories.map((cat) => (
+                                            <td key={cat} className="text-right py-1.5 text-gray-400 font-mono">
+                                              {h.category_scores?.[cat] != null ? h.category_scores[cat]!.toFixed(0) : '—'}
+                                            </td>
+                                          ))}
                                           <td className="text-right py-1.5 text-white font-mono font-medium">{h.score.toFixed(1)}</td>
+                                          <td className="text-right py-1.5 text-gray-400 font-mono pl-4">
+                                            {fmtPrice(h.entry_price_local ?? null)}
+                                            {h.currency && <span className="text-gray-600 text-[10px] ml-1">{h.currency}</span>}
+                                            {h.entry_date && (
+                                              <CellInfoTip>
+                                                <div className="text-gray-400">Trading date</div>
+                                                <div className="font-mono text-gray-200">{h.entry_date}</div>
+                                              </CellInfoTip>
+                                            )}
+                                          </td>
+                                          <td className="text-right py-1.5 text-gray-400 font-mono">
+                                            {fmtPrice(h.exit_price_local ?? null)}
+                                            {h.exit_date && (
+                                              <CellInfoTip>
+                                                <div className="text-gray-400">Trading date</div>
+                                                <div className="font-mono text-gray-200">{h.exit_date}</div>
+                                              </CellInfoTip>
+                                            )}
+                                          </td>
+                                          <td className="text-right py-1.5 text-gray-400 font-mono pl-4">
+                                            {fmtPrice(h.entry_price_eur ?? null)}
+                                          </td>
+                                          <td className="text-right py-1.5 text-gray-400 font-mono">
+                                            {fmtPrice(h.exit_price_eur ?? null)}
+                                          </td>
+                                          <td className={`text-right py-1.5 font-mono pl-4 ${h.forward_return_pct != null ? (h.forward_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
+                                            {fmtPct(h.forward_return_pct ?? null)}
+                                          </td>
                                         </tr>
                                       );
                                     })}
@@ -1677,7 +1797,15 @@ export default function MomentumBacktester() {
                           </tr>
                         )}
                       </Fragment>
-                    ))}
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

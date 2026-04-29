@@ -1,5 +1,6 @@
 import asyncio
 import functools
+import hashlib
 import json
 import os
 import re
@@ -90,7 +91,82 @@ _MONTHS = {
 }
 
 
-def _save_current_picks_snapshot(payload: dict, config: dict, triggered_by: str) -> int:
+def _strategy_hash(req: "BacktestRequest") -> str:
+    """Deterministic identifier for a strategy. Same parameters → same hash.
+    Date range is intentionally excluded — current-picks is a sliding "this
+    month" view and should cache across runs that differ only in dates."""
+    payload = {
+        "signal_weights": req.signal_weights or {},
+        "category_weights": req.category_weights or {},
+        "top_n_sectors": req.top_n_sectors,
+        "top_n_per_sector": req.top_n_per_sector,
+        "max_companies": req.max_companies,
+        "universe_label": req.universe_label,
+        "index_universe": req.index_universe,
+        "selection_mode": req.selection_mode,
+    }
+    s = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(s.encode()).hexdigest()[:16]
+
+
+def _persist_daily_picks(strategy_hash: str, config: dict, daily_picks: list[dict]) -> None:
+    """Upsert each day in daily_picks into current_picks_day for this strategy.
+    Synchronous; call via asyncio.to_thread."""
+    if not daily_picks:
+        return
+    rows: list[dict] = []
+    for dp in daily_picks:
+        target_date = dp.get("date")
+        if not target_date:
+            continue
+        as_of = f"{target_date[:7]}-01"
+        rows.append({
+            "strategy_hash": strategy_hash,
+            "target_date": target_date,
+            "as_of_date": as_of,
+            "holdings": dp.get("holdings") or [],
+            "portfolio_return_pct": dp.get("portfolio_return_pct"),
+            "turnover_abs": dp.get("turnover_abs", 0),
+            "turnover_pct": dp.get("turnover_pct", 0),
+            "config": config,
+        })
+    if rows:
+        supabase.table("current_picks_day").upsert(
+            rows, on_conflict="strategy_hash,target_date"
+        ).execute()
+
+
+def _fetch_daily_picks_history(strategy_hash: str) -> list[dict]:
+    """Return all stored daily picks for a strategy, sorted ascending by
+    target_date. Shape matches the in-memory DailyPick.to_dict()."""
+    resp = supabase.table("current_picks_day").select(
+        "target_date, holdings, portfolio_return_pct, turnover_abs, turnover_pct"
+    ).eq("strategy_hash", strategy_hash).order("target_date").execute()
+    rows = resp.data or []
+    return [
+        {
+            "date": r["target_date"],
+            "holdings": r.get("holdings") or [],
+            "portfolio_return_pct": r.get("portfolio_return_pct"),
+            "turnover_abs": r.get("turnover_abs") or 0,
+            "turnover_pct": float(r.get("turnover_pct") or 0),
+        }
+        for r in rows
+    ]
+
+
+def _find_cached_snapshot(strategy_hash: str, as_of_date: str) -> dict | None:
+    """Most recent snapshot for (hash, as_of_date), or None."""
+    resp = supabase.table("current_picks_snapshot").select("*").eq(
+        "strategy_hash", strategy_hash
+    ).eq("as_of_date", as_of_date).order(
+        "created_at", desc=True
+    ).limit(1).execute()
+    rows = resp.data or []
+    return rows[0] if rows else None
+
+
+def _save_current_picks_snapshot(payload: dict, config: dict, triggered_by: str, strategy_hash: str | None = None) -> int:
     """Insert a current_picks snapshot and return its snapshot_id.
     Synchronous (call via asyncio.to_thread from async paths)."""
     if triggered_by not in ("auto", "manual"):
@@ -102,6 +178,7 @@ def _save_current_picks_snapshot(payload: dict, config: dict, triggered_by: str)
         "config": config,
         "holdings": payload["holdings"],
         "daily_picks": payload.get("daily_picks") or [],
+        "strategy_hash": strategy_hash,
     }
     resp = supabase.table("current_picks_snapshot").insert(row).execute()
     if not resp.data:
@@ -1390,6 +1467,7 @@ class BacktestRequest(BaseModel):
     random_seed: int | None = None  # only used when selection_mode == "random"
     n_trials: int = 1  # >1 only valid with selection_mode=="random"; aggregates mean ± std
     mode: str = "backtest"  # "backtest" or "current_portfolio"
+    force_recompute: bool = False  # current_portfolio: ignore cache and recompute
 
 
 async def _momentum_backtest_stream(req: BacktestRequest):
@@ -1408,6 +1486,35 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         _today = date.today()
         req.start_date = (_today - _td(days=14 * 31)).isoformat()
         req.end_date = _today.isoformat()
+
+        # Cache hit short-circuit. Same strategy clicked twice in the same
+        # month → serve the stored snapshot, no recompute. Recompute button
+        # passes force_recompute=True to bypass.
+        if not req.force_recompute:
+            try:
+                hash_ = _strategy_hash(req)
+                month_start = date(_today.year, _today.month, 1).isoformat()
+                cached = await asyncio.to_thread(_find_cached_snapshot, hash_, month_start)
+                if cached:
+                    history = await asyncio.to_thread(_fetch_daily_picks_history, hash_)
+                    payload = {
+                        "snapshot_id": cached.get("snapshot_id"),
+                        "as_of_date": cached.get("as_of_date"),
+                        "latest_price_date": cached.get("latest_price_date"),
+                        "holdings": cached.get("holdings") or [],
+                        "daily_picks": cached.get("daily_picks") or [],
+                        "daily_picks_history": history,
+                        "strategy_hash": hash_,
+                        "from_cache": True,
+                    }
+                    yield _emit({"type": "progress", "pct": 100, "message": "Loaded cached current picks"})
+                    yield _emit({"type": "current_portfolio", "data": payload, "universe": []})
+                    yield _emit({"type": "done", "message": "Served from cache"})
+                    return
+            except Exception as e:
+                # Cache lookup failed — fall through to a fresh compute and
+                # surface the issue as a non-fatal warning.
+                yield _emit({"type": "warning", "scope": "cache", "message": f"Cache lookup failed: {type(e).__name__}: {e}"})
 
     try:
         yield _emit({"type": "progress", "pct": 0, "message": "Loading universe..."})
@@ -2057,18 +2164,37 @@ async def _momentum_backtest_stream(req: BacktestRequest):
 
         if req.mode == "current_portfolio":
             payload = result.to_dict()
-            # Persist snapshot so subsequent loads are instant. We don't fail
-            # the SSE if the insert errors — the user still sees the result.
+            hash_ = _strategy_hash(req)
+            payload["strategy_hash"] = hash_
+            cfg_dump = req.model_dump()
+            # Persist snapshot + per-day rows so subsequent loads are instant.
+            # Failures are surfaced as non-fatal warnings; the user still sees
+            # the freshly computed result.
             try:
                 snapshot_id = await asyncio.to_thread(
                     _save_current_picks_snapshot,
                     payload,
-                    req.model_dump(),
+                    cfg_dump,
                     "manual",
+                    hash_,
                 )
                 payload["snapshot_id"] = snapshot_id
             except Exception as e:
                 yield _emit({"type": "warning", "scope": "snapshot", "message": f"Could not persist snapshot: {type(e).__name__}: {e}"})
+            try:
+                await asyncio.to_thread(
+                    _persist_daily_picks,
+                    hash_,
+                    cfg_dump,
+                    payload.get("daily_picks") or [],
+                )
+            except Exception as e:
+                yield _emit({"type": "warning", "scope": "daily-picks", "message": f"Could not persist daily picks: {type(e).__name__}: {e}"})
+            try:
+                payload["daily_picks_history"] = await asyncio.to_thread(_fetch_daily_picks_history, hash_)
+            except Exception as e:
+                payload["daily_picks_history"] = payload.get("daily_picks") or []
+                yield _emit({"type": "warning", "scope": "daily-picks", "message": f"Could not fetch daily picks history: {type(e).__name__}: {e}"})
             yield _emit({"type": "current_portfolio", "data": payload, "universe": universe_snapshot})
             yield _emit({"type": "done", "message": "Current portfolio computed"})
         else:
@@ -2311,8 +2437,10 @@ async def cron_current_picks(req: BacktestRequest, x_cron_secret: str = Header(d
     if x_cron_secret != expected:
         raise HTTPException(401, "Invalid cron secret")
 
-    # Force the right mode regardless of what the caller sent.
+    # Force the right mode regardless of what the caller sent. Cron always
+    # recomputes — its purpose is to land a fresh weekly snapshot.
     req.mode = "current_portfolio"
+    req.force_recompute = True
     if req.selection_mode == "random":
         raise HTTPException(400, "Cron does not support random selection mode")
 
@@ -2351,6 +2479,7 @@ async def cron_current_picks(req: BacktestRequest, x_cron_secret: str = Header(d
             payload,
             req.model_dump(),
             "auto",
+            payload.get("strategy_hash"),
         )
         if manual_id is not None:
             await asyncio.to_thread(

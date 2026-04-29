@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import type { Snapshot } from '../longequity-universe/page';
 
 import { ingestStore, startIngest } from '../../lib/stores/ingest';
@@ -210,18 +210,17 @@ const SAVE_STEPS: StepDef[] = [
 
 export default function LongEquityUniverse() {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
-  const [snapshotsLoading, setSnapshotsLoading] = useState(true);
+  const [snapshotsLoading, setSnapshotsLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [data, setData] = useState<SnapshotData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
 
   const [latestAvailable, setLatestAvailable] = useState<string | null>(null);
-  const [loadingAvailable, setLoadingAvailable] = useState(true);
-  const [latestData, setLatestData] = useState<{ available: boolean; year?: number; month?: number } | null>(null);
+  const [loadingAvailable, setLoadingAvailable] = useState(false);
   const ingesting = ingestStore.use((s) => s.running);
   const ingestLog = ingestStore.use((s) => s.log);
   const setIngestLog = (next: typeof ingestLog) => ingestStore.set({ log: next });
-  const didAutoIngest = useRef(false);
 
   // Save-as-universe state
   const [universeName, setUniverseName] = useState('longequity_cumulative');
@@ -248,32 +247,26 @@ export default function LongEquityUniverse() {
     } catch {}
   }
 
-  // Fetch snapshots on mount — page shell renders instantly, tabs stream in.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
+  async function loadAll() {
+    setHasLoaded(true);
+    setSnapshotsLoading(true);
+    setLoadingAvailable(true);
+    const snapshotsPromise = (async () => {
       try {
         const res = await fetch(`${API_URL}/api/longequity/snapshots`);
         if (!res.ok) return;
         const fresh: Snapshot[] = await res.json();
-        if (cancelled) return;
         setSnapshots(fresh);
         if (fresh.length > 0) setSelectedDate(fresh[fresh.length - 1].target_date);
       } catch {
         // backend offline — surface nothing; empty-state UI handles it
       } finally {
-        if (!cancelled) setSnapshotsLoading(false);
+        setSnapshotsLoading(false);
       }
     })();
-    return () => { cancelled = true; };
-  }, []);
-
-  // Latest-available display — fires in parallel with snapshots, no gating.
-  useEffect(() => {
-    fetch(`${API_URL}/api/longequity/latest-available`)
+    const availablePromise = fetch(`${API_URL}/api/longequity/latest-available`)
       .then((r) => r.json())
       .then((d: { available: boolean; year?: number; month?: number }) => {
-        setLatestData(d);
         if (d.available && d.year && d.month) {
           setLatestAvailable(`${MONTH_NAMES[d.month]} ${d.year}`);
         } else {
@@ -282,26 +275,11 @@ export default function LongEquityUniverse() {
       })
       .catch(() => setLatestAvailable('Unknown'))
       .finally(() => setLoadingAvailable(false));
-  }, []);
-
-  // Auto-ingest decision — runs once both snapshots and latest-available are known.
-  useEffect(() => {
-    if (didAutoIngest.current) return;
-    if (snapshotsLoading) return;
-    if (!latestData || !latestData.available || !latestData.year || !latestData.month) return;
-    const remoteKey = latestData.year * 100 + latestData.month;
-    let shouldIngest = false;
-    if (snapshots.length === 0) {
-      shouldIngest = true;
-    } else {
-      const lastDate = snapshots[snapshots.length - 1].target_date;
-      const [y, m] = lastDate.split('-').map(Number);
-      if (remoteKey > y * 100 + m) shouldIngest = true;
-    }
-    if (shouldIngest) { didAutoIngest.current = true; runIngest(); }
-  }, [snapshotsLoading, latestData, snapshots]); // eslint-disable-line react-hooks/exhaustive-deps
+    await Promise.all([snapshotsPromise, availablePromise]);
+  }
 
   function runIngest() {
+    setHasLoaded(true);
     return startIngest(() => refreshSnapshots());
   }
 
@@ -406,19 +384,28 @@ export default function LongEquityUniverse() {
           </p>
         </div>
         <div className="flex items-center gap-4 shrink-0">
-          <div className="text-right text-sm">
-            <div className="text-gray-400">
-              Latest available:{' '}
-              <span className="text-white font-medium">
-                {loadingAvailable ? 'Checking...' : latestAvailable}
-              </span>
-            </div>
-            {!loadingAvailable && (
-              <div className="text-xs text-gray-600">
-                as of {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+          {hasLoaded && (
+            <div className="text-right text-sm">
+              <div className="text-gray-400">
+                Latest available:{' '}
+                <span className="text-white font-medium">
+                  {loadingAvailable ? 'Checking...' : latestAvailable ?? '—'}
+                </span>
               </div>
-            )}
-          </div>
+              {!loadingAvailable && latestAvailable && (
+                <div className="text-xs text-gray-600">
+                  as of {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+                </div>
+              )}
+            </div>
+          )}
+          <button
+            onClick={loadAll}
+            disabled={snapshotsLoading || loadingAvailable}
+            className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-700/60 text-gray-300 hover:text-white hover:border-gray-600 disabled:opacity-50 transition-colors whitespace-nowrap"
+          >
+            {snapshotsLoading || loadingAvailable ? 'Loading...' : hasLoaded ? 'Refresh' : 'Load'}
+          </button>
           <button
             onClick={runIngest}
             disabled={ingesting}
@@ -518,7 +505,11 @@ export default function LongEquityUniverse() {
           );
         })()}
 
-        {snapshotsLoading ? (
+        {!hasLoaded ? (
+          <p className="text-sm text-gray-500">
+            Click <span className="text-gray-300">Load</span> to fetch saved snapshots, or <span className="text-gray-300">Run ingest</span> to pull the latest LongEquity data.
+          </p>
+        ) : snapshotsLoading ? (
           <div>
             <div className="h-4 w-32 rounded bg-gray-800/60 animate-pulse mb-3" />
             <div className="flex gap-1.5 pb-3 overflow-hidden">

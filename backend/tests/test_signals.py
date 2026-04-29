@@ -21,6 +21,7 @@ from momentum.signals import (
     _volume_ratio,
     _volume_trend,
     compute_price_signals,
+    compute_signals_panel,
 )
 
 
@@ -379,3 +380,125 @@ class TestComputePriceSignals:
             price_index=price_index,
         )
         assert out.empty
+
+
+# ---------------------------------------------------------------------------
+# compute_signals_panel — parity with compute_price_signals
+# ---------------------------------------------------------------------------
+
+class TestSignalsPanelParity:
+    """The vectorized panel must produce identical signal values to the
+    per-cutoff path for the same (universe, cutoffs, prices, volumes)."""
+
+    @staticmethod
+    def _build_universe(company_ids: list[int]) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "company_id": company_ids,
+                "sector": [f"Sector {i % 3}" for i in company_ids],
+                "company_name": [f"Co{i}" for i in company_ids],
+                "gurufocus_ticker": [f"T{i}" for i in company_ids],
+            }
+        )
+
+    @staticmethod
+    def _build_price_series(seed: int, *, end: str = "2026-04-29", periods: int = 800) -> pd.Series:
+        # Deterministic random walk so the test is reproducible.
+        rng = np.random.default_rng(seed)
+        dates = pd.date_range(end=pd.Timestamp(end), periods=periods, freq="B")
+        steps = rng.normal(loc=0.0005, scale=0.02, size=periods)
+        prices = 100.0 * np.exp(np.cumsum(steps))
+        return pd.Series(prices, index=dates, dtype="float64")
+
+    @staticmethod
+    def _build_volume_series(seed: int, *, end: str = "2026-04-29", periods: int = 800) -> pd.Series:
+        rng = np.random.default_rng(seed + 1000)
+        dates = pd.date_range(end=pd.Timestamp(end), periods=periods, freq="B")
+        vols = rng.lognormal(mean=12.0, sigma=0.5, size=periods)
+        return pd.Series(vols, index=dates, dtype="float64")
+
+    def test_panel_matches_per_cutoff_across_dates(self):
+        # 5 companies, signals computed at 8 different cutoffs spanning a
+        # month. Every cell that the per-cutoff function emits must match
+        # the panel's lookup.
+        company_ids = [10, 20, 30, 40, 50]
+        price_index = {cid: self._build_price_series(seed=cid) for cid in company_ids}
+        volume_index = {cid: self._build_volume_series(seed=cid) for cid in company_ids}
+        universe = self._build_universe(company_ids)
+
+        cutoffs = [
+            date(2026, 4, 1), date(2026, 4, 6), date(2026, 4, 9), date(2026, 4, 14),
+            date(2026, 4, 17), date(2026, 4, 22), date(2026, 4, 27), date(2026, 4, 29),
+        ]
+
+        panel = compute_signals_panel(
+            universe, cutoffs,
+            price_index=price_index,
+            volume_index=volume_index,
+        )
+
+        signal_cols = [
+            "mom_12_1", "mom_6m", "volatility_adjusted_return_6m",
+            "drawdown_from_recent_high_pct", "above_200ma",
+            "vol_20d_vs_60d", "vol_trend_3m",
+        ]
+
+        for c in cutoffs:
+            expected = compute_price_signals(
+                pd.DataFrame(), universe, as_of_date=c,
+                price_index=price_index, volume_index=volume_index,
+            )
+            actual = panel[c]
+
+            assert set(expected["company_id"]) == set(actual["company_id"]), (
+                f"cutoff={c}: company set differs"
+            )
+
+            exp_idx = expected.set_index("company_id")
+            act_idx = actual.set_index("company_id")
+            for cid in exp_idx.index:
+                for col in signal_cols:
+                    e = exp_idx.at[cid, col] if col in exp_idx.columns else None
+                    a = act_idx.at[cid, col] if col in act_idx.columns else None
+                    if pd.isna(e) and pd.isna(a):
+                        continue
+                    if pd.isna(e) or pd.isna(a):
+                        # Drop the volume keys — the per-cutoff helper omits
+                        # them when len < 20; the panel mirrors that. So if
+                        # one is NaN and the other is missing, both should be
+                        # treated as "no value" — but if both are present and
+                        # only one is NaN, that's a real divergence.
+                        raise AssertionError(
+                            f"cutoff={c} cid={cid} col={col}: NaN/value mismatch — expected={e!r} actual={a!r}"
+                        )
+                    assert abs(float(e) - float(a)) < 1e-6, (
+                        f"cutoff={c} cid={cid} col={col}: expected={e} actual={a}"
+                    )
+
+    def test_panel_excludes_short_history(self):
+        # A company with <20 bars must be absent from every cutoff's frame.
+        end = pd.Timestamp("2026-04-29")
+        short_dates = pd.date_range(end=end, periods=10, freq="B")
+        price_index = {99: pd.Series([100.0] * 10, index=short_dates, dtype="float64")}
+        universe = self._build_universe([99])
+
+        panel = compute_signals_panel(
+            universe, [date(2026, 4, 30)],
+            price_index=price_index,
+        )
+        assert panel[date(2026, 4, 30)].empty
+
+    def test_panel_applies_staleness_filter(self):
+        # Last bar > 30 days before cutoff → excluded.
+        dates = pd.date_range(end=pd.Timestamp("2026-02-27"), periods=400, freq="B")
+        rng = np.random.default_rng(42)
+        prices = 100.0 * np.exp(np.cumsum(rng.normal(0.0005, 0.02, len(dates))))
+        price_index = {1: pd.Series(prices, index=dates, dtype="float64")}
+        universe = self._build_universe([1])
+
+        # Cutoff May 1 2026 — last bar Feb 27 is > 30 calendar days back.
+        panel = compute_signals_panel(
+            universe, [date(2026, 5, 1)],
+            price_index=price_index,
+        )
+        assert panel[date(2026, 5, 1)].empty

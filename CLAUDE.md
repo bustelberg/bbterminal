@@ -124,7 +124,7 @@ The frontend follows Next.js convention: `.env.local` overrides `.env`. Vercel u
 - `backtest.py` — Three runners:
   - `run_backtest` — monthly rebalance loop (signals → score & select → equal-weight → forward 1-month return → cumulative tracking)
   - `run_multi_trial_backtest` — N independent random-selection runs with sequential seeds, aggregates mean ± std for headline stats
-  - `run_current_portfolio` — single-month "what would the strategy hold today" with month-to-date returns
+  - `run_current_portfolio` — "what would the strategy hold today" + per-trading-day daily picks for the current month. Each daily pick is a `MonthlyHolding`-shaped record with start-of-month → that-day MTD return, plus portfolio-level MTD return and turnover vs the previous day.
 
 **`tests/`** — Pytest unit tests for momentum signals + scoring (`uv run pytest tests/`).
 
@@ -156,12 +156,15 @@ The frontend follows Next.js convention: `.env.local` overrides `.env`. Vercel u
 
 *Momentum*
 - `GET /api/momentum/signals` — Signal definitions
-- `POST /api/momentum/backtest` — SSE: runs backtest. Modes: standard backtest (`mode="backtest"`, default), random multi-trial (`selection_mode="random"`, `n_trials>1`), or current portfolio (`mode="current_portfolio"`).
+- `POST /api/momentum/backtest` — SSE: runs backtest. Modes:
+  - `mode="backtest"` (default) — standard backtest
+  - `selection_mode="random"`, `n_trials>1` — random multi-trial
+  - `mode="current_portfolio"` — current picks. The backend computes a `strategy_hash` from the request and short-circuits to the cached snapshot when one exists for `(hash, current month)`. Set `force_recompute=true` to bypass the cache (the **Recompute** button does this). Cache miss runs the full compute, then persists both a row in `current_picks_snapshot` and one row per trading day in `current_picks_day`. Response payload always includes `daily_picks_history` (all stored days for this strategy, across months).
 - `GET|POST|DELETE|PATCH /api/momentum/backtests[/{run_id}]` — Saved backtests CRUD + rename
 - `GET /api/momentum/current-picks` — List saved current-picks snapshots (most recent first)
 - `GET /api/momentum/current-picks/{id}` — Load one snapshot (full holdings)
 - `POST /api/momentum/current-picks/{id}/refresh-mtd` — MTD-only recompute on a stored snapshot's holdings (fast)
-- `POST /api/momentum/current-picks/cron` — Cron entry point. Requires `X-Cron-Secret` header. Forces `mode=current_portfolio`, persists with `triggered_by='auto'`. See Deployment / Cron section.
+- `POST /api/momentum/current-picks/cron` — Cron entry point. Requires `X-Cron-Secret` header. Forces `mode=current_portfolio` and `force_recompute=true`, persists with `triggered_by='auto'`. See Deployment / Cron section.
 
 *Universe (criteria-screened)*
 - `GET /api/universe/criteria`, `POST /api/universe/screen`, `POST /api/universe/build`
@@ -209,15 +212,15 @@ The frontend follows Next.js convention: `.env.local` overrides `.env`. Vercel u
 - `/acwi` — ACWI holdings / MSCI announcement explorer
 - `/fx-rates` — FX rate viewer + sync
 - `/request_gurufocus` — GuruFocus indicator fetch UI
-- `/login`, `/set-password` — Auth pages
+- `/login`, `/set-password` — Auth pages. After successful sign-in or password set, the user is redirected to `/` (the welcome page). The proxy middleware in `frontend/proxy.ts` enforces auth on all non-public routes and redirects authenticated users away from `/login`.
 
 **Components** (`frontend/app/components/`):
 - `Sidebar.tsx` — Navigation sidebar with auth
-- `LongEquityUniverse.tsx` — Snapshot viewer with region/country grouping, ingest pipeline UI
+- `LongEquityUniverse.tsx` — Snapshot viewer with region/country grouping, ingest pipeline UI. **Nothing fetches on mount** — the page shell renders empty until the user clicks **Load** (fetches saved snapshots + the latest available month) or **Run ingest** (kicks off the full ingest pipeline).
 - `AirsPortfolioUpload.tsx` — Portfolio scanner + list/detail views, drag & drop, localStorage cache
 - `CompanyManager.tsx` — Company CRUD table with inline editing
 - `IngestButton.tsx`, `ProgressTimeline.tsx`, `DialogHost.tsx`, `DatePartsPicker.tsx`, `ApiUsageBadge.tsx` — Shared UI
-- `MomentumBacktester.tsx` — Momentum backtest UI: config panel with signal weight sliders (grouped by category), category weight sliders, equity curve chart (Recharts), benchmark comparison, summary stats, monthly portfolio table with per-category scores. Saved backtests CRUD. Strategy mode selector (Momentum / Random baseline) with trial count + seed. "Current Picks" button for live MTD portfolio view.
+- `MomentumBacktester.tsx` — Momentum backtest UI: config panel with signal weight sliders (grouped by category), category weight sliders, equity curve chart (Recharts), benchmark comparison, summary stats, monthly portfolio table with per-category scores. Saved backtests CRUD. Strategy mode selector (Momentum / Random baseline) with trial count + seed. **Current Picks** button — hits the SSE backtest endpoint with `mode=current_portfolio`; the backend serves from cache (no recompute) when this strategy already has a snapshot for the current month. **Recompute** button passes `force_recompute=true` for a fresh run. Below the locked-at-start holdings table, the card renders a **Daily picks history** view: months as expandable rows (showing day count + latest MTD); each month expands to the days stored for it; each day expands to full per-holding detail (matching the backtest monthly portfolio table's columns). Past months are read-only — only days already saved are shown.
 - `BenchmarkManager.tsx` — Benchmark CRUD: add index tickers (e.g. SPY, ACWI), fetch prices, show date ranges
 - `EarningsDashboard.tsx` — Earnings data viewer
 - `UniverseScreener.tsx` — Criteria-driven universe screener
@@ -233,7 +236,7 @@ The frontend follows Next.js convention: `.env.local` overrides `.env`. Vercel u
 
 See [`docs/schema.md`](docs/schema.md) for the full ERD and table descriptions.
 
-Key tables: `company`, `metric_data` (time-series for prices, volumes, derived metrics), `universe` + `universe_membership`, `backtest_run`, `benchmark` + `benchmark_price`, `gurufocus_exchange` + `country` + `currency` + `fx_rate`, `airs_performance`.
+Key tables: `company`, `metric_data` (time-series for prices, volumes, derived metrics), `universe` + `universe_membership`, `backtest_run`, `benchmark` + `benchmark_price`, `gurufocus_exchange` + `country` + `currency` + `fx_rate`, `airs_performance`, `current_picks_snapshot` (one row per current-picks compute — locked-at-start holdings + current-month daily_picks blob, tagged with `strategy_hash`), `current_picks_day` (per-day row keyed by `(strategy_hash, target_date)` — backs the cross-month "Daily picks history" view and the cache lookup).
 
 ---
 
@@ -279,6 +282,7 @@ Modern fintech dark theme. Key principles:
 - **Momentum signal cutoff is strict `<`** (data must be from before `as_of_date`) so we never train on the bar we trade — see `signals.py`. Companies with last trade > 30 calendar days before `as_of_date` are filtered out (staleness guard).
 - **Momentum tests live in `backend/tests/`** — run with `uv run pytest tests/` from the backend dir.
 - Transient Supabase Storage / `metric_data.upsert` errors retry up to 3× with backoff via `_retry_transient` in `ingest/prices.py`.
+- **Current Picks caching**: a request's strategy identity is `_strategy_hash(req)` in `backend/main.py` — a 16-char SHA-256 of `signal_weights + category_weights + top_n_sectors + top_n_per_sector + max_companies + universe_label + index_universe + selection_mode`. Date range is intentionally excluded so the sliding "this month" view caches across runs that differ only in dates. Past months are read-only — `current_picks_day` only ever gains rows for the current month at compute time; it never backfills closed months.
 
 ---
 
@@ -302,7 +306,7 @@ curl -fsS -X POST "https://<backend>/api/momentum/current-picks/cron" \
   -d @/app/cron-current-picks.json
 ```
 
-Where `cron-current-picks.json` holds the strategy config (same shape as `BacktestRequest`) — typically the user's preferred signal weights, sectors, top-N, and `index_universe`. The endpoint forces `mode=current_portfolio` regardless of body content. The resulting snapshot lands in `current_picks_snapshot` with `triggered_by='auto'`.
+Where `cron-current-picks.json` holds the strategy config (same shape as `BacktestRequest`) — typically the user's preferred signal weights, sectors, top-N, and `index_universe`. The endpoint forces `mode=current_portfolio` and `force_recompute=true` regardless of body content (the cron's purpose is to land a fresh weekly snapshot, so it bypasses the cache). The resulting snapshot lands in `current_picks_snapshot` with `triggered_by='auto'` and the strategy hash. Per-day rows are also upserted into `current_picks_day` so the UI's "Daily picks history" stays current.
 
 To change the strategy the cron uses, edit `cron-current-picks.json` (or whichever payload file Railway is configured to send). To pause the cron, disable it in Railway's service config.
 

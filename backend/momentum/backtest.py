@@ -1,6 +1,8 @@
 """Monthly momentum backtest engine."""
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Callable
@@ -8,8 +10,10 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
-from .signals import PRICE_SIGNAL_DEFS, compute_price_signals
+from .signals import PRICE_SIGNAL_DEFS, compute_price_signals, compute_signals_panel
 from .scoring import score_and_select, random_select, _get_category_keys
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -96,25 +100,15 @@ class BacktestSummary:
 
 
 @dataclass
-class DailyPickHolding:
-    """Slim per-stock representation for daily picks — no entry/exit prices,
-    since these are hypothetical 'what would the strategy have picked today'
-    snapshots, not actual rebalances."""
-    company_id: int
-    ticker: str
-    company_name: str
-    sector: str
-    score: float
-
-
-@dataclass
 class DailyPick:
     """One trading day's worth of hypothetical picks + turnover vs the previous
-    day. Stored on the snapshot so the daily turnover view loads instantly."""
+    day. Each holding carries the start-of-month → that-day MTD return, so the
+    UI can render this list like the monthly backtest table."""
     date: str                              # YYYY-MM-DD
-    holdings: list[DailyPickHolding]
+    holdings: list[MonthlyHolding]
     turnover_abs: int                      # number of holdings that differ from previous day
     turnover_pct: float                    # turnover_abs / max(len(today), len(prev)) * 100
+    portfolio_return_pct: float | None = None  # equal-weight mean of holdings' MTD returns
 
 
 @dataclass
@@ -155,15 +149,26 @@ class CurrentPortfolio:
                     "date": d.date,
                     "turnover_abs": d.turnover_abs,
                     "turnover_pct": d.turnover_pct,
+                    "portfolio_return_pct": d.portfolio_return_pct,
                     "holdings": [
                         {
-                            "company_id": x.company_id,
-                            "ticker": x.ticker,
-                            "company_name": x.company_name,
-                            "sector": x.sector,
-                            "score": x.score,
+                            "company_id": h.company_id,
+                            "ticker": h.ticker,
+                            "company_name": h.company_name,
+                            "sector": h.sector,
+                            "score": h.score,
+                            "category_scores": h.category_scores,
+                            "weight": round(h.weight, 4),
+                            "forward_return_pct": h.forward_return_pct,
+                            "currency": h.currency,
+                            "entry_price_local": h.entry_price_local,
+                            "exit_price_local": h.exit_price_local,
+                            "entry_price_eur": h.entry_price_eur,
+                            "exit_price_eur": h.exit_price_eur,
+                            "entry_date": h.entry_date,
+                            "exit_date": h.exit_date,
                         }
-                        for x in d.holdings
+                        for h in d.holdings
                     ],
                 }
                 for d in self.daily_picks
@@ -278,6 +283,14 @@ def _date_on_or_after(series: pd.Series, target: pd.Timestamp) -> str | None:
     if len(idx) == 0:
         return None
     return idx[0].strftime("%Y-%m-%d")
+
+
+def _price_on_or_before(series: pd.Series, target: pd.Timestamp) -> tuple[float, pd.Timestamp] | None:
+    """Get (price, trading-date) of the latest available price on or before target."""
+    subset = series[series.index <= target]
+    if subset.empty:
+        return None
+    return float(subset.iloc[-1]), subset.index[-1]
 
 
 def _build_volume_index(volumes_df: pd.DataFrame) -> dict[int, pd.Series]:
@@ -825,6 +838,7 @@ def run_current_portfolio(
     if config.selection_mode == "random":
         raise ValueError("run_current_portfolio does not support random selection mode")
 
+    t_total_start = time.perf_counter()
     today_d = today or date.today()
     month_start = date(today_d.year, today_d.month, 1)
     month_key = month_start.isoformat()[:7]
@@ -867,12 +881,41 @@ def run_current_portfolio(
     )
     volume_index = _build_volume_index(volumes_df) if volumes_df is not None and not volumes_df.empty else None
 
-    # Compute signals as of start of current month
-    signals_df = compute_price_signals(
-        prices_df, month_universe_df, as_of_date=month_start,
+    # Trading dates that fall inside the current month, derived from prices_df.
+    # Built up front so the signal panel can compute every cutoff in one pass.
+    trading_dates_set: set[date] = set()
+    for raw_d in prices_df["target_date"].unique():
+        if isinstance(raw_d, date) and not isinstance(raw_d, pd.Timestamp):
+            dd = raw_d
+        elif isinstance(raw_d, str):
+            try:
+                dd = date.fromisoformat(raw_d[:10])
+            except ValueError:
+                continue
+        else:
+            try:
+                dd = pd.Timestamp(raw_d).date()
+            except Exception:
+                continue
+        if month_start <= dd <= today_d:
+            trading_dates_set.add(dd)
+    trading_dates = sorted(trading_dates_set)
+
+    # Single vectorized pass — computes every (company, cutoff) cell up front
+    # so the daily loop below is a cheap dict lookup. Includes month_start so
+    # the locked-at-start holdings use the same code path.
+    t_panel = time.perf_counter()
+    panel_cutoffs: list[date] = sorted({month_start, *trading_dates})
+    panel = compute_signals_panel(
+        month_universe_df, panel_cutoffs,
         price_index=price_index,
         volume_index=volume_index,
     )
+    t_panel_elapsed = time.perf_counter() - t_panel
+
+    t_month_start_signals = time.perf_counter()
+    signals_df = panel.get(month_start, pd.DataFrame())
+    t_month_start_signals_elapsed = time.perf_counter() - t_month_start_signals
     if signals_df.empty:
         if send_event:
             send_event("progress", month=month_key, pct=100, message="No companies had enough data for signals")
@@ -882,6 +925,7 @@ def run_current_portfolio(
         send_event("progress", month=month_key, pct=60, message=f"Scoring {len(signals_df)} companies...")
 
     # Score and select — same path as backtest momentum mode
+    t_month_start_select = time.perf_counter()
     selected = score_and_select(
         signals_df,
         config.signal_weights,
@@ -889,6 +933,7 @@ def run_current_portfolio(
         top_n_per_sector=config.top_n_per_sector,
         category_weights=config.category_weights,
     )
+    t_month_start_select_elapsed = time.perf_counter() - t_month_start_select
 
     if selected.empty:
         if send_event:
@@ -962,46 +1007,26 @@ def run_current_portfolio(
     if send_event:
         send_event("progress", month=month_key, pct=85, message=f"{len(holdings)} holdings selected; computing daily picks…")
 
-    # Daily picks: for each trading day from month_start through today,
-    # compute what the strategy WOULD have picked if rebalancing on that
-    # day. Lets the UI show day-over-day turnover.
-    #
-    # Cheap by reuse: compute_price_signals + score_and_select with the
-    # already-built price_index/volume_index. The `as_of_date` controls
-    # the strict-< cutoff inside compute_price_signals, so each day uses
-    # only data strictly before that date.
-    trading_dates_set: set[date] = set()
-    for raw_d in prices_df["target_date"].unique():
-        if isinstance(raw_d, date) and not isinstance(raw_d, pd.Timestamp):
-            dd = raw_d
-        elif isinstance(raw_d, str):
-            try:
-                dd = date.fromisoformat(raw_d[:10])
-            except ValueError:
-                continue
-        else:
-            try:
-                dd = pd.Timestamp(raw_d).date()
-            except Exception:
-                continue
-        if month_start <= dd <= today_d:
-            trading_dates_set.add(dd)
-    trading_dates = sorted(trading_dates_set)
-
+    # Daily picks: each cutoff already has its signals in `panel` from the
+    # single vectorized pass above, so this loop is just per-day score+select
+    # and holdings construction.
     daily_picks: list[DailyPick] = []
     prev_ids: set[int] = set()
+    t_daily_loop_start = time.perf_counter()
+    t_daily_signals_total = 0.0
+    t_daily_select_total = 0.0
+    t_daily_holdings_total = 0.0
     for i, d in enumerate(trading_dates):
         if send_event:
             pct = 85 + round(15 * (i + 1) / max(1, len(trading_dates)))
             send_event("progress", month=month_key, pct=pct, message=f"Daily picks {i + 1}/{len(trading_dates)}: {d.isoformat()}")
 
-        daily_signals = compute_price_signals(
-            prices_df, month_universe_df, as_of_date=d,
-            price_index=price_index,
-            volume_index=volume_index,
-        )
+        t_signals = time.perf_counter()
+        daily_signals = panel.get(d, pd.DataFrame())
+        t_daily_signals_total += time.perf_counter() - t_signals
         if daily_signals.empty:
             continue
+        t_select = time.perf_counter()
         daily_selected = score_and_select(
             daily_signals,
             config.signal_weights,
@@ -1009,22 +1034,68 @@ def run_current_portfolio(
             top_n_per_sector=config.top_n_per_sector,
             category_weights=config.category_weights,
         )
+        t_daily_select_total += time.perf_counter() - t_select
         if daily_selected.empty:
             continue
+        t_holdings = time.perf_counter()
 
-        day_holdings: list[DailyPickHolding] = []
+        day_ts = pd.Timestamp(d)
+        day_weight = 1.0 / len(daily_selected)
+        day_holdings: list[MonthlyHolding] = []
         today_ids: set[int] = set()
+        day_returns: list[float] = []
         for _, drow in daily_selected.iterrows():
             cid = int(drow["company_id"])
             today_ids.add(cid)
             score_val = drow.get("momentum_score")
-            day_holdings.append(DailyPickHolding(
+
+            series = price_index.get(cid)
+            entry_price = _price_on_or_after(series, entry_ts) if series is not None else None
+            exit_pair = _price_on_or_before(series, day_ts) if series is not None else None
+            exit_price = exit_pair[0] if exit_pair is not None else None
+
+            mtd_return = None
+            if entry_price and exit_price and entry_price > 0:
+                mtd_return = round((exit_price / entry_price - 1) * 100, 2)
+                day_returns.append(mtd_return)
+
+            local_series = local_price_index.get(cid) if local_price_index is not None else None
+            entry_local = _price_on_or_after(local_series, entry_ts) if local_series is not None else None
+            exit_local_pair = _price_on_or_before(local_series, day_ts) if local_series is not None else None
+            exit_local = exit_local_pair[0] if exit_local_pair is not None else None
+
+            date_series = local_series if local_series is not None else series
+            entry_dt = _date_on_or_after(date_series, entry_ts) if date_series is not None else None
+            exit_dt_pair = _price_on_or_before(date_series, day_ts) if date_series is not None else None
+            exit_dt = exit_dt_pair[1].strftime("%Y-%m-%d") if exit_dt_pair is not None else None
+
+            cat_scores: dict[str, float | None] = {}
+            for cat in _get_category_keys():
+                col = f"score_{cat}"
+                if col in drow.index and pd.notna(drow[col]):
+                    cat_scores[cat] = round(float(drow[col]), 1)
+                else:
+                    cat_scores[cat] = None
+
+            day_holdings.append(MonthlyHolding(
                 company_id=cid,
                 ticker=str(drow.get("gurufocus_ticker", "")),
                 company_name=str(drow.get("company_name", "")),
                 sector=str(drow["sector"]),
                 score=round(float(score_val), 2) if pd.notna(score_val) else 0.0,
+                category_scores=cat_scores,
+                weight=day_weight,
+                forward_return_pct=mtd_return,
+                currency=(company_currency or {}).get(cid),
+                entry_price_local=round(entry_local, 4) if entry_local is not None else None,
+                exit_price_local=round(exit_local, 4) if exit_local is not None else None,
+                entry_price_eur=round(entry_price, 4) if entry_price is not None else None,
+                exit_price_eur=round(exit_price, 4) if exit_price is not None else None,
+                entry_date=entry_dt,
+                exit_date=exit_dt,
             ))
+
+        port_mtd = round(sum(day_returns) / len(day_returns), 2) if day_returns else None
 
         # Turnover: max of (stocks added today, stocks removed today).
         # For a fixed-size portfolio with N swaps, both equal N — so the
@@ -1045,10 +1116,29 @@ def run_current_portfolio(
             holdings=day_holdings,
             turnover_abs=turnover_abs,
             turnover_pct=turnover_pct,
+            portfolio_return_pct=port_mtd,
         ))
         prev_ids = today_ids
+        t_daily_holdings_total += time.perf_counter() - t_holdings
 
+    t_daily_loop_elapsed = time.perf_counter() - t_daily_loop_start
+    t_total_elapsed = time.perf_counter() - t_total_start
+    n_days = len(trading_dates)
+    universe_size = int(month_universe_df["company_id"].nunique()) if not month_universe_df.empty else 0
+    timing_msg = (
+        f"[run_current_portfolio timing] total={t_total_elapsed:.2f}s | "
+        f"panel={t_panel_elapsed:.2f}s ({len(panel_cutoffs)} cutoffs) | "
+        f"month_start: signals={t_month_start_signals_elapsed * 1000:.1f}ms, "
+        f"select={t_month_start_select_elapsed:.2f}s | "
+        f"daily_loop={t_daily_loop_elapsed:.2f}s ({n_days} days, "
+        f"signals={t_daily_signals_total * 1000:.1f}ms (lookup), "
+        f"select={t_daily_select_total:.2f}s avg={t_daily_select_total / max(n_days, 1) * 1000:.0f}ms/day, "
+        f"holdings={t_daily_holdings_total:.2f}s) | "
+        f"universe_size={universe_size}"
+    )
+    _logger.info(timing_msg)
     if send_event:
+        send_event("timing", message=timing_msg)
         send_event("progress", month=month_key, pct=100, message=f"{len(holdings)} holdings, {len(daily_picks)} daily snapshots")
 
     return CurrentPortfolio(

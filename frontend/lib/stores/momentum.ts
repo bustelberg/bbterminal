@@ -60,12 +60,26 @@ export type BacktestResult = {
   summary: Summary;
 };
 
+// Per-day pick holding has the same shape as a Holding for newer snapshots
+// (price/return fields populated). Older snapshots persist a slim version
+// where the price/return/category_scores fields are absent — all extra
+// fields are therefore optional.
 export type DailyPickHolding = {
   company_id: number;
   ticker: string;
   company_name: string;
   sector: string;
   score: number;
+  category_scores?: Record<string, number | null>;
+  weight?: number;
+  forward_return_pct?: number | null;
+  currency?: string | null;
+  entry_price_local?: number | null;
+  exit_price_local?: number | null;
+  entry_price_eur?: number | null;
+  exit_price_eur?: number | null;
+  entry_date?: string | null;
+  exit_date?: string | null;
 };
 
 export type DailyPick = {
@@ -73,14 +87,18 @@ export type DailyPick = {
   holdings: DailyPickHolding[];
   turnover_abs: number;           // # stocks added (= removed for fixed-size) vs previous day
   turnover_pct: number;           // turnover_abs / portfolio_size * 100
+  portfolio_return_pct?: number | null;  // equal-weight mean MTD across this day's picks
 };
 
 export type CurrentPortfolio = {
   as_of_date: string;             // YYYY-MM-01 — start of current month
   latest_price_date: string | null; // most recent observed price across holdings
   holdings: Holding[];
-  daily_picks?: DailyPick[];      // per-trading-day hypothetical picks + turnover
+  daily_picks?: DailyPick[];      // current-month days produced by the most recent compute
+  daily_picks_history?: DailyPick[]; // all stored days for this strategy across months
   snapshot_id?: number;           // present when loaded from DB (or persisted post-compute)
+  strategy_hash?: string;
+  from_cache?: boolean;           // true when the backend served from cache
 };
 
 export type CurrentPicksSnapshotMeta = {
@@ -132,6 +150,7 @@ export type BacktestStartConfig = {
   random_seed: number | null;
   n_trials: number;
   mode?: 'backtest' | 'current_portfolio';
+  force_recompute?: boolean;
 };
 
 export const momentumStore = createStore<MomentumState>({
@@ -276,6 +295,8 @@ export async function loadCurrentPicksSnapshot(snapshotId: number): Promise<void
         latest_price_date: row.latest_price_date,
         holdings: row.holdings ?? [],
         daily_picks: row.daily_picks ?? [],
+        daily_picks_history: row.daily_picks_history ?? row.daily_picks ?? [],
+        strategy_hash: row.strategy_hash ?? undefined,
       },
       error: null,
     });
