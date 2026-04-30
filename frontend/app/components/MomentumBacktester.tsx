@@ -1021,6 +1021,12 @@ export default function MomentumBacktester() {
               result={result}
               categories={categories}
               exchangeByCompany={exchangeByCompany}
+              scoringConfig={{
+                universe_label: null,
+                index_universe: selectedIndexUniverse || null,
+                signal_weights: weights,
+                category_weights: categoryWeights,
+              }}
             />
 
             {/* Save */}

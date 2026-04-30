@@ -6,10 +6,21 @@ import CellInfoTip from './CellInfoTip';
 import TickerTimelineModal from './TickerTimelineModal';
 import { EXCHANGE_NAMES, fmtPct, fmtPrice, guruFocusUrl } from './utils';
 
+/** Subset of the active backtest's selection config that the per-ticker
+ * timeline modal forwards to the signal-breakdown endpoint. Lets the
+ * recompute see the same universe + weights the user actually ran. */
+export type ScoringConfig = {
+  universe_label: string | null;
+  index_universe: string | null;
+  signal_weights: Record<string, number>;
+  category_weights: Record<string, number>;
+};
+
 type Props = {
   result: BacktestResult;
   categories: string[];
   exchangeByCompany: Map<number, string>;
+  scoringConfig: ScoringConfig;
 };
 
 /** "Monthly Portfolios" card: one row per rebalance month, expandable to
@@ -19,7 +30,7 @@ type Props = {
  * that changes — new run, loaded saved run, etc. — the table resets its
  * expansion automatically.
  */
-export default function MonthlyHoldingsTable({ result, categories, exchangeByCompany }: Props) {
+export default function MonthlyHoldingsTable({ result, categories, exchangeByCompany, scoringConfig }: Props) {
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
   // company_id whose timeline modal is open, or null for closed.
   const [timelineCompanyId, setTimelineCompanyId] = useState<number | null>(null);
@@ -293,6 +304,7 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
       result={result}
       companyId={timelineCompanyId}
       exchangeByCompany={exchangeByCompany}
+      scoringConfig={scoringConfig}
       onClose={() => setTimelineCompanyId(null)}
     />
     </>
