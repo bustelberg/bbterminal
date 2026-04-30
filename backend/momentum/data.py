@@ -15,11 +15,20 @@ _logger = logging.getLogger(__name__)
 _MAX_RETRIES = 3
 _RETRY_DELAY = 5  # seconds
 
-# Concurrent chunk loads cut wall time roughly linearly with the worker count
-# until either the supabase client's connection pool or the upstream rate
-# limit becomes the bottleneck. 8 is a comfortable default for local Supabase
-# and Cloudflare-fronted prod alike.
+# Worker count for parallel Supabase chunk loads (price + volume reads,
+# paginated 50 company_ids per chunk). Bottleneck is the Supabase client's
+# connection pool / Cloudflare 502s, not the per-request work. 8 is a
+# comfortable default for local Supabase and Cloudflare-fronted prod alike.
 _LOAD_PARALLELISM = 8
+
+# Worker count for ECB FX history sync. Bottleneck is the ECB Statistical
+# Data Warehouse, which is free and has no documented rate limit but
+# regularly times out on full-history XML responses when too many requests
+# fire concurrently (we observed CNY read-timeout-60 at 8 workers). 4 still
+# gives ~4× speedup over sequential while leaving headroom for ECB to keep
+# up. Combined with the retry helper in `fx_rates._ecb_get`, transient
+# blips are recovered automatically.
+_FX_SYNC_PARALLELISM = 4
 
 
 def _query_with_retry(query_fn, description: str = "query"):
@@ -293,12 +302,14 @@ def sync_fx_rates_to_db(
     # Imported lazily so this module stays independent of fx_rates's HTTP side
     # effects unless sync is actually requested.
     from fx_rates import fetch_history
+    from datetime import date as _date, timedelta as _timedelta
 
-    status: dict[str, dict] = {}
-    for code in currency_codes:
+    today = _date.today()
+    end_iso = end_date.isoformat()
+
+    def _sync_one(code: str) -> tuple[str, dict]:
         if not code or code == "EUR":
-            status[code] = {"status": "skipped", "rows": 0}
-            continue
+            return code, {"status": "skipped", "rows": 0}
 
         try:
             resp = (
@@ -310,33 +321,22 @@ def sync_fx_rates_to_db(
                 .execute()
             )
         except Exception as e:
-            status[code] = {"status": "error", "error": f"db read: {e}", "rows": 0}
-            if on_progress:
-                on_progress(code, status[code])
-            continue
+            return code, {"status": "error", "error": f"db read: {e}", "rows": 0}
 
         existing_max = resp.data[0]["rate_date"] if resp.data else None
-        if existing_max and str(existing_max) >= end_date.isoformat():
-            status[code] = {"status": "cached", "rows": 0, "max_date": str(existing_max)}
-            if on_progress:
-                on_progress(code, status[code])
-            continue
+        if existing_max and str(existing_max) >= end_iso:
+            return code, {"status": "cached", "rows": 0, "max_date": str(existing_max)}
 
         # Fetch from ECB starting the day after what we have, or from start_date
         # if the table is empty for this currency. ECB is free and daily, so
         # re-fetching a wide window is cheap.
-        from datetime import date as _date, timedelta as _timedelta
-        today = _date.today()
         if existing_max:
             next_day = _date.fromisoformat(str(existing_max)) + _timedelta(days=1)
             # ECB rejects startPeriod strictly in the future with a 400. If we
             # already have data up through today, there's nothing to ask for —
             # treat the local cache as current.
             if next_day > today:
-                status[code] = {"status": "cached", "rows": 0, "max_date": str(existing_max)}
-                if on_progress:
-                    on_progress(code, status[code])
-                continue
+                return code, {"status": "cached", "rows": 0, "max_date": str(existing_max)}
             fetch_start = next_day.isoformat()
         else:
             fetch_start = start_date.isoformat()
@@ -344,26 +344,15 @@ def sync_fx_rates_to_db(
         try:
             rates = fetch_history(code, fetch_start)
         except Exception as e:
-            status[code] = {"status": "error", "error": f"ecb fetch: {e}", "rows": 0}
-            if on_progress:
-                on_progress(code, status[code])
-            continue
+            return code, {"status": "error", "error": f"ecb fetch: {e}", "rows": 0}
 
         if not rates:
             # Truly missing only when we have nothing in the DB at all.
             # Otherwise ECB just hasn't published new rates yet (weekends,
             # holidays, or a few-day publishing lag) — existing data is fine.
             if existing_max is None:
-                status[code] = {"status": "no_data", "rows": 0, "max_date": None}
-            else:
-                status[code] = {
-                    "status": "cached",
-                    "rows": 0,
-                    "max_date": str(existing_max),
-                }
-            if on_progress:
-                on_progress(code, status[code])
-            continue
+                return code, {"status": "no_data", "rows": 0, "max_date": None}
+            return code, {"status": "cached", "rows": 0, "max_date": str(existing_max)}
 
         rows_to_upsert = [
             {"currency_code": code, "rate_date": r["date"], "rate": r["rate"]}
@@ -377,16 +366,26 @@ def sync_fx_rates_to_db(
                     on_conflict="currency_code,rate_date",
                 ).execute()
                 upserted += len(rows_to_upsert[i : i + 500])
-            status[code] = {
+            return code, {
                 "status": "synced",
                 "rows": upserted,
                 "max_date": rows_to_upsert[-1]["rate_date"],
             }
         except Exception as e:
-            status[code] = {"status": "error", "error": f"db upsert: {e}", "rows": upserted}
+            return code, {"status": "error", "error": f"db upsert: {e}", "rows": upserted}
 
-        if on_progress:
-            on_progress(code, status[code])
+    status: dict[str, dict] = {}
+    if not currency_codes:
+        return status
+
+    # See `_FX_SYNC_PARALLELISM` — capped at the currency count so we don't
+    # spawn idle workers for small batches.
+    workers = min(_FX_SYNC_PARALLELISM, len(currency_codes))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for code, st in pool.map(_sync_one, currency_codes):
+            status[code] = st
+            if on_progress:
+                on_progress(code, st)
 
     return status
 

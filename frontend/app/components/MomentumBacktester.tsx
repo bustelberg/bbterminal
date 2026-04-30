@@ -20,278 +20,26 @@ import {
   type DailyPick,
   type DrawdownPeriod,
   type MonthlyRecord,
-  type Summary,
 } from '../../lib/stores/momentum';
+import CellInfoTip from './momentum/CellInfoTip';
+import {
+  EXCHANGE_NAMES,
+  SERIES_COLORS,
+  computeTopDrawdowns,
+  fmtPct,
+  fmtPrice,
+  guruFocusUrl,
+  tooltipStyle,
+} from './momentum/utils';
+import type {
+  BenchmarkOption,
+  BenchmarkPrice,
+  ComparisonItem,
+  SavedRun,
+  SignalDef,
+} from './momentum/types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-type SignalDef = {
-  key: string;
-  label: string;
-  description: string;
-  default_weight: number;
-  group?: string;
-};
-
-type SavedRun = {
-  run_id: number;
-  name: string;
-  created_at: string;
-  config: Record<string, unknown>;
-  summary: Summary;
-};
-
-type BenchmarkOption = {
-  benchmark_id: number;
-  ticker: string;
-  name: string;
-};
-
-type BenchmarkPrice = {
-  target_date: string;
-  price: number;
-};
-
-// Comparison series — strategies and benchmarks shown side by side on the chart.
-// `active` is implicit (derived from the live `result`) and is NOT stored here.
-type ComparisonItem =
-  | { id: string; kind: 'saved'; runId: number; label: string; monthly: MonthlyRecord[] }
-  | { id: string; kind: 'benchmark'; benchmarkId: number; label: string; prices: BenchmarkPrice[] };
-
-// Palette for series lines (index 0 = active strategy).
-const SERIES_COLORS = [
-  '#818cf8', // indigo
-  '#f59e0b', // amber
-  '#34d399', // emerald
-  '#f472b6', // pink
-  '#60a5fa', // sky
-  '#a78bfa', // violet
-  '#fb7185', // rose
-  '#22d3ee', // cyan
-];
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const fmtPct = (v: number | null) => (v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}%` : '—');
-
-const fmtPrice = (v: number | null | undefined) => {
-  if (v == null) return '—';
-  const d = Math.abs(v) >= 1000 ? 0 : Math.abs(v) >= 10 ? 2 : 4;
-  return v.toFixed(d);
-};
-
-function guruFocusUrl(ticker: string, exchange: string): string {
-  const USA = new Set(['NYSE', 'NASDAQ', 'US', 'AMEX']);
-  const t = ticker.toUpperCase();
-  const e = exchange.toUpperCase();
-  if (!e || USA.has(e)) return `https://www.gurufocus.com/stock/${t}/summary`;
-  return `https://www.gurufocus.com/stock/${e}:${t}/summary`;
-}
-
-const EXCHANGE_NAMES: Record<string, string> = {
-  NYSE: 'New York Stock Exchange',
-  NAS: 'NASDAQ',
-  NASDAQ: 'NASDAQ',
-  AMEX: 'NYSE American',
-  OTCPK: 'OTC Markets Pink',
-  OTCBB: 'OTC Bulletin Board',
-  LSE: 'London Stock Exchange',
-  XETR: 'Xetra (Deutsche Börse)',
-  XETRA: 'Xetra (Deutsche Börse)',
-  FRA: 'Frankfurt Stock Exchange',
-  GER: 'Deutsche Börse',
-  EPA: 'Euronext Paris',
-  XPAR: 'Euronext Paris',
-  AMS: 'Euronext Amsterdam',
-  XAMS: 'Euronext Amsterdam',
-  BRU: 'Euronext Brussels',
-  XBRU: 'Euronext Brussels',
-  LIS: 'Euronext Lisbon',
-  XLIS: 'Euronext Lisbon',
-  MIL: 'Borsa Italiana (Milan)',
-  BIT: 'Borsa Italiana (Milan)',
-  MCE: 'Bolsa de Madrid',
-  BME: 'Bolsa de Madrid',
-  SWX: 'SIX Swiss Exchange',
-  SIX: 'SIX Swiss Exchange',
-  VIE: 'Vienna Stock Exchange',
-  WBO: 'Vienna Stock Exchange',
-  WAR: 'Warsaw Stock Exchange',
-  WSE: 'Warsaw Stock Exchange',
-  IST: 'Borsa Istanbul',
-  XIST: 'Borsa Istanbul',
-  HEL: 'Nasdaq Helsinki',
-  CPH: 'Nasdaq Copenhagen',
-  STO: 'Nasdaq Stockholm',
-  OSL: 'Oslo Stock Exchange',
-  ICE: 'Nasdaq Iceland',
-  DUB: 'Euronext Dublin',
-  ATH: 'Athens Stock Exchange',
-  BUD: 'Budapest Stock Exchange',
-  PRA: 'Prague Stock Exchange',
-  BUC: 'Bucharest Stock Exchange',
-  MOEX: 'Moscow Exchange',
-  TSX: 'Toronto Stock Exchange',
-  TSXV: 'TSX Venture Exchange',
-  CVE: 'TSX Venture Exchange',
-  CNSX: 'Canadian Securities Exchange',
-  MEX: 'Bolsa Mexicana de Valores',
-  BCBA: 'Buenos Aires Stock Exchange',
-  BVMF: 'B3 (São Paulo)',
-  SAO: 'B3 (São Paulo)',
-  TSE: 'Tokyo Stock Exchange',
-  HKSE: 'Hong Kong Stock Exchange',
-  SHSE: 'Shanghai Stock Exchange',
-  SSE: 'Shanghai Stock Exchange',
-  SZSE: 'Shenzhen Stock Exchange',
-  TPE: 'Taiwan Stock Exchange',
-  TWSE: 'Taiwan Stock Exchange',
-  ROCO: 'Taipei Exchange',
-  XKRX: 'Korea Exchange',
-  KRX: 'Korea Exchange',
-  NSE: 'National Stock Exchange of India',
-  BSE: 'Bombay Stock Exchange',
-  SGX: 'Singapore Exchange',
-  XKLS: 'Bursa Malaysia',
-  KLSE: 'Bursa Malaysia',
-  BKK: 'Stock Exchange of Thailand',
-  SET: 'Stock Exchange of Thailand',
-  PHS: 'Philippine Stock Exchange',
-  IDX: 'Indonesia Stock Exchange',
-  ASX: 'Australian Securities Exchange',
-  NZSE: 'New Zealand Exchange',
-  NZX: 'New Zealand Exchange',
-  JSE: 'Johannesburg Stock Exchange',
-  TASE: 'Tel Aviv Stock Exchange',
-  SAU: 'Saudi Stock Exchange (Tadawul)',
-  DFM: 'Dubai Financial Market',
-  ADX: 'Abu Dhabi Securities Exchange',
-  QSE: 'Qatar Stock Exchange',
-};
-
-/** Compute top N non-overlapping drawdown periods from (date, value) pairs. */
-function computeTopDrawdowns(values: { date: string; value: number }[], n: number = 3): DrawdownPeriod[] {
-  if (values.length < 2) return [];
-
-  const periods: DrawdownPeriod[] = [];
-  let peakVal = values[0].value;
-  let peakDate = values[0].date;
-  let troughVal = peakVal;
-  let troughDate = peakDate;
-  let inDrawdown = false;
-
-  for (let i = 1; i < values.length; i++) {
-    const { date: dt, value: val } = values[i];
-    if (val >= peakVal) {
-      if (inDrawdown) {
-        periods.push({
-          drawdown_pct: Math.round((troughVal / peakVal - 1) * 10000) / 100,
-          peak_date: peakDate,
-          trough_date: troughDate,
-          recovery_date: dt,
-        });
-        inDrawdown = false;
-      }
-      peakVal = val;
-      peakDate = dt;
-      troughVal = val;
-      troughDate = dt;
-    } else {
-      inDrawdown = true;
-      if (val < troughVal) {
-        troughVal = val;
-        troughDate = dt;
-      }
-    }
-  }
-  if (inDrawdown) {
-    periods.push({
-      drawdown_pct: Math.round((troughVal / peakVal - 1) * 10000) / 100,
-      peak_date: peakDate,
-      trough_date: troughDate,
-      recovery_date: null,
-    });
-  }
-
-  // Pick top N non-overlapping
-  const sorted = [...periods].sort((a, b) => a.drawdown_pct - b.drawdown_pct);
-  const selected: DrawdownPeriod[] = [];
-  for (const p of sorted) {
-    if (selected.length >= n) break;
-    const pEnd = p.recovery_date ?? '9999-99';
-    const overlaps = selected.some(s => {
-      const sEnd = s.recovery_date ?? '9999-99';
-      return p.peak_date <= sEnd && pEnd >= s.peak_date;
-    });
-    if (!overlaps) selected.push(p);
-  }
-  return selected;
-}
-
-const tooltipStyle = {
-  contentStyle: { background: '#1a1d27', border: '1px solid rgba(75,85,99,0.4)', borderRadius: 8, fontSize: 13 },
-  labelStyle: { color: '#9ca3af' },
-  itemStyle: { color: '#e5e7eb' },
-};
-
-function CellInfoTip({ children }: { children: React.ReactNode }) {
-  const [show, setShow] = useState(false);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-  const iconRef = useRef<HTMLSpanElement>(null);
-  const tipWidth = 220;
-  const margin = 8;
-
-  const handleEnter = () => {
-    if (iconRef.current) {
-      const rect = iconRef.current.getBoundingClientRect();
-      const centerX = rect.left + rect.width / 2;
-      const clampedLeft = Math.max(
-        margin + tipWidth / 2,
-        Math.min(centerX, window.innerWidth - margin - tipWidth / 2),
-      );
-      setPos({ top: rect.bottom + 6, left: clampedLeft });
-    }
-    setShow(true);
-  };
-
-  // Close on any scroll so the fixed-positioned tooltip doesn't float over
-  // the sticky header after its anchor row has scrolled away.
-  useEffect(() => {
-    if (!show) return;
-    const close = () => setShow(false);
-    window.addEventListener('scroll', close, true);
-    return () => window.removeEventListener('scroll', close, true);
-  }, [show]);
-
-  return (
-    <span
-      className="inline-block align-middle"
-      onMouseEnter={handleEnter}
-      onMouseLeave={() => setShow(false)}
-    >
-      <span
-        ref={iconRef}
-        className="inline-flex items-center justify-center w-3 h-3 ml-1 rounded-full border border-gray-700 text-gray-500 text-[8px] leading-none hover:border-indigo-400 hover:text-indigo-400 transition-colors cursor-help align-middle"
-      >
-        i
-      </span>
-      {show && (
-        <span
-          className="fixed px-3 py-2 bg-[#1e2130] border border-gray-700 rounded-lg text-[11px] text-gray-300 leading-relaxed z-[9999] shadow-xl pointer-events-none"
-          style={{ top: pos.top, left: pos.left, width: tipWidth, transform: 'translate(-50%, 0)' }}
-        >
-          {children}
-        </span>
-      )}
-    </span>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -311,6 +59,7 @@ export default function MomentumBacktester() {
   const [topSectors, setTopSectors] = useState(4);
   const [topPerSector, setTopPerSector] = useState(6);
   const [skipPriceFetch, setSkipPriceFetch] = useState(false);
+  const [noCache, setNoCache] = useState(false);
   const [maxCompanies, setMaxCompanies] = useState(0);
   const [selectionMode, setSelectionMode] = useState<'momentum' | 'random'>('momentum');
   const [randomSeed, setRandomSeed] = useState<number>(42);
@@ -856,6 +605,7 @@ export default function MomentumBacktester() {
       selection_mode: selectionMode,
       random_seed: selectionMode === 'random' ? randomSeed : null,
       n_trials: selectionMode === 'random' ? Math.max(1, nTrials) : 1,
+      force_recompute: noCache,
     });
   };
 
@@ -1228,6 +978,18 @@ export default function MomentumBacktester() {
                 className="accent-indigo-500 w-4 h-4 cursor-pointer"
               />
               <span className="text-gray-400 text-xs">Skip data fetch</span>
+            </label>
+            <label
+              className="flex items-center gap-2 cursor-pointer select-none"
+              title="Bypass the replay cache and recompute the backtest from scratch."
+            >
+              <input
+                type="checkbox"
+                checked={noCache}
+                onChange={(e) => setNoCache(e.target.checked)}
+                className="accent-indigo-500 w-4 h-4 cursor-pointer"
+              />
+              <span className="text-gray-400 text-xs">Don&apos;t use cache</span>
             </label>
             <button
               onClick={runBacktest}

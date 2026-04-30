@@ -14,6 +14,7 @@ import csv
 import io
 import json
 import logging
+import time
 from datetime import date, datetime, timedelta
 
 import requests
@@ -21,6 +22,31 @@ import requests
 log = logging.getLogger(__name__)
 
 _ECB_BASE = "https://data-api.ecb.europa.eu/service/data/EXR"
+
+
+def _ecb_get(url: str, *, timeout: int = 90, max_attempts: int = 3) -> requests.Response:
+    """GET an ECB endpoint with retry on transient timeouts / connection errors / 5xx.
+
+    The ECB data API is free but flaky — read timeouts and 502/503 responses
+    happen regularly, especially when several full-history fetches run in
+    parallel (as `sync_fx_rates_to_db` does). 4xx responses are not retried
+    since they signal a malformed request.
+    """
+    last_err: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = requests.get(url, timeout=timeout)
+            if 500 <= resp.status_code < 600:
+                last_err = requests.HTTPError(f"{resp.status_code} from ECB", response=resp)
+                # fall through to retry
+            else:
+                resp.raise_for_status()
+                return resp
+        except (requests.ConnectionError, requests.Timeout) as e:
+            last_err = e
+        if attempt < max_attempts:
+            time.sleep(2 ** attempt)  # 2s, 4s
+    raise last_err  # type: ignore[misc]
 
 # All active ECB currencies (as of Apr 2026)
 ECB_CURRENCIES = [
@@ -38,8 +64,7 @@ def fetch_ecb_latest() -> list[dict]:
     """
     keys = "+".join(ECB_CURRENCIES)
     url = f"{_ECB_BASE}/D.{keys}.EUR.SP00.A?lastNObservations=1&format=csvdata"
-    resp = requests.get(url, timeout=30)
-    resp.raise_for_status()
+    resp = _ecb_get(url, timeout=30)
 
     reader = csv.DictReader(io.StringIO(resp.text))
     results = []
@@ -71,8 +96,7 @@ def fetch_ecb_history(currency: str, start_date: str | None = None) -> list[dict
     url = f"{_ECB_BASE}/D.{currency}.EUR.SP00.A?format=csvdata"
     if start_date:
         url += f"&startPeriod={start_date}"
-    resp = requests.get(url, timeout=60)
-    resp.raise_for_status()
+    resp = _ecb_get(url, timeout=90)
 
     reader = csv.DictReader(io.StringIO(resp.text))
     results = []

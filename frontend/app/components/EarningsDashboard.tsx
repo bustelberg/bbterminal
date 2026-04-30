@@ -53,6 +53,7 @@ const MC = {
   FWD_PE: 'indicator_q_forward_pe_ratio',
   PEG: 'indicator_q_peg_ratio',
   FCF: 'annuals__Cashflow Statement__Free Cash Flow',
+  REVENUE: 'annuals__Income Statement__Revenue',
   NET_INCOME: 'annuals__Income Statement__Net Income',
   EPS_DILUTED: 'annuals__Income Statement__EPS (Diluted)',
   EPS_FY1_EST: 'annual_per_share_eps_estimate',
@@ -132,6 +133,62 @@ function computeCAGR(series: { date: string; value: number }[], requirePositive 
   const years = (new Date(end.date).getTime() - new Date(start.date).getTime()) / (365.25 * 86400000);
   if (years < 0.5) return null;
   return Math.pow(end.value / start.value, 1 / years) - 1;
+}
+
+/** R² of log-linear regression (log(value) vs time in years). Returns null if any value <= 0. */
+function logLinearR2(series: { date: string; value: number }[]): number | null {
+  if (series.length < 3) return null;
+  if (series.some((p) => p.value <= 0)) return null;
+  const t0 = new Date(series[0].date).getTime();
+  const xs = series.map((p) => (new Date(p.date).getTime() - t0) / (365.25 * 86400000));
+  const ys = series.map((p) => Math.log(p.value));
+  const n = xs.length;
+  const meanX = xs.reduce((s, v) => s + v, 0) / n;
+  const meanY = ys.reduce((s, v) => s + v, 0) / n;
+  let sxx = 0;
+  let syy = 0;
+  let sxy = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - meanX;
+    const dy = ys[i] - meanY;
+    sxx += dx * dx;
+    syy += dy * dy;
+    sxy += dx * dy;
+  }
+  if (sxx === 0 || syy === 0) return null;
+  const r = sxy / Math.sqrt(sxx * syy);
+  return r * r;
+}
+
+/** Filter a daily/annual series to entries within the trailing N years of its last point. */
+function trailingYearsWindow(series: { date: string; value: number }[], years: number): { date: string; value: number }[] {
+  if (series.length === 0) return [];
+  const endMs = new Date(series[series.length - 1].date).getTime();
+  const cutoffMs = endMs - years * 365.25 * 86400000;
+  // Tolerance: the earliest point should not be more recent than (years - 0.5) ago,
+  // i.e. we need enough span to actually represent N years.
+  const filtered = series.filter((p) => new Date(p.date).getTime() >= cutoffMs);
+  if (filtered.length < 2) return [];
+  const span = (endMs - new Date(filtered[0].date).getTime()) / (365.25 * 86400000);
+  if (span < years - 0.5) return [];
+  return filtered;
+}
+
+function yoyGrowthRates(series: { date: string; value: number }[]): number[] {
+  const rates: number[] = [];
+  for (let i = 1; i < series.length; i++) {
+    const prev = series[i - 1].value;
+    const curr = series[i].value;
+    if (prev > 0 && curr > 0) rates.push(curr / prev - 1);
+  }
+  return rates;
+}
+
+function stdDev(values: number[]): number | null {
+  if (values.length < 2) return null;
+  const mean = values.reduce((s, v) => s + v, 0) / values.length;
+  const variance = values.reduce((s, v) => s + (v - mean) ** 2, 0) / (values.length - 1);
+  return Math.sqrt(variance);
 }
 
 function computeCAGRWindow(series: { date: string; value: number }[], years: number): number | null {
@@ -302,7 +359,7 @@ function LogPanel({ logs, logEndRef, running, onClose }: { logs: { type: string;
       </div>
       <div className="max-h-[5.5rem] overflow-y-auto p-3 font-mono text-xs">
       {logs.map((l, i) => (
-        <div key={i} className={l.type === 'error' ? 'text-rose-400' : l.type === 'done' ? 'text-emerald-400' : 'text-gray-400'}>
+        <div key={i} className={l.type === 'error' ? 'text-rose-400' : l.type === 'warning' ? 'text-amber-400' : l.type === 'done' ? 'text-emerald-400' : 'text-gray-400'}>
           {l.message}
         </div>
       ))}
@@ -390,7 +447,20 @@ const tooltipStyle = { backgroundColor: '#151821', border: '1px solid #374151', 
 // ---------------------------------------------------------------------------
 
 function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
-  const lv = useCallback((code: string) => latestValue(metrics, code), [metrics]);
+  // For any `annuals__X` code, also look up the `quarterly__X` twin and return
+  // whichever has the most recent target_date — quarterly is usually fresher
+  // for point-in-time / ratio metrics like Debt-to-Equity.
+  const lv = useCallback(
+    (code: string) => {
+      const annual = latestValue(metrics, code);
+      if (!code.startsWith('annuals__')) return annual;
+      const quarterly = latestValue(metrics, 'quarterly__' + code.slice('annuals__'.length));
+      if (!annual) return quarterly;
+      if (!quarterly) return annual;
+      return quarterly.date > annual.date ? quarterly : annual;
+    },
+    [metrics],
+  );
 
   // Derived: FCF / Net Income
   const fcfOverNi = useMemo(() => {
@@ -400,10 +470,34 @@ function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
     return fcf.value / ni.value;
   }, [lv]);
 
+  // Derived: Value Creation + Historical Growth metrics, computed from GuruFocus time series.
+  const valueGrowth = useMemo(() => {
+    const priceSeries = timeSeries(metrics, 'close_price');
+    const revSeries = annualSeries(metrics, MC.REVENUE);
+    const fcfSeries = annualSeries(metrics, MC.FCF);
 
+    const price5Y = trailingYearsWindow(priceSeries, 5);
+    const price10Y = trailingYearsWindow(priceSeries, 10);
+    const rev5Y = trailingYearsWindow(revSeries, 5);
+    const fcf5Y = trailingYearsWindow(fcfSeries, 5);
 
+    const lastDate = (s: { date: string }[]) => (s.length ? s[s.length - 1].date : null);
 
-  // Derived: FCF/share CAGR windows
+    return {
+      price5YCAGR: computeCAGR(price5Y),
+      price5YR2: logLinearR2(price5Y),
+      price10YCAGR: computeCAGR(price10Y),
+      price10YR2: logLinearR2(price10Y),
+      priceDate: lastDate(priceSeries),
+      rev5YCAGR: computeCAGR(rev5Y),
+      rev5YR2: logLinearR2(rev5Y),
+      revDate: lastDate(revSeries),
+      fcf5YCAGR: computeCAGR(fcf5Y),
+      fcf5YR2: logLinearR2(fcf5Y),
+      fcfGrowthSD: stdDev(yoyGrowthRates(fcf5Y)),
+      fcfDate: lastDate(fcfSeries),
+    };
+  }, [metrics]);
 
   type StatRow = { label: string; value: string; date?: string | null; info?: string };
 
@@ -432,10 +526,10 @@ function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
     {
       title: 'Value Creation',
       rows: [
-        { label: 'Price 5Y CAGR', value: fmtPct(lv(MC.SP_5Y_CAGR)?.value ?? null), date: lv(MC.SP_5Y_CAGR)?.date, info: 'Compound Annual Growth Rate of share price over the last 5 years (LongEquity).' },
-        { label: 'Price 5Y R²', value: fmtNum(lv(MC.SP_5Y_RSQ)?.value ?? null), date: lv(MC.SP_5Y_RSQ)?.date, info: 'R-squared of 5-year share price trend. Higher = more consistent growth.' },
-        { label: 'Price 10Y CAGR', value: fmtPct(lv(MC.SP_10Y_CAGR)?.value ?? null), date: lv(MC.SP_10Y_CAGR)?.date, info: 'Compound Annual Growth Rate of share price over the last 10 years (LongEquity).' },
-        { label: 'Price 10Y R²', value: fmtNum(lv(MC.SP_10Y_RSQ)?.value ?? null), date: lv(MC.SP_10Y_RSQ)?.date, info: 'R-squared of 10-year share price trend. Higher = more consistent growth.' },
+        { label: 'Price 5Y CAGR', value: fmtPct(valueGrowth.price5YCAGR), date: valueGrowth.priceDate, info: 'Compound Annual Growth Rate of share price over the last 5 years, from GuruFocus daily close prices.' },
+        { label: 'Price 5Y R²', value: fmtNum(valueGrowth.price5YR2), date: valueGrowth.priceDate, info: 'R-squared of log-linear regression of share price vs time over the last 5 years. Higher = more consistent growth.' },
+        { label: 'Price 10Y CAGR', value: fmtPct(valueGrowth.price10YCAGR), date: valueGrowth.priceDate, info: 'Compound Annual Growth Rate of share price over the last 10 years, from GuruFocus daily close prices.' },
+        { label: 'Price 10Y R²', value: fmtNum(valueGrowth.price10YR2), date: valueGrowth.priceDate, info: 'R-squared of log-linear regression of share price vs time over the last 10 years. Higher = more consistent growth.' },
       ],
     },
   ];
@@ -452,11 +546,11 @@ function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
     {
       title: 'Historical Growth',
       rows: [
-        { label: 'Revenue 5Y Growth', value: fmtPct(lv(MC.REV_GROWTH_5Y)?.value ?? null), date: lv(MC.REV_GROWTH_5Y)?.date, info: '5-year revenue growth rate (LongEquity).' },
-        { label: 'Revenue R²', value: fmtNum(lv(MC.REV_GROWTH_RSQ)?.value ?? null), date: lv(MC.REV_GROWTH_RSQ)?.date, info: 'R-squared of revenue growth trend. Higher = more consistent growth.' },
-        { label: 'FCF 5Y Growth', value: fmtPct(lv(MC.FCF_GROWTH_5Y)?.value ?? null), date: lv(MC.FCF_GROWTH_5Y)?.date, info: '5-year FCF growth rate (LongEquity).' },
-        { label: 'FCF Growth R²', value: fmtNum(lv(MC.FCF_GROWTH_RSQ)?.value ?? null), date: lv(MC.FCF_GROWTH_RSQ)?.date, info: 'R-squared of FCF growth trend. Higher = more consistent growth.' },
-        { label: 'FCF Growth SD', value: fmtNum(lv(MC.FCF_GROWTH_SD)?.value ?? null), date: lv(MC.FCF_GROWTH_SD)?.date, info: 'Standard deviation of FCF growth. Lower = more predictable.' },
+        { label: 'Revenue 5Y Growth', value: fmtPct(valueGrowth.rev5YCAGR), date: valueGrowth.revDate, info: '5-year revenue CAGR computed from GuruFocus annual revenue.' },
+        { label: 'Revenue R²', value: fmtNum(valueGrowth.rev5YR2), date: valueGrowth.revDate, info: 'R-squared of log-linear regression of revenue vs time over the last 5 years. Higher = more consistent growth.' },
+        { label: 'FCF 5Y Growth', value: fmtPct(valueGrowth.fcf5YCAGR), date: valueGrowth.fcfDate, info: '5-year FCF CAGR computed from GuruFocus annual free cash flow. Null if FCF was negative at either endpoint.' },
+        { label: 'FCF Growth R²', value: fmtNum(valueGrowth.fcf5YR2), date: valueGrowth.fcfDate, info: 'R-squared of log-linear regression of FCF vs time over the last 5 years. Null if any FCF in the window was non-positive.' },
+        { label: 'FCF Growth SD', value: fmtNum(valueGrowth.fcfGrowthSD), date: valueGrowth.fcfDate, info: 'Standard deviation of year-over-year FCF growth rates over the last 5 years. Lower = more predictable.' },
       ],
     },
     {
@@ -1050,6 +1144,7 @@ export default function EarningsDashboard() {
   const [selected, setSelected] = useState<Company | null>(null);
   const [metrics, setMetrics] = useState<MetricRow[]>([]);
   const [loadingMetrics, setLoadingMetrics] = useState(false);
+  const [noCache, setNoCache] = useState(false);
   const currentYear = new Date().getFullYear();
   const [startYear, setStartYear] = useState(2015);
   const [startYearInput, setStartYearInput] = useState('2015');
@@ -1107,10 +1202,10 @@ export default function EarningsDashboard() {
 
   useEffect(() => { sse.clearLogs(); loadMetrics(); }, [loadMetrics]);
 
-  const refresh = (source: string) => {
+  const refresh = (source: string, force = true) => {
     if (!selected) return;
     const endpoint = source === 'all' ? 'refresh-all' : `refresh/${source}`;
-    sse.start(`${API_URL}/api/earnings/${selected.company_id}/${endpoint}?force=true`, () => {
+    sse.start(`${API_URL}/api/earnings/${selected.company_id}/${endpoint}?force=${force}`, () => {
       loadMetrics();
       usageBadgeRef.current?.refresh();
     });
@@ -1126,7 +1221,21 @@ export default function EarningsDashboard() {
       {/* Company picker */}
       <div className="flex items-center gap-4">
         <CompanyPicker companies={companies} selected={selected} onSelect={setSelected} />
-        {selected && <RefreshButton label="Refresh All" running={sse.running} onClick={() => refresh('all')} />}
+        {selected && (
+          <>
+            <RefreshButton label="Refresh All" running={sse.running} onClick={() => refresh('all', noCache)} />
+            <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer select-none" title="Bypass GuruFocus storage cache and re-fetch every source from the API.">
+              <input
+                type="checkbox"
+                checked={noCache}
+                onChange={(e) => setNoCache(e.target.checked)}
+                disabled={sse.running}
+                className="h-4 w-4 rounded border-gray-700 bg-[#0f1117] text-indigo-600 focus:ring-1 focus:ring-indigo-500/30"
+              />
+              Don&apos;t use cache
+            </label>
+          </>
+        )}
       </div>
 
       {!selected && (

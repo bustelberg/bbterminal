@@ -394,6 +394,74 @@ def _pick_top_n_non_overlapping(periods: list[DrawdownPeriod], n: int) -> list[D
     return selected
 
 
+@dataclass
+class _BacktestPrepared:
+    """Precomputed inputs that depend only on dates / prices / universe — not
+    on the selection RNG. Cached and reused across trials by
+    `run_multi_trial_backtest` so the (expensive) signal panel is built once
+    rather than N times.
+    """
+    months: list[date]
+    price_index: dict[int, pd.Series]
+    local_price_index: dict[int, pd.Series] | None
+    volume_index: dict[int, pd.Series] | None
+    panel: dict[date, pd.DataFrame]
+
+
+def _prepare_backtest(
+    *,
+    start_date: date,
+    end_date: date,
+    prices_df: pd.DataFrame,
+    universe_df: pd.DataFrame,
+    volumes_df: pd.DataFrame | None,
+    prices_local_df: pd.DataFrame | None,
+    monthly_eligible: dict[str, dict[int, str | None]] | None,
+) -> _BacktestPrepared:
+    months = _generate_month_starts(start_date, end_date)
+    if len(months) < 2:
+        raise ValueError("Need at least 2 months for a backtest")
+
+    price_index = _build_price_index(prices_df)
+    local_price_index = (
+        _build_price_index(prices_local_df)
+        if prices_local_df is not None and not prices_local_df.empty
+        else None
+    )
+    volume_index = (
+        _build_volume_index(volumes_df)
+        if volumes_df is not None and not volumes_df.empty
+        else None
+    )
+
+    cutoff_dates = months[:-1]  # last month has no forward return → no signals needed
+    if monthly_eligible is not None:
+        panel_universe_ids: set[int] = set()
+        for month_dict in monthly_eligible.values():
+            panel_universe_ids.update(month_dict.keys())
+        panel_universe_df = (
+            universe_df[universe_df["company_id"].isin(panel_universe_ids)]
+            .reset_index(drop=True)
+        )
+    else:
+        panel_universe_df = universe_df
+
+    panel = compute_signals_panel(
+        panel_universe_df,
+        cutoff_dates,
+        price_index=price_index,
+        volume_index=volume_index,
+    )
+
+    return _BacktestPrepared(
+        months=months,
+        price_index=price_index,
+        local_price_index=local_price_index,
+        volume_index=volume_index,
+        panel=panel,
+    )
+
+
 def run_backtest(
     config: BacktestConfig,
     prices_df: pd.DataFrame,
@@ -404,6 +472,7 @@ def run_backtest(
     monthly_eligible: dict[str, dict[int, str | None]] | None = None,
     prices_local_df: pd.DataFrame | None = None,
     company_currency: dict[int, str | None] | None = None,
+    prepared: _BacktestPrepared | None = None,
 ) -> BacktestResult:
     """Run the monthly momentum backtest.
 
@@ -415,19 +484,26 @@ def run_backtest(
 
     If monthly_eligible is provided (from universe_snapshot), only companies
     in the eligible set for that month are considered.
-    """
-    months = _generate_month_starts(config.start_date, config.end_date)
-    if len(months) < 2:
-        raise ValueError("Need at least 2 months for a backtest")
 
-    # Build price index once — eliminates repeated DataFrame filtering
-    price_index = _build_price_index(prices_df)
-    local_price_index = (
-        _build_price_index(prices_local_df)
-        if prices_local_df is not None and not prices_local_df.empty
-        else None
-    )
-    volume_index = _build_volume_index(volumes_df) if volumes_df is not None and not volumes_df.empty else None
+    `prepared` is an internal optimization for `run_multi_trial_backtest`:
+    when supplied, the months / indices / signal panel are reused instead of
+    being recomputed. None means compute fresh.
+    """
+    if prepared is None:
+        prepared = _prepare_backtest(
+            start_date=config.start_date,
+            end_date=config.end_date,
+            prices_df=prices_df,
+            universe_df=universe_df,
+            volumes_df=volumes_df,
+            prices_local_df=prices_local_df,
+            monthly_eligible=monthly_eligible,
+        )
+    months = prepared.months
+    price_index = prepared.price_index
+    local_price_index = prepared.local_price_index
+    volume_index = prepared.volume_index
+    panel = prepared.panel
 
     monthly_records: list[MonthlyRecord] = []
     cumulative = 0.0  # cumulative return in %
@@ -457,8 +533,9 @@ def run_backtest(
                 message=f"Computing signals for {month_date.strftime('%b %Y')}...",
             )
 
-        # Filter universe for this month if snapshot-based
-        month_universe_df = universe_df
+        # Resolve this month's eligible set + sector map (snapshot-based universes only).
+        sector_map: dict[int, str | None] = {}
+        eligible_ids: set[int] | None = None
         if monthly_eligible is not None:
             month_key = month_date.isoformat()[:7]
             sector_map = monthly_eligible.get(month_key) or {}
@@ -484,20 +561,15 @@ def run_backtest(
                     empty_reason=reason,
                 ))
                 continue
-            month_universe_df = universe_df[
-                universe_df["company_id"].isin(eligible_ids)
-            ].copy().reset_index(drop=True)
-            # Attach per-month sector from the universe_membership snapshot.
-            # `load_universe` left sector=None on the base df; without this
-            # merge, sector-based selection would find 0 sectors.
-            month_universe_df["sector"] = month_universe_df["company_id"].map(sector_map)
 
-        # Compute signals as of this month
-        signals_df = compute_price_signals(
-            prices_df, month_universe_df, as_of_date=month_date,
-            price_index=price_index,
-            volume_index=volume_index,
-        )
+        # Look up signals for this month from the precomputed panel, then
+        # apply the per-month universe filter + sector remap when using a
+        # snapshot-based universe (the panel was built from the base
+        # `universe_df` whose sector is None for snapshot universes).
+        signals_df = panel.get(month_date, pd.DataFrame())
+        if not signals_df.empty and eligible_ids is not None:
+            signals_df = signals_df[signals_df["company_id"].isin(eligible_ids)].copy()
+            signals_df["sector"] = signals_df["company_id"].map(sector_map)
         if signals_df.empty:
             reason = f"No companies had enough price data (need >= 20 data points before {month_date.strftime('%b %Y')})"
             if send_event:
@@ -716,6 +788,26 @@ def run_multi_trial_backtest(
 
     base_seed = config.random_seed if config.random_seed is not None else 0
 
+    # Build the price/volume indices and signal panel once — they only depend
+    # on dates / prices / universe, none of which change across random trials.
+    # This turns N-trial wall time from O(N × panel) into O(panel + N × select).
+    if send_event and n_trials > 1:
+        send_event(
+            "progress",
+            month="prepare",
+            pct=0,
+            message=f"Precomputing signals for {n_trials} trials...",
+        )
+    prepared = _prepare_backtest(
+        start_date=config.start_date,
+        end_date=config.end_date,
+        prices_df=prices_df,
+        universe_df=universe_df,
+        volumes_df=volumes_df,
+        prices_local_df=prices_local_df,
+        monthly_eligible=monthly_eligible,
+    )
+
     trial_results: list[BacktestResult] = []
     for i in range(n_trials):
         if send_event:
@@ -746,6 +838,7 @@ def run_multi_trial_backtest(
             monthly_eligible=monthly_eligible,
             prices_local_df=prices_local_df,
             company_currency=company_currency,
+            prepared=prepared,
         )
         trial_results.append(result)
 

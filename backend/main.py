@@ -109,6 +109,63 @@ def _strategy_hash(req: "BacktestRequest") -> str:
     return hashlib.sha256(s.encode()).hexdigest()[:16]
 
 
+def _backtest_strategy_hash(req: "BacktestRequest") -> str:
+    """Deterministic identifier for a backtest config. Unlike `_strategy_hash`
+    (Current Picks, sliding view), this includes start/end dates and the
+    random-trial fields, so two runs cache to the same row only when their
+    full config — including the date range — matches.
+    """
+    payload = {
+        "start_date": req.start_date,
+        "end_date": req.end_date,
+        "signal_weights": req.signal_weights or {},
+        "category_weights": req.category_weights or {},
+        "top_n_sectors": req.top_n_sectors,
+        "top_n_per_sector": req.top_n_per_sector,
+        "max_companies": req.max_companies,
+        "universe_label": req.universe_label,
+        "index_universe": req.index_universe,
+        "selection_mode": req.selection_mode,
+        "random_seed": req.random_seed,
+        "n_trials": req.n_trials,
+    }
+    s = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(s.encode()).hexdigest()[:16]
+
+
+def _find_cached_backtest(strategy_hash: str) -> dict | None:
+    """Return today's cached backtest for this strategy, or None.
+    Cache validity is scoped to the current UTC day — once `data_date` rolls
+    over (after the next daily price refresh) the next replay misses."""
+    today_iso = date.today().isoformat()
+    resp = (
+        supabase.table("backtest_cache")
+        .select("*")
+        .eq("strategy_hash", strategy_hash)
+        .eq("data_date", today_iso)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    rows = resp.data or []
+    return rows[0] if rows else None
+
+
+def _save_backtest_cache(strategy_hash: str, config: dict, payload: dict) -> None:
+    """Replace any prior cache row for this strategy with today's payload.
+    Synchronous; call via asyncio.to_thread."""
+    today_iso = date.today().isoformat()
+    # Drop stale-day rows for this strategy first so each strategy has at
+    # most one row in the cache at any time.
+    supabase.table("backtest_cache").delete().eq("strategy_hash", strategy_hash).execute()
+    supabase.table("backtest_cache").insert({
+        "strategy_hash": strategy_hash,
+        "data_date": today_iso,
+        "config": config,
+        "payload": payload,
+    }).execute()
+
+
 def _persist_daily_picks(strategy_hash: str, config: dict, daily_picks: list[dict]) -> None:
     """Upsert each day in daily_picks into current_picks_day for this strategy.
     Synchronous; call via asyncio.to_thread."""
@@ -1255,6 +1312,10 @@ async def _earnings_refresh_stream(company_id: int, sources: list[str], force: b
             if r.api_calls > 0:
                 yield event("api_calls", f"{r.api_calls} API call(s)", region=region, count=r.api_calls)
 
+            if getattr(r, "is_forbidden", False):
+                yield event("warning", f"  {exchange} is an unsubscribed region on GuruFocus — stopping refresh, remaining sources skipped.")
+                break
+
         except Exception as e:
             yield event("error", f"  {source} failed: {e}")
 
@@ -1301,6 +1362,7 @@ _DASHBOARD_METRIC_CODES = [
     "annuals__Ratios__Capex-to-Operating-Cash-Flow",
     # Financials — Cashflow / Income
     "annuals__Cashflow Statement__Free Cash Flow",
+    "annuals__Income Statement__Revenue",
     "annuals__Income Statement__Net Income",
     "annuals__Income Statement__EPS (Diluted)",
     # Financials — Valuation
@@ -1334,6 +1396,14 @@ _DASHBOARD_METRIC_CODES = [
     "close_price",
     # Analyst estimates (annual_*)
     # These are fetched with a prefix filter below
+]
+
+# Quarterly twins of every annuals__ code above — surfaces fresher point-in-time
+# data (e.g. Debt-to-Equity) for SnapshotStats to prefer when more recent.
+_DASHBOARD_METRIC_CODES += [
+    "quarterly__" + c[len("annuals__"):]
+    for c in _DASHBOARD_METRIC_CODES
+    if c.startswith("annuals__")
 ]
 
 _LONGEQUITY_METRIC_CODES = [
@@ -1469,7 +1539,7 @@ class BacktestRequest(BaseModel):
     random_seed: int | None = None  # only used when selection_mode == "random"
     n_trials: int = 1  # >1 only valid with selection_mode=="random"; aggregates mean ± std
     mode: str = "backtest"  # "backtest" or "current_portfolio"
-    force_recompute: bool = False  # current_portfolio: ignore cache and recompute
+    force_recompute: bool = False  # ignore cached result and recompute (applies to backtest + current_portfolio)
 
 
 async def _momentum_backtest_stream(req: BacktestRequest):
@@ -1517,6 +1587,29 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                 # Cache lookup failed — fall through to a fresh compute and
                 # surface the issue as a non-fatal warning.
                 yield _emit({"type": "warning", "scope": "cache", "message": f"Cache lookup failed: {type(e).__name__}: {e}"})
+
+    # Backtest replay cache. Same config + same UTC day → return the stored
+    # payload instead of re-loading prices, re-running signals. Bypassed by
+    # force_recompute=true. The data_date column on backtest_cache scopes
+    # validity to today; tomorrow's first run misses naturally.
+    if req.mode != "current_portfolio" and not req.force_recompute:
+        try:
+            bt_hash = _backtest_strategy_hash(req)
+            cached_bt = await asyncio.to_thread(_find_cached_backtest, bt_hash)
+            if cached_bt:
+                cached_payload = cached_bt.get("payload") or {}
+                yield _emit({"type": "progress", "pct": 100, "message": "Loaded cached backtest result"})
+                yield _emit({
+                    "type": "result",
+                    "data": cached_payload.get("result"),
+                    "universe": cached_payload.get("universe", []),
+                    "from_cache": True,
+                    "strategy_hash": bt_hash,
+                })
+                yield _emit({"type": "done", "message": "Served from cache"})
+                return
+        except Exception as e:
+            yield _emit({"type": "warning", "scope": "cache", "message": f"Backtest cache lookup failed: {type(e).__name__}: {e}"})
 
     try:
         yield _emit({"type": "progress", "pct": 0, "message": "Loading universe..."})
@@ -2348,7 +2441,19 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             yield _emit({"type": "current_portfolio", "data": payload, "universe": universe_snapshot})
             yield _emit({"type": "done", "message": "Current portfolio computed"})
         else:
-            yield _emit({"type": "result", "data": result.to_dict(), "universe": universe_snapshot})
+            result_dict = result.to_dict()
+            yield _emit({"type": "result", "data": result_dict, "universe": universe_snapshot})
+            # Cache the result for replay. Failures are non-fatal — the user
+            # already received their result; we just won't have it cached.
+            try:
+                await asyncio.to_thread(
+                    _save_backtest_cache,
+                    _backtest_strategy_hash(req),
+                    req.model_dump(),
+                    {"result": result_dict, "universe": universe_snapshot},
+                )
+            except Exception as e:
+                yield _emit({"type": "warning", "scope": "cache", "message": f"Could not cache backtest: {type(e).__name__}: {e}"})
             yield _emit({"type": "done", "message": "Backtest complete"})
 
     except Exception as e:
