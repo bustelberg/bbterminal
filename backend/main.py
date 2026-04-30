@@ -1360,14 +1360,20 @@ _DASHBOARD_METRIC_CODES = [
     # Financials — Ratios
     "annuals__Ratios__Capex-to-Revenue",
     "annuals__Ratios__Capex-to-Operating-Cash-Flow",
+    "annuals__Ratios__ROE %",
+    "annuals__Ratios__Gross Margin %",
+    "annuals__Ratios__Net Margin %",
     # Financials — Cashflow / Income
     "annuals__Cashflow Statement__Free Cash Flow",
     "annuals__Income Statement__Revenue",
+    "annuals__Income Statement__Operating Income",
+    "annuals__Income Statement__Interest Expense",
     "annuals__Income Statement__Net Income",
     "annuals__Income Statement__EPS (Diluted)",
     # Financials — Valuation
     "annuals__Valuation Ratios__FCF Yield %",
     "annuals__Valuation Ratios__Dividend Yield %",
+    "annuals__Valuation Ratios__PEG Ratio",
     # Financials — Ratios (WACC / returns)
     "annuals__Ratios__WACC %",
     "annuals__Ratios__ROIC %",
@@ -1384,15 +1390,10 @@ _DASHBOARD_METRIC_CODES = [
     "annuals__Valuation and Quality__YoY Rev. per Sh. Growth",
     "annuals__Valuation and Quality__5-Year EBITDA Growth Rate (Per Share)",
     "annuals__Valuation and Quality__YoY EPS Growth",
-    # Indicators (quarterly)
-    "indicator_q_interest_coverage",
-    "indicator_q_roe",
-    "indicator_q_roic",
-    "indicator_q_gross_margin",
-    "indicator_q_net_margin",
+    # Indicators — only forward-looking metrics that aren't already in
+    # the financials JSON. ROE/ROIC/Margins/Interest Coverage/PEG/FCF
+    # Yield are all derived from financials now (see INDICATOR_KEYS).
     "indicator_q_forward_pe_ratio",
-    "indicator_q_peg_ratio",
-    "indicator_q_fcf_yield",
     # Daily close prices
     "close_price",
     # Analyst estimates (annual_*)
