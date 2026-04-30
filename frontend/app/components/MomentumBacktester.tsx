@@ -18,6 +18,7 @@ import CellInfoTip from './momentum/CellInfoTip';
 import DailyPicksHistory from './momentum/DailyPicksHistory';
 import EquityCurveCard from './momentum/EquityCurveCard';
 import MonthlyHoldingsTable from './momentum/MonthlyHoldingsTable';
+import SectorTimelineChart from './momentum/SectorTimelineChart';
 import {
   EXCHANGE_NAMES,
   fmtPct,
@@ -67,6 +68,36 @@ export default function MomentumBacktester() {
   const warnings = momentumStore.use((s) => s.warnings);
   const infos = momentumStore.use((s) => s.infos);
   const loadedRunId = momentumStore.use((s) => s.loadedRunId);
+  const runStartedAt = momentumStore.use((s) => s.runStartedAt);
+  const runEndedAt = momentumStore.use((s) => s.runEndedAt);
+
+  // Re-render once per second while a run is active so the "Running 47s"
+  // counter and per-line "+1.3s" timestamps stay live. Cheap; only fires
+  // while running.
+  const [, setNowTick] = useState(0);
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setNowTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [running]);
+
+  // Total elapsed for the panel header.
+  const totalElapsedMs = useMemo<number | null>(() => {
+    if (runStartedAt == null) return null;
+    const end = running ? Date.now() : (runEndedAt ?? Date.now());
+    return end - runStartedAt;
+  }, [running, runStartedAt, runEndedAt]);
+
+  // Per-entry log with relative timestamps so the timeline shows when each
+  // step actually fired (and how big the gaps between steps are).
+  const progressLog = useMemo(
+    () =>
+      progress.map((p) => ({
+        message: p.message,
+        relativeMs: runStartedAt != null ? p.t - runStartedAt : undefined,
+      })),
+    [progress, runStartedAt],
+  );
 
   const exchangeByCompany = useMemo(() => {
     const m = new Map<number, string>();
@@ -660,12 +691,13 @@ export default function MomentumBacktester() {
         {(running || error || progress.length > 0) && (
           <ProgressTimeline
             steps={[]}
-            log={progress.map(p => p.message)}
+            log={progressLog}
             pct={progress[progress.length - 1]?.pct ?? 0}
             errorMessage={error}
             running={running}
             defaultLogOpen
             title="Backtest progress"
+            totalElapsedMs={totalElapsedMs}
           />
         )}
 
@@ -982,6 +1014,8 @@ export default function MomentumBacktester() {
               loadedRunId={loadedRunId}
               savedRuns={savedRuns}
             />
+
+            <SectorTimelineChart result={result} />
 
             <MonthlyHoldingsTable
               result={result}

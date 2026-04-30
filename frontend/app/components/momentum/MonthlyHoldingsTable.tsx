@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { BacktestResult } from '../../../lib/stores/momentum';
 import CellInfoTip from './CellInfoTip';
+import TickerTimelineModal from './TickerTimelineModal';
 import { EXCHANGE_NAMES, fmtPct, fmtPrice, guruFocusUrl } from './utils';
 
 type Props = {
@@ -20,6 +21,8 @@ type Props = {
  */
 export default function MonthlyHoldingsTable({ result, categories, exchangeByCompany }: Props) {
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
+  // company_id whose timeline modal is open, or null for closed.
+  const [timelineCompanyId, setTimelineCompanyId] = useState<number | null>(null);
 
   // One-way turnover per month: % of current holdings that weren't held
   // last month. First month has no prior portfolio → null.
@@ -47,6 +50,7 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
   }, [result]);
 
   return (
+    <>
     <div className="bg-[#151821] rounded-xl border border-gray-800/40">
       <div className="px-5 py-4 border-b border-gray-800/40">
         <h3 className="text-white text-sm font-medium">Monthly Portfolios</h3>
@@ -153,6 +157,17 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
                               return (
                                 <tr key={h.company_id} className="border-t border-gray-800/20">
                                   <td className="py-1.5 font-mono whitespace-nowrap">
+                                    <button
+                                      type="button"
+                                      onClick={() => setTimelineCompanyId(h.company_id)}
+                                      className="mr-1.5 inline-flex w-3.5 h-3.5 items-center justify-center text-gray-500 hover:text-indigo-300 transition-colors align-middle"
+                                      title={`Show ${h.ticker} holding history across the backtest`}
+                                      aria-label={`Show ${h.ticker} timeline`}
+                                    >
+                                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                                        <path d="M2 13h12v1H2v-1zm0-3h2v2H2v-2zm3-2h2v4H5V8zm3-3h2v7H8V5zm3-2h2v9h-2V3z" />
+                                      </svg>
+                                    </button>
                                     <a
                                       href={href}
                                       target="_blank"
@@ -274,5 +289,12 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
         </table>
       </div>
     </div>
+    <TickerTimelineModal
+      result={result}
+      companyId={timelineCompanyId}
+      exchangeByCompany={exchangeByCompany}
+      onClose={() => setTimelineCompanyId(null)}
+    />
+    </>
   );
 }
