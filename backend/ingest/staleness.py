@@ -45,6 +45,24 @@ def is_cache_fresh(dates: list[date], *, today: date | None = None) -> tuple[boo
     min_interval = statistics.median(intervals)
 
     latest = dates[-1]
+
+    # Daily-frequency data (close prices, daily indicators) needs a stricter
+    # rule than the median-interval heuristic: we want the previous trading
+    # day's close to be present, accounting for weekends. The naive
+    # latest+median+50%buffer puts us 2 days behind real time on a weekday,
+    # which means a Wednesday refresh accepts a Monday-latest cache as
+    # "fresh" even though Tuesday's close has been published for ~18 hours.
+    if min_interval <= 2:
+        # Most recent close that should already be published = the latest
+        # weekday strictly before today (Mon-Fri only). On Saturday this
+        # gives Friday; on Monday this gives the prior Friday.
+        most_recent_close = today - timedelta(days=1)
+        while most_recent_close.weekday() >= 5:  # 5=Sat, 6=Sun
+            most_recent_close -= timedelta(days=1)
+        if latest >= most_recent_close:
+            return True, f"latest={latest}, daily, current through {most_recent_close}"
+        return False, f"latest={latest}, daily, expected through {most_recent_close}, now {today}"
+
     next_expected = latest + timedelta(days=min_interval)
 
     # Add a small buffer (50% of the interval, min 1 day) to account for

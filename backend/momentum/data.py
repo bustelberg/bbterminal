@@ -169,10 +169,12 @@ def _load_metric_chunks(
         company_ids[i : i + chunk_size]
         for i in range(0, len(company_ids), chunk_size)
     ]
+    chunks_total = len(chunks)
 
     rows: list[dict] = []
     rows_lock = threading.Lock()
     page_counter = [0]
+    chunks_done_counter = [0]
 
     def _load_chunk(chunk_idx_and_chunk: tuple[int, list[int]]) -> None:
         chunk_idx, chunk = chunk_idx_and_chunk
@@ -195,15 +197,25 @@ def _load_metric_chunks(
                 description=f"{description_prefix} chunk {chunk_idx + 1}",
             )
             if not resp.data:
+                # Empty chunk still counts as completed for progress.
+                with rows_lock:
+                    chunks_done_counter[0] += 1
+                    chunks_done_now = chunks_done_counter[0]
+                if on_progress:
+                    on_progress(len(rows), page_counter[0], chunks_done_now, chunks_total)
                 break
+            is_last_page = len(resp.data) < page_size
             with rows_lock:
                 rows.extend(resp.data)
                 page_counter[0] += 1
                 page_num = page_counter[0]
                 total_so_far = len(rows)
+                if is_last_page:
+                    chunks_done_counter[0] += 1
+                chunks_done_now = chunks_done_counter[0]
             if on_progress:
-                on_progress(total_so_far, page_num)
-            if len(resp.data) < page_size:
+                on_progress(total_so_far, page_num, chunks_done_now, chunks_total)
+            if is_last_page:
                 break
             offset += page_size
 

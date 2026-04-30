@@ -1961,8 +1961,13 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         import queue as _queue
         prices_progress_q: _queue.Queue = _queue.Queue()
 
-        def _on_prices_progress(rows_so_far: int, page_num: int):
-            prices_progress_q.put({"rows": rows_so_far, "page": page_num})
+        def _on_prices_progress(rows_so_far: int, page_num: int, chunks_done: int = 0, chunks_total: int = 0):
+            prices_progress_q.put({
+                "rows": rows_so_far,
+                "page": page_num,
+                "chunks_done": chunks_done,
+                "chunks_total": chunks_total,
+            })
 
         prices_task = asyncio.create_task(asyncio.to_thread(
             load_all_prices, supabase, company_ids, price_start, price_end,
@@ -1970,9 +1975,17 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         ))
 
         # Throttle: emit at most every PROGRESS_THROTTLE pages so the SSE
-        # stream isn't drowned in updates on very large loads.
+        # stream isn't drowned in updates on very large loads. Percentage is
+        # based on chunks-completed (each chunk is a fixed-size company batch
+        # — exact denominator known up front), not row count (unknown total).
         PROGRESS_THROTTLE = 25
         last_emitted_page = 0
+        def _fmt_progress(p: dict) -> str:
+            ct = p.get("chunks_total", 0)
+            cd = p.get("chunks_done", 0)
+            pct_str = f" ≈ {round(cd / ct * 100)}%" if ct else ""
+            return f"  Loaded {p['rows']:,} price rows ({cd}/{ct} chunks{pct_str})..."
+
         while not prices_task.done():
             drained = []
             while True:
@@ -1984,7 +1997,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                 latest = drained[-1]
                 if latest["page"] - last_emitted_page >= PROGRESS_THROTTLE:
                     last_emitted_page = latest["page"]
-                    yield _emit({"type": "progress", "pct": 63, "message": f"  Loaded {latest['rows']:,} price rows ({latest['page']} pages)..."})
+                    yield _emit({"type": "progress", "pct": 63, "message": _fmt_progress(latest)})
             await asyncio.sleep(0.1)
         # Final drain after task completion
         final_total = None
@@ -1994,7 +2007,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             except _queue.Empty:
                 break
         if final_total is not None and final_total["page"] != last_emitted_page:
-            yield _emit({"type": "progress", "pct": 64, "message": f"  Loaded {final_total['rows']:,} price rows ({final_total['page']} pages)..."})
+            yield _emit({"type": "progress", "pct": 64, "message": _fmt_progress(final_total)})
 
         prices_df = await prices_task
 
@@ -2021,12 +2034,45 @@ async def _momentum_backtest_stream(req: BacktestRequest):
 
         # Sync fx_rate table from ECB for every currency in range. This is
         # idempotent and cheap — it only fetches what's missing past the
-        # highest existing rate_date per currency.
+        # highest existing rate_date per currency. We stream per-currency
+        # progress so the user can see the sync isn't stuck.
         yield _emit({"type": "progress", "pct": 65, "message": f"Syncing FX rates from ECB (through {price_end})..."})
         yield _keepalive()
-        fx_sync = await asyncio.to_thread(
+
+        fx_progress_q: _queue.Queue = _queue.Queue()
+        fx_done = [0]
+        fx_total = len(currencies_needed)
+
+        def _on_fx_progress(code: str, status: dict):
+            fx_done[0] += 1
+            fx_progress_q.put({
+                "code": code,
+                "done": fx_done[0],
+                "total": fx_total,
+                "status": status.get("status"),
+            })
+
+        fx_task = asyncio.create_task(asyncio.to_thread(
             sync_fx_rates_to_db, supabase, currencies_needed, price_start, price_end,
-        )
+            on_progress=_on_fx_progress,
+        ))
+        while not fx_task.done():
+            drained = []
+            while True:
+                try:
+                    drained.append(fx_progress_q.get_nowait())
+                except _queue.Empty:
+                    break
+            if drained:
+                latest = drained[-1]
+                pct = round(latest["done"] / max(1, latest["total"]) * 100)
+                yield _emit({
+                    "type": "progress",
+                    "pct": 65,
+                    "message": f"  FX sync {latest['done']}/{latest['total']} ≈ {pct}% (latest: {latest['code']} → {latest['status']})",
+                })
+            await asyncio.sleep(0.15)
+        fx_sync = await fx_task
         synced_codes = sorted(c for c, s in fx_sync.items() if s.get("status") == "synced")
         cached_codes = sorted(c for c, s in fx_sync.items() if s.get("status") == "cached")
         failed_codes = sorted(c for c, s in fx_sync.items() if s.get("status") == "error")
@@ -2184,13 +2230,24 @@ async def _momentum_backtest_stream(req: BacktestRequest):
 
         volumes_progress_q: _queue.Queue = _queue.Queue()
 
-        def _on_volumes_progress(rows_so_far: int, page_num: int):
-            volumes_progress_q.put({"rows": rows_so_far, "page": page_num})
+        def _on_volumes_progress(rows_so_far: int, page_num: int, chunks_done: int = 0, chunks_total: int = 0):
+            volumes_progress_q.put({
+                "rows": rows_so_far,
+                "page": page_num,
+                "chunks_done": chunks_done,
+                "chunks_total": chunks_total,
+            })
 
         volumes_task = asyncio.create_task(asyncio.to_thread(
             load_all_volumes, supabase, company_ids, price_start, price_end,
             on_progress=_on_volumes_progress,
         ))
+
+        def _fmt_v_progress(p: dict) -> str:
+            ct = p.get("chunks_total", 0)
+            cd = p.get("chunks_done", 0)
+            pct_str = f" ≈ {round(cd / ct * 100)}%" if ct else ""
+            return f"  Loaded {p['rows']:,} volume rows ({cd}/{ct} chunks{pct_str})..."
 
         last_emitted_vpage = 0
         while not volumes_task.done():
@@ -2204,7 +2261,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                 latest = drained[-1]
                 if latest["page"] - last_emitted_vpage >= PROGRESS_THROTTLE:
                     last_emitted_vpage = latest["page"]
-                    yield _emit({"type": "progress", "pct": 66, "message": f"  Loaded {latest['rows']:,} volume rows ({latest['page']} pages)..."})
+                    yield _emit({"type": "progress", "pct": 66, "message": _fmt_v_progress(latest)})
             await asyncio.sleep(0.1)
         final_v = None
         while True:
@@ -2213,7 +2270,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             except _queue.Empty:
                 break
         if final_v is not None and final_v["page"] != last_emitted_vpage:
-            yield _emit({"type": "progress", "pct": 67, "message": f"  Loaded {final_v['rows']:,} volume rows ({final_v['page']} pages)..."})
+            yield _emit({"type": "progress", "pct": 67, "message": _fmt_v_progress(final_v)})
 
         volumes_df = await volumes_task
         n_vol = volumes_df["company_id"].nunique() if not volumes_df.empty else 0
@@ -2602,6 +2659,40 @@ def _refresh_mtd_for_holdings(holdings: list[dict]) -> tuple[list[dict], str | N
     company_ids = [int(h["company_id"]) for h in holdings if h.get("company_id") is not None]
     if not company_ids:
         return holdings, None
+
+    # Freshen GuruFocus prices for the held companies before reading the DB.
+    # Bounded by the number of held names (~20–30), and each call has its own
+    # DB-freshness fast path so it's a no-op for any company whose latest
+    # close already covers today. This is what unblocks the "daily picks last
+    # day is 0% because we never fetched the next-day close" case.
+    meta_resp = (
+        supabase.table("company")
+        .select("company_id,gurufocus_ticker,gurufocus_exchange:gurufocus_exchange(exchange_code)")
+        .in_("company_id", company_ids)
+        .execute()
+    )
+    company_meta: dict[int, tuple[str, str]] = {}
+    for r in (meta_resp.data or []):
+        cid = int(r["company_id"])
+        ticker = r.get("gurufocus_ticker") or ""
+        exch = (r.get("gurufocus_exchange") or {}).get("exchange_code") or ""
+        if ticker:
+            company_meta[cid] = (ticker, exch)
+
+    def _ensure(cid: int) -> None:
+        m = company_meta.get(cid)
+        if not m:
+            return
+        try:
+            ensure_prices_for_company(supabase, cid, m[0], m[1])
+        except Exception:
+            # Best-effort; downstream still uses whatever's in the DB.
+            pass
+
+    if company_meta:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(8, len(company_meta))) as pool:
+            list(pool.map(_ensure, list(company_meta.keys())))
 
     # Look back ~14 days from today — the latest close should always land
     # inside that window even after long weekends / holidays.
