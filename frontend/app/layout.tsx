@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Sidebar from "./components/Sidebar";
 import DialogHost from "./components/DialogHost";
+import LoadingTracker from "./components/LoadingTracker";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -33,6 +34,7 @@ export default function RootLayout({
         <Sidebar />
         <div className="flex-1 overflow-auto">{children}</div>
         <DialogHost />
+        <LoadingTracker />
       </body>
     </html>
   );

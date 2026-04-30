@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { dialog } from '../../lib/dialog';
+import { trackedFetch } from '../../lib/loading';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -11,6 +12,7 @@ type Company = {
   gurufocus_ticker: string;
   gurufocus_exchange: string;
   country: string | null;
+  universes: string[];
 };
 
 type SortField = 'company_name' | 'gurufocus_ticker' | 'gurufocus_exchange' | 'country';
@@ -22,6 +24,24 @@ function guruFocusUrl(ticker: string, exchange: string): string {
   const e = exchange.toUpperCase();
   if (USA.has(e)) return `https://www.gurufocus.com/stock/${t}/summary`;
   return `https://www.gurufocus.com/stock/${e}:${t}/summary`;
+}
+
+// Deterministic hue per universe label so the same universe always gets the
+// same chip colour across renders. Cheap string hash → 0-359 hue, with fixed
+// saturation + lightness tuned for legibility on the dark theme.
+function hashHue(label: string): number {
+  let h = 0;
+  for (let i = 0; i < label.length; i++) h = (h * 31 + label.charCodeAt(i)) | 0;
+  return Math.abs(h) % 360;
+}
+
+function universeChipStyle(label: string): React.CSSProperties {
+  const hue = hashHue(label);
+  return {
+    backgroundColor: `hsl(${hue} 70% 22% / 0.55)`,
+    borderColor: `hsl(${hue} 70% 45% / 0.55)`,
+    color: `hsl(${hue} 80% 78%)`,
+  };
 }
 
 const inputCls = 'w-full bg-[#0f1117] border border-gray-700 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-colors';
@@ -63,6 +83,7 @@ function EditRow({
         <datalist id="edit-exchange">{exchangeOptions.map((o) => <option key={o} value={o} />)}</datalist>
       </td>
       <td className="px-3 py-2 text-gray-400">{company.country ?? '—'}</td>
+      <td className="px-3 py-2 text-gray-600 text-xs">—</td>
       <td className="px-3 py-2">
         <div className="flex gap-1.5">
           <button onClick={handleSave} disabled={saving} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 transition-colors">
@@ -115,6 +136,7 @@ function AddRow({
         <datalist id="add-exchange">{exchangeOptions.map((o) => <option key={o} value={o} />)}</datalist>
       </td>
       <td className="px-3 py-2 text-sm text-gray-600">—</td>
+      <td className="px-3 py-2 text-sm text-gray-600">—</td>
       <td className="px-3 py-2">
         <div className="flex gap-1.5">
           <button onClick={handleAdd} disabled={saving || !name.trim() || !ticker.trim() || !exchange.trim()} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 transition-colors">
@@ -137,22 +159,45 @@ export default function CompanyManager() {
   const [search, setSearch] = useState('');
   const [filterExchange, setFilterExchange] = useState('');
   const [filterCountry, setFilterCountry] = useState('');
+  const [filterUniverse, setFilterUniverse] = useState('');
   const [filterDupes, setFilterDupes] = useState(false);
   const [sortField, setSortField] = useState<SortField>('company_name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [adding, setAdding] = useState(false);
+  const [pendingAdd, setPendingAdd] = useState<{
+    company_name: string;
+    gurufocus_ticker: string;
+    gurufocus_exchange: string;
+  } | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/companies`);
-      setCompanies(await res.json());
+      const res = await trackedFetch('Loading companies', `${API_URL}/api/companies`);
+      const data: Company[] = await res.json();
+      // Companies render immediately with empty memberships. The slower
+      // membership aggregate fires in parallel and merges in when ready.
+      setCompanies(data.map((c) => ({ ...c, universes: c.universes ?? [] })));
     } catch {
       setError('Failed to load companies');
     }
     setLoading(false);
+
+    try {
+      const res = await trackedFetch(
+        'Loading universe memberships',
+        `${API_URL}/api/companies/memberships`,
+      );
+      const { memberships } = (await res.json()) as { memberships: Record<string, string[]> };
+      setCompanies((prev) =>
+        prev.map((c) => ({ ...c, universes: memberships[String(c.company_id)] ?? [] })),
+      );
+    } catch {
+      // Non-fatal — chips just don't render.
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -164,6 +209,12 @@ export default function CompanyManager() {
 
   const countryOptions = useMemo(() => {
     const s = new Set(companies.map((c) => c.country).filter((v): v is string => !!v?.trim()));
+    return [...s].sort();
+  }, [companies]);
+
+  const universeOptions = useMemo(() => {
+    const s = new Set<string>();
+    for (const c of companies) for (const u of c.universes ?? []) s.add(u);
     return [...s].sort();
   }, [companies]);
 
@@ -194,6 +245,7 @@ export default function CompanyManager() {
     }
     if (filterExchange) list = list.filter((c) => c.gurufocus_exchange === filterExchange);
     if (filterCountry) list = list.filter((c) => c.country === filterCountry);
+    if (filterUniverse) list = list.filter((c) => (c.universes ?? []).includes(filterUniverse));
     if (filterDupes) {
       const nameCounts = new Map<string, number>();
       for (const c of companies) {
@@ -212,7 +264,7 @@ export default function CompanyManager() {
       const cmp = av.localeCompare(bv, undefined, { sensitivity: 'base' });
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [companies, search, filterExchange, filterCountry, filterDupes, sortField, sortDir]);
+  }, [companies, search, filterExchange, filterCountry, filterUniverse, filterDupes, sortField, sortDir]);
 
   // Count of companies that share a name with at least one other company.
   // Click the badge in the header to filter the table to just these rows.
@@ -261,20 +313,30 @@ export default function CompanyManager() {
 
   async function handleAdd(data: { company_name: string; gurufocus_ticker: string; gurufocus_exchange: string }) {
     setError(null);
+    setPendingAdd(data);
+  }
+
+  async function confirmAdd() {
+    if (!pendingAdd) return;
+    setConfirming(true);
+    setError(null);
     try {
       const res = await fetch(`${API_URL}/api/companies`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify(pendingAdd),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail ?? `HTTP ${res.status}`);
       }
+      setPendingAdd(null);
       setAdding(false);
       await load();
     } catch (e) {
       setError(`Add failed: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setConfirming(false);
     }
   }
 
@@ -354,6 +416,14 @@ export default function CompanyManager() {
           <option value="">All countries</option>
           {countryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
+        <select
+          value={filterUniverse}
+          onChange={(e) => setFilterUniverse(e.target.value)}
+          className="bg-[#151821] border border-gray-800/60 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
+        >
+          <option value="">All universes</option>
+          {universeOptions.map((u) => <option key={u} value={u}>{u}</option>)}
+        </select>
         <button
           onClick={() => setFilterDupes(!filterDupes)}
           className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -364,9 +434,9 @@ export default function CompanyManager() {
         >
           Duplicates
         </button>
-        {(search || filterExchange || filterCountry || filterDupes) && (
+        {(search || filterExchange || filterCountry || filterUniverse || filterDupes) && (
           <button
-            onClick={() => { setSearch(''); setFilterExchange(''); setFilterCountry(''); setFilterDupes(false); }}
+            onClick={() => { setSearch(''); setFilterExchange(''); setFilterCountry(''); setFilterUniverse(''); setFilterDupes(false); }}
             className="text-sm text-gray-500 hover:text-white transition-colors"
           >
             Clear filters
@@ -406,6 +476,7 @@ export default function CompanyManager() {
                 <th className={`${thCls} w-24`} onClick={() => handleSort('gurufocus_ticker')}>Ticker{sortIcon('gurufocus_ticker')}</th>
                 <th className={`${thCls} w-24`} onClick={() => handleSort('gurufocus_exchange')}>Exchange{sortIcon('gurufocus_exchange')}</th>
                 <th className={`${thCls} w-32`} onClick={() => handleSort('country')}>Country{sortIcon('country')}</th>
+                <th className="px-3 py-3 text-left text-xs font-medium">Memberships</th>
                 <th className="px-3 py-3 text-left text-xs font-medium w-28">Actions</th>
               </tr>
             </thead>
@@ -452,6 +523,25 @@ export default function CompanyManager() {
                     <td className="px-3 py-2.5 text-gray-400">{c.gurufocus_exchange}</td>
                     <td className="px-3 py-2.5 text-gray-400">{c.country ?? '—'}</td>
                     <td className="px-3 py-2.5">
+                      {(c.universes ?? []).length === 0 ? (
+                        <span className="text-xs text-gray-600">—</span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {c.universes.map((u) => (
+                            <button
+                              key={u}
+                              onClick={() => setFilterUniverse((cur) => (cur === u ? '' : u))}
+                              style={universeChipStyle(u)}
+                              title={`Filter by ${u}`}
+                              className="px-1.5 py-0.5 rounded text-[10px] font-medium border hover:brightness-125 transition"
+                            >
+                              {u}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5">
                       <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
                           onClick={() => { setEditingId(c.company_id); setAdding(false); }}
@@ -479,6 +569,62 @@ export default function CompanyManager() {
           </p>
         )}
       </div>
+
+      {pendingAdd && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="bg-[#151821] border border-gray-800/60 rounded-xl p-6 max-w-lg w-full mx-4 shadow-xl">
+            <h2 className="text-base font-semibold text-white mb-2">Verify GuruFocus listing</h2>
+            <p className="text-sm text-gray-400 leading-relaxed mb-4">
+              Open the URL below to confirm it points to the right company. The
+              ticker and exchange combination must match GuruFocus exactly,
+              otherwise no price data will be available for this company.
+            </p>
+            <div className="bg-[#0f1117] border border-gray-800/60 rounded-lg p-3 mb-4 space-y-1.5 text-sm">
+              <div className="flex justify-between gap-4">
+                <span className="text-gray-500">Name</span>
+                <span className="text-gray-200 font-medium text-right">{pendingAdd.company_name}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-gray-500">Ticker</span>
+                <span className="font-mono text-gray-200">{pendingAdd.gurufocus_ticker}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-gray-500">Exchange</span>
+                <span className="font-mono text-gray-200">{pendingAdd.gurufocus_exchange}</span>
+              </div>
+              <div className="pt-2 mt-2 border-t border-gray-800/60">
+                <a
+                  href={guruFocusUrl(pendingAdd.gurufocus_ticker, pendingAdd.gurufocus_exchange)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-indigo-400 hover:text-indigo-300 hover:underline break-all transition-colors"
+                >
+                  {guruFocusUrl(pendingAdd.gurufocus_ticker, pendingAdd.gurufocus_exchange)}
+                </a>
+              </div>
+            </div>
+            <p className="text-sm text-gray-300 mb-4">
+              Is this the company you mean to add?
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setPendingAdd(null)}
+                disabled={confirming}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmAdd}
+                disabled={confirming}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50"
+              >
+                {confirming ? 'Adding…' : 'Yes, add this company'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

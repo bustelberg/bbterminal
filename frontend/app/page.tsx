@@ -1,10 +1,16 @@
 import Link from 'next/link';
+import { cookies } from 'next/headers';
+import { createClient } from '../lib/supabase/server';
 
 type Tile = {
   href: string;
   label: string;
   description: string;
   badge?: string;
+  // Tiles marked `userVisible: true` are shown to regular users; everything
+  // else is admin-only. Mirrors the Sidebar's `userVisible` flag so the
+  // home page never advertises a page the user can't actually open.
+  userVisible?: true;
 };
 
 const tiles: Tile[] = [
@@ -12,6 +18,7 @@ const tiles: Tile[] = [
     href: '/earnings',
     label: 'Earnings Dashboard',
     description: 'Browse per-company earnings metrics pulled from GuruFocus, with quick refresh by source.',
+    userVisible: true,
   },
   {
     href: '/momentum',
@@ -63,10 +70,25 @@ const tiles: Tile[] = [
     href: '/companies',
     label: 'Companies',
     description: 'Searchable, filterable company table with inline edit, add, and delete (cascades metric and weight rows).',
+    userVisible: true,
   },
 ];
 
-export default function Home() {
+export default async function Home() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const cookieStore = await cookies();
+
+  // Match the middleware's role + view-as logic so the home tiles always
+  // reflect what the user can *actually* navigate to.
+  const realRole = (user?.app_metadata as { role?: string } | undefined)?.role === 'admin' ? 'admin' : 'user';
+  const viewAs = cookieStore.get('view_as')?.value;
+  const effectiveRole: 'admin' | 'user' = realRole === 'admin' && viewAs !== 'user' ? 'admin' : 'user';
+
+  const visibleTiles = effectiveRole === 'admin'
+    ? tiles
+    : tiles.filter((t) => t.userVisible);
+
   return (
     <div className="px-8 py-8 max-w-6xl">
       <div className="mb-8">
@@ -76,7 +98,7 @@ export default function Home() {
         </p>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {tiles.map(({ href, label, description, badge }) => (
+        {visibleTiles.map(({ href, label, description, badge }) => (
           <Link
             key={href}
             href={href}

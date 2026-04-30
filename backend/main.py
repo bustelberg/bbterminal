@@ -2,9 +2,12 @@ import asyncio
 import functools
 import hashlib
 import json
+import logging
 import os
 import re
+import threading
 import time
+from collections import OrderedDict
 from datetime import date
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Header
@@ -48,7 +51,11 @@ from index_universe.sp500 import (
     resolve_and_create_companies, store_index_membership,
     check_gurufocus_availability, load_changes,
 )
-from fx_rates import fetch_all_latest, fetch_history, get_coverage_info
+from fx_rates import (
+    get_coverage_info,
+    fetch_latest_from_db, fetch_history_from_db,
+    ECB_CURRENCIES, _USD_PEGS,
+)
 from index_universe.acwi import (
     load_acwi_holdings, get_msci_announcements,
     fetch_announcement_detail_cached, fetch_bulk_details,
@@ -83,6 +90,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def _verify_acwi_exchange_codes() -> None:
+    """Warn loudly if any exchange_code acwi.py can emit is missing from
+    `gurufocus_exchange`. Holdings on missing codes are silently dropped
+    during ACWI sync (see main.py around line 4905) — that bug ate MSFT
+    once already, this check is so it doesn't happen again."""
+    try:
+        from index_universe.acwi import expected_db_exchange_codes
+
+        expected = expected_db_exchange_codes()
+        resp = supabase.table("gurufocus_exchange").select("exchange_code").execute()
+        present = {r["exchange_code"] for r in (resp.data or [])}
+        missing = sorted(expected - present)
+        if missing:
+            logging.getLogger(__name__).warning(
+                "[acwi] exchange codes missing from gurufocus_exchange: %s. "
+                "Holdings on these exchanges will be silently skipped during "
+                "ACWI sync. Add a migration that seeds them.",
+                ", ".join(missing),
+            )
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            "[acwi] exchange code sanity check failed: %s", e
+        )
 
 _MONTHS = {
     "january": 1, "february": 2, "march": 3, "april": 4,
@@ -274,6 +307,210 @@ async def delete_account(authorization: str = Header(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Admin delete failed: {e}")
     return {"ok": True}
+
+
+# ─────────────────────────── Admin user management ────────────────────────
+# All endpoints below require the caller's JWT to carry app_metadata.role
+# == 'admin'. The role is set in auth.users.raw_app_meta_data by the
+# 20260502000000_admin_role.sql migration (or via PATCH /api/auth/users/{id}).
+
+
+def _require_admin(authorization: str) -> dict:
+    """Verify the Bearer token and return the user object. Raises 403 unless
+    that user has app_metadata.role == 'admin'."""
+    token = (authorization or "").replace("Bearer ", "")
+    if not token:
+        raise HTTPException(401, "Missing Authorization header")
+    try:
+        user_resp = supabase.auth.get_user(token)
+    except Exception as e:
+        raise HTTPException(401, f"Token verification failed: {e}")
+    user = getattr(user_resp, "user", None) if user_resp else None
+    if not user:
+        raise HTTPException(401, "Invalid token — no user found")
+    role = (getattr(user, "app_metadata", None) or {}).get("role")
+    if role != "admin":
+        raise HTTPException(403, "Admin role required")
+    return {"id": user.id, "email": user.email, "role": role}
+
+
+@app.get("/api/auth/me")
+async def auth_me(authorization: str = Header(...)):
+    """Return the caller's user info + role. Used by the frontend to decide
+    what to show; the source of truth for actual access is the middleware /
+    role check, not this endpoint."""
+    token = (authorization or "").replace("Bearer ", "")
+    try:
+        user_resp = supabase.auth.get_user(token)
+    except Exception as e:
+        raise HTTPException(401, f"Token verification failed: {e}")
+    user = getattr(user_resp, "user", None) if user_resp else None
+    if not user:
+        raise HTTPException(401, "Invalid token")
+    role = (getattr(user, "app_metadata", None) or {}).get("role") or "user"
+    return {"id": user.id, "email": user.email, "role": role}
+
+
+class CreateUserRequest(BaseModel):
+    email: str
+    password: str
+    role: str = "user"  # 'user' or 'admin'
+
+
+@app.get("/api/auth/users")
+async def list_users(authorization: str = Header(...)):
+    """List all users (admin only). Returns id, email, role, created_at."""
+    _require_admin(authorization)
+    try:
+        resp = supabase.auth.admin.list_users()
+    except Exception as e:
+        raise HTTPException(500, f"List users failed: {e}")
+    # supabase-py returns a list of User objects (not a wrapper).
+    raw_users = resp if isinstance(resp, list) else getattr(resp, "users", []) or []
+    out: list[dict] = []
+    for u in raw_users:
+        meta = getattr(u, "app_metadata", None) or {}
+        out.append({
+            "id": getattr(u, "id", None),
+            "email": getattr(u, "email", None),
+            "role": meta.get("role") or "user",
+            "created_at": str(getattr(u, "created_at", "") or ""),
+            "last_sign_in_at": str(getattr(u, "last_sign_in_at", "") or ""),
+        })
+    out.sort(key=lambda u: (u.get("role") != "admin", u.get("email") or ""))
+    return {"users": out}
+
+
+@app.post("/api/auth/users")
+async def create_user(req: CreateUserRequest, authorization: str = Header(...)):
+    """Create a new user with an initial password (admin only). The user
+    can sign in immediately and change the password from the UI later."""
+    _require_admin(authorization)
+    if req.role not in ("user", "admin"):
+        raise HTTPException(400, "role must be 'user' or 'admin'")
+    try:
+        result = supabase.auth.admin.create_user({
+            "email": req.email,
+            "password": req.password,
+            "email_confirm": True,
+            "app_metadata": {"role": req.role},
+        })
+    except Exception as e:
+        raise HTTPException(500, f"Create user failed: {e}")
+    user = getattr(result, "user", None) or result
+    return {
+        "id": getattr(user, "id", None),
+        "email": getattr(user, "email", None),
+        "role": req.role,
+    }
+
+
+class SetRoleRequest(BaseModel):
+    role: str  # 'user' or 'admin'
+
+
+@app.patch("/api/auth/users/{user_id}/role")
+async def set_user_role(user_id: str, req: SetRoleRequest, authorization: str = Header(...)):
+    """Promote/demote a user (admin only)."""
+    _require_admin(authorization)
+    if req.role not in ("user", "admin"):
+        raise HTTPException(400, "role must be 'user' or 'admin'")
+    try:
+        # Fetch the user first so we preserve any other app_metadata fields.
+        existing = supabase.auth.admin.get_user_by_id(user_id)
+        existing_user = getattr(existing, "user", None) or existing
+        existing_meta = (getattr(existing_user, "app_metadata", None) or {})
+        new_meta = {**existing_meta, "role": req.role}
+        supabase.auth.admin.update_user_by_id(user_id, {"app_metadata": new_meta})
+    except Exception as e:
+        raise HTTPException(500, f"Update role failed: {e}")
+    return {"id": user_id, "role": req.role}
+
+
+@app.delete("/api/auth/users/{user_id}")
+async def delete_user(user_id: str, authorization: str = Header(...)):
+    """Delete a user (admin only)."""
+    me = _require_admin(authorization)
+    if me["id"] == user_id:
+        raise HTTPException(400, "Use /api/auth/delete-account to delete your own account")
+    try:
+        supabase.auth.admin.delete_user(user_id)
+    except Exception as e:
+        raise HTTPException(500, f"Delete user failed: {e}")
+    return {"ok": True, "id": user_id}
+
+
+class ImpersonateRequest(BaseModel):
+    target_user_id: str
+
+
+@app.post("/api/auth/impersonate")
+async def impersonate_user(req: ImpersonateRequest, authorization: str = Header(...)):
+    """Mint real session tokens for another user (admin only).
+
+    Two-step server-side dance, hidden from the client:
+      1. `admin.generate_link({type: "magiclink", email})` produces a
+         hashed_token that's normally embedded in an email.
+      2. `auth.verify_otp({token_hash, type: "magiclink"})` consumes the
+         hashed_token and returns a fresh `{access_token, refresh_token}`
+         for the target user.
+
+    The frontend then calls `supabase.auth.setSession(...)` with those
+    tokens to swap the active session. No URL fragment, no magic-link
+    redirect, no race with cookie writes.
+    """
+    _require_admin(authorization)
+    try:
+        existing = supabase.auth.admin.get_user_by_id(req.target_user_id)
+    except Exception as e:
+        raise HTTPException(404, f"Target user not found: {e}")
+    target = getattr(existing, "user", None) or existing
+    target_email = getattr(target, "email", None)
+    if not target_email:
+        raise HTTPException(404, "Target user has no email")
+
+    try:
+        link_result = supabase.auth.admin.generate_link({
+            "type": "magiclink",
+            "email": target_email,
+            # `options` requires `redirect_to`; we don't actually use the
+            # action_link, but the type expects this field to be present.
+            "options": {"redirect_to": "http://localhost"},
+        })
+    except Exception as e:
+        raise HTTPException(500, f"generate_link failed: {e}")
+    properties = getattr(link_result, "properties", None)
+    hashed_token = getattr(properties, "hashed_token", None) if properties else None
+    if not hashed_token:
+        raise HTTPException(500, "generate_link returned no hashed_token")
+
+    # Use a throwaway client for verify_otp — supabase-py is stateful and
+    # `verify_otp` stores the resulting session on the client, replacing the
+    # service_role auth header. Calling it on the global `supabase` would
+    # silently switch every subsequent DB insert to the impersonated user's
+    # JWT, which is then subject to RLS and fails with 42501.
+    auth_only = create_client(
+        os.environ["SUPABASE_URL"],
+        os.environ["SUPABASE_SERVICE_KEY"],
+    )
+    try:
+        verification = auth_only.auth.verify_otp({
+            "token_hash": hashed_token,
+            "type": "magiclink",
+        })
+    except Exception as e:
+        raise HTTPException(500, f"verify_otp failed: {e}")
+    session = getattr(verification, "session", None)
+    if not session:
+        raise HTTPException(500, "verify_otp returned no session")
+
+    return {
+        "target_email": target_email,
+        "user_id": req.target_user_id,
+        "access_token": getattr(session, "access_token", None),
+        "refresh_token": getattr(session, "refresh_token", None),
+        "expires_at": getattr(session, "expires_at", None),
+    }
 
 
 @app.get("/api/hello")
@@ -1136,21 +1373,49 @@ def _resolve_exchange_id(exchange_code: str) -> int | None:
 
 @app.get("/api/companies")
 async def list_companies():
-    resp = (
-        supabase.table("company")
-        .select("company_id,company_name,gurufocus_ticker,exchange_id,gurufocus_exchange:gurufocus_exchange(exchange_code,country:country(country_name))")
-        .order("company_name")
-        .limit(10000)
-        .execute()
-    )
-    # Flatten the nested exchange join
-    rows = resp.data or []
-    for r in rows:
-        exch_info = r.pop("gurufocus_exchange", None) or {}
-        country_info = exch_info.pop("country", None) or {}
-        r["gurufocus_exchange"] = exch_info.get("exchange_code")
-        r["country"] = country_info.get("country_name")
-    return rows
+    """Return the company list. Memberships are fetched separately by the
+    frontend via `/api/companies/memberships` so a slow universe aggregate
+    can't block the table render."""
+    def _query():
+        resp = (
+            supabase.table("company")
+            .select("company_id,company_name,gurufocus_ticker,exchange_id,gurufocus_exchange:gurufocus_exchange(exchange_code,country:country(country_name))")
+            .order("company_name")
+            .limit(10000)
+            .execute()
+        )
+        rows = resp.data or []
+        for r in rows:
+            exch_info = r.pop("gurufocus_exchange", None) or {}
+            country_info = exch_info.pop("country", None) or {}
+            r["gurufocus_exchange"] = exch_info.get("exchange_code")
+            r["country"] = country_info.get("country_name")
+        return rows
+
+    return await asyncio.to_thread(_query)
+
+
+@app.get("/api/companies/memberships")
+async def list_company_memberships():
+    """Distinct universe labels per company. Computed server-side via the
+    `company_universe_labels` RPC; backed by an index on
+    universe_membership(company_id) so the aggregate is fast even when the
+    table holds millions of per-month rows. Returns
+    `{memberships: {company_id: [labels]}}`."""
+    def _query():
+        try:
+            resp = supabase.rpc("company_universe_labels").execute()
+            return {
+                str(r["company_id"]): (r.get("labels") or [])
+                for r in (resp.data or [])
+            }
+        except Exception:
+            # Migration may not be applied yet — return empty rather than 500
+            # so the page just shows no chips.
+            return {}
+
+    memberships = await asyncio.to_thread(_query)
+    return {"memberships": memberships}
 
 
 @app.post("/api/companies")
@@ -1521,6 +1786,378 @@ async def get_momentum_signals():
     return {"signals": PRICE_SIGNAL_DEFS, "categories": categories}
 
 
+class SignalBreakdownRequest(BaseModel):
+    company_id: int
+    as_of_date: str  # "YYYY-MM-01" for the start of a backtest month, or any YYYY-MM-DD
+    universe_label: str | None = None
+    index_universe: str | None = None
+    signal_weights: dict[str, float] | None = None
+    category_weights: dict[str, float] | None = None
+
+
+# In-process LRU cache for the (loaded universe, computed signal panel) at a
+# given cutoff. The expensive part of /signal-breakdown is loading 500+
+# companies' prices from Supabase + computing the panel — both depend ONLY
+# on (universe_label, index_universe, cutoff), not on the requesting company
+# or the user's signal/category weights. Caching this lets the first click
+# in a session pay the full cost (~3-8s) and every subsequent click for any
+# stock in any month already-cached return in <500ms (just one company's
+# prices fresh + cheap scoring + explain helpers). Bounded to 50 entries
+# (~3 MB total) so memory stays trivial.
+_BREAKDOWN_PANEL_CACHE: "OrderedDict[tuple, dict]" = OrderedDict()
+_BREAKDOWN_PANEL_CACHE_LOCK = threading.Lock()
+_BREAKDOWN_PANEL_CACHE_MAX = 50
+
+
+def _breakdown_cache_get(key: tuple) -> dict | None:
+    with _BREAKDOWN_PANEL_CACHE_LOCK:
+        if key in _BREAKDOWN_PANEL_CACHE:
+            _BREAKDOWN_PANEL_CACHE.move_to_end(key)
+            return _BREAKDOWN_PANEL_CACHE[key]
+    return None
+
+
+def _breakdown_cache_put(key: tuple, value: dict) -> None:
+    with _BREAKDOWN_PANEL_CACHE_LOCK:
+        _BREAKDOWN_PANEL_CACHE[key] = value
+        _BREAKDOWN_PANEL_CACHE.move_to_end(key)
+        while len(_BREAKDOWN_PANEL_CACHE) > _BREAKDOWN_PANEL_CACHE_MAX:
+            _BREAKDOWN_PANEL_CACHE.popitem(last=False)
+
+
+async def _signal_breakdown_stream(req: SignalBreakdownRequest):
+    """SSE generator for /api/momentum/signal-breakdown. Emits progress
+    events during the slow universe-load + panel-compute path so the UI
+    can show a meaningful progress bar; instant on cache hit."""
+    from datetime import timedelta as _td
+    from momentum.backtest import _build_price_index, _build_volume_index
+    from momentum.signals import compute_signals_panel
+    from momentum.scoring import compute_category_scores, _get_category_keys
+    from momentum.explain import explain_all_signals, _date_str
+    import pandas as _pd
+    import queue as _queue
+
+    def _emit(payload: dict) -> str:
+        return f"data: {json.dumps(payload)}\n\n"
+
+    try:
+        cutoff = date.fromisoformat(req.as_of_date)
+    except ValueError:
+        yield _emit({"type": "error", "message": f"as_of_date must be ISO YYYY-MM-DD, got {req.as_of_date!r}"})
+        return
+    cutoff_ts = _pd.Timestamp(cutoff)
+
+    label = req.universe_label or req.index_universe
+    cache_key = (req.universe_label, req.index_universe, cutoff.isoformat())
+
+    cached = _breakdown_cache_get(cache_key)
+    panel_df: _pd.DataFrame | None = None
+    if cached is not None:
+        panel_df = cached["panel_df"]
+        yield _emit({"type": "progress", "pct": 75, "message": "Cache hit — universe panel already computed for this month"})
+
+    if panel_df is None:
+        # SLOW PATH (cache miss): full universe load + panel computation.
+
+        # 1. Resolve the universe at the cutoff.
+        yield _emit({"type": "progress", "pct": 2, "message": "Loading universe..."})
+        universe_df = await asyncio.to_thread(load_universe, supabase)
+        if universe_df.empty:
+            yield _emit({"type": "error", "message": "No companies found in the database"})
+            return
+        yield _emit({"type": "progress", "pct": 6, "message": f"Loaded universe ({len(universe_df)} companies)"})
+
+        monthly_eligible: dict[str, dict[int, str | None]] | None = None
+        target_month_key = cutoff.strftime('%Y-%m')
+
+        def _load_membership(label: str) -> dict[str, dict[int, str | None]]:
+            u_resp = supabase.table("universe").select("universe_id").eq("label", label).limit(1).execute()
+            if not u_resp.data:
+                return {}
+            universe_id = u_resp.data[0]["universe_id"]
+            rows: list[dict] = []
+            offset, page_size = 0, 1000
+            while True:
+                resp = (
+                    supabase.table("universe_membership")
+                    .select("target_month, company_id, sector")
+                    .eq("universe_id", universe_id)
+                    .order("target_month").order("company_id")
+                    .range(offset, offset + page_size - 1)
+                    .execute()
+                )
+                batch = resp.data or []
+                rows.extend(batch)
+                if len(batch) < page_size:
+                    break
+                offset += page_size
+            out: dict[str, dict[int, str | None]] = {}
+            for r in rows:
+                m = (r.get("target_month") or "")[:7]
+                if not m:
+                    continue
+                out.setdefault(m, {})[r["company_id"]] = r.get("sector")
+            return out
+
+        if label:
+            yield _emit({"type": "progress", "pct": 8, "message": f"Loading universe membership for {label}..."})
+            monthly_eligible = await asyncio.to_thread(_load_membership, label)
+            if not monthly_eligible:
+                yield _emit({"type": "error", "message": f"No universe data for label {label!r}"})
+                return
+
+        if monthly_eligible is not None:
+            eligible = monthly_eligible.get(target_month_key) or {}
+            if not eligible:
+                available = sorted(monthly_eligible.keys())
+                hint = f" (available range: {available[0]} … {available[-1]})" if available else ""
+                yield _emit({"type": "error", "message": f"No companies in {label!r} for {target_month_key}{hint}"})
+                return
+            eligible_ids = set(eligible.keys())
+            universe_df = (
+                universe_df[universe_df["company_id"].isin(eligible_ids)]
+                .copy().reset_index(drop=True)
+            )
+            universe_df["sector"] = universe_df["company_id"].map(eligible)
+            yield _emit({"type": "progress", "pct": 12, "message": f"Filtered to {len(universe_df)} companies in {label} for {target_month_key}"})
+
+        universe_company_ids = sorted({int(c) for c in universe_df["company_id"]})
+
+        # 2. Load prices for the universe — pct 12 → 50 — granular via on_progress.
+        price_start = cutoff - _td(days=420)
+        prices_q: _queue.Queue = _queue.Queue()
+
+        def _on_prices_progress(rows: int, page: int, chunks_done: int = 0, chunks_total: int = 0):
+            prices_q.put({"rows": rows, "chunks_done": chunks_done, "chunks_total": chunks_total})
+
+        prices_task = asyncio.create_task(asyncio.to_thread(
+            load_all_prices, supabase, universe_company_ids, price_start, cutoff,
+            on_progress=_on_prices_progress,
+        ))
+        last_emit = 0
+        while not prices_task.done():
+            drained = []
+            while True:
+                try:
+                    drained.append(prices_q.get_nowait())
+                except _queue.Empty:
+                    break
+            if drained:
+                latest = drained[-1]
+                ct = latest.get("chunks_total", 0) or 1
+                cd = latest.get("chunks_done", 0)
+                # Map chunk progress into 12-50% band.
+                pct = 12 + round(cd / ct * 38)
+                if pct - last_emit >= 2:
+                    last_emit = pct
+                    yield _emit({"type": "progress", "pct": pct, "message": f"Loading prices: {latest['rows']:,} rows ({cd}/{ct} chunks)..."})
+            await asyncio.sleep(0.15)
+        u_prices_df = await prices_task
+        if u_prices_df.empty:
+            yield _emit({"type": "error", "message": "No price data available for any company in the universe at this date"})
+            return
+        yield _emit({"type": "progress", "pct": 50, "message": f"Loaded {len(u_prices_df):,} price rows"})
+
+        # 3. Load volumes for the universe — pct 50 → 65.
+        volumes_q: _queue.Queue = _queue.Queue()
+
+        def _on_volumes_progress(rows: int, page: int, chunks_done: int = 0, chunks_total: int = 0):
+            volumes_q.put({"rows": rows, "chunks_done": chunks_done, "chunks_total": chunks_total})
+
+        volumes_task = asyncio.create_task(asyncio.to_thread(
+            load_all_volumes, supabase, universe_company_ids, price_start, cutoff,
+            on_progress=_on_volumes_progress,
+        ))
+        last_emit = 50
+        while not volumes_task.done():
+            drained = []
+            while True:
+                try:
+                    drained.append(volumes_q.get_nowait())
+                except _queue.Empty:
+                    break
+            if drained:
+                latest = drained[-1]
+                ct = latest.get("chunks_total", 0) or 1
+                cd = latest.get("chunks_done", 0)
+                pct = 50 + round(cd / ct * 15)
+                if pct - last_emit >= 2:
+                    last_emit = pct
+                    yield _emit({"type": "progress", "pct": pct, "message": f"Loading volumes: {latest['rows']:,} rows ({cd}/{ct} chunks)..."})
+            await asyncio.sleep(0.15)
+        u_volumes_df = await volumes_task
+        yield _emit({"type": "progress", "pct": 65, "message": f"Loaded {len(u_volumes_df):,} volume rows"})
+
+        # 4. Build the signal panel for this single cutoff — pct 65 → 80.
+        yield _emit({"type": "progress", "pct": 68, "message": "Building price + volume indices..."})
+        u_price_index = await asyncio.to_thread(_build_price_index, u_prices_df)
+        u_volume_index = await asyncio.to_thread(_build_volume_index, u_volumes_df) if not u_volumes_df.empty else None
+
+        yield _emit({"type": "progress", "pct": 72, "message": f"Computing signals for {len(universe_df)} companies (rolling indicators)..."})
+        panel_df = await asyncio.to_thread(
+            lambda: compute_signals_panel(
+                universe_df, [cutoff], price_index=u_price_index, volume_index=u_volume_index,
+            ).get(cutoff, _pd.DataFrame())
+        )
+        yield _emit({"type": "progress", "pct": 80, "message": f"Computed panel for {len(panel_df)} companies (the others lacked enough history)"})
+
+        # Cache the panel only — keeps the entry small (~30-60 KB).
+        _breakdown_cache_put(cache_key, {"panel_df": panel_df})
+
+    # Per-company prices/volumes — needed every call for explain helpers.
+    yield _emit({"type": "progress", "pct": 82, "message": f"Loading prices/volumes for company #{req.company_id}..."})
+    price_start = cutoff - _td(days=420)
+    co_prices_df = await asyncio.to_thread(load_all_prices, supabase, [int(req.company_id)], price_start, cutoff)
+    if co_prices_df.empty:
+        yield _emit({"type": "error", "message": f"No price data for company {req.company_id} before {req.as_of_date}"})
+        return
+    co_volumes_df = await asyncio.to_thread(load_all_volumes, supabase, [int(req.company_id)], price_start, cutoff)
+    price_index = await asyncio.to_thread(_build_price_index, co_prices_df)
+    volume_index = await asyncio.to_thread(_build_volume_index, co_volumes_df) if not co_volumes_df.empty else None
+
+    # 5. Per-signal universe min/max — what the 0-100 normalization saw.
+    yield _emit({"type": "progress", "pct": 88, "message": "Computing universe-wide signal min/max..."})
+    signal_keys = [s["key"] for s in PRICE_SIGNAL_DEFS]
+    universe_minmax: dict[str, dict[str, float | None]] = {}
+    for k in signal_keys:
+        if k in panel_df.columns:
+            col = _pd.to_numeric(panel_df[k], errors="coerce")
+            if col.notna().any():
+                universe_minmax[k] = {"min": float(col.min()), "max": float(col.max())}
+            else:
+                universe_minmax[k] = {"min": None, "max": None}
+        else:
+            universe_minmax[k] = {"min": None, "max": None}
+
+    # 6. Score the universe + look up this company's row.
+    yield _emit({"type": "progress", "pct": 92, "message": "Running scoring engine + explain helpers..."})
+    sig_weights = req.signal_weights or {s["key"]: s["default_weight"] for s in PRICE_SIGNAL_DEFS}
+    cw = req.category_weights
+    cats_keys = _get_category_keys()
+    if cw and any(v != 0 for v in cw.values()):
+        cw_sum = sum(abs(v) for v in cw.values()) or 1.0
+        cw_normalized = {c: (cw.get(c, 0) / cw_sum) for c in cats_keys}
+    else:
+        n = len(cats_keys)
+        cw_normalized = {c: 1.0 / n for c in cats_keys}
+
+    scored_df = compute_category_scores(panel_df, sig_weights, req.category_weights) if not panel_df.empty else _pd.DataFrame()
+
+    company_row = None
+    if not scored_df.empty:
+        match = scored_df[scored_df["company_id"] == int(req.company_id)]
+        if not match.empty:
+            company_row = match.iloc[0].to_dict()
+
+    # 7. Run explain helpers against this company's trimmed series.
+    company_series = price_index.get(int(req.company_id))
+    if company_series is None or company_series.empty:
+        yield _emit({"type": "error", "message": f"No price data for company {req.company_id} before {req.as_of_date}"})
+        return
+    trimmed = company_series[company_series.index < cutoff_ts]
+    if trimmed.empty:
+        yield _emit({"type": "error", "message": f"No price data for company {req.company_id} strictly before {req.as_of_date}"})
+        return
+
+    company_vol = volume_index.get(int(req.company_id)) if volume_index else None
+    vol_trimmed = company_vol[company_vol.index < cutoff_ts] if company_vol is not None else None
+    explanations = explain_all_signals(trimmed, vol_trimmed)
+
+    # 8. Build per-signal + per-category response.
+    signals_response: list[dict] = []
+    for sig_def in PRICE_SIGNAL_DEFS:
+        key = sig_def["key"]
+        if key not in explanations:
+            continue
+        exp = explanations[key]
+        mm = universe_minmax.get(key, {})
+        sig_min = mm.get("min")
+        sig_max = mm.get("max")
+        normalized: float | None = None
+        if exp["value"] is not None and sig_min is not None and sig_max is not None:
+            if sig_max > sig_min:
+                normalized = round((exp["value"] - sig_min) / (sig_max - sig_min) * 100, 2)
+            else:
+                normalized = 50.0
+        signals_response.append({
+            "key": key,
+            "label": sig_def["label"],
+            "description": sig_def["description"],
+            "category": sig_def.get("group", "price"),
+            "raw_value": exp["value"],
+            "components": exp["components"],
+            "universe_min": sig_min,
+            "universe_max": sig_max,
+            "normalized_score": normalized,
+            "weight": sig_weights.get(key, 0),
+        })
+
+    category_scores: list[dict] = []
+    for cat_name, weight in cw_normalized.items():
+        score_val = company_row.get(f"score_{cat_name}") if company_row else None
+        score = float(score_val) if score_val is not None and not _pd.isna(score_val) else None
+        category_scores.append({
+            "category": cat_name,
+            "score": score,
+            "weight": weight,
+            "contribution": (score * weight) if score is not None else None,
+        })
+
+    momentum_score = None
+    if company_row and "momentum_score" in company_row and not _pd.isna(company_row["momentum_score"]):
+        momentum_score = float(company_row["momentum_score"])
+
+    # 9. Company metadata.
+    yield _emit({"type": "progress", "pct": 98, "message": "Looking up company metadata..."})
+    meta = await asyncio.to_thread(
+        lambda: (
+            supabase.table("company")
+            .select("company_id, gurufocus_ticker, company_name, gurufocus_exchange:gurufocus_exchange(exchange_code)")
+            .eq("company_id", req.company_id).limit(1).execute()
+        )
+    )
+    if not meta.data:
+        yield _emit({"type": "error", "message": f"Company {req.company_id} not found"})
+        return
+    m = meta.data[0]
+    exchange_code = (m.get("gurufocus_exchange") or {}).get("exchange_code") or ""
+
+    yield _emit({"type": "progress", "pct": 100, "message": "Done"})
+    yield _emit({
+        "type": "result",
+        "data": {
+            "company_id": int(req.company_id),
+            "ticker": m.get("gurufocus_ticker", ""),
+            "exchange": exchange_code,
+            "company_name": m.get("company_name", ""),
+            "as_of_date": req.as_of_date,
+            "anchor_date": _date_str(trimmed.index[-1]),
+            "anchor_price": float(trimmed.iloc[-1]),
+            "signals": signals_response,
+            "category_scores": category_scores,
+            "category_weights_normalized": cw_normalized,
+            "momentum_score": momentum_score,
+            "universe_size": int(panel_df.shape[0]) if not panel_df.empty else 0,
+            "in_universe_at_cutoff": company_row is not None,
+            "universe_label_used": label,
+        },
+    })
+
+
+@app.post("/api/momentum/signal-breakdown")
+async def signal_breakdown(req: SignalBreakdownRequest):
+    """SSE stream of step-by-step signal-breakdown computation. Emits
+    `progress` events with pct + message during the heavy universe load,
+    then a final `result` event with the full breakdown payload (or an
+    `error` event on failure). On cache hit the slow steps are skipped
+    and we go straight to per-company explain + scoring."""
+    return StreamingResponse(
+        _signal_breakdown_stream(req),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 _DEFAULT_END = "2026-01-01"
 _DEFAULT_START = "2017-01-01"
 
@@ -1756,6 +2393,23 @@ async def _momentum_backtest_stream(req: BacktestRequest):
 
         excluded_ids: set[int] = set()
 
+        # When a universe / index_universe is selected, drop every company
+        # that doesn't appear in any month of that universe. Otherwise
+        # price+volume gets fetched for unrelated companies (LongEquity-only
+        # adds, manual /companies entries, members of other saved universes)
+        # that the scoring pipeline would discard anyway, wasting GuruFocus
+        # API calls and wall-time. The filter is the union across months —
+        # per-month membership filtering still runs at scoring time.
+        if monthly_eligible is not None:
+            eligible_ids: set[int] = set()
+            for month_map in monthly_eligible.values():
+                eligible_ids.update(month_map.keys())
+            before = len(universe_df)
+            universe_df = universe_df[universe_df["company_id"].isin(eligible_ids)].reset_index(drop=True)
+            dropped = before - len(universe_df)
+            if dropped:
+                yield _emit({"type": "progress", "pct": 8, "message": f"Trimmed {dropped} companies not in selected universe ({len(universe_df)} remaining)"})
+
         # If max_companies is set, pre-trim the universe alphabetically so we
         # only fetch what we need. (Parallel fetch makes the old "stop at
         # ok_count" optimization hard to preserve.)
@@ -1961,8 +2615,13 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         import queue as _queue
         prices_progress_q: _queue.Queue = _queue.Queue()
 
-        def _on_prices_progress(rows_so_far: int, page_num: int):
-            prices_progress_q.put({"rows": rows_so_far, "page": page_num})
+        def _on_prices_progress(rows_so_far: int, page_num: int, chunks_done: int = 0, chunks_total: int = 0):
+            prices_progress_q.put({
+                "rows": rows_so_far,
+                "page": page_num,
+                "chunks_done": chunks_done,
+                "chunks_total": chunks_total,
+            })
 
         prices_task = asyncio.create_task(asyncio.to_thread(
             load_all_prices, supabase, company_ids, price_start, price_end,
@@ -1970,9 +2629,17 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         ))
 
         # Throttle: emit at most every PROGRESS_THROTTLE pages so the SSE
-        # stream isn't drowned in updates on very large loads.
+        # stream isn't drowned in updates on very large loads. Percentage is
+        # based on chunks-completed (each chunk is a fixed-size company batch
+        # — exact denominator known up front), not row count (unknown total).
         PROGRESS_THROTTLE = 25
         last_emitted_page = 0
+        def _fmt_progress(p: dict) -> str:
+            ct = p.get("chunks_total", 0)
+            cd = p.get("chunks_done", 0)
+            pct_str = f" ≈ {round(cd / ct * 100)}%" if ct else ""
+            return f"  Loaded {p['rows']:,} price rows ({cd}/{ct} chunks{pct_str})..."
+
         while not prices_task.done():
             drained = []
             while True:
@@ -1984,7 +2651,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                 latest = drained[-1]
                 if latest["page"] - last_emitted_page >= PROGRESS_THROTTLE:
                     last_emitted_page = latest["page"]
-                    yield _emit({"type": "progress", "pct": 63, "message": f"  Loaded {latest['rows']:,} price rows ({latest['page']} pages)..."})
+                    yield _emit({"type": "progress", "pct": 63, "message": _fmt_progress(latest)})
             await asyncio.sleep(0.1)
         # Final drain after task completion
         final_total = None
@@ -1994,7 +2661,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             except _queue.Empty:
                 break
         if final_total is not None and final_total["page"] != last_emitted_page:
-            yield _emit({"type": "progress", "pct": 64, "message": f"  Loaded {final_total['rows']:,} price rows ({final_total['page']} pages)..."})
+            yield _emit({"type": "progress", "pct": 64, "message": _fmt_progress(final_total)})
 
         prices_df = await prices_task
 
@@ -2021,12 +2688,45 @@ async def _momentum_backtest_stream(req: BacktestRequest):
 
         # Sync fx_rate table from ECB for every currency in range. This is
         # idempotent and cheap — it only fetches what's missing past the
-        # highest existing rate_date per currency.
+        # highest existing rate_date per currency. We stream per-currency
+        # progress so the user can see the sync isn't stuck.
         yield _emit({"type": "progress", "pct": 65, "message": f"Syncing FX rates from ECB (through {price_end})..."})
         yield _keepalive()
-        fx_sync = await asyncio.to_thread(
+
+        fx_progress_q: _queue.Queue = _queue.Queue()
+        fx_done = [0]
+        fx_total = len(currencies_needed)
+
+        def _on_fx_progress(code: str, status: dict):
+            fx_done[0] += 1
+            fx_progress_q.put({
+                "code": code,
+                "done": fx_done[0],
+                "total": fx_total,
+                "status": status.get("status"),
+            })
+
+        fx_task = asyncio.create_task(asyncio.to_thread(
             sync_fx_rates_to_db, supabase, currencies_needed, price_start, price_end,
-        )
+            on_progress=_on_fx_progress,
+        ))
+        while not fx_task.done():
+            drained = []
+            while True:
+                try:
+                    drained.append(fx_progress_q.get_nowait())
+                except _queue.Empty:
+                    break
+            if drained:
+                latest = drained[-1]
+                pct = round(latest["done"] / max(1, latest["total"]) * 100)
+                yield _emit({
+                    "type": "progress",
+                    "pct": 65,
+                    "message": f"  FX sync {latest['done']}/{latest['total']} ≈ {pct}% (latest: {latest['code']} → {latest['status']})",
+                })
+            await asyncio.sleep(0.15)
+        fx_sync = await fx_task
         synced_codes = sorted(c for c, s in fx_sync.items() if s.get("status") == "synced")
         cached_codes = sorted(c for c, s in fx_sync.items() if s.get("status") == "cached")
         failed_codes = sorted(c for c, s in fx_sync.items() if s.get("status") == "error")
@@ -2184,13 +2884,24 @@ async def _momentum_backtest_stream(req: BacktestRequest):
 
         volumes_progress_q: _queue.Queue = _queue.Queue()
 
-        def _on_volumes_progress(rows_so_far: int, page_num: int):
-            volumes_progress_q.put({"rows": rows_so_far, "page": page_num})
+        def _on_volumes_progress(rows_so_far: int, page_num: int, chunks_done: int = 0, chunks_total: int = 0):
+            volumes_progress_q.put({
+                "rows": rows_so_far,
+                "page": page_num,
+                "chunks_done": chunks_done,
+                "chunks_total": chunks_total,
+            })
 
         volumes_task = asyncio.create_task(asyncio.to_thread(
             load_all_volumes, supabase, company_ids, price_start, price_end,
             on_progress=_on_volumes_progress,
         ))
+
+        def _fmt_v_progress(p: dict) -> str:
+            ct = p.get("chunks_total", 0)
+            cd = p.get("chunks_done", 0)
+            pct_str = f" ≈ {round(cd / ct * 100)}%" if ct else ""
+            return f"  Loaded {p['rows']:,} volume rows ({cd}/{ct} chunks{pct_str})..."
 
         last_emitted_vpage = 0
         while not volumes_task.done():
@@ -2204,7 +2915,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                 latest = drained[-1]
                 if latest["page"] - last_emitted_vpage >= PROGRESS_THROTTLE:
                     last_emitted_vpage = latest["page"]
-                    yield _emit({"type": "progress", "pct": 66, "message": f"  Loaded {latest['rows']:,} volume rows ({latest['page']} pages)..."})
+                    yield _emit({"type": "progress", "pct": 66, "message": _fmt_v_progress(latest)})
             await asyncio.sleep(0.1)
         final_v = None
         while True:
@@ -2213,7 +2924,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             except _queue.Empty:
                 break
         if final_v is not None and final_v["page"] != last_emitted_vpage:
-            yield _emit({"type": "progress", "pct": 67, "message": f"  Loaded {final_v['rows']:,} volume rows ({final_v['page']} pages)..."})
+            yield _emit({"type": "progress", "pct": 67, "message": _fmt_v_progress(final_v)})
 
         volumes_df = await volumes_task
         n_vol = volumes_df["company_id"].nunique() if not volumes_df.empty else 0
@@ -2602,6 +3313,40 @@ def _refresh_mtd_for_holdings(holdings: list[dict]) -> tuple[list[dict], str | N
     company_ids = [int(h["company_id"]) for h in holdings if h.get("company_id") is not None]
     if not company_ids:
         return holdings, None
+
+    # Freshen GuruFocus prices for the held companies before reading the DB.
+    # Bounded by the number of held names (~20–30), and each call has its own
+    # DB-freshness fast path so it's a no-op for any company whose latest
+    # close already covers today. This is what unblocks the "daily picks last
+    # day is 0% because we never fetched the next-day close" case.
+    meta_resp = (
+        supabase.table("company")
+        .select("company_id,gurufocus_ticker,gurufocus_exchange:gurufocus_exchange(exchange_code)")
+        .in_("company_id", company_ids)
+        .execute()
+    )
+    company_meta: dict[int, tuple[str, str]] = {}
+    for r in (meta_resp.data or []):
+        cid = int(r["company_id"])
+        ticker = r.get("gurufocus_ticker") or ""
+        exch = (r.get("gurufocus_exchange") or {}).get("exchange_code") or ""
+        if ticker:
+            company_meta[cid] = (ticker, exch)
+
+    def _ensure(cid: int) -> None:
+        m = company_meta.get(cid)
+        if not m:
+            return
+        try:
+            ensure_prices_for_company(supabase, cid, m[0], m[1])
+        except Exception:
+            # Best-effort; downstream still uses whatever's in the DB.
+            pass
+
+    if company_meta:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(8, len(company_meta))) as pool:
+            list(pool.map(_ensure, list(company_meta.keys())))
 
     # Look back ~14 days from today — the latest close should always land
     # inside that window even after long weekends / holidays.
@@ -4423,17 +5168,61 @@ async def fx_coverage():
 
 @app.get("/api/fx/latest")
 async def fx_latest():
-    """Get latest daily rates for all currencies vs EUR (ECB + pegged + TWD)."""
-    rates = await asyncio.to_thread(fetch_all_latest)
-    return {"rates": rates, "count": len(rates)}
+    """Latest daily rates per currency.
+
+    Reads from the local fx_rate table (fast). Falls back to live ECB when
+    the table is empty so the page works on a fresh install — the user can
+    then click "Sync from ECB" to persist data and get the fast path on
+    subsequent loads.
+    """
+    rates = await asyncio.to_thread(fetch_latest_from_db, supabase)
+    source = "db"
+    if not rates:
+        from fx_rates import fetch_all_latest
+        rates = await asyncio.to_thread(fetch_all_latest)
+        source = "ecb_live"
+    return {"rates": rates, "count": len(rates), "source": source}
 
 
 @app.get("/api/fx/history/{currency}")
 async def fx_history(currency: str, start_date: str | None = None):
-    """Get daily historical FX rates for a currency vs EUR."""
+    """Daily historical FX rates for a currency.
+
+    Reads from the local fx_rate table (fast). Falls back to live ECB when
+    nothing is stored for that currency yet."""
     currency = currency.upper()
-    rates = await asyncio.to_thread(fetch_history, currency, start_date)
-    return {"currency": currency, "rates": rates, "count": len(rates)}
+    rates = await asyncio.to_thread(fetch_history_from_db, supabase, currency, start_date)
+    source = "db"
+    if not rates:
+        from fx_rates import fetch_history
+        rates = await asyncio.to_thread(fetch_history, currency, start_date)
+        source = "ecb_live"
+    return {"currency": currency, "rates": rates, "count": len(rates), "source": source}
+
+
+@app.post("/api/fx/sync")
+async def fx_sync(start_date: str | None = None):
+    """Sync ECB + pegged + TWD rates into the local fx_rate table.
+
+    Used by the FX page's manual sync button. Idempotent: each currency only
+    fetches the gap between its latest stored rate_date and today, so this is
+    cheap on subsequent runs."""
+    from datetime import date as _date
+    start = _date.fromisoformat(start_date) if start_date else _date(2000, 1, 1)
+    end = _date.today()
+    currencies = ECB_CURRENCIES + list(_USD_PEGS.keys()) + ["TWD"]
+    status = await asyncio.to_thread(
+        sync_fx_rates_to_db, supabase, currencies, start, end,
+    )
+    synced = [c for c, s in status.items() if s.get("status") == "synced"]
+    cached = [c for c, s in status.items() if s.get("status") == "cached"]
+    failed = [c for c, s in status.items() if s.get("status") == "error"]
+    return {
+        "synced": sorted(synced),
+        "cached": sorted(cached),
+        "failed": sorted(failed),
+        "details": status,
+    }
 
 
 # ---------------------------------------------------------------------------

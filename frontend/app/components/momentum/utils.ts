@@ -15,6 +15,19 @@ export const SERIES_COLORS = [
 export const fmtPct = (v: number | null) =>
   v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}%` : '—';
 
+/** Annualized return derived from a compound return + duration in months:
+ * (1 + compound_return/100)^(12/months) − 1, expressed as %. Returns null
+ * when not computable (non-positive factor, zero months). The math
+ * extrapolates short windows to a full year — useful for comparing
+ * different-duration runs on the same scale, but treat sub-12-month
+ * CAGRs with caution since they project a short observation forward. */
+export function annualize(compoundReturnPct: number | null, months: number): number | null {
+  if (compoundReturnPct == null || months <= 0) return null;
+  const factor = 1 + compoundReturnPct / 100;
+  if (factor <= 0) return null;
+  return (Math.pow(factor, 12 / months) - 1) * 100;
+}
+
 export const fmtPrice = (v: number | null | undefined) => {
   if (v == null) return '—';
   const d = Math.abs(v) >= 1000 ? 0 : Math.abs(v) >= 10 ? 2 : 4;

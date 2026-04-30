@@ -118,7 +118,7 @@ export type UniverseEntry = {
   sector: string;
 };
 
-export type ProgressEntry = { pct: number; message: string };
+export type ProgressEntry = { pct: number; message: string; t: number };
 export type WarningEntry = { scope: string; message: string };
 export type InfoEntry = { scope: string; message: string };
 
@@ -134,6 +134,10 @@ export type MomentumState = {
   warnings: WarningEntry[];
   infos: InfoEntry[];
   loadedRunId: number | null;
+  /** ms-since-epoch when the current/last run started, or null if no run has begun. */
+  runStartedAt: number | null;
+  /** ms-since-epoch when the current/last run finished (success or error), or null while running. */
+  runEndedAt: number | null;
 };
 
 export type BacktestStartConfig = {
@@ -165,6 +169,8 @@ export const momentumStore = createStore<MomentumState>({
   warnings: [],
   infos: [],
   loadedRunId: null,
+  runStartedAt: null,
+  runEndedAt: null,
 });
 
 let abortController: AbortController | null = null;
@@ -184,6 +190,8 @@ export async function startBacktest(cfg: BacktestStartConfig): Promise<void> {
     warnings: [],
     infos: [],
     loadedRunId: null,
+    runStartedAt: Date.now(),
+    runEndedAt: null,
   });
 
   let receivedDone = false;
@@ -210,7 +218,7 @@ export async function startBacktest(cfg: BacktestStartConfig): Promise<void> {
         lastEventTime = Date.now();
         if (data.type === 'progress') {
           momentumStore.set((s) => ({
-            progress: [...s.progress, { pct: data.pct ?? 0, message: data.message ?? '' }],
+            progress: [...s.progress, { pct: data.pct ?? 0, message: data.message ?? '', t: Date.now() }],
           }));
         } else if (data.type === 'warning') {
           momentumStore.set((s) => ({
@@ -230,9 +238,9 @@ export async function startBacktest(cfg: BacktestStartConfig): Promise<void> {
           if (data.universe) momentumStore.set({ universe: data.universe });
         } else if (data.type === 'done') {
           receivedDone = true;
-          momentumStore.set({ running: false });
+          momentumStore.set({ running: false, runEndedAt: Date.now() });
         } else if (data.type === 'error') {
-          momentumStore.set({ error: data.message ?? 'Unknown error', running: false });
+          momentumStore.set({ error: data.message ?? 'Unknown error', running: false, runEndedAt: Date.now() });
         }
       },
       controller.signal,
@@ -240,12 +248,13 @@ export async function startBacktest(cfg: BacktestStartConfig): Promise<void> {
 
     if (!receivedDone) {
       if (receivedResult) {
-        momentumStore.set({ running: false });
+        momentumStore.set({ running: false, runEndedAt: Date.now() });
       } else {
         const elapsed = Math.round((Date.now() - lastEventTime) / 1000);
         momentumStore.set({
           error: `Stream disconnected unexpectedly (last event ${elapsed}s ago). This can happen due to proxy timeouts — try again, the replay cache should make the second attempt fast.`,
           running: false,
+          runEndedAt: Date.now(),
         });
       }
     }
@@ -255,7 +264,7 @@ export async function startBacktest(cfg: BacktestStartConfig): Promise<void> {
     } else {
       momentumStore.set({ error: e instanceof Error ? e.message : 'Unknown error' });
     }
-    momentumStore.set({ running: false });
+    momentumStore.set({ running: false, runEndedAt: Date.now() });
   } finally {
     if (abortController === controller) abortController = null;
   }

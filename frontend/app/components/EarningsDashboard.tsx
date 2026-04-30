@@ -12,6 +12,7 @@ import {
   startEarningsRefresh,
   clearEarningsLogs,
 } from '../../lib/stores/earnings';
+import { trackedFetch } from '../../lib/loading';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -1388,7 +1389,7 @@ export default function EarningsDashboard() {
   });
 
   useEffect(() => {
-    fetch(`${API_URL}/api/companies`)
+    trackedFetch('Loading companies', `${API_URL}/api/companies`)
       .then((r) => r.json())
       .then((data) => setCompanies(Array.isArray(data) ? data : []))
       .catch(() => {});
@@ -1397,7 +1398,10 @@ export default function EarningsDashboard() {
   const loadMetrics = useCallback(() => {
     if (!selected) return;
     setLoadingMetrics(true);
-    fetch(`${API_URL}/api/earnings/${selected.company_id}/metrics`)
+    trackedFetch(
+      `Loading earnings metrics for ${selected.gurufocus_ticker}`,
+      `${API_URL}/api/earnings/${selected.company_id}/metrics`,
+    )
       .then((r) => r.json())
       .then((data) => setMetrics(Array.isArray(data) ? data : []))
       .catch(() => setMetrics([]))

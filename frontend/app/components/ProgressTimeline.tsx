@@ -6,10 +6,15 @@ export type StepStatus = 'pending' | 'in_progress' | 'done' | 'error';
 export type StepState = { status: StepStatus; message?: string };
 export type StepDef = { key: string; label: string };
 
+/** Log entry. `relativeMs` is milliseconds since the run started — when
+ * present we render it as a "+1.3s" prefix so each line shows when it
+ * arrived. Plain strings fall back to no prefix (backward compat). */
+export type LogEntry = string | { message: string; relativeMs?: number };
+
 export type ProgressTimelineProps = {
   steps: StepDef[];
   state?: Record<string, StepState>;
-  log?: string[];
+  log?: LogEntry[];
   doneSummary?: string | null;
   errorMessage?: string | null;
   running?: boolean;
@@ -24,6 +29,9 @@ export type ProgressTimelineProps = {
   title?: string;
   /** Optional dismiss button (top-right of the panel). */
   onDismiss?: () => void;
+  /** When set, the panel header shows live "Running 12s" while running and
+   * "Completed in 1m 23s" when done. ms since run started. */
+  totalElapsedMs?: number | null;
 };
 
 function StepIcon({ status }: { status: StepStatus }) {
@@ -45,6 +53,24 @@ function derivedPct(steps: StepDef[], state: Record<string, StepState>): number 
   return Math.round((score / steps.length) * 100);
 }
 
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rs = s % 60;
+  return `${m}m ${rs}s`;
+}
+
+function formatRelative(ms: number): string {
+  if (ms < 1000) return `+${ms}ms`;
+  if (ms < 60_000) return `+${(ms / 1000).toFixed(1)}s`;
+  const totalSeconds = Math.floor(ms / 1000);
+  const m = Math.floor(totalSeconds / 60);
+  const rs = totalSeconds % 60;
+  return `+${m}m ${rs.toString().padStart(2, '0')}s`;
+}
+
 export default function ProgressTimeline({
   steps,
   state = {},
@@ -58,6 +84,7 @@ export default function ProgressTimeline({
   defaultLogOpen = false,
   title,
   onDismiss,
+  totalElapsedMs,
 }: ProgressTimelineProps) {
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -76,9 +103,14 @@ export default function ProgressTimeline({
 
   return (
     <div className={`bg-[#0f1117] border border-gray-800 rounded-lg p-3 space-y-2 ${className ?? ''}`}>
-      {(title || onDismiss) && (
+      {(title || onDismiss || totalElapsedMs != null) && (
         <div className="flex items-center justify-between">
           {title && <div className="text-xs font-medium text-gray-300">{title}</div>}
+          {totalElapsedMs != null && (
+            <div className="text-[11px] font-mono text-gray-500 ml-3">
+              {running ? `Running ${formatElapsed(totalElapsedMs)}` : `Completed in ${formatElapsed(totalElapsedMs)}`}
+            </div>
+          )}
           {onDismiss && (
             <button
               onClick={onDismiss}
@@ -146,27 +178,38 @@ export default function ProgressTimeline({
         </div>
       )}
 
-      {log.length > 0 && (
-        defaultLogOpen ? (
+      {log.length > 0 && (() => {
+        const renderLine = (l: LogEntry, i: number) => {
+          if (typeof l === 'string') return <div key={i}>{l}</div>;
+          return (
+            <div key={i} className="flex gap-2">
+              <span className="text-gray-600 shrink-0 w-12 text-right">
+                {l.relativeMs != null ? formatRelative(l.relativeMs) : ''}
+              </span>
+              <span>{l.message}</span>
+            </div>
+          );
+        };
+        const inner = (
+          <div className="max-h-48 overflow-auto text-[11px] font-mono text-gray-400 space-y-0.5">
+            {log.map(renderLine)}
+            <div ref={logEndRef} />
+          </div>
+        );
+        return defaultLogOpen ? (
           <div>
             <div className="text-gray-500 text-xs mb-1">Verbose log ({log.length} events)</div>
-            <div className="max-h-48 overflow-auto text-[11px] font-mono text-gray-400 space-y-0.5">
-              {log.map((l, i) => <div key={i}>{l}</div>)}
-              <div ref={logEndRef} />
-            </div>
+            {inner}
           </div>
         ) : (
           <details>
             <summary className="text-gray-500 text-xs cursor-pointer hover:text-gray-300 select-none">
               Verbose log ({log.length} events)
             </summary>
-            <div className="mt-2 max-h-48 overflow-auto text-[11px] font-mono text-gray-400 space-y-0.5">
-              {log.map((l, i) => <div key={i}>{l}</div>)}
-              <div ref={logEndRef} />
-            </div>
+            <div className="mt-2">{inner}</div>
           </details>
-        )
-      )}
+        );
+      })()}
     </div>
   );
 }

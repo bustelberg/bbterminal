@@ -18,7 +18,7 @@ from supabase import Client
 
 logger = logging.getLogger(__name__)
 
-US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX"}
+US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX", "CBOE"}
 ASIA_EXCHANGES = {
     "TSE", "HKSE", "SHSE", "SSE", "SZSE", "TPE", "TWSE", "ROCO",
     "XKRX", "NSE", "BSE", "SGX", "XKLS", "ISX", "BKK", "PHS",

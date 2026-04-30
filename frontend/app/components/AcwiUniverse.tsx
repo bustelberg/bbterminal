@@ -10,6 +10,7 @@ import {
 } from '../../lib/stores/acwi';
 import DatePartsPicker from './DatePartsPicker';
 import ProgressTimeline from './ProgressTimeline';
+import { trackedFetch } from '../../lib/loading';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -117,7 +118,7 @@ export default function AcwiUniverse() {
   const loadNetAdditions = useCallback(async () => {
     setNetAdditionsLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/acwi/net-additions`);
+      const res = await trackedFetch('Loading ACWI net additions', `${API_URL}/api/acwi/net-additions`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setNetAdditions(data.net_additions);
@@ -130,7 +131,7 @@ export default function AcwiUniverse() {
 
   const loadAnnouncements = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/acwi/announcements`);
+      const res = await trackedFetch('Loading MSCI announcements', `${API_URL}/api/acwi/announcements`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setAnnouncements(data.announcements);
@@ -144,7 +145,7 @@ export default function AcwiUniverse() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${API_URL}/api/acwi/holdings`);
+        const res = await trackedFetch('Loading ACWI holdings', `${API_URL}/api/acwi/holdings`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setHoldings(data.holdings);
@@ -180,7 +181,10 @@ export default function AcwiUniverse() {
   const fetchDetail = useCallback(async (href: string) => {
     setManualDetails(prev => ({ ...prev, [href]: { standard: null, effective_date: null, loading: true } }));
     try {
-      const res = await fetch(`${API_URL}/api/acwi/announcement-detail?url=${encodeURIComponent(href)}`);
+      const res = await trackedFetch(
+        'Loading announcement detail',
+        `${API_URL}/api/acwi/announcement-detail?url=${encodeURIComponent(href)}`,
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setManualDetails(prev => ({ ...prev, [href]: { ...data, loading: false } }));

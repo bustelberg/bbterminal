@@ -33,6 +33,12 @@ export async function GET(request: NextRequest) {
     await supabase.auth.verifyOtp({ token_hash, type })
   }
 
-  // Redirect to set-password so the user can choose a permanent password
-  return NextResponse.redirect(`${origin}/set-password`)
+  // `?next=...` lets callers (e.g. the impersonation flow) land on a
+  // specific path after sign-in; default is /set-password for new-user
+  // flows where we still want to force a permanent password.
+  const next = searchParams.get('next')
+  // Only allow same-origin paths (must start with `/` and not `//` to
+  // prevent open-redirects).
+  const safeNext = next && next.startsWith('/') && !next.startsWith('//') ? next : '/set-password'
+  return NextResponse.redirect(`${origin}${safeNext}`)
 }

@@ -30,7 +30,7 @@ from ingest.api_usage import track_api_call
 _BUCKET = "gurufocus-raw"
 _CUTOFF = date(1998, 1, 1)
 
-US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX"}
+US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX", "CBOE"}
 
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
