@@ -39,15 +39,16 @@ _USER_AGENT = (
 )
 
 # Indicator keys we need for the earnings dashboard (quarterly variants)
+# Each entry here = one GuruFocus API call per refresh. We only keep
+# indicators that aren't already in the financials JSON. Everything else
+# (ROE, ROIC, Gross/Net Margin, Interest Coverage, PEG, FCF Yield) is
+# derived from the financials response in `_parse_financials` — those rows
+# land in metric_data with `annuals__/quarterly__Ratios__...` codes and
+# the dashboard reads them directly. Forward P/E stays here because it's
+# forward-looking (price ÷ next-year EPS estimate) and isn't in the
+# historical financials block.
 INDICATOR_KEYS = [
-    "interest_coverage",
-    "roe",
-    "roic",
-    "gross_margin",
-    "net_margin",
     "forward_pe_ratio",
-    "peg_ratio",
-    "fcf_yield",
 ]
 
 
@@ -378,6 +379,17 @@ def _parse_financials(data: dict, company_id: int) -> list[dict]:
             for path_parts, leaf in _flatten(top_val, [block_name, str(top_key)]):
                 metric_code = "__".join(path_parts)
                 if isinstance(leaf, list):
+                    # Pre-scan: only record this field's period rows if at
+                    # least one period has a real number. That keeps storage
+                    # bounded for fields GF never populates for this company
+                    # (e.g. "Effective Interest Rate on Debt %" on a debt-free
+                    # name) while still letting us emit null rows for periods
+                    # where GF returns "N/A". Without this, the dashboard
+                    # silently falls back to a stale numeric value from years
+                    # ago — see AAPL Interest Coverage 2023 vs the actual 2025
+                    # period being "N/A".
+                    if not any(_coerce_float(v) is not None for v in leaf):
+                        continue
                     for ps, v in zip_longest(period_strs, leaf, fillvalue=None):
                         if ps is None or ps.upper() == "TTM":
                             continue
@@ -385,8 +397,10 @@ def _parse_financials(data: dict, company_id: int) -> list[dict]:
                         if td is None:
                             continue
                         val = _coerce_float(v)
-                        if val is None:
-                            continue
+                        # `val` may be None when GF reported "N/A" for this
+                        # period; we still emit the row so the frontend can
+                        # show the period exists (with no meaningful value)
+                        # rather than walk back to the last numeric.
                         rows.append({
                             "company_id": company_id,
                             "metric_code": metric_code,

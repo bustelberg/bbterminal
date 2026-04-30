@@ -34,32 +34,37 @@ type MetricRow = {
 // Metric codes (matching old constants.py)
 // ---------------------------------------------------------------------------
 
+// Most ratios sit on `annuals__X` codes; lv() in SnapshotStats auto-prefers
+// the `quarterly__X` twin when it has a fresher target_date. Forward P/E is
+// the one exception — it's forward-looking (price ÷ next-FY EPS estimate)
+// and isn't in the financials JSON, so it stays on the indicators code.
 const MC = {
-  FCF_YIELD: 'indicator_q_fcf_yield',
+  FCF_YIELD: 'annuals__Valuation Ratios__FCF Yield %',
   PRICE: 'annuals__Per Share Data__Month End Stock Price',
   EPS_WO_NRI: 'annuals__Per Share Data__EPS without NRI',
   DIV_PS: 'annuals__Per Share Data__Dividends per Share',
   EPS_EST: 'annual_eps_nri_estimate',
   DIV_EST: 'annual_dividend_estimate',
   FCF_PS: 'annuals__Per Share Data__Free Cash Flow per Share',
-  INTEREST_COVERAGE: 'indicator_q_interest_coverage',
+  INTEREST_COVERAGE: 'annuals__Valuation and Quality__Interest Coverage',
   DEBT_TO_EQUITY: 'annuals__Balance Sheet__Debt-to-Equity',
   CAPEX_TO_REV: 'annuals__Ratios__Capex-to-Revenue',
   CAPEX_TO_OCF: 'annuals__Ratios__Capex-to-Operating-Cash-Flow',
-  ROE: 'indicator_q_roe',
-  ROIC: 'indicator_q_roic',
-  GROSS_MARGIN: 'indicator_q_gross_margin',
-  NET_MARGIN: 'indicator_q_net_margin',
+  ROE: 'annuals__Ratios__ROE %',
+  ROIC: 'annuals__Ratios__ROIC %',
+  GROSS_MARGIN: 'annuals__Ratios__Gross Margin %',
+  NET_MARGIN: 'annuals__Ratios__Net Margin %',
   FWD_PE: 'indicator_q_forward_pe_ratio',
-  PEG: 'indicator_q_peg_ratio',
+  PEG: 'annuals__Valuation Ratios__PEG Ratio',
   FCF: 'annuals__Cashflow Statement__Free Cash Flow',
   REVENUE: 'annuals__Income Statement__Revenue',
   NET_INCOME: 'annuals__Income Statement__Net Income',
+  OPERATING_INCOME: 'annuals__Income Statement__Operating Income',
+  INTEREST_EXPENSE: 'annuals__Income Statement__Interest Expense',
   EPS_DILUTED: 'annuals__Income Statement__EPS (Diluted)',
   EPS_FY1_EST: 'annual_per_share_eps_estimate',
   // Reverse DCF / WACC metrics
   WACC: 'annuals__Ratios__WACC %',
-  ROIC_ANNUAL: 'annuals__Ratios__ROIC %',
   BETA: 'annuals__Valuation and Quality__Beta',
   NET_CASH_PS: 'annuals__Valuation and Quality__Net Cash per Share',
   GF_INTRINSIC: 'annuals__Valuation and Quality__Intrinsic Value: Projected FCF',
@@ -96,6 +101,20 @@ function latestValue(metrics: MetricRow[], code: string): { value: number; date:
   return best ? { value: best.numeric_value!, date: best.target_date } : null;
 }
 
+/** Like `latestValue` but also returns rows whose `numeric_value` is null —
+ * the parser emits null rows when GuruFocus reports "N/A" for a period that
+ * exists in the response, so the dashboard can show the freshest period
+ * label even when the value isn't meaningful (rather than walk back to a
+ * stale numeric from years ago). */
+function latestObservation(metrics: MetricRow[], code: string): { value: number | null; date: string } | null {
+  let best: MetricRow | null = null;
+  for (const m of metrics) {
+    if (m.metric_code !== code) continue;
+    if (!best || m.target_date > best.target_date) best = m;
+  }
+  return best ? { value: best.numeric_value, date: best.target_date } : null;
+}
+
 /** Pick the earliest estimate after a reference date (for FY1 = next fiscal year). */
 function earliestFutureValue(metrics: MetricRow[], code: string, afterDate: string): { value: number; date: string } | null {
   let best: MetricRow | null = null;
@@ -114,6 +133,56 @@ function timeSeries(metrics: MetricRow[], code: string): { date: string; value: 
     .map((m) => ({ date: m.target_date, value: m.numeric_value! }));
 }
 
+type Cadence = {
+  label: string;             // human bucket: 'Daily' | 'Weekly' | 'Monthly' | 'Quarterly' | 'Semi-annual' | 'Annual' | 'Single point'
+  medianDays: number | null; // median gap between observations (null when there's only 1 point)
+  count: number;             // total observations for this code
+  firstDate: string;
+  lastDate: string;
+};
+
+/** Empirical observation cadence for a metric_code: bucket the median gap
+ * between consecutive periods where the source reported anything (numeric
+ * or N/A — both produce metric_data rows). Useful for sanity-checking
+ * "is this number stale or just slow-publishing?". */
+function observationCadence(metrics: MetricRow[], code: string): Cadence | null {
+  const dates = metrics
+    .filter((m) => m.metric_code === code)
+    .map((m) => m.target_date)
+    .sort();
+  if (dates.length === 0) return null;
+  if (dates.length === 1) {
+    return { label: 'Single point', medianDays: null, count: 1, firstDate: dates[0], lastDate: dates[0] };
+  }
+  const gaps: number[] = [];
+  for (let i = 1; i < dates.length; i++) {
+    gaps.push((new Date(dates[i]).getTime() - new Date(dates[i - 1]).getTime()) / 86400000);
+  }
+  gaps.sort((a, b) => a - b);
+  const median = gaps[Math.floor(gaps.length / 2)];
+  let label: Cadence['label'];
+  if (median <= 2) label = 'Daily';
+  else if (median <= 14) label = 'Weekly';
+  else if (median <= 45) label = 'Monthly';
+  else if (median <= 120) label = 'Quarterly';
+  else if (median <= 220) label = 'Semi-annual';
+  else label = 'Annual';
+  return {
+    label,
+    medianDays: Math.round(median),
+    count: dates.length,
+    firstDate: dates[0],
+    lastDate: dates[dates.length - 1],
+  };
+}
+
+function cadenceHoverText(c: Cadence): string {
+  if (c.medianDays == null) {
+    return `${c.label}. Only 1 observation stored (${c.firstDate}).`;
+  }
+  return `${c.label} (~${c.medianDays} days between observations). ${c.count} observations from ${c.firstDate} to ${c.lastDate}.`;
+}
+
 /** Collapse annual metrics to one point per calendar year (last date in each year). */
 function annualSeries(metrics: MetricRow[], code: string): { date: string; value: number }[] {
   const raw = timeSeries(metrics, code);
@@ -123,6 +192,50 @@ function annualSeries(metrics: MetricRow[], code: string): { date: string; value
     if (!byYear[yr] || p.date > byYear[yr].date) byYear[yr] = p;
   }
   return Object.values(byYear).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** Rolling trailing-twelve-months (TTM) sum over a quarterly flow series.
+ * Returns one point per quarter starting from the 4th, where each value is
+ * the sum of the previous 4 quarterly values. Use this to anchor 5Y CAGR
+ * and trend stats to the latest reported quarter rather than the latest
+ * fiscal-year close. */
+function ttmSeries(quarterly: { date: string; value: number }[]): { date: string; value: number }[] {
+  if (quarterly.length < 4) return [];
+  const out: { date: string; value: number }[] = [];
+  for (let i = 3; i < quarterly.length; i++) {
+    const sum = quarterly[i - 3].value + quarterly[i - 2].value + quarterly[i - 1].value + quarterly[i].value;
+    out.push({ date: quarterly[i].date, value: sum });
+  }
+  return out;
+}
+
+/** Build the freshest reasonable flow series for a financials code: prefer
+ * the quarterly twin's TTM (anchored to the latest reported quarter) when
+ * we have enough quarterly history; fall back to the annual series. The
+ * annual fallback covers companies / periods where GuruFocus only ships
+ * annual values. */
+function flowSeriesPreferQuarterlyTTM(metrics: MetricRow[], annualsCode: string): { date: string; value: number }[] {
+  if (annualsCode.startsWith('annuals__')) {
+    const qCode = 'quarterly__' + annualsCode.slice('annuals__'.length);
+    const q = timeSeries(metrics, qCode);
+    const ttm = ttmSeries(q);
+    if (ttm.length >= 5) return ttm;
+  }
+  return annualSeries(metrics, annualsCode);
+}
+
+/** Year-over-year growth rates for a TTM series: each rate compares quarter
+ * t's TTM to quarter (t-4)'s TTM, giving ~4× the data points of the annual
+ * version. Used for "FCF Growth SD" to get a tighter volatility estimate
+ * while keeping the same statistical meaning. */
+function ttmYoYGrowthRates(ttm: { date: string; value: number }[]): number[] {
+  const rates: number[] = [];
+  for (let i = 4; i < ttm.length; i++) {
+    const prev = ttm[i - 4].value;
+    const curr = ttm[i].value;
+    if (prev > 0 && curr > 0) rates.push(curr / prev - 1);
+  }
+  return rates;
 }
 
 function computeCAGR(series: { date: string; value: number }[], requirePositive = true): number | null {
@@ -450,11 +563,17 @@ function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
   // For any `annuals__X` code, also look up the `quarterly__X` twin and return
   // whichever has the most recent target_date — quarterly is usually fresher
   // for point-in-time / ratio metrics like Debt-to-Equity.
+  //
+  // We use `latestObservation` (null-aware) instead of `latestValue` so that
+  // when the most recent period exists but GF reported "N/A" for it, the
+  // dashboard shows the period date with a "—" value, rather than reaching
+  // back to a stale numeric from years ago. The existing fmt* helpers
+  // already render null as "—".
   const lv = useCallback(
     (code: string) => {
-      const annual = latestValue(metrics, code);
+      const annual = latestObservation(metrics, code);
       if (!code.startsWith('annuals__')) return annual;
-      const quarterly = latestValue(metrics, 'quarterly__' + code.slice('annuals__'.length));
+      const quarterly = latestObservation(metrics, 'quarterly__' + code.slice('annuals__'.length));
       if (!annual) return quarterly;
       if (!quarterly) return annual;
       return quarterly.date > annual.date ? quarterly : annual;
@@ -462,19 +581,73 @@ function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
     [metrics],
   );
 
+  // Resolve which underlying metric_code lv() actually picked, so the cadence
+  // hover reflects the real source (annual when the annual is fresher, the
+  // quarterly twin when it isn't). For non-annuals codes the picked source is
+  // just the input code.
+  const resolvedCode = useCallback(
+    (code: string): string => {
+      if (!code.startsWith('annuals__')) return code;
+      const annual = latestObservation(metrics, code);
+      const qCode = 'quarterly__' + code.slice('annuals__'.length);
+      const quarterly = latestObservation(metrics, qCode);
+      if (!annual && quarterly) return qCode;
+      if (annual && quarterly && quarterly.date > annual.date) return qCode;
+      return code;
+    },
+    [metrics],
+  );
+
+  const cadenceFor = useCallback(
+    (code: string): Cadence | null => observationCadence(metrics, resolvedCode(code)),
+    [metrics, resolvedCode],
+  );
+
   // Derived: FCF / Net Income
   const fcfOverNi = useMemo(() => {
     const fcf = lv(MC.FCF);
     const ni = lv(MC.NET_INCOME);
-    if (!fcf || !ni || ni.value === 0) return null;
+    if (!fcf || !ni || fcf.value == null || ni.value == null || ni.value === 0) return null;
     return fcf.value / ni.value;
   }, [lv]);
 
+  // Derived: Interest Coverage. GuruFocus's pre-computed
+  // `Valuation and Quality > Interest Coverage` is sparse on cash-rich /
+  // low-debt names (e.g. AAPL — GF returns "N/A" for the most recent quarters
+  // because the ratio is huge or undefined). With null rows now stored, the
+  // GF fallback at least dates correctly to the latest period; for a real
+  // numeric we recompute from raw Operating Income / Interest Expense so the
+  // row matches Debt-to-Equity's freshness whenever both components are
+  // populated.
+  const interestCoverage = useMemo<{ value: number | null; date: string; computed: boolean } | null>(() => {
+    const op = lv(MC.OPERATING_INCOME);
+    const ie = lv(MC.INTEREST_EXPENSE);
+    // Compute only when both raw fields have numeric values for their period.
+    if (op?.value != null && ie?.value != null && Math.abs(ie.value) > 0) {
+      const value = op.value / Math.abs(ie.value);
+      const date = op.date < ie.date ? op.date : ie.date;
+      return { value, date, computed: true };
+    }
+    // Fall back to GF's pre-computed series. `value` may be null when GF
+    // reported "N/A" for the most recent period — the row will render as
+    // "—" with that period's date instead of a stale numeric.
+    const fallback = lv(MC.INTEREST_COVERAGE);
+    return fallback ? { value: fallback.value, date: fallback.date, computed: false } : null;
+  }, [lv]);
+
   // Derived: Value Creation + Historical Growth metrics, computed from GuruFocus time series.
+  //
+  // Revenue and FCF flow series prefer the quarterly twin's TTM (so the
+  // latest data point lands at the most recent reported quarter end, not
+  // the latest fiscal-year close). Falls back to annuals when fewer than
+  // 5 quarterly points are available. The TTM construction means each
+  // point covers a full year of activity, so the CAGR / R² / SD math
+  // stays apples-to-apples with the annual version — just shifted to a
+  // freshly-anchored sliding window.
   const valueGrowth = useMemo(() => {
     const priceSeries = timeSeries(metrics, 'close_price');
-    const revSeries = annualSeries(metrics, MC.REVENUE);
-    const fcfSeries = annualSeries(metrics, MC.FCF);
+    const revSeries = flowSeriesPreferQuarterlyTTM(metrics, MC.REVENUE);
+    const fcfSeries = flowSeriesPreferQuarterlyTTM(metrics, MC.FCF);
 
     const price5Y = trailingYearsWindow(priceSeries, 5);
     const price10Y = trailingYearsWindow(priceSeries, 10);
@@ -482,6 +655,11 @@ function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
     const fcf5Y = trailingYearsWindow(fcfSeries, 5);
 
     const lastDate = (s: { date: string }[]) => (s.length ? s[s.length - 1].date : null);
+
+    // For the FCF SD: if we ended up with quarterly TTM we have ~16+ data
+    // points and use 4-quarter-lag YoY rates; if we fell back to annual we
+    // use the annual YoY rates.
+    const fcfYoY = fcf5Y.length >= 8 ? ttmYoYGrowthRates(fcf5Y) : yoyGrowthRates(fcf5Y);
 
     return {
       price5YCAGR: computeCAGR(price5Y),
@@ -494,42 +672,65 @@ function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
       revDate: lastDate(revSeries),
       fcf5YCAGR: computeCAGR(fcf5Y),
       fcf5YR2: logLinearR2(fcf5Y),
-      fcfGrowthSD: stdDev(yoyGrowthRates(fcf5Y)),
+      fcfGrowthSD: stdDev(fcfYoY),
       fcfDate: lastDate(fcfSeries),
     };
   }, [metrics]);
 
-  type StatRow = { label: string; value: string; date?: string | null; info?: string };
+  type StatRow = { label: string; value: string; date?: string | null; info?: string; cadence?: Cadence | null };
+
+  // Cadence sources for the computed Value-Creation / Historical-Growth rows.
+  // The displayed metric is derived (CAGR, R², SD), but the user wants to know
+  // how often the underlying observations land — i.e. is this 5Y growth built
+  // from 5 annual points or 20 quarterly ones?
+  const priceCadence = useMemo(() => observationCadence(metrics, 'close_price'), [metrics]);
+  const revenueCadence = cadenceFor(MC.REVENUE);
+  const fcfCadence = cadenceFor(MC.FCF);
+
+  // For the computed Interest Coverage row: report the slower of the two
+  // anchor cadences (Operating Income vs Interest Expense). When neither
+  // component is available we fall back to GuruFocus's pre-computed series
+  // and report its cadence directly.
+  const interestCoverageCadence = useMemo<Cadence | null>(() => {
+    if (interestCoverage?.computed) {
+      const opC = cadenceFor(MC.OPERATING_INCOME);
+      const ieC = cadenceFor(MC.INTEREST_EXPENSE);
+      if (!opC) return ieC ?? null;
+      if (!ieC) return opC;
+      return (opC.medianDays ?? 0) >= (ieC.medianDays ?? 0) ? opC : ieC;
+    }
+    return cadenceFor(MC.INTEREST_COVERAGE);
+  }, [interestCoverage, cadenceFor]);
 
   const leftSections: { title: string; rows: StatRow[] }[] = [
     {
       title: 'Balance Sheet',
       rows: [
-        { label: 'Interest Coverage', value: fmtNum(lv(MC.INTEREST_COVERAGE)?.value ?? null), date: lv(MC.INTEREST_COVERAGE)?.date, info: 'EBIT / Interest Expense. Higher = more capacity to service debt. Below 3 is a warning sign.' },
-        { label: 'Debt / Equity', value: fmtNum(lv(MC.DEBT_TO_EQUITY)?.value ?? null), date: lv(MC.DEBT_TO_EQUITY)?.date, info: 'Total Debt / Total Equity. Lower = less leverage. Above 2 warrants scrutiny.' },
+        { label: 'Interest Coverage', value: fmtNum(interestCoverage?.value ?? null), date: interestCoverage?.date, cadence: interestCoverageCadence, info: `EBIT / Interest Expense. Higher = more capacity to service debt. Below 3 is a warning sign. ${interestCoverage?.computed ? 'Computed from quarterly Operating Income ÷ Interest Expense — uses GuruFocus\'s pre-computed series only when raw fields are missing.' : 'Sourced from GuruFocus\'s Valuation & Quality > Interest Coverage (raw Income Statement components weren\'t both populated).'}` },
+        { label: 'Debt / Equity', value: fmtNum(lv(MC.DEBT_TO_EQUITY)?.value ?? null), date: lv(MC.DEBT_TO_EQUITY)?.date, cadence: cadenceFor(MC.DEBT_TO_EQUITY), info: 'Total Debt / Total Equity. Lower = less leverage. Above 2 warrants scrutiny.' },
       ],
     },
     {
       title: 'Capital Intensity',
       rows: [
-        { label: 'CAPEX / Revenue', value: fmtNum(lv(MC.CAPEX_TO_REV)?.value ?? null), date: lv(MC.CAPEX_TO_REV)?.date, info: 'Capital expenditure as a share of revenue. Lower = more capital-light business model.' },
-        { label: 'CAPEX / OCF', value: fmtNum(lv(MC.CAPEX_TO_OCF)?.value ?? null), date: lv(MC.CAPEX_TO_OCF)?.date, info: 'Capital expenditure as a share of operating cash flow. Lower = more cash left after reinvestment.' },
+        { label: 'CAPEX / Revenue', value: fmtNum(lv(MC.CAPEX_TO_REV)?.value ?? null), date: lv(MC.CAPEX_TO_REV)?.date, cadence: cadenceFor(MC.CAPEX_TO_REV), info: 'Capital expenditure as a share of revenue. Lower = more capital-light business model.' },
+        { label: 'CAPEX / OCF', value: fmtNum(lv(MC.CAPEX_TO_OCF)?.value ?? null), date: lv(MC.CAPEX_TO_OCF)?.date, cadence: cadenceFor(MC.CAPEX_TO_OCF), info: 'Capital expenditure as a share of operating cash flow. Lower = more cash left after reinvestment.' },
       ],
     },
     {
       title: 'Capital Allocation',
       rows: [
-        { label: 'ROE', value: fmtPctPoints(lv(MC.ROE)?.value ?? null), date: lv(MC.ROE)?.date, info: 'Return on Equity = Net Income / Shareholders\' Equity. Measures profit generated per dollar of equity.' },
-        { label: 'ROIC', value: fmtPctPoints(lv(MC.ROIC)?.value ?? null), date: lv(MC.ROIC)?.date, info: 'Return on Invested Capital = NOPAT / Invested Capital. Measures efficiency of all capital deployed.' },
+        { label: 'ROE', value: fmtPctPoints(lv(MC.ROE)?.value ?? null), date: lv(MC.ROE)?.date, cadence: cadenceFor(MC.ROE), info: 'Return on Equity = Net Income / Shareholders\' Equity. Measures profit generated per dollar of equity.' },
+        { label: 'ROIC', value: fmtPctPoints(lv(MC.ROIC)?.value ?? null), date: lv(MC.ROIC)?.date, cadence: cadenceFor(MC.ROIC), info: 'Return on Invested Capital = NOPAT / Invested Capital. Measures efficiency of all capital deployed.' },
       ],
     },
     {
       title: 'Value Creation',
       rows: [
-        { label: 'Price 5Y CAGR', value: fmtPct(valueGrowth.price5YCAGR), date: valueGrowth.priceDate, info: 'Compound Annual Growth Rate of share price over the last 5 years, from GuruFocus daily close prices.' },
-        { label: 'Price 5Y R²', value: fmtNum(valueGrowth.price5YR2), date: valueGrowth.priceDate, info: 'R-squared of log-linear regression of share price vs time over the last 5 years. Higher = more consistent growth.' },
-        { label: 'Price 10Y CAGR', value: fmtPct(valueGrowth.price10YCAGR), date: valueGrowth.priceDate, info: 'Compound Annual Growth Rate of share price over the last 10 years, from GuruFocus daily close prices.' },
-        { label: 'Price 10Y R²', value: fmtNum(valueGrowth.price10YR2), date: valueGrowth.priceDate, info: 'R-squared of log-linear regression of share price vs time over the last 10 years. Higher = more consistent growth.' },
+        { label: 'Price 5Y CAGR', value: fmtPct(valueGrowth.price5YCAGR), date: valueGrowth.priceDate, cadence: priceCadence, info: 'Compound Annual Growth Rate of share price over the last 5 years, from GuruFocus daily close prices.' },
+        { label: 'Price 5Y R²', value: fmtNum(valueGrowth.price5YR2), date: valueGrowth.priceDate, cadence: priceCadence, info: 'R-squared of log-linear regression of share price vs time over the last 5 years. Higher = more consistent growth.' },
+        { label: 'Price 10Y CAGR', value: fmtPct(valueGrowth.price10YCAGR), date: valueGrowth.priceDate, cadence: priceCadence, info: 'Compound Annual Growth Rate of share price over the last 10 years, from GuruFocus daily close prices.' },
+        { label: 'Price 10Y R²', value: fmtNum(valueGrowth.price10YR2), date: valueGrowth.priceDate, cadence: priceCadence, info: 'R-squared of log-linear regression of share price vs time over the last 10 years. Higher = more consistent growth.' },
       ],
     },
   ];
@@ -538,32 +739,32 @@ function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
     {
       title: 'Profitability',
       rows: [
-        { label: 'Gross Margin', value: fmtPctPoints(lv(MC.GROSS_MARGIN)?.value ?? null), date: lv(MC.GROSS_MARGIN)?.date, info: 'Gross Profit / Revenue. Indicates pricing power and cost of goods sold efficiency.' },
-        { label: 'Net Margin', value: fmtPctPoints(lv(MC.NET_MARGIN)?.value ?? null), date: lv(MC.NET_MARGIN)?.date, info: 'Net Income / Revenue. Bottom-line profitability after all expenses.' },
-        { label: 'FCF / Net Income', value: fmtPct(fcfOverNi), date: lv(MC.FCF)?.date, info: 'Free Cash Flow / Net Income. Above 1 means cash earnings exceed accounting earnings (high quality).' },
+        { label: 'Gross Margin', value: fmtPctPoints(lv(MC.GROSS_MARGIN)?.value ?? null), date: lv(MC.GROSS_MARGIN)?.date, cadence: cadenceFor(MC.GROSS_MARGIN), info: 'Gross Profit / Revenue. Indicates pricing power and cost of goods sold efficiency.' },
+        { label: 'Net Margin', value: fmtPctPoints(lv(MC.NET_MARGIN)?.value ?? null), date: lv(MC.NET_MARGIN)?.date, cadence: cadenceFor(MC.NET_MARGIN), info: 'Net Income / Revenue. Bottom-line profitability after all expenses.' },
+        { label: 'FCF / Net Income', value: fmtPct(fcfOverNi), date: lv(MC.FCF)?.date, cadence: cadenceFor(MC.FCF), info: 'Free Cash Flow / Net Income. Above 1 means cash earnings exceed accounting earnings (high quality).' },
       ],
     },
     {
       title: 'Historical Growth',
       rows: [
-        { label: 'Revenue 5Y Growth', value: fmtPct(valueGrowth.rev5YCAGR), date: valueGrowth.revDate, info: '5-year revenue CAGR computed from GuruFocus annual revenue.' },
-        { label: 'Revenue R²', value: fmtNum(valueGrowth.rev5YR2), date: valueGrowth.revDate, info: 'R-squared of log-linear regression of revenue vs time over the last 5 years. Higher = more consistent growth.' },
-        { label: 'FCF 5Y Growth', value: fmtPct(valueGrowth.fcf5YCAGR), date: valueGrowth.fcfDate, info: '5-year FCF CAGR computed from GuruFocus annual free cash flow. Null if FCF was negative at either endpoint.' },
-        { label: 'FCF Growth R²', value: fmtNum(valueGrowth.fcf5YR2), date: valueGrowth.fcfDate, info: 'R-squared of log-linear regression of FCF vs time over the last 5 years. Null if any FCF in the window was non-positive.' },
-        { label: 'FCF Growth SD', value: fmtNum(valueGrowth.fcfGrowthSD), date: valueGrowth.fcfDate, info: 'Standard deviation of year-over-year FCF growth rates over the last 5 years. Lower = more predictable.' },
+        { label: 'Revenue 5Y Growth', value: fmtPct(valueGrowth.rev5YCAGR), date: valueGrowth.revDate, cadence: revenueCadence, info: '5-year revenue CAGR. Anchored to the latest quarter\'s trailing-twelve-months revenue when quarterly data is available, otherwise to annual revenue.' },
+        { label: 'Revenue R²', value: fmtNum(valueGrowth.rev5YR2), date: valueGrowth.revDate, cadence: revenueCadence, info: 'R-squared of log-linear regression of TTM revenue vs time over the last 5 years. Higher = more consistent growth.' },
+        { label: 'FCF 5Y Growth', value: fmtPct(valueGrowth.fcf5YCAGR), date: valueGrowth.fcfDate, cadence: fcfCadence, info: '5-year FCF CAGR. Same TTM-quarterly construction as Revenue. Null if FCF was negative at either endpoint.' },
+        { label: 'FCF Growth R²', value: fmtNum(valueGrowth.fcf5YR2), date: valueGrowth.fcfDate, cadence: fcfCadence, info: 'R-squared of log-linear regression of TTM FCF vs time over the last 5 years. Null if any FCF in the window was non-positive.' },
+        { label: 'FCF Growth SD', value: fmtNum(valueGrowth.fcfGrowthSD), date: valueGrowth.fcfDate, cadence: fcfCadence, info: 'Standard deviation of 4-quarter-lag TTM FCF growth rates over the last 5 years (or annual YoY rates when quarterly data is sparse). Lower = more predictable.' },
       ],
     },
     {
       title: 'Outlook',
       rows: [
-        { label: 'EPS LT Growth EST', value: fmtPctPoints(lv(MC.EPS_EST)?.value ?? null), date: lv(MC.EPS_EST)?.date, info: 'Analyst consensus long-term EPS growth rate estimate (3-5 years forward).' },
+        { label: 'EPS LT Growth EST', value: fmtPctPoints(lv(MC.EPS_EST)?.value ?? null), date: lv(MC.EPS_EST)?.date, cadence: cadenceFor(MC.EPS_EST), info: 'Analyst consensus long-term EPS growth rate estimate (3-5 years forward).' },
       ],
     },
     {
       title: 'Valuation',
       rows: [
-        { label: 'Forward P/E', value: fmtNum(lv(MC.FWD_PE)?.value ?? null), date: lv(MC.FWD_PE)?.date, info: 'Price / Forward EPS estimate. Lower = cheaper relative to expected earnings.' },
-        { label: 'PEG', value: fmtNum(lv(MC.PEG)?.value ?? null), date: lv(MC.PEG)?.date, info: 'P/E / EPS Growth Rate. Below 1 suggests undervalued relative to growth; above 2 may be expensive.' },
+        { label: 'Forward P/E', value: fmtNum(lv(MC.FWD_PE)?.value ?? null), date: lv(MC.FWD_PE)?.date, cadence: cadenceFor(MC.FWD_PE), info: 'Price / Forward EPS estimate. Lower = cheaper relative to expected earnings.' },
+        { label: 'PEG', value: fmtNum(lv(MC.PEG)?.value ?? null), date: lv(MC.PEG)?.date, cadence: cadenceFor(MC.PEG), info: 'P/E / EPS Growth Rate. Below 1 suggests undervalued relative to growth; above 2 may be expensive.' },
       ],
     },
   ];
@@ -582,7 +783,10 @@ function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
                     {r.info && <InfoTip text={r.info} />}
                   </span>
                   <span className="text-right">
-                    <span className="text-white font-mono text-sm">{r.value}</span>
+                    <span className="inline-flex items-center justify-end gap-1.5">
+                      <span className="text-white font-mono text-sm">{r.value}</span>
+                      {r.cadence && <InfoTip text={cadenceHoverText(r.cadence)} />}
+                    </span>
                     {r.date && (
                       <span className="block text-gray-500 text-[10px] font-mono">{r.date}</span>
                     )}
