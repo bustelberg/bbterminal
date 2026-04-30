@@ -1374,6 +1374,7 @@ _DASHBOARD_METRIC_CODES = [
     # Financials — Income Statement
     "annuals__Income Statement__Tax Rate %",
     # Financials — Valuation and Quality
+    "annuals__Valuation and Quality__Interest Coverage",
     "annuals__Valuation and Quality__Net Cash per Share",
     "annuals__Valuation and Quality__Intrinsic Value: Projected FCF",
     "annuals__Valuation and Quality__Beta",
@@ -1422,10 +1423,28 @@ _LONGEQUITY_METRIC_CODES = [
 @app.get("/api/earnings/{company_id}/metrics")
 async def get_earnings_metrics(company_id: int):
     """Get dashboard metrics for a company (source=gurufocus, dates >= 2015)."""
+
+    # PostgREST caps a single response at ~1000 rows regardless of `.limit(N)`,
+    # and our `.order("target_date")` is ascending — so a flat `.limit(5000)`
+    # silently returns the OLDEST 1000 rows and hides everything recent. Every
+    # multi-row read here paginates instead.
+    def _paginate(builder_factory) -> list[dict]:
+        rows: list[dict] = []
+        offset = 0
+        page_size = 1000
+        while True:
+            page = builder_factory().range(offset, offset + page_size - 1).execute()
+            batch = page.data or []
+            rows.extend(batch)
+            if len(batch) < page_size:
+                break
+            offset += page_size
+        return rows
+
     try:
-        # Fetch non-price metric codes (low volume, fits in one page)
+        # Fetch non-price metric codes (annuals + quarterly twins + indicators)
         non_price_codes = [c for c in _DASHBOARD_METRIC_CODES if c != "close_price"]
-        resp = (
+        rows = _paginate(lambda: (
             supabase.table("metric_data")
             .select("metric_code,target_date,numeric_value,is_prediction")
             .eq("company_id", company_id)
@@ -1433,34 +1452,21 @@ async def get_earnings_metrics(company_id: int):
             .gte("target_date", "1998-01-01")
             .in_("metric_code", non_price_codes)
             .order("target_date")
-            .limit(5000)
-            .execute()
-        )
-        rows = resp.data or []
+        ))
 
-        # Fetch daily close prices separately (can be thousands of rows)
-        offset = 0
-        page_size = 1000
-        while True:
-            page = (
-                supabase.table("metric_data")
-                .select("metric_code,target_date,numeric_value,is_prediction")
-                .eq("company_id", company_id)
-                .eq("source_code", "gurufocus")
-                .eq("metric_code", "close_price")
-                .gte("target_date", "1998-01-01")
-                .order("target_date")
-                .range(offset, offset + page_size - 1)
-                .execute()
-            )
-            batch = page.data or []
-            rows.extend(batch)
-            if len(batch) < page_size:
-                break
-            offset += page_size
+        # Daily close prices (thousands of rows per company)
+        rows.extend(_paginate(lambda: (
+            supabase.table("metric_data")
+            .select("metric_code,target_date,numeric_value,is_prediction")
+            .eq("company_id", company_id)
+            .eq("source_code", "gurufocus")
+            .eq("metric_code", "close_price")
+            .gte("target_date", "1998-01-01")
+            .order("target_date")
+        )))
 
-        # Also fetch analyst estimates (annual_* prefix)
-        resp2 = (
+        # Analyst estimates (annual_* prefix)
+        rows.extend(_paginate(lambda: (
             supabase.table("metric_data")
             .select("metric_code,target_date,numeric_value,is_prediction")
             .eq("company_id", company_id)
@@ -1469,23 +1475,17 @@ async def get_earnings_metrics(company_id: int):
             .gte("target_date", "1998-01-01")
             .like("metric_code", "annual_%")
             .order("target_date")
-            .limit(2000)
-            .execute()
-        )
-        rows.extend(resp2.data or [])
+        )))
 
-        # Fetch LongEquity metrics
-        resp3 = (
+        # LongEquity metrics
+        rows.extend(_paginate(lambda: (
             supabase.table("metric_data")
             .select("metric_code,target_date,numeric_value,is_prediction")
             .eq("company_id", company_id)
             .eq("source_code", "longequity")
             .in_("metric_code", _LONGEQUITY_METRIC_CODES)
             .order("target_date")
-            .limit(1000)
-            .execute()
-        )
-        rows.extend(resp3.data or [])
+        )))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Query failed: {e}")
     return rows
@@ -1531,7 +1531,6 @@ class BacktestRequest(BaseModel):
     category_weights: dict[str, float] | None = None  # e.g. {"price": 50, "volume": 50}
     top_n_sectors: int = 4
     top_n_per_sector: int = 6
-    skip_price_fetch: bool = False  # skips both price and volume fetch
     max_companies: int = 0  # 0 = all, otherwise limit universe (alphabetical)
     universe_label: str | None = None  # if set, use universe_membership for per-month filtering
     index_universe: str | None = None  # if set, use universe_membership for per-month filtering (e.g. "SP500")
@@ -1756,186 +1755,183 @@ async def _momentum_backtest_stream(req: BacktestRequest):
 
         excluded_ids: set[int] = set()
 
-        if req.skip_price_fetch:
-            yield _emit({"type": "progress", "pct": 60, "message": "Skipping data fetch (using existing DB prices & volumes)"})
-        else:
-            # If max_companies is set, pre-trim the universe alphabetically so we
-            # only fetch what we need. (Parallel fetch makes the old "stop at
-            # ok_count" optimization hard to preserve.)
-            if req.max_companies > 0 and len(universe_df) > req.max_companies:
-                universe_df = universe_df.sort_values("gurufocus_ticker").head(req.max_companies).reset_index(drop=True)
+        # If max_companies is set, pre-trim the universe alphabetically so we
+        # only fetch what we need. (Parallel fetch makes the old "stop at
+        # ok_count" optimization hard to preserve.)
+        if req.max_companies > 0 and len(universe_df) > req.max_companies:
+            universe_df = universe_df.sort_values("gurufocus_ticker").head(req.max_companies).reset_index(drop=True)
 
-            total_companies = len(universe_df)
-            concurrency = int(os.environ.get("BACKTEST_FETCH_CONCURRENCY", "16"))
-            blocked_exchanges: set[str] = set()
-            skipped_count = 0
-            ok_count = 0
-            fetch_start_ts = time.monotonic()
+        total_companies = len(universe_df)
+        concurrency = int(os.environ.get("BACKTEST_FETCH_CONCURRENCY", "16"))
+        blocked_exchanges: set[str] = set()
+        skipped_count = 0
+        ok_count = 0
+        fetch_start_ts = time.monotonic()
 
-            # Warm the storage bucket once before launching tasks — otherwise the
-            # first N workers would race and each fire a bucket-create HTTP call.
-            await asyncio.to_thread(_ensure_bucket, supabase)
+        # Warm the storage bucket once before launching tasks — otherwise the
+        # first N workers would race and each fire a bucket-create HTTP call.
+        await asyncio.to_thread(_ensure_bucket, supabase)
 
-            # Each company task submits 2 blocking HTTP calls in parallel (price +
-            # volume), so the executor needs 2 slots per concurrent task or the
-            # second call queues behind the first and inflates wall-clock timings.
-            from concurrent.futures import ThreadPoolExecutor
-            pool_size = concurrency * 2 + 4
-            executor = ThreadPoolExecutor(max_workers=pool_size, thread_name_prefix="fetch")
-            loop = asyncio.get_event_loop()
+        # Each company task submits 2 blocking HTTP calls in parallel (price +
+        # volume), so the executor needs 2 slots per concurrent task or the
+        # second call queues behind the first and inflates wall-clock timings.
+        from concurrent.futures import ThreadPoolExecutor
+        pool_size = concurrency * 2 + 4
+        executor = ThreadPoolExecutor(max_workers=pool_size, thread_name_prefix="fetch")
+        loop = asyncio.get_event_loop()
 
-            yield _emit({"type": "progress", "pct": 5, "message": f"Ensuring price & volume data for {total_companies} companies (cutoff: {data_cutoff}, concurrency: {concurrency}, pool: {pool_size})..."})
-            yield _keepalive()
+        yield _emit({"type": "progress", "pct": 5, "message": f"Ensuring price & volume data for {total_companies} companies (cutoff: {data_cutoff}, concurrency: {concurrency}, pool: {pool_size})..."})
+        yield _keepalive()
 
-            result_queue: asyncio.Queue = asyncio.Queue()
-            sema = asyncio.Semaphore(concurrency)
-            inflight = {"count": 0, "peak": 0}
+        result_queue: asyncio.Queue = asyncio.Queue()
+        sema = asyncio.Semaphore(concurrency)
+        inflight = {"count": 0, "peak": 0}
 
-            async def _fetch_one(row_cid: int, row_ticker: str, row_exchange: str):
-                sym = f"{row_exchange}:{row_ticker}"
+        async def _fetch_one(row_cid: int, row_ticker: str, row_exchange: str):
+            sym = f"{row_exchange}:{row_ticker}"
+            if row_exchange in blocked_exchanges:
+                await result_queue.put({"cid": row_cid, "symbol": sym, "exchange": row_exchange, "status": "skipped_blocked"})
+                return
+            async with sema:
                 if row_exchange in blocked_exchanges:
                     await result_queue.put({"cid": row_cid, "symbol": sym, "exchange": row_exchange, "status": "skipped_blocked"})
                     return
-                async with sema:
-                    if row_exchange in blocked_exchanges:
-                        await result_queue.put({"cid": row_cid, "symbol": sym, "exchange": row_exchange, "status": "skipped_blocked"})
-                        return
-                    inflight["count"] += 1
-                    if inflight["count"] > inflight["peak"]:
-                        inflight["peak"] = inflight["count"]
-                    task_start = time.monotonic()
-                    try:
-                        # Run price + volume concurrently inside one company task
-                        pr_fut = loop.run_in_executor(
-                            executor,
-                            functools.partial(
-                                ensure_prices_for_company,
-                                supabase, row_cid, row_ticker, row_exchange,
-                                data_cutoff=data_cutoff,
-                            ),
-                        )
-                        vr_fut = loop.run_in_executor(
-                            executor,
-                            functools.partial(
-                                ensure_volume_for_company,
-                                supabase, row_cid, row_ticker, row_exchange,
-                                data_cutoff=data_cutoff,
-                            ),
-                        )
-                        pr_res, vr_res = await asyncio.gather(pr_fut, vr_fut, return_exceptions=True)
-                        if isinstance(pr_res, BaseException):
-                            raise pr_res
-                        pr = pr_res
-                        if isinstance(vr_res, BaseException):
-                            vr = PriceResult()
-                            vr.source = "error"
-                            vr.error = str(vr_res)
-                        else:
-                            vr = vr_res
-                        elapsed_ms = int((time.monotonic() - task_start) * 1000)
-                        await result_queue.put({"cid": row_cid, "symbol": sym, "exchange": row_exchange, "pr": pr, "vr": vr, "status": "ok", "ms": elapsed_ms})
-                    except Exception as e:
-                        elapsed_ms = int((time.monotonic() - task_start) * 1000)
-                        await result_queue.put({"cid": row_cid, "symbol": sym, "exchange": row_exchange, "error": f"{type(e).__name__}: {e}", "status": "error", "ms": elapsed_ms})
-                    finally:
-                        inflight["count"] -= 1
-
-            tasks = [
-                asyncio.create_task(_fetch_one(
-                    int(row["company_id"]),
-                    row["gurufocus_ticker"],
-                    row["gurufocus_exchange"] or "UNKNOWN",
-                ))
-                for _, row in universe_df.iterrows()
-            ]
-
-            async def _sentinel():
-                await asyncio.gather(*tasks, return_exceptions=True)
-                await result_queue.put(None)
-
-            sentinel_task = asyncio.create_task(_sentinel())
-
-            done_count = 0
-            try:
-                while True:
-                    evt = await result_queue.get()
-                    if evt is None:
-                        break
-                    done_count += 1
-                    pct = 5 + round((done_count / max(1, total_companies)) * 55)
-                    status = evt["status"]
-                    cid = evt["cid"]
-                    symbol = evt["symbol"]
-                    exchange = evt["exchange"]
-
-                    if status == "skipped_blocked":
-                        skipped_count += 1
-                        excluded_ids.add(cid)
-                        continue
-                    if status == "error":
-                        excluded_ids.add(cid)
-                        yield _emit({"type": "warning", "scope": "fetch", "symbol": symbol, "message": f"{symbol}: fetch failed — {evt['error']}"})
-                        continue
-
-                    pr = evt["pr"]
-                    vr = evt["vr"]
-
-                    if pr.is_forbidden:
-                        blocked_exchanges.add(exchange)
-                        excluded_ids.add(cid)
-                        yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: unsubscribed region — future {exchange} calls will be skipped"})
-                    elif pr.is_delisted:
-                        excluded_ids.add(cid)
-                        await asyncio.to_thread(
-                            lambda c=cid: (
-                                supabase.table("metric_data").delete().eq("company_id", c).execute(),
-                                supabase.table("portfolio_weight").delete().eq("company_id", c).execute(),
-                                supabase.table("company").delete().eq("company_id", c).execute(),
-                            )
-                        )
-                        yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: DELISTED — removed from database"})
-                    else:
-                        ok_count += 1
-                        parts: list[str] = []
-                        if pr.source == "cache":
-                            parts.append(f"price: cache ({pr.rows_loaded})")
-                        elif pr.source == "api":
-                            parts.append(f"price: API ({pr.rows_loaded})")
-                        elif pr.source == "stale_cache":
-                            parts.append(f"price: stale cache ({pr.rows_loaded})")
-                        elif pr.source == "none":
-                            parts.append("price: none")
-                        else:
-                            parts.append(f"price: {pr.source}")
-                        if vr:
-                            if vr.source == "cache":
-                                parts.append(f"vol: cache ({vr.rows_loaded})")
-                            elif vr.source == "api":
-                                parts.append(f"vol: API ({vr.rows_loaded})")
-                            elif vr.source == "stale_cache":
-                                parts.append(f"vol: stale cache ({vr.rows_loaded})")
-                            elif vr.source == "error":
-                                parts.append(f"vol: error ({vr.error})")
-                            else:
-                                parts.append(f"vol: none ({vr.error or 'unknown'})")
-                        else:
-                            parts.append("vol: failed")
-                        ms = evt.get("ms", 0)
-                        peak = inflight["peak"]
-                        yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol} ({done_count}/{total_companies}, {ms}ms, peak:{peak}): {' | '.join(parts)}"})
-            finally:
-                # Make sure the sentinel task completes before we leave this block
+                inflight["count"] += 1
+                if inflight["count"] > inflight["peak"]:
+                    inflight["peak"] = inflight["count"]
+                task_start = time.monotonic()
                 try:
-                    await sentinel_task
-                except Exception:
-                    pass
-                executor.shutdown(wait=False)
+                    # Run price + volume concurrently inside one company task
+                    pr_fut = loop.run_in_executor(
+                        executor,
+                        functools.partial(
+                            ensure_prices_for_company,
+                            supabase, row_cid, row_ticker, row_exchange,
+                            data_cutoff=data_cutoff,
+                        ),
+                    )
+                    vr_fut = loop.run_in_executor(
+                        executor,
+                        functools.partial(
+                            ensure_volume_for_company,
+                            supabase, row_cid, row_ticker, row_exchange,
+                            data_cutoff=data_cutoff,
+                        ),
+                    )
+                    pr_res, vr_res = await asyncio.gather(pr_fut, vr_fut, return_exceptions=True)
+                    if isinstance(pr_res, BaseException):
+                        raise pr_res
+                    pr = pr_res
+                    if isinstance(vr_res, BaseException):
+                        vr = PriceResult()
+                        vr.source = "error"
+                        vr.error = str(vr_res)
+                    else:
+                        vr = vr_res
+                    elapsed_ms = int((time.monotonic() - task_start) * 1000)
+                    await result_queue.put({"cid": row_cid, "symbol": sym, "exchange": row_exchange, "pr": pr, "vr": vr, "status": "ok", "ms": elapsed_ms})
+                except Exception as e:
+                    elapsed_ms = int((time.monotonic() - task_start) * 1000)
+                    await result_queue.put({"cid": row_cid, "symbol": sym, "exchange": row_exchange, "error": f"{type(e).__name__}: {e}", "status": "error", "ms": elapsed_ms})
+                finally:
+                    inflight["count"] -= 1
 
-            total_elapsed = time.monotonic() - fetch_start_ts
-            yield _emit({"type": "progress", "pct": 60, "message": f"Fetch complete in {total_elapsed:.1f}s (peak concurrency: {inflight['peak']}/{concurrency})"})
+        tasks = [
+            asyncio.create_task(_fetch_one(
+                int(row["company_id"]),
+                row["gurufocus_ticker"],
+                row["gurufocus_exchange"] or "UNKNOWN",
+            ))
+            for _, row in universe_df.iterrows()
+        ]
 
-            if blocked_exchanges:
-                yield _emit({"type": "warning", "scope": "fetch", "message": f"Blocked exchanges (unsubscribed): {', '.join(sorted(blocked_exchanges))} — {skipped_count} companies skipped"})
+        async def _sentinel():
+            await asyncio.gather(*tasks, return_exceptions=True)
+            await result_queue.put(None)
+
+        sentinel_task = asyncio.create_task(_sentinel())
+
+        done_count = 0
+        try:
+            while True:
+                evt = await result_queue.get()
+                if evt is None:
+                    break
+                done_count += 1
+                pct = 5 + round((done_count / max(1, total_companies)) * 55)
+                status = evt["status"]
+                cid = evt["cid"]
+                symbol = evt["symbol"]
+                exchange = evt["exchange"]
+
+                if status == "skipped_blocked":
+                    skipped_count += 1
+                    excluded_ids.add(cid)
+                    continue
+                if status == "error":
+                    excluded_ids.add(cid)
+                    yield _emit({"type": "warning", "scope": "fetch", "symbol": symbol, "message": f"{symbol}: fetch failed — {evt['error']}"})
+                    continue
+
+                pr = evt["pr"]
+                vr = evt["vr"]
+
+                if pr.is_forbidden:
+                    blocked_exchanges.add(exchange)
+                    excluded_ids.add(cid)
+                    yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: unsubscribed region — future {exchange} calls will be skipped"})
+                elif pr.is_delisted:
+                    excluded_ids.add(cid)
+                    await asyncio.to_thread(
+                        lambda c=cid: (
+                            supabase.table("metric_data").delete().eq("company_id", c).execute(),
+                            supabase.table("portfolio_weight").delete().eq("company_id", c).execute(),
+                            supabase.table("company").delete().eq("company_id", c).execute(),
+                        )
+                    )
+                    yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: DELISTED — removed from database"})
+                else:
+                    ok_count += 1
+                    parts: list[str] = []
+                    if pr.source == "cache":
+                        parts.append(f"price: cache ({pr.rows_loaded})")
+                    elif pr.source == "api":
+                        parts.append(f"price: API ({pr.rows_loaded})")
+                    elif pr.source == "stale_cache":
+                        parts.append(f"price: stale cache ({pr.rows_loaded})")
+                    elif pr.source == "none":
+                        parts.append("price: none")
+                    else:
+                        parts.append(f"price: {pr.source}")
+                    if vr:
+                        if vr.source == "cache":
+                            parts.append(f"vol: cache ({vr.rows_loaded})")
+                        elif vr.source == "api":
+                            parts.append(f"vol: API ({vr.rows_loaded})")
+                        elif vr.source == "stale_cache":
+                            parts.append(f"vol: stale cache ({vr.rows_loaded})")
+                        elif vr.source == "error":
+                            parts.append(f"vol: error ({vr.error})")
+                        else:
+                            parts.append(f"vol: none ({vr.error or 'unknown'})")
+                    else:
+                        parts.append("vol: failed")
+                    ms = evt.get("ms", 0)
+                    peak = inflight["peak"]
+                    yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol} ({done_count}/{total_companies}, {ms}ms, peak:{peak}): {' | '.join(parts)}"})
+        finally:
+            # Make sure the sentinel task completes before we leave this block
+            try:
+                await sentinel_task
+            except Exception:
+                pass
+            executor.shutdown(wait=False)
+
+        total_elapsed = time.monotonic() - fetch_start_ts
+        yield _emit({"type": "progress", "pct": 60, "message": f"Fetch complete in {total_elapsed:.1f}s (peak concurrency: {inflight['peak']}/{concurrency})"})
+
+        if blocked_exchanges:
+            yield _emit({"type": "warning", "scope": "fetch", "message": f"Blocked exchanges (unsubscribed): {', '.join(sorted(blocked_exchanges))} — {skipped_count} companies skipped"})
 
         # Remove excluded companies (blocked exchanges, delisted) from universe
         if excluded_ids:

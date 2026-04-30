@@ -42,7 +42,7 @@ const MC = {
   EPS_EST: 'annual_eps_nri_estimate',
   DIV_EST: 'annual_dividend_estimate',
   FCF_PS: 'annuals__Per Share Data__Free Cash Flow per Share',
-  INTEREST_COVERAGE: 'indicator_q_interest_coverage',
+  INTEREST_COVERAGE: 'annuals__Valuation and Quality__Interest Coverage',
   DEBT_TO_EQUITY: 'annuals__Balance Sheet__Debt-to-Equity',
   CAPEX_TO_REV: 'annuals__Ratios__Capex-to-Revenue',
   CAPEX_TO_OCF: 'annuals__Ratios__Capex-to-Operating-Cash-Flow',

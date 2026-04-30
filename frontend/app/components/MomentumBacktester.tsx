@@ -1,10 +1,6 @@
 'use client';
 
 import { Fragment, useState, useEffect, useMemo, useRef } from 'react';
-import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  CartesianGrid, Legend, ReferenceArea,
-} from 'recharts';
 
 import ApiUsageBadge from './ApiUsageBadge';
 import { dialog } from '../../lib/dialog';
@@ -17,24 +13,17 @@ import {
   loadCurrentPicksSnapshot,
   refreshCurrentPicksMTD,
   type BacktestStartConfig,
-  type DailyPick,
-  type DrawdownPeriod,
-  type MonthlyRecord,
 } from '../../lib/stores/momentum';
 import CellInfoTip from './momentum/CellInfoTip';
+import DailyPicksHistory from './momentum/DailyPicksHistory';
+import EquityCurveCard from './momentum/EquityCurveCard';
 import {
   EXCHANGE_NAMES,
-  SERIES_COLORS,
-  computeTopDrawdowns,
   fmtPct,
   fmtPrice,
   guruFocusUrl,
-  tooltipStyle,
 } from './momentum/utils';
 import type {
-  BenchmarkOption,
-  BenchmarkPrice,
-  ComparisonItem,
   SavedRun,
   SignalDef,
 } from './momentum/types';
@@ -58,7 +47,6 @@ export default function MomentumBacktester() {
   const [endDate, setEndDate] = useState(`${currentYear}-01`);
   const [topSectors, setTopSectors] = useState(4);
   const [topPerSector, setTopPerSector] = useState(6);
-  const [skipPriceFetch, setSkipPriceFetch] = useState(false);
   const [noCache, setNoCache] = useState(false);
   const [maxCompanies, setMaxCompanies] = useState(0);
   const [selectionMode, setSelectionMode] = useState<'momentum' | 'random'>('momentum');
@@ -85,49 +73,16 @@ export default function MomentumBacktester() {
     return m;
   }, [universe]);
 
-  // Group all stored daily picks by YYYY-MM. Falls back to daily_picks for
-  // legacy snapshots that predate daily_picks_history.
-  const dailyPicksByMonth = useMemo<Array<{ month: string; days: DailyPick[] }>>(() => {
-    if (!currentPortfolio) return [];
-    const source = currentPortfolio.daily_picks_history && currentPortfolio.daily_picks_history.length > 0
-      ? currentPortfolio.daily_picks_history
-      : currentPortfolio.daily_picks ?? [];
-    const groups = new Map<string, DailyPick[]>();
-    for (const dp of source) {
-      const month = dp.date.slice(0, 7);
-      const arr = groups.get(month);
-      if (arr) arr.push(dp);
-      else groups.set(month, [dp]);
-    }
-    // Sort months descending (most recent first); days within ascending.
-    return Array.from(groups.entries())
-      .sort((a, b) => b[0].localeCompare(a[0]))
-      .map(([month, days]) => ({
-        month,
-        days: days.slice().sort((a, b) => a.date.localeCompare(b.date)),
-      }));
-  }, [currentPortfolio]);
-
   // Purely local UI state — safe to reset on navigation
   const [showWarnings, setShowWarnings] = useState(true);
   const [showInfos, setShowInfos] = useState(false);
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
-  const [expandedDailyDate, setExpandedDailyDate] = useState<string | null>(null);
-  const [expandedHistoryMonth, setExpandedHistoryMonth] = useState<string | null>(null);
 
   // Save/load state
   const [savedRuns, setSavedRuns] = useState<SavedRun[]>([]);
   const [saveName, setSaveName] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Benchmark options (for "add series" dropdown) + unified comparison list.
-  const [benchmarkOptions, setBenchmarkOptions] = useState<BenchmarkOption[]>([]);
-  const [comparisons, setComparisons] = useState<ComparisonItem[]>([]);
-  const [addSeriesOpen, setAddSeriesOpen] = useState(false);
-  const addSeriesRef = useRef<HTMLDivElement>(null);
-  const [logScale, setLogScale] = useState(false);
-  const [hoveredDrawdown, setHoveredDrawdown] = useState<number | null>(null);
-  const [customFromMonth, setCustomFromMonth] = useState('');
   const [savedDropdownOpen, setSavedDropdownOpen] = useState(false);
   const savedDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -158,10 +113,6 @@ export default function MomentumBacktester() {
       .catch(() => {});
     loadSavedRuns();
     loadCurrentPicksSnapshots();
-    fetch(`${API_URL}/api/benchmarks`)
-      .then((r) => r.json())
-      .then((data) => setBenchmarkOptions(data))
-      .catch(() => {});
     const universesStart = Date.now();
     const tick = setInterval(() => setUniversesElapsed(Math.round((Date.now() - universesStart) / 1000)), 500);
     setUniversesLoading(true);
@@ -214,326 +165,6 @@ export default function MomentumBacktester() {
       .catch(() => {});
   };
 
-  // Close "add series" dropdown on outside click
-  useEffect(() => {
-    if (!addSeriesOpen) return;
-    const handleClick = (e: MouseEvent) => {
-      if (addSeriesRef.current && !addSeriesRef.current.contains(e.target as Node)) {
-        setAddSeriesOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [addSeriesOpen]);
-
-  // Helpers to add/remove comparison series
-  const addSavedSeries = async (runId: number) => {
-    if (comparisons.some((c) => c.kind === 'saved' && c.runId === runId)) return;
-    try {
-      const resp = await fetch(`${API_URL}/api/momentum/backtests/${runId}`);
-      if (!resp.ok) return;
-      const data = await resp.json();
-      const saved = data.result ?? data;
-      const monthly: MonthlyRecord[] = saved.monthly_records ?? [];
-      const label = data.name ?? `Backtest ${runId}`;
-      setComparisons((prev) => [...prev, { id: `saved:${runId}`, kind: 'saved', runId, label, monthly }]);
-    } catch {}
-  };
-
-  const addBenchmarkSeries = async (benchmarkId: number) => {
-    if (comparisons.some((c) => c.kind === 'benchmark' && c.benchmarkId === benchmarkId)) return;
-    const opt = benchmarkOptions.find((b) => b.benchmark_id === benchmarkId);
-    const label = opt ? opt.ticker : `Benchmark ${benchmarkId}`;
-    // Widen fetch window so any later series can still overlap.
-    try {
-      const resp = await fetch(
-        `${API_URL}/api/benchmarks/${benchmarkId}/prices?start_date=1990-01-01&end_date=2099-12-31`,
-      );
-      if (!resp.ok) return;
-      const prices: BenchmarkPrice[] = await resp.json();
-      setComparisons((prev) => [
-        ...prev,
-        { id: `bench:${benchmarkId}`, kind: 'benchmark', benchmarkId, label, prices },
-      ]);
-    } catch {}
-  };
-
-  const removeSeries = (id: string) => {
-    setComparisons((prev) => prev.filter((c) => c.id !== id));
-  };
-
-  // Resolve every series into a (YYYY-MM → growth factor) map, rebased to 1.0
-  // at the series' first observed month. The factor embeds the forward return
-  // earned during each month, so factor[month[i]] == cumProduct of returns
-  // through month[i] (consistent with strategy `cumulative_return_pct`).
-  type ResolvedSeries = {
-    id: string;
-    label: string;
-    color: string;
-    kind: 'active' | 'saved' | 'benchmark';
-    removable: boolean;
-    factorByMonth: Map<string, number>;
-    months: string[]; // sorted
-  };
-
-  const resolvedSeries = useMemo<ResolvedSeries[]>(() => {
-    const out: ResolvedSeries[] = [];
-    let colorIdx = 0;
-    const nextColor = () => SERIES_COLORS[colorIdx++ % SERIES_COLORS.length];
-
-    const fromMonthly = (monthly: MonthlyRecord[]): { map: Map<string, number>; months: string[] } => {
-      const map = new Map<string, number>();
-      const months: string[] = [];
-      for (const r of monthly) {
-        const factor = 1 + r.cumulative_return_pct / 100;
-        map.set(r.date, factor);
-        months.push(r.date);
-      }
-      return { map, months };
-    };
-
-    const fromPrices = (prices: BenchmarkPrice[]): { map: Map<string, number>; months: string[] } => {
-      // Pick first price per month.
-      const firstByMonth = new Map<string, number>();
-      for (const p of prices) {
-        const ym = p.target_date.slice(0, 7);
-        if (!firstByMonth.has(ym)) firstByMonth.set(ym, p.price);
-      }
-      const months = Array.from(firstByMonth.keys()).sort();
-      if (months.length === 0) return { map: new Map(), months: [] };
-      const map = new Map<string, number>();
-      const p0 = firstByMonth.get(months[0])!;
-      // Shift index so each month's "factor" reflects return through end of month
-      // (same convention as strategy records: cumReturn at month[i] includes
-      // the price change month[i] → month[i+1]).
-      for (let i = 0; i < months.length - 1; i++) {
-        const pn = firstByMonth.get(months[i + 1])!;
-        map.set(months[i], pn / p0);
-      }
-      // Last month: no forward price available — leave out.
-      return { map, months: months.slice(0, -1) };
-    };
-
-    if (result) {
-      const { map, months } = fromMonthly(result.monthly_records);
-      const activeName = loadedRunId != null
-        ? savedRuns.find((r) => r.run_id === loadedRunId)?.name
-        : undefined;
-      out.push({
-        id: 'active',
-        label: activeName || 'Strategy',
-        color: nextColor(),
-        kind: 'active',
-        removable: false,
-        factorByMonth: map,
-        months,
-      });
-    }
-
-    for (const c of comparisons) {
-      if (c.kind === 'saved') {
-        const { map, months } = fromMonthly(c.monthly);
-        out.push({
-          id: c.id,
-          label: c.label,
-          color: nextColor(),
-          kind: 'saved',
-          removable: true,
-          factorByMonth: map,
-          months,
-        });
-      } else {
-        const { map, months } = fromPrices(c.prices);
-        out.push({
-          id: c.id,
-          label: c.label,
-          color: nextColor(),
-          kind: 'benchmark',
-          removable: true,
-          factorByMonth: map,
-          months,
-        });
-      }
-    }
-    return out;
-  }, [result, comparisons, loadedRunId, savedRuns]);
-
-  // Determine the [maxStart, minEnd] alignment window over all series and
-  // compute per-series aligned points + summary stats, rebased so each series
-  // starts at 0% on windowStart.
-  type SeriesPoint = { date: string; cumReturnPct: number | null };
-  type SeriesStats = {
-    totalReturn: number;
-    annualized: number;
-    maxDd: number;
-    sharpe: number | null;
-    months: number;
-  };
-  type AlignedSeries = ResolvedSeries & {
-    points: SeriesPoint[];
-    stats: SeriesStats;
-    topDrawdowns: DrawdownPeriod[];
-  };
-
-  const alignedSeries = useMemo<{ series: AlignedSeries[]; windowStart: string | null; windowEnd: string | null; allMonths: string[] }>(() => {
-    if (resolvedSeries.length === 0) return { series: [], windowStart: null, windowEnd: null, allMonths: [] };
-
-    let maxStart = '';
-    let minEnd = '9999-99';
-    for (const s of resolvedSeries) {
-      if (s.months.length === 0) continue;
-      const first = s.months[0];
-      const last = s.months[s.months.length - 1];
-      if (first > maxStart) maxStart = first;
-      if (last < minEnd) minEnd = last;
-    }
-    if (!maxStart || minEnd === '9999-99' || maxStart > minEnd) {
-      return { series: [], windowStart: null, windowEnd: null, allMonths: [] };
-    }
-
-    // Union of all months each series has within [maxStart, minEnd]. If one
-    // series lacks a given month, that series reports null for it.
-    const monthSet = new Set<string>();
-    for (const s of resolvedSeries) {
-      for (const m of s.months) {
-        if (m >= maxStart && m <= minEnd) monthSet.add(m);
-      }
-    }
-    const allMonths = Array.from(monthSet).sort();
-
-    const series: AlignedSeries[] = resolvedSeries.map((s) => {
-      const baseFactor = s.factorByMonth.get(maxStart);
-      const points: SeriesPoint[] = allMonths.map((m) => {
-        const f = s.factorByMonth.get(m);
-        if (f == null || baseFactor == null) return { date: m, cumReturnPct: null };
-        return { date: m, cumReturnPct: (f / baseFactor - 1) * 100 };
-      });
-
-      // Monthly rebased returns for stats.
-      const monthlyRets: number[] = [];
-      let prev: number | null = null;
-      for (const p of points) {
-        if (p.cumReturnPct == null) continue;
-        const factor = 1 + p.cumReturnPct / 100;
-        if (prev != null && prev > 0) monthlyRets.push((factor / prev - 1) * 100);
-        prev = factor;
-      }
-      const lastNonNull = [...points].reverse().find((p) => p.cumReturnPct != null);
-      const totalReturn = lastNonNull?.cumReturnPct ?? 0;
-      const years = monthlyRets.length / 12;
-      const cumFactor = 1 + totalReturn / 100;
-      const annualized = years > 0 ? (Math.pow(cumFactor, 1 / years) - 1) * 100 : 0;
-
-      let peak = 1.0, maxDd = 0, factor = 1.0;
-      for (const r of monthlyRets) {
-        factor *= (1 + r / 100);
-        peak = Math.max(peak, factor);
-        const dd = (factor / peak - 1) * 100;
-        maxDd = Math.min(maxDd, dd);
-      }
-
-      let sharpe: number | null = null;
-      if (monthlyRets.length >= 12) {
-        const mean = monthlyRets.reduce((a, b) => a + b, 0) / monthlyRets.length;
-        const std = Math.sqrt(monthlyRets.reduce((a, b) => a + (b - mean) ** 2, 0) / monthlyRets.length);
-        if (std > 0) sharpe = (mean / std) * Math.sqrt(12);
-      }
-
-      const ddValues = points
-        .filter((p) => p.cumReturnPct != null)
-        .map((p) => ({ date: p.date, value: 1 + (p.cumReturnPct as number) / 100 }));
-      const topDrawdowns = computeTopDrawdowns(ddValues, 3);
-
-      return {
-        ...s,
-        points,
-        stats: { totalReturn, annualized, maxDd, sharpe, months: monthlyRets.length },
-        topDrawdowns,
-      };
-    });
-
-    return { series, windowStart: maxStart, windowEnd: minEnd, allMonths };
-  }, [resolvedSeries]);
-
-  // Yearly performance breakdown — per-series compound return for each calendar year.
-  const yearlyBreakdown = useMemo(() => {
-    const { series } = alignedSeries;
-    if (series.length === 0) return { years: [] as string[], bySeries: {} as Record<string, Record<string, number | null>> };
-
-    const yearsSet = new Set<string>();
-    const bySeries: Record<string, Record<string, number | null>> = {};
-
-    for (const s of series) {
-      const lastByYear = new Map<string, number>();
-      for (const p of s.points) {
-        if (p.cumReturnPct == null) continue;
-        const y = p.date.slice(0, 4);
-        lastByYear.set(y, p.cumReturnPct);
-      }
-      const ys = Array.from(lastByYear.keys()).sort();
-      let prev = 0;
-      const rowMap: Record<string, number | null> = {};
-      for (const y of ys) {
-        const cum = lastByYear.get(y)!;
-        rowMap[y] = ((1 + cum / 100) / (1 + prev / 100) - 1) * 100;
-        prev = cum;
-        yearsSet.add(y);
-      }
-      bySeries[s.id] = rowMap;
-    }
-
-    const years = Array.from(yearsSet).sort();
-    // Backfill missing years with null so the column count matches.
-    for (const s of series) {
-      for (const y of years) if (!(y in bySeries[s.id])) bySeries[s.id][y] = null;
-    }
-    return { years, bySeries };
-  }, [alignedSeries]);
-
-  // Cumulative return from customFromMonth through end of aligned window, per series.
-  const customRangeReturn = useMemo(() => {
-    const { series } = alignedSeries;
-    if (!customFromMonth || series.length === 0) return null;
-    const last = series[0].points[series[0].points.length - 1];
-    if (!last) return null;
-    const perSeries = series.map((s) => {
-      let start: number | null = null;
-      let end: number | null = null;
-      for (const p of s.points) {
-        if (p.cumReturnPct == null) continue;
-        if (p.date < customFromMonth) start = p.cumReturnPct;
-        end = p.cumReturnPct;
-      }
-      if (end == null) return { id: s.id, label: s.label, color: s.color, ret: null };
-      const s0 = start ?? 0;
-      return { id: s.id, label: s.label, color: s.color, ret: ((1 + end / 100) / (1 + s0 / 100) - 1) * 100 };
-    });
-    return { perSeries, fromDate: customFromMonth, toDate: last.date };
-  }, [alignedSeries, customFromMonth]);
-
-  // Chart data — wide-format per month, one key per series id, plus a 0%
-  // origin row so every line starts from the same reference point.
-  const chartData = useMemo(() => {
-    const { series, allMonths, windowStart } = alignedSeries;
-    if (series.length === 0 || allMonths.length === 0) return [];
-
-    const rows: Record<string, string | number | null>[] = [];
-    if (windowStart) {
-      const origin: Record<string, string | number | null> = { date: `${windowStart} (start)` };
-      for (const s of series) origin[s.id] = 0;
-      rows.push(origin);
-    }
-    for (const m of allMonths) {
-      const row: Record<string, string | number | null> = { date: m };
-      for (const s of series) {
-        const pt = s.points.find((p) => p.date === m);
-        row[s.id] = pt?.cumReturnPct ?? null;
-      }
-      rows.push(row);
-    }
-    return rows;
-  }, [alignedSeries]);
-
   // One-way turnover per month: % of current holdings that weren't held last month.
   // First month has no prior portfolio → null.
   const turnoverByDate = useMemo<Record<string, number | null>>(() => {
@@ -554,38 +185,6 @@ export default function MomentumBacktester() {
     return map;
   }, [result]);
 
-  // Log-scale chart data: ln(1 + cumReturn/100) * 100 applied to every series key.
-  const displayChartData = useMemo(() => {
-    if (!logScale) return chartData;
-    const seriesIds = alignedSeries.series.map((s) => s.id);
-    return chartData.map((p) => {
-      const out: Record<string, string | number | null> = { date: p.date as string };
-      for (const id of seriesIds) {
-        const v = p[id];
-        out[id] = typeof v === 'number' ? Math.log(1 + v / 100) * 100 : null;
-      }
-      return out;
-    });
-  }, [chartData, logScale, alignedSeries]);
-
-  // Y-axis domain for chart — used by ReferenceArea to span full height
-  const chartYDomain = useMemo<[number, number]>(() => {
-    if (!displayChartData.length) return [-100, 100];
-    const seriesIds = alignedSeries.series.map((s) => s.id);
-    let min = Infinity, max = -Infinity;
-    for (const p of displayChartData) {
-      for (const id of seriesIds) {
-        const v = p[id];
-        if (typeof v === 'number') {
-          if (v < min) min = v;
-          if (v > max) max = v;
-        }
-      }
-    }
-    if (min === Infinity || max === -Infinity) return [-100, 100];
-    const pad = Math.max((max - min) * 0.05, 5);
-    return [Math.floor(min - pad), Math.ceil(max + pad)];
-  }, [displayChartData, alignedSeries]);
 
   // Run backtest — delegates to the module-scoped momentumStore, which owns
   // the fetch/reader loop so it survives navigation away from /momentum.
@@ -598,7 +197,6 @@ export default function MomentumBacktester() {
       category_weights: categoryWeights,
       top_n_sectors: topSectors,
       top_n_per_sector: topPerSector,
-      skip_price_fetch: skipPriceFetch,
       max_companies: maxCompanies,
       universe_label: null,
       index_universe: selectedIndexUniverse || null,
@@ -616,7 +214,6 @@ export default function MomentumBacktester() {
     category_weights: categoryWeights,
     top_n_sectors: topSectors,
     top_n_per_sector: topPerSector,
-    skip_price_fetch: skipPriceFetch,
     max_companies: maxCompanies,
     universe_label: null,
     index_universe: selectedIndexUniverse || null,
@@ -970,27 +567,6 @@ export default function MomentumBacktester() {
                 </div>
               </>
             )}
-            <label className="flex items-center gap-2 cursor-pointer self-center pt-4">
-              <input
-                type="checkbox"
-                checked={skipPriceFetch}
-                onChange={(e) => setSkipPriceFetch(e.target.checked)}
-                className="accent-indigo-500 w-4 h-4 cursor-pointer"
-              />
-              <span className="text-gray-400 text-xs">Skip data fetch</span>
-            </label>
-            <label
-              className="flex items-center gap-2 cursor-pointer select-none"
-              title="Bypass the replay cache and recompute the backtest from scratch."
-            >
-              <input
-                type="checkbox"
-                checked={noCache}
-                onChange={(e) => setNoCache(e.target.checked)}
-                className="accent-indigo-500 w-4 h-4 cursor-pointer"
-              />
-              <span className="text-gray-400 text-xs">Don&apos;t use cache</span>
-            </label>
             <button
               onClick={runBacktest}
               disabled={running}
@@ -1012,6 +588,18 @@ export default function MomentumBacktester() {
             >
               Current Picks
             </button>
+            <label
+              className="flex items-center gap-2 cursor-pointer select-none self-center pt-4"
+              title="Bypass the replay cache and recompute the backtest from scratch."
+            >
+              <input
+                type="checkbox"
+                checked={noCache}
+                onChange={(e) => setNoCache(e.target.checked)}
+                className="accent-indigo-500 w-4 h-4 cursor-pointer"
+              />
+              <span className="text-gray-400 text-xs">Don&apos;t use cache</span>
+            </label>
             {running && (
               <button
                 onClick={cancelBacktest}
@@ -1398,656 +986,22 @@ export default function MomentumBacktester() {
                 No holdings selected for this month — universe or signals returned empty.
               </div>
             )}
-            {/* Daily picks history — months as buckets; expand a month to see
-                its stored days, expand a day to see full per-holding detail.
-                Current month days are computed on the fly (then cached). Past
-                months show only days already in the DB from prior computes. */}
-            {dailyPicksByMonth.length > 0 && (
-              <div className="border-t border-gray-800/40">
-                <div className="px-4 py-3 border-b border-gray-800/40">
-                  <div className="text-sm font-medium text-white">Daily picks history</div>
-                  <div className="text-xs text-gray-500 mt-0.5">
-                    Hypothetical: what the strategy would pick if rebalancing on each day. <span className="text-gray-400">MTD (chain)</span> is the cumulative return through that day, chain-linked across rebalances. <span className="text-gray-400">Next day</span> is that day&apos;s portfolio held one trading day forward. Past months are read-only — only days already saved are shown.
-                  </div>
-                </div>
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-gray-800/40 text-gray-600">
-                      <th className="text-left px-4 py-2 font-medium">
-                        Month
-                        <CellInfoTip>Calendar month (YYYY-MM) for which daily picks are stored. Past months are read-only — only the days already saved are listed.</CellInfoTip>
-                      </th>
-                      <th className="text-right px-3 py-2 font-medium">
-                        Days
-                        <CellInfoTip>Number of trading days saved for this month.</CellInfoTip>
-                      </th>
-                      <th className="text-right px-3 py-2 font-medium">
-                        Latest MTD
-                        <CellInfoTip>Chain-linked cumulative MTD return through the latest stored day in this month.</CellInfoTip>
-                      </th>
-                      <th className="text-right px-3 py-2 font-medium" colSpan={2} />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {dailyPicksByMonth.map(({ month, days }) => {
-                      const latestDay = days[days.length - 1];
-                      const latestMTD = latestDay?.portfolio_return_pct ?? null;
-                      const isOpen = expandedHistoryMonth === month;
-                      const monthLabel = (() => {
-                        const [y, m] = month.split('-').map(Number);
-                        return new Date(y, m - 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-                      })();
-                      return (
-                        <Fragment key={month}>
-                          <tr
-                            className="border-b border-gray-800/40 hover:bg-white/[0.02] cursor-pointer"
-                            onClick={() => setExpandedHistoryMonth(isOpen ? null : month)}
-                          >
-                            <td className="px-4 py-2 font-mono text-gray-200">
-                              <span className="text-gray-600 mr-2">{isOpen ? '▾' : '▸'}</span>
-                              {monthLabel}
-                            </td>
-                            <td className="px-3 py-2 text-right font-mono text-gray-300">{days.length}</td>
-                            <td className={`px-3 py-2 text-right font-mono ${latestMTD != null ? (latestMTD >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
-                              {fmtPct(latestMTD)}
-                            </td>
-                            <td colSpan={2} />
-                          </tr>
-                          {isOpen && (
-                            <tr>
-                              <td colSpan={5} className="bg-[#0f1117] p-0">
-                                <table className="w-full text-xs">
-                                  <thead>
-                                    <tr className="border-b border-gray-800/30 text-gray-600">
-                                      <th className="text-left px-5 py-1.5 font-medium">
-                                        Date
-                                        <CellInfoTip>The trading day on which the strategy is evaluated. Picks shown are what the strategy would buy at this day&apos;s close.</CellInfoTip>
-                                      </th>
-                                      <th className="text-right px-3 py-1.5 font-medium">
-                                        Holdings
-                                        <CellInfoTip>Number of stocks in this day&apos;s portfolio (equal-weighted).</CellInfoTip>
-                                      </th>
-                                      <th className="text-right px-3 py-1.5 font-medium">
-                                        MTD (chain)
-                                        <CellInfoTip>Cumulative month-to-date return through this day, chain-linked across rebalances. Each day&apos;s contribution = the prior day&apos;s portfolio held one trading day forward. Daily returns are multiplied: (1+r₁)(1+r₂)…(1+rₙ) − 1.</CellInfoTip>
-                                      </th>
-                                      <th className="text-right px-3 py-1.5 font-medium">
-                                        Next day
-                                        <CellInfoTip>One-day forward return of THIS day&apos;s portfolio held to the next trading day&apos;s close. Empty on the latest day (no next trading day yet).</CellInfoTip>
-                                      </th>
-                                      <th className="text-right px-3 py-1.5 font-medium">
-                                        Turnover
-                                        <CellInfoTip>Number of stocks that differ from the previous day&apos;s portfolio. For a fixed-size portfolio this equals both stocks added and stocks removed.</CellInfoTip>
-                                      </th>
-                                      <th className="text-right px-3 py-1.5 font-medium">
-                                        %
-                                        <CellInfoTip>Turnover expressed as a percentage of portfolio size: turnover ÷ max(today, yesterday) × 100.</CellInfoTip>
-                                      </th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {days.map((dp) => (
-                                      <Fragment key={dp.date}>
-                        <tr
-                          className="border-b border-gray-800/30 hover:bg-white/[0.02] cursor-pointer"
-                          onClick={() => setExpandedDailyDate(expandedDailyDate === dp.date ? null : dp.date)}
-                        >
-                          <td className="px-4 py-1.5 font-mono text-gray-200">
-                            <span className="text-gray-600 mr-2">{expandedDailyDate === dp.date ? '▾' : '▸'}</span>
-                            {dp.date}
-                          </td>
-                          <td className="px-3 py-1.5 text-right font-mono text-gray-300">{dp.holdings.length}</td>
-                          <td className={`px-3 py-1.5 text-right font-mono ${dp.portfolio_return_pct != null ? (dp.portfolio_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
-                            {fmtPct(dp.portfolio_return_pct ?? null)}
-                          </td>
-                          <td className={`px-3 py-1.5 text-right font-mono ${dp.next_day_return_pct != null ? (dp.next_day_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
-                            {fmtPct(dp.next_day_return_pct ?? null)}
-                          </td>
-                          <td className={`px-3 py-1.5 text-right font-mono ${dp.turnover_abs > 0 ? 'text-amber-400' : 'text-gray-600'}`}>
-                            {dp.turnover_abs > 0 ? dp.turnover_abs : '—'}
-                          </td>
-                          <td className={`px-3 py-1.5 text-right font-mono ${dp.turnover_pct > 0 ? 'text-amber-400' : 'text-gray-600'}`}>
-                            {dp.turnover_pct > 0 ? `${dp.turnover_pct.toFixed(2)}%` : '—'}
-                          </td>
-                        </tr>
-                        {expandedDailyDate === dp.date && (
-                          <tr>
-                            <td colSpan={6} className="bg-[#0f1117] px-5 py-3">
-                              <table className="w-full text-xs">
-                                <thead>
-                                  <tr className="text-gray-600">
-                                    <th className="text-left py-1 font-medium">
-                                      Ticker<CellInfoTip>The stock&apos;s ticker on its primary exchange. Click to open in GuruFocus.</CellInfoTip>
-                                    </th>
-                                    <th className="text-left py-1 font-medium">
-                                      Company<CellInfoTip>Issuer name. Click to open in GuruFocus.</CellInfoTip>
-                                    </th>
-                                    <th className="text-left py-1 font-medium">
-                                      Sector<CellInfoTip>GICS sector. Selection picks top sectors then top stocks within each.</CellInfoTip>
-                                    </th>
-                                    {categories.map((cat) => (
-                                      <th key={cat} className="text-right py-1 font-medium">
-                                        {cat === 'price' ? 'Price' : cat === 'volume' ? 'Vol' : cat}
-                                        <CellInfoTip>
-                                          {cat === 'price'
-                                            ? 'Composite 0–100 score across the price-momentum signals, min-max normalized within the universe at this date.'
-                                            : cat === 'volume'
-                                            ? 'Composite 0–100 score across the volume signals, min-max normalized within the universe at this date.'
-                                            : `${cat} category score, 0–100 normalized across the universe.`}
-                                        </CellInfoTip>
-                                      </th>
-                                    ))}
-                                    <th className="text-right py-1 font-medium">
-                                      Total<CellInfoTip>Weighted combination of the category scores. Selection ranks by this.</CellInfoTip>
-                                    </th>
-                                    <th className="text-right py-1 font-medium pl-4">
-                                      Start (local)<CellInfoTip>Entry price in local currency at this day&apos;s close — each day&apos;s pick is an independent 1-day portfolio.</CellInfoTip>
-                                    </th>
-                                    <th className="text-right py-1 font-medium">
-                                      End (local)<CellInfoTip>Exit price in local currency at the next trading day&apos;s close. Empty on the latest day (no next trading day yet).</CellInfoTip>
-                                    </th>
-                                    <th className="text-right py-1 font-medium pl-4">
-                                      Start (€)<CellInfoTip>Entry price converted to EUR using the day&apos;s ECB FX rate.</CellInfoTip>
-                                    </th>
-                                    <th className="text-right py-1 font-medium">
-                                      End (€)<CellInfoTip>Exit price converted to EUR using the next trading day&apos;s ECB FX rate.</CellInfoTip>
-                                    </th>
-                                    <th className="text-right py-1 font-medium pl-4">
-                                      Return<CellInfoTip>Per-stock 1-day return in EUR: (End € ÷ Start €) − 1. Empty on the latest day.</CellInfoTip>
-                                    </th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {[...dp.holdings]
-                                    .sort((a, b) => {
-                                      const sec = a.sector.localeCompare(b.sector);
-                                      return sec !== 0 ? sec : b.score - a.score;
-                                    })
-                                    .map((h) => {
-                                      const exch = exchangeByCompany.get(h.company_id) ?? '';
-                                      const href = guruFocusUrl(h.ticker, exch);
-                                      return (
-                                        <tr key={h.company_id} className="border-t border-gray-800/20">
-                                          <td className="py-1.5 font-mono whitespace-nowrap">
-                                            <a
-                                              href={href}
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                              className="text-indigo-400 hover:text-indigo-300 hover:underline"
-                                            >
-                                              {h.ticker}
-                                            </a>
-                                            {exch && (
-                                              <span
-                                                className="ml-1 text-[10px] text-gray-500"
-                                                title={EXCHANGE_NAMES[exch.toUpperCase()] ?? exch}
-                                              >
-                                                ({exch})
-                                              </span>
-                                            )}
-                                          </td>
-                                          <td className="py-1.5 truncate max-w-[200px]">
-                                            <a
-                                              href={href}
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                              className="text-gray-300 hover:text-indigo-300 hover:underline"
-                                            >
-                                              {h.company_name}
-                                            </a>
-                                          </td>
-                                          <td className="py-1.5 text-gray-500">{h.sector}</td>
-                                          {categories.map((cat) => (
-                                            <td key={cat} className="text-right py-1.5 text-gray-400 font-mono">
-                                              {h.category_scores?.[cat] != null ? h.category_scores[cat]!.toFixed(0) : '—'}
-                                            </td>
-                                          ))}
-                                          <td className="text-right py-1.5 text-white font-mono font-medium">{h.score.toFixed(1)}</td>
-                                          <td className="text-right py-1.5 text-gray-400 font-mono pl-4">
-                                            {fmtPrice(h.entry_price_local ?? null)}
-                                            {h.currency && <span className="text-gray-600 text-[10px] ml-1">{h.currency}</span>}
-                                            {h.entry_date && (
-                                              <CellInfoTip>
-                                                <div className="text-gray-400">Trading date</div>
-                                                <div className="font-mono text-gray-200">{h.entry_date}</div>
-                                              </CellInfoTip>
-                                            )}
-                                          </td>
-                                          <td className="text-right py-1.5 text-gray-400 font-mono">
-                                            {fmtPrice(h.exit_price_local ?? null)}
-                                            {h.exit_date && (
-                                              <CellInfoTip>
-                                                <div className="text-gray-400">Trading date</div>
-                                                <div className="font-mono text-gray-200">{h.exit_date}</div>
-                                              </CellInfoTip>
-                                            )}
-                                          </td>
-                                          <td className="text-right py-1.5 text-gray-400 font-mono pl-4">
-                                            {fmtPrice(h.entry_price_eur ?? null)}
-                                          </td>
-                                          <td className="text-right py-1.5 text-gray-400 font-mono">
-                                            {fmtPrice(h.exit_price_eur ?? null)}
-                                          </td>
-                                          <td className={`text-right py-1.5 font-mono pl-4 ${h.forward_return_pct != null ? (h.forward_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
-                                            {fmtPct(h.forward_return_pct ?? null)}
-                                          </td>
-                                        </tr>
-                                      );
-                                    })}
-                                </tbody>
-                              </table>
-                            </td>
-                          </tr>
-                        )}
-                      </Fragment>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </td>
-                            </tr>
-                          )}
-                        </Fragment>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <DailyPicksHistory
+              currentPortfolio={currentPortfolio}
+              categories={categories}
+              exchangeByCompany={exchangeByCompany}
+            />
           </div>
         )}
 
         {/* Results */}
         {result && (
           <>
-            {/* Comparison panel — active strategy + any added backtests/benchmarks */}
-            <div className="bg-[#151821] rounded-xl border border-gray-800/40 px-4 py-3">
-              <div className="flex items-center gap-3 flex-wrap">
-                <span className="text-gray-400 text-sm mr-1">Comparison</span>
-                {alignedSeries.series.map((s) => (
-                  <span
-                    key={s.id}
-                    className="inline-flex items-center gap-2 bg-[#0f1117] border border-gray-800 rounded-full pl-2 pr-1 py-1 text-xs"
-                  >
-                    <span className="inline-block w-2 h-2 rounded-full" style={{ background: s.color }} />
-                    <span className="text-gray-200">{s.label}</span>
-                    {s.removable && (
-                      <button
-                        type="button"
-                        onClick={() => removeSeries(s.id)}
-                        className="ml-0.5 w-4 h-4 rounded-full text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors flex items-center justify-center"
-                        title="Remove from comparison"
-                      >
-                        <svg className="w-2.5 h-2.5" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                        </svg>
-                      </button>
-                    )}
-                  </span>
-                ))}
-                <div className="relative" ref={addSeriesRef}>
-                  <button
-                    type="button"
-                    onClick={() => setAddSeriesOpen((o) => !o)}
-                    className="inline-flex items-center gap-1 text-xs text-indigo-300 hover:text-indigo-200 border border-indigo-500/40 hover:border-indigo-400/60 bg-indigo-500/10 hover:bg-indigo-500/20 rounded-full px-3 py-1 transition-colors"
-                  >
-                    + Add series
-                  </button>
-                  {addSeriesOpen && (
-                    <div className="absolute left-0 mt-1 w-72 bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-80 overflow-auto">
-                      {benchmarkOptions.length > 0 && (
-                        <div>
-                          <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-500 border-b border-gray-800/60">Benchmarks</div>
-                          {benchmarkOptions.map((b) => {
-                            const already = comparisons.some((c) => c.kind === 'benchmark' && c.benchmarkId === b.benchmark_id);
-                            return (
-                              <button
-                                key={b.benchmark_id}
-                                type="button"
-                                disabled={already}
-                                onClick={() => { addBenchmarkSeries(b.benchmark_id); setAddSeriesOpen(false); }}
-                                className="w-full text-left px-3 py-2 text-xs hover:bg-white/[0.03] disabled:opacity-40 disabled:cursor-not-allowed text-gray-200 flex items-center gap-2"
-                              >
-                                <span className="font-mono text-amber-300">{b.ticker}</span>
-                                <span className="text-gray-500 truncate">{b.name}</span>
-                                {already && <span className="ml-auto text-[10px] text-gray-600">added</span>}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                      {savedRuns.length > 0 && (
-                        <div>
-                          <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-500 border-t border-b border-gray-800/60">Saved Backtests</div>
-                          {savedRuns.map((r) => {
-                            const already = comparisons.some((c) => c.kind === 'saved' && c.runId === r.run_id);
-                            const isLoaded = r.run_id === loadedRunId;
-                            return (
-                              <button
-                                key={r.run_id}
-                                type="button"
-                                disabled={already || isLoaded}
-                                onClick={() => { addSavedSeries(r.run_id); setAddSeriesOpen(false); }}
-                                className="w-full text-left px-3 py-2 text-xs hover:bg-white/[0.03] disabled:opacity-40 disabled:cursor-not-allowed text-gray-200 flex items-center gap-2"
-                                title={isLoaded ? 'Currently loaded as the active strategy' : undefined}
-                              >
-                                <span className="truncate">{r.name}</span>
-                                {isLoaded && <span className="ml-auto text-[10px] text-gray-600">active</span>}
-                                {!isLoaded && already && <span className="ml-auto text-[10px] text-gray-600">added</span>}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                      {benchmarkOptions.length === 0 && savedRuns.length === 0 && (
-                        <div className="px-3 py-4 text-xs text-gray-500">No benchmarks or saved backtests available.</div>
-                      )}
-                    </div>
-                  )}
-                </div>
-                {alignedSeries.windowStart && alignedSeries.windowEnd && alignedSeries.series.length > 1 && (
-                  <span className="text-[11px] text-gray-500 font-mono ml-auto">
-                    aligned {alignedSeries.windowStart} → {alignedSeries.windowEnd}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Summary Stats */}
-            <div className="bg-[#151821] rounded-xl border border-gray-800/40 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-800/40 text-gray-500 text-xs">
-                    <th className="px-4 py-2.5 text-left font-medium"></th>
-                    <th className="px-3 py-2.5 text-right font-medium">
-                      Total Return<CellInfoTip>Cumulative return over the entire backtest period: (1 + r₁)(1 + r₂)…(1 + rₙ) − 1.</CellInfoTip>
-                    </th>
-                    <th className="px-3 py-2.5 text-right font-medium">
-                      Annualized<CellInfoTip>Geometric annual return: (1 + total_return)^(1/years) − 1, where years = months ÷ 12.</CellInfoTip>
-                    </th>
-                    <th className="px-3 py-2.5 text-right font-medium">
-                      Max Drawdown<CellInfoTip>Largest peak-to-trough decline observed during the backtest, expressed as a negative percentage of the prior peak.</CellInfoTip>
-                    </th>
-                    <th className="px-3 py-2.5 text-right font-medium">
-                      Sharpe<CellInfoTip>Annualized Sharpe ratio of monthly returns (risk-free rate = 0): mean ÷ std × √12. Computed only when ≥12 months of returns are available.</CellInfoTip>
-                    </th>
-                    <th className="px-3 py-2.5 text-right font-medium">
-                      Months<CellInfoTip>Number of monthly rebalance periods in the backtest.</CellInfoTip>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {alignedSeries.series.map((s) => (
-                    <tr key={s.id} className="border-b border-gray-800/30">
-                      <td className="px-4 py-2.5 font-medium flex items-center gap-2">
-                        <span className="inline-block w-2 h-2 rounded-full" style={{ background: s.color }} />
-                        <span className="text-gray-200">{s.label}</span>
-                      </td>
-                      <td className={`px-3 py-2.5 text-right font-mono ${s.stats.totalReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(s.stats.totalReturn)}</td>
-                      <td className={`px-3 py-2.5 text-right font-mono ${s.stats.annualized >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(s.stats.annualized)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-rose-400">{fmtPct(s.stats.maxDd)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-white">{s.stats.sharpe != null ? s.stats.sharpe.toFixed(2) : '—'}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-gray-300">{s.stats.months}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {/* Active strategy — raw (non-aligned) metrics, including turnover + holdings */}
-              <div className="px-4 py-3 border-t border-gray-800/40 text-xs text-gray-500 flex flex-wrap gap-x-6 gap-y-1">
-                <span>Strategy (full range): <span className="font-mono text-gray-300">Turnover {fmtPct(result.summary.avg_monthly_turnover_pct)}</span></span>
-                <span><span className="font-mono text-gray-300">Avg Holdings {result.summary.avg_holdings.toFixed(1)}</span></span>
-                <span><span className="font-mono text-gray-300">Months {result.summary.total_months}</span></span>
-              </div>
-              {/* Multi-trial cross-trial statistics — backend means ± std.
-                  These are the numbers to compare a momentum run against,
-                  NOT the per-series stats above (which derive from the mean
-                  equity curve and understate volatility). */}
-              {result.summary.n_trials != null && result.summary.n_trials > 1 && (
-                <div className="px-4 py-3 border-t border-gray-800/40">
-                  <div className="text-xs font-medium text-gray-400 mb-2">
-                    Cross-trial statistics ({result.summary.n_trials} random trials, mean ± std)
-                  </div>
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
-                    <div className="bg-[#0f1117] rounded-lg px-3 py-2">
-                      <div className="text-gray-500">Total Return</div>
-                      <div className="font-mono text-gray-200">
-                        {fmtPct(result.summary.total_return_pct)}
-                        <span className="text-gray-500"> ± {(result.summary.total_return_pct_std ?? 0).toFixed(2)}%</span>
-                      </div>
-                    </div>
-                    <div className="bg-[#0f1117] rounded-lg px-3 py-2">
-                      <div className="text-gray-500">Annualized</div>
-                      <div className="font-mono text-gray-200">
-                        {fmtPct(result.summary.annualized_return_pct)}
-                        <span className="text-gray-500"> ± {(result.summary.annualized_return_pct_std ?? 0).toFixed(2)}%</span>
-                      </div>
-                    </div>
-                    <div className="bg-[#0f1117] rounded-lg px-3 py-2">
-                      <div className="text-gray-500">Max Drawdown</div>
-                      <div className="font-mono text-gray-200">
-                        {fmtPct(result.summary.max_drawdown_pct)}
-                        <span className="text-gray-500"> ± {(result.summary.max_drawdown_pct_std ?? 0).toFixed(2)}%</span>
-                      </div>
-                    </div>
-                    <div className="bg-[#0f1117] rounded-lg px-3 py-2">
-                      <div className="text-gray-500">Sharpe</div>
-                      <div className="font-mono text-gray-200">
-                        {result.summary.sharpe_ratio != null ? result.summary.sharpe_ratio.toFixed(2) : '—'}
-                        {result.summary.sharpe_ratio_std != null && (
-                          <span className="text-gray-500"> ± {result.summary.sharpe_ratio_std.toFixed(2)}</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="bg-[#0f1117] rounded-lg px-3 py-2">
-                      <div className="text-gray-500">Turnover</div>
-                      <div className="font-mono text-gray-200">
-                        {fmtPct(result.summary.avg_monthly_turnover_pct)}
-                        <span className="text-gray-500"> ± {(result.summary.avg_monthly_turnover_pct_std ?? 0).toFixed(2)}%</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {alignedSeries.series.some((s) => s.topDrawdowns.length > 0) && (
-                <div className="px-4 py-3 border-t border-gray-800/40 space-y-3">
-                  {alignedSeries.series.map((s) => (
-                    s.topDrawdowns.length > 0 && (
-                      <div key={s.id}>
-                        <div className="text-xs font-medium mb-2 flex items-center gap-2">
-                          <span className="inline-block w-2 h-2 rounded-full" style={{ background: s.color }} />
-                          <span className="text-gray-400">{s.label} — Top Drawdowns</span>
-                        </div>
-                        <div className="grid grid-cols-3 gap-3">
-                          {s.topDrawdowns.map((dd, i) => {
-                            const alpha = [1.0, 0.6, 0.3][i] ?? 0.3;
-                            return (
-                              <div key={i} className="bg-[#0f1117] rounded-lg px-3 py-2">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <div className="w-2 h-2 rounded-full" style={{ background: s.color, opacity: alpha }} />
-                                  <span className="font-mono text-sm font-medium" style={{ color: s.color }}>{dd.drawdown_pct.toFixed(1)}%</span>
-                                </div>
-                                <div className="text-[10px] text-gray-500 font-mono">
-                                  {dd.peak_date} to {dd.trough_date}
-                                  {dd.recovery_date ? ` (recovered ${dd.recovery_date})` : ' (ongoing)'}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Yearly Performance + Custom Range */}
-            {yearlyBreakdown.years.length > 0 && (
-              <div className="bg-[#151821] rounded-xl border border-gray-800/40 overflow-hidden">
-                <div className="px-5 py-3 border-b border-gray-800/40">
-                  <h3 className="text-white text-sm font-medium">Yearly Performance</h3>
-                </div>
-                <div className="overflow-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-800/40 text-gray-500 text-xs">
-                        <th className="px-5 py-2.5 text-left font-medium">
-                          Year<CellInfoTip>Calendar year. Each cell shows the series&apos; cumulative return across that year (Jan 1 → Dec 31, or partial for the latest year).</CellInfoTip>
-                        </th>
-                        {alignedSeries.series.map((s) => (
-                          <th key={s.id} className="px-3 py-2.5 text-right font-medium">
-                            <span className="inline-flex items-center gap-1.5">
-                              <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: s.color }} />
-                              <span className="truncate max-w-[140px]">{s.label}</span>
-                            </span>
-                            <CellInfoTip>Annual return for this series. Strategy returns chain-link the monthly portfolio returns; benchmark returns chain-link daily closes.</CellInfoTip>
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {yearlyBreakdown.years.map((y) => (
-                        <tr key={y} className="border-b border-gray-800/20 hover:bg-white/[0.02]">
-                          <td className="px-5 py-2 text-gray-200 font-mono">{y}</td>
-                          {alignedSeries.series.map((s) => {
-                            const v = yearlyBreakdown.bySeries[s.id]?.[y];
-                            return (
-                              <td
-                                key={s.id}
-                                className={`px-3 py-2 text-right font-mono ${v != null ? (v >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}
-                              >
-                                {v != null ? fmtPct(v) : '—'}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="px-5 py-3 border-t border-gray-800/40 flex items-center gap-4 flex-wrap">
-                  <label className="text-xs text-gray-400 font-medium">From month:</label>
-                  <input
-                    type="month"
-                    value={customFromMonth}
-                    min={alignedSeries.windowStart ?? undefined}
-                    max={alignedSeries.windowEnd ?? undefined}
-                    onChange={(e) => setCustomFromMonth(e.target.value)}
-                    className="bg-[#0f1117] border border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-                  />
-                  {customFromMonth && (
-                    <button
-                      onClick={() => setCustomFromMonth('')}
-                      className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
-                    >
-                      clear
-                    </button>
-                  )}
-                  {customRangeReturn ? (
-                    <div className="flex items-center gap-4 text-xs ml-auto flex-wrap">
-                      <span className="text-gray-500 font-mono">{customRangeReturn.fromDate} → {customRangeReturn.toDate}</span>
-                      {customRangeReturn.perSeries.map((s) => (
-                        <span key={s.id} className="text-gray-400 inline-flex items-center gap-1.5">
-                          <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: s.color }} />
-                          {s.label}:{' '}
-                          {s.ret != null ? (
-                            <span className={`font-mono ${s.ret >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                              {fmtPct(s.ret)}
-                            </span>
-                          ) : (
-                            <span className="font-mono text-gray-600">—</span>
-                          )}
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-xs text-gray-500">Cumulative return from picked month through end of aligned window.</span>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Equity Curve */}
-            <div className="bg-[#151821] rounded-xl border border-gray-800/40 p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-white text-sm font-medium">Equity Curve ({logScale ? 'Log' : 'Cumulative'} Return %)</h3>
-                <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={logScale}
-                    onChange={(e) => setLogScale(e.target.checked)}
-                    className="accent-indigo-500 w-3.5 h-3.5"
-                  />
-                  Log scale
-                </label>
-              </div>
-              <ResponsiveContainer width="100%" height={350}>
-                <LineChart data={displayChartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-                  <XAxis
-                    dataKey="date"
-                    tick={{ fill: '#6b7280', fontSize: 11 }}
-                    tickLine={false}
-                    interval={Math.max(0, Math.floor(displayChartData.length / 12) - 1)}
-                  />
-                  <YAxis
-                    tick={{ fill: '#6b7280', fontSize: 11 }}
-                    tickLine={false}
-                    tickFormatter={(v: number) => `${v}%`}
-                    domain={chartYDomain}
-                  />
-                  <Tooltip
-                    {...tooltipStyle}
-                    formatter={(value, name) => {
-                      const v = Number(value);
-                      const s = alignedSeries.series.find((x) => x.id === name);
-                      return [`${v >= 0 ? '+' : ''}${v.toFixed(2)}%`, s?.label ?? String(name)];
-                    }}
-                  />
-                  {alignedSeries.series.length > 1 && (
-                    <Legend
-                      wrapperStyle={{ fontSize: 12, color: '#9ca3af' }}
-                      formatter={(value) => {
-                        const s = alignedSeries.series.find((x) => x.id === value);
-                        return s?.label ?? String(value);
-                      }}
-                    />
-                  )}
-                  {/* Drawdown overlays: only for the active strategy (first series) */}
-                  {alignedSeries.series[0]?.topDrawdowns.map((dd, i) => {
-                    const base = [0.25, 0.15, 0.10];
-                    const hovered = hoveredDrawdown === i;
-                    const opacity = hovered ? (base[i] ?? 0.10) + 0.15 : (base[i] ?? 0.10);
-                    return (
-                      <ReferenceArea
-                        key={`dd-${i}`}
-                        x1={dd.peak_date}
-                        x2={dd.recovery_date ?? (displayChartData[displayChartData.length - 1]?.date as string | undefined)}
-                        y1={chartYDomain[0]}
-                        y2={chartYDomain[1]}
-                        fill={`rgba(244,63,94,${opacity})`}
-                        strokeOpacity={0}
-                        style={{ cursor: 'pointer' }}
-                        onMouseEnter={() => setHoveredDrawdown(i)}
-                        onMouseLeave={() => setHoveredDrawdown(null)}
-                      />
-                    );
-                  })}
-                  {alignedSeries.series.map((s, i) => (
-                    <Line
-                      key={s.id}
-                      type="monotone"
-                      dataKey={s.id}
-                      stroke={s.color}
-                      strokeWidth={i === 0 ? 2 : 1.5}
-                      strokeDasharray={i === 0 ? undefined : '4 3'}
-                      dot={false}
-                      name={s.id}
-                      connectNulls
-                    />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+            <EquityCurveCard
+              result={result}
+              loadedRunId={loadedRunId}
+              savedRuns={savedRuns}
+            />
 
             {/* Monthly Portfolio Table */}
             <div className="bg-[#151821] rounded-xl border border-gray-800/40">

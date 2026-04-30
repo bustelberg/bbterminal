@@ -143,7 +143,6 @@ export type BacktestStartConfig = {
   category_weights: Record<string, number>;
   top_n_sectors: number;
   top_n_per_sector: number;
-  skip_price_fetch: boolean;
   max_companies: number;
   universe_label: string | null;
   index_universe: string | null;
@@ -245,7 +244,7 @@ export async function startBacktest(cfg: BacktestStartConfig): Promise<void> {
       } else {
         const elapsed = Math.round((Date.now() - lastEventTime) / 1000);
         momentumStore.set({
-          error: `Stream disconnected unexpectedly (last event ${elapsed}s ago). This can happen due to proxy timeouts — try again with "Skip data fetch" checked if prices are already loaded.`,
+          error: `Stream disconnected unexpectedly (last event ${elapsed}s ago). This can happen due to proxy timeouts — try again, the replay cache should make the second attempt fast.`,
           running: false,
         });
       }
