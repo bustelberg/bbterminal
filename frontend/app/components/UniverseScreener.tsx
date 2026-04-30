@@ -7,6 +7,7 @@ import {
 } from 'recharts';
 import { dialog } from '../../lib/dialog';
 import ProgressTimeline, { type StepDef, type StepState } from './ProgressTimeline';
+import { trackedFetch } from '../../lib/loading';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -73,7 +74,7 @@ export default function UniverseScreener() {
     setLoading(true);
     setError(null);
     try {
-      const r = await fetch(`${API_URL}/api/universe/labels`);
+      const r = await trackedFetch('Loading saved universes', `${API_URL}/api/universe/labels`);
       if (!r.ok) throw new Error(`${r.status}`);
       const data: UniverseRow[] = await r.json();
       setUniverses(data);
@@ -85,11 +86,11 @@ export default function UniverseScreener() {
   }, []);
 
   useEffect(() => {
-    fetch(`${API_URL}/api/universe/criteria`)
+    trackedFetch('Loading screening criteria', `${API_URL}/api/universe/criteria`)
       .then(r => r.json())
       .then(setCriteria)
       .catch(() => {});
-    fetch(`${API_URL}/api/universe/derived-metrics/criteria`)
+    trackedFetch('Loading derived-metric specs', `${API_URL}/api/universe/derived-metrics/criteria`)
       .then(r => r.json())
       .then(d => {
         setDerivedSpecs(d.specs || []);

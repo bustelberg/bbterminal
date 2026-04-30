@@ -169,10 +169,25 @@ def gurufocus_exchange_for_db(exchange: str) -> str | None:
     if gf is None:
         return None
     if gf == "":
-        # US exchanges — use NAS/NYSE from the API
-        us_map = {"NYSE": "NYSE", "NASDAQ": "NAS", "Cboe BZX": "NAS"}
+        # US exchanges — match the codes seeded in `gurufocus_exchange`
+        # (see supabase/migrations/20260418000000_normalized_schema.sql:128).
+        us_map = {"NYSE": "NYSE", "NASDAQ": "NASDAQ", "Cboe BZX": "CBOE"}
         return us_map.get(exchange, "NYSE")
     return _GF_URL_TO_API.get(gf, gf)
+
+
+def expected_db_exchange_codes() -> set[str]:
+    """Every db-side exchange_code acwi.py can emit for an iShares holding.
+
+    Used by main.py at startup to diff against `gurufocus_exchange.exchange_code`
+    so silent skips like the MSFT/NASDAQ regression fail loudly next time.
+    """
+    codes: set[str] = set()
+    for ishares_name in _ISHARES_TO_GF.keys():
+        c = gurufocus_exchange_for_db(ishares_name)
+        if c:
+            codes.add(c)
+    return codes
 
 
 _GF_TICKER_OVERRIDES_FILE = os.path.join(os.path.dirname(__file__), "gf_ticker_overrides.json")
@@ -249,6 +264,12 @@ def gurufocus_url(ticker: str, exchange: str) -> str | None:
     return f"https://www.gurufocus.com/stock/{symbol}/summary"
 
 
+_SKIP_LISTINGS: frozenset[tuple[str, str]] = frozenset({
+    ("HKSE", "3750"),
+    ("XSWX", "LISN"),
+})
+
+
 def gurufocus_ticker_normalized(ticker: str, exchange: str) -> tuple[str, str] | None:
     """Return (db_exchange_code, gf_ticker) for an iShares (ticker, exchange).
 
@@ -263,6 +284,8 @@ def gurufocus_ticker_normalized(ticker: str, exchange: str) -> tuple[str, str] |
         return None
     gf_prefix = _ISHARES_TO_GF.get(exchange)
     if gf_prefix is None:
+        return None
+    if (gf_prefix, ticker) in _SKIP_LISTINGS:
         return None
     final_prefix, t = _normalize_gf_ticker(ticker, gf_prefix)
     if final_prefix != gf_prefix:

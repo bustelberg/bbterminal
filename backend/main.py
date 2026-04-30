@@ -2,6 +2,7 @@ import asyncio
 import functools
 import hashlib
 import json
+import logging
 import os
 import re
 import threading
@@ -50,7 +51,11 @@ from index_universe.sp500 import (
     resolve_and_create_companies, store_index_membership,
     check_gurufocus_availability, load_changes,
 )
-from fx_rates import fetch_all_latest, fetch_history, get_coverage_info
+from fx_rates import (
+    get_coverage_info,
+    fetch_latest_from_db, fetch_history_from_db,
+    ECB_CURRENCIES, _USD_PEGS,
+)
 from index_universe.acwi import (
     load_acwi_holdings, get_msci_announcements,
     fetch_announcement_detail_cached, fetch_bulk_details,
@@ -85,6 +90,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def _verify_acwi_exchange_codes() -> None:
+    """Warn loudly if any exchange_code acwi.py can emit is missing from
+    `gurufocus_exchange`. Holdings on missing codes are silently dropped
+    during ACWI sync (see main.py around line 4905) — that bug ate MSFT
+    once already, this check is so it doesn't happen again."""
+    try:
+        from index_universe.acwi import expected_db_exchange_codes
+
+        expected = expected_db_exchange_codes()
+        resp = supabase.table("gurufocus_exchange").select("exchange_code").execute()
+        present = {r["exchange_code"] for r in (resp.data or [])}
+        missing = sorted(expected - present)
+        if missing:
+            logging.getLogger(__name__).warning(
+                "[acwi] exchange codes missing from gurufocus_exchange: %s. "
+                "Holdings on these exchanges will be silently skipped during "
+                "ACWI sync. Add a migration that seeds them.",
+                ", ".join(missing),
+            )
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            "[acwi] exchange code sanity check failed: %s", e
+        )
 
 _MONTHS = {
     "january": 1, "february": 2, "march": 3, "april": 4,
@@ -276,6 +307,210 @@ async def delete_account(authorization: str = Header(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Admin delete failed: {e}")
     return {"ok": True}
+
+
+# ─────────────────────────── Admin user management ────────────────────────
+# All endpoints below require the caller's JWT to carry app_metadata.role
+# == 'admin'. The role is set in auth.users.raw_app_meta_data by the
+# 20260502000000_admin_role.sql migration (or via PATCH /api/auth/users/{id}).
+
+
+def _require_admin(authorization: str) -> dict:
+    """Verify the Bearer token and return the user object. Raises 403 unless
+    that user has app_metadata.role == 'admin'."""
+    token = (authorization or "").replace("Bearer ", "")
+    if not token:
+        raise HTTPException(401, "Missing Authorization header")
+    try:
+        user_resp = supabase.auth.get_user(token)
+    except Exception as e:
+        raise HTTPException(401, f"Token verification failed: {e}")
+    user = getattr(user_resp, "user", None) if user_resp else None
+    if not user:
+        raise HTTPException(401, "Invalid token — no user found")
+    role = (getattr(user, "app_metadata", None) or {}).get("role")
+    if role != "admin":
+        raise HTTPException(403, "Admin role required")
+    return {"id": user.id, "email": user.email, "role": role}
+
+
+@app.get("/api/auth/me")
+async def auth_me(authorization: str = Header(...)):
+    """Return the caller's user info + role. Used by the frontend to decide
+    what to show; the source of truth for actual access is the middleware /
+    role check, not this endpoint."""
+    token = (authorization or "").replace("Bearer ", "")
+    try:
+        user_resp = supabase.auth.get_user(token)
+    except Exception as e:
+        raise HTTPException(401, f"Token verification failed: {e}")
+    user = getattr(user_resp, "user", None) if user_resp else None
+    if not user:
+        raise HTTPException(401, "Invalid token")
+    role = (getattr(user, "app_metadata", None) or {}).get("role") or "user"
+    return {"id": user.id, "email": user.email, "role": role}
+
+
+class CreateUserRequest(BaseModel):
+    email: str
+    password: str
+    role: str = "user"  # 'user' or 'admin'
+
+
+@app.get("/api/auth/users")
+async def list_users(authorization: str = Header(...)):
+    """List all users (admin only). Returns id, email, role, created_at."""
+    _require_admin(authorization)
+    try:
+        resp = supabase.auth.admin.list_users()
+    except Exception as e:
+        raise HTTPException(500, f"List users failed: {e}")
+    # supabase-py returns a list of User objects (not a wrapper).
+    raw_users = resp if isinstance(resp, list) else getattr(resp, "users", []) or []
+    out: list[dict] = []
+    for u in raw_users:
+        meta = getattr(u, "app_metadata", None) or {}
+        out.append({
+            "id": getattr(u, "id", None),
+            "email": getattr(u, "email", None),
+            "role": meta.get("role") or "user",
+            "created_at": str(getattr(u, "created_at", "") or ""),
+            "last_sign_in_at": str(getattr(u, "last_sign_in_at", "") or ""),
+        })
+    out.sort(key=lambda u: (u.get("role") != "admin", u.get("email") or ""))
+    return {"users": out}
+
+
+@app.post("/api/auth/users")
+async def create_user(req: CreateUserRequest, authorization: str = Header(...)):
+    """Create a new user with an initial password (admin only). The user
+    can sign in immediately and change the password from the UI later."""
+    _require_admin(authorization)
+    if req.role not in ("user", "admin"):
+        raise HTTPException(400, "role must be 'user' or 'admin'")
+    try:
+        result = supabase.auth.admin.create_user({
+            "email": req.email,
+            "password": req.password,
+            "email_confirm": True,
+            "app_metadata": {"role": req.role},
+        })
+    except Exception as e:
+        raise HTTPException(500, f"Create user failed: {e}")
+    user = getattr(result, "user", None) or result
+    return {
+        "id": getattr(user, "id", None),
+        "email": getattr(user, "email", None),
+        "role": req.role,
+    }
+
+
+class SetRoleRequest(BaseModel):
+    role: str  # 'user' or 'admin'
+
+
+@app.patch("/api/auth/users/{user_id}/role")
+async def set_user_role(user_id: str, req: SetRoleRequest, authorization: str = Header(...)):
+    """Promote/demote a user (admin only)."""
+    _require_admin(authorization)
+    if req.role not in ("user", "admin"):
+        raise HTTPException(400, "role must be 'user' or 'admin'")
+    try:
+        # Fetch the user first so we preserve any other app_metadata fields.
+        existing = supabase.auth.admin.get_user_by_id(user_id)
+        existing_user = getattr(existing, "user", None) or existing
+        existing_meta = (getattr(existing_user, "app_metadata", None) or {})
+        new_meta = {**existing_meta, "role": req.role}
+        supabase.auth.admin.update_user_by_id(user_id, {"app_metadata": new_meta})
+    except Exception as e:
+        raise HTTPException(500, f"Update role failed: {e}")
+    return {"id": user_id, "role": req.role}
+
+
+@app.delete("/api/auth/users/{user_id}")
+async def delete_user(user_id: str, authorization: str = Header(...)):
+    """Delete a user (admin only)."""
+    me = _require_admin(authorization)
+    if me["id"] == user_id:
+        raise HTTPException(400, "Use /api/auth/delete-account to delete your own account")
+    try:
+        supabase.auth.admin.delete_user(user_id)
+    except Exception as e:
+        raise HTTPException(500, f"Delete user failed: {e}")
+    return {"ok": True, "id": user_id}
+
+
+class ImpersonateRequest(BaseModel):
+    target_user_id: str
+
+
+@app.post("/api/auth/impersonate")
+async def impersonate_user(req: ImpersonateRequest, authorization: str = Header(...)):
+    """Mint real session tokens for another user (admin only).
+
+    Two-step server-side dance, hidden from the client:
+      1. `admin.generate_link({type: "magiclink", email})` produces a
+         hashed_token that's normally embedded in an email.
+      2. `auth.verify_otp({token_hash, type: "magiclink"})` consumes the
+         hashed_token and returns a fresh `{access_token, refresh_token}`
+         for the target user.
+
+    The frontend then calls `supabase.auth.setSession(...)` with those
+    tokens to swap the active session. No URL fragment, no magic-link
+    redirect, no race with cookie writes.
+    """
+    _require_admin(authorization)
+    try:
+        existing = supabase.auth.admin.get_user_by_id(req.target_user_id)
+    except Exception as e:
+        raise HTTPException(404, f"Target user not found: {e}")
+    target = getattr(existing, "user", None) or existing
+    target_email = getattr(target, "email", None)
+    if not target_email:
+        raise HTTPException(404, "Target user has no email")
+
+    try:
+        link_result = supabase.auth.admin.generate_link({
+            "type": "magiclink",
+            "email": target_email,
+            # `options` requires `redirect_to`; we don't actually use the
+            # action_link, but the type expects this field to be present.
+            "options": {"redirect_to": "http://localhost"},
+        })
+    except Exception as e:
+        raise HTTPException(500, f"generate_link failed: {e}")
+    properties = getattr(link_result, "properties", None)
+    hashed_token = getattr(properties, "hashed_token", None) if properties else None
+    if not hashed_token:
+        raise HTTPException(500, "generate_link returned no hashed_token")
+
+    # Use a throwaway client for verify_otp — supabase-py is stateful and
+    # `verify_otp` stores the resulting session on the client, replacing the
+    # service_role auth header. Calling it on the global `supabase` would
+    # silently switch every subsequent DB insert to the impersonated user's
+    # JWT, which is then subject to RLS and fails with 42501.
+    auth_only = create_client(
+        os.environ["SUPABASE_URL"],
+        os.environ["SUPABASE_SERVICE_KEY"],
+    )
+    try:
+        verification = auth_only.auth.verify_otp({
+            "token_hash": hashed_token,
+            "type": "magiclink",
+        })
+    except Exception as e:
+        raise HTTPException(500, f"verify_otp failed: {e}")
+    session = getattr(verification, "session", None)
+    if not session:
+        raise HTTPException(500, "verify_otp returned no session")
+
+    return {
+        "target_email": target_email,
+        "user_id": req.target_user_id,
+        "access_token": getattr(session, "access_token", None),
+        "refresh_token": getattr(session, "refresh_token", None),
+        "expires_at": getattr(session, "expires_at", None),
+    }
 
 
 @app.get("/api/hello")
@@ -1138,21 +1373,49 @@ def _resolve_exchange_id(exchange_code: str) -> int | None:
 
 @app.get("/api/companies")
 async def list_companies():
-    resp = (
-        supabase.table("company")
-        .select("company_id,company_name,gurufocus_ticker,exchange_id,gurufocus_exchange:gurufocus_exchange(exchange_code,country:country(country_name))")
-        .order("company_name")
-        .limit(10000)
-        .execute()
-    )
-    # Flatten the nested exchange join
-    rows = resp.data or []
-    for r in rows:
-        exch_info = r.pop("gurufocus_exchange", None) or {}
-        country_info = exch_info.pop("country", None) or {}
-        r["gurufocus_exchange"] = exch_info.get("exchange_code")
-        r["country"] = country_info.get("country_name")
-    return rows
+    """Return the company list. Memberships are fetched separately by the
+    frontend via `/api/companies/memberships` so a slow universe aggregate
+    can't block the table render."""
+    def _query():
+        resp = (
+            supabase.table("company")
+            .select("company_id,company_name,gurufocus_ticker,exchange_id,gurufocus_exchange:gurufocus_exchange(exchange_code,country:country(country_name))")
+            .order("company_name")
+            .limit(10000)
+            .execute()
+        )
+        rows = resp.data or []
+        for r in rows:
+            exch_info = r.pop("gurufocus_exchange", None) or {}
+            country_info = exch_info.pop("country", None) or {}
+            r["gurufocus_exchange"] = exch_info.get("exchange_code")
+            r["country"] = country_info.get("country_name")
+        return rows
+
+    return await asyncio.to_thread(_query)
+
+
+@app.get("/api/companies/memberships")
+async def list_company_memberships():
+    """Distinct universe labels per company. Computed server-side via the
+    `company_universe_labels` RPC; backed by an index on
+    universe_membership(company_id) so the aggregate is fast even when the
+    table holds millions of per-month rows. Returns
+    `{memberships: {company_id: [labels]}}`."""
+    def _query():
+        try:
+            resp = supabase.rpc("company_universe_labels").execute()
+            return {
+                str(r["company_id"]): (r.get("labels") or [])
+                for r in (resp.data or [])
+            }
+        except Exception:
+            # Migration may not be applied yet — return empty rather than 500
+            # so the page just shows no chips.
+            return {}
+
+    memberships = await asyncio.to_thread(_query)
+    return {"memberships": memberships}
 
 
 @app.post("/api/companies")
@@ -2129,6 +2392,23 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         data_cutoff = date.fromisoformat(req.end_date)
 
         excluded_ids: set[int] = set()
+
+        # When a universe / index_universe is selected, drop every company
+        # that doesn't appear in any month of that universe. Otherwise
+        # price+volume gets fetched for unrelated companies (LongEquity-only
+        # adds, manual /companies entries, members of other saved universes)
+        # that the scoring pipeline would discard anyway, wasting GuruFocus
+        # API calls and wall-time. The filter is the union across months —
+        # per-month membership filtering still runs at scoring time.
+        if monthly_eligible is not None:
+            eligible_ids: set[int] = set()
+            for month_map in monthly_eligible.values():
+                eligible_ids.update(month_map.keys())
+            before = len(universe_df)
+            universe_df = universe_df[universe_df["company_id"].isin(eligible_ids)].reset_index(drop=True)
+            dropped = before - len(universe_df)
+            if dropped:
+                yield _emit({"type": "progress", "pct": 8, "message": f"Trimmed {dropped} companies not in selected universe ({len(universe_df)} remaining)"})
 
         # If max_companies is set, pre-trim the universe alphabetically so we
         # only fetch what we need. (Parallel fetch makes the old "stop at
@@ -4888,17 +5168,61 @@ async def fx_coverage():
 
 @app.get("/api/fx/latest")
 async def fx_latest():
-    """Get latest daily rates for all currencies vs EUR (ECB + pegged + TWD)."""
-    rates = await asyncio.to_thread(fetch_all_latest)
-    return {"rates": rates, "count": len(rates)}
+    """Latest daily rates per currency.
+
+    Reads from the local fx_rate table (fast). Falls back to live ECB when
+    the table is empty so the page works on a fresh install — the user can
+    then click "Sync from ECB" to persist data and get the fast path on
+    subsequent loads.
+    """
+    rates = await asyncio.to_thread(fetch_latest_from_db, supabase)
+    source = "db"
+    if not rates:
+        from fx_rates import fetch_all_latest
+        rates = await asyncio.to_thread(fetch_all_latest)
+        source = "ecb_live"
+    return {"rates": rates, "count": len(rates), "source": source}
 
 
 @app.get("/api/fx/history/{currency}")
 async def fx_history(currency: str, start_date: str | None = None):
-    """Get daily historical FX rates for a currency vs EUR."""
+    """Daily historical FX rates for a currency.
+
+    Reads from the local fx_rate table (fast). Falls back to live ECB when
+    nothing is stored for that currency yet."""
     currency = currency.upper()
-    rates = await asyncio.to_thread(fetch_history, currency, start_date)
-    return {"currency": currency, "rates": rates, "count": len(rates)}
+    rates = await asyncio.to_thread(fetch_history_from_db, supabase, currency, start_date)
+    source = "db"
+    if not rates:
+        from fx_rates import fetch_history
+        rates = await asyncio.to_thread(fetch_history, currency, start_date)
+        source = "ecb_live"
+    return {"currency": currency, "rates": rates, "count": len(rates), "source": source}
+
+
+@app.post("/api/fx/sync")
+async def fx_sync(start_date: str | None = None):
+    """Sync ECB + pegged + TWD rates into the local fx_rate table.
+
+    Used by the FX page's manual sync button. Idempotent: each currency only
+    fetches the gap between its latest stored rate_date and today, so this is
+    cheap on subsequent runs."""
+    from datetime import date as _date
+    start = _date.fromisoformat(start_date) if start_date else _date(2000, 1, 1)
+    end = _date.today()
+    currencies = ECB_CURRENCIES + list(_USD_PEGS.keys()) + ["TWD"]
+    status = await asyncio.to_thread(
+        sync_fx_rates_to_db, supabase, currencies, start, end,
+    )
+    synced = [c for c, s in status.items() if s.get("status") == "synced"]
+    cached = [c for c, s in status.items() if s.get("status") == "cached"]
+    failed = [c for c, s in status.items() if s.get("status") == "error"]
+    return {
+        "synced": sorted(synced),
+        "cached": sorted(cached),
+        "failed": sorted(failed),
+        "details": status,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid,
 } from 'recharts';
+import { trackedFetch } from '../../lib/loading';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -189,35 +190,69 @@ export default function FxRates() {
   const [selectedCurrency, setSelectedCurrency] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [latestSource, setLatestSource] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    setError(null);
+    try {
+      const [covRes, ratesRes] = await Promise.all([
+        trackedFetch('Loading ACWI currency coverage', `${API_URL}/api/fx/coverage`),
+        trackedFetch('Loading latest FX rates', `${API_URL}/api/fx/latest`),
+      ]);
+      if (!covRes.ok || !ratesRes.ok) throw new Error('Failed to fetch FX data');
+      setCoverage(await covRes.json());
+      const ratesData = await ratesRes.json();
+      setLatestRates(ratesData.rates);
+      setLatestSource(ratesData.source ?? null);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }, []);
 
   useEffect(() => {
-    async function load() {
+    (async () => {
       setLoading(true);
-      setError(null);
-      try {
-        const [covRes, ratesRes] = await Promise.all([
-          fetch(`${API_URL}/api/fx/coverage`),
-          fetch(`${API_URL}/api/fx/latest`),
-        ]);
-        if (!covRes.ok || !ratesRes.ok) throw new Error('Failed to fetch FX data');
-        const covData = await covRes.json();
-        const ratesData = await ratesRes.json();
-        setCoverage(covData);
-        setLatestRates(ratesData.rates);
-      } catch (e: any) {
-        setError(e.message);
-      } finally {
-        setLoading(false);
-      }
+      await reload();
+      setLoading(false);
+    })();
+  }, [reload]);
+
+  const syncFromEcb = useCallback(async () => {
+    setSyncing(true);
+    setSyncMessage('Syncing from ECB / Yahoo…');
+    try {
+      const res = await trackedFetch(
+        'Syncing FX rates from ECB',
+        `${API_URL}/api/fx/sync`,
+        { method: 'POST' },
+      );
+      if (!res.ok) throw new Error('Sync failed');
+      const data = await res.json();
+      const failed = data.failed?.length ?? 0;
+      const synced = data.synced?.length ?? 0;
+      setSyncMessage(
+        failed > 0
+          ? `Synced ${synced}, failed ${failed}: ${data.failed.join(', ')}`
+          : `Synced ${synced} currencies`,
+      );
+      await reload();
+    } catch (e: any) {
+      setSyncMessage(`Sync failed: ${e.message}`);
+    } finally {
+      setSyncing(false);
     }
-    load();
-  }, []);
+  }, [reload]);
 
   const loadHistory = useCallback(async (currency: string) => {
     setSelectedCurrency(currency);
     setHistoryLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/fx/history/${currency}?start_date=2000-01-01`);
+      const res = await trackedFetch(
+        `Loading ${currency} history`,
+        `${API_URL}/api/fx/history/${currency}?start_date=2000-01-01`,
+      );
       if (!res.ok) throw new Error('Failed to fetch history');
       const data = await res.json();
       setHistory(data.rates);
@@ -258,9 +293,26 @@ export default function FxRates() {
 
   return (
     <div className="px-8 py-5 space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold text-white">FX Rates</h1>
-        <p className="text-sm text-gray-400 mt-1">ECB daily exchange rates vs EUR &mdash; for converting ACWI prices to a common currency</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold text-white">FX Rates</h1>
+          <p className="text-sm text-gray-400 mt-1">ECB daily exchange rates vs EUR &mdash; for converting ACWI prices to a common currency</p>
+          {latestSource === 'ecb_live' && (
+            <p className="text-xs text-amber-400 mt-2">
+              Loaded live from ECB (local <span className="font-mono">fx_rate</span> table is empty). Click <b>Sync from ECB</b> once to persist data for fast loads.
+            </p>
+          )}
+          {syncMessage && (
+            <p className="text-xs text-gray-500 mt-2">{syncMessage}</p>
+          )}
+        </div>
+        <button
+          onClick={syncFromEcb}
+          disabled={syncing}
+          className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 transition-colors"
+        >
+          {syncing ? 'Syncing…' : 'Sync from ECB'}
+        </button>
       </div>
 
       {/* Coverage summary */}

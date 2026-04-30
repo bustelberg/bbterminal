@@ -47,7 +47,7 @@ _USER_AGENT = (
     "Chrome/120.0.0.0 Safari/537.36"
 )
 
-US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX"}
+US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX", "CBOE"}
 
 # ── Formatting ──────────────────────────────────────────────────────────────
 

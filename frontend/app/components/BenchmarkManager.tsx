@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { dialog } from '../../lib/dialog';
+import { trackedFetch } from '../../lib/loading';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -30,7 +31,7 @@ export default function BenchmarkManager() {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/benchmarks`);
+      const res = await trackedFetch('Loading benchmarks', `${API_URL}/api/benchmarks`);
       setBenchmarks(await res.json());
     } catch {
       setError('Failed to load benchmarks');
@@ -45,7 +46,7 @@ export default function BenchmarkManager() {
     setAdding(true);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/benchmarks`, {
+      const res = await trackedFetch(`Adding benchmark ${ticker.trim()}`, `${API_URL}/api/benchmarks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticker: ticker.trim(), name: name.trim() }),
@@ -69,7 +70,7 @@ export default function BenchmarkManager() {
     setRefreshingId(id);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/benchmarks/${id}/refresh`, { method: 'POST' });
+      const res = await trackedFetch(`Refreshing benchmark prices`, `${API_URL}/api/benchmarks/${id}/refresh`, { method: 'POST' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.detail ?? `HTTP ${res.status}`);
@@ -84,7 +85,7 @@ export default function BenchmarkManager() {
     if (!(await dialog.confirm(`Delete benchmark "${ticker}"?`, { destructive: true, confirmLabel: 'Delete' }))) return;
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/benchmarks/${id}`, { method: 'DELETE' });
+      const res = await trackedFetch(`Deleting benchmark`, `${API_URL}/api/benchmarks/${id}`, { method: 'DELETE' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.detail ?? `HTTP ${res.status}`);

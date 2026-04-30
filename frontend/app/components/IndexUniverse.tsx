@@ -11,6 +11,7 @@ import {
   startSp500GfCheck,
   clearSp500GfCheck,
 } from '../../lib/stores/sp500';
+import { trackedFetch } from '../../lib/loading';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -66,7 +67,7 @@ export default function IndexUniverse() {
 
   // Load indexes on mount
   const loadIndexes = useCallback(() => {
-    fetch(`${API_URL}/api/index-universe/indexes`)
+    trackedFetch('Loading indexes', `${API_URL}/api/index-universe/indexes`)
       .then(r => r.json())
       .then(data => setIndexes(data))
       .catch(() => {});
@@ -76,7 +77,7 @@ export default function IndexUniverse() {
 
   // Load months for selected index
   const loadMonths = useCallback((idx: string) => {
-    fetch(`${API_URL}/api/index-universe/months?index=${encodeURIComponent(idx)}`)
+    trackedFetch(`Loading ${idx} months`, `${API_URL}/api/index-universe/months?index=${encodeURIComponent(idx)}`)
       .then(r => r.json())
       .then(data => setMonths(data))
       .catch(() => {});
@@ -84,7 +85,7 @@ export default function IndexUniverse() {
 
   // Load changes for selected index
   const loadChanges = useCallback((idx: string) => {
-    fetch(`${API_URL}/api/index-universe/changes?index=${encodeURIComponent(idx)}`)
+    trackedFetch(`Loading ${idx} change history`, `${API_URL}/api/index-universe/changes?index=${encodeURIComponent(idx)}`)
       .then(r => r.json())
       .then(data => setChanges(data))
       .catch(() => {});
@@ -94,7 +95,7 @@ export default function IndexUniverse() {
   const loadCumulative = useCallback((idx: string) => {
     setLoadingCumulative(true);
     setCumulative([]);
-    fetch(`${API_URL}/api/index-universe/cumulative?index=${encodeURIComponent(idx)}`)
+    trackedFetch(`Loading ${idx} cumulative tickers`, `${API_URL}/api/index-universe/cumulative?index=${encodeURIComponent(idx)}`)
       .then(r => r.json())
       .then(data => { setCumulative(data); setLoadingCumulative(false); })
       .catch(() => setLoadingCumulative(false));
@@ -118,7 +119,7 @@ export default function IndexUniverse() {
     setSelectedMonth(month);
     setLoadingMonth(true);
     setTickers([]);
-    fetch(`${API_URL}/api/index-universe/tickers?index=${encodeURIComponent(selectedIndex)}&month=${month}`)
+    trackedFetch(`Loading ${selectedIndex} tickers for ${month}`, `${API_URL}/api/index-universe/tickers?index=${encodeURIComponent(selectedIndex)}&month=${month}`)
       .then(r => r.json())
       .then(data => { setTickers(data); setLoadingMonth(false); })
       .catch(() => setLoadingMonth(false));
@@ -143,7 +144,7 @@ export default function IndexUniverse() {
   // Delete index
   const deleteIndex = async (idx: string) => {
     if (!(await dialog.confirm(`Delete all data for ${idx}?`, { destructive: true, confirmLabel: 'Delete' }))) return;
-    fetch(`${API_URL}/api/index-universe/indexes/${encodeURIComponent(idx)}`, { method: 'DELETE' })
+    trackedFetch(`Deleting ${idx}`, `${API_URL}/api/index-universe/indexes/${encodeURIComponent(idx)}`, { method: 'DELETE' })
       .then(() => {
         loadIndexes();
         if (selectedIndex === idx) {

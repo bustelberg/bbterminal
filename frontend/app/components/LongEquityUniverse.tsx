@@ -6,6 +6,7 @@ import type { Snapshot } from '../longequity-universe/page';
 import { ingestStore, startIngest } from '../../lib/stores/ingest';
 import DatePartsPicker from './DatePartsPicker';
 import ProgressTimeline, { type StepDef, type StepState } from './ProgressTimeline';
+import { trackedFetch } from '../../lib/loading';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -238,7 +239,7 @@ export default function LongEquityUniverse() {
 
   async function refreshSnapshots() {
     try {
-      const res = await fetch(`${API_URL}/api/longequity/snapshots`);
+      const res = await trackedFetch('Refreshing LongEquity snapshots', `${API_URL}/api/longequity/snapshots`);
       if (res.ok) {
         const fresh: Snapshot[] = await res.json();
         setSnapshots(fresh);
@@ -253,7 +254,7 @@ export default function LongEquityUniverse() {
     setLoadingAvailable(true);
     const snapshotsPromise = (async () => {
       try {
-        const res = await fetch(`${API_URL}/api/longequity/snapshots`);
+        const res = await trackedFetch('Loading LongEquity snapshots', `${API_URL}/api/longequity/snapshots`);
         if (!res.ok) return;
         const fresh: Snapshot[] = await res.json();
         setSnapshots(fresh);
@@ -264,17 +265,33 @@ export default function LongEquityUniverse() {
         setSnapshotsLoading(false);
       }
     })();
-    const availablePromise = fetch(`${API_URL}/api/longequity/latest-available`)
-      .then((r) => r.json())
-      .then((d: { available: boolean; year?: number; month?: number }) => {
+    const availablePromise = (async () => {
+      try {
+        const res = await trackedFetch(
+          'Checking latest available month',
+          `${API_URL}/api/longequity/latest-available`,
+        );
+        if (!res.ok) {
+          // Backend reachable but errored. Common causes: LONGEQUITY_BASE_URL
+          // env var unset, remote upstream temporarily down. Surface it so the
+          // user doesn't stare at a blank dash.
+          let detail = '';
+          try { detail = (await res.json())?.detail ?? ''; } catch {}
+          setLatestAvailable(detail ? `Error: ${detail.slice(0, 80)}` : `Error ${res.status}`);
+          return;
+        }
+        const d: { available: boolean; year?: number; month?: number } = await res.json();
         if (d.available && d.year && d.month) {
           setLatestAvailable(`${MONTH_NAMES[d.month]} ${d.year}`);
         } else {
           setLatestAvailable('Not found');
         }
-      })
-      .catch(() => setLatestAvailable('Unknown'))
-      .finally(() => setLoadingAvailable(false));
+      } catch (e) {
+        setLatestAvailable(e instanceof Error ? `Error: ${e.message}` : 'Unknown');
+      } finally {
+        setLoadingAvailable(false);
+      }
+    })();
     await Promise.all([snapshotsPromise, availablePromise]);
   }
 
@@ -287,7 +304,7 @@ export default function LongEquityUniverse() {
     if (selectedDate === null) return;
     setLoading(true);
     setData(null);
-    fetch(`${API_URL}/api/longequity/companies?target_date=${selectedDate}`)
+    trackedFetch(`Loading companies for ${selectedDate}`, `${API_URL}/api/longequity/companies?target_date=${selectedDate}`)
       .then((r) => r.json())
       .then((d: SnapshotData) => { setData(d); setLoading(false); })
       .catch(() => setLoading(false));
@@ -322,7 +339,7 @@ export default function LongEquityUniverse() {
     setSaveStepMap({});
     setSaveLog([]);
     try {
-      const resp = await fetch(`${API_URL}/api/longequity/save-universe`, {
+      const resp = await trackedFetch(`Saving universe ${name}`, `${API_URL}/api/longequity/save-universe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -353,13 +353,113 @@ def exchange_to_currency(exchange: str) -> str | None:
     return _EXCHANGE_TO_CURRENCY.get(exchange)
 
 
+_COVERAGE_CACHE: dict | None = None
+_COVERAGE_CACHE_KEY: float | None = None
+
+
+def fetch_latest_from_db(supabase) -> list[dict]:
+    """Latest stored rate per currency from the local `fx_rate` table.
+
+    Returns the same shape as `fetch_all_latest()` so the FX page renders
+    identically. EUR is excluded — it's the base, the frontend renders its
+    own row. The page-load path used to hit ECB live (~3-10s); this is a
+    single Postgres query.
+    """
+    # PostgREST has no DISTINCT ON, so we paginate the whole currency_code +
+    # rate_date columns ordered by (currency_code, rate_date desc) and pluck
+    # the first row per code in Python. ~30 currencies × ~7000 days = ~200K
+    # rows so we still need to bound this — but we only need the latest per
+    # currency, so we can fetch newest-first and short-circuit per code.
+    latest: dict[str, dict] = {}
+    page_size = 1000
+    offset = 0
+    seen_all = False
+    while not seen_all:
+        resp = (
+            supabase.table("fx_rate")
+            .select("currency_code, rate_date, rate")
+            .order("rate_date", desc=True)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        rows = resp.data or []
+        if not rows:
+            break
+        for r in rows:
+            code = r["currency_code"]
+            if code not in latest:
+                latest[code] = {
+                    "currency": code,
+                    "rate_date": r["rate_date"],
+                    "rate": float(r["rate"]),
+                }
+        if len(rows) < page_size:
+            break
+        offset += page_size
+        # Heuristic stop: once we've covered every currency seen so far for
+        # several pages and find no new ones, we can break early. Keep it
+        # simple: bound by 20 pages (20K rows) which is plenty for ~30
+        # currencies even when their latest dates are months apart.
+        if offset >= 20_000:
+            break
+
+    results = []
+    for code, row in latest.items():
+        info = CURRENCY_INFO.get(code)
+        source = "pegged" if code in _USD_PEGS else "yahoo" if code == "TWD" else "ecb"
+        results.append({
+            "currency": code,
+            "name": info[0] if info else code,
+            "country": info[1] if info else "",
+            "rate": row["rate"],
+            "date": row["rate_date"],
+            "source": source,
+        })
+    return sorted(results, key=lambda r: r["currency"])
+
+
+def fetch_history_from_db(supabase, currency: str, start_date: str | None = None) -> list[dict]:
+    """Daily history for one currency from the local `fx_rate` table."""
+    start = start_date or "2000-01-01"
+    rows: list[dict] = []
+    page_size = 1000
+    offset = 0
+    while True:
+        resp = (
+            supabase.table("fx_rate")
+            .select("rate_date, rate")
+            .eq("currency_code", currency)
+            .gte("rate_date", start)
+            .order("rate_date")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        batch = resp.data or []
+        rows.extend({"date": r["rate_date"], "rate": float(r["rate"])} for r in batch)
+        if len(batch) < page_size:
+            break
+        offset += page_size
+    return rows
+
+
 def get_coverage_info() -> dict:
     """Compare ACWI local currencies against ECB availability.
 
     Derives the local trading currency from each holding's exchange,
-    since the iShares file reports all prices in USD.
+    since the iShares file reports all prices in USD. Cached on the iShares
+    XLS file's mtime so repeat page loads don't re-parse the ~5MB XML.
     """
-    from index_universe.acwi import load_acwi_holdings
+    global _COVERAGE_CACHE, _COVERAGE_CACHE_KEY
+    from index_universe.acwi import load_acwi_holdings, _FILE
+    import os as _os
+
+    try:
+        mtime = _os.path.getmtime(_FILE)
+    except OSError:
+        mtime = 0.0
+    if _COVERAGE_CACHE is not None and _COVERAGE_CACHE_KEY == mtime:
+        return _COVERAGE_CACHE
+
     holdings, _ = load_acwi_holdings()
 
     # Count holdings per local currency (derived from exchange)
@@ -385,7 +485,7 @@ def get_coverage_info() -> dict:
         for code, info in CURRENCY_INFO.items()
     }
 
-    return {
+    result = {
         "ecb_currencies": ECB_CURRENCIES,
         "acwi_currencies": acwi_currencies,
         "currency_counts": currency_counts,
@@ -395,3 +495,6 @@ def get_coverage_info() -> dict:
         "eur_count": currency_counts.get("EUR", 0),
         "unmapped_exchanges": unmapped_exchanges,
     }
+    _COVERAGE_CACHE = result
+    _COVERAGE_CACHE_KEY = mtime
+    return result
