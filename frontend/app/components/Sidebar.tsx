@@ -120,10 +120,12 @@ export default function Sidebar() {
 
   useEffect(() => {
     const supabase = createClient();
-    // Capture both the user (for role) and the session (for access tokens
-    // we'll use to switch back to this account later). Promise.all so the
-    // store is updated atomically with the role state.
-    Promise.all([supabase.auth.getUser(), supabase.auth.getSession()]).then(([userRes, sessionRes]) => {
+
+    async function refresh() {
+      const [userRes, sessionRes] = await Promise.all([
+        supabase.auth.getUser(),
+        supabase.auth.getSession(),
+      ]);
       const user = userRes.data.user;
       const session = sessionRes.data.session;
       setEmail(user?.email ?? null);
@@ -131,10 +133,6 @@ export default function Sidebar() {
       const detectedRole: 'admin' | 'user' = meta.role === 'admin' ? 'admin' : 'user';
       setRole(detectedRole);
       setChecked(true);
-      // If we're signed in, upsert the current session into the multi-
-      // account store so we can switch back to this account instantly.
-      // Tokens get refreshed every time the sidebar mounts so they stay
-      // fresh as long as the user keeps using the app.
       if (user?.email && user?.id && session) {
         const updated = upsertSession({
           email: user.email,
@@ -148,8 +146,21 @@ export default function Sidebar() {
       } else {
         setStoredSessions(readSessions());
       }
+    }
+
+    refresh();
+
+    // The Sidebar lives in the root layout and stays mounted across
+    // /login ↔ /. Without this subscription, role/email would be frozen
+    // at whoever signed in *first* — switching accounts would leave the
+    // sidebar showing the previous user's nav items (or nothing if the
+    // new account's role hasn't been picked up yet).
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      refresh();
     });
+
     setViewAsUser(readViewAsCookie());
+    return () => subscription.unsubscribe();
   }, []);
 
   // Close the account menu on outside click.
