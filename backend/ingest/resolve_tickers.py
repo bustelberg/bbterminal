@@ -95,7 +95,6 @@ def detect_unknown_tickers(
     Return tickers in df not covered by fill_ticker.json or db_overrides.
     Each entry: {ticker, country, exchange}.
     """
-    import pandas as pd
 
     if fill_path is None:
         fill_path = Path(__file__).resolve().parent / "fill_ticker.json"

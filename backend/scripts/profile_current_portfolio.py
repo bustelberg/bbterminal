@@ -16,7 +16,7 @@ import os
 import pickle
 import sys
 import time
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 # Make the backend root importable when running from anywhere.
@@ -94,7 +94,7 @@ def build_dataset(sb, *, universe_label: str, price_start: date, price_end: date
     company_ids = sorted({cid for m in recent_months for cid in monthly_eligible[m]})
     print(f"[load] company_ids in last 6 months: {len(company_ids)}")
 
-    print(f"[load] universe (company table)...")
+    print("[load] universe (company table)...")
     t0 = time.perf_counter()
     universe_df = load_universe(sb)
     universe_df = universe_df[universe_df["company_id"].isin(company_ids)].reset_index(drop=True)
@@ -105,7 +105,7 @@ def build_dataset(sb, *, universe_label: str, price_start: date, price_end: date
     prices_local_df = load_all_prices(sb, company_ids, price_start, price_end)
     print(f"  -> {len(prices_local_df):,} price rows ({time.perf_counter() - t0:.1f}s)")
 
-    print(f"[load] company currencies...")
+    print("[load] company currencies...")
     t0 = time.perf_counter()
     company_currency = load_company_currency(sb, company_ids)
     needed_ccy = sorted({c for c in company_currency.values() if c})
@@ -117,12 +117,12 @@ def build_dataset(sb, *, universe_label: str, price_start: date, price_end: date
     fx_rates = load_fx_rates(sb, needed_ccy, price_start, price_end)
     print(f"  -> {sum(1 for v in fx_rates.values() if v is not None)} series loaded ({time.perf_counter() - t0:.1f}s)")
 
-    print(f"[load] converting prices to EUR...")
+    print("[load] converting prices to EUR...")
     t0 = time.perf_counter()
     prices_df, fx_stats = convert_prices_to_eur(prices_local_df, company_currency, fx_rates)
     print(f"  -> converted={fx_stats['converted_rows']:,} passthrough={fx_stats['passthrough_rows']:,} dropped_no_currency={fx_stats['dropped_no_currency']:,} dropped_no_fx={fx_stats['dropped_no_fx']:,} ({time.perf_counter() - t0:.1f}s)")
 
-    print(f"[load] volumes...")
+    print("[load] volumes...")
     t0 = time.perf_counter()
     volumes_df = load_all_volumes(sb, company_ids, price_start, price_end)
     print(f"  -> {len(volumes_df):,} volume rows ({time.perf_counter() - t0:.1f}s)")

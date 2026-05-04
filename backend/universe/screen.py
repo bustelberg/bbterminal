@@ -7,15 +7,14 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import date, datetime
 from typing import Generator
 
 from supabase import Client
 
-from ingest.prices import _build_symbol, _ensure_bucket, _fetch_from_storage, _upload_to_storage
-from ingest.earnings import _build_api_url, _api_request, _mask_url
+from ingest.prices import _build_symbol, _ensure_bucket, _upload_to_storage
+from ingest.earnings import _build_api_url, _api_request
 from ingest.api_usage import track_api_call
-from universe.criteria import evaluate_criteria, CriteriaResult, CRITERIA_NAMES
+from universe.criteria import evaluate_criteria
 
 logger = logging.getLogger(__name__)
 

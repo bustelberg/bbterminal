@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from collections import defaultdict
 from datetime import date, datetime
 from html.parser import HTMLParser

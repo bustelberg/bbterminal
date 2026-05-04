@@ -101,12 +101,25 @@ function clearAllSessions() {
 
 type SwitchableUser = { id: string; email: string | null; role: 'admin' | 'user' };
 
-export default function Sidebar() {
+// `initialUser` comes from the root layout's server-side getUser() call,
+// which has already been validated by proxy.ts. Passing it in lets the
+// sidebar render on first paint instead of waiting for the client-side
+// getUser() — and avoids the "tab-duplication race" where two tabs both
+// try to refresh tokens and the loser sees a transient null user, which
+// previously made the sidebar disappear until a hard refresh.
+type Props = {
+  initialUser: { email: string; role: 'admin' | 'user' } | null;
+};
+
+export default function Sidebar({ initialUser }: Props) {
   const pathname = usePathname();
   const router = useRouter();
-  const [email, setEmail] = useState<string | null>(null);
-  const [role, setRole] = useState<string | null>(null);
-  const [checked, setChecked] = useState(false);
+  const [email, setEmail] = useState<string | null>(initialUser?.email ?? null);
+  const [role, setRole] = useState<string | null>(initialUser?.role ?? null);
+  // `checked` gates the "show nothing" guard for unauthenticated users.
+  // When server already saw a user, we're done checking; when it didn't
+  // (auth pages, logged-out state), defer to client-side resolution.
+  const [checked, setChecked] = useState(initialUser != null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [viewAsUser, setViewAsUser] = useState(false);
@@ -121,31 +134,54 @@ export default function Sidebar() {
   useEffect(() => {
     const supabase = createClient();
 
-    async function refresh() {
+    // `event` is null on initial mount; on auth-state-change callbacks
+    // we get the actual event ('SIGNED_OUT', 'TOKEN_REFRESHED', etc.).
+    // We use it to decide whether a null `getUser()` should clear the
+    // sidebar or be ignored as a transient race.
+    async function refresh(event: string | null = null) {
       const [userRes, sessionRes] = await Promise.all([
         supabase.auth.getUser(),
         supabase.auth.getSession(),
       ]);
       const user = userRes.data.user;
       const session = sessionRes.data.session;
-      setEmail(user?.email ?? null);
-      const meta = (user?.app_metadata ?? {}) as { role?: string };
-      const detectedRole: 'admin' | 'user' = meta.role === 'admin' ? 'admin' : 'user';
-      setRole(detectedRole);
-      setChecked(true);
-      if (user?.email && user?.id && session) {
-        const updated = upsertSession({
-          email: user.email,
-          user_id: user.id,
-          role: detectedRole,
-          access_token: session.access_token,
-          refresh_token: session.refresh_token,
-          saved_at: Date.now(),
-        });
-        setStoredSessions(updated);
-      } else {
-        setStoredSessions(readSessions());
+
+      if (user?.email) {
+        // Got a real user — adopt it as the live state.
+        setEmail(user.email);
+        const meta = (user.app_metadata ?? {}) as { role?: string };
+        const detectedRole: 'admin' | 'user' = meta.role === 'admin' ? 'admin' : 'user';
+        setRole(detectedRole);
+        if (user.id && session) {
+          const updated = upsertSession({
+            email: user.email,
+            user_id: user.id,
+            role: detectedRole,
+            access_token: session.access_token,
+            refresh_token: session.refresh_token,
+            saved_at: Date.now(),
+          });
+          setStoredSessions(updated);
+        }
+      } else if (event === 'SIGNED_OUT') {
+        // Explicit sign-out — clear the sidebar. This is the ONE case
+        // where a null user should blank the UI.
+        setEmail(null);
+        setRole(null);
+      } else if (initialUser == null) {
+        // No initial server-side user AND client also sees none — show
+        // the unauthenticated state (no sidebar). This is the standard
+        // "logged out" path on auth pages or first visit.
+        setEmail(null);
+        setRole(null);
       }
+      // Otherwise: a transient null on initial mount or a TOKEN_REFRESHED
+      // event from a concurrent tab. Leave the sidebar as-is; the next
+      // auth-state-change should resolve it. This is the fix for the
+      // "duplicate tab → sidebar disappears" race.
+
+      setChecked(true);
+      if (!user?.email) setStoredSessions(readSessions());
     }
 
     refresh();
@@ -155,13 +191,13 @@ export default function Sidebar() {
     // at whoever signed in *first* — switching accounts would leave the
     // sidebar showing the previous user's nav items (or nothing if the
     // new account's role hasn't been picked up yet).
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
-      refresh();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      refresh(event);
     });
 
     setViewAsUser(readViewAsCookie());
     return () => subscription.unsubscribe();
-  }, []);
+  }, [initialUser]);
 
   // Close the account menu on outside click.
   useEffect(() => {

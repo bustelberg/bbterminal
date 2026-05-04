@@ -8,12 +8,15 @@ import re
 import threading
 import time
 from collections import OrderedDict
+
+import pandas as pd
 from datetime import date
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from typing import Literal
 from supabase import create_client
 from dotenv import load_dotenv
 
@@ -138,6 +141,7 @@ def _strategy_hash(req: "BacktestRequest") -> str:
         "index_universe": req.index_universe,
         "selection_mode": req.selection_mode,
         "rebalance_frequency": req.rebalance_frequency,
+        "strategy_type": req.strategy_type,
     }
     s = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(s.encode()).hexdigest()[:16]
@@ -163,6 +167,7 @@ def _backtest_strategy_hash(req: "BacktestRequest") -> str:
         "random_seed": req.random_seed,
         "n_trials": req.n_trials,
         "rebalance_frequency": req.rebalance_frequency,
+        "strategy_type": req.strategy_type,
     }
     s = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(s.encode()).hexdigest()[:16]
@@ -875,7 +880,8 @@ async def longequity_save_universe(req: LongEquitySaveUniverseRequest):
     snapshot. Sector and universe_ticker are carried forward from the most
     recent snapshot in which each company appeared.
     """
-    import queue as _queue, threading
+    import queue as _queue
+    import threading
 
     def _run(q: _queue.Queue):
         def emit(step: str, status: str, message: str):
@@ -890,7 +896,7 @@ async def longequity_save_universe(req: LongEquitySaveUniverseRequest):
                 return
 
             # --- Resolve date range -------------------------------------------
-            from datetime import date as _date, timedelta as _timedelta
+            from datetime import date as _date
             try:
                 start_d = _date.fromisoformat(req.start_date)
             except Exception:
@@ -1121,7 +1127,6 @@ def _save_performance_to_db(portfolio_name: str, rows: list[dict]):
 def _parse_att_excel(content: bytes) -> list[dict]:
     """Parse ATT Excel bytes into a list of performance row dicts."""
     import io
-    import pandas as pd
 
     df = pd.read_excel(io.BytesIO(content), engine="xlrd")
     rows = []
@@ -1504,7 +1509,7 @@ async def _earnings_refresh_stream(company_id: int, sources: list[str], force: b
     yield event("info", f"Refreshing earnings data for {name} ({ticker}.{exchange})")
 
     for source in sources:
-        yield event("info", f"")
+        yield event("info", "")
         yield event("info", f"--- {source.upper()} ---")
 
         try:
@@ -2174,12 +2179,19 @@ class BacktestRequest(BaseModel):
     max_companies: int = 0  # 0 = all, otherwise limit universe (alphabetical)
     universe_label: str | None = None  # if set, use universe_membership for per-month filtering
     index_universe: str | None = None  # if set, use universe_membership for per-month filtering (e.g. "SP500")
-    selection_mode: str = "momentum"  # "momentum" or "random"
+    # Literal values reject typos at the request boundary so a misspelled
+    # value never silently routes through a default branch downstream
+    # (e.g. an unknown `mode` quietly behaving like "backtest"). New
+    # variants need to be added here AND wherever the value is consumed.
+    selection_mode: Literal["momentum", "random"] = "momentum"
     random_seed: int | None = None  # only used when selection_mode == "random"
     n_trials: int = 1  # >1 only valid with selection_mode=="random"; aggregates mean ± std
-    mode: str = "backtest"  # "backtest" or "current_portfolio"
+    mode: Literal["backtest", "current_portfolio"] = "backtest"
     force_recompute: bool = False  # ignore cached result and recompute (applies to backtest + current_portfolio)
-    rebalance_frequency: str = "monthly"  # daily | weekly | monthly | every_2_months | every_3_months
+    rebalance_frequency: Literal[
+        "daily", "weekly", "monthly", "every_2_months", "every_3_months",
+    ] = "monthly"
+    strategy_type: Literal["long_only", "long_short"] = "long_only"
 
 
 async def _momentum_backtest_stream(req: BacktestRequest):
@@ -2391,6 +2403,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             "selection_mode": req.selection_mode,
             "random_seed": req.random_seed,
             "rebalance_frequency": req.rebalance_frequency,
+            "strategy_type": req.strategy_type,
         })
 
         data_cutoff = date.fromisoformat(req.end_date)
@@ -3387,9 +3400,15 @@ def _refresh_mtd_for_holdings(holdings: list[dict]) -> tuple[list[dict], str | N
             return
         try:
             ensure_prices_for_company(supabase, cid, m[0], m[1])
-        except Exception:
-            # Best-effort; downstream still uses whatever's in the DB.
-            pass
+        except Exception as e:
+            # Best-effort: downstream still uses whatever's in the DB. But
+            # silent failure here is exactly how the WAR:SPL "no MTD update"
+            # bug went unnoticed — surface it in logs so the next regression
+            # is at least googleable.
+            logging.getLogger(__name__).warning(
+                "[refresh_mtd] ensure_prices_for_company failed for cid=%s ticker=%s exch=%s: %s: %s",
+                cid, m[0], m[1], type(e).__name__, e,
+            )
 
     if company_meta:
         from concurrent.futures import ThreadPoolExecutor
@@ -3490,8 +3509,9 @@ async def cron_current_picks(req: BacktestRequest, x_cron_secret: str = Header(d
         raise HTTPException(400, "Cron does not support random selection mode")
 
     # Drain the SSE stream to completion, then persist + return JSON.
+    # The SSE stream's universe payload is for the frontend's display layer;
+    # the cron only needs the snapshot itself, so we drop it.
     payload: dict | None = None
-    universe_snapshot: list = []
     error_msg: str | None = None
     async for chunk in _momentum_backtest_stream(req):
         # Each chunk is "data: {json}\n\n" or ": keepalive\n\n"
@@ -3503,7 +3523,6 @@ async def cron_current_picks(req: BacktestRequest, x_cron_secret: str = Header(d
             continue
         if evt.get("type") == "current_portfolio":
             payload = evt.get("data") or {}
-            universe_snapshot = evt.get("universe") or []
         elif evt.get("type") == "error":
             error_msg = evt.get("message") or "unknown error"
 
@@ -4574,7 +4593,7 @@ async def universe_derive_create(body: DeriveUniverseRequest):
                 },
             }))
         except Exception as exc:
-            logger.exception("universe/derive failed")
+            logging.getLogger(__name__).exception("universe/derive failed")
             q.put(json.dumps({"type": "error", "message": str(exc)}))
         finally:
             q.put(None)
@@ -4975,7 +4994,8 @@ async def acwi_save_universe(req: AcwiSaveUniverseRequest):
 
     The saved universe can be selected in the momentum backtester via `index_universe`.
     """
-    import queue as _queue, threading
+    import queue as _queue
+    import threading
 
     def _run(q: _queue.Queue):
         def emit(message: str, pct: int | None = None):
@@ -4993,17 +5013,25 @@ async def acwi_save_universe(req: AcwiSaveUniverseRequest):
             exch_resp = supabase.table("gurufocus_exchange").select("exchange_id, exchange_code").execute()
             exch_id_map = {r["exchange_code"]: r["exchange_id"] for r in (exch_resp.data or [])}
 
-            # Bulk-load existing company rows for all exchanges we care about (single query)
+            # Bulk-load existing company rows for all exchanges we care about
+            # (single query). Two indexes built off the same fetch:
+            #   - existing_by_key[(exchange_id, gf_ticker)] → cid (primary)
+            #   - existing_by_name[(exchange_id, NORMALIZED_NAME)] → list[cid]
+            # The name index is the fallback that catches override renames
+            # (e.g. WAR:SPL → WAR:EBP) and prevents the duplicate-row bug
+            # that fired when the primary key changed but the company is
+            # still the same iShares row underneath.
             needed_exchanges = {fh["db_exchange"] for fh in feasible}
             needed_eids = [exch_id_map[e] for e in needed_exchanges if e in exch_id_map]
             existing_by_key: dict[tuple[int, str], int] = {}
+            existing_by_name: dict[tuple[int, str], list[int]] = {}
             if needed_eids:
                 offset = 0
                 page_size = 1000
                 while True:
                     c_resp = (
                         supabase.table("company")
-                        .select("company_id, gurufocus_ticker, exchange_id")
+                        .select("company_id, gurufocus_ticker, exchange_id, company_name")
                         .in_("exchange_id", needed_eids)
                         .range(offset, offset + page_size - 1)
                         .execute()
@@ -5012,6 +5040,9 @@ async def acwi_save_universe(req: AcwiSaveUniverseRequest):
                     for c in batch:
                         if c.get("gurufocus_ticker") and c.get("exchange_id") is not None:
                             existing_by_key[(c["exchange_id"], c["gurufocus_ticker"])] = c["company_id"]
+                        name_norm = (c.get("company_name") or "").strip().upper()
+                        if name_norm and c.get("exchange_id") is not None:
+                            existing_by_name.setdefault((c["exchange_id"], name_norm), []).append(c["company_id"])
                     if len(batch) < page_size:
                         break
                     offset += page_size
@@ -5023,6 +5054,7 @@ async def acwi_save_universe(req: AcwiSaveUniverseRequest):
             }
             created = 0
             already = 0
+            renamed = 0
             skipped = 0
             unknown_exchanges: set[str] = set()
             for idx, fh in enumerate(feasible):
@@ -5036,39 +5068,79 @@ async def acwi_save_universe(req: AcwiSaveUniverseRequest):
                 if cid is not None:
                     company_lookup[fh["symbol"]] = cid
                     already += 1
-                else:
+                    continue
+
+                # Primary key miss — try the name-based fallback to catch a
+                # ticker rename (e.g. an override added since last ingest).
+                # Only honor it when the name → cid mapping is unique on
+                # this exchange; ambiguous matches fall through to insert.
+                name_norm = (fh.get("company_name") or "").strip().upper()
+                rename_target: int | None = None
+                if name_norm:
+                    candidates = existing_by_name.get((eid, name_norm))
+                    if candidates and len(candidates) == 1:
+                        rename_target = candidates[0]
+
+                if rename_target is not None:
                     try:
-                        ins = supabase.table("company").insert({
+                        supabase.table("company").update({
                             "gurufocus_ticker": fh["gf_ticker"],
-                            "exchange_id": eid,
                             "company_name": fh["company_name"] or None,
-                        }).execute()
-                        if ins.data:
-                            cid = ins.data[0]["company_id"]
-                            existing_by_key[key] = cid
-                            company_lookup[fh["symbol"]] = cid
-                            created += 1
+                        }).eq("company_id", rename_target).execute()
+                        existing_by_key[key] = rename_target
+                        company_lookup[fh["symbol"]] = rename_target
+                        renamed += 1
+                        emit(
+                            f"  renamed {fh['db_exchange']}:* → {fh['symbol']} "
+                            f"({fh['company_name']}, company_id={rename_target})",
+                            None,
+                        )
                     except Exception as e:
                         skipped += 1
-                        emit(f"  failed to create {fh['symbol']} ({fh['company_name']}): {e}", None)
-                        continue
-                    # Tag with 'acwi' source
-                    try:
-                        supabase.table("company_source").upsert(
-                            {"company_id": cid, "source_code": "acwi"},
-                            on_conflict="company_id,source_code",
-                            ignore_duplicates=True,
-                        ).execute()
-                    except Exception:
-                        pass
+                        emit(f"  failed to rename to {fh['symbol']} ({fh['company_name']}): {e}", None)
+                    continue
+
+                # Genuinely new row — no existing match by ticker or by name.
+                try:
+                    ins = supabase.table("company").insert({
+                        "gurufocus_ticker": fh["gf_ticker"],
+                        "exchange_id": eid,
+                        "company_name": fh["company_name"] or None,
+                    }).execute()
+                    if ins.data:
+                        cid = ins.data[0]["company_id"]
+                        existing_by_key[key] = cid
+                        company_lookup[fh["symbol"]] = cid
+                        created += 1
+                except Exception as e:
+                    skipped += 1
+                    emit(f"  failed to create {fh['symbol']} ({fh['company_name']}): {e}", None)
+                    continue
+                # Tag with 'acwi' source
+                try:
+                    supabase.table("company_source").upsert(
+                        {"company_id": cid, "source_code": "acwi"},
+                        on_conflict="company_id,source_code",
+                        ignore_duplicates=True,
+                    ).execute()
+                except Exception:
+                    pass
 
                 if (idx + 1) % 200 == 0 or idx == len(feasible) - 1:
                     pct = 10 + round((idx + 1) / len(feasible) * 30)
-                    emit(f"Companies: {created} created, {already} existing, {skipped} skipped ({idx + 1}/{len(feasible)})", pct)
+                    emit(
+                        f"Companies: {created} created, {renamed} renamed, "
+                        f"{already} existing, {skipped} skipped ({idx + 1}/{len(feasible)})",
+                        pct,
+                    )
 
             if unknown_exchanges:
                 emit(f"Unknown exchanges (missing from gurufocus_exchange): {sorted(unknown_exchanges)}", None)
-            emit(f"Company sync done: {created} new, {already} existing, {skipped} skipped", 42)
+            emit(
+                f"Company sync done: {created} new, {renamed} renamed, "
+                f"{already} existing, {skipped} skipped",
+                42,
+            )
 
             emit(f"Reconstructing monthly holdings {req.start_date}..{req.end_date}...", 45)
             monthly, stats = reconstruct_acwi_monthly_holdings(req.start_date, req.end_date)
@@ -5091,7 +5163,7 @@ async def acwi_save_universe(req: AcwiSaveUniverseRequest):
                     f"Saved '{req.name}': {store_stats['months']} months, "
                     f"{store_stats['total_rows']} rows, "
                     f"{store_stats['matched_companies']}/{store_stats['unique_tickers']} tickers matched "
-                    f"({created} new companies created, {already} existing)"
+                    f"({created} new companies created, {renamed} renamed, {already} existing)"
                 ),
                 "stats": {
                     "name": req.name,
@@ -5100,6 +5172,7 @@ async def acwi_save_universe(req: AcwiSaveUniverseRequest):
                     "unique_tickers": store_stats["unique_tickers"],
                     "matched_companies": store_stats["matched_companies"],
                     "companies_created": created,
+                    "companies_renamed": renamed,
                     "companies_existing": already,
                     "companies_skipped": skipped,
                     "feasible_count": stats["feasible_count"],
@@ -5129,7 +5202,8 @@ async def acwi_save_universe(req: AcwiSaveUniverseRequest):
 @app.get("/api/acwi/fetch-all-details")
 async def acwi_fetch_all_details():
     """SSE stream: fetch details for all constituent changes not yet cached."""
-    import queue, threading
+    import queue
+    import threading
 
     def _emit(obj: dict) -> str:
         return json.dumps(obj, default=str)
@@ -5456,7 +5530,7 @@ async def gurufocus_exchanges(force_refresh: bool = False):
     """Fetch the list of supported GuruFocus exchanges. Cached in Supabase Storage."""
     from ingest.prices import (
         _ensure_bucket, _fetch_from_storage, _upload_to_storage,
-        _BUCKET, _USER_AGENT,
+        _USER_AGENT,
     )
 
     def work():

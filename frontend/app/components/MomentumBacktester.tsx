@@ -9,6 +9,9 @@ import {
   momentumStore,
   startBacktest,
   cancelBacktest,
+  startVariantsBacktest,
+  cancelVariantsBacktest,
+  clearVariants,
   loadCurrentPicksSnapshots,
   loadCurrentPicksSnapshot,
   refreshCurrentPicksMTD,
@@ -19,6 +22,7 @@ import DailyPicksHistory from './momentum/DailyPicksHistory';
 import EquityCurveCard from './momentum/EquityCurveCard';
 import MonthlyHoldingsTable from './momentum/MonthlyHoldingsTable';
 import SectorTimelineChart from './momentum/SectorTimelineChart';
+import VariantSummaryTable from './momentum/VariantSummaryTable';
 import {
   EXCHANGE_NAMES,
   fmtPct,
@@ -70,6 +74,23 @@ export default function MomentumBacktester() {
   const loadedRunId = momentumStore.use((s) => s.loadedRunId);
   const runStartedAt = momentumStore.use((s) => s.runStartedAt);
   const runEndedAt = momentumStore.use((s) => s.runEndedAt);
+  // Variants sweep — populated by the "Run variants" button. When a variant
+  // is active, the detail views below render that variant's BacktestResult
+  // instead of the single-run `result`.
+  const variants = momentumStore.use((s) => s.variants);
+  const activeVariantKey = momentumStore.use((s) => s.activeVariantKey);
+  const variantsRun = momentumStore.use((s) => s.variantsRun);
+  const variantsRunning = variantsRun != null && variantsRun.current != null;
+  const hasVariants = Object.keys(variants).length > 0;
+  const activeVariantOutcome = activeVariantKey ? variants[activeVariantKey] : undefined;
+  const activeVariantResult =
+    activeVariantOutcome?.status === 'ok' ? activeVariantOutcome.result : null;
+  // The detail views (equity curve, holdings, sector timeline) prefer the
+  // active variant's result when one is selected; otherwise they fall back
+  // to the single-run result. Saving and "loaded run" flows only apply to
+  // the single-run path.
+  const displayResult = activeVariantResult ?? result;
+  const showSingleRunSaveUI = !activeVariantResult;
 
   // Re-render once per second while a run is active so the "Running 47s"
   // counter and per-line "+1.3s" timestamps stay live. Cheap; only fires
@@ -199,7 +220,10 @@ export default function MomentumBacktester() {
 
   // Run backtest — delegates to the module-scoped momentumStore, which owns
   // the fetch/reader loop so it survives navigation away from /momentum.
+  // Single-run mode wipes any prior variants sweep so the UI doesn't show
+  // stale variant rows alongside the new single result.
   const runBacktest = () => {
+    clearVariants();
     return startBacktest({
       start_date: `${startDate}-01`,
       end_date: `${endDate}-01`,
@@ -213,6 +237,29 @@ export default function MomentumBacktester() {
       selection_mode: selectionMode,
       random_seed: selectionMode === 'random' ? randomSeed : null,
       n_trials: selectionMode === 'random' ? Math.max(1, nTrials) : 1,
+      force_recompute: noCache,
+    });
+  };
+
+  // Variant sweep — fans out the same base config across the 10 (frequency
+  // × strategy) combos. Backend cache keys on both axes so re-runs are fast.
+  // Random selection mode is incompatible with long-short, so the runner
+  // coerces to "momentum" — the variants comparison is signal-driven.
+  const runVariantsBacktest = () => {
+    momentumStore.set({ result: null, loadedRunId: null });
+    return startVariantsBacktest({
+      start_date: `${startDate}-01`,
+      end_date: `${endDate}-01`,
+      signal_weights: weights,
+      category_weights: categoryWeights,
+      top_n_sectors: topSectors,
+      top_n_per_sector: topPerSector,
+      max_companies: maxCompanies,
+      universe_label: null,
+      index_universe: selectedIndexUniverse || null,
+      selection_mode: 'momentum',
+      random_seed: null,
+      n_trials: 1,
       force_recompute: noCache,
     });
   };
@@ -580,10 +627,24 @@ export default function MomentumBacktester() {
             )}
             <button
               onClick={runBacktest}
-              disabled={running}
+              disabled={running || variantsRunning}
               className="px-5 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {running ? 'Running...' : 'Run Backtest'}
+            </button>
+            <button
+              onClick={runVariantsBacktest}
+              disabled={running || variantsRunning || selectionMode === 'random'}
+              className="px-4 py-2 rounded-lg text-sm font-medium border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/10 hover:text-indigo-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title={
+                selectionMode === 'random'
+                  ? 'Variants sweep requires momentum selection mode (long-short is incompatible with random)'
+                  : 'Run all 10 frequency × strategy variants and compare them in one table'
+              }
+            >
+              {variantsRunning
+                ? `Running variants ${variantsRun?.completed ?? 0}/${variantsRun?.total ?? 0}…`
+                : 'Run variants'}
             </button>
             <button
               onClick={showCurrentPicks}
@@ -617,6 +678,14 @@ export default function MomentumBacktester() {
                 className="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
               >
                 Cancel
+              </button>
+            )}
+            {variantsRunning && (
+              <button
+                onClick={cancelVariantsBacktest}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+              >
+                Cancel variants
               </button>
             )}
           </div>
@@ -1006,19 +1075,26 @@ export default function MomentumBacktester() {
           </div>
         )}
 
-        {/* Results */}
-        {result && (
+        {/* Variant sweep summary — appears as soon as one variant outcome
+            lands and stays visible alongside the active variant's detail
+            views below. Hidden entirely when no sweep has run. */}
+        {hasVariants && <VariantSummaryTable />}
+
+        {/* Results — either the single-run `result` or, when a variant is
+            active, that variant's BacktestResult. The detail components
+            don't care which path the data came from. */}
+        {displayResult && (
           <>
             <EquityCurveCard
-              result={result}
-              loadedRunId={loadedRunId}
+              result={displayResult}
+              loadedRunId={activeVariantResult ? null : loadedRunId}
               savedRuns={savedRuns}
             />
 
-            <SectorTimelineChart result={result} />
+            <SectorTimelineChart result={displayResult} />
 
             <MonthlyHoldingsTable
-              result={result}
+              result={displayResult}
               categories={categories}
               exchangeByCompany={exchangeByCompany}
               scoringConfig={{
@@ -1029,8 +1105,11 @@ export default function MomentumBacktester() {
               }}
             />
 
-            {/* Save */}
-            {!loadedRunId && (
+            {/* Save flow only applies to single-run results — saving an
+                individual variant from a sweep would clutter the saved-runs
+                list without much value (the variants UI is the comparison
+                tool). Hidden when a variant is the active result. */}
+            {showSingleRunSaveUI && !loadedRunId && (
               <div className="bg-[#151821] rounded-xl border border-gray-800/40 p-4 flex items-center gap-3">
                 <input
                   value={saveName}
@@ -1048,7 +1127,7 @@ export default function MomentumBacktester() {
                 </button>
               </div>
             )}
-            {loadedRunId && (
+            {showSingleRunSaveUI && loadedRunId && (
               <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-lg px-4 py-3 text-indigo-400 text-sm flex items-center gap-2">
                 <span>Loaded from saved run</span>
                 <span className="text-indigo-300 font-medium">
