@@ -31,8 +31,12 @@ export default function LoginPage() {
     setError(null)
     setInfo(null)
 
-    if (!isAllowed(email)) {
-      setError(`Access is restricted to @${ALLOWED_DOMAIN} accounts.`)
+    // Only restrict the *signup* path — admins can invite arbitrary users via
+    // /users, and once they're in the DB they should be able to sign in
+    // regardless of email domain. Sign-in failures for unknown accounts are
+    // still rejected by Supabase Auth itself.
+    if (mode === 'signup' && !isAllowed(email)) {
+      setError(`Self-signup is restricted to @${ALLOWED_DOMAIN} accounts. Ask the admin to invite you instead.`)
       return
     }
 

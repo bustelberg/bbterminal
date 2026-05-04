@@ -1,0 +1,69 @@
+# Runs on every push and pull request. Two parallel jobs — backend tests
+# (pytest) and frontend typecheck (tsc). Keep this fast and deterministic;
+# linting and integration tests can be added later as separate workflows.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Cancel an in-progress run when a newer commit lands on the same branch /
+# PR. Saves CI minutes on rapid push sequences without losing the latest
+# result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      # uv handles Python install + dependency resolution. Cache on by default
+      # speeds repeat runs ~3× by reusing the resolver / wheel cache.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "backend/pyproject.toml"
+
+      # No uv.lock in the repo yet — `uv sync` resolves fresh each run. If
+      # version drift becomes a problem, commit a lockfile and switch to
+      # `uv sync --frozen`. The `dev` group (pytest) is included by default.
+      - name: Sync dependencies
+        run: uv sync
+
+      - name: Run tests
+        run: uv run pytest tests/ -v
+
+  frontend:
+    name: Frontend (typecheck)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          # Node 22 LTS — Next.js 16 requires >= 18.18; 22 matches Vercel's
+          # current default and the dev environment.
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # No build step here — Vercel does that on deploy, and a build would
+      # fail on missing NEXT_PUBLIC_* env vars CI doesn't have. tsc --noEmit
+      # catches type regressions without that requirement.
+      - name: Typecheck
+        run: npx tsc --noEmit

@@ -654,6 +654,7 @@ function BreakdownView({ data }: { data: BreakdownData }) {
               <div className="text-[11px] text-gray-500 mt-0.5">
                 Universe range: <span className="font-mono">{rangeStr}</span>
               </div>
+              <NormStep s={s} />
               <ul className="mt-1.5 space-y-0.5">
                 {s.components.map((c, idx) => (
                   <li key={idx} className="text-[11px] text-gray-400 flex gap-2">
@@ -712,6 +713,59 @@ function BreakdownView({ data }: { data: BreakdownData }) {
     </div>
   );
 }
+
+/** Inline arithmetic for the min-max normalization step. The scoring engine
+ * does `norm = (raw − min) / (max − min)`, then × 100 and combines with the
+ * weight share (see backend/momentum/scoring.py:_score_category). Showing
+ * the substituted formula here lets the user verify the 0–100 figure rather
+ * than trusting it.
+ *
+ * Three branches:
+ *  - raw missing → backend reports None; selection treats it as 50.
+ *  - min == max (no spread) → engine substitutes 50 for everyone.
+ *  - normal → render the substituted formula and the result.
+ */
+function NormStep({ s }: { s: SignalBreakdown }) {
+  // 4-decimal default matches the rest of the breakdown modal so the
+  // numbers in the formula line up visually with `raw` and `Universe range`.
+  const fmt = (v: number | null) => (v == null ? '—' : Number.isInteger(v) ? `${v}` : `${v.toFixed(4)}`);
+  // Wrap negatives in parens so subtraction reads cleanly: `0.045 − (−0.12)`
+  // rather than the ambiguous `0.045 − -0.12`.
+  const term = (v: number) => (v < 0 ? `(${fmt(v)})` : fmt(v));
+
+  if (s.raw_value == null) {
+    return (
+      <div className="text-[11px] text-gray-500 mt-0.5">
+        Norm: raw value missing → defaults to <span className="text-gray-300 font-mono">50</span> in scoring
+      </div>
+    );
+  }
+  if (s.universe_min == null || s.universe_max == null) {
+    return (
+      <div className="text-[11px] text-gray-500 mt-0.5">
+        Norm: universe range unavailable → <span className="text-gray-300 font-mono">50</span>
+      </div>
+    );
+  }
+  if (s.universe_min === s.universe_max) {
+    return (
+      <div className="text-[11px] text-gray-500 mt-0.5">
+        Norm: range collapsed (every company has{' '}
+        <span className="font-mono">{fmt(s.universe_min)}</span>) → <span className="text-gray-300 font-mono">50</span>
+      </div>
+    );
+  }
+  return (
+    <div className="text-[11px] text-gray-500 mt-0.5 font-mono break-words">
+      Norm = (raw − min) / (max − min) × 100 ={' '}
+      <span className="text-gray-300">
+        ({term(s.raw_value)} − {term(s.universe_min)}) / ({term(s.universe_max)} − {term(s.universe_min)}) × 100
+      </span>{' '}
+      = <span className="text-indigo-300">{s.normalized_score != null ? s.normalized_score.toFixed(1) : '—'}</span>
+    </div>
+  );
+}
+
 
 /** Shows per-category arithmetic: for each category, the active signals,
  * their weight share within the category, normalized 0-100 score, and
