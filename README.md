@@ -1,5 +1,7 @@
 # BBTerminal
 
+[![CI](https://github.com/bustelberg/bbterminal/actions/workflows/ci.yml/badge.svg)](https://github.com/bustelberg/bbterminal/actions/workflows/ci.yml)
+
 A full-stack app with a **Next.js** frontend, **FastAPI** backend, and **Supabase** for auth/database.
 
 ---

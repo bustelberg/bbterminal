@@ -137,6 +137,7 @@ def _strategy_hash(req: "BacktestRequest") -> str:
         "universe_label": req.universe_label,
         "index_universe": req.index_universe,
         "selection_mode": req.selection_mode,
+        "rebalance_frequency": req.rebalance_frequency,
     }
     s = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(s.encode()).hexdigest()[:16]
@@ -161,6 +162,7 @@ def _backtest_strategy_hash(req: "BacktestRequest") -> str:
         "selection_mode": req.selection_mode,
         "random_seed": req.random_seed,
         "n_trials": req.n_trials,
+        "rebalance_frequency": req.rebalance_frequency,
     }
     s = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(s.encode()).hexdigest()[:16]
@@ -2177,6 +2179,7 @@ class BacktestRequest(BaseModel):
     n_trials: int = 1  # >1 only valid with selection_mode=="random"; aggregates mean ± std
     mode: str = "backtest"  # "backtest" or "current_portfolio"
     force_recompute: bool = False  # ignore cached result and recompute (applies to backtest + current_portfolio)
+    rebalance_frequency: str = "monthly"  # daily | weekly | monthly | every_2_months | every_3_months
 
 
 async def _momentum_backtest_stream(req: BacktestRequest):
@@ -2387,6 +2390,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             "top_n_per_sector": req.top_n_per_sector,
             "selection_mode": req.selection_mode,
             "random_seed": req.random_seed,
+            "rebalance_frequency": req.rebalance_frequency,
         })
 
         data_cutoff = date.fromisoformat(req.end_date)
@@ -2957,7 +2961,51 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         # This is a no-op in steady state — the gap sets are empty when
         # everything is already loaded — and only fires for genuinely missing
         # data (empty Storage JSONs, failed prior loads, new tickers, etc.).
-        gap_cids = sorted(set(_no_price_gap) | set(_no_vol_gap))
+        #
+        # When the user explicitly asks for fresh data on a current_portfolio
+        # run (force_recompute=True), expand the heal target list to include
+        # companies whose latest price/volume is older than the most recent
+        # expected trading day. Without this, "Don't use cache" only bypasses
+        # the snapshot cache and silently runs against stale prices.
+        # ensure_*_for_company short-circuits on fresh DB data, so any false
+        # positives just cost a DB lookup — no GuruFocus API call.
+        _stale_cids: set[int] = set()
+        if req.mode == "current_portfolio" and req.force_recompute:
+            from ingest.staleness import is_daily_data_fresh  # noqa: PLC0415
+            _today = date.today()
+            _latest_price_per_cid = (
+                prices_local_df.groupby("company_id")["target_date"].max().to_dict()
+                if prices_local_df is not None and not prices_local_df.empty
+                else {}
+            )
+            _latest_vol_per_cid = (
+                volumes_df.groupby("company_id")["target_date"].max().to_dict()
+                if volumes_df is not None and not volumes_df.empty
+                else {}
+            )
+
+            def _is_stale(latest) -> bool:
+                if latest is None:
+                    return False  # no data → handled by the gap path
+                d = latest.date() if hasattr(latest, "date") else latest
+                fresh, _reason = is_daily_data_fresh(d, today=_today)
+                return not fresh
+
+            for cid in company_ids:
+                cid = int(cid)
+                if _universe_exchange.get(cid, "UNKNOWN") in _unsubscribed_exchanges:
+                    continue
+                if _is_stale(_latest_price_per_cid.get(cid)) or _is_stale(_latest_vol_per_cid.get(cid)):
+                    _stale_cids.add(cid)
+
+            if _stale_cids:
+                yield _emit({
+                    "type": "info",
+                    "scope": "self-heal",
+                    "message": f"Force-recompute: {len(_stale_cids)} companies have stale data and will be refetched.",
+                })
+
+        gap_cids = sorted(set(_no_price_gap) | set(_no_vol_gap) | _stale_cids)
         if gap_cids:
             yield _emit({"type": "progress", "pct": 67, "message": f"Self-heal: refetching missing data for {len(gap_cids)} companies on subscribed exchanges..."})
             yield _keepalive()

@@ -53,7 +53,6 @@ export default function SectorTimelineChart({ result }: Props) {
     const runByMonth = new Map<string, Int16Array>();
     // (sector, monthIdx) → weight (% of portfolio)
     const weightByMonth = new Map<string, Float32Array>();
-    // sector → total months held (for ordering)
     const totalHeld = new Map<string, number>();
 
     // First pass: collect every sector ever held + per-month weights.
@@ -69,10 +68,7 @@ export default function SectorTimelineChart({ result }: Props) {
       }
     }
 
-    // Sort sectors by total months held desc — most persistent on top.
-    const sectors = Array.from(totalHeld.keys()).sort(
-      (a, b) => (totalHeld.get(b)! - totalHeld.get(a)!) || a.localeCompare(b),
-    );
+    const sectors = Array.from(totalHeld.keys()).sort((a, b) => a.localeCompare(b));
 
     // Initialize runByMonth with -1.
     for (const sec of sectors) {

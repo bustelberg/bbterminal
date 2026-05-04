@@ -10,6 +10,26 @@ from datetime import date, timedelta
 import statistics
 
 
+def is_daily_data_fresh(latest: date, *, today: date | None = None) -> tuple[bool, str]:
+    """Daily-frequency freshness check from a single max-date.
+
+    For datasets we already know are daily (close prices, volumes) we don't
+    want the single-point "fresh ≤7 days old" heuristic in is_cache_fresh —
+    that lets a Wednesday-old close pass as fresh on Monday, indefinitely.
+    Use this helper instead when checking the DB max date directly.
+
+    Returns (is_fresh, reason). Fresh = latest ≥ most recent expected trading
+    day (the latest weekday strictly before today, Mon-Fri).
+    """
+    today = today or date.today()
+    most_recent_close = today - timedelta(days=1)
+    while most_recent_close.weekday() >= 5:  # 5=Sat, 6=Sun
+        most_recent_close -= timedelta(days=1)
+    if latest >= most_recent_close:
+        return True, f"latest={latest}, daily, current through {most_recent_close}"
+    return False, f"latest={latest}, daily, expected through {most_recent_close}, now {today}"
+
+
 def is_cache_fresh(dates: list[date], *, today: date | None = None) -> tuple[bool, str]:
     """Check if cached data is still fresh based on its own data frequency.
 

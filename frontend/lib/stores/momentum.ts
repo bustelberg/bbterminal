@@ -239,6 +239,9 @@ export async function startBacktest(cfg: BacktestStartConfig): Promise<void> {
         } else if (data.type === 'done') {
           receivedDone = true;
           momentumStore.set({ running: false, runEndedAt: Date.now() });
+          if (cfg.mode === 'current_portfolio') {
+            maybeAutoRefreshCurrentMonthMTD(momentumStore.get().currentPortfolio);
+          }
         } else if (data.type === 'error') {
           momentumStore.set({ error: data.message ?? 'Unknown error', running: false, runEndedAt: Date.now() });
         }
@@ -297,21 +300,38 @@ export async function loadCurrentPicksSnapshot(snapshotId: number): Promise<void
       return;
     }
     const row = await resp.json();
-    momentumStore.set({
-      currentPortfolio: {
-        snapshot_id: row.snapshot_id,
-        as_of_date: row.as_of_date,
-        latest_price_date: row.latest_price_date,
-        holdings: row.holdings ?? [],
-        daily_picks: row.daily_picks ?? [],
-        daily_picks_history: row.daily_picks_history ?? row.daily_picks ?? [],
-        strategy_hash: row.strategy_hash ?? undefined,
-      },
-      error: null,
-    });
+    const cp: CurrentPortfolio = {
+      snapshot_id: row.snapshot_id,
+      as_of_date: row.as_of_date,
+      latest_price_date: row.latest_price_date,
+      holdings: row.holdings ?? [],
+      daily_picks: row.daily_picks ?? [],
+      daily_picks_history: row.daily_picks_history ?? row.daily_picks ?? [],
+      strategy_hash: row.strategy_hash ?? undefined,
+    };
+    momentumStore.set({ currentPortfolio: cp, error: null });
+    maybeAutoRefreshCurrentMonthMTD(cp);
   } catch (e) {
     momentumStore.set({ error: e instanceof Error ? e.message : 'Failed to load snapshot' });
   }
+}
+
+// Local YYYY-MM-DD — using local time so the staleness check matches the
+// user's wall-clock day (avoids spurious "stale" reads near UTC midnight).
+function todayIsoLocal(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// Fire-and-forget MTD refresh when a current-month snapshot's prices lag today.
+// Past-month snapshots are read-only, so we never refresh them. If price data
+// is already current (e.g. a fresh Recompute just finished), this is a no-op.
+function maybeAutoRefreshCurrentMonthMTD(cp: CurrentPortfolio | null): void {
+  if (!cp || cp.snapshot_id == null) return;
+  const today = todayIsoLocal();
+  if (cp.as_of_date.slice(0, 7) !== today.slice(0, 7)) return;
+  if (cp.latest_price_date && cp.latest_price_date >= today) return;
+  void refreshCurrentPicksMTD(cp.snapshot_id);
 }
 
 export async function refreshCurrentPicksMTD(snapshotId: number): Promise<void> {

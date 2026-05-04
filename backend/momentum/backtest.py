@@ -1,11 +1,11 @@
-"""Monthly momentum backtest engine."""
+"""Momentum backtest engine. Supports multiple rebalance frequencies."""
 from __future__ import annotations
 
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import date
-from typing import Any, Callable
+from datetime import date, timedelta
+from typing import Any, Callable, Literal
 
 import numpy as np
 import pandas as pd
@@ -14,6 +14,33 @@ from .signals import PRICE_SIGNAL_DEFS, compute_price_signals, compute_signals_p
 from .scoring import score_and_select, random_select, _get_category_keys
 
 _logger = logging.getLogger(__name__)
+
+
+# Rebalance cadence. New variants get added here + to _periods_per_year +
+# _generate_rebalance_dates. The default "monthly" preserves the original
+# month-start, hold-1-month behavior; the others stride differently.
+RebalanceFrequency = Literal[
+    "daily", "weekly", "monthly", "every_2_months", "every_3_months",
+]
+
+_DEFAULT_FREQUENCY: RebalanceFrequency = "monthly"
+
+
+def _periods_per_year(freq: RebalanceFrequency) -> float:
+    """Approximate number of rebalance periods per calendar year.
+
+    Used to (a) annualize total return, (b) scale Sharpe by √(periods/yr).
+    Daily uses 252 trading days; weekly uses 52; calendar-month variants
+    use 12 / 6 / 4. These are nominal — actual generated dates may differ
+    slightly when prices_df is short of trading days at boundaries.
+    """
+    return {
+        "daily": 252.0,
+        "weekly": 52.0,
+        "monthly": 12.0,
+        "every_2_months": 6.0,
+        "every_3_months": 4.0,
+    }[freq]
 
 
 @dataclass
@@ -26,6 +53,7 @@ class BacktestConfig:
     category_weights: dict[str, float] | None = None  # e.g. {"price": 0.5, "volume": 0.5}
     selection_mode: str = "momentum"  # "momentum" or "random"
     random_seed: int | None = None  # only used when selection_mode == "random"
+    rebalance_frequency: RebalanceFrequency = _DEFAULT_FREQUENCY
 
     @classmethod
     def from_dict(cls, d: dict) -> BacktestConfig:
@@ -38,6 +66,7 @@ class BacktestConfig:
             category_weights=d.get("category_weights"),
             selection_mode=d.get("selection_mode", "momentum"),
             random_seed=d.get("random_seed"),
+            rebalance_frequency=d.get("rebalance_frequency", _DEFAULT_FREQUENCY),
         )
 
 
@@ -260,6 +289,51 @@ def _generate_month_starts(start: date, end: date) -> list[date]:
     return months
 
 
+def _generate_rebalance_dates(
+    start: date,
+    end: date,
+    freq: RebalanceFrequency,
+    prices_df: pd.DataFrame | None = None,
+) -> list[date]:
+    """Generate rebalance dates for `freq` between [start, end].
+
+    For calendar-stride variants (monthly / 2m / 3m), produces every Nth
+    first-of-month date and is independent of prices_df — _price_on_or_after
+    walks the company's series to the next available trading day at entry.
+
+    For weekly, produces every Monday in range — actual entry still falls
+    on the first available trading day on/after that Monday via
+    _price_on_or_after.
+
+    For daily, requires prices_df to identify the actual set of trading days
+    in range (the union across all companies). Without prices_df we have no
+    calendar to use, so we'd produce Mon-Fri sequences that include
+    market holidays.
+    """
+    if freq == "monthly":
+        return _generate_month_starts(start, end)
+    if freq == "every_2_months":
+        return _generate_month_starts(start, end)[::2]
+    if freq == "every_3_months":
+        return _generate_month_starts(start, end)[::3]
+    if freq == "weekly":
+        # Every Monday in range. weekday(): Mon=0..Sun=6.
+        days_until_mon = (-start.weekday()) % 7
+        first_mon = start + timedelta(days=days_until_mon)
+        out: list[date] = []
+        d = first_mon
+        while d <= end:
+            out.append(d)
+            d += timedelta(days=7)
+        return out
+    if freq == "daily":
+        if prices_df is None or prices_df.empty:
+            raise ValueError("daily frequency requires prices_df to identify trading days")
+        all_dates = pd.to_datetime(prices_df["target_date"]).dt.date.unique()
+        return sorted(d for d in all_dates if start <= d <= end)
+    raise ValueError(f"Unknown rebalance frequency: {freq}")
+
+
 def _build_price_index(prices_df: pd.DataFrame) -> dict[int, pd.Series]:
     """Pre-index prices into a dict of {company_id: Series(price, DatetimeIndex)}.
 
@@ -400,12 +474,17 @@ class _BacktestPrepared:
     on the selection RNG. Cached and reused across trials by
     `run_multi_trial_backtest` so the (expensive) signal panel is built once
     rather than N times.
+
+    `periods` is the rebalance-date list (was named `months` when only
+    monthly was supported). Length must be ≥ 2 — first N-1 are entry dates,
+    last is the final exit date.
     """
-    months: list[date]
+    periods: list[date]
     price_index: dict[int, pd.Series]
     local_price_index: dict[int, pd.Series] | None
     volume_index: dict[int, pd.Series] | None
     panel: dict[date, pd.DataFrame]
+    frequency: RebalanceFrequency
 
 
 def _prepare_backtest(
@@ -417,10 +496,11 @@ def _prepare_backtest(
     volumes_df: pd.DataFrame | None,
     prices_local_df: pd.DataFrame | None,
     monthly_eligible: dict[str, dict[int, str | None]] | None,
+    frequency: RebalanceFrequency = _DEFAULT_FREQUENCY,
 ) -> _BacktestPrepared:
-    months = _generate_month_starts(start_date, end_date)
-    if len(months) < 2:
-        raise ValueError("Need at least 2 months for a backtest")
+    periods = _generate_rebalance_dates(start_date, end_date, frequency, prices_df)
+    if len(periods) < 2:
+        raise ValueError(f"Need at least 2 rebalance periods for a {frequency} backtest (got {len(periods)})")
 
     price_index = _build_price_index(prices_df)
     local_price_index = (
@@ -434,7 +514,7 @@ def _prepare_backtest(
         else None
     )
 
-    cutoff_dates = months[:-1]  # last month has no forward return → no signals needed
+    cutoff_dates = periods[:-1]  # last period has no forward return → no signals needed
     if monthly_eligible is not None:
         panel_universe_ids: set[int] = set()
         for month_dict in monthly_eligible.values():
@@ -454,11 +534,12 @@ def _prepare_backtest(
     )
 
     return _BacktestPrepared(
-        months=months,
+        periods=periods,
         price_index=price_index,
         local_price_index=local_price_index,
         volume_index=volume_index,
         panel=panel,
+        frequency=frequency,
     )
 
 
@@ -474,20 +555,22 @@ def run_backtest(
     company_currency: dict[int, str | None] | None = None,
     prepared: _BacktestPrepared | None = None,
 ) -> BacktestResult:
-    """Run the monthly momentum backtest.
+    """Run a momentum backtest at the configured rebalance cadence.
 
-    For each month:
-    1. Compute price and volume signals using data up to that month
+    For each rebalance period:
+    1. Compute price and volume signals using data strictly before the period
     2. Score and select top companies
-    3. Compute forward 1-month return for each holding
+    3. Compute forward return through the next rebalance date
     4. Track cumulative portfolio return
 
     If monthly_eligible is provided (from universe_snapshot), only companies
-    in the eligible set for that month are considered.
+    in the eligible set for that month are considered. The eligibility table
+    is keyed by YYYY-MM regardless of cadence — sub-monthly periods
+    inherit the snapshot of the month they fall in.
 
     `prepared` is an internal optimization for `run_multi_trial_backtest`:
-    when supplied, the months / indices / signal panel are reused instead of
-    being recomputed. None means compute fresh.
+    when supplied, the periods / indices / signal panel are reused instead
+    of being recomputed. None means compute fresh.
     """
     if prepared is None:
         prepared = _prepare_backtest(
@@ -498,46 +581,57 @@ def run_backtest(
             volumes_df=volumes_df,
             prices_local_df=prices_local_df,
             monthly_eligible=monthly_eligible,
+            frequency=config.rebalance_frequency,
         )
-    months = prepared.months
+    periods = prepared.periods
     price_index = prepared.price_index
     local_price_index = prepared.local_price_index
     volume_index = prepared.volume_index
     panel = prepared.panel
+    # Sub-monthly variants need full YYYY-MM-DD on each record so the UI can
+    # disambiguate same-month rows. Monthly/2m/3m keep "YYYY-MM" so saved
+    # results, the cache, and existing frontend charts stay backward-compatible.
+    sub_monthly = prepared.frequency in ("daily", "weekly")
+
+    def _record_date(d: date) -> str:
+        return d.isoformat() if sub_monthly else d.isoformat()[:7]
+
+    def _record_label(d: date) -> str:
+        return d.isoformat() if sub_monthly else d.strftime("%b %Y")
 
     monthly_records: list[MonthlyRecord] = []
     cumulative = 0.0  # cumulative return in %
     cumulative_factor = 1.0  # multiplicative
     prev_holdings_set: set[int] = set()
-    all_monthly_returns: list[float] = []
+    all_period_returns: list[float] = []
     turnover_values: list[float] = []
     holdings_counts: list[int] = []
 
     # Random selector RNG: seeded once per backtest so re-runs with the same
-    # seed produce identical picks across all months.
+    # seed produce identical picks across all periods.
     rng = (
         np.random.default_rng(config.random_seed)
         if config.selection_mode == "random"
         else None
     )
 
-    for i, month_date in enumerate(months[:-1]):  # last month has no forward return
-        next_month = months[i + 1]
+    for i, period_date in enumerate(periods[:-1]):  # last period has no forward return
+        next_period = periods[i + 1]
 
         if send_event:
-            pct = round((i / (len(months) - 1)) * 100)
+            pct = round((i / (len(periods) - 1)) * 100)
             send_event(
                 "progress",
-                month=month_date.isoformat()[:7],
+                month=_record_date(period_date),
                 pct=pct,
-                message=f"Computing signals for {month_date.strftime('%b %Y')}...",
+                message=f"Computing signals for {_record_label(period_date)}...",
             )
 
-        # Resolve this month's eligible set + sector map (snapshot-based universes only).
+        # Resolve this period's eligible set + sector map (snapshot-based universes only).
         sector_map: dict[int, str | None] = {}
         eligible_ids: set[int] | None = None
         if monthly_eligible is not None:
-            month_key = month_date.isoformat()[:7]
+            month_key = period_date.isoformat()[:7]
             sector_map = monthly_eligible.get(month_key) or {}
             eligible_ids = set(sector_map.keys())
             if not eligible_ids:
@@ -551,10 +645,10 @@ def run_backtest(
                     send_event(
                         "warning",
                         scope="universe",
-                        message=f"{month_date.strftime('%b %Y')}: {reason}",
+                        message=f"{_record_label(period_date)}: {reason}",
                     )
                 monthly_records.append(MonthlyRecord(
-                    date=month_date.isoformat()[:7],
+                    date=_record_date(period_date),
                     holdings=[],
                     portfolio_return_pct=None,
                     cumulative_return_pct=round(cumulative, 2),
@@ -562,30 +656,30 @@ def run_backtest(
                 ))
                 continue
 
-        # Look up signals for this month from the precomputed panel, then
+        # Look up signals for this period from the precomputed panel, then
         # apply the per-month universe filter + sector remap when using a
         # snapshot-based universe (the panel was built from the base
         # `universe_df` whose sector is None for snapshot universes).
-        signals_df = panel.get(month_date, pd.DataFrame())
+        signals_df = panel.get(period_date, pd.DataFrame())
         if not signals_df.empty and eligible_ids is not None:
             signals_df = signals_df[signals_df["company_id"].isin(eligible_ids)].copy()
             signals_df["sector"] = signals_df["company_id"].map(sector_map)
         if signals_df.empty:
-            reason = f"No companies had enough price data (need >= 20 data points before {month_date.strftime('%b %Y')})"
+            reason = f"No companies had enough price data (need >= 20 data points before {_record_label(period_date)})"
             if send_event:
                 send_event(
                     "progress",
-                    month=month_date.isoformat()[:7],
+                    month=_record_date(period_date),
                     pct=pct,
-                    message=f"{month_date.strftime('%b %Y')}: 0 holdings — {reason}",
+                    message=f"{_record_label(period_date)}: 0 holdings — {reason}",
                 )
                 send_event(
                     "warning",
                     scope="backtest",
-                    message=f"{month_date.strftime('%b %Y')}: {reason}",
+                    message=f"{_record_label(period_date)}: {reason}",
                 )
             monthly_records.append(MonthlyRecord(
-                date=month_date.isoformat()[:7],
+                date=_record_date(period_date),
                 holdings=[],
                 portfolio_return_pct=None,
                 cumulative_return_pct=round(cumulative, 2),
@@ -617,17 +711,17 @@ def run_backtest(
             if send_event:
                 send_event(
                     "progress",
-                    month=month_date.isoformat()[:7],
+                    month=_record_date(period_date),
                     pct=pct,
-                    message=f"{month_date.strftime('%b %Y')}: 0 holdings — {reason}",
+                    message=f"{_record_label(period_date)}: 0 holdings — {reason}",
                 )
                 send_event(
                     "warning",
                     scope="backtest",
-                    message=f"{month_date.strftime('%b %Y')}: {reason}",
+                    message=f"{_record_label(period_date)}: {reason}",
                 )
             monthly_records.append(MonthlyRecord(
-                date=month_date.isoformat()[:7],
+                date=_record_date(period_date),
                 holdings=[],
                 portfolio_return_pct=None,
                 cumulative_return_pct=round(cumulative, 2),
@@ -643,8 +737,8 @@ def run_backtest(
         # Compute forward returns using pre-indexed series
         holdings: list[MonthlyHolding] = []
         returns: list[float] = []
-        entry_ts = pd.Timestamp(month_date)
-        exit_ts = pd.Timestamp(next_month)
+        entry_ts = pd.Timestamp(period_date)
+        exit_ts = pd.Timestamp(next_period)
 
         for _, row in selected.iterrows():
             cid = int(row["company_id"])
@@ -701,7 +795,7 @@ def run_backtest(
         if port_return is not None:
             cumulative_factor *= (1 + port_return / 100)
             cumulative = (cumulative_factor - 1) * 100
-            all_monthly_returns.append(port_return)
+            all_period_returns.append(port_return)
 
         # Turnover
         current_set = {h.company_id for h in holdings}
@@ -713,15 +807,17 @@ def run_backtest(
         prev_holdings_set = current_set
 
         monthly_records.append(MonthlyRecord(
-            date=month_date.isoformat()[:7],
+            date=_record_date(period_date),
             holdings=holdings,
             portfolio_return_pct=port_return,
             cumulative_return_pct=round(cumulative, 2),
         ))
 
-    # Summary stats
+    # Summary stats. Annualization + Sharpe scaling depend on the rebalance
+    # cadence — daily uses √252, weekly √52, monthly √12, etc.
+    periods_per_year = _periods_per_year(prepared.frequency)
     total_return = round(cumulative, 2)
-    n_years = len(all_monthly_returns) / 12 if all_monthly_returns else 0
+    n_years = len(all_period_returns) / periods_per_year if all_period_returns else 0
     annualized = round((cumulative_factor ** (1 / n_years) - 1) * 100, 2) if n_years > 0 else 0
 
     # Identify all drawdown periods (peak-to-trough-to-recovery)
@@ -731,14 +827,15 @@ def run_backtest(
     top_drawdowns = _pick_top_n_non_overlapping(all_drawdown_periods, 3)
     max_dd = top_drawdowns[0].drawdown_pct if top_drawdowns else 0.0
 
-    # Sharpe (annualized, using monthly returns)
+    # Sharpe (annualized). Need at least one full calendar year of return
+    # observations to make the std-dev estimate meaningful.
     sharpe = None
-    if len(all_monthly_returns) >= 12:
-        arr = np.array(all_monthly_returns)
-        monthly_mean = float(arr.mean())
-        monthly_std = float(arr.std())
-        if monthly_std > 0:
-            sharpe = round((monthly_mean / monthly_std) * (12 ** 0.5), 2)
+    if len(all_period_returns) >= int(periods_per_year):
+        arr = np.array(all_period_returns)
+        period_mean = float(arr.mean())
+        period_std = float(arr.std())
+        if period_std > 0:
+            sharpe = round((period_mean / period_std) * (periods_per_year ** 0.5), 2)
 
     summary = BacktestSummary(
         total_return_pct=total_return,
@@ -746,7 +843,7 @@ def run_backtest(
         max_drawdown_pct=round(max_dd, 2),
         sharpe_ratio=sharpe,
         avg_monthly_turnover_pct=round(float(np.mean(turnover_values)), 2) if turnover_values else 0,
-        total_months=len(all_monthly_returns),
+        total_months=len(all_period_returns),
         avg_holdings=round(float(np.mean(holdings_counts)), 1) if holdings_counts else 0,
         top_drawdowns=top_drawdowns,
     )
@@ -806,6 +903,7 @@ def run_multi_trial_backtest(
         volumes_df=volumes_df,
         prices_local_df=prices_local_df,
         monthly_eligible=monthly_eligible,
+        frequency=config.rebalance_frequency,
     )
 
     trial_results: list[BacktestResult] = []
@@ -827,6 +925,7 @@ def run_multi_trial_backtest(
             category_weights=config.category_weights,
             selection_mode="random",
             random_seed=base_seed + i,
+            rebalance_frequency=config.rebalance_frequency,
         )
         # No per-month progress for individual trials — too noisy.
         result = run_backtest(

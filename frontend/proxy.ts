@@ -14,7 +14,9 @@ const PUBLIC_PATH_PREFIXES: readonly string[] = ['/login', '/set-password', '/au
 function pathAllowedFor(pathname: string, allowed: readonly string[]): boolean {
   for (const p of allowed) {
     if (pathname === p) return true
-    if (pathname.startsWith(p === '/' ? '/' : `${p}/`)) return true
+    // '/' must only match exactly — every path startsWith('/'), so the
+    // subroute form would let any pathname through and defeat the gate.
+    if (p !== '/' && pathname.startsWith(`${p}/`)) return true
   }
   return false
 }

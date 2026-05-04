@@ -17,7 +17,7 @@ from urllib.request import Request, urlopen
 
 from supabase import Client
 
-from ingest.staleness import is_cache_fresh
+from ingest.staleness import is_cache_fresh, is_daily_data_fresh
 from ingest.api_usage import track_api_call
 
 _BUCKET = "gurufocus-raw"
@@ -334,7 +334,7 @@ def ensure_volume_for_company(
     # download + full reparse per company before discovering nothing to write.
     db_max = _db_max_date(supabase, company_id, "volume")
     if db_max is not None:
-        fresh, _reason = is_cache_fresh([db_max], today=data_cutoff)
+        fresh, _reason = is_daily_data_fresh(db_max, today=data_cutoff)
         if fresh:
             result.source = "cache"
             return result
@@ -424,7 +424,7 @@ def ensure_prices_for_company(
     if not force_refresh:
         db_max = _db_max_date(supabase, company_id, "close_price")
         if db_max is not None:
-            fresh, reason = is_cache_fresh([db_max], today=data_cutoff)
+            fresh, reason = is_daily_data_fresh(db_max, today=data_cutoff)
             if fresh:
                 result.source = "cache"
                 _log(f"DB fresh ({reason}) — skipping Storage")
