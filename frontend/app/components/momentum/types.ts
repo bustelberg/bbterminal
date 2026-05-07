@@ -1,4 +1,4 @@
-import type { PeriodRecord, Summary } from '../../../lib/stores/momentum';
+import type { DailyRecord, PeriodRecord, Summary } from '../../../lib/stores/momentum';
 
 export type SignalDef = {
   key: string;
@@ -29,6 +29,9 @@ export type BenchmarkPrice = {
 
 // Comparison series — strategies and benchmarks shown side by side on the chart.
 // `active` is implicit (derived from the live `result`) and is NOT stored here.
+// `daily` is optional on saved runs — present for backtests saved after the
+// daily-curve refactor, absent for older payloads (the chart falls back to
+// `monthly` then).
 export type ComparisonItem =
-  | { id: string; kind: 'saved'; runId: number; label: string; monthly: PeriodRecord[] }
+  | { id: string; kind: 'saved'; runId: number; label: string; monthly: PeriodRecord[]; daily?: DailyRecord[] }
   | { id: string; kind: 'benchmark'; benchmarkId: number; label: string; prices: BenchmarkPrice[] };

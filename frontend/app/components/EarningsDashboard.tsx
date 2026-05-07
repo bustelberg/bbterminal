@@ -339,7 +339,7 @@ function fmtPct(v: number | null): string {
 
 function fmtNum(v: number | null, digits = 2): string {
   if (v == null) return '—';
-  return v.toLocaleString(undefined, { maximumFractionDigits: digits });
+  return v.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
 function fmtPctPoints(v: number | null): string {
@@ -491,11 +491,18 @@ function InfoTip({ text }: { text: string }) {
   const tipWidth = 224; // w-56
   const margin = 8;
 
+  // Compute the tooltip's top-left corner directly so we don't have to
+  // reason about how a transform interacts with the clamp. Tooltip is
+  // shown ABOVE the icon (translateY(-100%) handles the vertical shift,
+  // since the rendered height isn't known until after layout); horizontal
+  // position is the icon's center minus half the tooltip's width, then
+  // clamped into the viewport.
   const handleEnter = () => {
     if (iconRef.current) {
       const rect = iconRef.current.getBoundingClientRect();
-      const centerX = rect.left + rect.width / 2;
-      const clampedLeft = Math.max(margin + tipWidth / 2, Math.min(centerX, window.innerWidth - margin - tipWidth / 2));
+      const desiredLeft = rect.left + rect.width / 2 - tipWidth / 2;
+      const maxLeft = window.innerWidth - margin - tipWidth;
+      const clampedLeft = Math.max(margin, Math.min(desiredLeft, maxLeft));
       setPos({ top: rect.top - 8, left: clampedLeft });
     }
     setShow(true);
@@ -507,7 +514,7 @@ function InfoTip({ text }: { text: string }) {
       {show && (
         <span
           className="fixed w-56 px-3 py-2 bg-[#1e2130] border border-gray-700 rounded-lg text-xs text-gray-300 leading-relaxed z-[9999] shadow-xl pointer-events-none"
-          style={{ top: pos.top, left: pos.left, transform: 'translate(-50%, -100%)' }}
+          style={{ top: pos.top, left: pos.left, transform: 'translateY(-100%)' }}
         >
           {text}
         </span>
@@ -561,9 +568,12 @@ const tooltipStyle = { backgroundColor: '#151821', border: '1px solid #374151', 
 // ---------------------------------------------------------------------------
 
 function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
-  // For any `annuals__X` code, also look up the `quarterly__X` twin and return
-  // whichever has the most recent target_date — quarterly is usually fresher
-  // for point-in-time / ratio metrics like Debt-to-Equity.
+  // For any `annuals__X` code, prefer the `quarterly__X` twin whenever it
+  // exists — quarterly is the always-correct read for point-in-time / ratio
+  // metrics (Debt-to-Equity, Interest Coverage, CAPEX/Revenue, ROE, …) since
+  // GuruFocus's annual block is just a snapshot of the last fiscal year and
+  // will lag for most of the year. Annual is only used when the quarterly
+  // twin doesn't exist at all in the response (some metrics ship annual-only).
   //
   // We use `latestObservation` (null-aware) instead of `latestValue` so that
   // when the most recent period exists but GF reported "N/A" for it, the
@@ -572,29 +582,23 @@ function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
   // already render null as "—".
   const lv = useCallback(
     (code: string) => {
-      const annual = latestObservation(metrics, code);
-      if (!code.startsWith('annuals__')) return annual;
+      if (!code.startsWith('annuals__')) return latestObservation(metrics, code);
       const quarterly = latestObservation(metrics, 'quarterly__' + code.slice('annuals__'.length));
-      if (!annual) return quarterly;
-      if (!quarterly) return annual;
-      return quarterly.date > annual.date ? quarterly : annual;
+      if (quarterly) return quarterly;
+      return latestObservation(metrics, code);
     },
     [metrics],
   );
 
   // Resolve which underlying metric_code lv() actually picked, so the cadence
-  // hover reflects the real source (annual when the annual is fresher, the
-  // quarterly twin when it isn't). For non-annuals codes the picked source is
-  // just the input code.
+  // hover reflects the real source. For annuals codes we always prefer the
+  // quarterly twin when it exists, matching lv() above.
   const resolvedCode = useCallback(
     (code: string): string => {
       if (!code.startsWith('annuals__')) return code;
-      const annual = latestObservation(metrics, code);
       const qCode = 'quarterly__' + code.slice('annuals__'.length);
       const quarterly = latestObservation(metrics, qCode);
-      if (!annual && quarterly) return qCode;
-      if (annual && quarterly && quarterly.date > annual.date) return qCode;
-      return code;
+      return quarterly ? qCode : code;
     },
     [metrics],
   );
@@ -752,7 +756,7 @@ function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
         { label: 'Revenue R²', value: fmtNum(valueGrowth.rev5YR2), date: valueGrowth.revDate, cadence: revenueCadence, info: 'R-squared of log-linear regression of TTM revenue vs time over the last 5 years. Higher = more consistent growth.' },
         { label: 'FCF 5Y Growth', value: fmtPct(valueGrowth.fcf5YCAGR), date: valueGrowth.fcfDate, cadence: fcfCadence, info: '5-year FCF CAGR. Same TTM-quarterly construction as Revenue. Null if FCF was negative at either endpoint.' },
         { label: 'FCF Growth R²', value: fmtNum(valueGrowth.fcf5YR2), date: valueGrowth.fcfDate, cadence: fcfCadence, info: 'R-squared of log-linear regression of TTM FCF vs time over the last 5 years. Null if any FCF in the window was non-positive.' },
-        { label: 'FCF Growth SD', value: fmtNum(valueGrowth.fcfGrowthSD), date: valueGrowth.fcfDate, cadence: fcfCadence, info: 'Standard deviation of 4-quarter-lag TTM FCF growth rates over the last 5 years (or annual YoY rates when quarterly data is sparse). Lower = more predictable.' },
+        { label: 'FCF Growth SD', value: fmtPct(valueGrowth.fcfGrowthSD), date: valueGrowth.fcfDate, cadence: fcfCadence, info: 'Standard deviation of 4-quarter-lag TTM FCF growth rates over the last 5 years (or annual YoY rates when quarterly data is sparse). Lower = more predictable.' },
       ],
     },
     {

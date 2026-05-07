@@ -9,6 +9,7 @@ import {
   type VariantOutcome,
   type VariantsRunState,
 } from '../../../lib/stores/momentum';
+import CollapsibleCard from './CollapsibleCard';
 import { fmtPct } from './utils';
 
 // One row per VARIANT_DEFS entry. Click to make that variant the active one
@@ -31,20 +32,21 @@ export default function VariantSummaryTable() {
   if (!anyVariant) return null;
 
   return (
-    <div className="bg-[#151821] rounded-xl border border-gray-800/40 overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-800/40 flex items-center justify-between">
-        <div>
-          <div className="text-sm font-medium text-white">Variants</div>
-          <div className="text-xs text-gray-500">
-            Click a row to switch the equity curve, holdings, and sector timeline below.
-          </div>
+    <CollapsibleCard
+      title="Variants"
+      rightSlot={
+        <div className="flex items-center gap-3">
+          <span>Click a row to switch the equity curve, holdings, and sector timeline below.</span>
+          {run && <SweepStatus run={run} />}
         </div>
-        {run && <SweepStatus run={run} />}
-      </div>
-      <table className="w-full text-sm">
+      }
+    >
+      <table className="w-full text-sm border-t border-gray-800/40">
         <thead>
           <tr className="text-gray-500 text-xs border-b border-gray-800/40">
             <th className="text-left font-medium px-3 py-2">Variant</th>
+            <th className="text-right font-medium px-3 py-2">Start</th>
+            <th className="text-right font-medium px-3 py-2">End</th>
             <th className="text-right font-medium px-3 py-2">Annualized return</th>
             <th className="text-right font-medium px-3 py-2">Sharpe</th>
             <th className="text-right font-medium px-3 py-2">Total return</th>
@@ -63,7 +65,7 @@ export default function VariantSummaryTable() {
           ))}
         </tbody>
       </table>
-    </div>
+    </CollapsibleCard>
   );
 }
 
@@ -116,19 +118,21 @@ function VariantRow({
     if (clickable) setActiveVariant(variantKey);
   };
 
-  // Active row: stronger highlight + indigo left border.
-  // Clickable but not active: hover effect.
-  // Pending/running/errored: muted background, no hover.
-  const rowClass = isActive
-    ? 'bg-indigo-500/10 border-l-2 border-indigo-400'
-    : clickable
-      ? 'cursor-pointer hover:bg-white/[0.02] border-l-2 border-transparent'
-      : 'border-l-2 border-transparent';
+  // Active row: chevron indicator + slightly brighter label, no left border
+  // and no background tint (those were the "ugly selector").
+  // Clickable but not active: subtle hover bg.
+  // Pending/running/errored: no hover.
+  const rowClass = clickable && !isActive
+    ? 'cursor-pointer hover:bg-white/[0.02]'
+    : '';
 
   return (
     <tr className={`border-b border-gray-800/20 ${rowClass}`} onClick={handleClick}>
       <td className="px-3 py-2 text-gray-200">
         <div className="flex items-center gap-2">
+          <span className={`inline-block w-3 text-indigo-400 ${isActive ? '' : 'opacity-0'}`}>
+            ›
+          </span>
           <StatusBadge status={status} />
           <span className={isActive ? 'text-white font-medium' : ''}>{label}</span>
           {status === 'cancelled' && (
@@ -146,22 +150,30 @@ function VariantRow({
 
 function SummaryCells({ outcome }: { outcome: VariantOutcome | undefined }) {
   if (outcome?.status !== 'ok') {
-    // 4 placeholder cells so the row width stays stable across statuses.
+    // 6 placeholder cells (Start, End, Annualized, Sharpe, Total, DD) so the
+    // row width stays stable across statuses.
     return (
       <>
-        {[0, 1, 2, 3].map((i) => (
+        {[0, 1, 2, 3, 4, 5].map((i) => (
           <td key={i} className="px-3 py-2 text-right text-gray-700 font-mono">—</td>
         ))}
       </>
     );
   }
   const s = outcome.result.summary;
+  const records = outcome.result.monthly_records;
+  // First/last record dates → YYYY-MM. Records are emitted in chronological
+  // order by the backtest loop, so first = period start, last = period end.
+  const firstDate = records.length > 0 ? records[0].date.slice(0, 7) : '—';
+  const lastDate = records.length > 0 ? records[records.length - 1].date.slice(0, 7) : '—';
   const colorize = (v: number | null | undefined) =>
     v == null ? 'text-gray-500'
       : v >= 0 ? 'text-emerald-400'
       : 'text-rose-400';
   return (
     <>
+      <td className="px-3 py-2 text-right font-mono text-gray-400">{firstDate}</td>
+      <td className="px-3 py-2 text-right font-mono text-gray-400">{lastDate}</td>
       <td className={`px-3 py-2 text-right font-mono ${colorize(s.annualized_return_pct)}`}>
         {fmtPct(s.annualized_return_pct)}
       </td>

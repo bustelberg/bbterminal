@@ -236,9 +236,18 @@ class CurrentPortfolio:
 class BacktestResult:
     monthly_records: list[PeriodRecord]
     summary: BacktestSummary
+    # Daily portfolio equity curve, chain-linked across rebalance periods.
+    # Each entry: (YYYY-MM-DD, cumulative_return_pct). Empty for degenerate
+    # runs with no holdings; the frontend falls back to the period curve in
+    # that case.
+    daily_records: list[tuple[str, float]] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
+            "daily_records": [
+                {"date": d, "cumulative_return_pct": cum}
+                for d, cum in self.daily_records
+            ],
             "monthly_records": [
                 {
                     "date": r.date,
@@ -259,6 +268,7 @@ class BacktestResult:
                             "exit_price_eur": h.exit_price_eur,
                             "entry_date": h.entry_date,
                             "exit_date": h.exit_date,
+                            "side": h.side,
                         }
                         for h in r.holdings
                     ],
@@ -376,6 +386,122 @@ def _price_on_or_after(series: pd.Series, target: pd.Timestamp) -> float | None:
     if subset.empty:
         return None
     return float(subset.iloc[0])
+
+
+def _build_daily_equity_curve(
+    period_records: list["PeriodRecord"],
+    price_index: dict[int, pd.Series],
+    strategy_type: "StrategyType",
+) -> tuple[list[tuple[str, float]], list[float]]:
+    """Reconstruct a daily portfolio equity curve from the period-level
+    holdings.
+
+    Within each period the portfolio's daily relative value is
+        long-only:    mean over long-holdings of (price[t] / entry_price)
+        long-short:   1 + mean(long_price/entry) − mean(short_price/entry)
+    where each holding's `entry_price_eur` is the price it actually entered
+    at and `price[t]` is the latest-available EUR close on or before day t.
+    Periods are chain-linked so the curve is continuous across rebalances.
+
+    This produces stats (max DD, Sharpe) that respect intra-period moves —
+    a monthly strategy that's flat at month-end after a -15% mid-month
+    drawdown now reports that drawdown, where the period-level curve
+    masked it.
+
+    Returns:
+        daily_records: [(YYYY-MM-DD, cumulative_return_pct), …]
+        daily_returns: day-over-day arithmetic returns (for Sharpe).
+    """
+    daily_dates: list[date] = []
+    daily_factors: list[float] = []
+    cumulative_factor = 1.0  # carries across periods
+
+    for pr in period_records:
+        if not pr.holdings:
+            continue
+        long_h = [h for h in pr.holdings if h.side == "long" and h.entry_price_eur not in (None, 0)]
+        short_h = [h for h in pr.holdings if h.side == "short" and h.entry_price_eur not in (None, 0)]
+        if not long_h and not short_h:
+            continue
+
+        # Period window from the holdings' actual trading dates.
+        entry_iso = [h.entry_date for h in pr.holdings if h.entry_date]
+        exit_iso = [h.exit_date for h in pr.holdings if h.exit_date]
+        if not entry_iso or not exit_iso:
+            continue
+        period_start = pd.Timestamp(min(entry_iso))
+        period_end = pd.Timestamp(max(exit_iso))
+
+        # Union of trading days across all holdings inside the window.
+        # exit_date is exclusive — it's the next period's entry day, the
+        # close that day belongs to the next period's run.
+        all_days_set: set[pd.Timestamp] = set()
+        for h in pr.holdings:
+            s = price_index.get(h.company_id)
+            if s is None:
+                continue
+            # Inclusive on both bounds: the exit day is the day we sell at,
+            # and its price IS the period's realized close. Excluding it
+            # left daily-rebalance periods with zero days inside the
+            # window (each period was [T, T+1), so only T survived; that
+            # day's factor is always 1.0 since entry_price == price[T],
+            # producing the flat-line bug). Inclusive bounds duplicate the
+            # boundary date in adjacent periods, but the values are equal
+            # by chain-link construction so the chart is unaffected.
+            mask = (s.index >= period_start) & (s.index <= period_end)
+            all_days_set.update(s.index[mask].tolist())
+        if not all_days_set:
+            continue
+        sorted_days = sorted(all_days_set)
+
+        for day in sorted_days:
+            long_vals: list[float] = []
+            short_vals: list[float] = []
+            for h in long_h:
+                s = price_index.get(h.company_id)
+                if s is None:
+                    continue
+                # `asof` is O(log n) vs the O(n) boolean-mask slice; on a
+                # 6-year monthly run this is the difference between ~22s
+                # of curve construction and well under a second.
+                v = s.asof(day)
+                if pd.isna(v):
+                    continue
+                long_vals.append(float(v) / h.entry_price_eur)
+            for h in short_h:
+                s = price_index.get(h.company_id)
+                if s is None:
+                    continue
+                v = s.asof(day)
+                if pd.isna(v):
+                    continue
+                short_vals.append(float(v) / h.entry_price_eur)
+
+            long_avg = sum(long_vals) / len(long_vals) if long_vals else 1.0
+            short_avg = sum(short_vals) / len(short_vals) if short_vals else 1.0
+            if strategy_type == "long_short":
+                period_relative = 1.0 + (long_avg - 1.0) - (short_avg - 1.0)
+            else:
+                period_relative = long_avg
+
+            daily_factor = cumulative_factor * period_relative
+            daily_dates.append(day.date())
+            daily_factors.append(daily_factor)
+
+        if daily_factors:
+            # Chain-link: next period starts where this one finishes.
+            cumulative_factor = daily_factors[-1]
+
+    daily_records = [
+        (d.isoformat(), round((f - 1) * 100, 4))
+        for d, f in zip(daily_dates, daily_factors)
+    ]
+    daily_returns: list[float] = []
+    for i in range(1, len(daily_factors)):
+        prev = daily_factors[i - 1]
+        if prev > 0:
+            daily_returns.append(daily_factors[i] / prev - 1)
+    return daily_records, daily_returns
 
 
 def _date_on_or_after(series: pd.Series, target: pd.Timestamp) -> str | None:
@@ -912,29 +1038,53 @@ def run_backtest(
             cumulative_return_pct=round(cumulative, 2),
         ))
 
-    # Summary stats. Annualization + Sharpe scaling depend on the rebalance
-    # cadence — daily uses √252, weekly √52, monthly √12, etc.
-    periods_per_year = _periods_per_year(prepared.frequency)
+    # Build a daily equity curve from the period holdings. Drawdown +
+    # Sharpe are computed against this rather than the period-end curve so
+    # intra-period moves (a -15% week mid-month that recovers by month-end)
+    # are visible. Annualization uses the daily-based curve too — the
+    # period-level total_return is preserved as a sanity check but the
+    # headline stats now reflect actual daily volatility.
+    daily_curve, daily_returns = _build_daily_equity_curve(
+        period_records, price_index, config.strategy_type,
+    )
     total_return = round(cumulative, 2)
-    n_years = len(all_period_returns) / periods_per_year if all_period_returns else 0
-    annualized = round((cumulative_factor ** (1 / n_years) - 1) * 100, 2) if n_years > 0 else 0
+    if daily_curve:
+        first_factor = 1.0  # curve starts at 1.0 by construction
+        last_factor = 1.0 + daily_curve[-1][1] / 100
+        first_date = date.fromisoformat(daily_curve[0][0])
+        last_date = date.fromisoformat(daily_curve[-1][0])
+        n_years = max(0.0, (last_date - first_date).days / 365.25)
+        annualized = round(((last_factor / first_factor) ** (1 / n_years) - 1) * 100, 2) if n_years > 0 else 0
+    else:
+        n_years = len(all_period_returns) / _periods_per_year(prepared.frequency) if all_period_returns else 0
+        annualized = round((cumulative_factor ** (1 / n_years) - 1) * 100, 2) if n_years > 0 else 0
 
-    # Identify all drawdown periods (peak-to-trough-to-recovery)
-    values = [(r.date, 1 + r.cumulative_return_pct / 100) for r in period_records]
+    # Identify all drawdown periods (peak-to-trough-to-recovery) on the
+    # daily curve when available; fall back to the period curve otherwise.
+    if daily_curve:
+        values = [(d, 1 + cum / 100) for d, cum in daily_curve]
+    else:
+        values = [(r.date, 1 + r.cumulative_return_pct / 100) for r in period_records]
     all_drawdown_periods = _find_drawdown_periods(values)
-    # Pick top 3 non-overlapping
     top_drawdowns = _pick_top_n_non_overlapping(all_drawdown_periods, 3)
     max_dd = top_drawdowns[0].drawdown_pct if top_drawdowns else 0.0
 
-    # Sharpe (annualized). Need at least one full calendar year of return
-    # observations to make the std-dev estimate meaningful.
+    # Sharpe — annualized from daily returns × √252 when we have at least a
+    # month of trading days. Falls back to the old period-frequency formula
+    # when the daily curve is unavailable (e.g. degenerate runs).
     sharpe = None
-    if len(all_period_returns) >= int(periods_per_year):
+    if len(daily_returns) >= 21:
+        arr = np.array(daily_returns)
+        d_mean = float(arr.mean())
+        d_std = float(arr.std())
+        if d_std > 0:
+            sharpe = round((d_mean / d_std) * (252 ** 0.5), 2)
+    elif len(all_period_returns) >= int(_periods_per_year(prepared.frequency)):
         arr = np.array(all_period_returns)
         period_mean = float(arr.mean())
         period_std = float(arr.std())
         if period_std > 0:
-            sharpe = round((period_mean / period_std) * (periods_per_year ** 0.5), 2)
+            sharpe = round((period_mean / period_std) * (_periods_per_year(prepared.frequency) ** 0.5), 2)
 
     summary = BacktestSummary(
         total_return_pct=total_return,
@@ -950,7 +1100,11 @@ def run_backtest(
     if send_event:
         send_event("progress", month="done", pct=100, message="Backtest complete")
 
-    return BacktestResult(monthly_records=period_records, summary=summary)
+    return BacktestResult(
+        monthly_records=period_records,
+        summary=summary,
+        daily_records=daily_curve,
+    )
 
 
 def run_multi_trial_backtest(
@@ -1107,7 +1261,17 @@ def run_multi_trial_backtest(
     if send_event:
         send_event("progress", month="done", pct=100, message=f"{n_trials} trials complete")
 
-    return BacktestResult(monthly_records=aggregated_records, summary=summary)
+    # Daily curve: use trial 0's, same convention as `holdings` (random
+    # trials would otherwise need per-date alignment, and the curves
+    # themselves are random anyway). Cross-trial daily mean would be more
+    # principled but the multi-trial path is rarely used.
+    daily_curve = trial_results[0].daily_records if trial_results else []
+
+    return BacktestResult(
+        monthly_records=aggregated_records,
+        summary=summary,
+        daily_records=daily_curve,
+    )
 
 
 def run_current_portfolio(
