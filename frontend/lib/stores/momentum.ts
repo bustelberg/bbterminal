@@ -254,7 +254,7 @@ export type BacktestStartConfig = {
   max_companies: number;
   universe_label: string | null;
   index_universe: string | null;
-  selection_mode: 'momentum' | 'random';
+  selection_mode: 'momentum' | 'random' | 'all';
   random_seed: number | null;
   n_trials: number;
   mode?: 'backtest' | 'current_portfolio';

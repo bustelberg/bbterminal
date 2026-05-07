@@ -714,6 +714,108 @@ def _prepare_backtest(
     )
 
 
+@dataclass
+class _SharedBacktestInputs:
+    """The portion of a backtest's setup that's identical across every
+    variant in a sweep — price/volume indices and a single signal panel
+    built over the *union* of all variants' cutoff dates. Each variant
+    then takes a sliced view of this panel via `_prepare_variant_from_shared`.
+
+    Building the per-company rolling signal panels is the dominant cost
+    in `_prepare_backtest` (it scans each company's full price history
+    once); per-cutoff lookups are cheap searchsorted ops. Rolling those
+    builds into a single call cuts ~N-1 redundant scans for an N-variant
+    sweep, which is the difference between a 14-variant sweep paying
+    ~14×10s = 140s of panel construction vs ~10s.
+    """
+    price_index: dict[int, pd.Series]
+    local_price_index: dict[int, pd.Series] | None
+    volume_index: dict[int, pd.Series] | None
+    panel_universe_df: pd.DataFrame
+    union_panel: dict[date, pd.DataFrame]
+
+
+def build_shared_backtest_inputs(
+    *,
+    prices_df: pd.DataFrame,
+    universe_df: pd.DataFrame,
+    volumes_df: pd.DataFrame | None,
+    prices_local_df: pd.DataFrame | None,
+    monthly_eligible: dict[str, dict[int, str | None]] | None,
+    union_cutoffs: list[date],
+) -> _SharedBacktestInputs:
+    """Build the shared portion of `_BacktestPrepared` once for a sweep.
+    `union_cutoffs` should contain every cutoff date any variant in the
+    sweep will need (i.e. union of `_generate_rebalance_dates(...)[:-1]`
+    across variants). Cutoff order doesn't matter for the panel; the
+    function dedupes + sorts internally."""
+    price_index = _build_price_index(prices_df)
+    local_price_index = (
+        _build_price_index(prices_local_df)
+        if prices_local_df is not None and not prices_local_df.empty
+        else None
+    )
+    volume_index = (
+        _build_volume_index(volumes_df)
+        if volumes_df is not None and not volumes_df.empty
+        else None
+    )
+    if monthly_eligible is not None:
+        panel_universe_ids: set[int] = set()
+        for month_dict in monthly_eligible.values():
+            panel_universe_ids.update(month_dict.keys())
+        panel_universe_df = (
+            universe_df[universe_df["company_id"].isin(panel_universe_ids)]
+            .reset_index(drop=True)
+        )
+    else:
+        panel_universe_df = universe_df
+
+    deduped_cutoffs = sorted(set(union_cutoffs))
+    union_panel = compute_signals_panel(
+        panel_universe_df,
+        deduped_cutoffs,
+        price_index=price_index,
+        volume_index=volume_index,
+    )
+    return _SharedBacktestInputs(
+        price_index=price_index,
+        local_price_index=local_price_index,
+        volume_index=volume_index,
+        panel_universe_df=panel_universe_df,
+        union_panel=union_panel,
+    )
+
+
+def prepare_variant_from_shared(
+    *,
+    shared: _SharedBacktestInputs,
+    start_date: date,
+    end_date: date,
+    frequency: RebalanceFrequency,
+    prices_df: pd.DataFrame,
+) -> _BacktestPrepared:
+    """Build a `_BacktestPrepared` for one variant from sweep-shared
+    inputs. The signal panel is filtered to just this variant's cutoffs;
+    indices are reused as-is. Use this in place of `_prepare_backtest`
+    when you've already called `build_shared_backtest_inputs` for the
+    sweep — gives byte-identical results, just without re-doing the
+    expensive per-company rolling panel scan."""
+    periods = _generate_rebalance_dates(start_date, end_date, frequency, prices_df)
+    if len(periods) < 2:
+        raise ValueError(f"Need at least 2 rebalance periods for a {frequency} backtest (got {len(periods)})")
+    cutoff_set = set(periods[:-1])
+    sliced_panel = {d: df for d, df in shared.union_panel.items() if d in cutoff_set}
+    return _BacktestPrepared(
+        periods=periods,
+        price_index=shared.price_index,
+        local_price_index=shared.local_price_index,
+        volume_index=shared.volume_index,
+        panel=sliced_panel,
+        frequency=frequency,
+    )
+
+
 def run_backtest(
     config: BacktestConfig,
     prices_df: pd.DataFrame,
@@ -749,6 +851,10 @@ def run_backtest(
     # instead of silently producing nonsense.
     if config.strategy_type == "long_short" and config.selection_mode == "random":
         raise ValueError("long_short strategy is incompatible with random selection mode")
+    # `all` selection holds every eligible name in the universe — there's
+    # no top/bottom split to drive a long-short book either.
+    if config.strategy_type == "long_short" and config.selection_mode == "all":
+        raise ValueError("long_short strategy is incompatible with 'all' selection mode")
 
     if prepared is None:
         prepared = _prepare_backtest(
@@ -869,7 +975,15 @@ def run_backtest(
         # Select longs (always) and shorts (long-short only). For random
         # mode there's only ever one bucket — `selected_top` — and shorts
         # stay empty.
-        if rng is not None:
+        if config.selection_mode == "all":
+            # "Hold the whole universe" baseline — every eligible name in
+            # the period equally weighted. Useful as a market-cap-naive
+            # index proxy and as a control when comparing against
+            # signal-driven selections. top_n_sectors / top_n_per_sector
+            # are deliberately ignored: the whole point is no filtering.
+            selected_top = signals_df.copy().reset_index(drop=True)
+            selected_bottom = pd.DataFrame()
+        elif rng is not None:
             selected_top = random_select(
                 signals_df,
                 top_n_sectors=config.top_n_sectors,

@@ -46,6 +46,8 @@ from momentum.data import (
 from momentum.signals import PRICE_SIGNAL_DEFS
 from momentum.backtest import (
     BacktestConfig, run_backtest, run_multi_trial_backtest, run_current_portfolio,
+    build_shared_backtest_inputs, prepare_variant_from_shared,
+    _generate_rebalance_dates,
 )
 from universe.screen import screen_universe, build_and_store_universes, validate_vs_longequity
 from universe.criteria import CRITERIA_NAMES, CRITERIA_DESCRIPTIONS, CRITERIA_MIN_YEARS
@@ -2255,7 +2257,7 @@ class BacktestRequest(BaseModel):
     # value never silently routes through a default branch downstream
     # (e.g. an unknown `mode` quietly behaving like "backtest"). New
     # variants need to be added here AND wherever the value is consumed.
-    selection_mode: Literal["momentum", "random"] = "momentum"
+    selection_mode: Literal["momentum", "random", "all"] = "momentum"
     random_seed: int | None = None  # only used when selection_mode == "random"
     n_trials: int = 1  # >1 only valid with selection_mode=="random"; aggregates mean ± std
     mode: Literal["backtest", "current_portfolio"] = "backtest"
@@ -3297,19 +3299,63 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         # date generator and portfolio construction, not the underlying
         # data, so this is the cheap loop the sweep should always have been.
         if req.variants:
+            # Pre-build the sweep-shared inputs ONCE: price/volume indices
+            # plus a single signal panel covering the *union* of every
+            # variant's cutoff dates. The per-company rolling signal scan
+            # is the dominant cost of `_prepare_backtest`, and it's
+            # identical across every variant in the sweep — running it
+            # N times for N variants was wasting ~(N-1) full passes over
+            # the universe's price history. Skip the precompute when
+            # `selection_mode == 'all'` since the all-universe path
+            # doesn't consult signals.
+            shared_backtest = None
+            if req.selection_mode != "all":
+                _start_d = date.fromisoformat(req.start_date)
+                _end_d = date.fromisoformat(req.end_date)
+                _union_cutoffs: set[date] = set()
+                for _v in req.variants:
+                    try:
+                        _periods = _generate_rebalance_dates(
+                            _start_d, _end_d, _v.frequency, prices_df,
+                        )
+                    except Exception:
+                        # If a variant can't even produce dates, skip it
+                        # here — the per-variant loop below will surface
+                        # the error properly.
+                        continue
+                    if len(_periods) >= 2:
+                        _union_cutoffs.update(_periods[:-1])
+                if _union_cutoffs:
+                    yield _emit({
+                        "type": "progress",
+                        "pct": 68,
+                        "message": f"Precomputing signal panel over {len(_union_cutoffs)} union cutoffs (shared by all {len(req.variants)} variants)...",
+                    })
+                    yield _keepalive()
+                    shared_backtest = await asyncio.to_thread(
+                        build_shared_backtest_inputs,
+                        prices_df=prices_df,
+                        universe_df=universe_df,
+                        volumes_df=volumes_df,
+                        prices_local_df=prices_local_df,
+                        monthly_eligible=monthly_eligible,
+                        union_cutoffs=sorted(_union_cutoffs),
+                    )
+
             for v_idx, vspec in enumerate(req.variants):
                 variant_key = f"{vspec.frequency}__{vspec.strategy_type}"
                 yield _emit({"type": "variant_start", "variant_key": variant_key})
                 yield _keepalive()
 
                 # Per-variant config: same base, overridden frequency + strategy.
-                # Reject long_short + random at the variant level — the same
-                # combination check the single-run path applies, but per-row.
-                if req.selection_mode == "random" and vspec.strategy_type == "long_short":
+                # Reject long_short + random/all at the variant level —
+                # the same combination check the single-run path applies,
+                # but per-row.
+                if vspec.strategy_type == "long_short" and req.selection_mode in ("random", "all"):
                     yield _emit({
                         "type": "variant_error",
                         "variant_key": variant_key,
-                        "message": "long_short is not supported with selection_mode='random'",
+                        "message": f"long_short is not supported with selection_mode='{req.selection_mode}'",
                     })
                     continue
 
@@ -3333,9 +3379,41 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                 def _v_send_event(event_type: str, **kwargs):
                     v_progress_queue.put({"type": event_type, **kwargs})
 
-                def _v_run(cfg=v_config):
+                # Per-variant `_BacktestPrepared` built from the
+                # sweep-shared signal panel + indices. `prepared` already
+                # carries the variant's frequency, periods, and the
+                # filtered panel; `run_backtest` short-circuits its own
+                # `_prepare_backtest` call when `prepared` is supplied.
+                v_prepared = None
+                if shared_backtest is not None:
+                    try:
+                        v_prepared = prepare_variant_from_shared(
+                            shared=shared_backtest,
+                            start_date=date.fromisoformat(req.start_date),
+                            end_date=date.fromisoformat(req.end_date),
+                            frequency=vspec.frequency,
+                            prices_df=prices_df,
+                        )
+                    except Exception as _prep_err:
+                        # Fall through to the regular path which will
+                        # raise the same error inside the variant thread
+                        # so it surfaces as a per-variant error event.
+                        v_prepared = None
+                        logging.getLogger(__name__).debug(
+                            "[variants] prepare_variant_from_shared failed for %s: %s",
+                            variant_key, _prep_err,
+                        )
+
+                def _v_run(cfg=v_config, prepared=v_prepared):
                     try:
                         if req.selection_mode == "random" and req.n_trials > 1:
+                            # Multi-trial random repeats `run_backtest`
+                            # under the hood; it builds its own prepared.
+                            # The shared panel still helps if/when we
+                            # wire it through here, but for now we just
+                            # leave the per-trial path to use its own
+                            # cache (which already shares prepared
+                            # across trials of the SAME variant).
                             r = run_multi_trial_backtest(
                                 cfg, prices_df, universe_df, req.n_trials, _v_send_event,
                                 volumes_df=volumes_df,
@@ -3350,6 +3428,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                                 monthly_eligible=monthly_eligible,
                                 prices_local_df=prices_local_df,
                                 company_currency=company_currency,
+                                prepared=prepared,
                             )
                         v_result_holder.append(r)
                     except Exception as e:
