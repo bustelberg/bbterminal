@@ -3223,13 +3223,32 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         # Build universe snapshot once — used by both single-run and variants
         # paths. Variants reuse this for every per-variant `variant_result`
         # event so the client gets the same shape it would from a single run.
+        # `_norm_str` handles None / NaN explicitly: pandas Series .get("col",
+        # default) only falls through to the default when the COLUMN is
+        # missing, not when the cell is None or NaN. Without this normalization
+        # an exchange link that's absent in the DB ends up as the literal
+        # string "None" or "nan" in the JSON payload, which (a) breaks the
+        # frontend's GuruFocus URL helper (US-vs-non-US classifier sees
+        # "None" as non-US and produces "/stock/None:TICKER/summary") and
+        # (b) renders "(None)" or "(nan)" in the holdings table.
+        def _norm_str(val) -> str:
+            if val is None:
+                return ""
+            try:
+                if pd.isna(val):
+                    return ""
+            except (TypeError, ValueError):
+                pass
+            return str(val)
+
         universe_snapshot = [
             {
                 "company_id": int(row["company_id"]),
-                "ticker": str(row["gurufocus_ticker"]),
-                "exchange": str(row.get("gurufocus_exchange", "")),
-                "company_name": str(row.get("company_name", "")),
-                "sector": str(row.get("sector", "")),
+                "ticker": _norm_str(row.get("gurufocus_ticker")),
+                "exchange": _norm_str(row.get("gurufocus_exchange")),
+                "company_name": _norm_str(row.get("company_name")),
+                "sector": _norm_str(row.get("sector")),
+                "country": _norm_str(row.get("country")),
             }
             for _, row in universe_df.iterrows()
         ]

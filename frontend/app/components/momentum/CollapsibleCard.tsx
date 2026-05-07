@@ -58,7 +58,21 @@ export default function CollapsibleCard({
           <div className="text-[11px] text-gray-500 ml-3 flex items-center gap-2 flex-wrap">{rightSlot}</div>
         )}
       </div>
-      {!collapsed && <div className={bodyClassName}>{children}</div>}
+      {!collapsed && (
+        // `content-visibility: auto` lets the browser skip layout + paint
+        // for off-screen card bodies during scroll. With 10 variant runs
+        // and a wide-universe daily backtest the page can host tens of
+        // thousands of DOM nodes; this turns scrolling from janky into
+        // smooth without changing any visual output. `contain-intrinsic-size`
+        // gives the browser a placeholder height so the scrollbar doesn't
+        // jitter as cards realize.
+        <div
+          className={bodyClassName}
+          style={{ contentVisibility: 'auto', containIntrinsicSize: '600px' }}
+        >
+          {children}
+        </div>
+      )}
     </div>
   );
 }

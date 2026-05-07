@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { BacktestResult } from '../../../lib/stores/momentum';
 import CellInfoTip from './CellInfoTip';
 import type { ScoringConfig } from './MonthlyHoldingsTable';
-import { annualize, fmtPct, guruFocusUrl, EXCHANGE_NAMES } from './utils';
+import { annualize, displayExchange, fmtPct, guruFocusUrl, EXCHANGE_NAMES } from './utils';
 import { runSSE } from '../../../lib/stream';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
@@ -225,8 +225,9 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
 
   if (companyId == null) return null;
 
-  const exchange = exchangeByCompany.get(companyId) ?? '';
-  const href = ticker ? guruFocusUrl(ticker, exchange) : null;
+  const exchangeRaw = exchangeByCompany.get(companyId) ?? '';
+  const exchange = displayExchange(exchangeRaw);
+  const href = ticker ? guruFocusUrl(ticker, exchangeRaw) : null;
 
   // Identify run boundaries (a "buy" = transition from not-held → held;
   // "sell" = transition from held → not-held). Grouping consecutive

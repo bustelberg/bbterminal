@@ -55,10 +55,93 @@ type TimelineData = {
  * (e.g. "only long-side" for the long panel of a long-short backtest);
  * weights are computed against the count of *filtered* holdings per month
  * so a 50/50 long/short split shows each side at 100% of its own pie. */
+// Above this many records we bucket by calendar month before building
+// the cells. A 24-year daily backtest produces ~6000 records — at that
+// scale the chart was rendering ~60k tiny <div>s (each with a hover
+// handler), which made page scroll janky. Bucketing collapses to ~290
+// monthly cells per sector, which is also the sensible visual resolution
+// (a sub-pixel-wide cell carries no information). The bucket key is the
+// raw "YYYY-MM" prefix; the representative record per bucket is the LAST
+// one (most recent within the month) so tooltips still surface a real
+// date the user can recognize.
+const TIMELINE_BUCKET_THRESHOLD = 250;
+
+function bucketRecordsByMonth(records: readonly PeriodRecord[]): readonly PeriodRecord[] {
+  if (records.length <= TIMELINE_BUCKET_THRESHOLD) return records;
+
+  // Pass 1: per (month, sector), compound the daily per-sector mean
+  // returns into a single monthly factor. We need this so the bucketed
+  // holdings carry an aggregated forward_return that, when fed back into
+  // the same run-building logic below, reproduces the correct cumulative
+  // run return on the tooltip. Without it the bucketed run.rets would
+  // hold a single sub-percent daily mean per month and the tooltip's
+  // "Run return" would understate by orders of magnitude.
+  const compoundedByMonthSector = new Map<string, Map<string, number>>();
+  for (const rec of records) {
+    const monthKey = rec.date.slice(0, 7);
+    let monthFactors = compoundedByMonthSector.get(monthKey);
+    if (!monthFactors) {
+      monthFactors = new Map<string, number>();
+      compoundedByMonthSector.set(monthKey, monthFactors);
+    }
+    const sectorRets = new Map<string, number[]>();
+    for (const h of rec.holdings) {
+      if (h.forward_return_pct == null) continue;
+      const sec = h.sector || 'Unknown';
+      const arr = sectorRets.get(sec) ?? [];
+      arr.push(h.forward_return_pct);
+      sectorRets.set(sec, arr);
+    }
+    for (const [sec, rets] of sectorRets) {
+      const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
+      const factor = 1 + mean / 100;
+      const prior = monthFactors.get(sec) ?? 1.0;
+      monthFactors.set(sec, prior * factor);
+    }
+  }
+
+  // Pass 2: union holdings within each calendar month (a sector held on
+  // any day shows as held for the bucketed cell). Dedupe by company_id.
+  const byMonth = new Map<string, PeriodRecord>();
+  for (const rec of records) {
+    const monthKey = rec.date.slice(0, 7);
+    const prior = byMonth.get(monthKey);
+    if (!prior) {
+      byMonth.set(monthKey, { ...rec, date: monthKey, holdings: [...rec.holdings] });
+      continue;
+    }
+    const seen = new Set(prior.holdings.map((h) => h.company_id));
+    for (const h of rec.holdings) {
+      if (!seen.has(h.company_id)) {
+        prior.holdings.push(h);
+        seen.add(h.company_id);
+      }
+    }
+  }
+
+  // Pass 3: rewrite each bucketed holding's forward_return_pct with the
+  // sector's compounded monthly factor → percentage. Per-sector mean over
+  // these holdings then equals the compounded value, and chain-linking
+  // across months in a run reproduces the true period cumulative return.
+  for (const [monthKey, rec] of byMonth) {
+    const monthFactors = compoundedByMonthSector.get(monthKey);
+    if (!monthFactors) continue;
+    rec.holdings = rec.holdings.map((h) => {
+      const sec = h.sector || 'Unknown';
+      const factor = monthFactors.get(sec);
+      if (factor == null) return h;
+      return { ...h, forward_return_pct: (factor - 1) * 100 };
+    });
+  }
+
+  return Array.from(byMonth.values()).sort((a, b) => a.date.localeCompare(b.date));
+}
+
 function buildTimelineData(
   records: readonly PeriodRecord[],
   holdingFilter: (h: Holding) => boolean,
 ): TimelineData {
+  records = bucketRecordsByMonth(records);
   const months = records.map((r) => r.date);
   const runs = new Map<string, Run[]>();
   const runByMonth = new Map<string, Int16Array>();

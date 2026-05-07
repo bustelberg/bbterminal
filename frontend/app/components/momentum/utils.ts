@@ -34,12 +34,36 @@ export const fmtPrice = (v: number | null | undefined) => {
   return v.toFixed(d);
 };
 
+// US-listed exchanges per GuruFocus's URL convention: `/stock/TICKER/summary`
+// without a prefix. Non-US (XTER, HKSE, LSE, TSE, …) need `EXCHANGE:TICKER`.
+// Aligned with `backend/ingest/prices.py::US_EXCHANGES` so the click-through
+// link and the actual API request resolve to the same security. `US` is
+// kept as a catch-all some loaders use for OTC/pink sheets.
+const GURUFOCUS_US_EXCHANGES = new Set(['NYSE', 'NASDAQ', 'AMEX', 'CBOE', 'US']);
+
+// Strings that show up in the frontend payload when an exchange link is
+// missing on the backend side (pandas/JSON sometimes serializes None/NaN
+// as the literal "None"/"nan", and saved variant bundles from before the
+// snapshot-normalization fix still carry them). Treat them as no-exchange
+// so we don't synthesize broken `None:TICKER`-style URLs.
+const EMPTY_EXCHANGE_TOKENS = new Set(['', 'NONE', 'NAN', 'NULL', 'UNDEFINED']);
+
 export function guruFocusUrl(ticker: string, exchange: string): string {
-  const USA = new Set(['NYSE', 'NASDAQ', 'US', 'AMEX']);
   const t = ticker.toUpperCase();
-  const e = exchange.toUpperCase();
-  if (!e || USA.has(e)) return `https://www.gurufocus.com/stock/${t}/summary`;
+  const e = (exchange ?? '').toUpperCase();
+  if (EMPTY_EXCHANGE_TOKENS.has(e) || GURUFOCUS_US_EXCHANGES.has(e)) {
+    return `https://www.gurufocus.com/stock/${t}/summary`;
+  }
   return `https://www.gurufocus.com/stock/${e}:${t}/summary`;
+}
+
+/** Returns the exchange label fit for display (e.g. inside `(NYSE)` parens
+ * after a ticker). Empty when the value is missing or one of the
+ * pandas-junk sentinels — callers can `{label && <span>(label)</span>}`. */
+export function displayExchange(exchange: string | null | undefined): string {
+  const e = (exchange ?? '').trim();
+  if (!e || EMPTY_EXCHANGE_TOKENS.has(e.toUpperCase())) return '';
+  return e;
 }
 
 export const EXCHANGE_NAMES: Record<string, string> = {

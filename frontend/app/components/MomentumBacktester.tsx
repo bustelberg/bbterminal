@@ -411,10 +411,12 @@ export default function MomentumBacktester() {
             strategy: def.strategy,
             summary: r.summary,
             monthly_records: r.monthly_records,
-            // Persist the daily curve so the chart renders intra-period
-            // moves on reload. Omitted from older saves; the loader falls
-            // back to monthly when absent.
-            daily_records: r.daily_records ?? [],
+            // daily_records intentionally omitted — for a 24-year × 10-variant
+            // bundle they total several MB, which exceeds Supabase's
+            // statement_timeout when squeezed into a single JSONB insert.
+            // The chart falls back to monthly_records on reload; max-DD /
+            // Sharpe / drawdown periods are still in `summary` so headline
+            // stats survive. Re-run if the daily-resolution line is needed.
           })),
           universe,
         }),

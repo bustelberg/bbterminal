@@ -5,7 +5,7 @@ import type { BacktestResult } from '../../../lib/stores/momentum';
 import CellInfoTip from './CellInfoTip';
 import CollapsibleCard from './CollapsibleCard';
 import TickerTimelineModal from './TickerTimelineModal';
-import { EXCHANGE_NAMES, fmtPct, fmtPrice, guruFocusUrl } from './utils';
+import { EXCHANGE_NAMES, displayExchange, fmtPct, fmtPrice, guruFocusUrl } from './utils';
 
 /** Subset of the active backtest's selection config that the per-ticker
  * timeline modal forwards to the signal-breakdown endpoint. Lets the
@@ -170,8 +170,9 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
                               return sec !== 0 ? sec : b.score - a.score;
                             })
                             .map((h) => {
-                              const exch = exchangeByCompany.get(h.company_id) ?? '';
-                              const href = guruFocusUrl(h.ticker, exch);
+                              const exchRaw = exchangeByCompany.get(h.company_id) ?? '';
+                              const exch = displayExchange(exchRaw);
+                              const href = guruFocusUrl(h.ticker, exchRaw);
                               const isShort = h.side === 'short';
                               return (
                                 <tr key={`${h.side ?? 'long'}-${h.company_id}`} className={`border-t border-gray-800/20 ${isShort ? 'bg-rose-500/[0.04]' : ''}`}>

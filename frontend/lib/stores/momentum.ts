@@ -131,6 +131,7 @@ export type UniverseEntry = {
   exchange: string;
   company_name: string;
   sector: string;
+  country?: string;  // populated by the backend snapshot; absent on older saves
 };
 
 export type ProgressEntry = { pct: number; message: string; t: number };

@@ -1047,17 +1047,27 @@ def run_backtest(
     daily_curve, daily_returns = _build_daily_equity_curve(
         period_records, price_index, config.strategy_type,
     )
+    # `total_return` and `annualized_return_pct` are intentionally both
+    # derived from the period-chain `cumulative_factor`. The daily curve
+    # shadows the same growth path on average but diverges on the margin
+    # — period chain excludes holdings whose forward_return_pct is None
+    # (missing exit price), while the daily curve carries them through
+    # with a stale `asof()` price. Over thousands of daily rebalances
+    # those edge-case ratios accumulate, and the two end-of-backtest
+    # values disagree by more than rounding (the symptom: 37% annualized
+    # next to a 66,000% total return — math says one of those is wrong).
+    # Pinning both to the period chain keeps the headline numbers
+    # internally consistent. The daily curve is still the source for
+    # max-drawdown + Sharpe (those need intra-period detail) and for
+    # the chart line.
     total_return = round(cumulative, 2)
     if daily_curve:
-        first_factor = 1.0  # curve starts at 1.0 by construction
-        last_factor = 1.0 + daily_curve[-1][1] / 100
         first_date = date.fromisoformat(daily_curve[0][0])
         last_date = date.fromisoformat(daily_curve[-1][0])
         n_years = max(0.0, (last_date - first_date).days / 365.25)
-        annualized = round(((last_factor / first_factor) ** (1 / n_years) - 1) * 100, 2) if n_years > 0 else 0
     else:
         n_years = len(all_period_returns) / _periods_per_year(prepared.frequency) if all_period_returns else 0
-        annualized = round((cumulative_factor ** (1 / n_years) - 1) * 100, 2) if n_years > 0 else 0
+    annualized = round((cumulative_factor ** (1 / n_years) - 1) * 100, 2) if n_years > 0 else 0
 
     # Identify all drawdown periods (peak-to-trough-to-recovery) on the
     # daily curve when available; fall back to the period curve otherwise.
