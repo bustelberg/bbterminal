@@ -208,7 +208,7 @@ export default function DailyPicksHistory({ currentPortfolio, categories, exchan
                                           })
                                           .map((h) => {
                                             const exchRaw = exchangeByCompany.get(h.company_id) ?? '';
-                                            const exch = displayExchange(exchRaw);
+                                            const exch = displayExchange(exchRaw, h.ticker);
                                             const href = guruFocusUrl(h.ticker, exchRaw);
                                             return (
                                               <tr key={h.company_id} className="border-t border-gray-800/20">

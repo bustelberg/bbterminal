@@ -297,11 +297,37 @@ def _default_snapshot_name(config: dict) -> str:
     return f"{universe} · {ts}"
 
 
+# Cached probe for the `name` column on `current_picks_snapshot`. Migration
+# 20260507000000_current_picks_name.sql adds this column; if it hasn't been
+# applied yet we want the rest of the page to keep working (the snapshot
+# dropdown, the auto-save path) instead of 500ing every request. Probed
+# lazily on first use, then cached.
+_HAS_CURRENT_PICKS_NAME_COLUMN: bool | None = None
+
+
+def _has_current_picks_name_column() -> bool:
+    global _HAS_CURRENT_PICKS_NAME_COLUMN
+    if _HAS_CURRENT_PICKS_NAME_COLUMN is None:
+        try:
+            supabase.table("current_picks_snapshot").select("name").limit(0).execute()
+            _HAS_CURRENT_PICKS_NAME_COLUMN = True
+        except Exception as e:
+            _HAS_CURRENT_PICKS_NAME_COLUMN = False
+            logging.getLogger(__name__).warning(
+                "[current-picks] `name` column not present on current_picks_snapshot — "
+                "rename UX is disabled and the dropdown shows the auto-generated label. "
+                "Apply migration 20260507000000_current_picks_name.sql to enable. (%s: %s)",
+                type(e).__name__, e,
+            )
+    return _HAS_CURRENT_PICKS_NAME_COLUMN
+
+
 def _save_current_picks_snapshot(payload: dict, config: dict, triggered_by: str, strategy_hash: str | None = None, name: str | None = None) -> int:
     """Insert a current_picks snapshot and return its snapshot_id.
     Synchronous (call via asyncio.to_thread from async paths). When `name`
     is None, fills in a sensible default — the dropdown then shows
-    something readable instead of an empty label."""
+    something readable instead of an empty label. Skips the name column
+    entirely when the schema migration hasn't been applied yet."""
     if triggered_by not in ("auto", "manual"):
         raise ValueError(f"triggered_by must be 'auto' or 'manual', got {triggered_by!r}")
     row = {
@@ -312,8 +338,9 @@ def _save_current_picks_snapshot(payload: dict, config: dict, triggered_by: str,
         "holdings": payload["holdings"],
         "daily_picks": payload.get("daily_picks") or [],
         "strategy_hash": strategy_hash,
-        "name": name if name is not None else _default_snapshot_name(config),
     }
+    if _has_current_picks_name_column():
+        row["name"] = name if name is not None else _default_snapshot_name(config)
     resp = supabase.table("current_picks_snapshot").insert(row).execute()
     if not resp.data:
         raise RuntimeError("insert returned no data")
@@ -3349,9 +3376,20 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                     if evt is None:
                         break
                     if evt["type"] == "progress":
+                        # Scale this variant's internal pct (0-100) into
+                        # the overall sweep progress: each variant owns a
+                        # 32/N slice of the [68, 100] band, and within
+                        # the slice we advance proportionally to the
+                        # variant's own progress event. Without this the
+                        # bar was locked at the variant's start pct
+                        # throughout its run, then frozen at
+                        # `68 + ((N-1)/N)*32` after the last variant
+                        # finished — e.g. 84% for N=8.
+                        local_pct = float(evt.get("pct") or 0)
+                        sweep_fraction = (v_idx + max(0.0, min(100.0, local_pct)) / 100.0) / max(1, len(req.variants))
                         yield _emit({
                             "type": "progress",
-                            "pct": 68 + round((v_idx / max(1, len(req.variants))) * 32),
+                            "pct": 68 + round(sweep_fraction * 32),
                             "message": f"[{variant_key}] {evt.get('message', '')}",
                         })
                     elif evt["type"] == "warning":
@@ -3378,6 +3416,11 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                     "universe": universe_snapshot,
                 })
 
+            # Belt-and-suspenders 100% emit: even if the final variant
+            # didn't deliver a closing progress event (e.g. it errored,
+            # or was skipped because long_short+random is forbidden),
+            # the user-facing progress bar lands at 100 before `done`.
+            yield _emit({"type": "progress", "pct": 100, "message": f"Variants sweep complete ({len(req.variants)})"})
             yield _emit({"type": "done", "message": f"Variants sweep complete ({len(req.variants)})"})
             return
 
@@ -3643,17 +3686,21 @@ async def rename_backtest(run_id: int, req: RenameBacktestRequest):
 
 @app.get("/api/momentum/current-picks")
 async def list_current_picks():
-    """List snapshots, most recent first. Excludes the heavy holdings JSONB."""
+    """List snapshots, most recent first. Excludes the heavy holdings JSONB.
+    Drops the `name` column from the SELECT when the migration hasn't been
+    applied yet — the frontend already treats `name` as optional and falls
+    back to the auto-generated date/trigger label."""
+    has_name = await asyncio.to_thread(_has_current_picks_name_column)
+    cols = "snapshot_id, created_at, triggered_by, as_of_date, latest_price_date"
+    if has_name:
+        cols += ", name"
     resp = await asyncio.to_thread(
         lambda: supabase.table("current_picks_snapshot")
-        .select("snapshot_id, created_at, triggered_by, as_of_date, latest_price_date, name")
+        .select(cols)
         .order("created_at", desc=True)
         .execute()
     )
-    rows = resp.data or []
-    # Add holdings_count via a separate aggregate query? Cheaper to skip and let
-    # the UI show only metadata; the count appears on the loaded snapshot.
-    return rows
+    return resp.data or []
 
 
 @app.get("/api/momentum/current-picks/{snapshot_id}")
@@ -3694,6 +3741,12 @@ class RenameCurrentPicksRequest(BaseModel):
 @app.patch("/api/momentum/current-picks/{snapshot_id}")
 async def rename_current_picks(snapshot_id: int, req: RenameCurrentPicksRequest):
     """Set or clear a custom name on a current-picks snapshot."""
+    if not await asyncio.to_thread(_has_current_picks_name_column):
+        raise HTTPException(
+            503,
+            "Snapshot rename requires the `name` column. Apply migration "
+            "20260507000000_current_picks_name.sql to enable.",
+        )
     new_name = (req.name or "").strip() or None
     resp = await asyncio.to_thread(
         lambda: supabase.table("current_picks_snapshot")
@@ -5064,32 +5117,83 @@ async def index_universe_import_sp500():
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
+# Module-level cache for the universe-stats list. The underlying view does
+# COUNT(DISTINCT universe_ticker) over the full universe_membership table,
+# which sometimes trips Supabase's 8s statement_timeout once the table grows
+# past ~500k rows (S&P 500 history × ACWI × monthly entries). Reads change
+# rarely (only after an index ingest), so a 5-minute TTL avoids paying that
+# cost on every dropdown render. On timeout we fall back to a stale cached
+# entry if we have one, then to a cheap universe-table-only read so the UI
+# still loads — month/ticker counts come back as 0 in that degraded mode.
+_UNIVERSE_STATS_CACHE: dict = {"ts": 0.0, "data": None}
+_UNIVERSE_STATS_TTL = 300.0
+
+
 @app.get("/api/index-universe/indexes")
 async def index_universe_list():
     """List all stored index universes with month range and unique ticker counts.
     Aggregates are precomputed by the universe_stats view — querying membership
     rows directly and counting in Python ran ~70s for SP500 + ACWI."""
     def _run():
-        resp = (
-            supabase.table("universe_stats")
-            .select("*")
-            .order("label")
-            .execute()
-        )
-        result = []
-        for r in (resp.data or []):
-            if not r.get("start_month"):
-                continue  # skip empty universes
-            result.append({
-                "index_name": r["label"],
-                "description": r.get("description"),
-                "created_at": r.get("created_at"),
-                "start_month": r.get("start_month"),
-                "end_month": r.get("end_month"),
-                "month_count": r.get("month_count") or 0,
-                "total_unique_tickers": r.get("total_unique_tickers") or 0,
-            })
-        return result
+        now = time.time()
+        cached = _UNIVERSE_STATS_CACHE.get("data")
+        if cached is not None and (now - _UNIVERSE_STATS_CACHE["ts"]) < _UNIVERSE_STATS_TTL:
+            return cached
+        try:
+            resp = (
+                supabase.table("universe_stats")
+                .select("*")
+                .order("label")
+                .execute()
+            )
+            result = []
+            for r in (resp.data or []):
+                if not r.get("start_month"):
+                    continue  # skip empty universes
+                result.append({
+                    "index_name": r["label"],
+                    "description": r.get("description"),
+                    "created_at": r.get("created_at"),
+                    "start_month": r.get("start_month"),
+                    "end_month": r.get("end_month"),
+                    "month_count": r.get("month_count") or 0,
+                    "total_unique_tickers": r.get("total_unique_tickers") or 0,
+                })
+            _UNIVERSE_STATS_CACHE["data"] = result
+            _UNIVERSE_STATS_CACHE["ts"] = now
+            return result
+        except Exception as e:
+            logging.getLogger(__name__).warning(
+                "[index-universe] universe_stats query failed (%s: %s); "
+                "serving %s",
+                type(e).__name__, e,
+                "stale cache" if cached is not None else "degraded universe-table fallback",
+            )
+            if cached is not None:
+                return cached
+            # Final fallback: just list universes without aggregates so the
+            # dropdown still populates. Frontend tolerates 0/null counts.
+            try:
+                u_resp = (
+                    supabase.table("universe")
+                    .select("universe_id, label, description, created_at")
+                    .order("label")
+                    .execute()
+                )
+                return [
+                    {
+                        "index_name": r["label"],
+                        "description": r.get("description"),
+                        "created_at": r.get("created_at"),
+                        "start_month": None,
+                        "end_month": None,
+                        "month_count": 0,
+                        "total_unique_tickers": 0,
+                    }
+                    for r in (u_resp.data or [])
+                ]
+            except Exception:
+                raise e
     return await asyncio.to_thread(_run)
 
 

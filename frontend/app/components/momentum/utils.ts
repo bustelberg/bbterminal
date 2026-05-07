@@ -48,22 +48,53 @@ const GURUFOCUS_US_EXCHANGES = new Set(['NYSE', 'NASDAQ', 'AMEX', 'CBOE', 'US'])
 // so we don't synthesize broken `None:TICKER`-style URLs.
 const EMPTY_EXCHANGE_TOKENS = new Set(['', 'NONE', 'NAN', 'NULL', 'UNDEFINED']);
 
+/** Heuristic: when the exchange link is genuinely missing (saved-bundle
+ * universes from before the snapshot-normalization fix carry empty or
+ * "None" strings), guess the exchange from the ticker's shape so the
+ * GuruFocus URL still resolves to the right security. Returns '' when no
+ * confident guess is possible — caller should fall back to the bare
+ * ticker.
+ *  - 4-5 digit numeric → HKSE (Hong Kong: `01988` Bank of China,
+ *    `00700` Tencent, `03690` Meituan, etc.).
+ * Other patterns (LSE `.L` suffixes, SHSE/SZSE 6-digit numerics, …) are
+ * left to expand later — most real-world breakage comes from HKSE.
+ */
+function inferExchangeFromTicker(ticker: string): string {
+  if (/^\d{4,5}$/.test(ticker)) return 'HKSE';
+  return '';
+}
+
 export function guruFocusUrl(ticker: string, exchange: string): string {
   const t = ticker.toUpperCase();
-  const e = (exchange ?? '').toUpperCase();
-  if (EMPTY_EXCHANGE_TOKENS.has(e) || GURUFOCUS_US_EXCHANGES.has(e)) {
+  let e = (exchange ?? '').toUpperCase();
+  if (GURUFOCUS_US_EXCHANGES.has(e)) {
     return `https://www.gurufocus.com/stock/${t}/summary`;
+  }
+  if (EMPTY_EXCHANGE_TOKENS.has(e)) {
+    e = inferExchangeFromTicker(t);
+    if (!e) {
+      // No exchange and no confident guess — bare ticker is the safest
+      // bet (works for US-listed names).
+      return `https://www.gurufocus.com/stock/${t}/summary`;
+    }
   }
   return `https://www.gurufocus.com/stock/${e}:${t}/summary`;
 }
 
 /** Returns the exchange label fit for display (e.g. inside `(NYSE)` parens
- * after a ticker). Empty when the value is missing or one of the
- * pandas-junk sentinels — callers can `{label && <span>(label)</span>}`. */
-export function displayExchange(exchange: string | null | undefined): string {
+ * after a ticker, or as the value in an Exchange column). When the raw
+ * exchange is missing/junk, falls through to the same ticker-shape
+ * inference `guruFocusUrl` uses, so the column matches the link's
+ * resolution. Pass the ticker when you want that fallback; omit for a
+ * strict "what was on the row" reading. */
+export function displayExchange(exchange: string | null | undefined, ticker?: string): string {
   const e = (exchange ?? '').trim();
-  if (!e || EMPTY_EXCHANGE_TOKENS.has(e.toUpperCase())) return '';
-  return e;
+  if (e && !EMPTY_EXCHANGE_TOKENS.has(e.toUpperCase())) return e;
+  if (ticker) {
+    const inferred = inferExchangeFromTicker(ticker.toUpperCase());
+    if (inferred) return inferred;
+  }
+  return '';
 }
 
 export const EXCHANGE_NAMES: Record<string, string> = {

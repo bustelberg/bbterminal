@@ -120,6 +120,9 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
                               Ticker<CellInfoTip>The stock&apos;s ticker on its primary exchange. Click to open in GuruFocus.</CellInfoTip>
                             </th>
                             <th className="text-left py-1 font-medium">
+                              Exchange<CellInfoTip>GuruFocus exchange code (e.g. NYSE, NASDAQ, HKSE, XTER). US-listed names use the bare ticker on GuruFocus; everything else is referenced as `EXCHANGE:TICKER`.</CellInfoTip>
+                            </th>
+                            <th className="text-left py-1 font-medium">
                               Company<CellInfoTip>Issuer name. Click to open in GuruFocus.</CellInfoTip>
                             </th>
                             <th className="text-left py-1 font-medium">
@@ -171,7 +174,7 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
                             })
                             .map((h) => {
                               const exchRaw = exchangeByCompany.get(h.company_id) ?? '';
-                              const exch = displayExchange(exchRaw);
+                              const exch = displayExchange(exchRaw, h.ticker);
                               const href = guruFocusUrl(h.ticker, exchRaw);
                               const isShort = h.side === 'short';
                               return (
@@ -215,6 +218,12 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
                                         ({exch})
                                       </span>
                                     )}
+                                  </td>
+                                  <td
+                                    className="py-1.5 text-gray-400 font-mono whitespace-nowrap"
+                                    title={exch ? (EXCHANGE_NAMES[exch.toUpperCase()] ?? exch) : ''}
+                                  >
+                                    {exch || '—'}
                                   </td>
                                   <td className="py-1.5 truncate max-w-[200px]">
                                     <a

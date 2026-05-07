@@ -1,9 +1,23 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { BacktestResult, Holding, PeriodRecord } from '../../../lib/stores/momentum';
 import CollapsibleCard from './CollapsibleCard';
 import { annualize, fmtPct } from './utils';
+
+// Minimum on-screen width per cell. Cells stretch beyond this to fill the
+// panel when there are few enough records that everything fits; otherwise
+// each cell stays at this width and the panel scrolls horizontally. Picked
+// so a single cell — whether it represents a day, week, month, or quarter
+// — is wide enough to hover/click reliably and to read the year ticks
+// above it. Drives:
+//   - daily/weekly backtests post-bucketing (~290 monthly cells over
+//     24 years): cellWidth = MIN, panel shows ~50 cells at a time.
+//   - 3-month rebalance over 5 years (20 cells): cellWidth ~32px
+//     stretched, panel shows everything, no scroll.
+const MIN_CELL_WIDTH = 12;
+const SECTOR_LABEL_WIDTH = 140;
+const SECTOR_LABEL_GAP = 12; // matches `pr-3` on the label div
 
 type Props = {
   result: BacktestResult;
@@ -48,7 +62,46 @@ type TimelineData = {
   runByMonth: Map<string, Int16Array>;
   weightByMonth: Map<string, Float32Array>;
   months: string[];
+  /** Median calendar-day interval between consecutive records. Drives the
+   * tooltip's run-duration label (so a single-cell hold reads "1 wk" on a
+   * weekly cadence, "1 day" on daily, "3 mo" on quarterly, etc.) and the
+   * CAGR annualization. ~30 for monthly + bucketed sub-monthly cadences. */
+  cadenceDays: number;
 };
+
+/** Median interval (in calendar days) between consecutive records. Used
+ * to interpret a run's "cells held" as a real time duration. */
+function detectCadenceDays(months: readonly string[]): number {
+  if (months.length < 2) return 30;
+  const toMs = (s: string) => new Date(s.length === 7 ? `${s}-01` : s).getTime();
+  const intervals: number[] = [];
+  for (let i = 1; i < months.length; i++) {
+    const dt = (toMs(months[i]) - toMs(months[i - 1])) / 86400000;
+    if (dt > 0) intervals.push(dt);
+  }
+  if (intervals.length === 0) return 30;
+  intervals.sort((a, b) => a - b);
+  return intervals[Math.floor(intervals.length / 2)];
+}
+
+/** Format `cells × cadenceDays` total as a human duration string for the
+ * tooltip ("3 days" / "5 wks" / "8 mo" / "1.5 yrs"). Uses calendar
+ * conventions (~7 days / ~30 days / ~365.25 days) to keep numbers round. */
+function formatRunDuration(cells: number, cadenceDays: number): string {
+  const days = Math.max(1, Math.round(cells * cadenceDays));
+  if (days < 7) return `${days} day${days === 1 ? '' : 's'}`;
+  if (days < 30) {
+    const wks = Math.round(days / 7);
+    return `${wks} wk${wks === 1 ? '' : 's'}`;
+  }
+  if (days < 365) {
+    const mos = Math.round(days / 30);
+    return `${mos} mo${mos === 1 ? '' : 's'}`;
+  }
+  const yrs = days / 365.25;
+  // 1.0 / 2.0 etc render as "1.0 yrs" — fine for visual consistency.
+  return `${yrs.toFixed(1)} yrs`;
+}
 
 /** Build per-sector run lists + per-month weights for the given monthly
  * records. `holdingFilter` lets the caller restrict which holdings count
@@ -221,12 +274,19 @@ function buildTimelineData(
     let factor = 1.0;
     for (const r of openR.rets) factor *= 1 + r / 100;
     const cumulative = openR.rets.length > 0 ? (factor - 1) * 100 : null;
+    // The run is held FROM the entry rebalance THROUGH the exit boundary.
+    // For a single-period hold (endIdx == startIdx) the previous code set
+    // startMonth == endMonth, which produced "2025-05-05 → 2025-05-05" on
+    // daily cadences. Use months[endIdx + 1] (the next rebalance, where
+    // the position was exited) when it exists; fall back to the last
+    // record's date for runs that ran to the end of the backtest.
+    const exitIdx = endIdx + 1 < months.length ? endIdx + 1 : endIdx;
     const newRun: Run = {
       sector: sec,
       startIdx: openR.startIdx,
       endIdx,
       startMonth: months[openR.startIdx],
-      endMonth: months[endIdx],
+      endMonth: months[exitIdx],
       monthsHeld: endIdx - openR.startIdx + 1,
       cumulativeReturnPct: cumulative,
     };
@@ -237,7 +297,7 @@ function buildTimelineData(
     for (let j = openR.startIdx; j <= endIdx; j++) map[j] = newRunIdx;
   }
 
-  return { sectors, runs, runByMonth, weightByMonth, months };
+  return { sectors, runs, runByMonth, weightByMonth, months, cadenceDays: detectCadenceDays(months) };
 }
 
 export default function SectorTimelineChart({ result }: Props) {
@@ -396,10 +456,105 @@ function TimelinePanel({
   data: TimelineData;
   defaultCollapsed: boolean;
 }) {
-  const { sectors, runs, runByMonth, weightByMonth, months } = data;
+  const { sectors, runs, runByMonth, weightByMonth, months, cadenceDays } = data;
   const [hoveredRun, setHoveredRun] = useState<{ sector: string; runIdx: number } | null>(null);
+  const [hoveredCell, setHoveredCell] = useState<{ sector: string; monthIdx: number } | null>(null);
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  // Wraps the two-column panel (labels + scroll area). Wheel and drag
+  // handlers attach here so panning works no matter where in the panel
+  // the cursor sits — including over the label column on the left.
+  const panelRef = useRef<HTMLDivElement>(null);
+  // The label column is rendered as a sibling of the scroll area (not
+  // inside it via `position: sticky`), so cells physically can't render
+  // over the label background no matter what the stacking context does.
+  // The scroll area's clientWidth is therefore the cell-area width
+  // directly — no need to subtract a label-column width.
+  const [cellAreaWidth, setCellAreaWidth] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragState = useRef<{ startX: number; startScroll: number; moved: boolean } | null>(null);
+
+  // Resize observer keeps cell width in sync with the panel width.
+  useLayoutEffect(() => {
+    const el = scrollAreaRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      setCellAreaWidth(el.clientWidth);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // cellWidth = max(MIN_CELL_WIDTH, area/N). When records fit at the
+  // minimum cell width, they expand to fill the available space (no
+  // scroll). When records would be narrower than the minimum, cells stay
+  // at MIN_CELL_WIDTH and the panel scrolls horizontally — the user
+  // wheels or drags to pan.
+  const cellWidth = cellAreaWidth > 0 && months.length > 0
+    ? Math.max(MIN_CELL_WIDTH, cellAreaWidth / months.length)
+    : 0;
+  const cellsTotalWidth = cellWidth * months.length;
+  // The label column is a separate sibling now, so the scroll area's
+  // inner content is just the cells (year axis + sector rows). Initial
+  // scrollLeft = scrollWidth pins us to the right (most recent periods).
+  const innerWidth = cellsTotalWidth;
+  const hasOverflow = cellsTotalWidth > cellAreaWidth + 0.5;
+
+  // On mount + when content/cell-width changes, jump to the right edge so
+  // the most recent ~5 years are visible. The user pans backward in time
+  // by scrolling left.
+  useEffect(() => {
+    const el = scrollAreaRef.current;
+    if (!el || cellWidth === 0) return;
+    el.scrollLeft = el.scrollWidth;
+  }, [cellWidth, months.length]);
+
+  // Mouse-wheel converts vertical wheel input into horizontal scroll, but
+  // only when the panel actually overflows — otherwise normal page scroll
+  // behavior is preserved. Trackpad horizontal gestures (deltaX != 0) are
+  // added on top so two-finger swipes feel native. Listener lives on the
+  // whole panel (panelRef) so wheeling over the label column on the
+  // left also pans the cells — otherwise scrolling there would fall
+  // through to the page.
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    const onWheel = (e: WheelEvent) => {
+      const scroller = scrollAreaRef.current;
+      if (!scroller) return;
+      if (scroller.scrollWidth <= scroller.clientWidth) return;
+      e.preventDefault();
+      scroller.scrollLeft += e.deltaY + e.deltaX;
+    };
+    panel.addEventListener('wheel', onWheel, { passive: false });
+    return () => panel.removeEventListener('wheel', onWheel);
+  }, []);
+
+  // Drag-to-pan. Mouse-down captures the start; document-level mousemove +
+  // mouseup keep the drag active even if the cursor leaves the panel.
+  // `moved` is checked on click so a small unintentional drag still lets
+  // the cell hover/tooltip work.
+  useEffect(() => {
+    if (!isDragging) return;
+    const onMove = (e: MouseEvent) => {
+      const el = scrollAreaRef.current;
+      const s = dragState.current;
+      if (!el || !s) return;
+      const dx = e.clientX - s.startX;
+      if (Math.abs(dx) > 3) s.moved = true;
+      el.scrollLeft = s.startScroll - dx;
+    };
+    const onUp = () => {
+      setIsDragging(false);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+  }, [isDragging]);
 
   if (sectors.length === 0) {
     return (
@@ -413,19 +568,35 @@ function TimelinePanel({
     );
   }
 
+  const handleMouseDown = (e: React.MouseEvent) => {
+    const el = scrollAreaRef.current;
+    if (!el) return;
+    if (el.scrollWidth <= el.clientWidth) return; // nothing to pan
+    dragState.current = { startX: e.clientX, startScroll: el.scrollLeft, moved: false };
+    setIsDragging(true);
+    // Hide any open tooltip while panning.
+    setHoveredRun(null);
+    setHoveredCell(null);
+    setTooltipPos(null);
+  };
+
   const handleEnter = (sector: string, monthIdx: number, e: React.MouseEvent) => {
+    if (isDragging) return;
     const map = runByMonth.get(sector);
     if (!map) return;
     const runIdx = map[monthIdx];
     if (runIdx < 0) return;
     setHoveredRun({ sector, runIdx });
+    setHoveredCell({ sector, monthIdx });
     setTooltipPos({ x: e.clientX, y: e.clientY });
   };
   const handleMove = (e: React.MouseEvent) => {
+    if (isDragging) return;
     if (hoveredRun) setTooltipPos({ x: e.clientX, y: e.clientY });
   };
   const handleLeave = () => {
     setHoveredRun(null);
+    setHoveredCell(null);
     setTooltipPos(null);
   };
 
@@ -437,45 +608,89 @@ function TimelinePanel({
     <div ref={containerRef} onMouseLeave={handleLeave}>
       <CollapsibleCard
         title={title}
-        rightSlot={`${sectors.length} sectors over ${months.length} months · hover any cell to see when the sector was held and the return for that run`}
+        rightSlot={`${sectors.length} sectors over ${months.length} months · ${hasOverflow ? 'scroll the timeline (wheel or drag) to pan through earlier periods' : 'full range fits the panel'}`}
         defaultCollapsed={defaultCollapsed}
         bodyClassName="px-5 pb-5"
       >
-        <div className="overflow-x-auto" onMouseMove={handleMove}>
-          <div className="min-w-[800px]">
-            {/* Year axis above the rows. Mark only the first record of each
-                new calendar year (works for both monthly "YYYY-MM" rows and
-                daily "YYYY-MM-DD" rows — the daily case used to mark every
-                January day, ~21 ticks per year). */}
-            <div className="flex" style={{ paddingLeft: 152 /* sector label col + gap */ }}>
-              {months.map((m, i) => {
-                const thisYear = m.slice(0, 4);
-                const prevYear = i > 0 ? months[i - 1].slice(0, 4) : '';
-                const isYear = i === 0 || thisYear !== prevYear;
-                return (
-                  <div
-                    key={`yax-${m}`}
-                    className="flex-1 min-w-[6px] text-[9px] text-gray-600 font-mono shrink-0"
-                    style={{ borderLeft: isYear ? '1px solid rgba(75,85,99,0.35)' : undefined }}
-                  >
-                    {isYear ? <span className="pl-0.5">{thisYear}</span> : ''}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* One row per sector */}
+        {/* Two-column layout: a fixed-width label column (NOT inside the
+            scroll area, so no z-index / sticky shenanigans can ever let
+            cells render over labels) and a scrolling cells panel beside
+            it. Heights line up because both columns produce the same row
+            sequence with identical margins / heights. Drag + wheel
+            handlers attach to this outer flex container so panning works
+            from anywhere on the panel — including the label column. */}
+        <div
+          ref={panelRef}
+          className="flex select-none"
+          style={{ cursor: isDragging ? 'grabbing' : hasOverflow ? 'grab' : 'default' }}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMove}
+        >
+          <div
+            className="shrink-0"
+            style={{
+              width: SECTOR_LABEL_WIDTH + SECTOR_LABEL_GAP,
+              backgroundColor: '#151821',
+              borderRight: '1px solid rgba(75, 85, 99, 0.6)',
+              boxShadow: '6px 0 8px -6px rgba(0, 0, 0, 0.6)',
+              // High zIndex on the column itself isn't strictly needed
+              // (it's a sibling of the scroll area, not an overlay), but
+              // it covers any future overlay that might try to creep in.
+              position: 'relative',
+              zIndex: 1,
+            }}
+          >
+            {/* Spacer for the year-axis row in the scroll panel. Same
+                height as the year-axis cells so the first sector label
+                lines up with the first sector row. */}
+            <div className="text-[9px] font-mono" aria-hidden="true">&nbsp;</div>
             {sectors.map((sec, sIdx) => {
               const color = colorForSector(sec, sIdx);
-              const map = runByMonth.get(sec);
-              const wts = weightByMonth.get(sec);
               return (
-                <div key={sec} className="flex items-center mt-1.5">
-                  <div className="w-[140px] shrink-0 pr-3 text-[11px] text-gray-300 truncate flex items-center gap-1.5">
-                    <span className="inline-block w-2 h-2 rounded-sm shrink-0" style={{ background: color }} />
-                    <span className="truncate">{sec}</span>
-                  </div>
-                  <div className="flex flex-1 gap-[1px] items-stretch h-5">
+                <div
+                  key={`label-${sec}`}
+                  className="flex items-center mt-1.5 h-5 pr-3 text-[11px] text-gray-300 truncate gap-1.5"
+                >
+                  <span className="inline-block w-2 h-2 rounded-sm shrink-0" style={{ background: color }} />
+                  <span className="truncate">{sec}</span>
+                </div>
+              );
+            })}
+          </div>
+          <div
+            ref={scrollAreaRef}
+            className="overflow-x-auto flex-1 min-w-0"
+          >
+            <div style={{ width: innerWidth, position: 'relative' }}>
+              {/* Year axis above the cell rows. */}
+              <div className="flex">
+                {months.map((m, i) => {
+                  const thisYear = m.slice(0, 4);
+                  const prevYear = i > 0 ? months[i - 1].slice(0, 4) : '';
+                  const isYear = i === 0 || thisYear !== prevYear;
+                  return (
+                    <div
+                      key={`yax-${m}`}
+                      className="text-[9px] text-gray-600 font-mono shrink-0"
+                      style={{
+                        width: cellWidth,
+                        borderLeft: isYear ? '1px solid rgba(75,85,99,0.35)' : undefined,
+                      }}
+                    >
+                      {isYear ? <span className="pl-0.5">{thisYear}</span> : ''}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* One row of cells per sector — labels render in the
+                  sibling column on the left. */}
+              {sectors.map((sec, sIdx) => {
+                const color = colorForSector(sec, sIdx);
+                const map = runByMonth.get(sec);
+                const wts = weightByMonth.get(sec);
+                return (
+                  <div key={sec} className="flex items-stretch mt-1.5 h-5">
                     {months.map((m, mIdx) => {
                       const runIdx = map?.[mIdx] ?? -1;
                       const held = runIdx >= 0;
@@ -483,26 +698,52 @@ function TimelinePanel({
                       const inHoveredRun = hoveredRun
                         && hoveredRun.sector === sec
                         && hoveredRun.runIdx === runIdx;
+                      const isThisHovered = hoveredCell
+                        && hoveredCell.sector === sec
+                        && hoveredCell.monthIdx === mIdx;
                       const baseAlpha = 0.25 + (w / 100) * 0.75;
-                      const alpha = inHoveredRun ? 1.0 : baseAlpha;
                       return (
                         <div
                           key={`${sec}-${m}`}
-                          className="flex-1 min-w-[3px] cursor-pointer transition-opacity"
+                          className="shrink-0"
                           style={{
+                            width: cellWidth,
                             background: held ? color : 'transparent',
-                            opacity: held ? alpha : 1,
-                            outline: inHoveredRun ? `1px solid ${color}` : undefined,
-                            outlineOffset: inHoveredRun ? '1px' : undefined,
+                            opacity: held ? baseAlpha : 1,
+                            // Visible separator between cells. Background
+                            // matches the panel so empty cells stay empty
+                            // while held cells appear to have a 1-px gap
+                            // between them — same trick as `gap`, but
+                            // box-sizing keeps each cell exactly cellWidth
+                            // so the layout math (innerWidth, scroll-to-
+                            // right) doesn't drift.
+                            borderRight: '1px solid #151821',
+                            boxSizing: 'border-box',
+                            // Hover highlight is borders-only — no
+                            // brightness/opacity changes on the cell
+                            // itself, since those looked muddy at small
+                            // cell widths. The hovered cell gets a white
+                            // 2-px outline; other cells in the same run
+                            // get a 1-px outline in the sector color so
+                            // the run extent stays readable.
+                            outline: isThisHovered
+                              ? '2px solid rgba(255,255,255,0.95)'
+                              : inHoveredRun
+                                ? `1px solid ${color}`
+                                : undefined,
+                            outlineOffset: isThisHovered ? '0px' : inHoveredRun ? '1px' : undefined,
+                            zIndex: isThisHovered ? 5 : undefined,
+                            position: isThisHovered ? 'relative' : undefined,
+                            cursor: isDragging ? 'grabbing' : 'pointer',
                           }}
                           onMouseEnter={(e) => handleEnter(sec, mIdx, e)}
                         />
                       );
                     })}
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         </div>
       </CollapsibleCard>
@@ -525,10 +766,16 @@ function TimelinePanel({
           </div>
           <div className="text-gray-400 font-mono">
             {runForTooltip.startMonth} → {runForTooltip.endMonth}
-            <span className="text-gray-500"> ({runForTooltip.monthsHeld} mo)</span>
+            <span className="text-gray-500"> ({formatRunDuration(runForTooltip.monthsHeld, cadenceDays)})</span>
           </div>
           {(() => {
-            const cagr = annualize(runForTooltip.cumulativeReturnPct, runForTooltip.monthsHeld);
+            // CAGR needs duration in months. monthsHeld is the cell count;
+            // for non-monthly cadences (weekly, daily, every_2_months,
+            // every_3_months) multiply through cadenceDays/30 so the
+            // exponent is right. Otherwise a single-week run would get
+            // 12× annualization rather than 52×.
+            const monthsEquiv = (runForTooltip.monthsHeld * cadenceDays) / 30;
+            const cagr = annualize(runForTooltip.cumulativeReturnPct, monthsEquiv);
             const runColor = (v: number | null | undefined) =>
               v == null ? 'text-gray-500' : v >= 0 ? 'text-emerald-400 font-mono' : 'text-rose-400 font-mono';
             return (

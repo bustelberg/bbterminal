@@ -53,13 +53,26 @@ function derivedPct(steps: StepDef[], state: Record<string, StepState>): number 
   return Math.round((score / steps.length) * 100);
 }
 
+/** Human-readable elapsed-time label for the running/completed badge.
+ * Shows only the relevant units — seconds-only when under a minute,
+ * "M minutes S seconds" when under an hour, "H hours M minutes S seconds"
+ * past an hour. Pluralizes correctly so "1 minute 1 second" reads right. */
 function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  const rs = s % 60;
-  return `${m}m ${rs}s`;
+  // Sub-second: round up so the badge never sticks at "0 seconds".
+  const totalSeconds = Math.max(1, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const pluralize = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
+  const parts: string[] = [];
+  if (hours > 0) parts.push(pluralize(hours, 'hour'));
+  if (minutes > 0) parts.push(pluralize(minutes, 'minute'));
+  // Show seconds when nothing else would, when the minute total is small
+  // enough that they're still meaningful, or when the seconds value
+  // itself is non-zero — drop them on a clean "2 hours 0 minutes 0
+  // seconds" so the chip doesn't read awkwardly.
+  if (seconds > 0 || parts.length === 0) parts.push(pluralize(seconds, 'second'));
+  return parts.join(' ');
 }
 
 function formatRelative(ms: number): string {
