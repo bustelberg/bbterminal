@@ -143,7 +143,10 @@ export type InfoEntry = { scope: string; message: string };
 // compare them side-by-side. Variants are run sequentially against the
 // same base config (signal/category weights, sectors, top-N, universe).
 export type RebalanceFrequency =
-  | 'daily' | 'weekly' | 'monthly' | 'every_2_months' | 'every_3_months';
+  | 'daily' | 'weekly' | 'monthly'
+  | 'every_2_months' | 'every_3_months' | 'every_4_months' | 'every_5_months'
+  | 'every_6_months' | 'every_7_months' | 'every_8_months' | 'every_9_months'
+  | 'every_10_months' | 'every_11_months' | 'every_12_months';
 export type StrategyType = 'long_only' | 'long_short';
 export type VariantKey = `${RebalanceFrequency}__${StrategyType}`;
 export type VariantDef = {
@@ -159,16 +162,34 @@ export type VariantDef = {
 // market-neutral counterparts" with rebalance cost decreasing down each
 // group.
 export const VARIANT_DEFS: readonly VariantDef[] = [
-  { key: 'every_3_months__long_only',  frequency: 'every_3_months',  strategy: 'long_only',  label: 'Every 3 months · Long-only' },
-  { key: 'every_2_months__long_only',  frequency: 'every_2_months',  strategy: 'long_only',  label: 'Every 2 months · Long-only' },
-  { key: 'monthly__long_only',         frequency: 'monthly',         strategy: 'long_only',  label: 'Monthly · Long-only'        },
-  { key: 'weekly__long_only',          frequency: 'weekly',          strategy: 'long_only',  label: 'Weekly · Long-only'         },
-  { key: 'daily__long_only',           frequency: 'daily',           strategy: 'long_only',  label: 'Daily · Long-only'          },
-  { key: 'every_3_months__long_short', frequency: 'every_3_months',  strategy: 'long_short', label: 'Every 3 months · Long-short'},
-  { key: 'every_2_months__long_short', frequency: 'every_2_months',  strategy: 'long_short', label: 'Every 2 months · Long-short'},
-  { key: 'monthly__long_short',        frequency: 'monthly',         strategy: 'long_short', label: 'Monthly · Long-short'       },
-  { key: 'weekly__long_short',         frequency: 'weekly',          strategy: 'long_short', label: 'Weekly · Long-short'        },
-  { key: 'daily__long_short',          frequency: 'daily',           strategy: 'long_short', label: 'Daily · Long-short'         },
+  { key: 'every_12_months__long_only', frequency: 'every_12_months', strategy: 'long_only',  label: 'Every 12 months · Long-only' },
+  { key: 'every_11_months__long_only', frequency: 'every_11_months', strategy: 'long_only',  label: 'Every 11 months · Long-only' },
+  { key: 'every_10_months__long_only', frequency: 'every_10_months', strategy: 'long_only',  label: 'Every 10 months · Long-only' },
+  { key: 'every_9_months__long_only',  frequency: 'every_9_months',  strategy: 'long_only',  label: 'Every 9 months · Long-only'  },
+  { key: 'every_8_months__long_only',  frequency: 'every_8_months',  strategy: 'long_only',  label: 'Every 8 months · Long-only'  },
+  { key: 'every_7_months__long_only',  frequency: 'every_7_months',  strategy: 'long_only',  label: 'Every 7 months · Long-only'  },
+  { key: 'every_6_months__long_only',  frequency: 'every_6_months',  strategy: 'long_only',  label: 'Every 6 months · Long-only'  },
+  { key: 'every_5_months__long_only',  frequency: 'every_5_months',  strategy: 'long_only',  label: 'Every 5 months · Long-only'  },
+  { key: 'every_4_months__long_only',  frequency: 'every_4_months',  strategy: 'long_only',  label: 'Every 4 months · Long-only'  },
+  { key: 'every_3_months__long_only',  frequency: 'every_3_months',  strategy: 'long_only',  label: 'Every 3 months · Long-only'  },
+  { key: 'every_2_months__long_only',  frequency: 'every_2_months',  strategy: 'long_only',  label: 'Every 2 months · Long-only'  },
+  { key: 'monthly__long_only',         frequency: 'monthly',         strategy: 'long_only',  label: 'Monthly · Long-only'         },
+  { key: 'weekly__long_only',          frequency: 'weekly',          strategy: 'long_only',  label: 'Weekly · Long-only'          },
+  { key: 'daily__long_only',           frequency: 'daily',           strategy: 'long_only',  label: 'Daily · Long-only'           },
+  { key: 'every_12_months__long_short', frequency: 'every_12_months', strategy: 'long_short', label: 'Every 12 months · Long-short' },
+  { key: 'every_11_months__long_short', frequency: 'every_11_months', strategy: 'long_short', label: 'Every 11 months · Long-short' },
+  { key: 'every_10_months__long_short', frequency: 'every_10_months', strategy: 'long_short', label: 'Every 10 months · Long-short' },
+  { key: 'every_9_months__long_short',  frequency: 'every_9_months',  strategy: 'long_short', label: 'Every 9 months · Long-short'  },
+  { key: 'every_8_months__long_short',  frequency: 'every_8_months',  strategy: 'long_short', label: 'Every 8 months · Long-short'  },
+  { key: 'every_7_months__long_short',  frequency: 'every_7_months',  strategy: 'long_short', label: 'Every 7 months · Long-short'  },
+  { key: 'every_6_months__long_short',  frequency: 'every_6_months',  strategy: 'long_short', label: 'Every 6 months · Long-short'  },
+  { key: 'every_5_months__long_short',  frequency: 'every_5_months',  strategy: 'long_short', label: 'Every 5 months · Long-short'  },
+  { key: 'every_4_months__long_short',  frequency: 'every_4_months',  strategy: 'long_short', label: 'Every 4 months · Long-short'  },
+  { key: 'every_3_months__long_short',  frequency: 'every_3_months',  strategy: 'long_short', label: 'Every 3 months · Long-short'  },
+  { key: 'every_2_months__long_short',  frequency: 'every_2_months',  strategy: 'long_short', label: 'Every 2 months · Long-short'  },
+  { key: 'monthly__long_short',         frequency: 'monthly',         strategy: 'long_short', label: 'Monthly · Long-short'         },
+  { key: 'weekly__long_short',          frequency: 'weekly',          strategy: 'long_short', label: 'Weekly · Long-short'          },
+  { key: 'daily__long_short',           frequency: 'daily',           strategy: 'long_short', label: 'Daily · Long-short'           },
 ];
 
 export type VariantOutcome =

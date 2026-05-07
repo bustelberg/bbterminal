@@ -2233,7 +2233,10 @@ _DEFAULT_START = "2017-01-01"
 
 class VariantSpec(BaseModel):
     frequency: Literal[
-        "daily", "weekly", "monthly", "every_2_months", "every_3_months",
+        "daily", "weekly", "monthly",
+        "every_2_months", "every_3_months", "every_4_months", "every_5_months",
+        "every_6_months", "every_7_months", "every_8_months", "every_9_months",
+        "every_10_months", "every_11_months", "every_12_months",
     ]
     strategy_type: Literal["long_only", "long_short"]
 
@@ -2263,7 +2266,10 @@ class BacktestRequest(BaseModel):
     # they can refresh stale data.
     db_only: bool = True
     rebalance_frequency: Literal[
-        "daily", "weekly", "monthly", "every_2_months", "every_3_months",
+        "daily", "weekly", "monthly",
+        "every_2_months", "every_3_months", "every_4_months", "every_5_months",
+        "every_6_months", "every_7_months", "every_8_months", "every_9_months",
+        "every_10_months", "every_11_months", "every_12_months",
     ] = "monthly"
     strategy_type: Literal["long_only", "long_short"] = "long_only"
     # When set (non-empty), the request becomes a variants sweep: the data

@@ -20,7 +20,10 @@ _logger = logging.getLogger(__name__)
 # _generate_rebalance_dates. The default "monthly" preserves the original
 # month-start, hold-1-month behavior; the others stride differently.
 RebalanceFrequency = Literal[
-    "daily", "weekly", "monthly", "every_2_months", "every_3_months",
+    "daily", "weekly", "monthly",
+    "every_2_months", "every_3_months", "every_4_months", "every_5_months",
+    "every_6_months", "every_7_months", "every_8_months", "every_9_months",
+    "every_10_months", "every_11_months", "every_12_months",
 ]
 
 _DEFAULT_FREQUENCY: RebalanceFrequency = "monthly"
@@ -54,6 +57,15 @@ def _periods_per_year(freq: RebalanceFrequency) -> float:
         "monthly": 12.0,
         "every_2_months": 6.0,
         "every_3_months": 4.0,
+        "every_4_months": 3.0,
+        "every_5_months": 12.0 / 5.0,
+        "every_6_months": 2.0,
+        "every_7_months": 12.0 / 7.0,
+        "every_8_months": 12.0 / 8.0,
+        "every_9_months": 12.0 / 9.0,
+        "every_10_months": 12.0 / 10.0,
+        "every_11_months": 12.0 / 11.0,
+        "every_12_months": 1.0,
     }[freq]
 
 
@@ -342,10 +354,23 @@ def _generate_rebalance_dates(
     """
     if freq == "monthly":
         return _generate_month_starts(start, end)
-    if freq == "every_2_months":
-        return _generate_month_starts(start, end)[::2]
-    if freq == "every_3_months":
-        return _generate_month_starts(start, end)[::3]
+    # every_N_months → take every N-th month-start. Adding new strides only
+    # needs an entry in the map below + the Literal at the top.
+    _MONTH_STRIDES = {
+        "every_2_months": 2,
+        "every_3_months": 3,
+        "every_4_months": 4,
+        "every_5_months": 5,
+        "every_6_months": 6,
+        "every_7_months": 7,
+        "every_8_months": 8,
+        "every_9_months": 9,
+        "every_10_months": 10,
+        "every_11_months": 11,
+        "every_12_months": 12,
+    }
+    if freq in _MONTH_STRIDES:
+        return _generate_month_starts(start, end)[::_MONTH_STRIDES[freq]]
     if freq == "weekly":
         # Every Monday in range. weekday(): Mon=0..Sun=6.
         days_until_mon = (-start.weekday()) % 7
