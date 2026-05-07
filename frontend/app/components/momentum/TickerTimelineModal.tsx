@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { BacktestResult } from '../../../lib/stores/momentum';
 import CellInfoTip from './CellInfoTip';
 import type { ScoringConfig } from './MonthlyHoldingsTable';
-import { annualize, fmtPct, guruFocusUrl, EXCHANGE_NAMES } from './utils';
+import { annualize, displayExchange, fmtPct, guruFocusUrl, EXCHANGE_NAMES } from './utils';
 import { runSSE } from '../../../lib/stream';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
@@ -152,6 +152,54 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
   // Pre-compute the per-month cell data for the selected company. Also
   // grab a representative ticker/name/sector from any month it was held.
   const { cells, ticker, companyName, sector, summary } = useMemo(() => {
+    // For daily/weekly backtests the records list runs into the
+    // thousands. The modal's cell strip is meant to read as a
+    // month-by-month visual; rendering 6000 8-px cells produces a
+    // 48000-px-wide modal that overflows the viewport and (per the
+    // year-axis bug) duplicates the year tick on every January day. Fix
+    // both by bucketing into one cell per calendar month before any
+    // downstream processing — held = held on any day in the month;
+    // forward return = compounded across the held days; score = mean.
+    const monthBuckets = new Map<string, {
+      heldAnyDay: boolean;
+      factor: number;
+      scores: number[];
+      sector: string | null;
+      ticker: string;
+      company_name: string;
+    }>();
+    for (const r of result.monthly_records) {
+      const h = companyId == null
+        ? null
+        : r.holdings.find((x) => x.company_id === companyId);
+      const monthKey = r.date.slice(0, 7);
+      let bucket = monthBuckets.get(monthKey);
+      if (!bucket) {
+        bucket = {
+          heldAnyDay: false,
+          factor: 1,
+          scores: [],
+          sector: null,
+          ticker: '',
+          company_name: '',
+        };
+        monthBuckets.set(monthKey, bucket);
+      }
+      if (h) {
+        bucket.heldAnyDay = true;
+        if (h.forward_return_pct != null && Number.isFinite(h.forward_return_pct)) {
+          bucket.factor *= 1 + h.forward_return_pct / 100;
+        }
+        if (h.score != null && Number.isFinite(h.score)) bucket.scores.push(h.score);
+        if (h.sector) bucket.sector = h.sector;
+        if (!bucket.ticker && h.ticker) bucket.ticker = h.ticker;
+        if (!bucket.company_name && h.company_name) bucket.company_name = h.company_name;
+      }
+    }
+    const monthlyRecords = Array.from(monthBuckets.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, b]) => ({ date, bucket: b }));
+
     const cells: MonthCell[] = [];
     let ticker = '';
     let companyName = '';
@@ -163,18 +211,26 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
     let worstRet = Infinity;
     let worstRetMonth = '';
 
-    for (const r of result.monthly_records) {
-      const h = companyId == null
-        ? null
-        : r.holdings.find((x) => x.company_id === companyId);
+    for (const { date, bucket } of monthlyRecords) {
+      const heldThisMonth = bucket.heldAnyDay;
+      const monthRet = heldThisMonth && bucket.factor > 0
+        ? (bucket.factor - 1) * 100
+        : null;
+      const meanScore = bucket.scores.length > 0
+        ? bucket.scores.reduce((a, c) => a + c, 0) / bucket.scores.length
+        : null;
       const cell: MonthCell = {
-        date: r.date,
-        held: !!h,
-        forwardReturnPct: h?.forward_return_pct ?? null,
-        score: h ? h.score : null,
-        sector: h ? h.sector : null,
+        date,
+        held: heldThisMonth,
+        forwardReturnPct: monthRet,
+        score: meanScore,
+        sector: heldThisMonth ? bucket.sector : null,
       };
       cells.push(cell);
+      const h = heldThisMonth
+        ? { forward_return_pct: monthRet, ticker: bucket.ticker, company_name: bucket.company_name, sector: bucket.sector }
+        : null;
+      const r = { date };
 
       if (h) {
         monthsHeld += 1;
@@ -198,10 +254,8 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
     const compoundReturnPct = monthsHeld > 0 ? (totalRet - 1) * 100 : null;
     const summary = {
       monthsHeld,
-      totalMonths: result.monthly_records.length,
-      pct: result.monthly_records.length > 0
-        ? (monthsHeld / result.monthly_records.length) * 100
-        : 0,
+      totalMonths: cells.length,
+      pct: cells.length > 0 ? (monthsHeld / cells.length) * 100 : 0,
       compoundReturnPct,
       cagrPct: annualize(compoundReturnPct, monthsHeld),
       bestRet: bestRet === -Infinity ? null : bestRet,
@@ -225,8 +279,9 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
 
   if (companyId == null) return null;
 
-  const exchange = exchangeByCompany.get(companyId) ?? '';
-  const href = ticker ? guruFocusUrl(ticker, exchange) : null;
+  const exchangeRaw = exchangeByCompany.get(companyId) ?? '';
+  const exchange = displayExchange(exchangeRaw, ticker);
+  const href = ticker ? guruFocusUrl(ticker, exchangeRaw) : null;
 
   // Identify run boundaries (a "buy" = transition from not-held → held;
   // "sell" = transition from held → not-held). Grouping consecutive
@@ -248,7 +303,11 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
   const cellColor = (c: MonthCell): string => {
     if (!c.held) return 'rgba(75, 85, 99, 0.15)';
     const r = c.forwardReturnPct;
-    if (r == null) return 'rgba(99, 102, 241, 0.45)'; // indigo when held but no return
+    // NaN / Infinity / null all fall back to indigo. Without the
+    // Number.isFinite guard a stray NaN propagated into Math.min and
+    // ended up in the rgba alpha slot, which the browser parses as an
+    // invalid color and Recharts/dev-tools both warn about.
+    if (r == null || !Number.isFinite(r)) return 'rgba(99, 102, 241, 0.45)';
     if (r >= 0) {
       // emerald, intensity by magnitude (cap at 20%)
       const a = 0.30 + Math.min(1, r / 20) * 0.55;
@@ -423,19 +482,21 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
             ))}
           </div>
 
-          {/* Year-boundary axis labels under the strip. */}
+          {/* Year-boundary axis labels under the strip. Mark only the
+              first cell of each new calendar year so weekly/daily
+              cadences don't repeat the same year tick four+ times. */}
           <div className="flex gap-[2px] mt-1">
             {cells.map((c, i) => {
-              const month = c.date.slice(5, 7);
-              const showYear = month === '01' || i === 0;
-              const year = c.date.slice(0, 4);
+              const thisYear = c.date.slice(0, 4);
+              const prevYear = i > 0 ? cells[i - 1].date.slice(0, 4) : '';
+              const showYear = i === 0 || thisYear !== prevYear;
               return (
                 <div
                   key={`ax-${c.date}`}
                   className="text-[9px] text-gray-600 font-mono shrink-0 text-left"
                   style={{ width: 8 }}
                 >
-                  {showYear ? year : ''}
+                  {showYear ? thisYear : ''}
                 </div>
               );
             })}
@@ -520,7 +581,13 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
                   // The visit's selection happened at the start month — so
                   // the breakdown asks the backend "what did the strategy
                   // see at YYYY-MM-01 that led to picking this stock?"
-                  const asOfDate = `${start.date}-01`;
+                  // Cells are bucketed monthly (`YYYY-MM`), but defend
+                  // against any code path that ever feeds in a full
+                  // `YYYY-MM-DD` so we don't produce an invalid
+                  // `YYYY-MM-DD-01` and crash the breakdown endpoint.
+                  const asOfDate = start.date.length === 7
+                    ? `${start.date}-01`
+                    : start.date;
                   return (
                     <Fragment key={i}>
                     <tr

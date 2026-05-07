@@ -10,7 +10,7 @@ import time
 from collections import OrderedDict
 
 import pandas as pd
-from datetime import date
+from datetime import date, datetime
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -125,6 +125,28 @@ _MONTHS = {
     "may": 5, "june": 6, "july": 7, "august": 8,
     "september": 9, "october": 10, "november": 11, "december": 12,
 }
+
+
+def _latest_db_price_date() -> date | None:
+    """Latest target_date in metric_data for metric_code='close_price' across
+    the whole table. Used as a fast pre-flight gate so we don't run a heavy
+    compute against stale DB data. Returns None if the table is empty."""
+    resp = (
+        supabase.table("metric_data")
+        .select("target_date")
+        .eq("metric_code", "close_price")
+        .order("target_date", desc=True)
+        .limit(1)
+        .execute()
+    )
+    rows = resp.data or []
+    if not rows:
+        return None
+    raw = rows[0].get("target_date")
+    if not raw:
+        return None
+    # Supabase returns ISO date strings; normalize.
+    return date.fromisoformat(str(raw)[:10])
 
 
 def _strategy_hash(req: "BacktestRequest") -> str:
@@ -265,9 +287,47 @@ def _find_cached_snapshot(strategy_hash: str, as_of_date: str) -> dict | None:
     return rows[0] if rows else None
 
 
-def _save_current_picks_snapshot(payload: dict, config: dict, triggered_by: str, strategy_hash: str | None = None) -> int:
+def _default_snapshot_name(config: dict) -> str:
+    """Sensible default label for an auto-saved current-picks snapshot.
+    Format: "{universe or 'All companies'} · {YYYY-MM-DD HH:MM}". Picked
+    so multiple snapshots of the same strategy across days/hours are
+    distinguishable at a glance in the dropdown."""
+    universe = (config.get("index_universe") or config.get("universe_label") or "All companies").strip() or "All companies"
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+    return f"{universe} · {ts}"
+
+
+# Cached probe for the `name` column on `current_picks_snapshot`. Migration
+# 20260507000000_current_picks_name.sql adds this column; if it hasn't been
+# applied yet we want the rest of the page to keep working (the snapshot
+# dropdown, the auto-save path) instead of 500ing every request. Probed
+# lazily on first use, then cached.
+_HAS_CURRENT_PICKS_NAME_COLUMN: bool | None = None
+
+
+def _has_current_picks_name_column() -> bool:
+    global _HAS_CURRENT_PICKS_NAME_COLUMN
+    if _HAS_CURRENT_PICKS_NAME_COLUMN is None:
+        try:
+            supabase.table("current_picks_snapshot").select("name").limit(0).execute()
+            _HAS_CURRENT_PICKS_NAME_COLUMN = True
+        except Exception as e:
+            _HAS_CURRENT_PICKS_NAME_COLUMN = False
+            logging.getLogger(__name__).warning(
+                "[current-picks] `name` column not present on current_picks_snapshot — "
+                "rename UX is disabled and the dropdown shows the auto-generated label. "
+                "Apply migration 20260507000000_current_picks_name.sql to enable. (%s: %s)",
+                type(e).__name__, e,
+            )
+    return _HAS_CURRENT_PICKS_NAME_COLUMN
+
+
+def _save_current_picks_snapshot(payload: dict, config: dict, triggered_by: str, strategy_hash: str | None = None, name: str | None = None) -> int:
     """Insert a current_picks snapshot and return its snapshot_id.
-    Synchronous (call via asyncio.to_thread from async paths)."""
+    Synchronous (call via asyncio.to_thread from async paths). When `name`
+    is None, fills in a sensible default — the dropdown then shows
+    something readable instead of an empty label. Skips the name column
+    entirely when the schema migration hasn't been applied yet."""
     if triggered_by not in ("auto", "manual"):
         raise ValueError(f"triggered_by must be 'auto' or 'manual', got {triggered_by!r}")
     row = {
@@ -279,6 +339,8 @@ def _save_current_picks_snapshot(payload: dict, config: dict, triggered_by: str,
         "daily_picks": payload.get("daily_picks") or [],
         "strategy_hash": strategy_hash,
     }
+    if _has_current_picks_name_column():
+        row["name"] = name if name is not None else _default_snapshot_name(config)
     resp = supabase.table("current_picks_snapshot").insert(row).execute()
     if not resp.data:
         raise RuntimeError("insert returned no data")
@@ -2169,6 +2231,16 @@ _DEFAULT_END = "2026-01-01"
 _DEFAULT_START = "2017-01-01"
 
 
+class VariantSpec(BaseModel):
+    frequency: Literal[
+        "daily", "weekly", "monthly",
+        "every_2_months", "every_3_months", "every_4_months", "every_5_months",
+        "every_6_months", "every_7_months", "every_8_months", "every_9_months",
+        "every_10_months", "every_11_months", "every_12_months",
+    ]
+    strategy_type: Literal["long_only", "long_short"]
+
+
 class BacktestRequest(BaseModel):
     start_date: str = _DEFAULT_START
     end_date: str = _DEFAULT_END  # also used as data cutoff — no data newer than this
@@ -2188,10 +2260,26 @@ class BacktestRequest(BaseModel):
     n_trials: int = 1  # >1 only valid with selection_mode=="random"; aggregates mean ± std
     mode: Literal["backtest", "current_portfolio"] = "backtest"
     force_recompute: bool = False  # ignore cached result and recompute (applies to backtest + current_portfolio)
+    # When true (the default for the user-facing buttons), the compute uses
+    # only data already in the DB — no GuruFocus / ECB API calls to fill in
+    # gaps. The cron and the explicit "Recompute" button override this so
+    # they can refresh stale data.
+    db_only: bool = True
     rebalance_frequency: Literal[
-        "daily", "weekly", "monthly", "every_2_months", "every_3_months",
+        "daily", "weekly", "monthly",
+        "every_2_months", "every_3_months", "every_4_months", "every_5_months",
+        "every_6_months", "every_7_months", "every_8_months", "every_9_months",
+        "every_10_months", "every_11_months", "every_12_months",
     ] = "monthly"
     strategy_type: Literal["long_only", "long_short"] = "long_only"
+    # When set (non-empty), the request becomes a variants sweep: the data
+    # pipeline (universe load → ensure → bulk-load prices/volumes → FX) runs
+    # ONCE, then the backtest computation runs per variant against the same
+    # in-memory frames. Each variant emits its own `variant_start` /
+    # `variant_result` / `variant_error` events identified by a key of
+    # `{frequency}__{strategy_type}`. Sweeps are backtest-only; combining
+    # `variants` with `mode="current_portfolio"` is rejected.
+    variants: list[VariantSpec] | None = None
 
 
 async def _momentum_backtest_stream(req: BacktestRequest):
@@ -2201,6 +2289,13 @@ async def _momentum_backtest_stream(req: BacktestRequest):
 
     def _keepalive() -> str:
         return ": keepalive\n\n"
+
+    # Variants sweep is backtest-only and not cached as a bundle. Per-variant
+    # results are streamed individually; if the user wants caching they can
+    # save the bundle from the UI.
+    if req.variants and req.mode == "current_portfolio":
+        yield _emit({"type": "error", "message": "Variants sweep is not supported with mode='current_portfolio'"})
+        return
 
     # current_portfolio mode runs against today only; coerce the date range
     # so price loading covers ~14 months of history (12m momentum + buffer)
@@ -2242,9 +2337,11 @@ async def _momentum_backtest_stream(req: BacktestRequest):
 
     # Backtest replay cache. Same config + same UTC day → return the stored
     # payload instead of re-loading prices, re-running signals. Bypassed by
-    # force_recompute=true. The data_date column on backtest_cache scopes
-    # validity to today; tomorrow's first run misses naturally.
-    if req.mode != "current_portfolio" and not req.force_recompute:
+    # force_recompute=true. Skipped entirely for variants sweeps — the
+    # per-variant results are streamed and not cached as a bundle. The
+    # data_date column on backtest_cache scopes validity to today;
+    # tomorrow's first run misses naturally.
+    if req.mode != "current_portfolio" and not req.force_recompute and not req.variants:
         try:
             bt_hash = _backtest_strategy_hash(req)
             cached_bt = await asyncio.to_thread(_find_cached_backtest, bt_hash)
@@ -2270,6 +2367,45 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             yield _emit({"type": "error", "message": "No companies found in database"})
             return
         yield _emit({"type": "progress", "pct": 5, "message": f"Found {len(universe_df)} companies"})
+
+        # Pre-flight DB-staleness check. A heavy compute against data that's
+        # too old to support the requested window is a waste — surface it
+        # before we spin up the fetch loop / load gigabytes of prices.
+        # current_portfolio: needs at least one trade ON OR AFTER the start
+        # of the current month (otherwise we can't price the entry leg).
+        # backtest: only a soft warning — the loop truncates to whatever
+        # data exists, but the user should know the requested window won't
+        # be honoured in full.
+        latest_price_date = await asyncio.to_thread(_latest_db_price_date)
+        if latest_price_date is None:
+            yield _emit({"type": "error", "message": "DB has no price data — run an ingest first"})
+            return
+        if req.mode == "current_portfolio":
+            _today = date.today()
+            month_start = date(_today.year, _today.month, 1)
+            if latest_price_date < month_start:
+                lag_days = (_today - latest_price_date).days
+                yield _emit({
+                    "type": "error",
+                    "message": (
+                        f"Cannot compute current picks for {month_start.isoformat()[:7]}: "
+                        f"latest price in DB is {latest_price_date.isoformat()} "
+                        f"({lag_days} days behind today). "
+                        f"Use 'Recompute' to fetch fresh data, or run an ingest first."
+                    ),
+                })
+                return
+        else:
+            req_end = date.fromisoformat(req.end_date)
+            if latest_price_date < req_end:
+                yield _emit({
+                    "type": "warning",
+                    "scope": "data",
+                    "message": (
+                        f"Backtest end is {req_end.isoformat()} but DB only has prices "
+                        f"through {latest_price_date.isoformat()} — the run will truncate."
+                    ),
+                })
 
         # Load universe membership if a label is specified
         monthly_eligible: dict[str, set[int]] | None = None
@@ -2440,180 +2576,200 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         ok_count = 0
         fetch_start_ts = time.monotonic()
 
-        # Warm the storage bucket once before launching tasks — otherwise the
-        # first N workers would race and each fire a bucket-create HTTP call.
-        await asyncio.to_thread(_ensure_bucket, supabase)
+        # Companies whose pass-1 ensure call hit a transient API failure
+        # (source == "stale_cache" for either price or volume): the DB has
+        # older data and the live API call couldn't refresh it. The audit
+        # below uses this set as the self-heal retry list instead of
+        # re-deriving "stale" from the bulk-loaded frame — the per-company
+        # pass-1 outcome is the authoritative signal of "tried and failed".
+        pass1_transient: set[int] = set()
 
-        # Each company task submits 2 blocking HTTP calls in parallel (price +
-        # volume), so the executor needs 2 slots per concurrent task or the
-        # second call queues behind the first and inflates wall-clock timings.
-        from concurrent.futures import ThreadPoolExecutor
-        pool_size = concurrency * 2 + 4
-        executor = ThreadPoolExecutor(max_workers=pool_size, thread_name_prefix="fetch")
-        loop = asyncio.get_event_loop()
+        # In db_only mode (the default for the user-facing buttons) we
+        # bypass the per-company API ensure-loop and just consume whatever
+        # is already in the DB. The pre-flight staleness check above has
+        # already errored if the DB isn't current enough; missing-data
+        # filtering happens later in signals.py via the 30-day staleness
+        # guard. This skips the bucket warmup, the executor, fetch_one,
+        # blocked-exchange detection, and delisted-company pruning.
+        if req.db_only:
+            yield _emit({"type": "progress", "pct": 60, "message": f"DB-only mode: skipping API fetches for {total_companies} companies"})
+        else:
+            # Warm the storage bucket once before launching tasks — otherwise the
+            # first N workers would race and each fire a bucket-create HTTP call.
+            await asyncio.to_thread(_ensure_bucket, supabase)
 
-        yield _emit({"type": "progress", "pct": 5, "message": f"Ensuring price & volume data for {total_companies} companies (cutoff: {data_cutoff}, concurrency: {concurrency}, pool: {pool_size})..."})
-        yield _keepalive()
+            # Each company task submits 2 blocking HTTP calls in parallel (price +
+            # volume), so the executor needs 2 slots per concurrent task or the
+            # second call queues behind the first and inflates wall-clock timings.
+            from concurrent.futures import ThreadPoolExecutor
+            pool_size = concurrency * 2 + 4
+            executor = ThreadPoolExecutor(max_workers=pool_size, thread_name_prefix="fetch")
+            loop = asyncio.get_event_loop()
 
-        result_queue: asyncio.Queue = asyncio.Queue()
-        sema = asyncio.Semaphore(concurrency)
-        inflight = {"count": 0, "peak": 0}
+            yield _emit({"type": "progress", "pct": 5, "message": f"Ensuring price & volume data for {total_companies} companies (cutoff: {data_cutoff}, concurrency: {concurrency}, pool: {pool_size})..."})
+            yield _keepalive()
 
-        async def _fetch_one(row_cid: int, row_ticker: str, row_exchange: str):
-            sym = f"{row_exchange}:{row_ticker}"
-            if row_exchange in blocked_exchanges:
-                await result_queue.put({"cid": row_cid, "symbol": sym, "exchange": row_exchange, "status": "skipped_blocked"})
-                return
-            async with sema:
+            result_queue: asyncio.Queue = asyncio.Queue()
+            sema = asyncio.Semaphore(concurrency)
+            inflight = {"count": 0, "peak": 0}
+
+            async def _fetch_one(row_cid: int, row_ticker: str, row_exchange: str):
+                sym = f"{row_exchange}:{row_ticker}"
                 if row_exchange in blocked_exchanges:
                     await result_queue.put({"cid": row_cid, "symbol": sym, "exchange": row_exchange, "status": "skipped_blocked"})
                     return
-                inflight["count"] += 1
-                if inflight["count"] > inflight["peak"]:
-                    inflight["peak"] = inflight["count"]
-                task_start = time.monotonic()
-                try:
-                    # Run price + volume concurrently inside one company task
-                    pr_fut = loop.run_in_executor(
-                        executor,
-                        functools.partial(
-                            ensure_prices_for_company,
-                            supabase, row_cid, row_ticker, row_exchange,
-                            data_cutoff=data_cutoff,
-                        ),
-                    )
-                    vr_fut = loop.run_in_executor(
-                        executor,
-                        functools.partial(
-                            ensure_volume_for_company,
-                            supabase, row_cid, row_ticker, row_exchange,
-                            data_cutoff=data_cutoff,
-                        ),
-                    )
-                    pr_res, vr_res = await asyncio.gather(pr_fut, vr_fut, return_exceptions=True)
-                    if isinstance(pr_res, BaseException):
-                        raise pr_res
-                    pr = pr_res
-                    if isinstance(vr_res, BaseException):
-                        vr = PriceResult()
-                        vr.source = "error"
-                        vr.error = str(vr_res)
-                    else:
-                        vr = vr_res
-                    elapsed_ms = int((time.monotonic() - task_start) * 1000)
-                    await result_queue.put({"cid": row_cid, "symbol": sym, "exchange": row_exchange, "pr": pr, "vr": vr, "status": "ok", "ms": elapsed_ms})
-                except Exception as e:
-                    elapsed_ms = int((time.monotonic() - task_start) * 1000)
-                    await result_queue.put({"cid": row_cid, "symbol": sym, "exchange": row_exchange, "error": f"{type(e).__name__}: {e}", "status": "error", "ms": elapsed_ms})
-                finally:
-                    inflight["count"] -= 1
-
-        tasks = [
-            asyncio.create_task(_fetch_one(
-                int(row["company_id"]),
-                row["gurufocus_ticker"],
-                row["gurufocus_exchange"] or "UNKNOWN",
-            ))
-            for _, row in universe_df.iterrows()
-        ]
-
-        async def _sentinel():
-            await asyncio.gather(*tasks, return_exceptions=True)
-            await result_queue.put(None)
-
-        sentinel_task = asyncio.create_task(_sentinel())
-
-        done_count = 0
-        try:
-            while True:
-                evt = await result_queue.get()
-                if evt is None:
-                    break
-                done_count += 1
-                pct = 5 + round((done_count / max(1, total_companies)) * 55)
-                status = evt["status"]
-                cid = evt["cid"]
-                symbol = evt["symbol"]
-                exchange = evt["exchange"]
-
-                if status == "skipped_blocked":
-                    skipped_count += 1
-                    excluded_ids.add(cid)
-                    continue
-                if status == "error":
-                    excluded_ids.add(cid)
-                    yield _emit({"type": "warning", "scope": "fetch", "symbol": symbol, "message": f"{symbol}: fetch failed — {evt['error']}"})
-                    continue
-
-                pr = evt["pr"]
-                vr = evt["vr"]
-
-                if pr.is_forbidden:
-                    blocked_exchanges.add(exchange)
-                    excluded_ids.add(cid)
-                    yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: unsubscribed region — future {exchange} calls will be skipped"})
-                elif pr.is_delisted:
-                    excluded_ids.add(cid)
-                    await asyncio.to_thread(
-                        lambda c=cid: (
-                            supabase.table("metric_data").delete().eq("company_id", c).execute(),
-                            supabase.table("portfolio_weight").delete().eq("company_id", c).execute(),
-                            supabase.table("company").delete().eq("company_id", c).execute(),
+                async with sema:
+                    if row_exchange in blocked_exchanges:
+                        await result_queue.put({"cid": row_cid, "symbol": sym, "exchange": row_exchange, "status": "skipped_blocked"})
+                        return
+                    inflight["count"] += 1
+                    if inflight["count"] > inflight["peak"]:
+                        inflight["peak"] = inflight["count"]
+                    task_start = time.monotonic()
+                    try:
+                        # Run price + volume concurrently inside one company task
+                        pr_fut = loop.run_in_executor(
+                            executor,
+                            functools.partial(
+                                ensure_prices_for_company,
+                                supabase, row_cid, row_ticker, row_exchange,
+                                data_cutoff=data_cutoff,
+                            ),
                         )
-                    )
-                    yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: DELISTED — removed from database"})
-                else:
-                    ok_count += 1
-                    parts: list[str] = []
-                    if pr.source == "cache":
-                        parts.append(f"price: cache ({pr.rows_loaded})")
-                    elif pr.source == "api":
-                        parts.append(f"price: API ({pr.rows_loaded})")
-                    elif pr.source == "stale_cache":
-                        parts.append(f"price: stale cache ({pr.rows_loaded})")
-                    elif pr.source == "none":
-                        parts.append("price: none")
-                    else:
-                        parts.append(f"price: {pr.source}")
-                    if vr:
-                        if vr.source == "cache":
-                            parts.append(f"vol: cache ({vr.rows_loaded})")
-                        elif vr.source == "api":
-                            parts.append(f"vol: API ({vr.rows_loaded})")
-                        elif vr.source == "stale_cache":
-                            parts.append(f"vol: stale cache ({vr.rows_loaded})")
-                        elif vr.source == "error":
-                            parts.append(f"vol: error ({vr.error})")
+                        vr_fut = loop.run_in_executor(
+                            executor,
+                            functools.partial(
+                                ensure_volume_for_company,
+                                supabase, row_cid, row_ticker, row_exchange,
+                                data_cutoff=data_cutoff,
+                            ),
+                        )
+                        pr_res, vr_res = await asyncio.gather(pr_fut, vr_fut, return_exceptions=True)
+                        if isinstance(pr_res, BaseException):
+                            raise pr_res
+                        pr = pr_res
+                        if isinstance(vr_res, BaseException):
+                            vr = PriceResult()
+                            vr.source = "error"
+                            vr.error = str(vr_res)
                         else:
-                            parts.append(f"vol: none ({vr.error or 'unknown'})")
-                    else:
-                        parts.append("vol: failed")
-                    ms = evt.get("ms", 0)
-                    peak = inflight["peak"]
-                    yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol} ({done_count}/{total_companies}, {ms}ms, peak:{peak}): {' | '.join(parts)}"})
-        finally:
-            # Make sure the sentinel task completes before we leave this block
+                            vr = vr_res
+                        elapsed_ms = int((time.monotonic() - task_start) * 1000)
+                        await result_queue.put({"cid": row_cid, "symbol": sym, "exchange": row_exchange, "pr": pr, "vr": vr, "status": "ok", "ms": elapsed_ms})
+                    except Exception as e:
+                        elapsed_ms = int((time.monotonic() - task_start) * 1000)
+                        await result_queue.put({"cid": row_cid, "symbol": sym, "exchange": row_exchange, "error": f"{type(e).__name__}: {e}", "status": "error", "ms": elapsed_ms})
+                    finally:
+                        inflight["count"] -= 1
+
+            tasks = [
+                asyncio.create_task(_fetch_one(
+                    int(row["company_id"]),
+                    row["gurufocus_ticker"],
+                    row["gurufocus_exchange"] or "UNKNOWN",
+                ))
+                for _, row in universe_df.iterrows()
+            ]
+
+            async def _sentinel():
+                await asyncio.gather(*tasks, return_exceptions=True)
+                await result_queue.put(None)
+
+            sentinel_task = asyncio.create_task(_sentinel())
+
+            done_count = 0
             try:
-                await sentinel_task
-            except Exception:
-                pass
-            executor.shutdown(wait=False)
+                while True:
+                    evt = await result_queue.get()
+                    if evt is None:
+                        break
+                    done_count += 1
+                    pct = 5 + round((done_count / max(1, total_companies)) * 55)
+                    status = evt["status"]
+                    cid = evt["cid"]
+                    symbol = evt["symbol"]
+                    exchange = evt["exchange"]
 
-        total_elapsed = time.monotonic() - fetch_start_ts
-        yield _emit({"type": "progress", "pct": 60, "message": f"Fetch complete in {total_elapsed:.1f}s (peak concurrency: {inflight['peak']}/{concurrency})"})
+                    if status == "skipped_blocked":
+                        skipped_count += 1
+                        excluded_ids.add(cid)
+                        continue
+                    if status == "error":
+                        excluded_ids.add(cid)
+                        yield _emit({"type": "warning", "scope": "fetch", "symbol": symbol, "message": f"{symbol}: fetch failed — {evt['error']}"})
+                        continue
 
-        if blocked_exchanges:
-            yield _emit({"type": "warning", "scope": "fetch", "message": f"Blocked exchanges (unsubscribed): {', '.join(sorted(blocked_exchanges))} — {skipped_count} companies skipped"})
+                    pr = evt["pr"]
+                    vr = evt["vr"]
 
-        # Remove excluded companies (blocked exchanges, delisted) from universe
-        if excluded_ids:
-            universe_df = universe_df[~universe_df["company_id"].isin(excluded_ids)].reset_index(drop=True)
-            yield _emit({"type": "progress", "pct": 61, "message": f"Universe after exclusions: {len(universe_df)} companies"})
+                    if pr.is_forbidden:
+                        blocked_exchanges.add(exchange)
+                        excluded_ids.add(cid)
+                        yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: unsubscribed region — future {exchange} calls will be skipped"})
+                    elif pr.is_delisted:
+                        excluded_ids.add(cid)
+                        await asyncio.to_thread(
+                            lambda c=cid: (
+                                supabase.table("metric_data").delete().eq("company_id", c).execute(),
+                                supabase.table("portfolio_weight").delete().eq("company_id", c).execute(),
+                                supabase.table("company").delete().eq("company_id", c).execute(),
+                            )
+                        )
+                        yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol}: DELISTED — removed from database"})
+                    else:
+                        ok_count += 1
+                        if pr.source == "stale_cache" or (vr and vr.source == "stale_cache"):
+                            pass1_transient.add(cid)
+                        parts: list[str] = []
+                        if pr.source == "cache":
+                            parts.append(f"price: cache ({pr.rows_loaded})")
+                        elif pr.source == "api":
+                            parts.append(f"price: API ({pr.rows_loaded})")
+                        elif pr.source == "stale_cache":
+                            parts.append(f"price: stale cache ({pr.rows_loaded})")
+                        elif pr.source == "none":
+                            parts.append("price: none")
+                        else:
+                            parts.append(f"price: {pr.source}")
+                        if vr:
+                            if vr.source == "cache":
+                                parts.append(f"vol: cache ({vr.rows_loaded})")
+                            elif vr.source == "api":
+                                parts.append(f"vol: API ({vr.rows_loaded})")
+                            elif vr.source == "stale_cache":
+                                parts.append(f"vol: stale cache ({vr.rows_loaded})")
+                            elif vr.source == "error":
+                                parts.append(f"vol: error ({vr.error})")
+                            else:
+                                parts.append(f"vol: none ({vr.error or 'unknown'})")
+                        else:
+                            parts.append("vol: failed")
+                        ms = evt.get("ms", 0)
+                        peak = inflight["peak"]
+                        yield _emit({"type": "progress", "pct": pct, "message": f"  {symbol} ({done_count}/{total_companies}, {ms}ms, peak:{peak}): {' | '.join(parts)}"})
+            finally:
+                # Make sure the sentinel task completes before we leave this block
+                try:
+                    await sentinel_task
+                except Exception:
+                    pass
+                executor.shutdown(wait=False)
 
-        # Optionally limit universe size (alphabetical by ticker) — applied after exclusions
-        if req.max_companies > 0 and len(universe_df) > req.max_companies:
-            universe_df = universe_df.sort_values("gurufocus_ticker").head(req.max_companies).reset_index(drop=True)
-            yield _emit({"type": "progress", "pct": 61, "message": f"Limited to {len(universe_df)} companies (alphabetical)"})
+            total_elapsed = time.monotonic() - fetch_start_ts
+            yield _emit({"type": "progress", "pct": 60, "message": f"Fetch complete in {total_elapsed:.1f}s (peak concurrency: {inflight['peak']}/{concurrency})"})
+
+            if blocked_exchanges:
+                yield _emit({"type": "warning", "scope": "fetch", "message": f"Blocked exchanges (unsubscribed): {', '.join(sorted(blocked_exchanges))} — {skipped_count} companies skipped"})
+
+            # Remove excluded companies (blocked exchanges, delisted) from universe
+            if excluded_ids:
+                universe_df = universe_df[~universe_df["company_id"].isin(excluded_ids)].reset_index(drop=True)
+                yield _emit({"type": "progress", "pct": 61, "message": f"Universe after exclusions: {len(universe_df)} companies"})
+
+            # Optionally limit universe size (alphabetical by ticker) — applied after exclusions
+            if req.max_companies > 0 and len(universe_df) > req.max_companies:
+                universe_df = universe_df.sort_values("gurufocus_ticker").head(req.max_companies).reset_index(drop=True)
+                yield _emit({"type": "progress", "pct": 61, "message": f"Limited to {len(universe_df)} companies (alphabetical)"})
 
         company_ids = universe_df["company_id"].tolist()
 
@@ -2707,87 +2863,93 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         # idempotent and cheap — it only fetches what's missing past the
         # highest existing rate_date per currency. We stream per-currency
         # progress so the user can see the sync isn't stuck.
-        yield _emit({"type": "progress", "pct": 65, "message": f"Syncing FX rates from ECB (through {price_end})..."})
-        yield _keepalive()
+        # Skipped under db_only — no external ECB calls; rely on whatever
+        # FX rows are already in the DB (gaps surface as the existing
+        # "no FX history for X" warning during conversion).
+        if req.db_only:
+            yield _emit({"type": "progress", "pct": 65, "message": "DB-only mode: skipping ECB FX sync, using cached FX rates"})
+        else:
+            yield _emit({"type": "progress", "pct": 65, "message": f"Syncing FX rates from ECB (through {price_end})..."})
+            yield _keepalive()
 
-        fx_progress_q: _queue.Queue = _queue.Queue()
-        fx_done = [0]
-        fx_total = len(currencies_needed)
+            fx_progress_q: _queue.Queue = _queue.Queue()
+            fx_done = [0]
+            fx_total = len(currencies_needed)
 
-        def _on_fx_progress(code: str, status: dict):
-            fx_done[0] += 1
-            fx_progress_q.put({
-                "code": code,
-                "done": fx_done[0],
-                "total": fx_total,
-                "status": status.get("status"),
-            })
-
-        fx_task = asyncio.create_task(asyncio.to_thread(
-            sync_fx_rates_to_db, supabase, currencies_needed, price_start, price_end,
-            on_progress=_on_fx_progress,
-        ))
-        while not fx_task.done():
-            drained = []
-            while True:
-                try:
-                    drained.append(fx_progress_q.get_nowait())
-                except _queue.Empty:
-                    break
-            if drained:
-                latest = drained[-1]
-                pct = round(latest["done"] / max(1, latest["total"]) * 100)
-                yield _emit({
-                    "type": "progress",
-                    "pct": 65,
-                    "message": f"  FX sync {latest['done']}/{latest['total']} ≈ {pct}% (latest: {latest['code']} → {latest['status']})",
+            def _on_fx_progress(code: str, status: dict):
+                fx_done[0] += 1
+                fx_progress_q.put({
+                    "code": code,
+                    "done": fx_done[0],
+                    "total": fx_total,
+                    "status": status.get("status"),
                 })
-            await asyncio.sleep(0.15)
-        fx_sync = await fx_task
-        synced_codes = sorted(c for c, s in fx_sync.items() if s.get("status") == "synced")
-        cached_codes = sorted(c for c, s in fx_sync.items() if s.get("status") == "cached")
-        failed_codes = sorted(c for c, s in fx_sync.items() if s.get("status") == "error")
-        nodata_codes = sorted(c for c, s in fx_sync.items() if s.get("status") == "no_data")
-        total_rows = sum(s.get("rows", 0) for s in fx_sync.values())
-        yield _emit({
-            "type": "progress",
-            "pct": 65,
-            "message": (
-                f"FX sync done: {len(synced_codes)} updated ({total_rows:,} rows), "
-                f"{len(cached_codes)} already current, "
-                f"{len(failed_codes)} failed, {len(nodata_codes)} no_data"
-            ),
-        })
-        if failed_codes:
-            for code in failed_codes:
-                err = fx_sync[code].get("error", "unknown")
-                yield _emit({"type": "warning", "scope": "fx", "message": f"FX sync failed for {code}: {err}"})
-        if nodata_codes:
-            _ccy_names = {
-                "AED": "UAE Dirham", "ARS": "Argentine Peso", "AUD": "Australian Dollar",
-                "BRL": "Brazilian Real", "CAD": "Canadian Dollar", "CHF": "Swiss Franc",
-                "CLP": "Chilean Peso", "CNY": "Chinese Yuan", "COP": "Colombian Peso",
-                "CZK": "Czech Koruna", "DKK": "Danish Krone", "EGP": "Egyptian Pound",
-                "EUR": "Euro", "GBP": "British Pound", "GBX": "British Penny",
-                "HKD": "Hong Kong Dollar", "HUF": "Hungarian Forint", "IDR": "Indonesian Rupiah",
-                "ILS": "Israeli Shekel", "INR": "Indian Rupee", "ISK": "Icelandic Krona",
-                "JPY": "Japanese Yen", "KRW": "South Korean Won", "MXN": "Mexican Peso",
-                "MYR": "Malaysian Ringgit", "NOK": "Norwegian Krone", "NZD": "New Zealand Dollar",
-                "PEN": "Peruvian Sol", "PHP": "Philippine Peso", "PKR": "Pakistani Rupee",
-                "PLN": "Polish Zloty", "QAR": "Qatari Riyal", "RON": "Romanian Leu",
-                "RUB": "Russian Ruble", "SAR": "Saudi Riyal", "SEK": "Swedish Krona",
-                "SGD": "Singapore Dollar", "THB": "Thai Baht", "TRY": "Turkish Lira",
-                "TWD": "Taiwan Dollar", "USD": "US Dollar", "VND": "Vietnamese Dong",
-                "ZAR": "South African Rand",
-            }
-            labeled = ", ".join(
-                f"{c} ({_ccy_names[c]})" if c in _ccy_names else c for c in nodata_codes
-            )
+
+            fx_task = asyncio.create_task(asyncio.to_thread(
+                sync_fx_rates_to_db, supabase, currencies_needed, price_start, price_end,
+                on_progress=_on_fx_progress,
+            ))
+            while not fx_task.done():
+                drained = []
+                while True:
+                    try:
+                        drained.append(fx_progress_q.get_nowait())
+                    except _queue.Empty:
+                        break
+                if drained:
+                    latest = drained[-1]
+                    pct = round(latest["done"] / max(1, latest["total"]) * 100)
+                    yield _emit({
+                        "type": "progress",
+                        "pct": 65,
+                        "message": f"  FX sync {latest['done']}/{latest['total']} ≈ {pct}% (latest: {latest['code']} → {latest['status']})",
+                    })
+                await asyncio.sleep(0.15)
+            fx_sync = await fx_task
+            synced_codes = sorted(c for c, s in fx_sync.items() if s.get("status") == "synced")
+            cached_codes = sorted(c for c, s in fx_sync.items() if s.get("status") == "cached")
+            failed_codes = sorted(c for c, s in fx_sync.items() if s.get("status") == "error")
+            nodata_codes = sorted(c for c, s in fx_sync.items() if s.get("status") == "no_data")
+            total_rows = sum(s.get("rows", 0) for s in fx_sync.values())
             yield _emit({
-                "type": "warning",
-                "scope": "fx",
-                "message": f"No FX data returned for: {labeled} (ECB may not cover these)",
+                "type": "progress",
+                "pct": 65,
+                "message": (
+                    f"FX sync done: {len(synced_codes)} updated ({total_rows:,} rows), "
+                    f"{len(cached_codes)} already current, "
+                    f"{len(failed_codes)} failed, {len(nodata_codes)} no_data"
+                ),
             })
+            if failed_codes:
+                for code in failed_codes:
+                    err = fx_sync[code].get("error", "unknown")
+                    yield _emit({"type": "warning", "scope": "fx", "message": f"FX sync failed for {code}: {err}"})
+            if nodata_codes:
+                _ccy_names = {
+                    "AED": "UAE Dirham", "ARS": "Argentine Peso", "AUD": "Australian Dollar",
+                    "BRL": "Brazilian Real", "CAD": "Canadian Dollar", "CHF": "Swiss Franc",
+                    "CLP": "Chilean Peso", "CNY": "Chinese Yuan", "COP": "Colombian Peso",
+                    "CZK": "Czech Koruna", "DKK": "Danish Krone", "EGP": "Egyptian Pound",
+                    "EUR": "Euro", "GBP": "British Pound", "GBX": "British Penny",
+                    "HKD": "Hong Kong Dollar", "HUF": "Hungarian Forint", "IDR": "Indonesian Rupiah",
+                    "ILS": "Israeli Shekel", "INR": "Indian Rupee", "ISK": "Icelandic Krona",
+                    "JPY": "Japanese Yen", "KRW": "South Korean Won", "MXN": "Mexican Peso",
+                    "MYR": "Malaysian Ringgit", "NOK": "Norwegian Krone", "NZD": "New Zealand Dollar",
+                    "PEN": "Peruvian Sol", "PHP": "Philippine Peso", "PKR": "Pakistani Rupee",
+                    "PLN": "Polish Zloty", "QAR": "Qatari Riyal", "RON": "Romanian Leu",
+                    "RUB": "Russian Ruble", "SAR": "Saudi Riyal", "SEK": "Swedish Krona",
+                    "SGD": "Singapore Dollar", "THB": "Thai Baht", "TRY": "Turkish Lira",
+                    "TWD": "Taiwan Dollar", "USD": "US Dollar", "VND": "Vietnamese Dong",
+                    "ZAR": "South African Rand",
+                }
+                labeled = ", ".join(
+                    f"{c} ({_ccy_names[c]})" if c in _ccy_names else c for c in nodata_codes
+                )
+                yield _emit({
+                    "type": "warning",
+                    "scope": "fx",
+                    "message": f"No FX data returned for: {labeled} (ECB may not cover these)",
+                })
 
         yield _emit({"type": "progress", "pct": 65, "message": f"Loading FX rates ({price_start} to {price_end}) for {len(currencies_needed)} currencies..."})
         yield _keepalive()
@@ -2976,49 +3138,41 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         # data (empty Storage JSONs, failed prior loads, new tickers, etc.).
         #
         # When the user explicitly asks for fresh data on a current_portfolio
-        # run (force_recompute=True), expand the heal target list to include
-        # companies whose latest price/volume is older than the most recent
-        # expected trading day. Without this, "Don't use cache" only bypasses
-        # the snapshot cache and silently runs against stale prices.
-        # ensure_*_for_company short-circuits on fresh DB data, so any false
-        # positives just cost a DB lookup — no GuruFocus API call.
+        # run (force_recompute=True), also retry every company whose pass-1
+        # ensure call hit a transient API failure (source == "stale_cache").
+        # This is the per-company pass-1 outcome, not a re-derivation of
+        # "stale" from the bulk frame — pass-1 already runs the same
+        # is_daily_data_fresh predicate, so a successful "api" outcome cannot
+        # produce a stale row in the audit. Only transient API failures need
+        # a second attempt.
         _stale_cids: set[int] = set()
         if req.mode == "current_portfolio" and req.force_recompute:
-            from ingest.staleness import is_daily_data_fresh  # noqa: PLC0415
-            _today = date.today()
-            _latest_price_per_cid = (
-                prices_local_df.groupby("company_id")["target_date"].max().to_dict()
-                if prices_local_df is not None and not prices_local_df.empty
-                else {}
-            )
-            _latest_vol_per_cid = (
-                volumes_df.groupby("company_id")["target_date"].max().to_dict()
-                if volumes_df is not None and not volumes_df.empty
-                else {}
-            )
-
-            def _is_stale(latest) -> bool:
-                if latest is None:
-                    return False  # no data → handled by the gap path
-                d = latest.date() if hasattr(latest, "date") else latest
-                fresh, _reason = is_daily_data_fresh(d, today=_today)
-                return not fresh
-
-            for cid in company_ids:
-                cid = int(cid)
-                if _universe_exchange.get(cid, "UNKNOWN") in _unsubscribed_exchanges:
-                    continue
-                if _is_stale(_latest_price_per_cid.get(cid)) or _is_stale(_latest_vol_per_cid.get(cid)):
-                    _stale_cids.add(cid)
-
+            company_id_set = {int(c) for c in company_ids}
+            _stale_cids = {
+                cid for cid in pass1_transient
+                if cid in company_id_set
+                and _universe_exchange.get(cid, "UNKNOWN") not in _unsubscribed_exchanges
+            }
             if _stale_cids:
                 yield _emit({
                     "type": "info",
                     "scope": "self-heal",
-                    "message": f"Force-recompute: {len(_stale_cids)} companies have stale data and will be refetched.",
+                    "message": f"Force-recompute: {len(_stale_cids)} companies hit transient API errors during pass 1 — retrying.",
                 })
 
         gap_cids = sorted(set(_no_price_gap) | set(_no_vol_gap) | _stale_cids)
+        if req.db_only and gap_cids:
+            # Don't refetch under db_only — surface the gap as a non-fatal
+            # warning so the user knows some companies will be filtered out
+            # of the universe by the staleness guard in signals.py.
+            sample = ", ".join(_label(int(c)) for c in gap_cids[:8])
+            more = f" (+{len(gap_cids) - 8} more)" if len(gap_cids) > 8 else ""
+            yield _emit({
+                "type": "warning",
+                "scope": "data",
+                "message": f"DB-only mode: {len(gap_cids)} companies have missing price/volume data and will be excluded from this run: {sample}{more}",
+            })
+            gap_cids = []
         if gap_cids:
             yield _emit({"type": "progress", "pct": 67, "message": f"Self-heal: refetching missing data for {len(gap_cids)} companies on subscribed exchanges..."})
             yield _keepalive()
@@ -3099,6 +3253,184 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                         [volumes_df, new_volumes], ignore_index=True
                     ).sort_values(["company_id", "target_date"]).reset_index(drop=True)
 
+        # Build universe snapshot once — used by both single-run and variants
+        # paths. Variants reuse this for every per-variant `variant_result`
+        # event so the client gets the same shape it would from a single run.
+        # `_norm_str` handles None / NaN explicitly: pandas Series .get("col",
+        # default) only falls through to the default when the COLUMN is
+        # missing, not when the cell is None or NaN. Without this normalization
+        # an exchange link that's absent in the DB ends up as the literal
+        # string "None" or "nan" in the JSON payload, which (a) breaks the
+        # frontend's GuruFocus URL helper (US-vs-non-US classifier sees
+        # "None" as non-US and produces "/stock/None:TICKER/summary") and
+        # (b) renders "(None)" or "(nan)" in the holdings table.
+        def _norm_str(val) -> str:
+            if val is None:
+                return ""
+            try:
+                if pd.isna(val):
+                    return ""
+            except (TypeError, ValueError):
+                pass
+            return str(val)
+
+        universe_snapshot = [
+            {
+                "company_id": int(row["company_id"]),
+                "ticker": _norm_str(row.get("gurufocus_ticker")),
+                "exchange": _norm_str(row.get("gurufocus_exchange")),
+                "company_name": _norm_str(row.get("company_name")),
+                "sector": _norm_str(row.get("sector")),
+                "country": _norm_str(row.get("country")),
+            }
+            for _, row in universe_df.iterrows()
+        ]
+
+        # ── Variants sweep path ─────────────────────────────────────────────
+        # All data is loaded; iterate variants, running just the backtest
+        # computation per (frequency × strategy_type). Each variant emits its
+        # own `variant_start` / `variant_result` / `variant_error` event so
+        # the frontend can update the variants table row-by-row. The data
+        # frames (prices_df, prices_local_df, volumes_df, fx_rates,
+        # company_currency, monthly_eligible, universe_df) are reused
+        # verbatim — frequency / strategy_type only affect the rebalance
+        # date generator and portfolio construction, not the underlying
+        # data, so this is the cheap loop the sweep should always have been.
+        if req.variants:
+            for v_idx, vspec in enumerate(req.variants):
+                variant_key = f"{vspec.frequency}__{vspec.strategy_type}"
+                yield _emit({"type": "variant_start", "variant_key": variant_key})
+                yield _keepalive()
+
+                # Per-variant config: same base, overridden frequency + strategy.
+                # Reject long_short + random at the variant level — the same
+                # combination check the single-run path applies, but per-row.
+                if req.selection_mode == "random" and vspec.strategy_type == "long_short":
+                    yield _emit({
+                        "type": "variant_error",
+                        "variant_key": variant_key,
+                        "message": "long_short is not supported with selection_mode='random'",
+                    })
+                    continue
+
+                v_config = BacktestConfig.from_dict({
+                    "start_date": req.start_date,
+                    "end_date": req.end_date,
+                    "signal_weights": req.signal_weights or {s["key"]: s["default_weight"] for s in PRICE_SIGNAL_DEFS},
+                    "category_weights": req.category_weights,
+                    "top_n_sectors": req.top_n_sectors,
+                    "top_n_per_sector": req.top_n_per_sector,
+                    "selection_mode": req.selection_mode,
+                    "random_seed": req.random_seed,
+                    "rebalance_frequency": vspec.frequency,
+                    "strategy_type": vspec.strategy_type,
+                })
+
+                v_progress_queue: _queue.Queue = _queue.Queue()
+                v_result_holder: list = []
+                v_error_holder: list = []
+
+                def _v_send_event(event_type: str, **kwargs):
+                    v_progress_queue.put({"type": event_type, **kwargs})
+
+                def _v_run(cfg=v_config):
+                    try:
+                        if req.selection_mode == "random" and req.n_trials > 1:
+                            r = run_multi_trial_backtest(
+                                cfg, prices_df, universe_df, req.n_trials, _v_send_event,
+                                volumes_df=volumes_df,
+                                monthly_eligible=monthly_eligible,
+                                prices_local_df=prices_local_df,
+                                company_currency=company_currency,
+                            )
+                        else:
+                            r = run_backtest(
+                                cfg, prices_df, universe_df, _v_send_event,
+                                volumes_df=volumes_df,
+                                monthly_eligible=monthly_eligible,
+                                prices_local_df=prices_local_df,
+                                company_currency=company_currency,
+                            )
+                        v_result_holder.append(r)
+                    except Exception as e:
+                        v_error_holder.append(e)
+                    finally:
+                        v_progress_queue.put(None)
+
+                yield _emit({
+                    "type": "progress",
+                    "pct": 68 + round((v_idx / max(1, len(req.variants))) * 32),
+                    "message": f"[{variant_key}] running backtest computation ({v_idx + 1}/{len(req.variants)})...",
+                })
+                yield _keepalive()
+
+                loop = asyncio.get_event_loop()
+                loop.run_in_executor(None, _v_run)
+
+                # Same keepalive-15s pattern as the single-run path so the
+                # proxy doesn't kill the connection during long signal
+                # computation phases.
+                v_last_yield = time.monotonic()
+                while True:
+                    try:
+                        evt = await asyncio.to_thread(v_progress_queue.get, timeout=0.2)
+                    except Exception:
+                        if time.monotonic() - v_last_yield >= 15.0:
+                            yield _keepalive()
+                            v_last_yield = time.monotonic()
+                        continue
+                    if evt is None:
+                        break
+                    if evt["type"] == "progress":
+                        # Scale this variant's internal pct (0-100) into
+                        # the overall sweep progress: each variant owns a
+                        # 32/N slice of the [68, 100] band, and within
+                        # the slice we advance proportionally to the
+                        # variant's own progress event. Without this the
+                        # bar was locked at the variant's start pct
+                        # throughout its run, then frozen at
+                        # `68 + ((N-1)/N)*32` after the last variant
+                        # finished — e.g. 84% for N=8.
+                        local_pct = float(evt.get("pct") or 0)
+                        sweep_fraction = (v_idx + max(0.0, min(100.0, local_pct)) / 100.0) / max(1, len(req.variants))
+                        yield _emit({
+                            "type": "progress",
+                            "pct": 68 + round(sweep_fraction * 32),
+                            "message": f"[{variant_key}] {evt.get('message', '')}",
+                        })
+                    elif evt["type"] == "warning":
+                        yield _emit({
+                            "type": "warning",
+                            "scope": evt.get("scope", "backtest"),
+                            "message": f"[{variant_key}] {evt.get('message', '')}",
+                        })
+                    v_last_yield = time.monotonic()
+
+                if v_error_holder:
+                    yield _emit({
+                        "type": "variant_error",
+                        "variant_key": variant_key,
+                        "message": f"{type(v_error_holder[0]).__name__}: {v_error_holder[0]}",
+                    })
+                    continue
+
+                v_result_dict = v_result_holder[0].to_dict()
+                yield _emit({
+                    "type": "variant_result",
+                    "variant_key": variant_key,
+                    "data": v_result_dict,
+                    "universe": universe_snapshot,
+                })
+
+            # Belt-and-suspenders 100% emit: even if the final variant
+            # didn't deliver a closing progress event (e.g. it errored,
+            # or was skipped because long_short+random is forbidden),
+            # the user-facing progress bar lands at 100 before `done`.
+            yield _emit({"type": "progress", "pct": 100, "message": f"Variants sweep complete ({len(req.variants)})"})
+            yield _emit({"type": "done", "message": f"Variants sweep complete ({len(req.variants)})"})
+            return
+
+        # ── Single-run path ─────────────────────────────────────────────────
         # Run backtest with progress callback via queue for real-time streaming
         progress_queue: _queue.Queue = _queue.Queue()
         backtest_result_holder: list = []
@@ -3144,11 +3476,20 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         loop = asyncio.get_event_loop()
         loop.run_in_executor(None, _run_backtest)
 
-        # Stream progress events in real-time as the backtest runs
+        # Stream progress events in real-time as the backtest runs. Emit a
+        # keepalive comment every ~15s of silence so the proxy doesn't close
+        # the connection during long signal-computation steps that produce no
+        # visible events (current_portfolio on a wide universe can sit silent
+        # for >30s between emissions).
+        last_yield = time.monotonic()
+        keepalive_interval = 15.0
         while True:
             try:
                 evt = await asyncio.to_thread(progress_queue.get, timeout=0.2)
             except Exception:
+                if time.monotonic() - last_yield >= keepalive_interval:
+                    yield _keepalive()
+                    last_yield = time.monotonic()
                 continue
             if evt is None:
                 break
@@ -3157,22 +3498,13 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                 yield _emit({"type": "progress", "pct": scaled_pct, "message": evt.get("message", "")})
             elif evt["type"] == "warning":
                 yield _emit({"type": "warning", "scope": evt.get("scope", "backtest"), "message": evt.get("message", "")})
+            last_yield = time.monotonic()
 
         if backtest_error_holder:
             raise backtest_error_holder[0]
         result = backtest_result_holder[0]
 
-        # Build universe snapshot for saving
-        universe_snapshot = [
-            {
-                "company_id": int(row["company_id"]),
-                "ticker": str(row["gurufocus_ticker"]),
-                "exchange": str(row.get("gurufocus_exchange", "")),
-                "company_name": str(row.get("company_name", "")),
-                "sector": str(row.get("sector", "")),
-            }
-            for _, row in universe_df.iterrows()
-        ]
+        # universe_snapshot was built above (shared with the variants path).
 
         if req.mode == "current_portfolio":
             payload = result.to_dict()
@@ -3360,17 +3692,21 @@ async def rename_backtest(run_id: int, req: RenameBacktestRequest):
 
 @app.get("/api/momentum/current-picks")
 async def list_current_picks():
-    """List snapshots, most recent first. Excludes the heavy holdings JSONB."""
+    """List snapshots, most recent first. Excludes the heavy holdings JSONB.
+    Drops the `name` column from the SELECT when the migration hasn't been
+    applied yet — the frontend already treats `name` as optional and falls
+    back to the auto-generated date/trigger label."""
+    has_name = await asyncio.to_thread(_has_current_picks_name_column)
+    cols = "snapshot_id, created_at, triggered_by, as_of_date, latest_price_date"
+    if has_name:
+        cols += ", name"
     resp = await asyncio.to_thread(
         lambda: supabase.table("current_picks_snapshot")
-        .select("snapshot_id, created_at, triggered_by, as_of_date, latest_price_date")
+        .select(cols)
         .order("created_at", desc=True)
         .execute()
     )
-    rows = resp.data or []
-    # Add holdings_count via a separate aggregate query? Cheaper to skip and let
-    # the UI show only metadata; the count appears on the loaded snapshot.
-    return rows
+    return resp.data or []
 
 
 @app.get("/api/momentum/current-picks/{snapshot_id}")
@@ -3381,6 +3717,47 @@ async def get_current_picks(snapshot_id: int):
         .select("*")
         .eq("snapshot_id", snapshot_id)
         .limit(1)
+        .execute()
+    )
+    if not resp.data:
+        raise HTTPException(404, "Snapshot not found")
+    return resp.data[0]
+
+
+@app.delete("/api/momentum/current-picks/{snapshot_id}")
+async def delete_current_picks(snapshot_id: int):
+    """Delete a current-picks snapshot."""
+    resp = await asyncio.to_thread(
+        lambda: supabase.table("current_picks_snapshot")
+        .delete()
+        .eq("snapshot_id", snapshot_id)
+        .execute()
+    )
+    if not resp.data:
+        raise HTTPException(404, "Snapshot not found")
+    return {"ok": True}
+
+
+class RenameCurrentPicksRequest(BaseModel):
+    # Empty string clears the custom label and falls the dropdown back to
+    # the auto-generated date/trigger title.
+    name: str | None = None
+
+
+@app.patch("/api/momentum/current-picks/{snapshot_id}")
+async def rename_current_picks(snapshot_id: int, req: RenameCurrentPicksRequest):
+    """Set or clear a custom name on a current-picks snapshot."""
+    if not await asyncio.to_thread(_has_current_picks_name_column):
+        raise HTTPException(
+            503,
+            "Snapshot rename requires the `name` column. Apply migration "
+            "20260507000000_current_picks_name.sql to enable.",
+        )
+    new_name = (req.name or "").strip() or None
+    resp = await asyncio.to_thread(
+        lambda: supabase.table("current_picks_snapshot")
+        .update({"name": new_name})
+        .eq("snapshot_id", snapshot_id)
         .execute()
     )
     if not resp.data:
@@ -3522,9 +3899,11 @@ async def cron_current_picks(req: BacktestRequest, x_cron_secret: str = Header(d
         raise HTTPException(401, "Invalid cron secret")
 
     # Force the right mode regardless of what the caller sent. Cron always
-    # recomputes — its purpose is to land a fresh weekly snapshot.
+    # recomputes against fresh API data — its purpose is to land a fresh
+    # weekly snapshot, so the db_only default is overridden here.
     req.mode = "current_portfolio"
     req.force_recompute = True
+    req.db_only = False
     if req.selection_mode == "random":
         raise HTTPException(400, "Cron does not support random selection mode")
 
@@ -4744,32 +5123,83 @@ async def index_universe_import_sp500():
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
+# Module-level cache for the universe-stats list. The underlying view does
+# COUNT(DISTINCT universe_ticker) over the full universe_membership table,
+# which sometimes trips Supabase's 8s statement_timeout once the table grows
+# past ~500k rows (S&P 500 history × ACWI × monthly entries). Reads change
+# rarely (only after an index ingest), so a 5-minute TTL avoids paying that
+# cost on every dropdown render. On timeout we fall back to a stale cached
+# entry if we have one, then to a cheap universe-table-only read so the UI
+# still loads — month/ticker counts come back as 0 in that degraded mode.
+_UNIVERSE_STATS_CACHE: dict = {"ts": 0.0, "data": None}
+_UNIVERSE_STATS_TTL = 300.0
+
+
 @app.get("/api/index-universe/indexes")
 async def index_universe_list():
     """List all stored index universes with month range and unique ticker counts.
     Aggregates are precomputed by the universe_stats view — querying membership
     rows directly and counting in Python ran ~70s for SP500 + ACWI."""
     def _run():
-        resp = (
-            supabase.table("universe_stats")
-            .select("*")
-            .order("label")
-            .execute()
-        )
-        result = []
-        for r in (resp.data or []):
-            if not r.get("start_month"):
-                continue  # skip empty universes
-            result.append({
-                "index_name": r["label"],
-                "description": r.get("description"),
-                "created_at": r.get("created_at"),
-                "start_month": r.get("start_month"),
-                "end_month": r.get("end_month"),
-                "month_count": r.get("month_count") or 0,
-                "total_unique_tickers": r.get("total_unique_tickers") or 0,
-            })
-        return result
+        now = time.time()
+        cached = _UNIVERSE_STATS_CACHE.get("data")
+        if cached is not None and (now - _UNIVERSE_STATS_CACHE["ts"]) < _UNIVERSE_STATS_TTL:
+            return cached
+        try:
+            resp = (
+                supabase.table("universe_stats")
+                .select("*")
+                .order("label")
+                .execute()
+            )
+            result = []
+            for r in (resp.data or []):
+                if not r.get("start_month"):
+                    continue  # skip empty universes
+                result.append({
+                    "index_name": r["label"],
+                    "description": r.get("description"),
+                    "created_at": r.get("created_at"),
+                    "start_month": r.get("start_month"),
+                    "end_month": r.get("end_month"),
+                    "month_count": r.get("month_count") or 0,
+                    "total_unique_tickers": r.get("total_unique_tickers") or 0,
+                })
+            _UNIVERSE_STATS_CACHE["data"] = result
+            _UNIVERSE_STATS_CACHE["ts"] = now
+            return result
+        except Exception as e:
+            logging.getLogger(__name__).warning(
+                "[index-universe] universe_stats query failed (%s: %s); "
+                "serving %s",
+                type(e).__name__, e,
+                "stale cache" if cached is not None else "degraded universe-table fallback",
+            )
+            if cached is not None:
+                return cached
+            # Final fallback: just list universes without aggregates so the
+            # dropdown still populates. Frontend tolerates 0/null counts.
+            try:
+                u_resp = (
+                    supabase.table("universe")
+                    .select("universe_id, label, description, created_at")
+                    .order("label")
+                    .execute()
+                )
+                return [
+                    {
+                        "index_name": r["label"],
+                        "description": r.get("description"),
+                        "created_at": r.get("created_at"),
+                        "start_month": None,
+                        "end_month": None,
+                        "month_count": 0,
+                        "total_unique_tickers": 0,
+                    }
+                    for r in (u_resp.data or [])
+                ]
+            except Exception:
+                raise e
     return await asyncio.to_thread(_run)
 
 

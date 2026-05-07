@@ -14,12 +14,15 @@ import {
   loadCurrentPicksSnapshots,
   loadCurrentPicksSnapshot,
   refreshCurrentPicksMTD,
+  deleteCurrentPicksSnapshot,
+  renameCurrentPicksSnapshot,
   VARIANT_DEFS,
   type BacktestStartConfig,
   type VariantKey,
   type VariantOutcome,
 } from '../../lib/stores/momentum';
 import CellInfoTip from './momentum/CellInfoTip';
+import CollapsibleCard from './momentum/CollapsibleCard';
 import DailyPicksHistory from './momentum/DailyPicksHistory';
 import EquityCurveCard from './momentum/EquityCurveCard';
 import MonthlyHoldingsTable from './momentum/MonthlyHoldingsTable';
@@ -37,6 +40,25 @@ import type {
 } from './momentum/types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+
+/** Inline spinner used everywhere a small async indicator is needed in this
+ * page (per-row dropdown loads, delete/rename in flight, etc.). The 12-px
+ * variant fits inline next to text or in icon-button slots without bumping
+ * the row height. */
+function Spinner({ size = 12 }: { size?: number }) {
+  return (
+    <svg
+      className="animate-spin text-indigo-400"
+      style={{ width: size, height: size }}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-label="Loading"
+    >
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+    </svg>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -140,11 +162,50 @@ export default function MomentumBacktester() {
     [progress, runStartedAt],
   );
 
+  // Live company directory loaded on mount — used as a fallback exchange
+  // source when the active backtest's universe payload is missing the
+  // link (saved variant bundles from before the snapshot-normalization
+  // fix carry empty/None exchange strings, so ORCL/NYSE etc. would
+  // otherwise render as "—" in the holdings table even though the GF
+  // URL helper still resolves correctly via the bare-ticker fallback).
+  const [companyExchangeMap, setCompanyExchangeMap] = useState<Map<number, string>>(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_URL}/api/companies`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: { company_id: number; gurufocus_exchange: string | null }[]) => {
+        if (cancelled) return;
+        const m = new Map<number, string>();
+        for (const c of data) {
+          const exch = (c.gurufocus_exchange ?? '').trim();
+          if (exch) m.set(c.company_id, exch);
+        }
+        setCompanyExchangeMap(m);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   const exchangeByCompany = useMemo(() => {
     const m = new Map<number, string>();
-    for (const u of universe) m.set(u.company_id, u.exchange);
+    // Primary source: the universe payload bundled with the active
+    // backtest result. Skip junk strings ("None"/"nan") so the company
+    // map below can fill in.
+    for (const u of universe) {
+      const e = (u.exchange ?? '').trim();
+      if (!e) continue;
+      const upper = e.toUpperCase();
+      if (upper === 'NONE' || upper === 'NAN' || upper === 'NULL') continue;
+      m.set(u.company_id, e);
+    }
+    // Fallback: live company directory. Only fills in entries the
+    // universe didn't supply, so a fresh run still wins over the static
+    // directory if anything was renamed.
+    for (const [cid, exch] of companyExchangeMap) {
+      if (!m.has(cid)) m.set(cid, exch);
+    }
     return m;
-  }, [universe]);
+  }, [universe, companyExchangeMap]);
 
   // Purely local UI state — safe to reset on navigation
   const [showWarnings, setShowWarnings] = useState(true);
@@ -152,11 +213,34 @@ export default function MomentumBacktester() {
 
   // Save/load state
   const [savedRuns, setSavedRuns] = useState<SavedRun[]>([]);
-  const [saveName, setSaveName] = useState('');
   const [saving, setSaving] = useState(false);
 
   const [savedDropdownOpen, setSavedDropdownOpen] = useState(false);
   const savedDropdownRef = useRef<HTMLDivElement>(null);
+  const [picksDropdownOpen, setPicksDropdownOpen] = useState(false);
+  const picksDropdownRef = useRef<HTMLDivElement>(null);
+  // First-fetch loading state for the current-picks dropdown (the saved-
+  // backtests dropdown has its own `savedRunsLoading` further down). Both
+  // header dropdowns render unconditionally and surface this as a spinner
+  // + "Loading saved …" label, instead of disappearing until data lands.
+  const [picksListLoading, setPicksListLoading] = useState(true);
+
+  // Per-row spinners for the saved-backtests dropdown. The current-picks
+  // dropdown reads its equivalents from the store so the actions can also
+  // be driven from elsewhere (e.g. an inline rename in the picks card).
+  const [loadingRunId, setLoadingRunId] = useState<number | null>(null);
+  const [deletingRunId, setDeletingRunId] = useState<number | null>(null);
+  const [renamingRunId, setRenamingRunId] = useState<number | null>(null);
+  const loadingSnapshotId = momentumStore.use((s) => s.loadingSnapshotId);
+  const deletingSnapshotId = momentumStore.use((s) => s.deletingSnapshotId);
+  const renamingSnapshotId = momentumStore.use((s) => s.renamingSnapshotId);
+  // Multi-select sets for bulk delete in each header dropdown. Cleared
+  // automatically when the dropdown closes — the selection isn't meant
+  // to persist across opens.
+  const [selectedRunIds, setSelectedRunIds] = useState<Set<number>>(new Set());
+  const [selectedSnapshotIds, setSelectedSnapshotIds] = useState<Set<number>>(new Set());
+  const [bulkDeletingRuns, setBulkDeletingRuns] = useState(false);
+  const [bulkDeletingSnapshots, setBulkDeletingSnapshots] = useState(false);
 
   // Universe selection state — all universes live in the same table and are served
   // by /api/index-universe/indexes with enriched metadata.
@@ -184,7 +268,8 @@ export default function MomentumBacktester() {
       })
       .catch(() => {});
     loadSavedRuns();
-    loadCurrentPicksSnapshots();
+    setPicksListLoading(true);
+    loadCurrentPicksSnapshots().finally(() => setPicksListLoading(false));
     const universesStart = Date.now();
     const tick = setInterval(() => setUniversesElapsed(Math.round((Date.now() - universesStart) / 1000)), 500);
     setUniversesLoading(true);
@@ -230,6 +315,28 @@ export default function MomentumBacktester() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [savedDropdownOpen]);
 
+  // Reset multi-select when either dropdown closes — selection should
+  // not persist across opens, otherwise users land on a stale "5
+  // selected" state next time they peek.
+  useEffect(() => {
+    if (!savedDropdownOpen) setSelectedRunIds(new Set());
+  }, [savedDropdownOpen]);
+
+  useEffect(() => {
+    if (!picksDropdownOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (picksDropdownRef.current && !picksDropdownRef.current.contains(e.target as Node)) {
+        setPicksDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [picksDropdownOpen]);
+
+  useEffect(() => {
+    if (!picksDropdownOpen) setSelectedSnapshotIds(new Set());
+  }, [picksDropdownOpen]);
+
   useEffect(() => {
     if (!variantsPickerOpen) return;
     const handleClick = (e: MouseEvent) => {
@@ -241,11 +348,19 @@ export default function MomentumBacktester() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [variantsPickerOpen]);
 
+  // null = first fetch in flight; [] = loaded but empty; non-empty array =
+  // populated. The header dropdown reads this to show a spinner + "Loading
+  // saved backtests…" instead of disappearing while the request is in
+  // flight (which previously made the dropdown look like it materialized
+  // out of nowhere when the response landed).
+  const [savedRunsLoading, setSavedRunsLoading] = useState(true);
   const loadSavedRuns = () => {
+    setSavedRunsLoading(true);
     fetch(`${API_URL}/api/momentum/backtests`)
       .then((r) => r.json())
-      .then((data) => setSavedRuns(data))
-      .catch(() => {});
+      .then((data) => setSavedRuns(Array.isArray(data) ? data : []))
+      .catch(() => {})
+      .finally(() => setSavedRunsLoading(false));
   };
 
 
@@ -280,7 +395,7 @@ export default function MomentumBacktester() {
     );
   };
 
-  const _currentPortfolioConfig = (force: boolean): BacktestStartConfig => ({
+  const _currentPortfolioConfig = (opts: { force: boolean; dbOnly: boolean }): BacktestStartConfig => ({
     start_date: `${startDate}-01`,
     end_date: `${endDate}-01`,
     signal_weights: weights,
@@ -294,23 +409,26 @@ export default function MomentumBacktester() {
     random_seed: null,
     n_trials: 1,
     mode: 'current_portfolio',
-    force_recompute: force,
+    force_recompute: opts.force,
+    db_only: opts.dbOnly,
   });
 
-  // Hit the backend for "what is my strategy holding right now?". The backend
-  // serves from cache if (this strategy, this month) is already stored —
-  // unless the user has ticked "Don't use cache", in which case we bypass
-  // the cached snapshot the same way Run Backtest does. Random mode is
-  // unsupported here.
+  // Hit the backend for "what is my strategy holding right now?". By
+  // default, runs DB-only — no GuruFocus / ECB calls, just whatever is
+  // already in Supabase. With "Don't use cache" checked, both the
+  // snapshot cache AND the db_only guard are disabled, so missing
+  // prices/volumes/FX are fetched fresh (same path as Recompute).
   const showCurrentPicks = async () => {
-    await startBacktest(_currentPortfolioConfig(noCache));
+    await startBacktest(_currentPortfolioConfig({ force: noCache, dbOnly: !noCache }));
     loadCurrentPicksSnapshots();
   };
 
-  // Force a fresh full compute. Slow (signals + scoring + price fetch),
-  // but persists a new snapshot in the DB so future loads are instant.
+  // "Recompute" is the explicit "I want fresh data" path: it bypasses
+  // both the snapshot cache (force_recompute) AND the db_only guard, so
+  // the backend will fetch any missing prices / volumes / FX from the
+  // upstream APIs. Slow, but produces a new snapshot.
   const recomputeCurrentPortfolio = async () => {
-    await startBacktest(_currentPortfolioConfig(true));
+    await startBacktest(_currentPortfolioConfig({ force: true, dbOnly: false }));
     loadCurrentPicksSnapshots();
   };
 
@@ -319,8 +437,19 @@ export default function MomentumBacktester() {
   // completed-ok payloads land in the bundle. Loading later rehydrates the
   // sweep state so the detail views switch between variants exactly like
   // they did during the live sweep.
-  const saveVariantsBundle = async () => {
-    if (!saveName.trim()) return;
+  /** Auto-save default: "{universe or 'All companies'} · {YYYY-MM-DD HH:MM}".
+   * Universe gives strategic context; the timestamp disambiguates re-runs
+   * of the same config so they don't collide in the dropdown. */
+  const defaultVariantsBundleName = (): string => {
+    const universe = (selectedIndexUniverse || '').trim() || 'All companies';
+    const now = new Date();
+    const ts = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    return `${universe} · ${ts}`;
+  };
+
+  const saveVariantsBundle = async (overrideName?: string) => {
+    const name = (overrideName ?? defaultVariantsBundleName()).trim();
+    if (!name) return;
     const okEntries = VARIANT_DEFS.flatMap((v) => {
       const o = variants[v.key];
       return o?.status === 'ok' ? [{ def: v, result: o.result }] : [];
@@ -332,7 +461,7 @@ export default function MomentumBacktester() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: saveName.trim(),
+          name,
           config: {
             start_date: `${startDate}-01`,
             end_date: `${endDate}-01`,
@@ -353,13 +482,18 @@ export default function MomentumBacktester() {
             strategy: def.strategy,
             summary: r.summary,
             monthly_records: r.monthly_records,
+            // daily_records intentionally omitted — for a 24-year × 10-variant
+            // bundle they total several MB, which exceeds Supabase's
+            // statement_timeout when squeezed into a single JSONB insert.
+            // The chart falls back to monthly_records on reload; max-DD /
+            // Sharpe / drawdown periods are still in `summary` so headline
+            // stats survive. Re-run if the daily-resolution line is needed.
           })),
           universe,
         }),
       });
       if (resp.ok) {
         const saved = await resp.json();
-        setSaveName('');
         momentumStore.set({ loadedRunId: saved.run_id });
         loadSavedRuns();
       }
@@ -368,6 +502,7 @@ export default function MomentumBacktester() {
   };
 
   const loadBacktest = async (runId: number) => {
+    setLoadingRunId(runId);
     try {
       const resp = await fetch(`${API_URL}/api/momentum/backtests/${runId}`);
       if (!resp.ok) return;
@@ -405,6 +540,7 @@ export default function MomentumBacktester() {
             result: {
               summary: v.summary,
               monthly_records: v.monthly_records ?? [],
+              daily_records: v.daily_records ?? [],
             },
           };
           if (firstKey == null) firstKey = key;
@@ -428,6 +564,7 @@ export default function MomentumBacktester() {
       momentumStore.set({
         result: {
           monthly_records: saved.monthly_records ?? [],
+          daily_records: saved.daily_records ?? [],
           summary: saved.summary ?? {
             total_return_pct: 0,
             annualized_return_pct: 0,
@@ -451,18 +588,135 @@ export default function MomentumBacktester() {
       });
     } catch {
       momentumStore.set({ error: 'Failed to load backtest' });
+    } finally {
+      setLoadingRunId(null);
     }
   };
 
   const deleteBacktest = async (runId: number) => {
-    setSavedRuns(prev => prev.filter(r => r.run_id !== runId));
+    setDeletingRunId(runId);
     if (loadedRunId === runId) momentumStore.set({ loadedRunId: null });
     try {
       await fetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' });
+      setSavedRuns(prev => prev.filter(r => r.run_id !== runId));
     } catch {
       loadSavedRuns();
+    } finally {
+      setDeletingRunId(null);
     }
   };
+
+  /** Display label for a current-picks snapshot. Prefers the user's custom
+   * name when set; otherwise falls back to the auto-generated date/trigger
+   * pair so the dropdown is never empty. */
+  const snapshotLabel = (s: { name?: string | null; created_at: string; triggered_by: string; as_of_date: string }): string => {
+    const trimmed = (s.name ?? '').trim();
+    if (trimmed) return trimmed;
+    return `${s.created_at.slice(0, 10)} · ${s.triggered_by} · ${s.as_of_date.slice(0, 7)}`;
+  };
+
+  const renameSnapshot = async (snapshotId: number, currentName: string | null | undefined) => {
+    const next = await dialog.prompt('Name for this snapshot (leave empty to clear):', {
+      title: 'Rename snapshot',
+      defaultValue: currentName ?? '',
+    });
+    if (next == null) return; // user cancelled
+    const trimmed = next.trim();
+    if (trimmed === (currentName ?? '').trim()) return; // no change
+    await renameCurrentPicksSnapshot(snapshotId, trimmed === '' ? null : trimmed);
+  };
+
+  const confirmDeleteSnapshot = async (s: { snapshot_id: number; name?: string | null; created_at: string; triggered_by: string; as_of_date: string }) => {
+    const label = snapshotLabel(s);
+    if (await dialog.confirm(`Delete snapshot "${label}"?`, { destructive: true, confirmLabel: 'Delete' })) {
+      await deleteCurrentPicksSnapshot(s.snapshot_id);
+    }
+  };
+
+  /** Bulk-delete handlers fire all DELETE requests in parallel. Confirm
+   * once up front; on completion clear the selection and close the
+   * dropdown so the post-delete state is visually obvious. */
+  const bulkDeleteRuns = async () => {
+    const ids = Array.from(selectedRunIds);
+    if (ids.length === 0) return;
+    const ok = await dialog.confirm(
+      `Delete ${ids.length} saved backtest${ids.length === 1 ? '' : 's'}?`,
+      { destructive: true, confirmLabel: `Delete ${ids.length}` },
+    );
+    if (!ok) return;
+    setBulkDeletingRuns(true);
+    try {
+      await Promise.all(
+        ids.map((runId) =>
+          fetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' }).catch(() => {})
+        ),
+      );
+      setSavedRuns((prev) => prev.filter((r) => !selectedRunIds.has(r.run_id)));
+      if (loadedRunId != null && selectedRunIds.has(loadedRunId)) {
+        momentumStore.set({ loadedRunId: null });
+      }
+      setSelectedRunIds(new Set());
+    } finally {
+      setBulkDeletingRuns(false);
+    }
+  };
+
+  const bulkDeleteSnapshots = async () => {
+    const ids = Array.from(selectedSnapshotIds);
+    if (ids.length === 0) return;
+    const ok = await dialog.confirm(
+      `Delete ${ids.length} current-picks snapshot${ids.length === 1 ? '' : 's'}?`,
+      { destructive: true, confirmLabel: `Delete ${ids.length}` },
+    );
+    if (!ok) return;
+    setBulkDeletingSnapshots(true);
+    try {
+      // deleteCurrentPicksSnapshot already updates the store (removes
+      // from currentPicksSnapshots, clears currentPortfolio if matched).
+      // Run in parallel for speed.
+      await Promise.all(ids.map((id) => deleteCurrentPicksSnapshot(id)));
+      setSelectedSnapshotIds(new Set());
+    } finally {
+      setBulkDeletingSnapshots(false);
+    }
+  };
+
+  const toggleRunSelected = (runId: number) => {
+    setSelectedRunIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(runId)) next.delete(runId); else next.add(runId);
+      return next;
+    });
+  };
+  const toggleSnapshotSelected = (snapshotId: number) => {
+    setSelectedSnapshotIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(snapshotId)) next.delete(snapshotId); else next.add(snapshotId);
+      return next;
+    });
+  };
+
+  // Auto-save the variant bundle when a sweep finishes successfully. Fires
+  // exactly once per sweep, keyed on `runStartedAt` so re-runs trigger again.
+  // Skips if (a) the result was loaded from a saved run, (b) no variants
+  // completed OK, or (c) a save is already in flight. The dropdown's
+  // existing rename / delete buttons cover post-save tweaks.
+  const lastAutoSavedRunStartedAtRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (running) return;
+    if (runEndedAt == null || runStartedAt == null) return;
+    if (lastAutoSavedRunStartedAtRef.current === runStartedAt) return;
+    if (loadedRunId != null) return; // already saved (loaded from disk or just saved)
+    if (saving) return;
+    const okCount = VARIANT_DEFS.filter((v) => variants[v.key]?.status === 'ok').length;
+    if (okCount === 0) return;
+    lastAutoSavedRunStartedAtRef.current = runStartedAt;
+    void saveVariantsBundle();
+    // The dependency list intentionally omits saveVariantsBundle (it
+    // closes over many setters and would re-fire spuriously); the ref
+    // guard ensures we only auto-save once per (runStartedAt) anyway.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running, runEndedAt, runStartedAt, variants, loadedRunId, saving]);
 
   const renameBacktest = async (runId: number, currentName: string) => {
     const next = await dialog.prompt('New name for this backtest:', {
@@ -470,6 +724,7 @@ export default function MomentumBacktester() {
       defaultValue: currentName,
     });
     if (!next || next.trim() === '' || next === currentName) return;
+    setRenamingRunId(runId);
     try {
       const resp = await fetch(`${API_URL}/api/momentum/backtests/${runId}`, {
         method: 'PATCH',
@@ -480,6 +735,8 @@ export default function MomentumBacktester() {
       loadSavedRuns();
     } catch (e) {
       dialog.alert(`Rename failed: ${e instanceof Error ? e.message : e}`, { title: 'Rename failed' });
+    } finally {
+      setRenamingRunId(null);
     }
   };
 
@@ -495,48 +752,232 @@ export default function MomentumBacktester() {
         </div>
         <div className="flex items-center gap-3">
           <ApiUsageBadge />
-        {savedRuns.length > 0 && (
+        {(() => {
+          const picksEmpty = !picksListLoading && currentPicksSnapshots.length === 0;
+          const triggerLabel = picksListLoading
+            ? 'Loading saved current picks…'
+            : picksEmpty
+              ? 'No saved current picks yet'
+              : currentPortfolio?.snapshot_id != null
+                ? (() => {
+                    const snap = currentPicksSnapshots.find((s) => s.snapshot_id === currentPortfolio.snapshot_id);
+                    return snap ? snapshotLabel(snap) : 'Load saved current picks...';
+                  })()
+                : 'Load saved current picks...';
+          return (
+          <div className="relative" ref={picksDropdownRef}>
+            <button
+              type="button"
+              onClick={() => { if (!picksListLoading && !picksEmpty) setPicksDropdownOpen((o) => !o); }}
+              disabled={picksListLoading || picksEmpty}
+              className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white flex items-center gap-2 hover:border-indigo-500 focus:outline-none focus:border-indigo-500 transition-colors min-w-[220px] disabled:opacity-70 disabled:cursor-default disabled:hover:border-gray-700"
+              title="Load a saved current-picks snapshot"
+            >
+              {(picksListLoading || loadingSnapshotId != null) && <Spinner />}
+              <span className="truncate">{triggerLabel}</span>
+              <svg className={`w-3.5 h-3.5 text-gray-500 ml-auto transition-transform ${picksDropdownOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+              </svg>
+            </button>
+            {picksDropdownOpen && (
+              <div className="absolute right-0 mt-1 w-80 bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-96 overflow-auto">
+                {selectedSnapshotIds.size > 0 && (
+                  <div className="sticky top-0 z-10 bg-[#1a1d27] border-b border-gray-700 px-3 py-2 flex items-center justify-between gap-2">
+                    <span className="text-xs text-gray-300">
+                      {selectedSnapshotIds.size} selected
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedSnapshotIds(new Set())}
+                        className="text-[11px] text-gray-500 hover:text-gray-300 px-2 py-1 rounded transition-colors"
+                      >
+                        clear
+                      </button>
+                      <button
+                        type="button"
+                        onClick={bulkDeleteSnapshots}
+                        disabled={bulkDeletingSnapshots}
+                        className="text-[11px] font-medium px-2 py-1 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 hover:bg-rose-500/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+                      >
+                        {bulkDeletingSnapshots && <Spinner size={12} />}
+                        Delete {selectedSnapshotIds.size}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {currentPicksSnapshots.map((s) => {
+                  const isActive = s.snapshot_id === currentPortfolio?.snapshot_id;
+                  const isLoadingThis = loadingSnapshotId === s.snapshot_id;
+                  const isDeletingThis = deletingSnapshotId === s.snapshot_id;
+                  const isRenamingThis = renamingSnapshotId === s.snapshot_id;
+                  const isSelected = selectedSnapshotIds.has(s.snapshot_id);
+                  const customName = (s.name ?? '').trim();
+                  return (
+                    <div
+                      key={s.snapshot_id}
+                      className={`group flex items-center gap-2 px-3 py-2 border-b border-gray-800/40 last:border-b-0 hover:bg-white/[0.03] transition-colors ${isActive ? 'bg-indigo-500/10' : ''} ${isSelected ? 'bg-rose-500/[0.06]' : ''}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => { e.stopPropagation(); toggleSnapshotSelected(s.snapshot_id); }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="accent-indigo-500 w-3.5 h-3.5 shrink-0 cursor-pointer"
+                        title="Select for bulk delete"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => { loadCurrentPicksSnapshot(s.snapshot_id); setPicksDropdownOpen(false); }}
+                        disabled={isLoadingThis || isDeletingThis}
+                        className="flex-1 text-left min-w-0 disabled:opacity-60"
+                      >
+                        <div className={`text-sm truncate flex items-center gap-1.5 ${isActive ? 'text-indigo-300' : 'text-gray-200'}`}>
+                          {isLoadingThis && <Spinner />}
+                          <span className="truncate">
+                            {customName || `${s.created_at.slice(0, 16).replace('T', ' ')}`}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-gray-500 font-mono">
+                          {customName
+                            ? `${s.created_at.slice(0, 10)} · ${s.triggered_by} · as of ${s.as_of_date.slice(0, 10)}`
+                            : `${s.triggered_by} · as of ${s.as_of_date.slice(0, 10)}`}
+                          {s.latest_price_date && <> · MTD through {s.latest_price_date}</>}
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); renameSnapshot(s.snapshot_id, s.name); }}
+                        disabled={isRenamingThis || isDeletingThis}
+                        className="p-1.5 rounded text-gray-500 hover:text-indigo-400 hover:bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-100 disabled:cursor-wait"
+                        title="Rename"
+                      >
+                        {isRenamingThis ? (
+                          <Spinner size={14} />
+                        ) : (
+                          <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                          </svg>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); confirmDeleteSnapshot(s); }}
+                        disabled={isDeletingThis || isRenamingThis}
+                        className="p-1.5 rounded text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-100 disabled:cursor-wait"
+                        title="Delete"
+                      >
+                        {isDeletingThis ? (
+                          <Spinner size={14} />
+                        ) : (
+                          <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          );
+        })()}
+        {(() => {
+          const runsEmpty = !savedRunsLoading && savedRuns.length === 0;
+          const runsLabel = savedRunsLoading
+            ? 'Loading saved backtests…'
+            : runsEmpty
+              ? 'No saved backtests yet'
+              : (loadedRunId
+                  ? savedRuns.find((r) => r.run_id === loadedRunId)?.name ?? 'Load saved backtest...'
+                  : 'Load saved backtest...');
+          return (
           <div className="relative" ref={savedDropdownRef}>
             <button
               type="button"
-              onClick={() => setSavedDropdownOpen((o) => !o)}
-              className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white flex items-center gap-2 hover:border-indigo-500 focus:outline-none focus:border-indigo-500 transition-colors min-w-[220px]"
+              onClick={() => { if (!savedRunsLoading && !runsEmpty) setSavedDropdownOpen((o) => !o); }}
+              disabled={savedRunsLoading || runsEmpty}
+              className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white flex items-center gap-2 hover:border-indigo-500 focus:outline-none focus:border-indigo-500 transition-colors min-w-[220px] disabled:opacity-70 disabled:cursor-default disabled:hover:border-gray-700"
             >
-              <span className="truncate">
-                {loadedRunId
-                  ? savedRuns.find((r) => r.run_id === loadedRunId)?.name ?? 'Load saved backtest...'
-                  : 'Load saved backtest...'}
-              </span>
+              {(savedRunsLoading || loadingRunId != null) && <Spinner />}
+              <span className="truncate">{runsLabel}</span>
               <svg className={`w-3.5 h-3.5 text-gray-500 ml-auto transition-transform ${savedDropdownOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
               </svg>
             </button>
             {savedDropdownOpen && (
               <div className="absolute right-0 mt-1 w-80 bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-96 overflow-auto">
+                {selectedRunIds.size > 0 && (
+                  <div className="sticky top-0 z-10 bg-[#1a1d27] border-b border-gray-700 px-3 py-2 flex items-center justify-between gap-2">
+                    <span className="text-xs text-gray-300">
+                      {selectedRunIds.size} selected
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedRunIds(new Set())}
+                        className="text-[11px] text-gray-500 hover:text-gray-300 px-2 py-1 rounded transition-colors"
+                      >
+                        clear
+                      </button>
+                      <button
+                        type="button"
+                        onClick={bulkDeleteRuns}
+                        disabled={bulkDeletingRuns}
+                        className="text-[11px] font-medium px-2 py-1 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 hover:bg-rose-500/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+                      >
+                        {bulkDeletingRuns && <Spinner size={12} />}
+                        Delete {selectedRunIds.size}
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {savedRuns.map((r) => {
                   const isActive = r.run_id === loadedRunId;
+                  const isLoadingThis = loadingRunId === r.run_id;
+                  const isDeletingThis = deletingRunId === r.run_id;
+                  const isRenamingThis = renamingRunId === r.run_id;
+                  const isSelected = selectedRunIds.has(r.run_id);
                   return (
                     <div
                       key={r.run_id}
-                      className={`group flex items-center gap-2 px-3 py-2 border-b border-gray-800/40 last:border-b-0 hover:bg-white/[0.03] transition-colors ${isActive ? 'bg-indigo-500/10' : ''}`}
+                      className={`group flex items-center gap-2 px-3 py-2 border-b border-gray-800/40 last:border-b-0 hover:bg-white/[0.03] transition-colors ${isActive ? 'bg-indigo-500/10' : ''} ${isSelected ? 'bg-rose-500/[0.06]' : ''}`}
                     >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => { e.stopPropagation(); toggleRunSelected(r.run_id); }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="accent-indigo-500 w-3.5 h-3.5 shrink-0 cursor-pointer"
+                        title="Select for bulk delete"
+                      />
                       <button
                         type="button"
                         onClick={() => { loadBacktest(r.run_id); setSavedDropdownOpen(false); }}
-                        className="flex-1 text-left min-w-0"
+                        disabled={isLoadingThis || isDeletingThis}
+                        className="flex-1 text-left min-w-0 disabled:opacity-60"
                       >
-                        <div className={`text-sm truncate ${isActive ? 'text-indigo-300' : 'text-gray-200'}`}>{r.name}</div>
+                        <div className={`text-sm truncate flex items-center gap-1.5 ${isActive ? 'text-indigo-300' : 'text-gray-200'}`}>
+                          {isLoadingThis && <Spinner />}
+                          <span className="truncate">{r.name}</span>
+                        </div>
                         <div className="text-[10px] text-gray-500 font-mono">{new Date(r.created_at).toLocaleDateString()}</div>
                       </button>
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); renameBacktest(r.run_id, r.name); }}
-                        className="p-1.5 rounded text-gray-500 hover:text-indigo-400 hover:bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity"
+                        disabled={isRenamingThis || isDeletingThis}
+                        className="p-1.5 rounded text-gray-500 hover:text-indigo-400 hover:bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-100 disabled:cursor-wait"
                         title="Rename"
                       >
-                        <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                          <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-                        </svg>
+                        {isRenamingThis ? (
+                          <Spinner size={14} />
+                        ) : (
+                          <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                          </svg>
+                        )}
                       </button>
                       <button
                         type="button"
@@ -546,12 +987,17 @@ export default function MomentumBacktester() {
                             deleteBacktest(r.run_id);
                           }
                         }}
-                        className="p-1.5 rounded text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                        disabled={isDeletingThis || isRenamingThis}
+                        className="p-1.5 rounded text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-100 disabled:cursor-wait"
                         title="Delete"
                       >
-                        <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                        </svg>
+                        {isDeletingThis ? (
+                          <Spinner size={14} />
+                        ) : (
+                          <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                          </svg>
+                        )}
                       </button>
                     </div>
                   );
@@ -559,7 +1005,8 @@ export default function MomentumBacktester() {
               </div>
             )}
           </div>
-        )}
+          );
+        })()}
         </div>
       </div>
 
@@ -670,32 +1117,10 @@ export default function MomentumBacktester() {
                 <option value="random">Random (baseline)</option>
               </select>
             </div>
-            {selectionMode === 'random' && (
-              <>
-                <div>
-                  <label className="text-gray-500 text-xs block mb-1">Seed</label>
-                  <input
-                    type="number"
-                    value={randomSeed}
-                    onChange={(e) => setRandomSeed(Number(e.target.value))}
-                    className="w-20 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-                    title="Same seed reproduces the same random picks. With Trials > 1, trials use seed, seed+1, ..."
-                  />
-                </div>
-                <div>
-                  <label className="text-gray-500 text-xs block mb-1">Trials</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={100}
-                    value={nTrials}
-                    onChange={(e) => setNTrials(Number(e.target.value))}
-                    className="w-16 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-                    title="Number of independent random trials. Summary shows mean ± std across trials."
-                  />
-                </div>
-              </>
-            )}
+            {/* Random-mode params (Trials, Seed) live in the
+                "Strategy parameters" section below — same place as the
+                momentum signal/category weights — so the inline config
+                row only has to carry universe-level inputs. */}
             {(() => {
               const eligibleCount = VARIANT_DEFS
                 .filter((v) => selectedVariantKeys.has(v.key))
@@ -827,69 +1252,123 @@ export default function MomentumBacktester() {
             )}
           </div>
 
-          {/* Signal Weights */}
-          <div className="space-y-4">
-            {['price', 'volume'].map((group) => {
-              const groupSignals = signalDefs.filter((s) => (s.group ?? 'price') === group);
-              if (groupSignals.length === 0) return null;
-              return (
-                <div key={group}>
-                  <h3 className="text-gray-400 text-xs font-medium mb-2.5 uppercase tracking-wider">
-                    {group === 'price' ? 'Price Momentum' : 'Volume Confirmation'}
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2.5">
-                    {groupSignals.map((s) => (
-                      <div key={s.key} className="flex items-center gap-3">
-                        <div className="w-36 shrink-0 flex items-center gap-1.5">
-                          <span className="text-gray-300 text-xs font-medium">{s.label}</span>
-                          <span className="relative group/tip">
-                            <span className="text-gray-600 hover:text-gray-400 cursor-help text-xs">&#9432;</span>
-                            <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover/tip:block w-64 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-300 text-xs leading-relaxed shadow-xl z-50 pointer-events-none">
-                              {s.description}
-                            </span>
-                          </span>
-                        </div>
-                        <input
-                          type="range"
-                          min={0}
-                          max={10}
-                          step={1}
-                          value={weights[s.key] ?? 0}
-                          onChange={(e) => setWeights((prev) => ({ ...prev, [s.key]: Number(e.target.value) }))}
-                          className="flex-1 h-1 accent-indigo-500 cursor-pointer"
-                        />
-                        <span className="text-gray-500 text-xs w-5 text-right font-mono shrink-0">{weights[s.key] ?? 0}</span>
+          {/* Strategy parameters — content swaps based on the selected
+              strategy. Momentum shows the price/volume signal weights
+              and category weights; Random shows only the Trials and
+              Seed inputs (which control how many independent random
+              selections are run in parallel for the mean ± std
+              reporting). The header makes the section's role explicit
+              so it's not mistaken for a generic config block. */}
+          <div className="border-t border-gray-800/60 pt-4">
+            <div className="flex items-baseline gap-3 mb-3">
+              <h2 className="text-gray-300 text-xs font-semibold uppercase tracking-wider">
+                Strategy parameters
+              </h2>
+              <span className="text-[10px] text-gray-500">
+                {selectionMode === 'random'
+                  ? 'Random baseline · trials run independently with sequential seeds'
+                  : 'Momentum · ranks the universe by signal-weighted score'}
+              </span>
+            </div>
+
+            {selectionMode === 'momentum' && (
+              <div className="space-y-4">
+                {['price', 'volume'].map((group) => {
+                  const groupSignals = signalDefs.filter((s) => (s.group ?? 'price') === group);
+                  if (groupSignals.length === 0) return null;
+                  return (
+                    <div key={group}>
+                      <h3 className="text-gray-400 text-xs font-medium mb-2.5 uppercase tracking-wider">
+                        {group === 'price' ? 'Price Momentum' : 'Volume Confirmation'}
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2.5">
+                        {groupSignals.map((s) => (
+                          <div key={s.key} className="flex items-center gap-3">
+                            <div className="w-36 shrink-0 flex items-center gap-1.5">
+                              <span className="text-gray-300 text-xs font-medium">{s.label}</span>
+                              <span className="relative group/tip">
+                                <span className="text-gray-600 hover:text-gray-400 cursor-help text-xs">&#9432;</span>
+                                <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover/tip:block w-64 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-300 text-xs leading-relaxed shadow-xl z-50 pointer-events-none">
+                                  {s.description}
+                                </span>
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              min={0}
+                              max={10}
+                              step={1}
+                              value={weights[s.key] ?? 0}
+                              onChange={(e) => setWeights((prev) => ({ ...prev, [s.key]: Number(e.target.value) }))}
+                              className="flex-1 h-1 accent-indigo-500 cursor-pointer"
+                            />
+                            <span className="text-gray-500 text-xs w-5 text-right font-mono shrink-0">{weights[s.key] ?? 0}</span>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    </div>
+                  );
+                })}
+                {/* Category Weights */}
+                {categories.length > 1 && (
+                  <div>
+                    <h3 className="text-gray-400 text-xs font-medium mb-2.5 uppercase tracking-wider">Category Weights</h3>
+                    <div className="flex items-center gap-6">
+                      {categories.map((cat) => (
+                        <div key={cat} className="flex items-center gap-2">
+                          <span className="text-gray-300 text-xs font-medium w-28">
+                            {cat === 'price' ? 'Price Momentum' : cat === 'volume' ? 'Volume Confirmation' : cat}
+                          </span>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={5}
+                            value={categoryWeights[cat] ?? 50}
+                            onChange={(e) => setCategoryWeights((prev) => ({ ...prev, [cat]: Number(e.target.value) }))}
+                            className="w-32 h-1 accent-indigo-500 cursor-pointer"
+                          />
+                          <span className="text-gray-500 text-xs w-8 text-right font-mono">{categoryWeights[cat] ?? 50}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {selectionMode === 'random' && (
+              <div className="flex flex-wrap items-end gap-6">
+                <div>
+                  <label className="text-gray-500 text-xs block mb-1">Trials (parallel seeds)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={nTrials}
+                    onChange={(e) => setNTrials(Number(e.target.value))}
+                    className="w-24 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                    title="Independent random-selection runs. Summary headline becomes mean ± std across trials."
+                  />
+                  <div className="text-[10px] text-gray-600 mt-1 max-w-[260px]">
+                    More trials → tighter confidence on the noise-floor return. 5–25 is a sensible range.
                   </div>
                 </div>
-              );
-            })}
-          {/* Category Weights */}
-          {categories.length > 1 && (
-            <div>
-              <h3 className="text-gray-400 text-xs font-medium mb-2.5 uppercase tracking-wider">Category Weights</h3>
-              <div className="flex items-center gap-6">
-                {categories.map((cat) => (
-                  <div key={cat} className="flex items-center gap-2">
-                    <span className="text-gray-300 text-xs font-medium w-28">
-                      {cat === 'price' ? 'Price Momentum' : cat === 'volume' ? 'Volume Confirmation' : cat}
-                    </span>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      step={5}
-                      value={categoryWeights[cat] ?? 50}
-                      onChange={(e) => setCategoryWeights((prev) => ({ ...prev, [cat]: Number(e.target.value) }))}
-                      className="w-32 h-1 accent-indigo-500 cursor-pointer"
-                    />
-                    <span className="text-gray-500 text-xs w-8 text-right font-mono">{categoryWeights[cat] ?? 50}%</span>
+                <div>
+                  <label className="text-gray-500 text-xs block mb-1">Base seed</label>
+                  <input
+                    type="number"
+                    value={randomSeed}
+                    onChange={(e) => setRandomSeed(Number(e.target.value))}
+                    className="w-24 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                    title="Same base seed reproduces the same set of random picks. Trials use seed, seed+1, ..., seed+N-1."
+                  />
+                  <div className="text-[10px] text-gray-600 mt-1 max-w-[260px]">
+                    Reproducibility anchor; trials use seed, seed+1, …, seed+N−1.
                   </div>
-                ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
           </div>
         </div>
 
@@ -966,77 +1445,64 @@ export default function MomentumBacktester() {
         )}
 
         {/* Current Portfolio (MTD) — shown above backtest results, independent */}
-        {currentPortfolio && (
-          <div className="bg-[#151821] rounded-xl border border-gray-800/40 overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-800/40 flex items-center justify-between flex-wrap gap-3">
-              <div className="flex items-center gap-3 flex-wrap">
-                <div>
-                  <div className="text-sm font-medium text-white">Current Picks</div>
-                  <div className="text-xs text-gray-500">
-                    Rebalance as of <span className="font-mono text-gray-400">{currentPortfolio.as_of_date}</span>
-                    {currentPortfolio.latest_price_date && (
-                      <> · MTD through <span className="font-mono text-gray-400">{currentPortfolio.latest_price_date}</span></>
-                    )}
-                    {' · '}{currentPortfolio.holdings.length} holdings
-                  </div>
+        {currentPortfolio && (() => {
+          const portMTD = (() => {
+            if (currentPortfolio.holdings.length === 0) return null;
+            const validReturns = currentPortfolio.holdings
+              .map(h => h.forward_return_pct)
+              .filter((r): r is number => r != null);
+            if (validReturns.length === 0) return null;
+            return validReturns.reduce((a, b) => a + b, 0) / validReturns.length;
+          })();
+          return (
+          <CollapsibleCard
+            title={
+              <div className="min-w-0">
+                <div>Current Picks</div>
+                <div className="text-xs text-gray-500 font-normal mt-0.5">
+                  Rebalance as of <span className="font-mono text-gray-400">{currentPortfolio.as_of_date}</span>
+                  {currentPortfolio.latest_price_date && (
+                    <> · MTD through <span className="font-mono text-gray-400">{currentPortfolio.latest_price_date}</span></>
+                  )}
+                  {' · '}{currentPortfolio.holdings.length} holdings
                 </div>
-                {/* Snapshot picker */}
-                {currentPicksSnapshots.length > 0 && (
-                  <select
-                    value={currentPortfolio.snapshot_id ?? ''}
-                    onChange={(e) => {
-                      const id = Number(e.target.value);
-                      if (id) loadCurrentPicksSnapshot(id);
-                    }}
-                    className="bg-[#0f1117] border border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-                    title="Switch to a historic snapshot"
-                  >
-                    {currentPortfolio.snapshot_id == null && <option value="">(unsaved)</option>}
-                    {currentPicksSnapshots.map((s) => (
-                      <option key={s.snapshot_id} value={s.snapshot_id}>
-                        {s.created_at.slice(0, 16).replace('T', ' ')} · {s.triggered_by} · {s.as_of_date.slice(0, 7)}
-                      </option>
-                    ))}
-                  </select>
-                )}
+              </div>
+            }
+            rightSlot={
+              <>
                 {/* Refresh MTD button — only meaningful when a saved snapshot is loaded */}
                 {currentPortfolio.snapshot_id != null && (
                   <button
-                    onClick={() => refreshCurrentPicksMTD(currentPortfolio.snapshot_id!)}
+                    onClick={(e) => { e.stopPropagation(); refreshCurrentPicksMTD(currentPortfolio.snapshot_id!); }}
                     disabled={refreshingMTD || running}
                     className="px-2.5 py-1 rounded-lg text-xs font-medium border border-gray-700 text-gray-300 hover:bg-white/5 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
                     title="Refresh month-to-date returns using the latest available prices (does not re-run signals)"
                   >
-                    <span className="text-emerald-400">✓</span>
+                    {refreshingMTD ? <Spinner /> : <span className="text-emerald-400">✓</span>}
                     {refreshingMTD ? 'Refreshing…' : 'Refresh MTD'}
                   </button>
                 )}
                 {/* Force a new full compute */}
                 <button
-                  onClick={recomputeCurrentPortfolio}
+                  onClick={(e) => { e.stopPropagation(); recomputeCurrentPortfolio(); }}
                   disabled={running}
-                  className="px-2.5 py-1 rounded-lg text-xs font-medium border border-gray-700 text-gray-300 hover:bg-white/5 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-2.5 py-1 rounded-lg text-xs font-medium border border-gray-700 text-gray-300 hover:bg-white/5 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
                   title="Run the full strategy now and save a new snapshot (slow)"
                 >
+                  {running && <Spinner />}
                   Recompute
                 </button>
-              </div>
-              {currentPortfolio.holdings.length > 0 && (() => {
-                const validReturns = currentPortfolio.holdings
-                  .map(h => h.forward_return_pct)
-                  .filter((r): r is number => r != null);
-                if (validReturns.length === 0) return null;
-                const portMTD = validReturns.reduce((a, b) => a + b, 0) / validReturns.length;
-                return (
-                  <div className="text-right">
-                    <div className="text-xs text-gray-500">Portfolio MTD (equal-weight)</div>
-                    <div className={`text-lg font-mono font-medium ${portMTD >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {portMTD != null && (
+                  <div className="text-right ml-2">
+                    <div className="text-[10px] text-gray-500">Portfolio MTD</div>
+                    <div className={`text-base font-mono font-medium ${portMTD >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                       {portMTD >= 0 ? '+' : ''}{portMTD.toFixed(2)}%
                     </div>
                   </div>
-                );
-              })()}
-            </div>
+                )}
+              </>
+            }
+          >
             {currentPortfolio.holdings.length > 0 ? (
               <div className="bg-[#0f1117] px-5 py-3">
                 <table className="w-full text-xs">
@@ -1209,8 +1675,9 @@ export default function MomentumBacktester() {
               categories={categories}
               exchangeByCompany={exchangeByCompany}
             />
-          </div>
-        )}
+          </CollapsibleCard>
+          );
+        })()}
 
         {/* Variant sweep summary — appears as soon as one variant outcome
             lands and stays visible alongside the active variant's detail
@@ -1242,42 +1709,19 @@ export default function MomentumBacktester() {
               }}
             />
 
-            {/* Variant-bundle save: shown when at least one variant has
-                completed-ok and the bundle hasn't been loaded from disk.
-                One row in `backtest_run` holds all completed variants.
-                Errored / cancelled / pending variants are skipped. */}
-            {hasVariants && !loadedRunId && !variantsRunning && (() => {
-              const okCount = Object.values(variants).filter((o): o is Extract<VariantOutcome, { status: 'ok' }> => o?.status === 'ok').length;
-              const totalCount = Object.keys(variants).length;
-              const skippedCount = totalCount - okCount;
-              return (
-                <div className="bg-[#151821] rounded-xl border border-gray-800/40 p-4 flex items-center gap-3 flex-wrap">
-                  <input
-                    value={saveName}
-                    onChange={(e) => setSaveName(e.target.value)}
-                    placeholder="Variant run name..."
-                    className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white flex-1 max-w-xs focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 placeholder-gray-600 transition-colors"
-                    onKeyDown={(e) => { if (e.key === 'Enter') saveVariantsBundle(); }}
-                  />
-                  <button
-                    onClick={saveVariantsBundle}
-                    disabled={saving || !saveName.trim() || okCount === 0}
-                    className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    title={okCount === 0 ? 'No completed variants to save yet' : `Bundle ${okCount} variant${okCount === 1 ? '' : 's'} into one saved run`}
-                  >
-                    {saving ? 'Saving...' : `Save variant run (${okCount})`}
-                  </button>
-                  {skippedCount > 0 && (
-                    <span className="text-xs text-gray-500">
-                      {skippedCount} not saved (cancelled / failed / pending)
-                    </span>
-                  )}
-                </div>
-              );
-            })()}
+            {/* Auto-save status. Variant sweeps + single-strategy runs are
+                saved automatically with a default name when they finish.
+                The pill shows the resulting name; rename / delete are in
+                the saved-backtests dropdown in the page header. */}
+            {saving && hasVariants && (
+              <div className="bg-[#151821] border border-gray-800/40 rounded-lg px-4 py-3 text-gray-400 text-sm flex items-center gap-2">
+                <Spinner />
+                <span>Auto-saving variant bundle…</span>
+              </div>
+            )}
             {loadedRunId && (
               <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-lg px-4 py-3 text-indigo-400 text-sm flex items-center gap-2">
-                <span>Loaded from saved run</span>
+                <span>Saved as</span>
                 <span className="text-indigo-300 font-medium">
                   {savedRuns.find((r) => r.run_id === loadedRunId)?.name}
                 </span>

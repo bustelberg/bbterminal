@@ -480,9 +480,13 @@ class TestWeeklyBacktest:
         assert result.monthly_records[-1].date == "2024-02-05"
 
 
-class TestSharpeAnnualizationByFrequency:
-    """Sharpe is sqrt-scaled by periods_per_year. Same per-period mean and
-    std across two frequencies → reported Sharpe scales by √(ratio).
+class TestSharpeFromDailyCurve:
+    """Sharpe is now derived from the daily equity curve × √252 regardless
+    of rebalance frequency — period-level returns under-sample intra-period
+    volatility, so a monthly strategy that's flat at month-end after a
+    -15% mid-month dip used to report a wildly inflated Sharpe. Each test
+    re-derives the expected value from the result's daily_records to
+    confirm the formula stayed the same across frequencies.
     """
 
     def _build_window(self, *, freq, bt_start, bt_end, prices_end):
@@ -506,7 +510,20 @@ class TestSharpeAnnualizationByFrequency:
         )
         return run_backtest(config, prices, universe)
 
-    def test_monthly_uses_sqrt_12(self):
+    @staticmethod
+    def _expected_sharpe(result):
+        """Reconstruct daily returns from result.daily_records and apply
+        the √252 annualization the backtest uses internally."""
+        factors = [1.0 + cum / 100 for _, cum in result.daily_records]
+        rets = [
+            factors[i] / factors[i - 1] - 1
+            for i in range(1, len(factors))
+            if factors[i - 1] > 0
+        ]
+        arr = np.array(rets)
+        return round((arr.mean() / arr.std()) * (252 ** 0.5), 2)
+
+    def test_monthly_sharpe_uses_daily_returns_x_sqrt_252(self):
         result = self._build_window(
             freq="monthly",
             bt_start=date(2020, 1, 1),
@@ -514,15 +531,12 @@ class TestSharpeAnnualizationByFrequency:
             prices_end="2024-03-01",
         )
         assert result.summary.sharpe_ratio is not None
-        # Re-derive from the per-period returns to confirm the √12 factor.
-        rets = [r.portfolio_return_pct for r in result.monthly_records
-                if r.portfolio_return_pct is not None]
-        assert len(rets) >= 12
-        arr = np.array(rets)
-        expected = round((arr.mean() / arr.std()) * (12 ** 0.5), 2)
-        assert result.summary.sharpe_ratio == pytest.approx(expected)
+        assert len(result.daily_records) >= 21
+        assert result.summary.sharpe_ratio == pytest.approx(
+            self._expected_sharpe(result)
+        )
 
-    def test_every_2_months_uses_sqrt_6(self):
+    def test_every_2_months_sharpe_uses_daily_returns_x_sqrt_252(self):
         result = self._build_window(
             freq="every_2_months",
             bt_start=date(2020, 1, 1),
@@ -530,12 +544,10 @@ class TestSharpeAnnualizationByFrequency:
             prices_end="2024-03-01",
         )
         assert result.summary.sharpe_ratio is not None
-        rets = [r.portfolio_return_pct for r in result.monthly_records
-                if r.portfolio_return_pct is not None]
-        assert len(rets) >= 6
-        arr = np.array(rets)
-        expected = round((arr.mean() / arr.std()) * (6 ** 0.5), 2)
-        assert result.summary.sharpe_ratio == pytest.approx(expected)
+        assert len(result.daily_records) >= 21
+        assert result.summary.sharpe_ratio == pytest.approx(
+            self._expected_sharpe(result)
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -3,8 +3,9 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { BacktestResult } from '../../../lib/stores/momentum';
 import CellInfoTip from './CellInfoTip';
+import CollapsibleCard from './CollapsibleCard';
 import TickerTimelineModal from './TickerTimelineModal';
-import { EXCHANGE_NAMES, fmtPct, fmtPrice, guruFocusUrl } from './utils';
+import { EXCHANGE_NAMES, displayExchange, fmtPct, fmtPrice, guruFocusUrl } from './utils';
 
 /** Subset of the active backtest's selection config that the per-ticker
  * timeline modal forwards to the signal-breakdown endpoint. Lets the
@@ -62,28 +63,25 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
 
   return (
     <>
-    <div className="bg-[#151821] rounded-xl border border-gray-800/40">
-      <div className="px-5 py-4 border-b border-gray-800/40">
-        <h3 className="text-white text-sm font-medium">Monthly Portfolios</h3>
-      </div>
-      <div className="max-h-[500px] overflow-auto">
+    <CollapsibleCard title="Portfolios">
+      <div className="max-h-[500px] overflow-auto border-t border-gray-800/40">
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-[#151821] z-20">
             <tr className="text-gray-500 text-xs border-b border-gray-800/40">
               <th className="text-left px-5 py-2.5 font-medium">
-                Month<CellInfoTip>The rebalance month (YYYY-MM). The strategy enters the month&apos;s portfolio at the first trading day and holds until the next first-of-month.</CellInfoTip>
+                Period<CellInfoTip>Rebalance period start. The strategy enters this period&apos;s portfolio at the first trading day and holds until the next rebalance. Format is YYYY-MM for monthly+ cadences and YYYY-MM-DD for daily/weekly.</CellInfoTip>
               </th>
               <th className="text-right px-3 py-2.5 font-medium">
-                Holdings<CellInfoTip>Number of stocks in the portfolio for this month (equal-weighted). Determined by top_n_sectors × top_n_per_sector, minus any failures.</CellInfoTip>
+                Holdings<CellInfoTip>Number of stocks in the portfolio for this period (equal-weighted). Long-only: top_n_sectors × top_n_per_sector. Long-short: same on each side, so total is up to 2×.</CellInfoTip>
               </th>
               <th className="text-right px-3 py-2.5 font-medium">
-                Return<CellInfoTip>Equal-weighted portfolio return for this month: mean of holdings&apos; (next-month-entry ÷ this-month-entry) − 1, in EUR.</CellInfoTip>
+                Return<CellInfoTip>Equal-weighted portfolio return for this period in EUR. Long-only: mean of holdings&apos; (exit ÷ entry) − 1. Long-short: long-side mean minus short-side mean.</CellInfoTip>
               </th>
               <th className="text-right px-3 py-2.5 font-medium">
-                Turnover<CellInfoTip>Percentage of this month&apos;s holdings not held in the previous month. 0% means the strategy held the same portfolio; 100% means it replaced everything.</CellInfoTip>
+                Turnover<CellInfoTip>Percentage of this period&apos;s holdings that weren&apos;t held in the previous period. 0% means the strategy held the same portfolio; 100% means it replaced everything.</CellInfoTip>
               </th>
               <th className="text-right px-5 py-2.5 font-medium">
-                Cumulative<CellInfoTip>Cumulative return through the end of this month, since the backtest start: chain-linked product of all prior monthly returns.</CellInfoTip>
+                Cumulative<CellInfoTip>Cumulative return through the end of this period, since the backtest start: chain-linked product of all prior period returns.</CellInfoTip>
               </th>
             </tr>
           </thead>
@@ -116,7 +114,13 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
                         <thead>
                           <tr className="text-gray-600">
                             <th className="text-left py-1 font-medium">
+                              Side<CellInfoTip>Direction of the position. Long-only backtests are all &quot;Long&quot;. Long-short backtests group longs at the top and shorts at the bottom of each portfolio.</CellInfoTip>
+                            </th>
+                            <th className="text-left py-1 font-medium">
                               Ticker<CellInfoTip>The stock&apos;s ticker on its primary exchange. Click to open in GuruFocus.</CellInfoTip>
+                            </th>
+                            <th className="text-left py-1 font-medium">
+                              Exchange<CellInfoTip>GuruFocus exchange code (e.g. NYSE, NASDAQ, HKSE, XTER). US-listed names use the bare ticker on GuruFocus; everything else is referenced as `EXCHANGE:TICKER`.</CellInfoTip>
                             </th>
                             <th className="text-left py-1 font-medium">
                               Company<CellInfoTip>Issuer name. Click to open in GuruFocus.</CellInfoTip>
@@ -140,10 +144,10 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
                               Total<CellInfoTip>Weighted combination of the category scores. Selection ranks by this.</CellInfoTip>
                             </th>
                             <th className="text-right py-1 font-medium pl-4">
-                              Start (local)<CellInfoTip>Entry price in local currency at the first trading day of this month.</CellInfoTip>
+                              Start (local)<CellInfoTip>Entry price in local currency at the first trading day of this period.</CellInfoTip>
                             </th>
                             <th className="text-right py-1 font-medium">
-                              End (local)<CellInfoTip>Exit price in local currency at the first trading day of the next month.</CellInfoTip>
+                              End (local)<CellInfoTip>Exit price in local currency at the first trading day of the next period.</CellInfoTip>
                             </th>
                             <th className="text-right py-1 font-medium pl-4">
                               Start (€)<CellInfoTip>Entry price converted to EUR using the day&apos;s ECB FX rate.</CellInfoTip>
@@ -152,21 +156,40 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
                               End (€)<CellInfoTip>Exit price converted to EUR using the day&apos;s ECB FX rate.</CellInfoTip>
                             </th>
                             <th className="text-right py-1 font-medium pl-4">
-                              Return<CellInfoTip>Per-stock return in EUR over this month: (End € ÷ Start €) − 1.</CellInfoTip>
+                              Return<CellInfoTip>Per-stock price return in EUR over this period: (End € ÷ Start €) − 1. For shorts the period contribution is the negation of this.</CellInfoTip>
                             </th>
                           </tr>
                         </thead>
                         <tbody>
                           {[...r.holdings]
                             .sort((a, b) => {
+                              // Longs first (top half), shorts second (bottom).
+                              // Within each side, sort by sector then score so
+                              // related names cluster together.
+                              const sideA = a.side === 'short' ? 1 : 0;
+                              const sideB = b.side === 'short' ? 1 : 0;
+                              if (sideA !== sideB) return sideA - sideB;
                               const sec = a.sector.localeCompare(b.sector);
                               return sec !== 0 ? sec : b.score - a.score;
                             })
                             .map((h) => {
-                              const exch = exchangeByCompany.get(h.company_id) ?? '';
-                              const href = guruFocusUrl(h.ticker, exch);
+                              const exchRaw = exchangeByCompany.get(h.company_id) ?? '';
+                              const exch = displayExchange(exchRaw, h.ticker);
+                              const href = guruFocusUrl(h.ticker, exchRaw);
+                              const isShort = h.side === 'short';
                               return (
-                                <tr key={h.company_id} className="border-t border-gray-800/20">
+                                <tr key={`${h.side ?? 'long'}-${h.company_id}`} className={`border-t border-gray-800/20 ${isShort ? 'bg-rose-500/[0.04]' : ''}`}>
+                                  <td className="py-1.5 pr-2 whitespace-nowrap">
+                                    <span
+                                      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                        isShort
+                                          ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
+                                          : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/25'
+                                      }`}
+                                    >
+                                      {isShort ? 'Short' : 'Long'}
+                                    </span>
+                                  </td>
                                   <td className="py-1.5 font-mono whitespace-nowrap">
                                     <button
                                       type="button"
@@ -195,6 +218,12 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
                                         ({exch})
                                       </span>
                                     )}
+                                  </td>
+                                  <td
+                                    className="py-1.5 text-gray-400 font-mono whitespace-nowrap"
+                                    title={exch ? (EXCHANGE_NAMES[exch.toUpperCase()] ?? exch) : ''}
+                                  >
+                                    {exch || '—'}
                                   </td>
                                   <td className="py-1.5 truncate max-w-[200px]">
                                     <a
@@ -289,7 +318,7 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
                   <tr key={`${r.date}-empty`}>
                     <td colSpan={4} className="bg-[#0f1117] px-5 py-4">
                       <div className="text-xs text-gray-500">
-                        {r.empty_reason || 'No holdings for this month (unknown reason)'}
+                        {r.empty_reason || 'No holdings for this period (unknown reason)'}
                       </div>
                     </td>
                   </tr>
@@ -299,7 +328,7 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
           </tbody>
         </table>
       </div>
-    </div>
+    </CollapsibleCard>
     <TickerTimelineModal
       result={result}
       companyId={timelineCompanyId}

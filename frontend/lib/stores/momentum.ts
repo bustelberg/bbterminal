@@ -19,6 +19,10 @@ export type Holding = {
   exit_price_eur?: number | null;
   entry_date?: string | null;
   exit_date?: string | null;
+  // "long" or "short". Long-only backtests omit this (treated as long);
+  // long-short backtests include it on every holding so the dashboard can
+  // split sector breakdowns / equity contributions by side.
+  side?: 'long' | 'short';
 };
 
 export type PeriodRecord = {
@@ -55,9 +59,19 @@ export type Summary = {
   avg_monthly_turnover_pct_std?: number | null;
 };
 
+export type DailyRecord = {
+  date: string;                      // YYYY-MM-DD
+  cumulative_return_pct: number;
+};
+
 export type BacktestResult = {
   monthly_records: PeriodRecord[];
   summary: Summary;
+  // Daily portfolio equity curve, chain-linked across rebalances. The
+  // equity curve chart, max-drawdown overlays, and Sharpe all derive from
+  // this. Empty for degenerate runs / older saved results — the chart
+  // falls back to monthly_records in that case.
+  daily_records?: DailyRecord[];
 };
 
 // Per-day pick holding has the same shape as a Holding for newer snapshots
@@ -108,6 +122,7 @@ export type CurrentPicksSnapshotMeta = {
   triggered_by: 'auto' | 'manual';
   as_of_date: string;
   latest_price_date: string | null;
+  name?: string | null;           // optional custom label set via rename
 };
 
 export type UniverseEntry = {
@@ -116,6 +131,7 @@ export type UniverseEntry = {
   exchange: string;
   company_name: string;
   sector: string;
+  country?: string;  // populated by the backend snapshot; absent on older saves
 };
 
 export type ProgressEntry = { pct: number; message: string; t: number };
@@ -127,7 +143,10 @@ export type InfoEntry = { scope: string; message: string };
 // compare them side-by-side. Variants are run sequentially against the
 // same base config (signal/category weights, sectors, top-N, universe).
 export type RebalanceFrequency =
-  | 'daily' | 'weekly' | 'monthly' | 'every_2_months' | 'every_3_months';
+  | 'daily' | 'weekly' | 'monthly'
+  | 'every_2_months' | 'every_3_months' | 'every_4_months' | 'every_5_months'
+  | 'every_6_months' | 'every_7_months' | 'every_8_months' | 'every_9_months'
+  | 'every_10_months' | 'every_11_months' | 'every_12_months';
 export type StrategyType = 'long_only' | 'long_short';
 export type VariantKey = `${RebalanceFrequency}__${StrategyType}`;
 export type VariantDef = {
@@ -137,20 +156,40 @@ export type VariantDef = {
   label: string;          // human-readable, e.g. "Monthly · Long-only"
 };
 
-// Insertion order = display order in tables and tabs. Frequencies cluster
-// together so you can read "monthly long-only vs monthly long-short" as
-// adjacent rows; strategies alternate within each frequency.
+// Insertion order = display order in tables and tabs. Long-only group comes
+// first (largest period → smallest), then the long-short group in the same
+// frequency order. Reads as "all the directional bets first, then their
+// market-neutral counterparts" with rebalance cost decreasing down each
+// group.
 export const VARIANT_DEFS: readonly VariantDef[] = [
-  { key: 'monthly__long_only',         frequency: 'monthly',         strategy: 'long_only',  label: 'Monthly · Long-only'        },
-  { key: 'monthly__long_short',        frequency: 'monthly',         strategy: 'long_short', label: 'Monthly · Long-short'       },
-  { key: 'every_2_months__long_only',  frequency: 'every_2_months',  strategy: 'long_only',  label: 'Every 2 months · Long-only' },
-  { key: 'every_2_months__long_short', frequency: 'every_2_months',  strategy: 'long_short', label: 'Every 2 months · Long-short'},
-  { key: 'every_3_months__long_only',  frequency: 'every_3_months',  strategy: 'long_only',  label: 'Every 3 months · Long-only' },
-  { key: 'every_3_months__long_short', frequency: 'every_3_months',  strategy: 'long_short', label: 'Every 3 months · Long-short'},
-  { key: 'weekly__long_only',          frequency: 'weekly',          strategy: 'long_only',  label: 'Weekly · Long-only'         },
-  { key: 'weekly__long_short',         frequency: 'weekly',          strategy: 'long_short', label: 'Weekly · Long-short'        },
-  { key: 'daily__long_only',           frequency: 'daily',           strategy: 'long_only',  label: 'Daily · Long-only'          },
-  { key: 'daily__long_short',          frequency: 'daily',           strategy: 'long_short', label: 'Daily · Long-short'         },
+  { key: 'every_12_months__long_only', frequency: 'every_12_months', strategy: 'long_only',  label: 'Every 12 months · Long-only' },
+  { key: 'every_11_months__long_only', frequency: 'every_11_months', strategy: 'long_only',  label: 'Every 11 months · Long-only' },
+  { key: 'every_10_months__long_only', frequency: 'every_10_months', strategy: 'long_only',  label: 'Every 10 months · Long-only' },
+  { key: 'every_9_months__long_only',  frequency: 'every_9_months',  strategy: 'long_only',  label: 'Every 9 months · Long-only'  },
+  { key: 'every_8_months__long_only',  frequency: 'every_8_months',  strategy: 'long_only',  label: 'Every 8 months · Long-only'  },
+  { key: 'every_7_months__long_only',  frequency: 'every_7_months',  strategy: 'long_only',  label: 'Every 7 months · Long-only'  },
+  { key: 'every_6_months__long_only',  frequency: 'every_6_months',  strategy: 'long_only',  label: 'Every 6 months · Long-only'  },
+  { key: 'every_5_months__long_only',  frequency: 'every_5_months',  strategy: 'long_only',  label: 'Every 5 months · Long-only'  },
+  { key: 'every_4_months__long_only',  frequency: 'every_4_months',  strategy: 'long_only',  label: 'Every 4 months · Long-only'  },
+  { key: 'every_3_months__long_only',  frequency: 'every_3_months',  strategy: 'long_only',  label: 'Every 3 months · Long-only'  },
+  { key: 'every_2_months__long_only',  frequency: 'every_2_months',  strategy: 'long_only',  label: 'Every 2 months · Long-only'  },
+  { key: 'monthly__long_only',         frequency: 'monthly',         strategy: 'long_only',  label: 'Monthly · Long-only'         },
+  { key: 'weekly__long_only',          frequency: 'weekly',          strategy: 'long_only',  label: 'Weekly · Long-only'          },
+  { key: 'daily__long_only',           frequency: 'daily',           strategy: 'long_only',  label: 'Daily · Long-only'           },
+  { key: 'every_12_months__long_short', frequency: 'every_12_months', strategy: 'long_short', label: 'Every 12 months · Long-short' },
+  { key: 'every_11_months__long_short', frequency: 'every_11_months', strategy: 'long_short', label: 'Every 11 months · Long-short' },
+  { key: 'every_10_months__long_short', frequency: 'every_10_months', strategy: 'long_short', label: 'Every 10 months · Long-short' },
+  { key: 'every_9_months__long_short',  frequency: 'every_9_months',  strategy: 'long_short', label: 'Every 9 months · Long-short'  },
+  { key: 'every_8_months__long_short',  frequency: 'every_8_months',  strategy: 'long_short', label: 'Every 8 months · Long-short'  },
+  { key: 'every_7_months__long_short',  frequency: 'every_7_months',  strategy: 'long_short', label: 'Every 7 months · Long-short'  },
+  { key: 'every_6_months__long_short',  frequency: 'every_6_months',  strategy: 'long_short', label: 'Every 6 months · Long-short'  },
+  { key: 'every_5_months__long_short',  frequency: 'every_5_months',  strategy: 'long_short', label: 'Every 5 months · Long-short'  },
+  { key: 'every_4_months__long_short',  frequency: 'every_4_months',  strategy: 'long_short', label: 'Every 4 months · Long-short'  },
+  { key: 'every_3_months__long_short',  frequency: 'every_3_months',  strategy: 'long_short', label: 'Every 3 months · Long-short'  },
+  { key: 'every_2_months__long_short',  frequency: 'every_2_months',  strategy: 'long_short', label: 'Every 2 months · Long-short'  },
+  { key: 'monthly__long_short',         frequency: 'monthly',         strategy: 'long_short', label: 'Monthly · Long-short'         },
+  { key: 'weekly__long_short',          frequency: 'weekly',          strategy: 'long_short', label: 'Weekly · Long-short'          },
+  { key: 'daily__long_short',           frequency: 'daily',           strategy: 'long_short', label: 'Daily · Long-short'           },
 ];
 
 export type VariantOutcome =
@@ -195,6 +234,14 @@ export type MomentumState = {
   activeVariantKey: VariantKey | null;
   /** Sweep progress, or null when no sweep is in flight. */
   variantsRun: VariantsRunState | null;
+  /** Snapshot id currently being loaded from the current-picks dropdown, or
+   * null when idle. Drives the per-row spinner in the header dropdown. */
+  loadingSnapshotId: number | null;
+  /** Snapshot id currently being deleted (so the row can show a spinner
+   * + the rest of the dropdown stays interactive). */
+  deletingSnapshotId: number | null;
+  /** Snapshot id currently being renamed. */
+  renamingSnapshotId: number | null;
 };
 
 export type BacktestStartConfig = {
@@ -212,10 +259,19 @@ export type BacktestStartConfig = {
   n_trials: number;
   mode?: 'backtest' | 'current_portfolio';
   force_recompute?: boolean;
+  // When true (the backend default), the run uses only data already in
+  // the DB — no GuruFocus / ECB calls. The Recompute button overrides
+  // this to fetch fresh data when prices have fallen behind.
+  db_only?: boolean;
   // Optional variant axes — backend defaults match Phase 1/2 (long-only,
   // monthly). Variant sweep populates both per request.
   rebalance_frequency?: RebalanceFrequency;
   strategy_type?: StrategyType;
+  // When set, the request becomes a sweep: backend loads data once and
+  // runs the backtest computation per variant, streaming a separate
+  // `variant_result` event per (frequency × strategy_type). Replaces
+  // the per-variant POST loop the frontend used to do.
+  variants?: { frequency: RebalanceFrequency; strategy_type: StrategyType }[];
 };
 
 export const momentumStore = createStore<MomentumState>({
@@ -235,6 +291,9 @@ export const momentumStore = createStore<MomentumState>({
   variants: {},
   activeVariantKey: null,
   variantsRun: null,
+  loadingSnapshotId: null,
+  deletingSnapshotId: null,
+  renamingSnapshotId: null,
 });
 
 let abortController: AbortController | null = null;
@@ -348,82 +407,19 @@ export function cancelBacktest(): void {
 
 // ─── Variants sweep ──────────────────────────────────────────────────────
 //
-// `startVariantsBacktest` fans out the user's base config over the
-// `VARIANT_DEFS` cross-product (5 frequencies × 2 strategy types). Each
-// variant is its own SSE call to the same endpoint; the backend's
-// strategy_hash includes both axes, so cache hits for repeat sweeps are
-// cheap. Sequential, not parallel — to keep API-load predictable and
-// because cache hits make it fast in steady state.
+// `startVariantsBacktest` fires ONE SSE call to `/api/momentum/backtest` with
+// `variants: [...]` set. The backend loads the universe / prices / volumes /
+// FX once, then runs the backtest computation per variant against the same
+// in-memory frames, streaming `variant_start` / `variant_result` /
+// `variant_error` events as each completes. Per-variant progress messages
+// are prefixed with the variant key by the backend so the shared
+// ProgressTimeline reads naturally.
 
 let variantsAbortController: AbortController | null = null;
 
-/** Drain one backtest SSE call to completion, returning the BacktestResult.
- * Throws on error or abort. Forwards progress / warning / info events into
- * the shared momentumStore (prefixed with `variantLabel`) so the existing
- * ProgressTimeline panel reflects what's happening for the in-flight
- * variant. */
-async function _runOneVariant(
-  cfg: BacktestStartConfig,
-  variantLabel: string,
-  signal: AbortSignal,
-): Promise<BacktestResult> {
-  let result: BacktestResult | null = null;
-  let errorMsg: string | null = null;
-  await runSSE(
-    `${API_URL}/api/momentum/backtest`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(cfg),
-    },
-    (raw) => {
-      const data = raw as {
-        type: string;
-        pct?: number;
-        message?: string;
-        scope?: string;
-        data?: BacktestResult;
-      };
-      if (data.type === 'progress') {
-        momentumStore.set((s) => ({
-          progress: [...s.progress, {
-            pct: data.pct ?? 0,
-            message: `[${variantLabel}] ${data.message ?? ''}`,
-            t: Date.now(),
-          }],
-        }));
-      } else if (data.type === 'warning') {
-        momentumStore.set((s) => ({
-          warnings: [...s.warnings, {
-            scope: data.scope ?? 'backtest',
-            message: `[${variantLabel}] ${data.message ?? ''}`,
-          }],
-        }));
-      } else if (data.type === 'info') {
-        momentumStore.set((s) => ({
-          infos: [...s.infos, {
-            scope: data.scope ?? 'backtest',
-            message: `[${variantLabel}] ${data.message ?? ''}`,
-          }],
-        }));
-      } else if (data.type === 'result') {
-        result = (data.data as BacktestResult) ?? null;
-      } else if (data.type === 'error') {
-        errorMsg = data.message ?? 'Unknown error';
-      }
-      // Ignore done — the sweep tracks its own completion.
-    },
-    signal,
-  );
-  if (errorMsg) throw new Error(errorMsg);
-  if (!result) throw new Error('Stream ended without a result');
-  return result;
-}
-
-/** Run the selected variants sequentially against the given base config.
- * `keys` defaults to every variant in `VARIANT_DEFS`. `selection_mode`,
- * `random_seed`, `n_trials`, and `force_recompute` carry over from `base`;
- * `rebalance_frequency` and `strategy_type` are overwritten per variant.
+/** Run the selected variants against the given base config. `keys` defaults
+ * to every variant in `VARIANT_DEFS`. The backend handles the sequencing —
+ * frontend just dispatches each `variant_*` event into the store.
  *
  * Caller is responsible for filtering out incompatible variants — the
  * backend rejects `long_short` + `random` (long-short selection without
@@ -431,11 +427,10 @@ async function _runOneVariant(
  * pairs in `keys` when `base.selection_mode === 'random'`.
  *
  * Sweeps drive the same `running` / `progress` / `runStartedAt` fields as
- * a single backtest so the existing ProgressTimeline lights up while a
- * sweep is in flight; per-variant log lines are prefixed with the variant
- * label. */
+ * a single backtest so the existing ProgressTimeline lights up while the
+ * sweep is in flight. */
 export async function startVariantsBacktest(
-  base: Omit<BacktestStartConfig, 'rebalance_frequency' | 'strategy_type' | 'mode'>,
+  base: Omit<BacktestStartConfig, 'rebalance_frequency' | 'strategy_type' | 'mode' | 'variants'>,
   keys?: readonly VariantKey[],
 ): Promise<void> {
   variantsAbortController?.abort();
@@ -473,59 +468,119 @@ export async function startVariantsBacktest(
     runEndedAt: null,
   });
 
+  const cfg: BacktestStartConfig = {
+    ...base,
+    variants: targets.map((v) => ({ frequency: v.frequency, strategy_type: v.strategy })),
+  };
+
   let aborted = false;
+  let topLevelError: string | null = null;
 
-  for (const variant of targets) {
-    if (controller.signal.aborted) { aborted = true; break; }
-
-    momentumStore.set((s) => ({
-      variants: { ...s.variants, [variant.key]: { status: 'running' } },
-      variantsRun: s.variantsRun
-        ? { ...s.variantsRun, current: variant.key }
-        : null,
-    }));
-
-    const cfg: BacktestStartConfig = {
-      ...base,
-      rebalance_frequency: variant.frequency,
-      strategy_type: variant.strategy,
-    };
-
-    try {
-      const result = await _runOneVariant(cfg, variant.label, controller.signal);
-      momentumStore.set((s) => {
-        // Auto-select the first variant that completes so detail views have
-        // something to show without a click.
-        const nextActive = s.activeVariantKey ?? variant.key;
-        return {
-          variants: { ...s.variants, [variant.key]: { status: 'ok', result } },
-          activeVariantKey: nextActive,
-          variantsRun: s.variantsRun
-            ? { ...s.variantsRun, completed: s.variantsRun.completed + 1 }
-            : null,
+  try {
+    await runSSE(
+      `${API_URL}/api/momentum/backtest`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cfg),
+      },
+      (raw) => {
+        const data = raw as {
+          type: string;
+          pct?: number;
+          message?: string;
+          scope?: string;
+          variant_key?: string;
+          data?: BacktestResult;
         };
-      });
-    } catch (e) {
-      // Chrome can surface an aborted fetch as `TypeError: Failed to
-      // fetch` rather than a DOMException with name=AbortError, so trust
-      // the signal state — it's the only reliable cancellation signal.
-      if (controller.signal.aborted || (e as { name?: string })?.name === 'AbortError') {
-        aborted = true;
-        break;
-      }
-      const msg = e instanceof Error ? e.message : String(e);
-      momentumStore.set((s) => ({
-        variants: { ...s.variants, [variant.key]: { status: 'error', message: msg } },
-        variantsRun: s.variantsRun
-          ? { ...s.variantsRun, completed: s.variantsRun.completed + 1 }
-          : null,
-      }));
+        if (data.type === 'progress') {
+          momentumStore.set((s) => ({
+            progress: [...s.progress, {
+              pct: data.pct ?? 0,
+              message: data.message ?? '',
+              t: Date.now(),
+            }],
+          }));
+        } else if (data.type === 'warning') {
+          momentumStore.set((s) => ({
+            warnings: [...s.warnings, {
+              scope: data.scope ?? 'backtest',
+              message: data.message ?? '',
+            }],
+          }));
+        } else if (data.type === 'info') {
+          momentumStore.set((s) => ({
+            infos: [...s.infos, {
+              scope: data.scope ?? 'backtest',
+              message: data.message ?? '',
+            }],
+          }));
+        } else if (data.type === 'variant_start' && data.variant_key) {
+          const key = data.variant_key as VariantKey;
+          momentumStore.set((s) => ({
+            variants: { ...s.variants, [key]: { status: 'running' } },
+            variantsRun: s.variantsRun
+              ? { ...s.variantsRun, current: key }
+              : null,
+          }));
+        } else if (data.type === 'variant_result' && data.variant_key) {
+          const key = data.variant_key as VariantKey;
+          const result = (data.data as BacktestResult) ?? null;
+          if (result) {
+            momentumStore.set((s) => {
+              // Auto-select the first variant that completes so detail
+              // views have something to show without a click.
+              const nextActive = s.activeVariantKey ?? key;
+              return {
+                variants: { ...s.variants, [key]: { status: 'ok', result } },
+                activeVariantKey: nextActive,
+                variantsRun: s.variantsRun
+                  ? { ...s.variantsRun, completed: s.variantsRun.completed + 1 }
+                  : null,
+              };
+            });
+          }
+        } else if (data.type === 'variant_error' && data.variant_key) {
+          const key = data.variant_key as VariantKey;
+          const msg = data.message ?? 'Unknown error';
+          momentumStore.set((s) => ({
+            variants: { ...s.variants, [key]: { status: 'error', message: msg } },
+            variantsRun: s.variantsRun
+              ? { ...s.variantsRun, completed: s.variantsRun.completed + 1 }
+              : null,
+          }));
+        } else if (data.type === 'error') {
+          topLevelError = data.message ?? 'Unknown error';
+        }
+        // Ignore done — the sweep tracks its own completion.
+      },
+      controller.signal,
+    );
+  } catch (e) {
+    if (controller.signal.aborted || (e as { name?: string })?.name === 'AbortError') {
+      aborted = true;
+    } else {
+      topLevelError = e instanceof Error ? e.message : String(e);
     }
   }
 
-  if (aborted) {
-    // Mark the in-flight variant + every still-pending variant as
-    // cancelled so the table doesn't leave a spinner spinning forever.
+  if (topLevelError) {
+    // Pipeline-level failure (data load, FX sync, etc.) — every variant
+    // that hadn't already errored out gets the failure as its message so
+    // the table doesn't leave them spinning.
+    momentumStore.set((s) => {
+      const next = { ...s.variants };
+      for (const v of targets) {
+        const cur = next[v.key];
+        if (cur?.status === 'running' || cur?.status === 'pending') {
+          next[v.key] = { status: 'error', message: topLevelError! };
+        }
+      }
+      return { variants: next, error: topLevelError };
+    });
+  } else if (aborted) {
+    // User-cancelled the sweep — mark the in-flight + still-pending
+    // variants as cancelled so the table doesn't leave a spinner running.
     momentumStore.set((s) => {
       const next = { ...s.variants };
       for (const v of targets) {
@@ -583,6 +638,7 @@ export async function loadCurrentPicksSnapshots(): Promise<void> {
 }
 
 export async function loadCurrentPicksSnapshot(snapshotId: number): Promise<void> {
+  momentumStore.set({ loadingSnapshotId: snapshotId, error: null });
   try {
     const resp = await fetch(`${API_URL}/api/momentum/current-picks/${snapshotId}`);
     if (!resp.ok) {
@@ -603,6 +659,58 @@ export async function loadCurrentPicksSnapshot(snapshotId: number): Promise<void
     maybeAutoRefreshCurrentMonthMTD(cp);
   } catch (e) {
     momentumStore.set({ error: e instanceof Error ? e.message : 'Failed to load snapshot' });
+  } finally {
+    momentumStore.set({ loadingSnapshotId: null });
+  }
+}
+
+export async function deleteCurrentPicksSnapshot(snapshotId: number): Promise<void> {
+  momentumStore.set({ deletingSnapshotId: snapshotId, error: null });
+  try {
+    const resp = await fetch(`${API_URL}/api/momentum/current-picks/${snapshotId}`, {
+      method: 'DELETE',
+    });
+    if (!resp.ok) {
+      momentumStore.set({ error: `Failed to delete snapshot ${snapshotId}` });
+      return;
+    }
+    momentumStore.set((s) => ({
+      currentPicksSnapshots: s.currentPicksSnapshots.filter((m) => m.snapshot_id !== snapshotId),
+      // If the deleted snapshot was loaded, clear it.
+      currentPortfolio: s.currentPortfolio?.snapshot_id === snapshotId ? null : s.currentPortfolio,
+    }));
+  } catch (e) {
+    momentumStore.set({ error: e instanceof Error ? e.message : 'Delete failed' });
+  } finally {
+    momentumStore.set({ deletingSnapshotId: null });
+  }
+}
+
+export async function renameCurrentPicksSnapshot(
+  snapshotId: number,
+  name: string | null,
+): Promise<void> {
+  momentumStore.set({ renamingSnapshotId: snapshotId, error: null });
+  try {
+    const resp = await fetch(`${API_URL}/api/momentum/current-picks/${snapshotId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    if (!resp.ok) {
+      momentumStore.set({ error: `Failed to rename snapshot ${snapshotId}` });
+      return;
+    }
+    const updated = await resp.json();
+    momentumStore.set((s) => ({
+      currentPicksSnapshots: s.currentPicksSnapshots.map((m) =>
+        m.snapshot_id === snapshotId ? { ...m, name: updated.name ?? null } : m,
+      ),
+    }));
+  } catch (e) {
+    momentumStore.set({ error: e instanceof Error ? e.message : 'Rename failed' });
+  } finally {
+    momentumStore.set({ renamingSnapshotId: null });
   }
 }
 

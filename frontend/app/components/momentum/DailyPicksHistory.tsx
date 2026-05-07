@@ -3,7 +3,7 @@
 import { Fragment, useMemo, useState } from 'react';
 import type { CurrentPortfolio, DailyPick } from '../../../lib/stores/momentum';
 import CellInfoTip from './CellInfoTip';
-import { EXCHANGE_NAMES, fmtPct, fmtPrice, guruFocusUrl } from './utils';
+import { EXCHANGE_NAMES, displayExchange, fmtPct, fmtPrice, guruFocusUrl } from './utils';
 
 type Props = {
   currentPortfolio: CurrentPortfolio | null;
@@ -207,8 +207,9 @@ export default function DailyPicksHistory({ currentPortfolio, categories, exchan
                                             return sec !== 0 ? sec : b.score - a.score;
                                           })
                                           .map((h) => {
-                                            const exch = exchangeByCompany.get(h.company_id) ?? '';
-                                            const href = guruFocusUrl(h.ticker, exch);
+                                            const exchRaw = exchangeByCompany.get(h.company_id) ?? '';
+                                            const exch = displayExchange(exchRaw, h.ticker);
+                                            const href = guruFocusUrl(h.ticker, exchRaw);
                                             return (
                                               <tr key={h.company_id} className="border-t border-gray-800/20">
                                                 <td className="py-1.5 font-mono whitespace-nowrap">

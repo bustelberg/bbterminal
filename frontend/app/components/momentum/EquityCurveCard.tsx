@@ -7,10 +7,13 @@ import {
 } from 'recharts';
 import type {
   BacktestResult,
+  DailyRecord,
   DrawdownPeriod,
   PeriodRecord,
+  Summary,
 } from '../../../lib/stores/momentum';
 import CellInfoTip from './CellInfoTip';
+import CollapsibleCard from './CollapsibleCard';
 import { SERIES_COLORS, computeTopDrawdowns, fmtPct, tooltipStyle } from './utils';
 import type { BenchmarkOption, BenchmarkPrice, ComparisonItem, SavedRun } from './types';
 
@@ -41,6 +44,10 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
   const [logScale, setLogScale] = useState(false);
   const [hoveredDrawdown, setHoveredDrawdown] = useState<number | null>(null);
   const [customFromMonth, setCustomFromMonth] = useState('');
+  // Identifier of an "Add series" operation currently in flight — used to
+  // show a small spinner pill while we fetch the backend payload. Cleared
+  // once the comparison item lands in `comparisons`.
+  const [addingSeriesId, setAddingSeriesId] = useState<string | null>(null);
 
   // Load benchmark options for the "add series" dropdown
   useEffect(() => {
@@ -65,21 +72,26 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
   // Helpers to add/remove comparison series
   const addSavedSeries = async (runId: number) => {
     if (comparisons.some((c) => c.kind === 'saved' && c.runId === runId)) return;
+    setAddingSeriesId(`saved:${runId}`);
     try {
       const resp = await fetch(`${API_URL}/api/momentum/backtests/${runId}`);
       if (!resp.ok) return;
       const data = await resp.json();
       const saved = data.result ?? data;
       const monthly: PeriodRecord[] = saved.monthly_records ?? [];
+      const daily: DailyRecord[] | undefined = saved.daily_records;
       const label = data.name ?? `Backtest ${runId}`;
-      setComparisons((prev) => [...prev, { id: `saved:${runId}`, kind: 'saved', runId, label, monthly }]);
-    } catch {}
+      setComparisons((prev) => [...prev, { id: `saved:${runId}`, kind: 'saved', runId, label, monthly, daily }]);
+    } catch {} finally {
+      setAddingSeriesId(null);
+    }
   };
 
   const addBenchmarkSeries = async (benchmarkId: number) => {
     if (comparisons.some((c) => c.kind === 'benchmark' && c.benchmarkId === benchmarkId)) return;
     const opt = benchmarkOptions.find((b) => b.benchmark_id === benchmarkId);
     const label = opt ? opt.ticker : `Benchmark ${benchmarkId}`;
+    setAddingSeriesId(`bench:${benchmarkId}`);
     // Widen fetch window so any later series can still overlap.
     try {
       const resp = await fetch(
@@ -91,7 +103,9 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
         ...prev,
         { id: `bench:${benchmarkId}`, kind: 'benchmark', benchmarkId, label, prices },
       ]);
-    } catch {}
+    } catch {} finally {
+      setAddingSeriesId(null);
+    }
   };
 
   const removeSeries = (id: string) => {
@@ -128,29 +142,45 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
       return { map, months };
     };
 
-    const fromPrices = (prices: BenchmarkPrice[]): { map: Map<string, number>; months: string[] } => {
-      // Pick first price per month.
-      const firstByMonth = new Map<string, number>();
-      for (const p of prices) {
-        const ym = p.target_date.slice(0, 7);
-        if (!firstByMonth.has(ym)) firstByMonth.set(ym, p.price);
+    /** Prefer daily_records when present so the chart line, max DD, and
+     * Sharpe all reflect intra-period moves. Falls back to monthly_records
+     * for older saved runs that don't carry the daily curve. */
+    const fromResult = (r: BacktestResult): { map: Map<string, number>; months: string[] } => {
+      if (r.daily_records && r.daily_records.length > 0) {
+        const map = new Map<string, number>();
+        const dates: string[] = [];
+        for (const d of r.daily_records) {
+          map.set(d.date, 1 + d.cumulative_return_pct / 100);
+          dates.push(d.date);
+        }
+        return { map, months: dates };
       }
-      const months = Array.from(firstByMonth.keys()).sort();
-      if (months.length === 0) return { map: new Map(), months: [] };
-      const map = new Map<string, number>();
-      const p0 = firstByMonth.get(months[0])!;
-      // Shift index so each month's "factor" reflects return through end of month
-      // (same convention as strategy records: cumReturn at month[i] includes
-      // the price change month[i] → month[i+1]).
-      for (let i = 0; i < months.length - 1; i++) {
-        const pn = firstByMonth.get(months[i + 1])!;
-        map.set(months[i], pn / p0);
-      }
-      // Last month: no forward price available — leave out.
-      return { map, months: months.slice(0, -1) };
+      return fromMonthly(r.monthly_records);
     };
 
-    const { map, months } = fromMonthly(result.monthly_records);
+    const fromPrices = (prices: BenchmarkPrice[]): { map: Map<string, number>; months: string[] } => {
+      // Daily granularity to align with the strategy's daily curve. Each
+      // entry's factor is `price[t] / price[firstDay]` so the series rebases
+      // to 1.0 on its earliest day; the alignment logic below shifts that
+      // basis to the common window start.
+      if (prices.length === 0) return { map: new Map(), months: [] };
+      const sorted = prices
+        .slice()
+        .sort((a, b) => a.target_date.localeCompare(b.target_date));
+      const map = new Map<string, number>();
+      const dates: string[] = [];
+      const p0 = sorted[0].price;
+      if (!p0 || p0 <= 0) return { map: new Map(), months: [] };
+      for (const p of sorted) {
+        if (!map.has(p.target_date)) {
+          map.set(p.target_date, p.price / p0);
+          dates.push(p.target_date);
+        }
+      }
+      return { map, months: dates };
+    };
+
+    const { map, months } = fromResult(result);
     const activeName = loadedRunId != null
       ? savedRuns.find((r) => r.run_id === loadedRunId)?.name
       : undefined;
@@ -166,7 +196,9 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
 
     for (const c of comparisons) {
       if (c.kind === 'saved') {
-        const { map, months } = fromMonthly(c.monthly);
+        const { map, months } = c.daily && c.daily.length > 0
+          ? fromResult({ monthly_records: c.monthly, summary: {} as Summary, daily_records: c.daily })
+          : fromMonthly(c.monthly);
         out.push({
           id: c.id,
           label: c.label,
@@ -236,30 +268,55 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
     const allMonths = Array.from(monthSet).sort();
 
     const series: AlignedSeries[] = resolvedSeries.map((s) => {
-      const baseFactor = s.factorByMonth.get(maxStart);
+      // baseFactor anchors this series to the common window start. If the
+      // series doesn't have an exact entry on maxStart (a monthly
+      // benchmark vs a daily strategy whose first date is mid-month, for
+      // example), fall back to the earliest entry on or after maxStart so
+      // the series isn't blanked out by alignment.
+      let baseFactor = s.factorByMonth.get(maxStart);
+      if (baseFactor == null) {
+        for (const m of s.months) {
+          if (m >= maxStart) { baseFactor = s.factorByMonth.get(m); break; }
+        }
+      }
       const points: SeriesPoint[] = allMonths.map((m) => {
         const f = s.factorByMonth.get(m);
         if (f == null || baseFactor == null) return { date: m, cumReturnPct: null };
         return { date: m, cumReturnPct: (f / baseFactor - 1) * 100 };
       });
 
-      // Monthly rebased returns for stats.
-      const monthlyRets: number[] = [];
+      // Period-over-period rebased returns for stats. Cadence (daily vs
+      // monthly) is detected from the actual date range — `points` may be
+      // daily for the strategy and monthly for a benchmark; both are
+      // handled uniformly by deriving periodsPerYear from observations
+      // per actual year of the aligned window. This is what makes max DD
+      // honor intra-month moves on a monthly strategy whose daily curve
+      // is now available.
+      const periodReturns: number[] = [];
+      const periodDates: string[] = [];
       let prev: number | null = null;
       for (const p of points) {
         if (p.cumReturnPct == null) continue;
         const factor = 1 + p.cumReturnPct / 100;
-        if (prev != null && prev > 0) monthlyRets.push((factor / prev - 1) * 100);
+        if (prev != null && prev > 0) {
+          periodReturns.push((factor / prev - 1) * 100);
+          periodDates.push(p.date);
+        }
         prev = factor;
       }
       const lastNonNull = [...points].reverse().find((p) => p.cumReturnPct != null);
       const totalReturn = lastNonNull?.cumReturnPct ?? 0;
-      const years = monthlyRets.length / 12;
       const cumFactor = 1 + totalReturn / 100;
-      const annualized = years > 0 ? (Math.pow(cumFactor, 1 / years) - 1) * 100 : 0;
+      const firstPointDate = points.find((p) => p.cumReturnPct != null)?.date ?? null;
+      const lastPointDate = lastNonNull?.date ?? null;
+      const yearsByDate = firstPointDate && lastPointDate
+        ? (new Date(lastPointDate).getTime() - new Date(firstPointDate).getTime()) / (365.25 * 86400000)
+        : 0;
+      const annualized = yearsByDate > 0 ? (Math.pow(cumFactor, 1 / yearsByDate) - 1) * 100 : 0;
+      const periodsPerYear = yearsByDate > 0 ? periodReturns.length / yearsByDate : 12;
 
       let peak = 1.0, maxDd = 0, factor = 1.0;
-      for (const r of monthlyRets) {
+      for (const r of periodReturns) {
         factor *= (1 + r / 100);
         peak = Math.max(peak, factor);
         const dd = (factor / peak - 1) * 100;
@@ -267,10 +324,13 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
       }
 
       let sharpe: number | null = null;
-      if (monthlyRets.length >= 12) {
-        const mean = monthlyRets.reduce((a, b) => a + b, 0) / monthlyRets.length;
-        const std = Math.sqrt(monthlyRets.reduce((a, b) => a + (b - mean) ** 2, 0) / monthlyRets.length);
-        if (std > 0) sharpe = (mean / std) * Math.sqrt(12);
+      // Need at least one full year of observations regardless of cadence
+      // (so a 5-month daily run still doesn't get a Sharpe — same guard
+      // as the backend for the active strategy).
+      if (periodReturns.length >= Math.max(12, Math.round(periodsPerYear))) {
+        const mean = periodReturns.reduce((a, b) => a + b, 0) / periodReturns.length;
+        const std = Math.sqrt(periodReturns.reduce((a, b) => a + (b - mean) ** 2, 0) / periodReturns.length);
+        if (std > 0) sharpe = (mean / std) * Math.sqrt(periodsPerYear);
       }
 
       const ddValues = points
@@ -281,7 +341,7 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
       return {
         ...s,
         points,
-        stats: { totalReturn, annualized, maxDd, sharpe, months: monthlyRets.length },
+        stats: { totalReturn, annualized, maxDd, sharpe, months: periodReturns.length },
         topDrawdowns,
       };
     });
@@ -432,9 +492,20 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
             <button
               type="button"
               onClick={() => setAddSeriesOpen((o) => !o)}
-              className="inline-flex items-center gap-1 text-xs text-indigo-300 hover:text-indigo-200 border border-indigo-500/40 hover:border-indigo-400/60 bg-indigo-500/10 hover:bg-indigo-500/20 rounded-full px-3 py-1 transition-colors"
+              disabled={addingSeriesId != null}
+              className="inline-flex items-center gap-1.5 text-xs text-indigo-300 hover:text-indigo-200 border border-indigo-500/40 hover:border-indigo-400/60 bg-indigo-500/10 hover:bg-indigo-500/20 rounded-full px-3 py-1 transition-colors disabled:opacity-70 disabled:cursor-wait"
             >
-              + Add series
+              {addingSeriesId != null ? (
+                <>
+                  <svg className="animate-spin w-3 h-3 text-indigo-300" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Adding…
+                </>
+              ) : (
+                <>+ Add series</>
+              )}
             </button>
             {addSeriesOpen && (
               <div className="absolute left-0 mt-1 w-72 bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-80 overflow-auto">
@@ -497,8 +568,8 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
       </div>
 
       {/* Summary Stats */}
-      <div className="bg-[#151821] rounded-xl border border-gray-800/40 overflow-hidden">
-        <table className="w-full text-sm">
+      <CollapsibleCard title="Summary">
+        <table className="w-full text-sm border-t border-gray-800/40">
           <thead>
             <tr className="border-b border-gray-800/40 text-gray-500 text-xs">
               <th className="px-4 py-2.5 text-left font-medium"></th>
@@ -506,16 +577,16 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
                 Total Return<CellInfoTip>Cumulative return over the entire backtest period: (1 + r₁)(1 + r₂)…(1 + rₙ) − 1.</CellInfoTip>
               </th>
               <th className="px-3 py-2.5 text-right font-medium">
-                Annualized<CellInfoTip>Geometric annual return: (1 + total_return)^(1/years) − 1, where years = months ÷ 12.</CellInfoTip>
+                Annualized<CellInfoTip>Geometric annual return: (1 + total_return)^(1/years) − 1. Years are derived from the actual span of dates in the curve, not the period count.</CellInfoTip>
               </th>
               <th className="px-3 py-2.5 text-right font-medium">
-                Max Drawdown<CellInfoTip>Largest peak-to-trough decline observed during the backtest, expressed as a negative percentage of the prior peak.</CellInfoTip>
+                Max Drawdown<CellInfoTip>Largest peak-to-trough decline observed during the backtest, expressed as a negative percentage of the prior peak. Computed daily when the strategy ships a daily curve (so intra-month moves on a monthly strategy are caught), monthly otherwise.</CellInfoTip>
               </th>
               <th className="px-3 py-2.5 text-right font-medium">
-                Sharpe<CellInfoTip>Annualized Sharpe ratio of monthly returns (risk-free rate = 0): mean ÷ std × √12. Computed only when ≥12 months of returns are available.</CellInfoTip>
+                Sharpe<CellInfoTip>Annualized Sharpe ratio of period returns (risk-free rate = 0): mean ÷ std × √(periods/year). Auto-detects cadence — daily curves use √252, monthly √12. Computed only when at least one full year of observations is available.</CellInfoTip>
               </th>
               <th className="px-3 py-2.5 text-right font-medium">
-                Months<CellInfoTip>Number of monthly rebalance periods in the backtest.</CellInfoTip>
+                Periods<CellInfoTip>Number of return observations in the aligned window. Equals trading days when the curve is daily, calendar months when the curve is monthly.</CellInfoTip>
               </th>
             </tr>
           </thead>
@@ -622,14 +693,11 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
             ))}
           </div>
         )}
-      </div>
+      </CollapsibleCard>
 
       {/* Yearly Performance + Custom Range */}
       {yearlyBreakdown.years.length > 0 && (
-        <div className="bg-[#151821] rounded-xl border border-gray-800/40 overflow-hidden">
-          <div className="px-5 py-3 border-b border-gray-800/40">
-            <h3 className="text-white text-sm font-medium">Yearly Performance</h3>
-          </div>
+        <CollapsibleCard title="Yearly Performance">
           <div className="overflow-auto">
             <table className="w-full text-sm">
               <thead>
@@ -707,14 +775,17 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
               <span className="text-xs text-gray-500">Cumulative return from picked month through end of aligned window.</span>
             )}
           </div>
-        </div>
+        </CollapsibleCard>
       )}
 
       {/* Equity Curve */}
-      <div className="bg-[#151821] rounded-xl border border-gray-800/40 p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-white text-sm font-medium">Equity Curve ({logScale ? 'Log' : 'Cumulative'} Return %)</h3>
-          <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer select-none">
+      <CollapsibleCard
+        title={`Equity Curve (${logScale ? 'Log' : 'Cumulative'} Return %)`}
+        rightSlot={
+          <label
+            className="flex items-center gap-2 cursor-pointer select-none"
+            onClick={(e) => e.stopPropagation()}
+          >
             <input
               type="checkbox"
               checked={logScale}
@@ -723,7 +794,9 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
             />
             Log scale
           </label>
-        </div>
+        }
+        bodyClassName="px-5 pb-5"
+      >
         <ResponsiveContainer width="100%" height={350}>
           <LineChart data={displayChartData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
@@ -791,7 +864,7 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
             ))}
           </LineChart>
         </ResponsiveContainer>
-      </div>
+      </CollapsibleCard>
     </>
   );
 }
