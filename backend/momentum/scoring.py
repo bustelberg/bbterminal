@@ -5,10 +5,18 @@ independently, then combined via category weights into a final score.
 """
 from __future__ import annotations
 
+from typing import Literal
+
 import numpy as np
 import pandas as pd
 
 from .signals import PRICE_SIGNAL_DEFS
+
+# "top" = best sectors / best names per sector (long bucket).
+# "bottom" = worst sectors / worst names per sector (short bucket for
+# long-short strategies). Default is "top" so existing call sites — which
+# expect long-only behavior — are unchanged.
+SelectionDirection = Literal["top", "bottom"]
 
 
 def _score_category(
@@ -120,8 +128,16 @@ def score_and_select(
     top_n_sectors: int = 4,
     top_n_per_sector: int = 6,
     category_weights: dict[str, float] | None = None,
+    direction: SelectionDirection = "top",
 ) -> pd.DataFrame:
-    """Full pipeline: score companies -> pick top sectors -> pick top companies.
+    """Full pipeline: score companies → pick N sectors → pick M companies / sector.
+
+    `direction="top"` (default) picks the highest-scoring sectors and the
+    highest-scoring companies within each — long-only momentum.
+
+    `direction="bottom"` picks the lowest-scoring sectors and the lowest-
+    scoring companies within each — used as the short bucket of a long-short
+    strategy.
 
     Returns a DataFrame of selected companies with their scores and sector.
     """
@@ -131,17 +147,24 @@ def score_and_select(
     # Score each company with per-category scores
     scored = compute_category_scores(signals_df, signal_weights, category_weights)
 
-    # Aggregate to sector and pick top sectors
+    # Aggregate to sector and pick from the right end of the ranking. The
+    # aggregator returns sectors descending by mean score, so .head() →
+    # top, .tail() → bottom.
     sector_scores = aggregate_to_sector(scored)
-    top_sectors = sector_scores.head(top_n_sectors)["sector"].tolist()
+    if direction == "top":
+        chosen_sectors = sector_scores.head(top_n_sectors)["sector"].tolist()
+        ascending_within = False
+    else:
+        chosen_sectors = sector_scores.tail(top_n_sectors)["sector"].tolist()
+        ascending_within = True
 
-    # Filter to top sectors only
-    in_top_sectors = scored[scored["sector"].isin(top_sectors)].copy()
+    in_chosen_sectors = scored[scored["sector"].isin(chosen_sectors)].copy()
 
-    # Within each top sector, pick top N companies by final score
+    # Within each chosen sector, pick the N best (top) or N worst (bottom)
+    # by final score.
     selected = (
-        in_top_sectors
-        .sort_values(["sector", "momentum_score"], ascending=[True, False])
+        in_chosen_sectors
+        .sort_values(["sector", "momentum_score"], ascending=[True, ascending_within])
         .groupby("sector")
         .head(top_n_per_sector)
         .reset_index(drop=True)

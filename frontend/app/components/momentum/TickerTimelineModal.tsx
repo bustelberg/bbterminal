@@ -327,7 +327,7 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
             <div className="text-gray-500 flex items-center gap-1">
               Distinct visits
               <CellInfoTip>
-                Number of separate buy → sell cycles. A "visit" is a continuous run of months where the stock was held; if the strategy dropped it for a month and re-bought later, that&apos;s two visits.
+                Number of separate buy → sell cycles. A &quot;visit&quot; is a continuous run of months where the stock was held; if the strategy dropped it for a month and re-bought later, that&apos;s two visits.
               </CellInfoTip>
             </div>
             <div className="font-mono text-gray-200">{runs.length}</div>
@@ -338,7 +338,7 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
               <CellInfoTip>
                 Cumulative return across all months the stock was held: chain-link the monthly forward returns —
                 <span className="font-mono"> (1+r₁)(1+r₂)…(1+rₙ) − 1</span>.
-                Months when not held don&apos;t contribute, so this answers "what was the strategy&apos;s realized return on this stock during its visits?".
+                Months when not held don&apos;t contribute, so this answers &quot;what was the strategy&apos;s realized return on this stock during its visits?&quot;.
               </CellInfoTip>
             </div>
             <div className={`font-mono ${summary.compoundReturnPct != null && summary.compoundReturnPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -464,7 +464,7 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
                   <th className="text-left py-1.5 font-medium">
                     <span className="inline-flex items-center gap-1">
                       Sold
-                      <CellInfoTip>First month after the visit ended — i.e. the rebalance at which the strategy stopped holding this stock. Shows "— still held" if the visit reaches the end of the backtest.</CellInfoTip>
+                      <CellInfoTip>First month after the visit ended — i.e. the rebalance at which the strategy stopped holding this stock. Shows &quot;— still held&quot; if the visit reaches the end of the backtest.</CellInfoTip>
                     </span>
                   </th>
                   <th className="text-right py-1.5 font-medium">

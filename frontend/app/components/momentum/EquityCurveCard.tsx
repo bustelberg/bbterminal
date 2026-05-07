@@ -8,7 +8,7 @@ import {
 import type {
   BacktestResult,
   DrawdownPeriod,
-  MonthlyRecord,
+  PeriodRecord,
 } from '../../../lib/stores/momentum';
 import CellInfoTip from './CellInfoTip';
 import { SERIES_COLORS, computeTopDrawdowns, fmtPct, tooltipStyle } from './utils';
@@ -70,7 +70,7 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
       if (!resp.ok) return;
       const data = await resp.json();
       const saved = data.result ?? data;
-      const monthly: MonthlyRecord[] = saved.monthly_records ?? [];
+      const monthly: PeriodRecord[] = saved.monthly_records ?? [];
       const label = data.name ?? `Backtest ${runId}`;
       setComparisons((prev) => [...prev, { id: `saved:${runId}`, kind: 'saved', runId, label, monthly }]);
     } catch {}
@@ -117,7 +117,7 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
     let colorIdx = 0;
     const nextColor = () => SERIES_COLORS[colorIdx++ % SERIES_COLORS.length];
 
-    const fromMonthly = (monthly: MonthlyRecord[]): { map: Map<string, number>; months: string[] } => {
+    const fromMonthly = (monthly: PeriodRecord[]): { map: Map<string, number>; months: string[] } => {
       const map = new Map<string, number>();
       const months: string[] = [];
       for (const r of monthly) {

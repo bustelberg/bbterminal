@@ -9,16 +9,22 @@ import {
   momentumStore,
   startBacktest,
   cancelBacktest,
+  startVariantsBacktest,
+  cancelVariantsBacktest,
   loadCurrentPicksSnapshots,
   loadCurrentPicksSnapshot,
   refreshCurrentPicksMTD,
+  VARIANT_DEFS,
   type BacktestStartConfig,
+  type VariantKey,
+  type VariantOutcome,
 } from '../../lib/stores/momentum';
 import CellInfoTip from './momentum/CellInfoTip';
 import DailyPicksHistory from './momentum/DailyPicksHistory';
 import EquityCurveCard from './momentum/EquityCurveCard';
 import MonthlyHoldingsTable from './momentum/MonthlyHoldingsTable';
 import SectorTimelineChart from './momentum/SectorTimelineChart';
+import VariantSummaryTable from './momentum/VariantSummaryTable';
 import {
   EXCHANGE_NAMES,
   fmtPct,
@@ -55,6 +61,25 @@ export default function MomentumBacktester() {
   const [randomSeed, setRandomSeed] = useState<number>(42);
   const [nTrials, setNTrials] = useState<number>(1);
 
+  // Variant sweep selection — which (frequency × strategy) combos to run.
+  // Default to all selected so the "Run variants" button matches its
+  // pre-selection behavior. Controls live in a popover next to the button.
+  const [selectedVariantKeys, setSelectedVariantKeys] = useState<Set<VariantKey>>(
+    () => new Set(VARIANT_DEFS.map((v) => v.key)),
+  );
+  const [variantsPickerOpen, setVariantsPickerOpen] = useState(false);
+  const variantsPickerRef = useRef<HTMLDivElement>(null);
+  const toggleVariantKey = (key: VariantKey) => {
+    setSelectedVariantKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+  // Backend rejects `long_short` + `random` (long-short without a
+  // signal-driven score is meaningless), so when Random is selected we
+  // hide the long-short rows from the picker and only run long-only.
+
   // Backtest run state lives in a module-scoped store so the SSE stream
   // keeps running when the user navigates away from /momentum.
   const running = momentumStore.use((s) => s.running);
@@ -70,6 +95,22 @@ export default function MomentumBacktester() {
   const loadedRunId = momentumStore.use((s) => s.loadedRunId);
   const runStartedAt = momentumStore.use((s) => s.runStartedAt);
   const runEndedAt = momentumStore.use((s) => s.runEndedAt);
+  // Variants sweep — populated by the "Run variants" button. When a variant
+  // is active, the detail views below render that variant's BacktestResult
+  // instead of the single-run `result`.
+  const variants = momentumStore.use((s) => s.variants);
+  const activeVariantKey = momentumStore.use((s) => s.activeVariantKey);
+  const variantsRun = momentumStore.use((s) => s.variantsRun);
+  const variantsRunning = variantsRun != null && variantsRun.current != null;
+  const hasVariants = Object.keys(variants).length > 0;
+  const activeVariantOutcome = activeVariantKey ? variants[activeVariantKey] : undefined;
+  const activeVariantResult =
+    activeVariantOutcome?.status === 'ok' ? activeVariantOutcome.result : null;
+  // The detail views (equity curve, holdings, sector timeline) prefer the
+  // active variant's result when one is selected; otherwise they fall back
+  // to the single-run result. Saving and "loaded run" flows only apply to
+  // the single-run path.
+  const displayResult = activeVariantResult ?? result;
 
   // Re-render once per second while a run is active so the "Running 47s"
   // counter and per-line "+1.3s" timestamps stay live. Cheap; only fires
@@ -189,6 +230,17 @@ export default function MomentumBacktester() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [savedDropdownOpen]);
 
+  useEffect(() => {
+    if (!variantsPickerOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (variantsPickerRef.current && !variantsPickerRef.current.contains(e.target as Node)) {
+        setVariantsPickerOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [variantsPickerOpen]);
+
   const loadSavedRuns = () => {
     fetch(`${API_URL}/api/momentum/backtests`)
       .then((r) => r.json())
@@ -197,24 +249,35 @@ export default function MomentumBacktester() {
   };
 
 
-  // Run backtest — delegates to the module-scoped momentumStore, which owns
-  // the fetch/reader loop so it survives navigation away from /momentum.
-  const runBacktest = () => {
-    return startBacktest({
-      start_date: `${startDate}-01`,
-      end_date: `${endDate}-01`,
-      signal_weights: weights,
-      category_weights: categoryWeights,
-      top_n_sectors: topSectors,
-      top_n_per_sector: topPerSector,
-      max_companies: maxCompanies,
-      universe_label: null,
-      index_universe: selectedIndexUniverse || null,
-      selection_mode: selectionMode,
-      random_seed: selectionMode === 'random' ? randomSeed : null,
-      n_trials: selectionMode === 'random' ? Math.max(1, nTrials) : 1,
-      force_recompute: noCache,
-    });
+  // Variant sweep — fans the current config out across the selected
+  // (frequency × strategy) combos. Backend cache keys on both axes so
+  // re-runs are fast. When Random is the active strategy, long-short
+  // variants are filtered out (the backend rejects that combination).
+  const runVariantsBacktest = () => {
+    const eligibleKeys = VARIANT_DEFS
+      .filter((v) => selectedVariantKeys.has(v.key))
+      .filter((v) => selectionMode !== 'random' || v.strategy !== 'long_short')
+      .map((v) => v.key);
+    if (eligibleKeys.length === 0) return;
+    momentumStore.set({ result: null, loadedRunId: null });
+    return startVariantsBacktest(
+      {
+        start_date: `${startDate}-01`,
+        end_date: `${endDate}-01`,
+        signal_weights: weights,
+        category_weights: categoryWeights,
+        top_n_sectors: topSectors,
+        top_n_per_sector: topPerSector,
+        max_companies: maxCompanies,
+        universe_label: null,
+        index_universe: selectedIndexUniverse || null,
+        selection_mode: selectionMode,
+        random_seed: selectionMode === 'random' ? randomSeed : null,
+        n_trials: selectionMode === 'random' ? Math.max(1, nTrials) : 1,
+        force_recompute: noCache,
+      },
+      eligibleKeys,
+    );
   };
 
   const _currentPortfolioConfig = (force: boolean): BacktestStartConfig => ({
@@ -251,8 +314,18 @@ export default function MomentumBacktester() {
     loadCurrentPicksSnapshots();
   };
 
-  const saveBacktest = async () => {
-    if (!result || !saveName.trim()) return;
+  // Persist every `ok` variant from the current sweep as one row. Variants
+  // still pending / running / cancelled / errored are skipped — only
+  // completed-ok payloads land in the bundle. Loading later rehydrates the
+  // sweep state so the detail views switch between variants exactly like
+  // they did during the live sweep.
+  const saveVariantsBundle = async () => {
+    if (!saveName.trim()) return;
+    const okEntries = VARIANT_DEFS.flatMap((v) => {
+      const o = variants[v.key];
+      return o?.status === 'ok' ? [{ def: v, result: o.result }] : [];
+    });
+    if (okEntries.length === 0) return;
     setSaving(true);
     try {
       const resp = await fetch(`${API_URL}/api/momentum/backtests`, {
@@ -269,12 +342,18 @@ export default function MomentumBacktester() {
             top_n_per_sector: topPerSector,
             universe_label: null,
             index_universe: selectedIndexUniverse || null,
-            selection_mode: selectionMode,
-            random_seed: selectionMode === 'random' ? randomSeed : null,
-            n_trials: selectionMode === 'random' ? Math.max(1, nTrials) : 1,
+            selection_mode: 'momentum',
+            random_seed: null,
+            n_trials: 1,
           },
-          summary: result.summary,
-          monthly_records: result.monthly_records,
+          variants: okEntries.map(({ def, result: r }) => ({
+            key: def.key,
+            label: def.label,
+            frequency: def.frequency,
+            strategy: def.strategy,
+            summary: r.summary,
+            monthly_records: r.monthly_records,
+          })),
           universe,
         }),
       });
@@ -310,6 +389,42 @@ export default function MomentumBacktester() {
 
       // Restore result — saved runs store the payload under `result`.
       const saved = data.result ?? data;
+
+      // Variant bundle: rehydrate the sweep state instead of the single
+      // `result`. The detail views (equity curve, holdings, sector
+      // timeline) switch on `activeVariantKey`, so they pick this up
+      // automatically.
+      if (saved.kind === 'variants' && Array.isArray(saved.variants)) {
+        const next: Partial<Record<VariantKey, VariantOutcome>> = {};
+        let firstKey: VariantKey | null = null;
+        for (const v of saved.variants) {
+          const key = v?.key as VariantKey | undefined;
+          if (!key) continue;
+          next[key] = {
+            status: 'ok',
+            result: {
+              summary: v.summary,
+              monthly_records: v.monthly_records ?? [],
+            },
+          };
+          if (firstKey == null) firstKey = key;
+        }
+        momentumStore.set({
+          result: null,
+          variants: next,
+          activeVariantKey: firstKey,
+          variantsRun: null,
+          universe: saved.universe ?? [],
+          loadedRunId: runId,
+          error: null,
+          warnings: [],
+          infos: [],
+          progress: [],
+        });
+        return;
+      }
+
+      // Single-run shape (legacy + default).
       momentumStore.set({
         result: {
           monthly_records: saved.monthly_records ?? [],
@@ -324,6 +439,9 @@ export default function MomentumBacktester() {
             top_drawdowns: [],
           },
         },
+        variants: {},
+        activeVariantKey: null,
+        variantsRun: null,
         universe: saved.universe ?? [],
         loadedRunId: runId,
         error: null,
@@ -578,13 +696,93 @@ export default function MomentumBacktester() {
                 </div>
               </>
             )}
-            <button
-              onClick={runBacktest}
-              disabled={running}
-              className="px-5 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {running ? 'Running...' : 'Run Backtest'}
-            </button>
+            {(() => {
+              const eligibleCount = VARIANT_DEFS
+                .filter((v) => selectedVariantKeys.has(v.key))
+                .filter((v) => selectionMode !== 'random' || v.strategy !== 'long_short')
+                .length;
+              return (
+                <div className="relative inline-flex" ref={variantsPickerRef}>
+                  <button
+                    onClick={runVariantsBacktest}
+                    disabled={running || variantsRunning || eligibleCount === 0}
+                    className="px-5 py-2 rounded-l-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={
+                      eligibleCount === 0
+                        ? selectionMode === 'random'
+                          ? 'Random selection requires at least one long-only variant (long-short is unsupported in random mode)'
+                          : 'Select at least one variant to run'
+                        : `Run ${eligibleCount} selected variant${eligibleCount === 1 ? '' : 's'} and compare them in one table`
+                    }
+                  >
+                    {variantsRunning
+                      ? `Running variants ${variantsRun?.completed ?? 0}/${variantsRun?.total ?? 0}…`
+                      : `Run variants (${eligibleCount})`}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVariantsPickerOpen((o) => !o)}
+                    disabled={running || variantsRunning}
+                    className="px-2 py-2 rounded-r-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Choose which variants to include in the sweep"
+                    aria-label="Choose variants"
+                  >
+                    <svg className={`w-3.5 h-3.5 transition-transform ${variantsPickerOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                  {variantsPickerOpen && (
+                    <div className="absolute top-full left-0 mt-1 w-72 bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-medium text-gray-300">Variants to run</span>
+                        <div className="flex items-center gap-2 text-[11px]">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedVariantKeys(new Set(VARIANT_DEFS.map((v) => v.key)))}
+                            className="text-indigo-400 hover:text-indigo-300"
+                          >
+                            All
+                          </button>
+                          <span className="text-gray-700">·</span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedVariantKeys(new Set())}
+                            className="text-gray-400 hover:text-gray-200"
+                          >
+                            None
+                          </button>
+                        </div>
+                      </div>
+                      {selectionMode === 'random' && (
+                        <div className="mb-2 px-2 py-1.5 text-[10px] text-amber-300/80 bg-amber-500/5 border border-amber-500/20 rounded">
+                          Long-short is disabled in random mode (no signal-driven score to short on).
+                        </div>
+                      )}
+                      <ul className="space-y-1 max-h-72 overflow-auto">
+                        {VARIANT_DEFS.map((v) => {
+                          const checked = selectedVariantKeys.has(v.key);
+                          const disabled = selectionMode === 'random' && v.strategy === 'long_short';
+                          return (
+                            <li key={v.key}>
+                              <label className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs ${disabled ? 'text-gray-600 cursor-not-allowed' : 'text-gray-300 hover:bg-white/5 cursor-pointer'}`}>
+                                <input
+                                  type="checkbox"
+                                  checked={checked && !disabled}
+                                  disabled={disabled}
+                                  onChange={() => toggleVariantKey(v.key)}
+                                  className="accent-indigo-500 w-3.5 h-3.5 cursor-pointer disabled:cursor-not-allowed"
+                                />
+                                <span>{v.label}</span>
+                              </label>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             <button
               onClick={showCurrentPicks}
               disabled={running || selectionMode === 'random'}
@@ -611,12 +809,20 @@ export default function MomentumBacktester() {
               />
               <span className="text-gray-400 text-xs">Don&apos;t use cache</span>
             </label>
-            {running && (
+            {running && !variantsRunning && (
               <button
                 onClick={cancelBacktest}
                 className="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
               >
                 Cancel
+              </button>
+            )}
+            {variantsRunning && (
+              <button
+                onClick={cancelVariantsBacktest}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+              >
+                Cancel variants
               </button>
             )}
           </div>
@@ -1006,19 +1212,26 @@ export default function MomentumBacktester() {
           </div>
         )}
 
-        {/* Results */}
-        {result && (
+        {/* Variant sweep summary — appears as soon as one variant outcome
+            lands and stays visible alongside the active variant's detail
+            views below. Hidden entirely when no sweep has run. */}
+        {hasVariants && <VariantSummaryTable />}
+
+        {/* Results — either the single-run `result` or, when a variant is
+            active, that variant's BacktestResult. The detail components
+            don't care which path the data came from. */}
+        {displayResult && (
           <>
             <EquityCurveCard
-              result={result}
-              loadedRunId={loadedRunId}
+              result={displayResult}
+              loadedRunId={activeVariantResult ? null : loadedRunId}
               savedRuns={savedRuns}
             />
 
-            <SectorTimelineChart result={result} />
+            <SectorTimelineChart result={displayResult} />
 
             <MonthlyHoldingsTable
-              result={result}
+              result={displayResult}
               categories={categories}
               exchangeByCompany={exchangeByCompany}
               scoringConfig={{
@@ -1029,31 +1242,50 @@ export default function MomentumBacktester() {
               }}
             />
 
-            {/* Save */}
-            {!loadedRunId && (
-              <div className="bg-[#151821] rounded-xl border border-gray-800/40 p-4 flex items-center gap-3">
-                <input
-                  value={saveName}
-                  onChange={(e) => setSaveName(e.target.value)}
-                  placeholder="Backtest name..."
-                  className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white flex-1 max-w-xs focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 placeholder-gray-600 transition-colors"
-                  onKeyDown={(e) => { if (e.key === 'Enter') saveBacktest(); }}
-                />
-                <button
-                  onClick={saveBacktest}
-                  disabled={saving || !saveName.trim()}
-                  className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {saving ? 'Saving...' : 'Save Backtest'}
-                </button>
-              </div>
-            )}
+            {/* Variant-bundle save: shown when at least one variant has
+                completed-ok and the bundle hasn't been loaded from disk.
+                One row in `backtest_run` holds all completed variants.
+                Errored / cancelled / pending variants are skipped. */}
+            {hasVariants && !loadedRunId && !variantsRunning && (() => {
+              const okCount = Object.values(variants).filter((o): o is Extract<VariantOutcome, { status: 'ok' }> => o?.status === 'ok').length;
+              const totalCount = Object.keys(variants).length;
+              const skippedCount = totalCount - okCount;
+              return (
+                <div className="bg-[#151821] rounded-xl border border-gray-800/40 p-4 flex items-center gap-3 flex-wrap">
+                  <input
+                    value={saveName}
+                    onChange={(e) => setSaveName(e.target.value)}
+                    placeholder="Variant run name..."
+                    className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white flex-1 max-w-xs focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 placeholder-gray-600 transition-colors"
+                    onKeyDown={(e) => { if (e.key === 'Enter') saveVariantsBundle(); }}
+                  />
+                  <button
+                    onClick={saveVariantsBundle}
+                    disabled={saving || !saveName.trim() || okCount === 0}
+                    className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={okCount === 0 ? 'No completed variants to save yet' : `Bundle ${okCount} variant${okCount === 1 ? '' : 's'} into one saved run`}
+                  >
+                    {saving ? 'Saving...' : `Save variant run (${okCount})`}
+                  </button>
+                  {skippedCount > 0 && (
+                    <span className="text-xs text-gray-500">
+                      {skippedCount} not saved (cancelled / failed / pending)
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
             {loadedRunId && (
               <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-lg px-4 py-3 text-indigo-400 text-sm flex items-center gap-2">
                 <span>Loaded from saved run</span>
                 <span className="text-indigo-300 font-medium">
                   {savedRuns.find((r) => r.run_id === loadedRunId)?.name}
                 </span>
+                {hasVariants && (
+                  <span className="text-indigo-400/70 text-xs">
+                    · {Object.keys(variants).length} variants
+                  </span>
+                )}
               </div>
             )}
 

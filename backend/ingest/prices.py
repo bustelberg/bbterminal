@@ -5,6 +5,7 @@ and load into metric_data (only dates >= 2023-01-01).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -132,8 +133,15 @@ def _upload_to_storage(supabase: Client, path: str, data: list) -> None:
                 ),
                 description=f"storage.update({path})",
             )
-        except Exception:
-            pass
+        except Exception as upd_e:
+            # Both create and update of the cache JSON failed. Storage
+            # is now stale, but the DB-side freshness check in
+            # ensure_*_for_company will trigger a fresh API fetch on
+            # the next run, so this is recoverable. Log so it's visible.
+            logging.getLogger(__name__).warning(
+                "[storage] update fallback failed for %s: %s: %s",
+                path, type(upd_e).__name__, upd_e,
+            )
 
 
 _HAS_CURL = shutil.which("curl") is not None
@@ -256,8 +264,15 @@ def _db_max_date(supabase: Client, company_id: int, metric_code: str) -> date | 
         )
         if resp.data and resp.data[0].get("target_date"):
             return date.fromisoformat(resp.data[0]["target_date"])
-    except Exception:
-        pass
+    except Exception as e:
+        # Returning None makes the caller treat this as "nothing in DB" and
+        # fall through to the Storage / API path — the right behavior on a
+        # transient blip. But log so the right behavior isn't masking a
+        # persistent Supabase outage.
+        logging.getLogger(__name__).warning(
+            "[_db_max_date] query failed for cid=%s metric=%s: %s: %s",
+            company_id, metric_code, type(e).__name__, e,
+        )
     return None
 
 
@@ -447,7 +462,7 @@ def ensure_prices_for_company(
                 else:
                     _log(f"cache stale ({reason}), refreshing from API")
             else:
-                _log(f"cache exists but parsed 0 prices from it")
+                _log("cache exists but parsed 0 prices from it")
         else:
             _log(f"no cache at {path}")
 

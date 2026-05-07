@@ -314,5 +314,4 @@ To change the strategy the cron uses, edit `cron-current-picks.json` (or whichev
 
 ## Known issues
 
-- Sidebar occasionally disappears after login — likely hydration/auth state timing issue. Hard refresh fixes it.
 - Universe for backtesting uses current company list retroactively (survivorship bias) when no `index_universe` (e.g. SP500, ACWI) is selected — LongEquity-derived snapshots only exist from Aug 2025 onward.

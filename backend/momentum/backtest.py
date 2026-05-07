@@ -10,7 +10,7 @@ from typing import Any, Callable, Literal
 import numpy as np
 import pandas as pd
 
-from .signals import PRICE_SIGNAL_DEFS, compute_price_signals, compute_signals_panel
+from .signals import PRICE_SIGNAL_DEFS, compute_signals_panel
 from .scoring import score_and_select, random_select, _get_category_keys
 
 _logger = logging.getLogger(__name__)
@@ -24,6 +24,20 @@ RebalanceFrequency = Literal[
 ]
 
 _DEFAULT_FREQUENCY: RebalanceFrequency = "monthly"
+
+
+# Long-only = pick top sectors / top names per sector and equal-weight long them.
+# Long-short = also pick bottom sectors / bottom names and short them at 100%
+# gross on each side (200% gross, 0% net). Period return is then
+# mean(long_returns) − mean(short_returns).
+StrategyType = Literal["long_only", "long_short"]
+
+_DEFAULT_STRATEGY: StrategyType = "long_only"
+
+# A holding's `side` decides whether its forward return contributes positively
+# or negatively to the period return. Long-only backtests emit only "long"
+# rows; long-short emits both, dedupe-collisions removed.
+HoldingSide = Literal["long", "short"]
 
 
 def _periods_per_year(freq: RebalanceFrequency) -> float:
@@ -54,6 +68,7 @@ class BacktestConfig:
     selection_mode: str = "momentum"  # "momentum" or "random"
     random_seed: int | None = None  # only used when selection_mode == "random"
     rebalance_frequency: RebalanceFrequency = _DEFAULT_FREQUENCY
+    strategy_type: StrategyType = _DEFAULT_STRATEGY
 
     @classmethod
     def from_dict(cls, d: dict) -> BacktestConfig:
@@ -67,11 +82,12 @@ class BacktestConfig:
             selection_mode=d.get("selection_mode", "momentum"),
             random_seed=d.get("random_seed"),
             rebalance_frequency=d.get("rebalance_frequency", _DEFAULT_FREQUENCY),
+            strategy_type=d.get("strategy_type", _DEFAULT_STRATEGY),
         )
 
 
 @dataclass
-class MonthlyHolding:
+class PeriodHolding:
     company_id: int
     ticker: str
     company_name: str
@@ -87,12 +103,16 @@ class MonthlyHolding:
     exit_price_eur: float | None = None
     entry_date: str | None = None
     exit_date: str | None = None
+    # "long" or "short". forward_return_pct is always the underlying price
+    # return; the period-level aggregator uses `side` to decide the sign of
+    # the contribution. Long-only backtests emit "long" everywhere.
+    side: HoldingSide = "long"
 
 
 @dataclass
-class MonthlyRecord:
+class PeriodRecord:
     date: str  # YYYY-MM
-    holdings: list[MonthlyHolding]
+    holdings: list[PeriodHolding]
     portfolio_return_pct: float | None
     cumulative_return_pct: float
     empty_reason: str | None = None
@@ -139,7 +159,7 @@ class DailyPick:
         day's portfolio held until the next trading day. NULL on the latest
         day in the panel (no next day yet)."""
     date: str                              # YYYY-MM-DD
-    holdings: list[MonthlyHolding]
+    holdings: list[PeriodHolding]
     turnover_abs: int                      # number of holdings that differ from previous day
     turnover_pct: float                    # turnover_abs / max(len(today), len(prev)) * 100
     portfolio_return_pct: float | None = None
@@ -152,7 +172,7 @@ class CurrentPortfolio:
     the first of the current month, MTD return through the latest price)."""
     as_of_date: str       # YYYY-MM-01 — start of current month
     latest_price_date: str | None  # most recent price date observed across the portfolio
-    holdings: list[MonthlyHolding]
+    holdings: list[PeriodHolding]
     daily_picks: list[DailyPick] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -214,7 +234,7 @@ class CurrentPortfolio:
 
 @dataclass
 class BacktestResult:
-    monthly_records: list[MonthlyRecord]
+    monthly_records: list[PeriodRecord]
     summary: BacktestSummary
 
     def to_dict(self) -> dict:
@@ -572,6 +592,13 @@ def run_backtest(
     when supplied, the periods / indices / signal panel are reused instead
     of being recomputed. None means compute fresh.
     """
+    # Random selection has no meaningful interpretation for long-short — a
+    # randomly-picked short bucket is just noise on top of a randomly-picked
+    # long bucket, with no signal-driven structure. Catch it loudly here
+    # instead of silently producing nonsense.
+    if config.strategy_type == "long_short" and config.selection_mode == "random":
+        raise ValueError("long_short strategy is incompatible with random selection mode")
+
     if prepared is None:
         prepared = _prepare_backtest(
             start_date=config.start_date,
@@ -586,7 +613,8 @@ def run_backtest(
     periods = prepared.periods
     price_index = prepared.price_index
     local_price_index = prepared.local_price_index
-    volume_index = prepared.volume_index
+    # volume_index isn't used directly here — it was already incorporated
+    # into the precomputed signal panel during _prepare_backtest.
     panel = prepared.panel
     # Sub-monthly variants need full YYYY-MM-DD on each record so the UI can
     # disambiguate same-month rows. Monthly/2m/3m keep "YYYY-MM" so saved
@@ -599,7 +627,7 @@ def run_backtest(
     def _record_label(d: date) -> str:
         return d.isoformat() if sub_monthly else d.strftime("%b %Y")
 
-    monthly_records: list[MonthlyRecord] = []
+    period_records: list[PeriodRecord] = []
     cumulative = 0.0  # cumulative return in %
     cumulative_factor = 1.0  # multiplicative
     prev_holdings_set: set[int] = set()
@@ -647,7 +675,7 @@ def run_backtest(
                         scope="universe",
                         message=f"{_record_label(period_date)}: {reason}",
                     )
-                monthly_records.append(MonthlyRecord(
+                period_records.append(PeriodRecord(
                     date=_record_date(period_date),
                     holdings=[],
                     portfolio_return_pct=None,
@@ -678,7 +706,7 @@ def run_backtest(
                     scope="backtest",
                     message=f"{_record_label(period_date)}: {reason}",
                 )
-            monthly_records.append(MonthlyRecord(
+            period_records.append(PeriodRecord(
                 date=_record_date(period_date),
                 holdings=[],
                 portfolio_return_pct=None,
@@ -687,24 +715,64 @@ def run_backtest(
             ))
             continue
 
-        # Score and select (or pick at random as a noise-floor baseline)
+        # Select longs (always) and shorts (long-short only). For random
+        # mode there's only ever one bucket — `selected_top` — and shorts
+        # stay empty.
         if rng is not None:
-            selected = random_select(
+            selected_top = random_select(
                 signals_df,
                 top_n_sectors=config.top_n_sectors,
                 top_n_per_sector=config.top_n_per_sector,
                 rng=rng,
             )
+            selected_bottom = pd.DataFrame()
         else:
-            selected = score_and_select(
+            selected_top = score_and_select(
                 signals_df,
                 config.signal_weights,
                 top_n_sectors=config.top_n_sectors,
                 top_n_per_sector=config.top_n_per_sector,
                 category_weights=config.category_weights,
+                direction="top",
             )
+            if config.strategy_type == "long_short":
+                selected_bottom = score_and_select(
+                    signals_df,
+                    config.signal_weights,
+                    top_n_sectors=config.top_n_sectors,
+                    top_n_per_sector=config.top_n_per_sector,
+                    category_weights=config.category_weights,
+                    direction="bottom",
+                )
+                # If a name lands in both books (small universe / overlapping
+                # sector sets), drop it from both. The intent is "go long the
+                # best and short the worst" — keeping a name on both sides
+                # is just self-cancellation that distorts the gross-200%
+                # weight math.
+                if not selected_bottom.empty and not selected_top.empty:
+                    top_ids = set(selected_top["company_id"].astype(int))
+                    bot_ids = set(selected_bottom["company_id"].astype(int))
+                    collisions = top_ids & bot_ids
+                    if collisions:
+                        selected_top = selected_top[
+                            ~selected_top["company_id"].isin(collisions)
+                        ].reset_index(drop=True)
+                        selected_bottom = selected_bottom[
+                            ~selected_bottom["company_id"].isin(collisions)
+                        ].reset_index(drop=True)
+                        if send_event:
+                            send_event(
+                                "warning",
+                                scope="backtest",
+                                message=(
+                                    f"{_record_label(period_date)}: dropped "
+                                    f"{len(collisions)} name(s) appearing on both long and short books"
+                                ),
+                            )
+            else:
+                selected_bottom = pd.DataFrame()
 
-        if selected.empty:
+        if selected_top.empty and selected_bottom.empty:
             n_signals = len(signals_df)
             sectors = signals_df["sector"].nunique() if "sector" in signals_df.columns else 0
             reason = f"{n_signals} companies had signals across {sectors} sectors but none passed selection (top_n_sectors={config.top_n_sectors}, top_n_per_sector={config.top_n_per_sector})"
@@ -720,7 +788,7 @@ def run_backtest(
                     scope="backtest",
                     message=f"{_record_label(period_date)}: {reason}",
                 )
-            monthly_records.append(MonthlyRecord(
+            period_records.append(PeriodRecord(
                 date=_record_date(period_date),
                 holdings=[],
                 portfolio_return_pct=None,
@@ -729,28 +797,29 @@ def run_backtest(
             ))
             continue
 
-        # Equal weight
-        n_holdings = len(selected)
-        weight = 1.0 / n_holdings
-        holdings_counts.append(n_holdings)
+        # Equal weight per side. For long-only the short bucket is empty so
+        # the long book sums to 1.0 (100% gross long). For long-short each
+        # side sums to 1.0 independently → 200% gross, 0% net.
+        n_long = len(selected_top)
+        n_short = len(selected_bottom)
+        long_weight = 1.0 / n_long if n_long > 0 else 0.0
+        short_weight = 1.0 / n_short if n_short > 0 else 0.0
+        holdings_counts.append(n_long + n_short)
 
-        # Compute forward returns using pre-indexed series
-        holdings: list[MonthlyHolding] = []
-        returns: list[float] = []
         entry_ts = pd.Timestamp(period_date)
         exit_ts = pd.Timestamp(next_period)
 
-        for _, row in selected.iterrows():
+        # Closure that fills in price lookups + per-category scores for one
+        # selected row. Returns the holding plus the price return so the
+        # caller can route it into the long or short bucket.
+        def _make_holding(row: pd.Series, side: HoldingSide, w: float) -> tuple[PeriodHolding, float | None]:
             cid = int(row["company_id"])
             series = price_index.get(cid)
-
             entry_price = _price_on_or_after(series, entry_ts) if series is not None else None
             exit_price = _price_on_or_after(series, exit_ts) if series is not None else None
-
-            fwd_return = None
+            fwd_return: float | None = None
             if entry_price and exit_price and entry_price > 0:
                 fwd_return = round((exit_price / entry_price - 1) * 100, 2)
-                returns.append(fwd_return)
 
             local_series = local_price_index.get(cid) if local_price_index is not None else None
             entry_local = _price_on_or_after(local_series, entry_ts) if local_series is not None else None
@@ -761,7 +830,6 @@ def run_backtest(
             entry_dt = _date_on_or_after(date_series, entry_ts) if date_series is not None else None
             exit_dt = _date_on_or_after(date_series, exit_ts) if date_series is not None else None
 
-            # Extract per-category scores
             cat_scores: dict[str, float | None] = {}
             for cat in _get_category_keys():
                 col = f"score_{cat}"
@@ -771,14 +839,14 @@ def run_backtest(
                     cat_scores[cat] = None
 
             score_val = row.get("momentum_score")
-            holdings.append(MonthlyHolding(
+            return PeriodHolding(
                 company_id=cid,
                 ticker=str(row.get("gurufocus_ticker", "")),
                 company_name=str(row.get("company_name", "")),
                 sector=str(row["sector"]),
                 score=round(float(score_val), 2) if pd.notna(score_val) else 0.0,
                 category_scores=cat_scores,
-                weight=weight,
+                weight=w,
                 forward_return_pct=fwd_return,
                 currency=(company_currency or {}).get(cid),
                 entry_price_local=round(entry_local, 4) if entry_local is not None else None,
@@ -787,10 +855,41 @@ def run_backtest(
                 exit_price_eur=round(exit_price, 4) if exit_price is not None else None,
                 entry_date=entry_dt,
                 exit_date=exit_dt,
-            ))
+                side=side,
+            ), fwd_return
 
-        # Portfolio return = equal-weighted average of individual returns
-        port_return = round(float(np.mean(returns)), 2) if returns else None
+        holdings: list[PeriodHolding] = []
+        long_returns: list[float] = []
+        short_returns: list[float] = []
+        for _, row in selected_top.iterrows():
+            h, ret = _make_holding(row, "long", long_weight)
+            holdings.append(h)
+            if ret is not None:
+                long_returns.append(ret)
+        for _, row in selected_bottom.iterrows():
+            h, ret = _make_holding(row, "short", short_weight)
+            holdings.append(h)
+            if ret is not None:
+                short_returns.append(ret)
+
+        # Portfolio return:
+        #   long-only: equal-weighted mean of long returns.
+        #   long-short (gross 100% long + 100% short): mean(long) − mean(short).
+        # If a side is empty (degenerate period), fall back to whatever is
+        # available — the strategy temporarily becomes one-sided.
+        if config.strategy_type == "long_short":
+            long_avg = float(np.mean(long_returns)) if long_returns else None
+            short_avg = float(np.mean(short_returns)) if short_returns else None
+            if long_avg is not None and short_avg is not None:
+                port_return = round(long_avg - short_avg, 2)
+            elif long_avg is not None:
+                port_return = round(long_avg, 2)
+            elif short_avg is not None:
+                port_return = round(-short_avg, 2)
+            else:
+                port_return = None
+        else:
+            port_return = round(float(np.mean(long_returns)), 2) if long_returns else None
 
         if port_return is not None:
             cumulative_factor *= (1 + port_return / 100)
@@ -806,7 +905,7 @@ def run_backtest(
             turnover_values.append(turnover)
         prev_holdings_set = current_set
 
-        monthly_records.append(MonthlyRecord(
+        period_records.append(PeriodRecord(
             date=_record_date(period_date),
             holdings=holdings,
             portfolio_return_pct=port_return,
@@ -821,7 +920,7 @@ def run_backtest(
     annualized = round((cumulative_factor ** (1 / n_years) - 1) * 100, 2) if n_years > 0 else 0
 
     # Identify all drawdown periods (peak-to-trough-to-recovery)
-    values = [(r.date, 1 + r.cumulative_return_pct / 100) for r in monthly_records]
+    values = [(r.date, 1 + r.cumulative_return_pct / 100) for r in period_records]
     all_drawdown_periods = _find_drawdown_periods(values)
     # Pick top 3 non-overlapping
     top_drawdowns = _pick_top_n_non_overlapping(all_drawdown_periods, 3)
@@ -851,7 +950,7 @@ def run_backtest(
     if send_event:
         send_event("progress", month="done", pct=100, message="Backtest complete")
 
-    return BacktestResult(monthly_records=monthly_records, summary=summary)
+    return BacktestResult(monthly_records=period_records, summary=summary)
 
 
 def run_multi_trial_backtest(
@@ -871,8 +970,8 @@ def run_multi_trial_backtest(
 
     Headline summary stats are means across trials; *_std fields hold the
     cross-trial standard deviation. The equity curve (cumulative_return_pct
-    on each MonthlyRecord) is the per-month mean across trials. Holdings
-    on each MonthlyRecord come from the first trial — they're random
+    on each PeriodRecord) is the per-month mean across trials. Holdings
+    on each PeriodRecord come from the first trial — they're random
     anyway, so aggregating them isn't meaningful.
 
     Forces selection_mode="random". Caller controls the base seed via
@@ -926,6 +1025,7 @@ def run_multi_trial_backtest(
             selection_mode="random",
             random_seed=base_seed + i,
             rebalance_frequency=config.rebalance_frequency,
+            strategy_type=config.strategy_type,
         )
         # No per-month progress for individual trials — too noisy.
         result = run_backtest(
@@ -944,7 +1044,7 @@ def run_multi_trial_backtest(
     # Aggregate: per-month mean cumulative return across trials. All trials
     # iterate the same month grid so records align by index.
     n_months = max(len(r.monthly_records) for r in trial_results)
-    aggregated_records: list[MonthlyRecord] = []
+    aggregated_records: list[PeriodRecord] = []
     base_records = trial_results[0].monthly_records  # holdings + dates from trial 0
     for m_idx in range(n_months):
         cum_values = []
@@ -959,7 +1059,7 @@ def run_multi_trial_backtest(
         if not cum_values:
             continue
         base = base_records[m_idx] if m_idx < len(base_records) else None
-        aggregated_records.append(MonthlyRecord(
+        aggregated_records.append(PeriodRecord(
             date=base.date if base else "",
             holdings=base.holdings if base else [],
             portfolio_return_pct=round(float(np.mean(port_returns)), 2) if port_returns else None,
@@ -1146,7 +1246,7 @@ def run_current_portfolio(
     weight = 1.0 / n_holdings
     entry_ts = pd.Timestamp(month_start)
 
-    holdings: list[MonthlyHolding] = []
+    holdings: list[PeriodHolding] = []
     latest_observed: pd.Timestamp | None = None
 
     for _, row in selected.iterrows():
@@ -1185,7 +1285,7 @@ def run_current_portfolio(
                 cat_scores[cat] = None
 
         score_val = row.get("momentum_score")
-        holdings.append(MonthlyHolding(
+        holdings.append(PeriodHolding(
             company_id=cid,
             ticker=str(row.get("gurufocus_ticker", "")),
             company_name=str(row.get("company_name", "")),
@@ -1249,7 +1349,7 @@ def run_current_portfolio(
 
         day_ts = pd.Timestamp(d)
         day_weight = 1.0 / len(daily_selected)
-        day_holdings: list[MonthlyHolding] = []
+        day_holdings: list[PeriodHolding] = []
         today_ids: set[int] = set()
 
         # Each daily pick is its own 1-day portfolio: bought at THAT day's
@@ -1316,7 +1416,7 @@ def run_current_portfolio(
                 else:
                     cat_scores[cat] = None
 
-            day_holdings.append(MonthlyHolding(
+            day_holdings.append(PeriodHolding(
                 company_id=cid,
                 ticker=str(drow.get("gurufocus_ticker", "")),
                 company_name=str(drow.get("company_name", "")),
