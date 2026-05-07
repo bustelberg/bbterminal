@@ -157,7 +157,8 @@ export type VariantOutcome =
   | { status: 'pending' }
   | { status: 'running' }
   | { status: 'ok'; result: BacktestResult }
-  | { status: 'error'; message: string };
+  | { status: 'error'; message: string }
+  | { status: 'cancelled' };
 
 export type VariantsRunState = {
   /** Currently-executing variant key, or null between runs. */
@@ -325,9 +326,12 @@ export async function startBacktest(cfg: BacktestStartConfig): Promise<void> {
       }
     }
   } catch (e) {
-    if ((e as { name?: string })?.name === 'AbortError') {
-      // user-initiated cancel
-    } else {
+    // Chrome can surface an aborted fetch as `TypeError: Failed to
+    // fetch` rather than a DOMException with name=AbortError. Trust the
+    // signal state to distinguish a user cancel from a real failure.
+    const isCancel =
+      controller.signal.aborted || (e as { name?: string })?.name === 'AbortError';
+    if (!isCancel) {
       momentumStore.set({ error: e instanceof Error ? e.message : 'Unknown error' });
     }
     momentumStore.set({ running: false, runEndedAt: Date.now() });
@@ -354,10 +358,13 @@ export function cancelBacktest(): void {
 let variantsAbortController: AbortController | null = null;
 
 /** Drain one backtest SSE call to completion, returning the BacktestResult.
- * Throws on error or abort. Doesn't touch the single-run momentumStore
- * fields — purpose-built for the variants sweep. */
+ * Throws on error or abort. Forwards progress / warning / info events into
+ * the shared momentumStore (prefixed with `variantLabel`) so the existing
+ * ProgressTimeline panel reflects what's happening for the in-flight
+ * variant. */
 async function _runOneVariant(
   cfg: BacktestStartConfig,
+  variantLabel: string,
   signal: AbortSignal,
 ): Promise<BacktestResult> {
   let result: BacktestResult | null = null;
@@ -372,17 +379,39 @@ async function _runOneVariant(
     (raw) => {
       const data = raw as {
         type: string;
+        pct?: number;
         message?: string;
+        scope?: string;
         data?: BacktestResult;
       };
-      if (data.type === 'result') {
+      if (data.type === 'progress') {
+        momentumStore.set((s) => ({
+          progress: [...s.progress, {
+            pct: data.pct ?? 0,
+            message: `[${variantLabel}] ${data.message ?? ''}`,
+            t: Date.now(),
+          }],
+        }));
+      } else if (data.type === 'warning') {
+        momentumStore.set((s) => ({
+          warnings: [...s.warnings, {
+            scope: data.scope ?? 'backtest',
+            message: `[${variantLabel}] ${data.message ?? ''}`,
+          }],
+        }));
+      } else if (data.type === 'info') {
+        momentumStore.set((s) => ({
+          infos: [...s.infos, {
+            scope: data.scope ?? 'backtest',
+            message: `[${variantLabel}] ${data.message ?? ''}`,
+          }],
+        }));
+      } else if (data.type === 'result') {
         result = (data.data as BacktestResult) ?? null;
       } else if (data.type === 'error') {
         errorMsg = data.message ?? 'Unknown error';
       }
-      // Ignore progress / warning / info / done events — the per-variant
-      // detail panes will show whatever's in the result; the sweep-level
-      // progress UI just tracks completion counts.
+      // Ignore done — the sweep tracks its own completion.
     },
     signal,
   );
@@ -391,39 +420,63 @@ async function _runOneVariant(
   return result;
 }
 
-/** Run all 10 variants sequentially against the given base config. The
- * `selection_mode`, `random_seed`, `n_trials`, and `force_recompute` fields
- * carry over from `base`; `rebalance_frequency` and `strategy_type` are
- * overwritten per variant. Random + long-short is forbidden by the backend,
- * so this helper coerces `selection_mode` to "momentum" — the random
- * baseline isn't part of the variants story. */
+/** Run the selected variants sequentially against the given base config.
+ * `keys` defaults to every variant in `VARIANT_DEFS`. `selection_mode`,
+ * `random_seed`, `n_trials`, and `force_recompute` carry over from `base`;
+ * `rebalance_frequency` and `strategy_type` are overwritten per variant.
+ *
+ * Caller is responsible for filtering out incompatible variants — the
+ * backend rejects `long_short` + `random` (long-short selection without
+ * a signal-driven score is meaningless), so the UI must not pass those
+ * pairs in `keys` when `base.selection_mode === 'random'`.
+ *
+ * Sweeps drive the same `running` / `progress` / `runStartedAt` fields as
+ * a single backtest so the existing ProgressTimeline lights up while a
+ * sweep is in flight; per-variant log lines are prefixed with the variant
+ * label. */
 export async function startVariantsBacktest(
   base: Omit<BacktestStartConfig, 'rebalance_frequency' | 'strategy_type' | 'mode'>,
+  keys?: readonly VariantKey[],
 ): Promise<void> {
   variantsAbortController?.abort();
   const controller = new AbortController();
   variantsAbortController = controller;
 
-  // Reset sweep state. Pre-seed every variant with `pending` so the UI can
-  // render placeholder rows before any result lands.
+  // Resolve which variants to run, preserving VARIANT_DEFS display order so
+  // the summary table reads consistently.
+  const selectedSet = new Set<VariantKey>(keys ?? VARIANT_DEFS.map((v) => v.key));
+  const targets = VARIANT_DEFS.filter((v) => selectedSet.has(v.key));
+  if (targets.length === 0) return;
+
+  // Reset sweep state. Only pre-seed variants we plan to run — un-selected
+  // keys stay absent from `variants` so the summary table doesn't render
+  // ghost rows for them.
   const initial: Partial<Record<VariantKey, VariantOutcome>> = {};
-  for (const v of VARIANT_DEFS) initial[v.key] = { status: 'pending' };
+  for (const v of targets) initial[v.key] = { status: 'pending' };
+  const startedAt = Date.now();
   momentumStore.set({
     variants: initial,
     activeVariantKey: null,
     variantsRun: {
       current: null,
       completed: 0,
-      total: VARIANT_DEFS.length,
-      startedAt: Date.now(),
+      total: targets.length,
+      startedAt,
     },
+    // Drive the shared progress UI as if this were a single long run.
+    running: true,
+    progress: [],
     error: null,
     warnings: [],
     infos: [],
+    runStartedAt: startedAt,
+    runEndedAt: null,
   });
 
-  for (const variant of VARIANT_DEFS) {
-    if (controller.signal.aborted) break;
+  let aborted = false;
+
+  for (const variant of targets) {
+    if (controller.signal.aborted) { aborted = true; break; }
 
     momentumStore.set((s) => ({
       variants: { ...s.variants, [variant.key]: { status: 'running' } },
@@ -434,15 +487,12 @@ export async function startVariantsBacktest(
 
     const cfg: BacktestStartConfig = {
       ...base,
-      selection_mode: 'momentum',  // long-short forbids random; coerce
-      random_seed: null,
-      n_trials: 1,
       rebalance_frequency: variant.frequency,
       strategy_type: variant.strategy,
     };
 
     try {
-      const result = await _runOneVariant(cfg, controller.signal);
+      const result = await _runOneVariant(cfg, variant.label, controller.signal);
       momentumStore.set((s) => {
         // Auto-select the first variant that completes so detail views have
         // something to show without a click.
@@ -456,7 +506,13 @@ export async function startVariantsBacktest(
         };
       });
     } catch (e) {
-      if ((e as { name?: string })?.name === 'AbortError') break;
+      // Chrome can surface an aborted fetch as `TypeError: Failed to
+      // fetch` rather than a DOMException with name=AbortError, so trust
+      // the signal state — it's the only reliable cancellation signal.
+      if (controller.signal.aborted || (e as { name?: string })?.name === 'AbortError') {
+        aborted = true;
+        break;
+      }
       const msg = e instanceof Error ? e.message : String(e);
       momentumStore.set((s) => ({
         variants: { ...s.variants, [variant.key]: { status: 'error', message: msg } },
@@ -467,15 +523,36 @@ export async function startVariantsBacktest(
     }
   }
 
+  if (aborted) {
+    // Mark the in-flight variant + every still-pending variant as
+    // cancelled so the table doesn't leave a spinner spinning forever.
+    momentumStore.set((s) => {
+      const next = { ...s.variants };
+      for (const v of targets) {
+        const cur = next[v.key];
+        if (cur?.status === 'running' || cur?.status === 'pending') {
+          next[v.key] = { status: 'cancelled' };
+        }
+      }
+      return { variants: next };
+    });
+  }
+
   momentumStore.set((s) => ({
     variantsRun: s.variantsRun ? { ...s.variantsRun, current: null } : null,
+    running: false,
+    runEndedAt: Date.now(),
   }));
   if (variantsAbortController === controller) variantsAbortController = null;
 }
 
 export function cancelVariantsBacktest(): void {
   variantsAbortController?.abort();
-  variantsAbortController = null;
+  // Don't null out `variantsAbortController` here — `startVariantsBacktest`
+  // is still inside its loop and will clear it from the `finally` path
+  // once the AbortError unwinds. Resetting `current` here only flips the
+  // sweep header out of "running"; the loop's post-abort cleanup handles
+  // the per-row 'cancelled' transitions.
   momentumStore.set((s) => ({
     variantsRun: s.variantsRun ? { ...s.variantsRun, current: null } : null,
   }));

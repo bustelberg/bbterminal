@@ -52,7 +52,7 @@ export default function VariantSummaryTable() {
           </tr>
         </thead>
         <tbody>
-          {VARIANT_DEFS.map((v) => (
+          {VARIANT_DEFS.filter((v) => variants[v.key] != null).map((v) => (
             <VariantRow
               key={v.key}
               variantKey={v.key}
@@ -131,6 +131,9 @@ function VariantRow({
         <div className="flex items-center gap-2">
           <StatusBadge status={status} />
           <span className={isActive ? 'text-white font-medium' : ''}>{label}</span>
+          {status === 'cancelled' && (
+            <span className="text-[10px] text-gray-500 italic">cancelled</span>
+          )}
         </div>
         {status === 'error' && outcome?.status === 'error' && (
           <div className="text-[10px] text-rose-400 mt-0.5 font-mono">{outcome.message}</div>
@@ -189,6 +192,9 @@ function StatusBadge({ status }: { status: VariantOutcome['status'] }) {
   }
   if (status === 'ok') {
     return <span className="inline-block w-2 h-2 rounded-full bg-emerald-400" title="Done" />;
+  }
+  if (status === 'cancelled') {
+    return <span className="inline-block w-2 h-2 rounded-full bg-gray-500" title="Cancelled" />;
   }
   return <span className="inline-block w-2 h-2 rounded-full bg-rose-500" title="Error" />;
 }

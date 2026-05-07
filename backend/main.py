@@ -3244,22 +3244,42 @@ async def momentum_backtest(req: BacktestRequest):
 class SaveBacktestRequest(BaseModel):
     name: str
     config: dict
-    summary: dict
-    monthly_records: list
+    # Single-run shape — provide summary + monthly_records.
+    summary: dict | None = None
+    monthly_records: list | None = None
+    # Variant-bundle shape — provide a list of variants, each
+    # {key, label, summary, monthly_records}. When present,
+    # `summary` / `monthly_records` are ignored and the row is stored as
+    # `result = {kind: "variants", variants, universe}`.
+    variants: list | None = None
     universe: list  # [{company_id, ticker, exchange, company_name, sector}]
 
 
 @app.post("/api/momentum/backtests")
 async def save_backtest(req: SaveBacktestRequest):
-    """Save a backtest run to the database."""
-    row = {
-        "name": req.name.strip(),
-        "config": req.config,
-        "result": {
+    """Save a backtest run to the database. Accepts either a single-run
+    shape (summary + monthly_records) or a variant bundle (variants[])."""
+    if req.variants is not None:
+        result_blob = {
+            "kind": "variants",
+            "variants": req.variants,
+            "universe": req.universe,
+        }
+    else:
+        if req.summary is None or req.monthly_records is None:
+            raise HTTPException(
+                422,
+                "Single-run save requires summary and monthly_records",
+            )
+        result_blob = {
             "summary": req.summary,
             "monthly_records": req.monthly_records,
             "universe": req.universe,
-        },
+        }
+    row = {
+        "name": req.name.strip(),
+        "config": req.config,
+        "result": result_blob,
     }
     resp = await asyncio.to_thread(
         lambda: supabase.table("backtest_run").insert(row).execute()
