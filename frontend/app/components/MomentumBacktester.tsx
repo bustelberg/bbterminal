@@ -882,7 +882,7 @@ export default function MomentumBacktester() {
               </svg>
             </button>
             {picksDropdownOpen && (
-              <div className="absolute right-0 mt-1 w-80 bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-96 overflow-auto">
+              <div className="absolute right-0 mt-1 w-max min-w-[280px] max-w-[90vw] bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-96 overflow-auto">
                 {selectedSnapshotIds.size > 0 && (
                   <div className="sticky top-0 z-10 bg-[#1a1d27] border-b border-gray-700 px-3 py-2 flex items-center justify-between gap-2">
                     <span className="text-xs text-gray-300">
@@ -932,15 +932,15 @@ export default function MomentumBacktester() {
                         type="button"
                         onClick={() => { loadCurrentPicksSnapshot(s.snapshot_id); setPicksDropdownOpen(false); }}
                         disabled={isLoadingThis || isDeletingThis}
-                        className="flex-1 text-left min-w-0 disabled:opacity-60"
+                        className="flex-1 text-left disabled:opacity-60"
                       >
-                        <div className={`text-sm truncate flex items-center gap-1.5 ${isActive ? 'text-indigo-300' : 'text-gray-200'}`}>
+                        <div className={`text-sm flex items-center gap-1.5 whitespace-nowrap ${isActive ? 'text-indigo-300' : 'text-gray-200'}`}>
                           {isLoadingThis && <Spinner />}
-                          <span className="truncate">
+                          <span>
                             {customName || `${s.created_at.slice(0, 16).replace('T', ' ')}`}
                           </span>
                         </div>
-                        <div className="text-[10px] text-gray-500 font-mono">
+                        <div className="text-[10px] text-gray-500 font-mono whitespace-nowrap">
                           {customName
                             ? `${s.created_at.slice(0, 10)} · ${s.triggered_by} · as of ${s.as_of_date.slice(0, 10)}`
                             : `${s.triggered_by} · as of ${s.as_of_date.slice(0, 10)}`}
@@ -1009,7 +1009,7 @@ export default function MomentumBacktester() {
               </svg>
             </button>
             {savedDropdownOpen && (
-              <div className="absolute right-0 mt-1 w-80 bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-96 overflow-auto">
+              <div className="absolute right-0 mt-1 w-max min-w-[280px] max-w-[90vw] bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-96 overflow-auto">
                 {selectedRunIds.size > 0 && (
                   <div className="sticky top-0 z-10 bg-[#1a1d27] border-b border-gray-700 px-3 py-2 flex items-center justify-between gap-2">
                     <span className="text-xs text-gray-300">
@@ -1058,11 +1058,11 @@ export default function MomentumBacktester() {
                         type="button"
                         onClick={() => { loadBacktest(r.run_id); setSavedDropdownOpen(false); }}
                         disabled={isLoadingThis || isDeletingThis}
-                        className="flex-1 text-left min-w-0 disabled:opacity-60"
+                        className="flex-1 text-left disabled:opacity-60"
                       >
-                        <div className={`text-sm truncate flex items-center gap-1.5 ${isActive ? 'text-indigo-300' : 'text-gray-200'}`}>
+                        <div className={`text-sm flex items-center gap-1.5 whitespace-nowrap ${isActive ? 'text-indigo-300' : 'text-gray-200'}`}>
                           {isLoadingThis && <Spinner />}
-                          <span className="truncate">{r.name}</span>
+                          <span>{r.name}</span>
                         </div>
                         <div className="text-[10px] text-gray-500 font-mono">{new Date(r.created_at).toLocaleDateString()}</div>
                       </button>

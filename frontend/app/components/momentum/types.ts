@@ -12,8 +12,11 @@ export type SavedRun = {
   run_id: number;
   name: string;
   created_at: string;
-  config: Record<string, unknown>;
-  summary: Summary;
+  // config + summary are populated only by the per-run load endpoint
+  // (/api/momentum/backtests/{run_id}). The list endpoint trims them
+  // out to keep the dropdown payload small.
+  config?: Record<string, unknown>;
+  summary?: Summary;
 };
 
 export type BenchmarkOption = {
