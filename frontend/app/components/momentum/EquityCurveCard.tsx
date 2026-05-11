@@ -126,6 +126,17 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
     months: string[]; // sorted
   };
 
+  // If ANY comparison lacks daily_records (saved backtests are persisted with
+  // only monthly_records on the server side), we cannot honestly mix daily
+  // (YYYY-MM-DD) and monthly (YYYY-MM) date keys — lexicographic string
+  // alignment of those two formats produces empty windows in some date
+  // ranges. Downgrade every series (including the active one) to monthly so
+  // the comparison renders at a common cadence. When every series carries a
+  // daily curve, we keep daily resolution.
+  const forceMonthlyAcrossAllSeries = useMemo(() => {
+    return comparisons.some((c) => c.kind === 'saved' && (!c.daily || c.daily.length === 0));
+  }, [comparisons]);
+
   const resolvedSeries = useMemo<ResolvedSeries[]>(() => {
     const out: ResolvedSeries[] = [];
     let colorIdx = 0;
@@ -142,11 +153,41 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
       return { map, months };
     };
 
+    /** Downsample a daily curve to one point per month (last observation
+     * wins for each YYYY-MM bucket). Used when any comparison forces
+     * monthly cadence — otherwise YYYY-MM and YYYY-MM-DD strings won't
+     * align. */
+    const fromDailyAsMonthly = (daily: DailyRecord[]): { map: Map<string, number>; months: string[] } => {
+      const map = new Map<string, number>();
+      for (const d of daily) {
+        const m = d.date.slice(0, 7); // YYYY-MM
+        map.set(m, 1 + d.cumulative_return_pct / 100);
+      }
+      return { map, months: Array.from(map.keys()).sort() };
+    };
+
+    const fromBenchmarkAsMonthly = (prices: BenchmarkPrice[]): { map: Map<string, number>; months: string[] } => {
+      if (prices.length === 0) return { map: new Map(), months: [] };
+      const sorted = prices.slice().sort((a, b) => a.target_date.localeCompare(b.target_date));
+      const p0 = sorted[0].price;
+      if (!p0 || p0 <= 0) return { map: new Map(), months: [] };
+      // Last observation per YYYY-MM
+      const map = new Map<string, number>();
+      for (const p of sorted) {
+        const m = p.target_date.slice(0, 7);
+        map.set(m, p.price / p0);
+      }
+      return { map, months: Array.from(map.keys()).sort() };
+    };
+
     /** Prefer daily_records when present so the chart line, max DD, and
      * Sharpe all reflect intra-period moves. Falls back to monthly_records
-     * for older saved runs that don't carry the daily curve. */
+     * for older saved runs that don't carry the daily curve. When
+     * forceMonthlyAcrossAllSeries is set, the daily curve is downsampled
+     * to monthly so all series share the YYYY-MM keying. */
     const fromResult = (r: BacktestResult): { map: Map<string, number>; months: string[] } => {
       if (r.daily_records && r.daily_records.length > 0) {
+        if (forceMonthlyAcrossAllSeries) return fromDailyAsMonthly(r.daily_records);
         const map = new Map<string, number>();
         const dates: string[] = [];
         for (const d of r.daily_records) {
@@ -209,7 +250,9 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
           months,
         });
       } else {
-        const { map, months } = fromPrices(c.prices);
+        const { map, months } = forceMonthlyAcrossAllSeries
+          ? fromBenchmarkAsMonthly(c.prices)
+          : fromPrices(c.prices);
         out.push({
           id: c.id,
           label: c.label,
