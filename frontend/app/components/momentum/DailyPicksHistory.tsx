@@ -53,7 +53,8 @@ export default function DailyPicksHistory({ currentPortfolio, categories, exchan
           Hypothetical: what the strategy would pick if rebalancing on each day. <span className="text-gray-400">MTD (chain)</span> is the cumulative return through that day, chain-linked across rebalances. <span className="text-gray-400">Next day</span> is that day&apos;s portfolio held one trading day forward. Past months are read-only — only days already saved are shown.
         </div>
       </div>
-      <table className="w-full text-xs">
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs min-w-max">
         <thead>
           <tr className="border-b border-gray-800/40 text-gray-600">
             <th className="text-left px-4 py-2 font-medium">
@@ -293,8 +294,9 @@ export default function DailyPicksHistory({ currentPortfolio, categories, exchan
               </Fragment>
             );
           })}
-        </tbody>
-      </table>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

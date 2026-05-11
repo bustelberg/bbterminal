@@ -801,16 +801,16 @@ export default function MomentumBacktester() {
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden">
       {/* Header */}
-      <div className="px-8 py-5 border-b border-gray-800/60 flex items-center justify-between">
-        <div>
+      <div className="px-8 py-5 border-b border-gray-800/60 flex flex-wrap items-center justify-between gap-y-3">
+        <div className="min-w-0">
           <h1 className="text-lg font-semibold text-white">Momentum Backtester</h1>
           <p className="text-xs text-gray-500 mt-0.5">
             Price momentum portfolio — equal-weight, monthly rebalancing, sector-filtered
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center justify-end gap-3 min-w-0">
           <ApiUsageBadge />
         {(() => {
           const picksEmpty = !picksListLoading && currentPicksSnapshots.length === 0;
@@ -1070,7 +1070,7 @@ export default function MomentumBacktester() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto px-8 py-5 space-y-5">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-8 py-5 space-y-5">
         {/* Config Panel */}
         <div className="bg-[#151821] rounded-xl border border-gray-800/40 p-5">
           <div className="flex flex-wrap items-end gap-5 mb-5">
@@ -1577,8 +1577,8 @@ export default function MomentumBacktester() {
             }
           >
             {currentPortfolio.holdings.length > 0 ? (
-              <div className="bg-[#0f1117] px-5 py-3">
-                <table className="w-full text-xs">
+              <div className="bg-[#0f1117] px-5 py-3 overflow-x-auto">
+                <table className="w-full text-xs min-w-max">
                   <thead>
                     <tr className="text-gray-600">
                       <th className="text-left py-1 font-medium">
