@@ -35,7 +35,7 @@ from .types import (
     _periods_per_year,
     _SECTOR_ALIASES,
 )
-from .dates import _generate_month_starts, _generate_rebalance_dates
+from .dates import _generate_rebalance_dates
 from .indices import (
     _build_price_index,
     _build_volume_index,
