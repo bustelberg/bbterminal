@@ -83,6 +83,7 @@ app = FastAPI()
 
 _cors_origins = [
     "http://localhost:3000",
+    "http://localhost:3001",
     "https://bbterminal.vercel.app",
     "https://bbterminal-api.vercel.app",
 ]
@@ -2257,9 +2258,15 @@ class BacktestRequest(BaseModel):
     # value never silently routes through a default branch downstream
     # (e.g. an unknown `mode` quietly behaving like "backtest"). New
     # variants need to be added here AND wherever the value is consumed.
-    selection_mode: Literal["momentum", "random", "all"] = "momentum"
+    selection_mode: Literal["momentum", "random", "all", "sector_etf"] = "momentum"
     random_seed: int | None = None  # only used when selection_mode == "random"
     n_trials: int = 1  # >1 only valid with selection_mode=="random"; aggregates mean ± std
+    # Required when selection_mode == "sector_etf": maps sector name → benchmark_id.
+    # The strategy ranks sectors via stock-aggregate momentum then holds the
+    # mapped ETF for each picked sector (one per sector). Reuses /benchmarks
+    # data for ETF prices; only benchmarks with a non-null `sector` tag are
+    # eligible.
+    sector_etfs: dict[str, int] | None = None
     mode: Literal["backtest", "current_portfolio"] = "backtest"
     force_recompute: bool = False  # ignore cached result and recompute (applies to backtest + current_portfolio)
     # When true (the default for the user-facing buttons), the compute uses
@@ -2542,6 +2549,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             "random_seed": req.random_seed,
             "rebalance_frequency": req.rebalance_frequency,
             "strategy_type": req.strategy_type,
+            "sector_etfs": req.sector_etfs,
         })
 
         data_cutoff = date.fromisoformat(req.end_date)
@@ -3324,7 +3332,10 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                         # the error properly.
                         continue
                     if len(_periods) >= 2:
-                        _union_cutoffs.update(_periods[:-1])
+                        # Include every rebalance date (not just periods[:-1])
+                        # — the last entry becomes the open-period entry in
+                        # run_backtest and needs signals at that cutoff too.
+                        _union_cutoffs.update(_periods)
                 if _union_cutoffs:
                     yield _emit({
                         "type": "progress",
@@ -3341,6 +3352,46 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                         monthly_eligible=monthly_eligible,
                         union_cutoffs=sorted(_union_cutoffs),
                     )
+
+            # Sector-ETF mode: prefetch benchmark prices once for the whole
+            # sweep so every variant shares them (same shape as the
+            # single-run path above; pulled out to its own block so the
+            # variant loop can reference the names).
+            variant_benchmark_price_index: dict[int, pd.Series] | None = None
+            variant_benchmark_meta: dict[int, tuple[str, str]] | None = None
+            if req.selection_mode == "sector_etf" and req.sector_etfs:
+                _bm_ids = sorted({int(v) for v in req.sector_etfs.values()})
+                if _bm_ids:
+                    _meta_resp = await asyncio.to_thread(
+                        lambda: supabase.table("benchmark")
+                        .select("benchmark_id, ticker, name")
+                        .in_("benchmark_id", _bm_ids)
+                        .execute()
+                    )
+                    variant_benchmark_meta = {
+                        int(r["benchmark_id"]): (r["ticker"], r["name"])
+                        for r in (_meta_resp.data or [])
+                    }
+                    _px_rows: list[dict] = []
+                    for _i in range(0, len(_bm_ids), 50):
+                        _chunk = _bm_ids[_i:_i + 50]
+                        _px_resp = await asyncio.to_thread(
+                            lambda c=_chunk: supabase.table("benchmark_price")
+                            .select("benchmark_id, target_date, price")
+                            .in_("benchmark_id", c)
+                            .order("target_date")
+                            .execute()
+                        )
+                        _px_rows.extend(_px_resp.data or [])
+                    variant_benchmark_price_index = {}
+                    if _px_rows:
+                        _df_bm = pd.DataFrame(_px_rows)
+                        for _bid, _group in _df_bm.groupby("benchmark_id"):
+                            variant_benchmark_price_index[int(_bid)] = pd.Series(
+                                _group["price"].values,
+                                index=pd.DatetimeIndex(_group["target_date"]),
+                                dtype="float64",
+                            ).sort_index()
 
             for v_idx, vspec in enumerate(req.variants):
                 variant_key = f"{vspec.frequency}__{vspec.strategy_type}"
@@ -3370,6 +3421,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                     "random_seed": req.random_seed,
                     "rebalance_frequency": vspec.frequency,
                     "strategy_type": vspec.strategy_type,
+                    "sector_etfs": req.sector_etfs,
                 })
 
                 v_progress_queue: _queue.Queue = _queue.Queue()
@@ -3429,6 +3481,8 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                                 prices_local_df=prices_local_df,
                                 company_currency=company_currency,
                                 prepared=prepared,
+                                benchmark_price_index=variant_benchmark_price_index,
+                                benchmark_meta=variant_benchmark_meta,
                             )
                         v_result_holder.append(r)
                     except Exception as e:
@@ -3510,6 +3564,52 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             return
 
         # ── Single-run path ─────────────────────────────────────────────────
+        # When selection_mode == "sector_etf", pre-fetch the prices for every
+        # mapped benchmark ETF once and pass them through to run_backtest /
+        # run_current_portfolio. We avoid the (cheap) fetch when the mode
+        # doesn't need it.
+        benchmark_price_index: dict[int, pd.Series] | None = None
+        benchmark_meta: dict[int, tuple[str, str]] | None = None
+        if req.selection_mode == "sector_etf" and req.sector_etfs:
+            bm_ids = sorted({int(v) for v in req.sector_etfs.values()})
+            if bm_ids:
+                meta_resp = await asyncio.to_thread(
+                    lambda: supabase.table("benchmark")
+                    .select("benchmark_id, ticker, name")
+                    .in_("benchmark_id", bm_ids)
+                    .execute()
+                )
+                benchmark_meta = {
+                    int(r["benchmark_id"]): (r["ticker"], r["name"])
+                    for r in (meta_resp.data or [])
+                }
+                # Pull prices in chunks of 50 IDs (same Cloudflare safety
+                # pattern used elsewhere). benchmark_price rows are small
+                # but we may have all 11 sector ETFs × decades of dailies.
+                px_rows: list[dict] = []
+                for i in range(0, len(bm_ids), 50):
+                    chunk = bm_ids[i:i + 50]
+                    px_resp = await asyncio.to_thread(
+                        lambda c=chunk: supabase.table("benchmark_price")
+                        .select("benchmark_id, target_date, price")
+                        .in_("benchmark_id", c)
+                        .order("target_date")
+                        .execute()
+                    )
+                    px_rows.extend(px_resp.data or [])
+                benchmark_price_index = {}
+                # Build per-benchmark pd.Series. Same shape as `price_index`
+                # so run_backtest's price-lookup helpers (_price_on_or_after,
+                # _date_on_or_after) work without modification.
+                if px_rows:
+                    df_bm = pd.DataFrame(px_rows)
+                    for bid, group in df_bm.groupby("benchmark_id"):
+                        benchmark_price_index[int(bid)] = pd.Series(
+                            group["price"].values,
+                            index=pd.DatetimeIndex(group["target_date"]),
+                            dtype="float64",
+                        ).sort_index()
+
         # Run backtest with progress callback via queue for real-time streaming
         progress_queue: _queue.Queue = _queue.Queue()
         backtest_result_holder: list = []
@@ -3542,6 +3642,8 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                         monthly_eligible=monthly_eligible,
                         prices_local_df=prices_local_df,
                         company_currency=company_currency,
+                        benchmark_price_index=benchmark_price_index,
+                        benchmark_meta=benchmark_meta,
                     )
                 backtest_result_holder.append(r)
             except Exception as e:
@@ -4042,14 +4144,21 @@ async def cron_current_picks(req: BacktestRequest, x_cron_secret: str = Header(d
 class CreateBenchmarkRequest(BaseModel):
     ticker: str
     name: str
+    sector: str | None = None
+
+
+class UpdateBenchmarkSectorRequest(BaseModel):
+    # `null` clears the sector tag; a string sets it. Empty string also
+    # treated as clear so the frontend doesn't need a separate clear path.
+    sector: str | None
 
 
 @app.get("/api/benchmarks")
 async def list_benchmarks():
-    """List all benchmarks with price date range."""
+    """List all benchmarks with price date range and sector tag."""
     resp = await asyncio.to_thread(
         lambda: supabase.table("benchmark")
-        .select("benchmark_id, ticker, name, created_at")
+        .select("benchmark_id, ticker, name, sector, created_at")
         .order("name")
         .execute()
     )
@@ -4102,9 +4211,13 @@ async def create_benchmark(req: CreateBenchmarkRequest):
     if not parsed:
         raise HTTPException(502, f"No prices parsed for {ticker}")
 
-    # Create benchmark record
+    # Create benchmark record (sector tag optional)
+    row = {"ticker": ticker, "name": name}
+    sector_clean = (req.sector or "").strip() or None
+    if sector_clean:
+        row["sector"] = sector_clean
     resp = await asyncio.to_thread(
-        lambda: supabase.table("benchmark").insert({"ticker": ticker, "name": name}).execute()
+        lambda: supabase.table("benchmark").insert(row).execute()
     )
     if not resp.data:
         raise HTTPException(500, "Failed to create benchmark")
@@ -4179,6 +4292,30 @@ async def delete_benchmark(benchmark_id: int):
     if not resp.data:
         raise HTTPException(404, "Benchmark not found")
     return {"ok": True}
+
+
+@app.patch("/api/benchmarks/{benchmark_id}")
+async def update_benchmark_sector(benchmark_id: int, req: UpdateBenchmarkSectorRequest):
+    """Set or clear the GICS sector tag on a benchmark. Used by the
+    selection_mode='sector_etf' momentum mode to look up which ETF to hold
+    for each picked sector. The DB has a partial unique index on sector so
+    only one benchmark can carry each sector at a time."""
+    sector_clean = (req.sector or "").strip() or None
+    try:
+        resp = await asyncio.to_thread(
+            lambda: supabase.table("benchmark")
+            .update({"sector": sector_clean})
+            .eq("benchmark_id", benchmark_id)
+            .execute()
+        )
+    except Exception as e:
+        msg = str(e)
+        if "benchmark_sector_unique" in msg or "duplicate" in msg.lower():
+            raise HTTPException(409, f"Another benchmark already tags sector '{sector_clean}'")
+        raise
+    if not resp.data:
+        raise HTTPException(404, "Benchmark not found")
+    return resp.data[0]
 
 
 @app.get("/api/benchmarks/{benchmark_id}/prices")

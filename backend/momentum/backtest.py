@@ -11,7 +11,10 @@ import numpy as np
 import pandas as pd
 
 from .signals import PRICE_SIGNAL_DEFS, compute_signals_panel
-from .scoring import score_and_select, random_select, _get_category_keys
+from .scoring import (
+    score_and_select, random_select, _get_category_keys,
+    compute_category_scores, aggregate_to_sector,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -77,10 +80,27 @@ class BacktestConfig:
     top_n_sectors: int = 4
     top_n_per_sector: int = 6
     category_weights: dict[str, float] | None = None  # e.g. {"price": 0.5, "volume": 0.5}
-    selection_mode: str = "momentum"  # "momentum" or "random"
+    selection_mode: str = "momentum"  # "momentum" | "random" | "all" | "sector_etf"
     random_seed: int | None = None  # only used when selection_mode == "random"
+    # Sector -> benchmark_id mapping. Required only when
+    # selection_mode == "sector_etf". The strategy ranks sectors via the
+    # usual stock-aggregate momentum, then holds the mapped ETF (one per
+    # selected sector) instead of picking individual stocks. Returns are
+    # read from benchmark_price.
+    sector_etfs: dict[str, int] | None = None
     rebalance_frequency: RebalanceFrequency = _DEFAULT_FREQUENCY
     strategy_type: StrategyType = _DEFAULT_STRATEGY
+    # When True, run_backtest appends one trailing "open" period record
+    # whose entry is the last scheduled rebalance date and whose exit is
+    # the most recent available close. The open period appears in
+    # monthly_records and the daily curve, but is excluded from Sharpe
+    # and annualization (so the headline stats stay apples-to-apples with
+    # the closed periods).
+    #
+    # Default here is False so library/test callers get the historical
+    # closed-only behavior unchanged. The HTTP path (BacktestConfig.from_dict)
+    # defaults this to True so API requests opt in by default.
+    include_open_period: bool = False
 
     @classmethod
     def from_dict(cls, d: dict) -> BacktestConfig:
@@ -93,8 +113,10 @@ class BacktestConfig:
             category_weights=d.get("category_weights"),
             selection_mode=d.get("selection_mode", "momentum"),
             random_seed=d.get("random_seed"),
+            sector_etfs=d.get("sector_etfs"),
             rebalance_frequency=d.get("rebalance_frequency", _DEFAULT_FREQUENCY),
             strategy_type=d.get("strategy_type", _DEFAULT_STRATEGY),
+            include_open_period=d.get("include_open_period", True),
         )
 
 
@@ -128,6 +150,14 @@ class PeriodRecord:
     portfolio_return_pct: float | None
     cumulative_return_pct: float
     empty_reason: str | None = None
+    # True when this record is the trailing "open" period — the strategy's
+    # current portfolio whose holding period hasn't yet completed. Exit
+    # price for an open period is the most recent available close rather
+    # than the next scheduled rebalance. Open periods are included in
+    # monthly_records (and the daily curve) for visibility, but they are
+    # excluded from Sharpe and annualization stats since they represent a
+    # partial holding period.
+    is_open: bool = False
 
 
 @dataclass
@@ -287,6 +317,7 @@ class BacktestResult:
                     "portfolio_return_pct": r.portfolio_return_pct,
                     "cumulative_return_pct": r.cumulative_return_pct,
                     **({"empty_reason": r.empty_reason} if r.empty_reason else {}),
+                    **({"is_open": True} if r.is_open else {}),
                 }
                 for r in self.monthly_records
             ],
@@ -685,7 +716,13 @@ def _prepare_backtest(
         else None
     )
 
-    cutoff_dates = periods[:-1]  # last period has no forward return → no signals needed
+    # Include ALL periods as cutoffs (not just periods[:-1]). The last entry
+    # is normally just an exit anchor — but when run_backtest decides to
+    # append an "open" period it becomes the entry of that final partial
+    # period and needs signals computed at that cutoff. Including it
+    # unconditionally costs one extra signal column per company; the
+    # alternative (recomputing on demand) is more code for the same work.
+    cutoff_dates = periods
     if monthly_eligible is not None:
         panel_universe_ids: set[int] = set()
         for month_dict in monthly_eligible.values():
@@ -804,7 +841,9 @@ def prepare_variant_from_shared(
     periods = _generate_rebalance_dates(start_date, end_date, frequency, prices_df)
     if len(periods) < 2:
         raise ValueError(f"Need at least 2 rebalance periods for a {frequency} backtest (got {len(periods)})")
-    cutoff_set = set(periods[:-1])
+    # Include all periods as cutoffs (see _prepare_backtest above for the
+    # full justification — the last entry becomes the open-period entry).
+    cutoff_set = set(periods)
     sliced_panel = {d: df for d, df in shared.union_panel.items() if d in cutoff_set}
     return _BacktestPrepared(
         periods=periods,
@@ -827,6 +866,13 @@ def run_backtest(
     prices_local_df: pd.DataFrame | None = None,
     company_currency: dict[int, str | None] | None = None,
     prepared: _BacktestPrepared | None = None,
+    # benchmark_price_index: {benchmark_id: pd.Series(price, DatetimeIndex)}.
+    # Required when config.selection_mode == "sector_etf"; ignored otherwise.
+    # Holds the price history of each sector ETF the strategy may rotate
+    # into. Caller pre-fetches from the `benchmark_price` table.
+    benchmark_price_index: dict[int, pd.Series] | None = None,
+    # {benchmark_id: (ticker, name)} for display in the holdings table.
+    benchmark_meta: dict[int, tuple[str, str]] | None = None,
 ) -> BacktestResult:
     """Run a momentum backtest at the configured rebalance cadence.
 
@@ -878,6 +924,25 @@ def run_backtest(
     # results, the cache, and existing frontend charts stay backward-compatible.
     sub_monthly = prepared.frequency in ("daily", "weekly")
 
+    # === Open-period extension ===========================================
+    # If config requests it and there's real price data available beyond the
+    # last scheduled rebalance, append today's last-available trading date as
+    # an extra "exit" date. The main loop then naturally processes
+    # periods[-2] → periods[-1] as the open period; we mark that record
+    # is_open=True and skip its return when accumulating headline stats.
+    open_iter_idx = -1
+    if config.include_open_period:
+        last_avail_ts: pd.Timestamp | None = None
+        for s in price_index.values():
+            if s.empty:
+                continue
+            m = s.index.max()
+            if last_avail_ts is None or m > last_avail_ts:
+                last_avail_ts = m
+        if last_avail_ts is not None and pd.Timestamp(periods[-1]) < last_avail_ts:
+            periods = list(periods) + [last_avail_ts.date()]
+            open_iter_idx = len(periods) - 2  # index in periods[:-1] for the open entry
+
     def _record_date(d: date) -> str:
         return d.isoformat() if sub_monthly else d.isoformat()[:7]
 
@@ -902,6 +967,12 @@ def run_backtest(
 
     for i, period_date in enumerate(periods[:-1]):  # last period has no forward return
         next_period = periods[i + 1]
+        # True only for the trailing open-period iteration (when extension is
+        # active). The loop treats it like any other period — same signals,
+        # same selection, same forward-return calc — but stats accumulators
+        # below skip its return so closed-period headline numbers are
+        # unaffected.
+        is_open_iter = i == open_iter_idx
 
         if send_event:
             pct = round((i / (len(periods) - 1)) * 100)
@@ -938,6 +1009,7 @@ def run_backtest(
                     portfolio_return_pct=None,
                     cumulative_return_pct=round(cumulative, 2),
                     empty_reason=reason,
+                    is_open=is_open_iter,
                 ))
                 continue
 
@@ -969,6 +1041,132 @@ def run_backtest(
                 portfolio_return_pct=None,
                 cumulative_return_pct=round(cumulative, 2),
                 empty_reason=reason,
+                is_open=is_open_iter,
+            ))
+            continue
+
+        # ─── Sector ETF branch ───────────────────────────────────────
+        # Ranks sectors via the same stock-aggregate momentum the regular
+        # mode uses, then holds the user-mapped ETF for each picked sector
+        # (one holding per sector) instead of picking individual stocks.
+        # Returns come from benchmark_price (passed in via
+        # benchmark_price_index) rather than the company price_index. The
+        # branch fully owns its iteration of the main loop — it builds
+        # holdings, computes port_return, updates accumulators, appends a
+        # PeriodRecord, and `continue`s to the next period.
+        if config.selection_mode == "sector_etf":
+            if not config.sector_etfs or benchmark_price_index is None:
+                reason = "sector_etf mode requires sector_etfs config + benchmark prices"
+                if send_event:
+                    send_event("warning", scope="backtest", message=f"{_record_label(period_date)}: {reason}")
+                period_records.append(PeriodRecord(
+                    date=_record_date(period_date), holdings=[],
+                    portfolio_return_pct=None,
+                    cumulative_return_pct=round(cumulative, 2),
+                    empty_reason=reason, is_open=is_open_iter,
+                ))
+                continue
+
+            # Rank sectors via stock-aggregate momentum (top half of
+            # score_and_select). long_short is not supported here — picking
+            # short sectors via ETF makes less intuitive sense and the user
+            # didn't ask for it.
+            scored_for_sectors = compute_category_scores(
+                signals_df, config.signal_weights, config.category_weights,
+            )
+            sector_scores = aggregate_to_sector(scored_for_sectors)
+            chosen_sectors_df = sector_scores.head(config.top_n_sectors)
+            chosen_pairs: list[tuple[str, float]] = []
+            for _, row in chosen_sectors_df.iterrows():
+                sec = str(row["sector"])
+                if sec in config.sector_etfs:
+                    chosen_pairs.append((sec, float(row.get("momentum_score") or 0)))
+
+            if not chosen_pairs:
+                reason = (
+                    f"{len(chosen_sectors_df)} sectors ranked but none mapped to an ETF "
+                    f"(sector_etfs covers: {sorted(config.sector_etfs.keys())})"
+                )
+                if send_event:
+                    send_event("warning", scope="backtest", message=f"{_record_label(period_date)}: {reason}")
+                period_records.append(PeriodRecord(
+                    date=_record_date(period_date), holdings=[],
+                    portfolio_return_pct=None,
+                    cumulative_return_pct=round(cumulative, 2),
+                    empty_reason=reason, is_open=is_open_iter,
+                ))
+                continue
+
+            entry_ts = pd.Timestamp(period_date)
+            exit_ts = pd.Timestamp(next_period)
+            weight = 1.0 / len(chosen_pairs)
+            holdings: list[PeriodHolding] = []
+            long_returns: list[float] = []
+            for sec, agg_score in chosen_pairs:
+                bid = config.sector_etfs[sec]
+                series = benchmark_price_index.get(bid)
+                entry_price = _price_on_or_after(series, entry_ts) if series is not None else None
+                exit_price = _price_on_or_after(series, exit_ts) if series is not None else None
+                fwd_return: float | None = None
+                if entry_price and exit_price and entry_price > 0:
+                    fwd_return = round((exit_price / entry_price - 1) * 100, 2)
+                bm_ticker, bm_name = (benchmark_meta or {}).get(bid, (f"BM:{bid}", f"Benchmark {bid}"))
+                entry_dt = _date_on_or_after(series, entry_ts) if series is not None else None
+                exit_dt = _date_on_or_after(series, exit_ts) if series is not None else None
+                holdings.append(PeriodHolding(
+                    # Negative IDs distinguish ETF holdings from real company
+                    # rows downstream (frontend never queries metric_data for
+                    # negative cids, so they don't collide).
+                    company_id=-bid,
+                    ticker=bm_ticker,
+                    company_name=bm_name,
+                    sector=sec,
+                    score=round(agg_score, 2),
+                    category_scores={cat: None for cat in _get_category_keys()},
+                    weight=weight,
+                    forward_return_pct=fwd_return,
+                    currency="USD",
+                    entry_price_local=round(entry_price, 4) if entry_price is not None else None,
+                    exit_price_local=round(exit_price, 4) if exit_price is not None else None,
+                    entry_price_eur=round(entry_price, 4) if entry_price is not None else None,
+                    exit_price_eur=round(exit_price, 4) if exit_price is not None else None,
+                    entry_date=entry_dt,
+                    exit_date=exit_dt,
+                    side="long",
+                ))
+                if fwd_return is not None:
+                    long_returns.append(fwd_return)
+            holdings_counts.append(len(holdings))
+            port_return = round(float(np.mean(long_returns)), 2) if long_returns else None
+
+            # Accumulate stats (closed only). Mirrors the regular path's
+            # accounting so total_return / Sharpe / Max DD all flow through
+            # consistently.
+            record_cum = cumulative
+            if port_return is not None:
+                if is_open_iter:
+                    record_cum = (cumulative_factor * (1 + port_return / 100) - 1) * 100
+                else:
+                    cumulative_factor *= (1 + port_return / 100)
+                    cumulative = (cumulative_factor - 1) * 100
+                    all_period_returns.append(port_return)
+                    record_cum = cumulative
+
+            current_set = {h.company_id for h in holdings}
+            if prev_holdings_set and not is_open_iter:
+                overlap = len(current_set & prev_holdings_set)
+                total = max(len(current_set), len(prev_holdings_set))
+                turnover = round((1 - overlap / total) * 100, 2) if total > 0 else 0
+                turnover_values.append(turnover)
+            if not is_open_iter:
+                prev_holdings_set = current_set
+
+            period_records.append(PeriodRecord(
+                date=_record_date(period_date),
+                holdings=holdings,
+                portfolio_return_pct=port_return,
+                cumulative_return_pct=round(record_cum, 2),
+                is_open=is_open_iter,
             ))
             continue
 
@@ -1059,6 +1257,7 @@ def run_backtest(
                 portfolio_return_pct=None,
                 cumulative_return_pct=round(cumulative, 2),
                 empty_reason=reason,
+                is_open=is_open_iter,
             ))
             continue
 
@@ -1156,35 +1355,53 @@ def run_backtest(
         else:
             port_return = round(float(np.mean(long_returns)), 2) if long_returns else None
 
+        # Accumulate stats from CLOSED periods only. The open period's
+        # display cumulative is computed separately so the chart line
+        # continues, but it doesn't shift `cumulative_factor` / `cumulative`
+        # / `all_period_returns` (those drive total_return, annualized,
+        # Sharpe, etc., which we keep apples-to-apples with closed periods).
+        record_cum = cumulative
         if port_return is not None:
-            cumulative_factor *= (1 + port_return / 100)
-            cumulative = (cumulative_factor - 1) * 100
-            all_period_returns.append(port_return)
+            if is_open_iter:
+                record_cum = (cumulative_factor * (1 + port_return / 100) - 1) * 100
+            else:
+                cumulative_factor *= (1 + port_return / 100)
+                cumulative = (cumulative_factor - 1) * 100
+                all_period_returns.append(port_return)
+                record_cum = cumulative
 
-        # Turnover
+        # Turnover — skip when the row is the open period (it's a partial
+        # holding, comparing it against the prior closed period inflates
+        # the count and contaminates avg_monthly_turnover_pct).
         current_set = {h.company_id for h in holdings}
-        if prev_holdings_set:
+        if prev_holdings_set and not is_open_iter:
             overlap = len(current_set & prev_holdings_set)
             total = max(len(current_set), len(prev_holdings_set))
             turnover = round((1 - overlap / total) * 100, 2) if total > 0 else 0
             turnover_values.append(turnover)
-        prev_holdings_set = current_set
+        if not is_open_iter:
+            prev_holdings_set = current_set
 
         period_records.append(PeriodRecord(
             date=_record_date(period_date),
             holdings=holdings,
             portfolio_return_pct=port_return,
-            cumulative_return_pct=round(cumulative, 2),
+            cumulative_return_pct=round(record_cum, 2),
+            is_open=is_open_iter,
         ))
 
-    # Build a daily equity curve from the period holdings. Drawdown +
-    # Sharpe are computed against this rather than the period-end curve so
-    # intra-period moves (a -15% week mid-month that recovers by month-end)
-    # are visible. Annualization uses the daily-based curve too — the
-    # period-level total_return is preserved as a sanity check but the
-    # headline stats now reflect actual daily volatility.
-    daily_curve, daily_returns = _build_daily_equity_curve(
+    # Headline stats (total_return, annualized, max DD, Sharpe) are computed
+    # from CLOSED periods only so an open period's partial-window data
+    # doesn't bias the numbers. The daily curve we publish for the chart
+    # (`daily_curve`) still includes the open period — that's the line the
+    # user sees through "today". `closed_curve` is the same chain truncated
+    # at the last closed period; it's what feeds Sharpe + Max DD.
+    closed_records = [r for r in period_records if not r.is_open]
+    daily_curve, _daily_returns_full = _build_daily_equity_curve(
         period_records, price_index, config.strategy_type,
+    )
+    closed_curve, closed_daily_returns = _build_daily_equity_curve(
+        closed_records, price_index, config.strategy_type,
     )
     # `total_return` and `annualized_return_pct` are intentionally both
     # derived from the period-chain `cumulative_factor`. The daily curve
@@ -1200,30 +1417,33 @@ def run_backtest(
     # max-drawdown + Sharpe (those need intra-period detail) and for
     # the chart line.
     total_return = round(cumulative, 2)
-    if daily_curve:
-        first_date = date.fromisoformat(daily_curve[0][0])
-        last_date = date.fromisoformat(daily_curve[-1][0])
+    if closed_curve:
+        first_date = date.fromisoformat(closed_curve[0][0])
+        last_date = date.fromisoformat(closed_curve[-1][0])
         n_years = max(0.0, (last_date - first_date).days / 365.25)
     else:
         n_years = len(all_period_returns) / _periods_per_year(prepared.frequency) if all_period_returns else 0
     annualized = round((cumulative_factor ** (1 / n_years) - 1) * 100, 2) if n_years > 0 else 0
 
     # Identify all drawdown periods (peak-to-trough-to-recovery) on the
-    # daily curve when available; fall back to the period curve otherwise.
-    if daily_curve:
-        values = [(d, 1 + cum / 100) for d, cum in daily_curve]
+    # closed-period daily curve. Open period is excluded so a still-running
+    # mid-drawdown doesn't fold into the historical max DD.
+    if closed_curve:
+        values = [(d, 1 + cum / 100) for d, cum in closed_curve]
     else:
-        values = [(r.date, 1 + r.cumulative_return_pct / 100) for r in period_records]
+        values = [(r.date, 1 + r.cumulative_return_pct / 100) for r in closed_records]
     all_drawdown_periods = _find_drawdown_periods(values)
     top_drawdowns = _pick_top_n_non_overlapping(all_drawdown_periods, 3)
     max_dd = top_drawdowns[0].drawdown_pct if top_drawdowns else 0.0
 
     # Sharpe — annualized from daily returns × √252 when we have at least a
     # month of trading days. Falls back to the old period-frequency formula
-    # when the daily curve is unavailable (e.g. degenerate runs).
+    # when the daily curve is unavailable (e.g. degenerate runs). Uses
+    # closed-period daily returns only (open period's partial-window
+    # samples would understate volatility).
     sharpe = None
-    if len(daily_returns) >= 21:
-        arr = np.array(daily_returns)
+    if len(closed_daily_returns) >= 21:
+        arr = np.array(closed_daily_returns)
         d_mean = float(arr.mean())
         d_std = float(arr.std())
         if d_std > 0:

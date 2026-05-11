@@ -79,9 +79,36 @@ export default function MomentumBacktester() {
   const [topPerSector, setTopPerSector] = useState(6);
   const [noCache, setNoCache] = useState(false);
   const [maxCompanies, setMaxCompanies] = useState(0);
-  const [selectionMode, setSelectionMode] = useState<'momentum' | 'random' | 'all'>('momentum');
+  const [selectionMode, setSelectionMode] = useState<'momentum' | 'random' | 'all' | 'sector_etf'>('momentum');
   const [randomSeed, setRandomSeed] = useState<number>(42);
   const [nTrials, setNTrials] = useState<number>(1);
+
+  // Sector → benchmark_id mapping for selection_mode='sector_etf'. Loaded
+  // lazily from /api/benchmarks when the user picks Sector ETF mode (and
+  // refreshed whenever they pop back to that mode in case they've edited
+  // mappings on /benchmarks in another tab).
+  const [sectorEtfs, setSectorEtfs] = useState<Record<string, number>>({});
+  const [sectorEtfsLoading, setSectorEtfsLoading] = useState(false);
+  const [sectorEtfsError, setSectorEtfsError] = useState<string | null>(null);
+  useEffect(() => {
+    if (selectionMode !== 'sector_etf') return;
+    let cancelled = false;
+    setSectorEtfsLoading(true);
+    setSectorEtfsError(null);
+    fetch(`${API_URL}/api/benchmarks`)
+      .then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then((rows: Array<{ benchmark_id: number; ticker: string; sector: string | null }>) => {
+        if (cancelled) return;
+        const map: Record<string, number> = {};
+        for (const r of rows) {
+          if (r.sector) map[r.sector] = r.benchmark_id;
+        }
+        setSectorEtfs(map);
+      })
+      .catch((e) => { if (!cancelled) setSectorEtfsError(String(e?.message ?? e)); })
+      .finally(() => { if (!cancelled) setSectorEtfsLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectionMode]);
 
   // Variant sweep selection — which (frequency × strategy) combos to run.
   // Default to all selected so the "Run variants" button matches its
@@ -392,6 +419,7 @@ export default function MomentumBacktester() {
         selection_mode: selectionMode,
         random_seed: selectionMode === 'random' ? randomSeed : null,
         n_trials: selectionMode === 'random' ? Math.max(1, nTrials) : 1,
+        sector_etfs: selectionMode === 'sector_etf' ? sectorEtfs : undefined,
         force_recompute: noCache,
       },
       eligibleKeys,
@@ -489,6 +517,7 @@ export default function MomentumBacktester() {
             selection_mode: selectionMode,
             random_seed: selectionMode === 'random' ? randomSeed : null,
             n_trials: selectionMode === 'random' ? Math.max(1, nTrials) : 1,
+            sector_etfs: selectionMode === 'sector_etf' ? sectorEtfs : null,
           },
           variants: okEntries.map(({ def, result: r }) => ({
             key: def.key,
@@ -555,7 +584,18 @@ export default function MomentumBacktester() {
       if (cfg.category_weights) setCategoryWeights(cfg.category_weights);
       if (cfg.top_n_sectors) setTopSectors(cfg.top_n_sectors);
       if (cfg.top_n_per_sector) setTopPerSector(cfg.top_n_per_sector);
-      if (cfg.selection_mode === 'random' || cfg.selection_mode === 'momentum') setSelectionMode(cfg.selection_mode);
+      if (
+        cfg.selection_mode === 'random'
+        || cfg.selection_mode === 'momentum'
+        || cfg.selection_mode === 'all'
+        || cfg.selection_mode === 'sector_etf'
+      ) setSelectionMode(cfg.selection_mode);
+      if (cfg.selection_mode === 'sector_etf' && cfg.sector_etfs && typeof cfg.sector_etfs === 'object') {
+        // Rehydrate the saved sector→benchmark_id mapping so the badge
+        // status under the strategy dropdown matches what the saved run
+        // was using (and a re-run goes through the same mapping).
+        setSectorEtfs(cfg.sector_etfs as Record<string, number>);
+      }
       if (typeof cfg.random_seed === 'number') setRandomSeed(cfg.random_seed);
       if (typeof cfg.n_trials === 'number') setNTrials(cfg.n_trials);
       // Legacy saved runs may have used universe_label; both hit the same table now.
@@ -1169,21 +1209,40 @@ export default function MomentumBacktester() {
               <label className="text-gray-500 text-xs block mb-1">Strategy</label>
               <select
                 value={selectionMode}
-                onChange={(e) => setSelectionMode(e.target.value as 'momentum' | 'random' | 'all')}
+                onChange={(e) => setSelectionMode(e.target.value as 'momentum' | 'random' | 'all' | 'sector_etf')}
                 className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-                title="Momentum ranks the universe by signal score. Random picks sectors/stocks at random (noise-floor baseline). All holds every eligible name in the universe equal-weighted (index-proxy benchmark)."
+                title="Momentum ranks the universe by signal score. Random picks sectors/stocks at random (noise-floor baseline). All holds every eligible name in the universe equal-weighted (index-proxy benchmark). Sector ETF ranks sectors via stock-aggregate momentum then holds the mapped sector ETF for each picked sector — set the mapping on /benchmarks."
               >
                 <option value="momentum">Momentum</option>
                 <option value="random">Random (baseline)</option>
                 <option value="all">All universe (index proxy)</option>
+                <option value="sector_etf">Sector ETF (per-sector benchmark)</option>
               </select>
+              {selectionMode === 'sector_etf' && (
+                <div className="text-[10px] mt-1 max-w-xs">
+                  {sectorEtfsLoading ? (
+                    <span className="text-gray-500">loading sector mapping…</span>
+                  ) : sectorEtfsError ? (
+                    <span className="text-rose-400">{sectorEtfsError}</span>
+                  ) : Object.keys(sectorEtfs).length === 0 ? (
+                    <span className="text-amber-400">
+                      No sector→ETF mappings yet. Open <a href="/benchmarks" className="underline">/benchmarks</a> and tag at least one benchmark with a sector.
+                    </span>
+                  ) : (
+                    <span className="text-gray-500">
+                      {Object.keys(sectorEtfs).length} sector{Object.keys(sectorEtfs).length === 1 ? '' : 's'} mapped:{' '}
+                      <span className="text-gray-400">{Object.keys(sectorEtfs).sort().join(', ')}</span>
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
             {/* Random-mode params (Trials, Seed) live in the
                 "Strategy parameters" section below — same place as the
                 momentum signal/category weights — so the inline config
                 row only has to carry universe-level inputs. */}
             {(() => {
-              const longShortBlocked = selectionMode === 'random' || selectionMode === 'all';
+              const longShortBlocked = selectionMode === 'random' || selectionMode === 'all' || selectionMode === 'sector_etf';
               const eligibleCount = VARIANT_DEFS
                 .filter((v) => selectedVariantKeys.has(v.key))
                 .filter((v) => !longShortBlocked || v.strategy !== 'long_short')
@@ -1240,7 +1299,7 @@ export default function MomentumBacktester() {
                           </button>
                         </div>
                       </div>
-                      {(selectionMode === 'random' || selectionMode === 'all') && (
+                      {(selectionMode === 'random' || selectionMode === 'all' || selectionMode === 'sector_etf') && (
                         <div className="mb-2 px-2 py-1.5 text-[10px] text-amber-300/80 bg-amber-500/5 border border-amber-500/20 rounded">
                           Long-short is disabled in {selectionMode === 'all' ? 'all-universe' : 'random'} mode (no top/bottom split to short on).
                         </div>
@@ -1248,7 +1307,7 @@ export default function MomentumBacktester() {
                       <ul className="space-y-1 max-h-72 overflow-auto">
                         {VARIANT_DEFS.map((v) => {
                           const checked = selectedVariantKeys.has(v.key);
-                          const disabled = (selectionMode === 'random' || selectionMode === 'all') && v.strategy === 'long_short';
+                          const disabled = (selectionMode === 'random' || selectionMode === 'all' || selectionMode === 'sector_etf') && v.strategy === 'long_short';
                           return (
                             <li key={v.key}>
                               <label className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs ${disabled ? 'text-gray-600 cursor-not-allowed' : 'text-gray-300 hover:bg-white/5 cursor-pointer'}`}>

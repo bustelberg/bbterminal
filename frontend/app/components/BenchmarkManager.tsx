@@ -10,10 +10,27 @@ type Benchmark = {
   benchmark_id: number;
   ticker: string;
   name: string;
+  sector: string | null;
   created_at: string;
   price_from: string | null;
   price_to: string | null;
 };
+
+/** GICS sectors. Match the strings the company table stores so the
+ * momentum strategy's sector aggregation finds the mapped ETF. */
+const GICS_SECTORS = [
+  'Communication Services',
+  'Consumer Discretionary',
+  'Consumer Staples',
+  'Energy',
+  'Financials',
+  'Health Care',
+  'Industrials',
+  'Information Technology',
+  'Materials',
+  'Real Estate',
+  'Utilities',
+] as const;
 
 export default function BenchmarkManager() {
   const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
@@ -79,6 +96,30 @@ export default function BenchmarkManager() {
       setError(`Refresh failed: ${e instanceof Error ? e.message : e}`);
     }
     setRefreshingId(null);
+  };
+
+  /** Set or clear the GICS sector tag on a benchmark. Backend enforces
+   * uniqueness (only one ETF per sector); a 409 response surfaces as a
+   * top-level error so the user can fix the conflict. Updates the row
+   * in-place on success rather than reloading the whole list. */
+  const handleSetSector = async (id: number, sector: string | null) => {
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/benchmarks/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sector }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail ?? `HTTP ${res.status}`);
+      }
+      setBenchmarks((prev) =>
+        prev.map((b) => (b.benchmark_id === id ? { ...b, sector } : b)),
+      );
+    } catch (e) {
+      setError(`Set sector failed: ${e instanceof Error ? e.message : e}`);
+    }
   };
 
   const handleDelete = async (id: number, ticker: string) => {
@@ -157,21 +198,46 @@ export default function BenchmarkManager() {
               <tr className="border-b border-gray-800/60 text-gray-500">
                 <th className="px-5 py-3 text-left text-xs font-medium">Ticker</th>
                 <th className="px-3 py-3 text-left text-xs font-medium">Name</th>
+                <th className="px-3 py-3 text-left text-xs font-medium">Sector ETF</th>
                 <th className="px-3 py-3 text-left text-xs font-medium">Price Range</th>
                 <th className="px-3 py-3 text-right text-xs font-medium w-40">Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={4} className="px-5 py-8 text-center text-gray-600">Loading...</td></tr>
+                <tr><td colSpan={5} className="px-5 py-8 text-center text-gray-600">Loading...</td></tr>
               )}
               {!loading && benchmarks.length === 0 && (
-                <tr><td colSpan={4} className="px-5 py-8 text-center text-gray-600">No benchmarks yet. Add one above.</td></tr>
+                <tr><td colSpan={5} className="px-5 py-8 text-center text-gray-600">No benchmarks yet. Add one above.</td></tr>
               )}
-              {benchmarks.map((b) => (
+              {benchmarks.map((b) => {
+                // Sectors already taken by other rows — disable them in this
+                // row's picker so the user can't pick a sector that's
+                // already mapped (the DB unique index would reject anyway,
+                // but graying it out is friendlier).
+                const takenSectors = new Set(
+                  benchmarks
+                    .filter((x) => x.benchmark_id !== b.benchmark_id && x.sector)
+                    .map((x) => x.sector!),
+                );
+                return (
                 <tr key={b.benchmark_id} className="border-b border-gray-800/30 hover:bg-white/[0.02] transition-colors group">
                   <td className="px-5 py-2.5 text-indigo-400 font-mono font-medium">{b.ticker}</td>
                   <td className="px-3 py-2.5 text-gray-200">{b.name}</td>
+                  <td className="px-3 py-2.5">
+                    <select
+                      value={b.sector ?? ''}
+                      onChange={(e) => handleSetSector(b.benchmark_id, e.target.value || null)}
+                      className="bg-[#0f1117] border border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                    >
+                      <option value="">— none —</option>
+                      {GICS_SECTORS.map((s) => (
+                        <option key={s} value={s} disabled={takenSectors.has(s)}>
+                          {s}{takenSectors.has(s) ? ' (used)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
                   <td className="px-3 py-2.5 text-gray-500 text-xs font-mono">
                     {b.price_from && b.price_to
                       ? `${b.price_from} → ${b.price_to}`
@@ -195,7 +261,8 @@ export default function BenchmarkManager() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

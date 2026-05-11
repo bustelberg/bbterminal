@@ -95,6 +95,11 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
                   <td className="px-5 py-2.5 text-gray-300 font-mono">
                     <span className="text-gray-600 mr-2">{expandedMonth === r.date ? '▾' : '▸'}</span>
                     {r.date}
+                    {r.is_open && (
+                      <span className="ml-2 inline-flex items-center text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                        open · YTD
+                      </span>
+                    )}
                   </td>
                   <td className="text-right px-3 py-2.5 text-gray-400 font-mono">{r.holdings.length}</td>
                   <td className={`text-right px-3 py-2.5 font-mono ${r.portfolio_return_pct != null ? (r.portfolio_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
