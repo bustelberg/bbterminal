@@ -72,6 +72,39 @@ def _periods_per_year(freq: RebalanceFrequency) -> float:
     }[freq]
 
 
+# Common cross-source sector aliases. The universe's `sector` column may
+# come from iShares fund holdings ("Technology", "Communication") or
+# Wikipedia-scraped S&P 500 data ("Information Technology",
+# "Communication Services") or LongEquity inputs — all referring to the
+# same GICS bucket. `_norm_sector` collapses them so the sector_etf
+# mapping (set once on /benchmarks with the canonical names) matches no
+# matter which source provided the row. Add lowercase keys; values match
+# the canonical form a normalized comparison will reach.
+_SECTOR_ALIASES: dict[str, str] = {
+    "technology": "information technology",
+    "tech": "information technology",
+    "communication": "communication services",
+    "communications": "communication services",
+    "telecom": "communication services",
+    "telecommunication": "communication services",
+    "telecommunications": "communication services",
+    "telecommunication services": "communication services",
+    "healthcare": "health care",
+    "financial": "financials",
+    "financial services": "financials",
+}
+
+
+def _norm_sector(s: str | None) -> str:
+    """Lowercase + strip + alias-map a sector string for cross-source
+    comparison. Returns "" for None/empty so unset rows never accidentally
+    match each other."""
+    if not s:
+        return ""
+    base = " ".join(s.lower().split())
+    return _SECTOR_ALIASES.get(base, base)
+
+
 @dataclass
 class BacktestConfig:
     start_date: date
@@ -1087,16 +1120,46 @@ def run_backtest(
                 signals_df, config.signal_weights, config.category_weights,
             )
             sector_scores = aggregate_to_sector(scored_for_sectors)
-            chosen_sectors_df = sector_scores.head(config.top_n_sectors)
-            chosen_pairs: list[tuple[str, float]] = []
-            for _, row in chosen_sectors_df.iterrows():
+            # Walk the FULL ranked sector list (not just the top-N) and
+            # collect sectors that have a mapped ETF until we've filled
+            # top_n_sectors slots. The earlier `head(top_n).filter(has_ETF)`
+            # version silently lost the slot whenever a top-N sector had no
+            # matching ETF — typically due to a sector-string mismatch
+            # between the company table ("Technology", "Healthcare") and
+            # the benchmark sector tag ("Information Technology",
+            # "Health Care"). The normalized lookup below also handles the
+            # common aliases.
+            sector_etfs_norm = {_norm_sector(k): v for k, v in config.sector_etfs.items()}
+            unmatched_top: list[str] = []
+            chosen_pairs: list[tuple[str, int, float]] = []  # (display_sector, benchmark_id, score)
+            for _, row in sector_scores.iterrows():
+                if len(chosen_pairs) >= config.top_n_sectors:
+                    break
                 sec = str(row["sector"])
-                if sec in config.sector_etfs:
-                    chosen_pairs.append((sec, float(row.get("momentum_score") or 0)))
+                bid = sector_etfs_norm.get(_norm_sector(sec))
+                if bid is None:
+                    if len(unmatched_top) < config.top_n_sectors:
+                        unmatched_top.append(sec)
+                    continue
+                chosen_pairs.append((sec, int(bid), float(row.get("momentum_score") or 0)))
+
+            # Surface unmatched sectors as a one-shot warning so the user
+            # knows a string mismatch is dropping a slot — without this the
+            # symptom is silently "sometimes 3 sectors instead of 4".
+            if unmatched_top and send_event:
+                send_event(
+                    "warning", scope="backtest",
+                    message=(
+                        f"{_record_label(period_date)}: "
+                        f"top sector(s) without a mapped ETF, "
+                        f"fell through to next: {unmatched_top} "
+                        f"(mapped: {sorted(config.sector_etfs.keys())})"
+                    ),
+                )
 
             if not chosen_pairs:
                 reason = (
-                    f"{len(chosen_sectors_df)} sectors ranked but none mapped to an ETF "
+                    f"{len(sector_scores)} sectors ranked but none matched a mapped ETF "
                     f"(sector_etfs covers: {sorted(config.sector_etfs.keys())})"
                 )
                 if send_event:
@@ -1114,8 +1177,7 @@ def run_backtest(
             weight = 1.0 / len(chosen_pairs)
             holdings: list[PeriodHolding] = []
             long_returns: list[float] = []
-            for sec, agg_score in chosen_pairs:
-                bid = config.sector_etfs[sec]
+            for sec, bid, agg_score in chosen_pairs:
                 series = benchmark_price_index.get(bid)
                 entry_price = _price_on_or_after(series, entry_ts) if series is not None else None
                 exit_price = _price_on_or_after(series, exit_ts) if series is not None else None
