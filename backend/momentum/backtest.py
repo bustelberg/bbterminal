@@ -448,6 +448,7 @@ def _build_daily_equity_curve(
     period_records: list["PeriodRecord"],
     price_index: dict[int, pd.Series],
     strategy_type: "StrategyType",
+    benchmark_price_index: dict[int, pd.Series] | None = None,
 ) -> tuple[list[tuple[str, float]], list[float]]:
     """Reconstruct a daily portfolio equity curve from the period-level
     holdings.
@@ -464,10 +465,21 @@ def _build_daily_equity_curve(
     drawdown now reports that drawdown, where the period-level curve
     masked it.
 
+    Sector-ETF holdings carry a NEGATIVE company_id (-benchmark_id) so
+    their price lookups can't collide with real companies in price_index.
+    Pass `benchmark_price_index` (keyed by positive benchmark_id) and this
+    function will route negative-cid holdings through it. Without that,
+    sector-ETF runs would have an empty daily curve and the headline
+    stats would fall back to period-level Sharpe (= √1 for every_12_months).
+
     Returns:
         daily_records: [(YYYY-MM-DD, cumulative_return_pct), …]
         daily_returns: day-over-day arithmetic returns (for Sharpe).
     """
+    def _series_for(cid: int) -> pd.Series | None:
+        if cid < 0 and benchmark_price_index is not None:
+            return benchmark_price_index.get(-cid)
+        return price_index.get(cid)
     daily_dates: list[date] = []
     daily_factors: list[float] = []
     cumulative_factor = 1.0  # carries across periods
@@ -493,7 +505,7 @@ def _build_daily_equity_curve(
         # close that day belongs to the next period's run.
         all_days_set: set[pd.Timestamp] = set()
         for h in pr.holdings:
-            s = price_index.get(h.company_id)
+            s = _series_for(h.company_id)
             if s is None:
                 continue
             # Inclusive on both bounds: the exit day is the day we sell at,
@@ -514,7 +526,7 @@ def _build_daily_equity_curve(
             long_vals: list[float] = []
             short_vals: list[float] = []
             for h in long_h:
-                s = price_index.get(h.company_id)
+                s = _series_for(h.company_id)
                 if s is None:
                     continue
                 # `asof` is O(log n) vs the O(n) boolean-mask slice; on a
@@ -525,7 +537,7 @@ def _build_daily_equity_curve(
                     continue
                 long_vals.append(float(v) / h.entry_price_eur)
             for h in short_h:
-                s = price_index.get(h.company_id)
+                s = _series_for(h.company_id)
                 if s is None:
                     continue
                 v = s.asof(day)
@@ -1399,9 +1411,11 @@ def run_backtest(
     closed_records = [r for r in period_records if not r.is_open]
     daily_curve, _daily_returns_full = _build_daily_equity_curve(
         period_records, price_index, config.strategy_type,
+        benchmark_price_index=benchmark_price_index,
     )
     closed_curve, closed_daily_returns = _build_daily_equity_curve(
         closed_records, price_index, config.strategy_type,
+        benchmark_price_index=benchmark_price_index,
     )
     # `total_return` and `annualized_return_pct` are intentionally both
     # derived from the period-chain `cumulative_factor`. The daily curve

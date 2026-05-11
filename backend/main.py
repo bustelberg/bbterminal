@@ -3372,17 +3372,28 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                         int(r["benchmark_id"]): (r["ticker"], r["name"])
                         for r in (_meta_resp.data or [])
                     }
+                    # Paginate per benchmark_id to bypass Supabase's silent
+                    # 1000-row default (see single-run path for the full
+                    # story). Without this, all variants share an empty
+                    # post-1999 price series and emit 0% returns.
                     _px_rows: list[dict] = []
-                    for _i in range(0, len(_bm_ids), 50):
-                        _chunk = _bm_ids[_i:_i + 50]
-                        _px_resp = await asyncio.to_thread(
-                            lambda c=_chunk: supabase.table("benchmark_price")
-                            .select("benchmark_id, target_date, price")
-                            .in_("benchmark_id", c)
-                            .order("target_date")
-                            .execute()
-                        )
-                        _px_rows.extend(_px_resp.data or [])
+                    _page_size = 1000
+                    for _bid in _bm_ids:
+                        _offset = 0
+                        while True:
+                            _px_resp = await asyncio.to_thread(
+                                lambda b=_bid, o=_offset: supabase.table("benchmark_price")
+                                .select("benchmark_id, target_date, price")
+                                .eq("benchmark_id", b)
+                                .order("target_date")
+                                .range(o, o + _page_size - 1)
+                                .execute()
+                            )
+                            _batch = _px_resp.data or []
+                            _px_rows.extend(_batch)
+                            if len(_batch) < _page_size:
+                                break
+                            _offset += _page_size
                     variant_benchmark_price_index = {}
                     if _px_rows:
                         _df_bm = pd.DataFrame(_px_rows)
@@ -3583,20 +3594,30 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                     int(r["benchmark_id"]): (r["ticker"], r["name"])
                     for r in (meta_resp.data or [])
                 }
-                # Pull prices in chunks of 50 IDs (same Cloudflare safety
-                # pattern used elsewhere). benchmark_price rows are small
-                # but we may have all 11 sector ETFs × decades of dailies.
+                # Pull every price row per benchmark, paginating to defeat
+                # Supabase's silent 1000-row limit. A single ETF since
+                # 1998 has ~6,886 daily bars and 11 ETFs together exceed
+                # 75k rows — a single .in_() query would truncate to the
+                # earliest ~90 days per benchmark, and every entry/exit
+                # lookup downstream would return None.
                 px_rows: list[dict] = []
-                for i in range(0, len(bm_ids), 50):
-                    chunk = bm_ids[i:i + 50]
-                    px_resp = await asyncio.to_thread(
-                        lambda c=chunk: supabase.table("benchmark_price")
-                        .select("benchmark_id, target_date, price")
-                        .in_("benchmark_id", c)
-                        .order("target_date")
-                        .execute()
-                    )
-                    px_rows.extend(px_resp.data or [])
+                page_size = 1000
+                for bid in bm_ids:
+                    offset = 0
+                    while True:
+                        px_resp = await asyncio.to_thread(
+                            lambda b=bid, o=offset: supabase.table("benchmark_price")
+                            .select("benchmark_id, target_date, price")
+                            .eq("benchmark_id", b)
+                            .order("target_date")
+                            .range(o, o + page_size - 1)
+                            .execute()
+                        )
+                        batch = px_resp.data or []
+                        px_rows.extend(batch)
+                        if len(batch) < page_size:
+                            break
+                        offset += page_size
                 benchmark_price_index = {}
                 # Build per-benchmark pd.Series. Same shape as `price_index`
                 # so run_backtest's price-lookup helpers (_price_on_or_after,

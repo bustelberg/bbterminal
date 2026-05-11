@@ -480,7 +480,9 @@ export default function MomentumBacktester() {
       ? 'Random'
       : selectionMode === 'all'
         ? 'All-universe'
-        : 'Momentum';
+        : selectionMode === 'sector_etf'
+          ? 'Sector ETF'
+          : 'Momentum';
     const startYear = startDate.slice(0, 4);
     const endYear = endDate.slice(0, 4);
     const range = startYear === endYear ? startYear : `${startYear}-${endYear}`;
