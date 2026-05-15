@@ -1850,13 +1850,33 @@ export default function MomentumBacktester() {
         {/* Results — either the single-run `result` or, when a variant is
             active, that variant's BacktestResult. The detail components
             don't care which path the data came from. */}
-        {displayResult && (
+        {displayResult && (() => {
+          // Full label for the active strategy row in EquityCurveCard's
+          // Summary table. Matches the format a saved comparison would
+          // show: "{base name} · {variant label}" — e.g. "ACWI-mei ·
+          // Momentum · 2002-2026 · Every 12 months · Long-only". Base
+          // comes from the loaded saved-run name when one is loaded,
+          // otherwise from defaultVariantsBundleName() (the same name
+          // the auto-save would pick). Variant suffix is folded in
+          // whenever a sweep variant is active.
+          const baseName = loadedRunId != null
+            ? savedRuns.find((r) => r.run_id === loadedRunId)?.name
+            : undefined;
+          const labelBase = baseName ?? defaultVariantsBundleName();
+          const variantLabel = activeVariantKey
+            ? VARIANT_DEFS.find((v) => v.key === activeVariantKey)?.label
+            : undefined;
+          const activeStrategyLabel = variantLabel
+            ? `${labelBase} · ${variantLabel}`
+            : labelBase;
+          return (
           <>
             <EquityCurveCard
               result={displayResult}
               loadedRunId={activeVariantResult ? null : loadedRunId}
               savedRuns={savedRuns}
               exchangeByCompany={exchangeByCompany}
+              activeStrategyLabel={activeStrategyLabel}
             />
 
             <SectorTimelineChart result={displayResult} />
@@ -1902,7 +1922,8 @@ export default function MomentumBacktester() {
               Note: Uses current company universe applied retroactively (survivorship bias). Returns are hypothetical and do not account for transaction costs.
             </p>
           </>
-        )}
+          );
+        })()}
       </div>
     </div>
   );
