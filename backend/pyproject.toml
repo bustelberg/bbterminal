@@ -17,6 +17,7 @@ dependencies = [
     "xlrd>=2.0.2",
     "lxml>=6.0.4",
     "anthropic>=0.96.0",
+    "curl-cffi>=0.7.0",
 ]
 
 [dependency-groups]

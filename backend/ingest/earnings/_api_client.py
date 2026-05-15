@@ -1,8 +1,17 @@
-"""GuruFocus HTTP client — curl-first with urllib fallback.
+"""GuruFocus HTTP client — curl_cffi-first with urllib fallback.
 
-Python's urllib TLS fingerprint gets blocked by Cloudflare on the
-GuruFocus edge, so we shell out to `curl` when it's available and only
-fall back to urllib when it isn't.
+Cloudflare on the GuruFocus edge does TLS-fingerprint inspection (JA3),
+not just User-Agent header matching. Python's stock urllib presents a
+fingerprint Cloudflare flags as a bot; subprocess'ing to the system
+`curl` works on Windows (Schannel) but fails on Linux containers
+(OpenSSL) — Linux curl's fingerprint is also in the bot bucket.
+
+`curl_cffi` is a Python binding to libcurl-impersonate that replays a
+real Chrome TLS handshake — the same ALPN/cipher order, GREASE values,
+and extension layout a current Chrome build sends. That gets us through
+the same Cloudflare edge the real browser does. We fall back to urllib
+only when curl_cffi can't be imported (e.g. wheel missing for the host
+arch).
 
 A 1.5s per-process rate limit protects us against bursting the API in
 parallel-fetch scenarios — the worker pool in the backtest stream can
@@ -12,13 +21,17 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
-import subprocess
 import time
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+try:
+    from curl_cffi import requests as cf_requests  # type: ignore[import-not-found]
+    _HAS_CURL_CFFI = True
+except ImportError:
+    _HAS_CURL_CFFI = False
 
 
 _USER_AGENT = (
@@ -29,9 +42,6 @@ _USER_AGENT = (
 
 _last_api_call: float = 0.0
 _API_MIN_INTERVAL = 1.5  # seconds between requests
-
-# Use curl if available — Python's urllib TLS fingerprint gets blocked by Cloudflare
-_HAS_CURL = shutil.which("curl") is not None
 
 
 class ApiResult:
@@ -55,43 +65,34 @@ class ApiResult:
         return False
 
 
-def _api_request_curl(url: str, timeout: int = 30) -> ApiResult:
-    """Fetch via curl subprocess to bypass Cloudflare TLS fingerprinting."""
+def _api_request_cf(url: str, timeout: int = 30) -> ApiResult:
+    """Fetch via curl_cffi with Chrome120 impersonation to bypass
+    Cloudflare TLS-fingerprint inspection on the GuruFocus edge."""
     masked_url = url
     api_key = os.environ.get("GURUFOCUS_API_KEY", "")
     if api_key:
         masked_url = url.replace(api_key, api_key[:4] + "***")
 
     try:
-        # Use -w to capture HTTP status code, remove -f so we get the body on errors
-        result = subprocess.run(
-            ["curl", "-s", "--max-time", str(timeout),
-             "-w", "\n%{http_code}",
-             "-H", f"User-Agent: {_USER_AGENT}",
-             "-H", "Accept: application/json",
-             url],
-            capture_output=True, text=True, timeout=timeout + 5,
+        resp = cf_requests.get(
+            url,
+            headers={"User-Agent": _USER_AGENT, "Accept": "application/json"},
+            timeout=timeout,
+            impersonate="chrome120",
         )
-        if result.returncode != 0 and result.returncode != 22:
-            stderr = result.stderr.strip()[:200] if result.stderr else ""
-            return ApiResult(None, f"curl exit {result.returncode}: {stderr} ({masked_url})")
-
-        # Split body from status code (last line)
-        output = result.stdout.rsplit("\n", 1)
-        body = output[0] if len(output) > 1 else result.stdout
-        status_code = int(output[-1]) if len(output) > 1 and output[-1].isdigit() else None
-
-        if status_code and status_code >= 400:
-            return ApiResult(None, f"API HTTP {status_code} body={body[:200]} ({masked_url})", status_code)
+        status_code = resp.status_code
+        body = resp.text or ""
+        if status_code >= 400:
+            return ApiResult(
+                None, f"API HTTP {status_code} body={body[:200]} ({masked_url})", status_code
+            )
         if not body:
             return ApiResult(None, f"API empty response ({masked_url})", status_code)
         return ApiResult(json.loads(body), f"API OK ({masked_url})", status_code)
-    except subprocess.TimeoutExpired:
-        return ApiResult(None, f"API timeout after {timeout}s ({masked_url})")
     except json.JSONDecodeError as e:
         return ApiResult(None, f"API returned invalid JSON: {e} ({masked_url})")
     except Exception as e:
-        return ApiResult(None, f"curl error: {type(e).__name__}: {e} ({masked_url})")
+        return ApiResult(None, f"curl_cffi error: {type(e).__name__}: {e} ({masked_url})")
 
 
 def _api_request_urllib(url: str, timeout: int = 30) -> ApiResult:
@@ -128,8 +129,8 @@ def _api_request(url: str, timeout: int = 30) -> ApiResult:
         time.sleep(_API_MIN_INTERVAL - elapsed)
     _last_api_call = time.time()
 
-    if _HAS_CURL:
-        return _api_request_curl(url, timeout)
+    if _HAS_CURL_CFFI:
+        return _api_request_cf(url, timeout)
     return _api_request_urllib(url, timeout)
 
 
