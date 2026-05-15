@@ -31,6 +31,18 @@ export type PeriodRecord = {
   portfolio_return_pct: number | null;
   cumulative_return_pct: number;
   empty_reason?: string;
+  // True when this is the trailing "open" period — the strategy's current
+  // (still in flight) holding. Returns reflect the partial window from the
+  // last scheduled rebalance through the most recent available close. The
+  // backend excludes open periods from Sharpe/annualization; the UI should
+  // tag the row visually so users can tell it's a YTD snapshot rather than
+  // a closed period.
+  is_open?: boolean;
+  // Effective end date for an open period: the most recent date common to
+  // every held company (min of per-holding max trade dates). Surfaced next
+  // to the "open" badge so users see how stale the displayed return is
+  // when some names stopped reporting earlier than others.
+  as_of_date?: string;
 };
 
 export type DrawdownPeriod = {
@@ -254,9 +266,14 @@ export type BacktestStartConfig = {
   max_companies: number;
   universe_label: string | null;
   index_universe: string | null;
-  selection_mode: 'momentum' | 'random';
+  selection_mode: 'momentum' | 'random' | 'all' | 'sector_etf';
   random_seed: number | null;
   n_trials: number;
+  // {sector: benchmark_id} — required when selection_mode === 'sector_etf'.
+  // The momentum backtester populates this from the benchmarks tagged with
+  // a sector on /benchmarks; the backend looks up benchmark_price for each
+  // mapped ETF and uses those returns for the chosen sectors.
+  sector_etfs?: Record<string, number>;
   mode?: 'backtest' | 'current_portfolio';
   force_recompute?: boolean;
   // When true (the backend default), the run uses only data already in

@@ -52,13 +52,11 @@ const inputAddCls = 'w-full bg-[#0f1117] border border-emerald-800/50 rounded-lg
 function EditRow({
   company,
   exchangeOptions,
-  countryOptions,
   onSave,
   onCancel,
 }: {
   company: Company;
   exchangeOptions: string[];
-  countryOptions: string[];
   onSave: (updated: Partial<Company>) => Promise<void>;
   onCancel: () => void;
 }) {
@@ -102,12 +100,10 @@ function EditRow({
 
 function AddRow({
   exchangeOptions,
-  countryOptions,
   onAdd,
   onCancel,
 }: {
   exchangeOptions: string[];
-  countryOptions: string[];
   onAdd: (c: { company_name: string; gurufocus_ticker: string; gurufocus_exchange: string }) => Promise<void>;
   onCancel: () => void;
 }) {
@@ -484,7 +480,6 @@ export default function CompanyManager() {
               {adding && (
                 <AddRow
                   exchangeOptions={exchangeOptions}
-                  countryOptions={countryOptions}
                   onAdd={handleAdd}
                   onCancel={() => setAdding(false)}
                 />
@@ -495,7 +490,6 @@ export default function CompanyManager() {
                     key={c.company_id}
                     company={c}
                     exchangeOptions={exchangeOptions}
-                    countryOptions={countryOptions}
                     onSave={(updated) => handleSave(c.company_id, updated)}
                     onCancel={() => setEditingId(null)}
                   />

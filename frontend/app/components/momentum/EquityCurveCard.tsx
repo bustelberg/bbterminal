@@ -15,7 +15,8 @@ import type {
 import CellInfoTip from './CellInfoTip';
 import CollapsibleCard from './CollapsibleCard';
 import { SERIES_COLORS, computeTopDrawdowns, fmtPct, tooltipStyle } from './utils';
-import type { BenchmarkOption, BenchmarkPrice, ComparisonItem, SavedRun } from './types';
+import type { BenchmarkOption, BenchmarkPrice, ComparisonItem, SavedRun, SavedVariant } from './types';
+import { buildFeeMap, computeNetStats, parenPct, type NetStats } from './feeStats';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -29,6 +30,12 @@ type Props = {
   loadedRunId: number | null;
   /** Saved backtests available for comparison. */
   savedRuns: SavedRun[];
+  /** Per-company exchange lookup. When provided alongside non-zero
+   * `/api/exchange-fees`, every stat surfaced on the active strategy
+   * gets a `gross (net)` parenthetical computed from the fee model in
+   * `feeStats.ts`. Optional so the card stays usable when the parent
+   * doesn't pipe it through (e.g. saved-bundle reload flows). */
+  exchangeByCompany?: Map<number, string>;
 };
 
 /** "Equity Curve" card cluster: comparison pill row, summary stats,
@@ -36,9 +43,12 @@ type Props = {
  * own benchmark/saved comparison state and all the chart-derived memos
  * — the parent only feeds it the active strategy plus the saved-run
  * list. */
-export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Props) {
+export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchangeByCompany }: Props) {
   const [benchmarkOptions, setBenchmarkOptions] = useState<BenchmarkOption[]>([]);
   const [comparisons, setComparisons] = useState<ComparisonItem[]>([]);
+  // Per-exchange fees (bps) for the (net) parenthetical. Fetched once
+  // on mount; null when the user hasn't configured any non-zero fees.
+  const [feesByExchange, setFeesByExchange] = useState<Map<string, number> | null>(null);
   const [addSeriesOpen, setAddSeriesOpen] = useState(false);
   const addSeriesRef = useRef<HTMLDivElement>(null);
   const [logScale, setLogScale] = useState(false);
@@ -56,6 +66,29 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
       .then((data) => setBenchmarkOptions(data))
       .catch(() => {});
   }, []);
+
+  // Load per-exchange fees once on mount. Stays null when nothing is
+  // configured so all the `parenPct(...)` calls below render as empty
+  // strings (no parens, no visual noise).
+  useEffect(() => {
+    fetch(`${API_URL}/api/exchange-fees`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => {
+        const m = buildFeeMap(rows ?? []);
+        setFeesByExchange(m.size > 0 ? m : null);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Net stats for the active strategy. We deliberately only compute the
+  // parenthetical for the active strategy — comparison saved runs may be
+  // on different universes whose company → exchange map we don't have
+  // loaded, and benchmarks have no holdings to trade. Active = the
+  // information the user actually configured fees against.
+  const activeNetStats = useMemo<NetStats | null>(() => {
+    if (!feesByExchange || !exchangeByCompany) return null;
+    return computeNetStats(result.monthly_records, feesByExchange, exchangeByCompany);
+  }, [feesByExchange, exchangeByCompany, result.monthly_records]);
 
   // Close "add series" dropdown on outside click
   useEffect(() => {
@@ -78,10 +111,45 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
       if (!resp.ok) return;
       const data = await resp.json();
       const saved = data.result ?? data;
-      const monthly: PeriodRecord[] = saved.monthly_records ?? [];
-      const daily: DailyRecord[] | undefined = saved.daily_records;
-      const label = data.name ?? `Backtest ${runId}`;
-      setComparisons((prev) => [...prev, { id: `saved:${runId}`, kind: 'saved', runId, label, monthly, daily }]);
+      // Variant bundles (Random multi-trial sweeps, frequency sweeps, etc.)
+      // store records under each variant rather than at the top level. Pick
+      // the first variant — mirrors how loadBacktest chooses `firstKey`
+      // when rehydrating a sweep as the active strategy.
+      const baseLabel = data.name ?? `Backtest ${runId}`;
+      let monthly: PeriodRecord[] = [];
+      let daily: DailyRecord[] | undefined;
+      let summary: Summary | undefined;
+      let label = baseLabel;
+      let allVariants: SavedVariant[] | undefined;
+      let variantIndex: number | undefined;
+      if (saved?.kind === 'variants' && Array.isArray(saved.variants) && saved.variants.length > 0) {
+        allVariants = saved.variants as SavedVariant[];
+        variantIndex = 0;
+        const v = allVariants[0];
+        monthly = v?.monthly_records ?? [];
+        daily = v?.daily_records;
+        summary = v?.summary;
+        if (v?.label) label = `${baseLabel} · ${v.label}`;
+      } else {
+        monthly = saved.monthly_records ?? [];
+        daily = saved.daily_records;
+        summary = saved.summary;
+      }
+      setComparisons((prev) => [
+        ...prev,
+        {
+          id: `saved:${runId}`,
+          kind: 'saved',
+          runId,
+          label,
+          monthly,
+          daily,
+          summary,
+          allVariants,
+          variantIndex,
+          baseLabel,
+        },
+      ]);
     } catch {} finally {
       setAddingSeriesId(null);
     }
@@ -112,10 +180,46 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
     setComparisons((prev) => prev.filter((c) => c.id !== id));
   };
 
-  // Resolve every series into a (YYYY-MM → growth factor) map, rebased to 1.0
-  // at the series' first observed month. The factor embeds the forward return
-  // earned during each month, so factor[month[i]] == cumProduct of returns
-  // through month[i] (consistent with strategy `cumulative_return_pct`).
+  /** Switch which variant of a saved variant-bundle comparison is overlaid.
+   * No-op for benchmarks or saved single-runs (which don't carry
+   * `allVariants`). The series's label/monthly/daily/summary are rederived
+   * from the chosen variant in place, preserving the badge's slot and color. */
+  const switchVariant = (id: string, newIndex: number) => {
+    setComparisons((prev) =>
+      prev.map((c) => {
+        if (c.id !== id || c.kind !== 'saved' || !c.allVariants || !c.allVariants[newIndex]) return c;
+        const v = c.allVariants[newIndex];
+        const base = c.baseLabel ?? c.label;
+        return {
+          ...c,
+          variantIndex: newIndex,
+          monthly: v.monthly_records ?? [],
+          daily: v.daily_records,
+          summary: v.summary,
+          label: v.label ? `${base} · ${v.label}` : base,
+        };
+      }),
+    );
+  };
+
+  // One global "variant picker open" per comparison id — keeps clicks
+  // outside the picker from leaving multiple pickers open.
+  const [variantPickerOpen, setVariantPickerOpen] = useState<string | null>(null);
+  const variantPickerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!variantPickerOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!variantPickerRef.current?.contains(e.target as Node)) setVariantPickerOpen(null);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [variantPickerOpen]);
+
+  // Resolve every series into a (date → growth factor) map. Date keys are
+  // normalized to YYYY-MM-DD so that string comparison correctly orders dates
+  // across mixed cadences — a saved variant with monthly_records ("2002-01")
+  // sits at the *end of January* on the timeline, lining up with a daily
+  // strategy's "2002-01-31" rather than colliding lexicographically.
   type ResolvedSeries = {
     id: string;
     label: string;
@@ -123,7 +227,11 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
     kind: 'active' | 'saved' | 'benchmark';
     removable: boolean;
     factorByMonth: Map<string, number>;
-    months: string[]; // sorted
+    months: string[]; // sorted YYYY-MM-DD
+    // Backend-computed canonical stats. Present for any series that came out
+    // of a backtest run (active or saved); benchmarks fall back to
+    // points-derived stats since there's no run to attribute to them.
+    summary?: Summary;
   };
 
   const resolvedSeries = useMemo<ResolvedSeries[]>(() => {
@@ -131,20 +239,35 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
     let colorIdx = 0;
     const nextColor = () => SERIES_COLORS[colorIdx++ % SERIES_COLORS.length];
 
+    // Promote a YYYY-MM monthly_records date to end-of-month YYYY-MM-DD so
+    // it can be sorted/compared against daily YYYY-MM-DD dates correctly.
+    // Using "28" for Feb is conservative — we just need a stable last-day-
+    // of-month-ish anchor, not the exact trading day.
+    const endOfMonth = (yyyymm: string): string => {
+      if (yyyymm.length !== 7) return yyyymm; // already YYYY-MM-DD
+      const [y, m] = yyyymm.split('-').map(Number);
+      // JavaScript: new Date(y, m, 0) gives the last day of month m (1-indexed)
+      const last = new Date(y, m, 0).getDate();
+      return `${yyyymm}-${String(last).padStart(2, '0')}`;
+    };
+
     const fromMonthly = (monthly: PeriodRecord[]): { map: Map<string, number>; months: string[] } => {
       const map = new Map<string, number>();
       const months: string[] = [];
       for (const r of monthly) {
+        const key = endOfMonth(r.date);
         const factor = 1 + r.cumulative_return_pct / 100;
-        map.set(r.date, factor);
-        months.push(r.date);
+        map.set(key, factor);
+        months.push(key);
       }
+      months.sort();
       return { map, months };
     };
 
     /** Prefer daily_records when present so the chart line, max DD, and
      * Sharpe all reflect intra-period moves. Falls back to monthly_records
-     * for older saved runs that don't carry the daily curve. */
+     * for older saved runs that don't carry the daily curve. Dates are
+     * normalized to YYYY-MM-DD either way. */
     const fromResult = (r: BacktestResult): { map: Map<string, number>; months: string[] } => {
       if (r.daily_records && r.daily_records.length > 0) {
         const map = new Map<string, number>();
@@ -159,14 +282,11 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
     };
 
     const fromPrices = (prices: BenchmarkPrice[]): { map: Map<string, number>; months: string[] } => {
-      // Daily granularity to align with the strategy's daily curve. Each
-      // entry's factor is `price[t] / price[firstDay]` so the series rebases
-      // to 1.0 on its earliest day; the alignment logic below shifts that
-      // basis to the common window start.
+      // Daily granularity. Each entry's factor is `price[t] / price[firstDay]`
+      // so the series rebases to 1.0 on its earliest day; alignment shifts
+      // that basis to the common window start later.
       if (prices.length === 0) return { map: new Map(), months: [] };
-      const sorted = prices
-        .slice()
-        .sort((a, b) => a.target_date.localeCompare(b.target_date));
+      const sorted = prices.slice().sort((a, b) => a.target_date.localeCompare(b.target_date));
       const map = new Map<string, number>();
       const dates: string[] = [];
       const p0 = sorted[0].price;
@@ -192,6 +312,7 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
       removable: false,
       factorByMonth: map,
       months,
+      summary: result.summary,
     });
 
     for (const c of comparisons) {
@@ -207,6 +328,7 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
           removable: true,
           factorByMonth: map,
           months,
+          summary: c.summary,
         });
       } else {
         const { map, months } = fromPrices(c.prices);
@@ -315,11 +437,11 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
       const annualized = yearsByDate > 0 ? (Math.pow(cumFactor, 1 / yearsByDate) - 1) * 100 : 0;
       const periodsPerYear = yearsByDate > 0 ? periodReturns.length / yearsByDate : 12;
 
-      let peak = 1.0, maxDd = 0, factor = 1.0;
+      let peakDd = 1.0, maxDd = 0, ddFactor = 1.0;
       for (const r of periodReturns) {
-        factor *= (1 + r / 100);
-        peak = Math.max(peak, factor);
-        const dd = (factor / peak - 1) * 100;
+        ddFactor *= (1 + r / 100);
+        peakDd = Math.max(peakDd, ddFactor);
+        const dd = (ddFactor / peakDd - 1) * 100;
         maxDd = Math.min(maxDd, dd);
       }
 
@@ -338,10 +460,31 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
         .map((p) => ({ date: p.date, value: 1 + (p.cumReturnPct as number) / 100 }));
       const topDrawdowns = computeTopDrawdowns(ddValues, 3);
 
+      // Prefer the backend's canonical summary stats whenever the series
+      // came from an actual backtest run. The backend computes Sharpe + max
+      // drawdown from the daily curve (so a 12-month-rebalance strategy
+      // still gets full intra-period detail) — re-deriving them from the
+      // few rebased monthly points here would under-count volatility and
+      // produce a different number for the same strategy depending on
+      // which table it's shown in. Points-derived stats are only used as a
+      // fallback for benchmarks (which have no summary attached).
+      const useBackendStats = s.summary != null;
+      const finalStats: SeriesStats = useBackendStats
+        ? {
+            totalReturn: s.summary!.total_return_pct,
+            annualized: s.summary!.annualized_return_pct,
+            maxDd: s.summary!.max_drawdown_pct,
+            sharpe: s.summary!.sharpe_ratio,
+            // Periods reflects observation count in the aligned window
+            // (informational, not used for any math now).
+            months: periodReturns.length,
+          }
+        : { totalReturn, annualized, maxDd, sharpe, months: periodReturns.length };
+
       return {
         ...s,
         points,
-        stats: { totalReturn, annualized, maxDd, sharpe, months: periodReturns.length },
+        stats: finalStats,
         topDrawdowns,
       };
     });
@@ -358,19 +501,51 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
     const bySeries: Record<string, Record<string, number | null>> = {};
 
     for (const s of series) {
-      const lastByYear = new Map<string, number>();
+      // Track first + last observation per year so we can detect partial
+      // years. A year is "complete from the start" only when either:
+      //   - there's a prior year of observations (so prev_year_end is the
+      //     proper baseline), or
+      //   - the first observation in this year falls in January.
+      // Otherwise the series's earliest point in that year is the rebase
+      // baseline (cumReturnPct == 0), and computing "cum_at_year_end / 1 - 1"
+      // produces a spurious 0% for what's really a partial year.
+      type YearStat = { firstDate: string; firstCum: number; lastCum: number; count: number };
+      const yearStats = new Map<string, YearStat>();
       for (const p of s.points) {
         if (p.cumReturnPct == null) continue;
         const y = p.date.slice(0, 4);
-        lastByYear.set(y, p.cumReturnPct);
+        const existing = yearStats.get(y);
+        if (existing) {
+          existing.lastCum = p.cumReturnPct;
+          existing.count++;
+        } else {
+          yearStats.set(y, { firstDate: p.date, firstCum: p.cumReturnPct, lastCum: p.cumReturnPct, count: 1 });
+        }
       }
-      const ys = Array.from(lastByYear.keys()).sort();
-      let prev = 0;
+      const ys = Array.from(yearStats.keys()).sort();
+      let prevCum: number | null = null;
       const rowMap: Record<string, number | null> = {};
       for (const y of ys) {
-        const cum = lastByYear.get(y)!;
-        rowMap[y] = ((1 + cum / 100) / (1 + prev / 100) - 1) * 100;
-        prev = cum;
+        const stat = yearStats.get(y)!;
+        const firstMonth = stat.firstDate.slice(5, 7);
+        // A year is shown as "—" when either:
+        //   - it's a partial first year (series's first observation is past
+        //     January AND there's no prior year of observations to baseline
+        //     against), or
+        //   - the year has MULTIPLE observations that are all the same value
+        //     (e.g., a momentum strategy still in its 12-month warmup period
+        //     with no positions held). Single-observation years (annual or
+        //     longer rebalance cadences) can't tell us whether the cum moved
+        //     within the year, so they're always rendered.
+        const isCompleteFromStart = prevCum !== null || firstMonth === "01";
+        const flatYear = stat.count > 1 && Math.abs(stat.lastCum - stat.firstCum) < 1e-9;
+        if (!isCompleteFromStart || flatYear) {
+          rowMap[y] = null;
+        } else {
+          const baseline = prevCum ?? 0;
+          rowMap[y] = ((1 + stat.lastCum / 100) / (1 + baseline / 100) - 1) * 100;
+        }
+        prevCum = stat.lastCum;
         yearsSet.add(y);
       }
       bySeries[s.id] = rowMap;
@@ -390,6 +565,24 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
     if (!customFromMonth || series.length === 0) return null;
     const last = series[0].points[series[0].points.length - 1];
     if (!last) return null;
+    // Walk the active strategy's net cumulative chain for the same
+    // window, so the active row gets its (net) parenthetical alongside
+    // the gross figure. Mirrors the gross math: start factor = cum at
+    // the last date < fromMonth (or 1.0 if none), end factor = cum at
+    // the final date.
+    let netRet: number | null = null;
+    if (activeNetStats) {
+      let startFactor = 1.0;
+      let endFactor: number | null = null;
+      for (let i = 0; i < activeNetStats.dates.length; i++) {
+        const d = activeNetStats.dates[i];
+        if (d < customFromMonth) startFactor = activeNetStats.cum_factors[i];
+        endFactor = activeNetStats.cum_factors[i];
+      }
+      if (endFactor != null && startFactor > 0) {
+        netRet = (endFactor / startFactor - 1) * 100;
+      }
+    }
     const perSeries = series.map((s) => {
       let start: number | null = null;
       let end: number | null = null;
@@ -398,12 +591,18 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
         if (p.date < customFromMonth) start = p.cumReturnPct;
         end = p.cumReturnPct;
       }
-      if (end == null) return { id: s.id, label: s.label, color: s.color, ret: null };
+      if (end == null) return { id: s.id, label: s.label, color: s.color, ret: null, netRet: null };
       const s0 = start ?? 0;
-      return { id: s.id, label: s.label, color: s.color, ret: ((1 + end / 100) / (1 + s0 / 100) - 1) * 100 };
+      return {
+        id: s.id,
+        label: s.label,
+        color: s.color,
+        ret: ((1 + end / 100) / (1 + s0 / 100) - 1) * 100,
+        netRet: s.kind === 'active' ? netRet : null,
+      };
     });
     return { perSeries, fromDate: customFromMonth, toDate: last.date };
-  }, [alignedSeries, customFromMonth]);
+  }, [alignedSeries, customFromMonth, activeNetStats]);
 
   // Chart data — wide-format per month, one key per series id, plus a 0%
   // origin row so every line starts from the same reference point.
@@ -467,27 +666,72 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
       <div className="bg-[#151821] rounded-xl border border-gray-800/40 px-4 py-3">
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-gray-400 text-sm mr-1">Comparison</span>
-          {alignedSeries.series.map((s) => (
-            <span
-              key={s.id}
-              className="inline-flex items-center gap-2 bg-[#0f1117] border border-gray-800 rounded-full pl-2 pr-1 py-1 text-xs"
-            >
-              <span className="inline-block w-2 h-2 rounded-full" style={{ background: s.color }} />
-              <span className="text-gray-200">{s.label}</span>
-              {s.removable && (
-                <button
-                  type="button"
-                  onClick={() => removeSeries(s.id)}
-                  className="ml-0.5 w-4 h-4 rounded-full text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors flex items-center justify-center"
-                  title="Remove from comparison"
-                >
-                  <svg className="w-2.5 h-2.5" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                  </svg>
-                </button>
-              )}
-            </span>
-          ))}
+          {alignedSeries.series.map((s) => {
+            // Look up the underlying ComparisonItem so the badge can offer a
+            // variant picker when the saved run is a variant bundle.
+            const cmp = comparisons.find((c) => c.id === s.id);
+            const hasVariantPicker =
+              cmp != null && cmp.kind === 'saved' && cmp.allVariants != null && cmp.allVariants.length > 1;
+            const pickerOpen = variantPickerOpen === s.id;
+            return (
+              <span
+                key={s.id}
+                className="relative inline-flex items-center gap-2 bg-[#0f1117] border border-gray-800 rounded-full pl-2 pr-1 py-1 text-xs"
+                ref={pickerOpen ? variantPickerRef : undefined}
+              >
+                <span className="inline-block w-2 h-2 rounded-full" style={{ background: s.color }} />
+                {hasVariantPicker ? (
+                  <button
+                    type="button"
+                    onClick={() => setVariantPickerOpen(pickerOpen ? null : s.id)}
+                    className="text-gray-200 hover:text-white inline-flex items-center gap-1"
+                    title="Switch variant"
+                  >
+                    <span>{s.label}</span>
+                    <svg className={`w-3 h-3 text-gray-500 transition-transform ${pickerOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                ) : (
+                  <span className="text-gray-200">{s.label}</span>
+                )}
+                {s.removable && (
+                  <button
+                    type="button"
+                    onClick={() => removeSeries(s.id)}
+                    className="ml-0.5 w-4 h-4 rounded-full text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors flex items-center justify-center"
+                    title="Remove from comparison"
+                  >
+                    <svg className="w-2.5 h-2.5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                )}
+                {hasVariantPicker && pickerOpen && cmp.kind === 'saved' && cmp.allVariants && (
+                  <div className="absolute left-0 top-full mt-1 w-64 bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-80 overflow-auto">
+                    <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-500 border-b border-gray-800/60">
+                      Variants ({cmp.allVariants.length})
+                    </div>
+                    {cmp.allVariants.map((v, idx) => {
+                      const isCurrent = idx === (cmp.variantIndex ?? 0);
+                      return (
+                        <button
+                          key={v.key}
+                          type="button"
+                          disabled={isCurrent}
+                          onClick={() => { switchVariant(s.id, idx); setVariantPickerOpen(null); }}
+                          className={`w-full text-left px-3 py-2 text-xs hover:bg-white/[0.03] disabled:opacity-100 disabled:cursor-default flex items-center justify-between gap-2 ${isCurrent ? 'bg-indigo-500/10 text-indigo-300' : 'text-gray-200'}`}
+                        >
+                          <span className="truncate">{v.label}</span>
+                          {isCurrent && <span className="text-[10px] text-indigo-400">current</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </span>
+            );
+          })}
           <div className="relative" ref={addSeriesRef}>
             <button
               type="button"
@@ -591,19 +835,28 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
             </tr>
           </thead>
           <tbody>
-            {alignedSeries.series.map((s) => (
+            {alignedSeries.series.map((s) => {
+              // The (net) parenthetical only applies to the ACTIVE
+              // strategy — comparison saved runs may belong to a
+              // different universe whose company→exchange map we
+              // don't have loaded, and benchmarks have no holdings
+              // to trade. `activeNetStats` is null when fees aren't
+              // configured at all, in which case parenPct renders ''.
+              const net = s.kind === 'active' ? activeNetStats : null;
+              return (
               <tr key={s.id} className="border-b border-gray-800/30">
                 <td className="px-4 py-2.5 font-medium flex items-center gap-2">
                   <span className="inline-block w-2 h-2 rounded-full" style={{ background: s.color }} />
                   <span className="text-gray-200">{s.label}</span>
                 </td>
-                <td className={`px-3 py-2.5 text-right font-mono ${s.stats.totalReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(s.stats.totalReturn)}</td>
-                <td className={`px-3 py-2.5 text-right font-mono ${s.stats.annualized >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(s.stats.annualized)}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-rose-400">{fmtPct(s.stats.maxDd)}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-white">{s.stats.sharpe != null ? s.stats.sharpe.toFixed(2) : '—'}</td>
+                <td className={`px-3 py-2.5 text-right font-mono ${s.stats.totalReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(s.stats.totalReturn)}<span className="text-gray-500">{parenPct(net?.total_return_pct)}</span></td>
+                <td className={`px-3 py-2.5 text-right font-mono ${s.stats.annualized >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(s.stats.annualized)}<span className="text-gray-500">{parenPct(net?.annualized_return_pct)}</span></td>
+                <td className="px-3 py-2.5 text-right font-mono text-rose-400">{fmtPct(s.stats.maxDd)}<span className="text-gray-500">{parenPct(net?.max_drawdown_pct)}</span></td>
+                <td className="px-3 py-2.5 text-right font-mono text-white">{s.stats.sharpe != null ? s.stats.sharpe.toFixed(2) : '—'}<span className="text-gray-500">{net?.sharpe_ratio != null ? ` (${net.sharpe_ratio.toFixed(2)})` : ''}</span></td>
                 <td className="px-3 py-2.5 text-right font-mono text-gray-300">{s.stats.months}</td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
         {/* Active strategy — raw (non-aligned) metrics, including turnover + holdings */}
@@ -722,12 +975,17 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
                     <td className="px-5 py-2 text-gray-200 font-mono">{y}</td>
                     {alignedSeries.series.map((s) => {
                       const v = yearlyBreakdown.bySeries[s.id]?.[y];
+                      // Active-strategy column gets the (net) parenthetical
+                      // when fees are configured; other columns stay
+                      // gross-only (see activeNetStats memo for why).
+                      const netY = s.kind === 'active' ? activeNetStats?.yearly[y] : undefined;
                       return (
                         <td
                           key={s.id}
                           className={`px-3 py-2 text-right font-mono ${v != null ? (v >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}
                         >
                           {v != null ? fmtPct(v) : '—'}
+                          {netY != null && <span className="text-gray-500">{parenPct(netY)}</span>}
                         </td>
                       );
                     })}
@@ -764,6 +1022,7 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
                     {s.ret != null ? (
                       <span className={`font-mono ${s.ret >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {fmtPct(s.ret)}
+                        {s.netRet != null && <span className="text-gray-500">{parenPct(s.netRet)}</span>}
                       </span>
                     ) : (
                       <span className="font-mono text-gray-600">—</span>

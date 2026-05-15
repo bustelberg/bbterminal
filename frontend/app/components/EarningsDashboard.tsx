@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  ReferenceLine, CartesianGrid, Legend,
+  ReferenceLine, CartesianGrid,
 } from 'recharts';
 
 import ApiUsageBadge, { type ApiUsageBadgeHandle } from './ApiUsageBadge';
@@ -305,33 +305,6 @@ function stdDev(values: number[]): number | null {
   return Math.sqrt(variance);
 }
 
-function computeCAGRWindow(series: { date: string; value: number }[], years: number): number | null {
-  if (series.length < 2) return null;
-  const endDate = new Date(series[series.length - 1].date);
-  const cutoff = new Date(endDate);
-  cutoff.setFullYear(cutoff.getFullYear() - years);
-  const cutoffStr = cutoff.toISOString().slice(0, 10);
-  // find closest point to cutoff
-  let best = series[0];
-  for (const p of series) {
-    if (p.date <= cutoffStr) best = p;
-  }
-  if (best.date === series[series.length - 1].date) return null;
-  return computeCAGR([best, series[series.length - 1]]);
-}
-
-function indexTo100(series: { date: string; value: number }[]): { date: string; value: number; raw: number }[] {
-  const firstPositive = series.find((s) => s.value > 0);
-  if (!firstPositive) return [];
-  const base = firstPositive.value;
-  const startIdx = series.indexOf(firstPositive);
-  return series.slice(startIdx).map((s) => ({
-    date: s.date,
-    value: (s.value / base) * 100,
-    raw: s.value,
-  }));
-}
-
 function fmtPct(v: number | null): string {
   if (v == null) return '—';
   return `${(v * 100).toFixed(2)}%`;
@@ -533,29 +506,6 @@ function SectionLoader({ label }: { label: string }) {
         </svg>
         <span className="text-gray-400 text-sm">Loading {label}...</span>
       </div>
-    </div>
-  );
-}
-
-function StatCard({ label, value, sub }: { label: string; value: string; sub?: string | null }) {
-  return (
-    <div className="bg-[#0f1117] rounded-lg p-3 border border-gray-800/40">
-      <div className="text-gray-500 text-xs mb-1">{label}</div>
-      <div className="text-white font-mono text-lg">{value}</div>
-      {sub && <div className="text-gray-600 text-xs mt-1">{sub}</div>}
-    </div>
-  );
-}
-
-function KPIRow({ items }: { items: { label: string; value: string }[] }) {
-  return (
-    <div className="flex gap-6 mb-3">
-      {items.map((kpi) => (
-        <div key={kpi.label}>
-          <div className="text-gray-500 text-xs">{kpi.label}</div>
-          <div className="text-white font-mono">{kpi.value}</div>
-        </div>
-      ))}
     </div>
   );
 }
@@ -1061,9 +1011,9 @@ function FCFShareChart({ metrics }: { metrics: MetricRow[] }) {
             name="FCF/share"
             stroke="#818cf8"
             strokeWidth={2}
-            dot={(props: any) => {
+            dot={(props: { cx?: number; cy?: number; payload?: { value: number } }) => {
               const { cx, cy, payload } = props;
-              if (payload.value < 0) {
+              if (payload && payload.value < 0) {
                 return <circle cx={cx} cy={cy} r={3} fill="#f87171" stroke="#f87171" />;
               }
               return <circle cx={cx} cy={cy} r={0} fill="none" stroke="none" />;
@@ -1095,8 +1045,15 @@ function EGMCalculator({ metrics }: { metrics: MetricRow[] }) {
     setFy1(fy1Raw ? fy1Raw.value.toFixed(2) : '');
   }, [epsRaw, fy1Raw]);
 
+  // Initialize defaults exactly once after raw data first arrives. The
+  // setState-in-effect lint is correct that this is a discouraged
+  // pattern, but the canonical alternative ("derive everything during
+  // render") doesn't fit here — `resetDefaults` writes to several
+  // form-state setters the user can then edit, so it must be a one-shot
+  // side effect, not a derived value.
   useEffect(() => {
     if (!initialized && (epsRaw || fy1Raw)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       resetDefaults();
       setInitialized(true);
     }
@@ -1220,9 +1177,13 @@ function ReverseDCF({ metrics }: { metrics: MetricRow[] }) {
     setYears('10');
   }, [priceRaw, fcfRaw, netCashRaw, waccRaw]);
 
-  // Only auto-fill on first data load, not on every re-render
+  // Only auto-fill on first data load, not on every re-render. Same
+  // pattern as the EPS panel above — one-shot init of editable form
+  // state from raw data, so the setState-in-effect lint gets a
+  // justified suppression.
   useEffect(() => {
     if (!initialized && (priceRaw || fcfRaw)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       resetDefaults();
       setInitialized(true);
     }
@@ -1412,6 +1373,15 @@ export default function EarningsDashboard() {
       .finally(() => setLoadingMetrics(false));
   }, [selected]);
 
+  // Run on every (selected → loadMetrics) change: wipe the SSE log
+  // panel from the previous company's refresh and re-fetch metrics for
+  // the new one. Both calls are intentional side effects.
+  // The lint flags two things: `sse.clearLogs()` is a setState call
+  // inside an effect (intentional — we WANT to clear the log when
+  // switching companies, that's an external-state sync), and `sse` is
+  // missing from deps (the SSE handle is stable across renders, so
+  // re-running on its identity would just thrash for no benefit).
+  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
   useEffect(() => { sse.clearLogs(); loadMetrics(); }, [loadMetrics]);
 
   const refresh = (source: string, force = true) => {

@@ -658,6 +658,28 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
                   );
                 })}
               </tbody>
+              {/* Cumulative across every visit: chain-linked compound
+                  return is the same arithmetic as `summary.compoundReturnPct`
+                  (months not held contribute factor=1, so visit-product ≡
+                  monthly-product across held months). Sits in the
+                  bottom-right of the modal so the per-visit numbers above
+                  always have a running total to compare against. */}
+              <tfoot>
+                <tr className="border-t border-gray-700/60 bg-white/[0.02]">
+                  <td colSpan={3} className="py-2 text-gray-300 text-xs font-medium">
+                    Total
+                  </td>
+                  <td className="py-2 text-right text-gray-300 font-mono">
+                    {summary.monthsHeld}
+                  </td>
+                  <td className={`py-2 text-right font-mono font-medium ${summary.compoundReturnPct != null && summary.compoundReturnPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {fmtPct(summary.compoundReturnPct)}
+                  </td>
+                  <td className={`py-2 text-right font-mono font-medium ${summary.cagrPct != null && summary.cagrPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {fmtPct(summary.cagrPct)}
+                  </td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         )}

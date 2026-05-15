@@ -189,6 +189,28 @@ The frontend follows Next.js convention: `.env.local` overrides `.env`. Vercel u
 - `POST /api/indicators/fetch`
 - `GET /api/gurufocus/{exchanges,exchange-currencies}`
 
+*Scheduled refresh + pipeline*
+- `POST /api/ingest/scheduled-refresh/cron?job_name=<weekly_price_volume|monthly_price_volume>` — X-Cron-Secret protected fallback entry (the in-process APScheduler uses this path's sister `kick_off_refresh()` directly).
+- `POST /api/ingest/scheduled-refresh/trigger?job_name=manual` — manual UI trigger (Run-now button on `/schedule`).
+- `GET /api/ingest/runs?limit=N` — recent pipeline runs (newest first).
+- `GET /api/ingest/runs/{run_id}` — one row including all per-phase result columns.
+- `GET /api/ingest/runs/{run_id}/acwi-membership?q=` — searchable membership for the ACWI snapshot the run captured.
+- `GET|PUT /api/schedule-config` — the "scheduled strategy" singleton (selected `backtest_run.run_id` drives the pipeline's momentum phase).
+
+*Transaction fees*
+- `GET /api/exchange-fees` — every exchange (from `gurufocus_exchange`) joined with its configured `fee_bps` (0 when unset).
+- `PUT /api/exchange-fees/{exchange_code}` body `{fee_bps: float}` — upsert.
+- `DELETE /api/exchange-fees/{exchange_code}` — drop the row (equivalent to setting it to 0).
+
+*Admin API* — for external scripts (e.g. IBKR rebalancer). Bearer JWT with `app_metadata.role == 'admin'` required.
+- `GET /api/admin/portfolio/latest` — latest scheduled-strategy snapshot, IBKR-ready (ticker / exchange / currency / target_weight / side / prices / company_name / sector per holding).
+- `GET /api/admin/portfolio/{snapshot_id}` — same shape, specific snapshot.
+- `GET /api/admin/runs/latest` — most recent pipeline run summary + most recent successful run.
+- `GET /api/admin/pipeline-runs?limit=N` — recent runs list (newest first).
+- `GET /api/admin/data-freshness` — per-source freshness (close_price / volume max date + trading-day age, latest snapshot, latest run).
+- `GET /api/admin/health` — composite go/no-go: `{is_healthy, is_healthy_strict, checks, problems}`. Strict requires green on every check; loose tolerates a single failed run.
+- `GET /api/admin/sanity-check` — coarse counts per major table + recent-run status distribution + latest snapshot summary. For "is everything basically wired up" eyeball checks.
+
 **Environment variables** (`.env`, overridden by `.env.local` if present):
 - `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`
 - `GURUFOCUS_BASE_URL`, `GURUFOCUS_API_KEY`
@@ -212,6 +234,10 @@ The frontend follows Next.js convention: `.env.local` overrides `.env`. Vercel u
 - `/acwi` — ACWI holdings / MSCI announcement explorer
 - `/fx-rates` — FX rate viewer + sync
 - `/request_gurufocus` — GuruFocus indicator fetch UI
+- `/schedule` — Scheduled pipeline (ACWI → prices → momentum). Top: "Scheduled strategy" picker that drives the momentum phase. Middle: weekly + monthly job cards with "Run now". Bottom: recent runs list — each row has a three-dot phase pip, expands to show the ACWI diff (counts + click-to-expand lists), the searchable ACWI membership for that run, and the momentum holdings rendered via `MonthlyHoldingsTable` (same look as /momentum's holdings table). Backed by `ingest_run` + `schedule_config` tables.
+- `/api` — Admin-only interactive endpoint explorer. Lists each admin API endpoint as a card with description, params, "Try it" button, and "Copy as curl". Uses the user's current Supabase session as the Bearer token so the explorer hits the real endpoints exactly as an external script would.
+- `/documentation` — Admin-only reference for calling the admin API from external scripts. Includes the full `bbterminal_client.py` Python source (copy-pasteable), a curl quick-start, env-var setup, a PowerShell one-off variant, and an endpoint reference table cross-linking to `/api`.
+- `/fees` — Per-exchange one-way transaction fees + broker-support toggle. Each row has a "Supported" checkbox (default checked) plus a fee_bps input; changes are batched and committed via a sticky Save button (no auto-save). Unsupported exchanges are dropped from the backtest universe entirely — every company on that exchange is excluded before signals are computed (filter applied in `backtest_stream/stream.py` right after `load_universe`). Backtest stats (Total Return, Annualized, Sharpe, Max DD, yearly breakdown, custom range, variants table) render `gross (net)` using a trade-aware fee model: a holding pays the buy fee only when it first appears vs the previous period, the sell fee only when it doesn't roll into the next period, and the open period never pays sell. Net stats are computed client-side in `frontend/app/components/momentum/feeStats.ts` so adjusting fees updates parentheticals on the next backtest render without re-running. Backed by `exchange_fee` table (`fee_bps` + `is_broker_supported`).
 - `/login`, `/set-password` — Auth pages. After successful sign-in or password set, the user is redirected to `/` (the welcome page). The proxy middleware in `frontend/proxy.ts` enforces auth on all non-public routes and redirects authenticated users away from `/login`.
 
 **Components** (`frontend/app/components/`):
@@ -236,7 +262,7 @@ The frontend follows Next.js convention: `.env.local` overrides `.env`. Vercel u
 
 See [`docs/schema.md`](docs/schema.md) for the full ERD and table descriptions.
 
-Key tables: `company`, `metric_data` (time-series for prices, volumes, derived metrics), `universe` + `universe_membership`, `backtest_run`, `benchmark` + `benchmark_price`, `gurufocus_exchange` + `country` + `currency` + `fx_rate`, `airs_performance`, `current_picks_snapshot` (one row per current-picks compute — locked-at-start holdings + current-month daily_picks blob, tagged with `strategy_hash`), `current_picks_day` (per-day row keyed by `(strategy_hash, target_date)` — backs the cross-month "Daily picks history" view and the cache lookup).
+Key tables: `company`, `metric_data` (time-series for prices, volumes, derived metrics), `universe` + `universe_membership`, `backtest_run`, `benchmark` + `benchmark_price`, `gurufocus_exchange` + `country` + `currency` + `fx_rate`, `airs_performance`, `current_picks_snapshot` (one row per current-picks compute — locked-at-start holdings + current-month daily_picks blob, tagged with `strategy_hash`), `current_picks_day` (per-day row keyed by `(strategy_hash, target_date)` — backs the cross-month "Daily picks history" view and the cache lookup), `ingest_run` (per-pipeline-run audit row backing `/schedule` — carries phase tracking + per-phase result columns: `acwi_universe_id` / `acwi_target_month` / `acwi_summary` jsonb / `momentum_snapshot_id` / `momentum_summary` jsonb), `schedule_config` (singleton row holding the user's selected scheduled-strategy `backtest_run.run_id` driving the pipeline's momentum phase), `exchange_fee` (per-exchange one-way bps backing `/fees`).
 
 ---
 
@@ -274,7 +300,7 @@ Modern fintech dark theme. Key principles:
 - SSE keepalive comments (`: keepalive\n\n`) sent before long-running operations to prevent proxy timeouts
 - AIRS portfolio data is parsed server-side but cached client-side in localStorage (no DB storage)
 - Company deletion cascades: removes metric_data and portfolio_weight rows first
-- GuruFocus API subscription covers USA + Europe regions only
+- GuruFocus API subscription covers USA + Europe + Asia (incl. Middle East). Russia, Africa, LatAm, AU/NZ are out of scope — see `FEASIBLE_GF_EXCHANGES` in `backend/index_universe/acwi/exchange_map.py`
 - Price/volume data cutoff: `1998-01-01` — no data before this date is stored
 - Supabase `.in_()` queries batched in chunks of 50 to avoid Cloudflare 502 errors
 - GuruFocus raw API responses cached in Supabase Storage bucket `gurufocus-raw` as JSON files
@@ -285,6 +311,83 @@ Modern fintech dark theme. Key principles:
 - **Current Picks caching**: a request's strategy identity is `_strategy_hash(req)` in `backend/main.py` — a 16-char SHA-256 of `signal_weights + category_weights + top_n_sectors + top_n_per_sector + max_companies + universe_label + index_universe + selection_mode`. Date range is intentionally excluded so the sliding "this month" view caches across runs that differ only in dates. Past months are read-only — `current_picks_day` only ever gains rows for the current month at compute time; it never backfills closed months.
 
 ---
+
+## Admin API (external scripts)
+
+The `/api/admin/*` endpoints exist so a local script (IBKR rebalancer, monitoring cron, etc.) can pull the latest scheduled-strategy portfolio + monitor pipeline health without opening the BBTerminal web UI. All require a Supabase JWT whose `app_metadata.role == 'admin'` — same gate the UI's admin pages use.
+
+**Sign in (email + password → access_token):**
+```bash
+ACCESS_TOKEN=$(curl -fsS -X POST \
+  "$SUPABASE_URL/auth/v1/token?grant_type=password" \
+  -H "apikey: $SUPABASE_ANON_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com","password":"…"}' \
+  | jq -r .access_token)
+```
+
+Tokens expire after ~1h. For long-running scripts, hold both `access_token` and `refresh_token` and re-call `/auth/v1/token?grant_type=refresh_token` when the access token expires.
+
+**Get the latest portfolio (for an IBKR rebalancer):**
+```bash
+curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" \
+  "https://<backend>/api/admin/portfolio/latest"
+```
+
+Response shape:
+```jsonc
+{
+  "snapshot_id": 42,
+  "as_of_date": "2026-05-15",
+  "latest_price_date": "2026-05-14",
+  "created_at": "2026-05-15T02:08:11Z",
+  "strategy": {
+    "name": "ACWI-mei · Momentum · 2002-2026",
+    "selection_mode": "momentum",
+    "strategy_type": "long_only",
+    "top_n_sectors": 4,
+    "top_n_per_sector": 3
+  },
+  "holdings_count": 12,
+  "total_weight": 1.0,
+  "holdings": [
+    {
+      "ticker": "NESTE",
+      "exchange": "OHEL",          // GuruFocus exchange code, map to IBKR yourself
+      "currency": "EUR",
+      "side": "long",
+      "target_weight": 0.0833,
+      "company_id": 782,
+      "company_name": "NESTE",
+      "sector": "Energy",
+      "entry_price_local": 28.52,
+      "entry_price_eur": 28.52,
+      "entry_date": "2026-05-01",
+      "score": 87.4
+    }
+  ]
+}
+```
+
+Symbol → IBKR mapping is intentionally left to the script — GuruFocus codes don't 1:1 with IBKR exchange codes (e.g. `OHEL` here → IBKR `HEL`). Maintain the translation in your script so we don't lock in a particular broker convention.
+
+**Pre-trade safety gate:**
+```bash
+HEALTH=$(curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" \
+  "https://<backend>/api/admin/health")
+echo "$HEALTH" | jq -e '.is_healthy_strict == true' >/dev/null || {
+  echo "Refusing to trade — bbterminal not healthy: $(echo "$HEALTH" | jq -r .problems)"
+  exit 1
+}
+```
+
+**Monitor cron success:**
+```bash
+curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" \
+  "https://<backend>/api/admin/runs/latest"
+```
+
+Use the `latest.started_at` / `latest.status` fields to alert when no run has happened in the last 8 days, or the most recent one ended in `error`.
 
 ## Deployment
 
@@ -309,6 +412,40 @@ curl -fsS -X POST "https://<backend>/api/momentum/current-picks/cron" \
 Where `cron-current-picks.json` holds the strategy config (same shape as `BacktestRequest`) — typically the user's preferred signal weights, sectors, top-N, and `index_universe`. The endpoint forces `mode=current_portfolio` and `force_recompute=true` regardless of body content (the cron's purpose is to land a fresh weekly snapshot, so it bypasses the cache). The resulting snapshot lands in `current_picks_snapshot` with `triggered_by='auto'` and the strategy hash. Per-day rows are also upserted into `current_picks_day` so the UI's "Daily picks history" stays current.
 
 To change the strategy the cron uses, edit `cron-current-picks.json` (or whichever payload file Railway is configured to send). To pause the cron, disable it in Railway's service config.
+
+### Schedule: in-process pipeline (ACWI → prices → momentum)
+
+The scheduled refresh runs from an in-process APScheduler defined in `backend/scheduler.py` — **no Railway Cron entries required**. Two `BackgroundScheduler` triggers fire the SAME three-phase pipeline:
+
+| Job name | Trigger | Captures |
+|---|---|---|
+| `weekly_price_volume` | Tuesday 02:00 UTC | The previous Monday's global closes — US closes at ~21:00 UTC Monday, so 02:00 UTC Tuesday is ~5h later (plenty of GuruFocus settle time). |
+| `monthly_price_volume` | 2nd of every month, 02:00 UTC | The first trading day's closes. If the 1st was a weekend/holiday the run still fires but freshness checks short-circuit; the next weekly tick catches up. |
+
+Each fire calls `kick_off_refresh(job_name, "auto")` from `routers/ingest_runs.py`, which inserts an `ingest_run` row tagged `triggered_by='auto'` and spawns the daemon worker `_run_pipeline_sync` that executes:
+
+  **Phase 1 — ACWI refresh** via `run_acwi_save_universe()` (the sync core extracted from `/api/acwi/save-universe`). Reconstructs the last two months of ACWI membership, then diffs this month vs last month to produce `acwi_summary` JSONB with `{additions, removals, renames}` lists. Persisted on the run row as `acwi_universe_id` / `acwi_target_month` / `acwi_summary`.
+
+  **Phase 2 — price + volume refresh** (the original behavior pre-pipeline). Walks every row in `company` through `ensure_prices_for_company` + `ensure_volume_for_company`. Per-class counters checkpoint to the row every 100 companies. Forbidden / delisted / unexpected-error tallies surface on the same row.
+
+  **Phase 3 — momentum compute**. Reads `schedule_config.selected_run_id` to find the "scheduled strategy" (a saved `backtest_run` row). Drains `_momentum_backtest_stream` with `mode=current_portfolio` + that strategy's config. Persists the resulting `current_picks_snapshot` and links it on `ingest_run.momentum_snapshot_id`. Skipped silently when no strategy is selected.
+
+Phases are independent — a failure in one is captured in `error_summary` but the next phase still attempts. `current_phase` reflects the live phase (or `done` when finished). The `/schedule` UI shows three-dot phase pips per run + an expandable detail panel with the ACWI diff lists, a searchable membership viewer, and the holdings (rendered via `MonthlyHoldingsTable` fed a one-period synthetic result, so it matches the `/momentum` look exactly).
+
+**Trade-offs vs Railway Cron:**
+- ✅ Code-managed: deploys with `git push`, no UI clicks. Cron expressions live in `scheduler.py`.
+- ⚠️ Single-instance assumption. If Railway ever runs the backend with N replicas, each replica fires its own tick — the freshness checks no-op duplicates so it's "wasteful but harmless" rather than broken. Set `DISABLE_SCHEDULER=1` on all-but-one replica if you scale out.
+- ⚠️ A restart that lands exactly at 02:00 UTC drops that tick. Acceptable for a recovery cadence in days; the next week catches up.
+
+To pause: set `DISABLE_SCHEDULER=1` in the Railway env and redeploy.
+
+**The `POST /api/ingest/scheduled-refresh/cron` HTTP endpoint still exists** (X-Cron-Secret protected) for parity with the manual `/trigger` endpoint — useful if you ever want to revert to Railway Cron without touching code — but it's not used by the current setup.
+
+**Backtests** (`/api/momentum/backtest`) unconditionally set `db_only=True` for `mode=backtest` — they never refresh data lazily, so results are predictable and fast. If the DB looks stale, click "Run now" on `/schedule` or wait for the next scheduled tick.
+
+**Current-picks is NOT scheduled.** It's an on-demand action the user kicks off from the UI's "Current Picks" / "Recompute" buttons. If the existing Railway-UI Monday 02:00 UTC current-picks cron is still configured, you can disable it — `mode=current_portfolio` keeps its own narrow self-heal for its ~30 held names when the user clicks the button.
+
+Per-company outcomes aren't stored on `ingest_run` — only aggregates (`prices_refreshed`, `volumes_refreshed`, `forbidden_count`, `delisted_count`, `error_count`). The first ~5 unexpected errors are captured in `error_summary` for triage.
 
 ---
 

@@ -92,8 +92,12 @@ export default function Indicators() {
       });
       const data = await res.json();
       setResult(data);
-    } catch (e: any) {
-      setResult({ success: false, symbol: `${exchange}:${ticker}`, error: e.message });
+    } catch (e) {
+      setResult({
+        success: false,
+        symbol: `${exchange}:${ticker}`,
+        error: e instanceof Error ? e.message : String(e),
+      });
     } finally {
       setLoading(false);
     }

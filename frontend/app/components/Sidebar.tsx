@@ -24,6 +24,10 @@ const navItems: NavItem[] = [
   { href: '/request_gurufocus', label: 'Request GuruFocus' },
   { href: '/benchmarks', label: 'Benchmarks' },
   { href: '/companies', label: 'Companies', userVisible: true },
+  { href: '/schedule', label: 'Schedule' },
+  { href: '/fees', label: 'Fees' },
+  { href: '/api', label: 'API' },
+  { href: '/documentation', label: 'Documentation' },
 ];
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';

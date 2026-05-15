@@ -79,9 +79,36 @@ export default function MomentumBacktester() {
   const [topPerSector, setTopPerSector] = useState(6);
   const [noCache, setNoCache] = useState(false);
   const [maxCompanies, setMaxCompanies] = useState(0);
-  const [selectionMode, setSelectionMode] = useState<'momentum' | 'random'>('momentum');
+  const [selectionMode, setSelectionMode] = useState<'momentum' | 'random' | 'all' | 'sector_etf'>('momentum');
   const [randomSeed, setRandomSeed] = useState<number>(42);
   const [nTrials, setNTrials] = useState<number>(1);
+
+  // Sector → benchmark_id mapping for selection_mode='sector_etf'. Loaded
+  // lazily from /api/benchmarks when the user picks Sector ETF mode (and
+  // refreshed whenever they pop back to that mode in case they've edited
+  // mappings on /benchmarks in another tab).
+  const [sectorEtfs, setSectorEtfs] = useState<Record<string, number>>({});
+  const [sectorEtfsLoading, setSectorEtfsLoading] = useState(false);
+  const [sectorEtfsError, setSectorEtfsError] = useState<string | null>(null);
+  useEffect(() => {
+    if (selectionMode !== 'sector_etf') return;
+    let cancelled = false;
+    setSectorEtfsLoading(true);
+    setSectorEtfsError(null);
+    fetch(`${API_URL}/api/benchmarks`)
+      .then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then((rows: Array<{ benchmark_id: number; ticker: string; sector: string | null }>) => {
+        if (cancelled) return;
+        const map: Record<string, number> = {};
+        for (const r of rows) {
+          if (r.sector) map[r.sector] = r.benchmark_id;
+        }
+        setSectorEtfs(map);
+      })
+      .catch((e) => { if (!cancelled) setSectorEtfsError(String(e?.message ?? e)); })
+      .finally(() => { if (!cancelled) setSectorEtfsLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectionMode]);
 
   // Variant sweep selection — which (frequency × strategy) combos to run.
   // Default to all selected so the "Run variants" button matches its
@@ -371,7 +398,10 @@ export default function MomentumBacktester() {
   const runVariantsBacktest = () => {
     const eligibleKeys = VARIANT_DEFS
       .filter((v) => selectedVariantKeys.has(v.key))
-      .filter((v) => selectionMode !== 'random' || v.strategy !== 'long_short')
+      // long-short needs a meaningful top vs. bottom split — neither
+      // random nor "all universe" provides one, so those combinations
+      // are dropped from the sweep.
+      .filter((v) => (selectionMode !== 'random' && selectionMode !== 'all') || v.strategy !== 'long_short')
       .map((v) => v.key);
     if (eligibleKeys.length === 0) return;
     momentumStore.set({ result: null, loadedRunId: null });
@@ -389,6 +419,7 @@ export default function MomentumBacktester() {
         selection_mode: selectionMode,
         random_seed: selectionMode === 'random' ? randomSeed : null,
         n_trials: selectionMode === 'random' ? Math.max(1, nTrials) : 1,
+        sector_etfs: selectionMode === 'sector_etf' ? sectorEtfs : undefined,
         force_recompute: noCache,
       },
       eligibleKeys,
@@ -437,14 +468,25 @@ export default function MomentumBacktester() {
   // completed-ok payloads land in the bundle. Loading later rehydrates the
   // sweep state so the detail views switch between variants exactly like
   // they did during the live sweep.
-  /** Auto-save default: "{universe or 'All companies'} · {YYYY-MM-DD HH:MM}".
-   * Universe gives strategic context; the timestamp disambiguates re-runs
-   * of the same config so they don't collide in the dropdown. */
+  /** Auto-save default: "{universe} · {strategy} · {startYear}-{endYear}".
+   * Includes the four parameters that fully describe the experiment so a
+   * user scanning the dropdown can tell what they're looking at without
+   * loading anything. Two sweeps with identical config still produce the
+   * same default name — the user can rename via the saved-runs dropdown
+   * if they want to keep both. */
   const defaultVariantsBundleName = (): string => {
     const universe = (selectedIndexUniverse || '').trim() || 'All companies';
-    const now = new Date();
-    const ts = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    return `${universe} · ${ts}`;
+    const strategyLabel = selectionMode === 'random'
+      ? 'Random'
+      : selectionMode === 'all'
+        ? 'All-universe'
+        : selectionMode === 'sector_etf'
+          ? 'Sector ETF'
+          : 'Momentum';
+    const startYear = startDate.slice(0, 4);
+    const endYear = endDate.slice(0, 4);
+    const range = startYear === endYear ? startYear : `${startYear}-${endYear}`;
+    return `${universe} · ${strategyLabel} · ${range}`;
   };
 
   const saveVariantsBundle = async (overrideName?: string) => {
@@ -471,9 +513,13 @@ export default function MomentumBacktester() {
             top_n_per_sector: topPerSector,
             universe_label: null,
             index_universe: selectedIndexUniverse || null,
-            selection_mode: 'momentum',
-            random_seed: null,
-            n_trials: 1,
+            // Persist the actual selection_mode used for this sweep —
+            // "momentum" was hardcoded, which made All-universe and
+            // Random saves report the wrong strategy on reload.
+            selection_mode: selectionMode,
+            random_seed: selectionMode === 'random' ? randomSeed : null,
+            n_trials: selectionMode === 'random' ? Math.max(1, nTrials) : 1,
+            sector_etfs: selectionMode === 'sector_etf' ? sectorEtfs : null,
           },
           variants: okEntries.map(({ def, result: r }) => ({
             key: def.key,
@@ -481,13 +527,23 @@ export default function MomentumBacktester() {
             frequency: def.frequency,
             strategy: def.strategy,
             summary: r.summary,
-            monthly_records: r.monthly_records,
-            // daily_records intentionally omitted — for a 24-year × 10-variant
-            // bundle they total several MB, which exceeds Supabase's
-            // statement_timeout when squeezed into a single JSONB insert.
-            // The chart falls back to monthly_records on reload; max-DD /
-            // Sharpe / drawdown periods are still in `summary` so headline
-            // stats survive. Re-run if the daily-resolution line is needed.
+            // For All-universe runs, each PeriodRecord ships every name in
+            // the universe (~2900 holdings) — over 14 variants × 288
+            // periods this grows into a multi-GB JSONB and the insert
+            // trips Supabase's statement_timeout. Strip the holdings;
+            // dates + portfolio_return_pct + cumulative_return_pct still
+            // power the equity curve and summary table on reload, and
+            // "what was held" is "the whole universe" by definition.
+            monthly_records: selectionMode === 'all'
+              ? r.monthly_records.map((rec) => ({ ...rec, holdings: [] }))
+              : r.monthly_records,
+            // Keep the daily equity curve so the chart line, intra-period
+            // max-DD overlays, and the √252 Sharpe recompute survive reload.
+            // The backend compacts these into a `{dates, returns}`
+            // parallel-array form before insert (~3× smaller JSONB) and
+            // re-expands them on load, so even a 24y × 14-variant bundle
+            // fits comfortably under Supabase's statement_timeout.
+            daily_records: r.daily_records ?? [],
           })),
           universe,
         }),
@@ -496,8 +552,23 @@ export default function MomentumBacktester() {
         const saved = await resp.json();
         momentumStore.set({ loadedRunId: saved.run_id });
         loadSavedRuns();
+      } else {
+        // Surface save failures instead of swallowing — the previous
+        // catch-all hid the All-universe statement-timeout case, which
+        // looked to the user like "auto-save just doesn't fire".
+        let detail = `${resp.status}`;
+        try { detail = `${resp.status} ${await resp.text()}`.slice(0, 240); } catch {}
+        console.error('[momentum] auto-save failed:', detail);
+        momentumStore.set((s) => ({
+          warnings: [...s.warnings, { scope: 'save', message: `Auto-save failed (${detail}). Bundle was not persisted.` }],
+        }));
       }
-    } catch {}
+    } catch (e) {
+      console.error('[momentum] auto-save threw:', e);
+      momentumStore.set((s) => ({
+        warnings: [...s.warnings, { scope: 'save', message: `Auto-save error: ${e instanceof Error ? e.message : String(e)}` }],
+      }));
+    }
     setSaving(false);
   };
 
@@ -516,7 +587,18 @@ export default function MomentumBacktester() {
       if (cfg.category_weights) setCategoryWeights(cfg.category_weights);
       if (cfg.top_n_sectors) setTopSectors(cfg.top_n_sectors);
       if (cfg.top_n_per_sector) setTopPerSector(cfg.top_n_per_sector);
-      if (cfg.selection_mode === 'random' || cfg.selection_mode === 'momentum') setSelectionMode(cfg.selection_mode);
+      if (
+        cfg.selection_mode === 'random'
+        || cfg.selection_mode === 'momentum'
+        || cfg.selection_mode === 'all'
+        || cfg.selection_mode === 'sector_etf'
+      ) setSelectionMode(cfg.selection_mode);
+      if (cfg.selection_mode === 'sector_etf' && cfg.sector_etfs && typeof cfg.sector_etfs === 'object') {
+        // Rehydrate the saved sector→benchmark_id mapping so the badge
+        // status under the strategy dropdown matches what the saved run
+        // was using (and a re-run goes through the same mapping).
+        setSectorEtfs(cfg.sector_etfs as Record<string, number>);
+      }
       if (typeof cfg.random_seed === 'number') setRandomSeed(cfg.random_seed);
       if (typeof cfg.n_trials === 'number') setNTrials(cfg.n_trials);
       // Legacy saved runs may have used universe_label; both hit the same table now.
@@ -705,11 +787,32 @@ export default function MomentumBacktester() {
   useEffect(() => {
     if (running) return;
     if (runEndedAt == null || runStartedAt == null) return;
-    if (lastAutoSavedRunStartedAtRef.current === runStartedAt) return;
-    if (loadedRunId != null) return; // already saved (loaded from disk or just saved)
+    if (lastAutoSavedRunStartedAtRef.current === runStartedAt) {
+      // already auto-saved this run — nothing to log, this is the
+      // steady-state path on every re-render after the save.
+      return;
+    }
+    if (loadedRunId != null) {
+      // Skipping because the result was loaded from disk (or another
+      // auto-save already landed). Surface the reason so a user
+      // wondering "why didn't my run auto-save" can see in the console.
+      console.info('[momentum] auto-save skipped: loadedRunId already set', { loadedRunId });
+      lastAutoSavedRunStartedAtRef.current = runStartedAt;
+      return;
+    }
     if (saving) return;
-    const okCount = VARIANT_DEFS.filter((v) => variants[v.key]?.status === 'ok').length;
-    if (okCount === 0) return;
+    const okEntries = VARIANT_DEFS.filter((v) => variants[v.key]?.status === 'ok');
+    const errEntries = VARIANT_DEFS.filter((v) => variants[v.key]?.status === 'error');
+    if (okEntries.length === 0) {
+      console.warn('[momentum] auto-save skipped: 0 successful variants', {
+        attempted: Object.keys(variants).length,
+        ok: 0,
+        errored: errEntries.length,
+        errors: errEntries.map((v) => ({ key: v.key, msg: (variants[v.key] as { message?: string })?.message })),
+      });
+      lastAutoSavedRunStartedAtRef.current = runStartedAt;
+      return;
+    }
     lastAutoSavedRunStartedAtRef.current = runStartedAt;
     void saveVariantsBundle();
     // The dependency list intentionally omits saveVariantsBundle (it
@@ -741,16 +844,16 @@ export default function MomentumBacktester() {
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden">
       {/* Header */}
-      <div className="px-8 py-5 border-b border-gray-800/60 flex items-center justify-between">
-        <div>
+      <div className="px-8 py-5 border-b border-gray-800/60 flex flex-wrap items-center justify-between gap-y-3">
+        <div className="min-w-0">
           <h1 className="text-lg font-semibold text-white">Momentum Backtester</h1>
           <p className="text-xs text-gray-500 mt-0.5">
             Price momentum portfolio — equal-weight, monthly rebalancing, sector-filtered
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center justify-end gap-3 min-w-0">
           <ApiUsageBadge />
         {(() => {
           const picksEmpty = !picksListLoading && currentPicksSnapshots.length === 0;
@@ -780,7 +883,7 @@ export default function MomentumBacktester() {
               </svg>
             </button>
             {picksDropdownOpen && (
-              <div className="absolute right-0 mt-1 w-80 bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-96 overflow-auto">
+              <div className="absolute right-0 mt-1 w-max min-w-[280px] max-w-[90vw] bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-96 overflow-auto">
                 {selectedSnapshotIds.size > 0 && (
                   <div className="sticky top-0 z-10 bg-[#1a1d27] border-b border-gray-700 px-3 py-2 flex items-center justify-between gap-2">
                     <span className="text-xs text-gray-300">
@@ -830,15 +933,15 @@ export default function MomentumBacktester() {
                         type="button"
                         onClick={() => { loadCurrentPicksSnapshot(s.snapshot_id); setPicksDropdownOpen(false); }}
                         disabled={isLoadingThis || isDeletingThis}
-                        className="flex-1 text-left min-w-0 disabled:opacity-60"
+                        className="flex-1 text-left disabled:opacity-60"
                       >
-                        <div className={`text-sm truncate flex items-center gap-1.5 ${isActive ? 'text-indigo-300' : 'text-gray-200'}`}>
+                        <div className={`text-sm flex items-center gap-1.5 whitespace-nowrap ${isActive ? 'text-indigo-300' : 'text-gray-200'}`}>
                           {isLoadingThis && <Spinner />}
-                          <span className="truncate">
+                          <span>
                             {customName || `${s.created_at.slice(0, 16).replace('T', ' ')}`}
                           </span>
                         </div>
-                        <div className="text-[10px] text-gray-500 font-mono">
+                        <div className="text-[10px] text-gray-500 font-mono whitespace-nowrap">
                           {customName
                             ? `${s.created_at.slice(0, 10)} · ${s.triggered_by} · as of ${s.as_of_date.slice(0, 10)}`
                             : `${s.triggered_by} · as of ${s.as_of_date.slice(0, 10)}`}
@@ -907,7 +1010,7 @@ export default function MomentumBacktester() {
               </svg>
             </button>
             {savedDropdownOpen && (
-              <div className="absolute right-0 mt-1 w-80 bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-96 overflow-auto">
+              <div className="absolute right-0 mt-1 w-max min-w-[280px] max-w-[90vw] bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-96 overflow-auto">
                 {selectedRunIds.size > 0 && (
                   <div className="sticky top-0 z-10 bg-[#1a1d27] border-b border-gray-700 px-3 py-2 flex items-center justify-between gap-2">
                     <span className="text-xs text-gray-300">
@@ -956,11 +1059,11 @@ export default function MomentumBacktester() {
                         type="button"
                         onClick={() => { loadBacktest(r.run_id); setSavedDropdownOpen(false); }}
                         disabled={isLoadingThis || isDeletingThis}
-                        className="flex-1 text-left min-w-0 disabled:opacity-60"
+                        className="flex-1 text-left disabled:opacity-60"
                       >
-                        <div className={`text-sm truncate flex items-center gap-1.5 ${isActive ? 'text-indigo-300' : 'text-gray-200'}`}>
+                        <div className={`text-sm flex items-center gap-1.5 whitespace-nowrap ${isActive ? 'text-indigo-300' : 'text-gray-200'}`}>
                           {isLoadingThis && <Spinner />}
-                          <span className="truncate">{r.name}</span>
+                          <span>{r.name}</span>
                         </div>
                         <div className="text-[10px] text-gray-500 font-mono">{new Date(r.created_at).toLocaleDateString()}</div>
                       </button>
@@ -1010,7 +1113,7 @@ export default function MomentumBacktester() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto px-8 py-5 space-y-5">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-8 py-5 space-y-5">
         {/* Config Panel */}
         <div className="bg-[#151821] rounded-xl border border-gray-800/40 p-5">
           <div className="flex flex-wrap items-end gap-5 mb-5">
@@ -1109,22 +1212,43 @@ export default function MomentumBacktester() {
               <label className="text-gray-500 text-xs block mb-1">Strategy</label>
               <select
                 value={selectionMode}
-                onChange={(e) => setSelectionMode(e.target.value as 'momentum' | 'random')}
+                onChange={(e) => setSelectionMode(e.target.value as 'momentum' | 'random' | 'all' | 'sector_etf')}
                 className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-                title="Random ignores all signal weights and picks sectors/stocks at random — use as a noise-floor baseline."
+                title="Momentum ranks the universe by signal score. Random picks sectors/stocks at random (noise-floor baseline). All holds every eligible name in the universe equal-weighted (index-proxy benchmark). Sector ETF ranks sectors via stock-aggregate momentum then holds the mapped sector ETF for each picked sector — set the mapping on /benchmarks."
               >
                 <option value="momentum">Momentum</option>
                 <option value="random">Random (baseline)</option>
+                <option value="all">All universe (index proxy)</option>
+                <option value="sector_etf">Sector ETF (per-sector benchmark)</option>
               </select>
+              {selectionMode === 'sector_etf' && (
+                <div className="text-[10px] mt-1 max-w-xs">
+                  {sectorEtfsLoading ? (
+                    <span className="text-gray-500">loading sector mapping…</span>
+                  ) : sectorEtfsError ? (
+                    <span className="text-rose-400">{sectorEtfsError}</span>
+                  ) : Object.keys(sectorEtfs).length === 0 ? (
+                    <span className="text-amber-400">
+                      No sector→ETF mappings yet. Open <a href="/benchmarks" className="underline">/benchmarks</a> and tag at least one benchmark with a sector.
+                    </span>
+                  ) : (
+                    <span className="text-gray-500">
+                      {Object.keys(sectorEtfs).length} sector{Object.keys(sectorEtfs).length === 1 ? '' : 's'} mapped:{' '}
+                      <span className="text-gray-400">{Object.keys(sectorEtfs).sort().join(', ')}</span>
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
             {/* Random-mode params (Trials, Seed) live in the
                 "Strategy parameters" section below — same place as the
                 momentum signal/category weights — so the inline config
                 row only has to carry universe-level inputs. */}
             {(() => {
+              const longShortBlocked = selectionMode === 'random' || selectionMode === 'all' || selectionMode === 'sector_etf';
               const eligibleCount = VARIANT_DEFS
                 .filter((v) => selectedVariantKeys.has(v.key))
-                .filter((v) => selectionMode !== 'random' || v.strategy !== 'long_short')
+                .filter((v) => !longShortBlocked || v.strategy !== 'long_short')
                 .length;
               return (
                 <div className="relative inline-flex" ref={variantsPickerRef}>
@@ -1134,8 +1258,8 @@ export default function MomentumBacktester() {
                     className="px-5 py-2 rounded-l-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     title={
                       eligibleCount === 0
-                        ? selectionMode === 'random'
-                          ? 'Random selection requires at least one long-only variant (long-short is unsupported in random mode)'
+                        ? longShortBlocked
+                          ? `${selectionMode === 'all' ? 'All-universe' : 'Random'} mode supports long-only variants only — pick at least one`
                           : 'Select at least one variant to run'
                         : `Run ${eligibleCount} selected variant${eligibleCount === 1 ? '' : 's'} and compare them in one table`
                     }
@@ -1178,15 +1302,15 @@ export default function MomentumBacktester() {
                           </button>
                         </div>
                       </div>
-                      {selectionMode === 'random' && (
+                      {(selectionMode === 'random' || selectionMode === 'all' || selectionMode === 'sector_etf') && (
                         <div className="mb-2 px-2 py-1.5 text-[10px] text-amber-300/80 bg-amber-500/5 border border-amber-500/20 rounded">
-                          Long-short is disabled in random mode (no signal-driven score to short on).
+                          Long-short is disabled in {selectionMode === 'all' ? 'all-universe' : 'random'} mode (no top/bottom split to short on).
                         </div>
                       )}
                       <ul className="space-y-1 max-h-72 overflow-auto">
                         {VARIANT_DEFS.map((v) => {
                           const checked = selectedVariantKeys.has(v.key);
-                          const disabled = selectionMode === 'random' && v.strategy === 'long_short';
+                          const disabled = (selectionMode === 'random' || selectionMode === 'all' || selectionMode === 'sector_etf') && v.strategy === 'long_short';
                           return (
                             <li key={v.key}>
                               <label className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs ${disabled ? 'text-gray-600 cursor-not-allowed' : 'text-gray-300 hover:bg-white/5 cursor-pointer'}`}>
@@ -1267,7 +1391,9 @@ export default function MomentumBacktester() {
               <span className="text-[10px] text-gray-500">
                 {selectionMode === 'random'
                   ? 'Random baseline · trials run independently with sequential seeds'
-                  : 'Momentum · ranks the universe by signal-weighted score'}
+                  : selectionMode === 'all'
+                    ? 'All universe · holds every eligible name each rebalance, equal-weighted'
+                    : 'Momentum · ranks the universe by signal-weighted score'}
               </span>
             </div>
 
@@ -1367,6 +1493,15 @@ export default function MomentumBacktester() {
                     Reproducibility anchor; trials use seed, seed+1, …, seed+N−1.
                   </div>
                 </div>
+              </div>
+            )}
+
+            {selectionMode === 'all' && (
+              <div className="bg-[#0f1117] border border-gray-800/60 rounded-lg px-4 py-3 text-xs text-gray-400 leading-relaxed max-w-[640px]">
+                <div className="text-gray-300 font-medium mb-1">No tunable parameters.</div>
+                Each rebalance period holds every company in the selected universe&apos;s month-snapshot,
+                equal-weighted. Use this as an index-proxy benchmark to compare against the momentum
+                strategy. Top-N sectors and signal weights above are ignored. Only <span className="text-gray-300">long-only</span> is supported — long-short would need a top/bottom split that doesn&apos;t exist in this mode.
               </div>
             )}
           </div>
@@ -1504,8 +1639,8 @@ export default function MomentumBacktester() {
             }
           >
             {currentPortfolio.holdings.length > 0 ? (
-              <div className="bg-[#0f1117] px-5 py-3">
-                <table className="w-full text-xs">
+              <div className="bg-[#0f1117] px-5 py-3 overflow-x-auto">
+                <table className="w-full text-xs min-w-max">
                   <thead>
                     <tr className="text-gray-600">
                       <th className="text-left py-1 font-medium">
@@ -1682,7 +1817,7 @@ export default function MomentumBacktester() {
         {/* Variant sweep summary — appears as soon as one variant outcome
             lands and stays visible alongside the active variant's detail
             views below. Hidden entirely when no sweep has run. */}
-        {hasVariants && <VariantSummaryTable />}
+        {hasVariants && <VariantSummaryTable exchangeByCompany={exchangeByCompany} />}
 
         {/* Results — either the single-run `result` or, when a variant is
             active, that variant's BacktestResult. The detail components
@@ -1693,6 +1828,7 @@ export default function MomentumBacktester() {
               result={displayResult}
               loadedRunId={activeVariantResult ? null : loadedRunId}
               savedRuns={savedRuns}
+              exchangeByCompany={exchangeByCompany}
             />
 
             <SectorTimelineChart result={displayResult} />

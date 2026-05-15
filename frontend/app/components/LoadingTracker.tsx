@@ -5,7 +5,10 @@ import { loadingStore } from '../../lib/loading';
 
 export default function LoadingTracker() {
   const items = loadingStore.use((s) => s.items);
-  const [now, setNow] = useState(Date.now());
+  // Lazy initializer — Date.now() is impure, calling it inline would
+  // trip react-hooks/purity. The () => Date.now() form runs once at
+  // mount, after which the setInterval below drives updates.
+  const [now, setNow] = useState(() => Date.now());
 
   // Tick once per second so the elapsed time updates while the panel is open.
   useEffect(() => {

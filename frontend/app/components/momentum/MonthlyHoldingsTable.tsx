@@ -1,11 +1,13 @@
 'use client';
 
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { BacktestResult } from '../../../lib/stores/momentum';
 import CellInfoTip from './CellInfoTip';
 import CollapsibleCard from './CollapsibleCard';
 import TickerTimelineModal from './TickerTimelineModal';
 import { EXCHANGE_NAMES, displayExchange, fmtPct, fmtPrice, guruFocusUrl } from './utils';
+
+type HeldCompany = { company_id: number; ticker: string; company_name: string };
 
 /** Subset of the active backtest's selection config that the per-ticker
  * timeline modal forwards to the signal-breakdown endpoint. Lets the
@@ -36,6 +38,25 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
   // company_id whose timeline modal is open, or null for closed.
   const [timelineCompanyId, setTimelineCompanyId] = useState<number | null>(null);
 
+  // Every distinct company ever held during this backtest — one entry per
+  // company_id, regardless of how many months it appeared in. Drives the
+  // header search box; an exact ticker match wins over a fuzzy name hit.
+  const heldCompanies = useMemo<HeldCompany[]>(() => {
+    const seen = new Map<number, HeldCompany>();
+    for (const r of result.monthly_records) {
+      for (const h of r.holdings) {
+        if (!seen.has(h.company_id)) {
+          seen.set(h.company_id, {
+            company_id: h.company_id,
+            ticker: h.ticker ?? '',
+            company_name: h.company_name ?? '',
+          });
+        }
+      }
+    }
+    return Array.from(seen.values()).sort((a, b) => a.ticker.localeCompare(b.ticker));
+  }, [result]);
+
   // One-way turnover per month: % of current holdings that weren't held
   // last month. First month has no prior portfolio → null.
   const turnoverByDate = useMemo<Record<string, number | null>>(() => {
@@ -56,14 +77,27 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
   }, [result]);
 
   // When the active result changes (new run / loaded saved run) collapse
-  // any open month so the user starts at a clean view.
-  useEffect(() => {
+  // any open month so the user starts at a clean view. React 19's
+  // recommended pattern for "reset state when a prop changes" is to
+  // track the prior value and reset during render — no effect needed.
+  // https://react.dev/reference/react/useState#storing-information-from-previous-renders
+  const [lastResult, setLastResult] = useState(result);
+  if (result !== lastResult) {
+    setLastResult(result);
     setExpandedMonth(null);
-  }, [result]);
+  }
 
   return (
     <>
-    <CollapsibleCard title="Portfolios">
+    <CollapsibleCard
+      title="Portfolios"
+      rightSlot={
+        <CompanySearch
+          companies={heldCompanies}
+          onPick={(cid) => setTimelineCompanyId(cid)}
+        />
+      }
+    >
       <div className="max-h-[500px] overflow-auto border-t border-gray-800/40">
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-[#151821] z-20">
@@ -95,6 +129,18 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
                   <td className="px-5 py-2.5 text-gray-300 font-mono">
                     <span className="text-gray-600 mr-2">{expandedMonth === r.date ? '▾' : '▸'}</span>
                     {r.date}
+                    {r.is_open && (
+                      <span
+                        className="ml-2 inline-flex items-center text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30"
+                        title={
+                          r.as_of_date
+                            ? `Return is calculated through ${r.as_of_date} — the most recent date with prices for every held name`
+                            : 'Open period — return reflects the partial window from the last rebalance through today'
+                        }
+                      >
+                        open · {r.as_of_date ? `as of ${r.as_of_date}` : 'YTD'}
+                      </span>
+                    )}
                   </td>
                   <td className="text-right px-3 py-2.5 text-gray-400 font-mono">{r.holdings.length}</td>
                   <td className={`text-right px-3 py-2.5 font-mono ${r.portfolio_return_pct != null ? (r.portfolio_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
@@ -337,5 +383,132 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
       onClose={() => setTimelineCompanyId(null)}
     />
     </>
+  );
+}
+
+/** Search box in the Portfolios card header. Filters the set of companies
+ * ever held during this backtest by ticker prefix / name substring and lets
+ * the user open the same TickerTimelineModal that a row click would. Lives
+ * inside the CollapsibleCard's clickable header, so every interactive
+ * element stops click + key propagation to avoid toggling the card. */
+function CompanySearch({
+  companies,
+  onPick,
+}: {
+  companies: HeldCompany[];
+  onPick: (companyId: number) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    // Rank: exact ticker > ticker prefix > ticker contains > name contains.
+    type Scored = HeldCompany & { rank: number };
+    const scored: Scored[] = [];
+    for (const c of companies) {
+      const t = c.ticker.toLowerCase();
+      const n = c.company_name.toLowerCase();
+      let rank = -1;
+      if (t === q) rank = 0;
+      else if (t.startsWith(q)) rank = 1;
+      else if (t.includes(q)) rank = 2;
+      else if (n.includes(q)) rank = 3;
+      if (rank >= 0) scored.push({ ...c, rank });
+    }
+    scored.sort((a, b) => a.rank - b.rank || a.ticker.localeCompare(b.ticker));
+    return scored.slice(0, 30);
+  }, [query, companies]);
+
+  // Reset highlighted index whenever the filter set changes. Same
+  // "track prior value, reset during render" pattern the parent uses
+  // above so the React 19 lint stays clean.
+  const [lastQuery, setLastQuery] = useState(query);
+  if (query !== lastQuery) {
+    setLastQuery(query);
+    setActiveIdx(0);
+  }
+
+  // Close on outside click.
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, []);
+
+  const choose = (cid: number) => {
+    onPick(cid);
+    setQuery('');
+    setOpen(false);
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative"
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          // Stop bubbling so the CollapsibleCard header doesn't treat
+          // Space/Enter as a toggle, then handle list navigation locally.
+          e.stopPropagation();
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            setActiveIdx((i) => Math.min(matches.length - 1, i + 1));
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            setActiveIdx((i) => Math.max(0, i - 1));
+          } else if (e.key === 'Enter') {
+            if (matches[activeIdx]) {
+              e.preventDefault();
+              choose(matches[activeIdx].company_id);
+            }
+          } else if (e.key === 'Escape') {
+            setOpen(false);
+            setQuery('');
+          }
+        }}
+        placeholder={`Search ${companies.length} stocks…`}
+        className="bg-[#0f1117] border border-gray-700 rounded-lg px-2.5 py-1 text-xs text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 focus:outline-none w-48"
+      />
+      {open && query.trim() && (
+        <div className="absolute right-0 top-full mt-1 w-72 max-h-80 overflow-y-auto bg-[#1e2130] border border-gray-700 rounded-lg shadow-2xl z-30">
+          {matches.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-gray-500">No matches in this backtest</div>
+          ) : (
+            matches.map((c, i) => (
+              <button
+                key={c.company_id}
+                type="button"
+                onMouseEnter={() => setActiveIdx(i)}
+                onClick={() => choose(c.company_id)}
+                className={`w-full text-left px-3 py-1.5 border-b border-gray-800/30 last:border-b-0 ${
+                  i === activeIdx ? 'bg-white/[0.05]' : 'hover:bg-white/[0.03]'
+                }`}
+              >
+                <div className="font-mono text-xs text-gray-200">{c.ticker || '—'}</div>
+                <div className="text-[10px] text-gray-500 truncate">{c.company_name || '—'}</div>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
   );
 }

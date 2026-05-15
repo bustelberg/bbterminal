@@ -14,15 +14,19 @@ import { trackedFetch } from '../../lib/loading';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
-// GuruFocus exchange prefixes considered "feasible" (USA + Europe + Asia, ex-Russia).
+// GuruFocus exchange prefixes considered "feasible" — regions covered by the
+// current GuruFocus subscription: USA + Europe + Asia (incl. Middle East),
+// excluding Russia / AU / NZ / Africa / LatAm.
 // US stocks are identified separately by gf_exchange === null (empty prefix).
 const FEASIBLE_GF_EXCHANGES = new Set([
   // Europe
   'LSE', 'XTER', 'XPAR', 'XAMS', 'XBRU', 'XLIS', 'MIL', 'XMAD', 'XSWX',
   'OSTO', 'OCSE', 'OSL', 'OHEL', 'WAR', 'XPRA', 'ATH', 'DUB', 'BUD', 'IST',
-  // Asia
+  // Asia (East / SE / South)
   'TSE', 'HKSE', 'SHSE', 'SZSE', 'TPE', 'ROCO', 'XKRX',
   'NSE', 'BSE', 'SGX', 'XKLS', 'ISX', 'BKK', 'PHS',
+  // Middle East
+  'SAU', 'DSMD', 'KUW', 'XTAE', 'ADX', 'DFM',
 ]);
 
 type Holding = {
@@ -415,7 +419,9 @@ export default function AcwiUniverse() {
       groups[key].push({ announcement: a, detail: d });
     }
     return groups;
-  }, [announcements, manualDetails, getDetail]);
+    // `getDetail` already closes over `manualDetails`, so listing both is
+    // a redundant dep that ESLint flags. Drop `manualDetails`.
+  }, [announcements, getDetail]);
 
   const otherCountryCoded = useMemo(() => {
     return announcements.filter(a => a.is_other_country_coded);
