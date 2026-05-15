@@ -129,6 +129,7 @@ def score_and_select(
     top_n_per_sector: int = 6,
     category_weights: dict[str, float] | None = None,
     direction: SelectionDirection = "top",
+    min_price_score: float | None = None,
 ) -> pd.DataFrame:
     """Full pipeline: score companies → pick N sectors → pick M companies / sector.
 
@@ -139,6 +140,13 @@ def score_and_select(
     scoring companies within each — used as the short bucket of a long-short
     strategy.
 
+    `min_price_score` is an optional gate that drops any company whose
+    `score_price` is at or below the threshold BEFORE sector aggregation.
+    Only applied to the long bucket (`direction="top"`) — for a long-short
+    strategy the short side wants low-score names by design. Filter
+    happens pre-aggregation so a sector full of below-threshold names
+    doesn't get its average pulled up by the few survivors.
+
     Returns a DataFrame of selected companies with their scores and sector.
     """
     if signals_df.empty:
@@ -146,6 +154,21 @@ def score_and_select(
 
     # Score each company with per-category scores
     scored = compute_category_scores(signals_df, signal_weights, category_weights)
+
+    # Optional price-score floor — applied only to long selection (the
+    # short bucket explicitly targets low scores, so a min there would
+    # be self-defeating). Comparison uses strict `>` so a threshold of
+    # 30 means "must beat 30", matching how the UI label reads. NaN
+    # scores are dropped — a company that couldn't be scored on the
+    # price category isn't a candidate for a price-floor strategy.
+    if direction == "top" and min_price_score is not None and "score_price" in scored.columns:
+        before = len(scored)
+        scored = scored[
+            scored["score_price"].notna() & (scored["score_price"] > min_price_score)
+        ].copy()
+        # No-op safety: if every company was excluded the rest of the
+        # function still produces an empty DataFrame cleanly.
+        _ = before  # kept for future logging / event emission
 
     # Aggregate to sector and pick from the right end of the ranking. The
     # aggregator returns sectors descending by mean score, so .head() →

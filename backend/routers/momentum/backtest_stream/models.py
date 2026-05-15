@@ -32,6 +32,13 @@ class BacktestRequest(BaseModel):
     top_n_sectors: int = 4
     top_n_per_sector: int = 6
     max_companies: int = 0  # 0 = all, otherwise limit universe (alphabetical)
+    # Optional 0-100 floor on `score_price` for long selection. None
+    # disables the filter (default + pre-feature behavior). When set
+    # (e.g. 30), only companies whose price-category score strictly
+    # exceeds the threshold are eligible for the long bucket. Short
+    # bucket of long-short strategies ignores it — see
+    # scoring.score_and_select for the rationale.
+    min_price_score: float | None = None
     universe_label: str | None = None  # if set, use universe_membership for per-month filtering
     index_universe: str | None = None  # if set, use universe_membership for per-month filtering (e.g. "SP500")
     # Literal values reject typos at the request boundary so a misspelled

@@ -376,6 +376,7 @@ def compute_selection_period(
             top_n_per_sector=config.top_n_per_sector,
             category_weights=config.category_weights,
             direction="top",
+            min_price_score=config.min_price_score,
         )
         if config.strategy_type == "long_short":
             selected_bottom = score_and_select(

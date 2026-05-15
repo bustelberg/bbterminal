@@ -5,7 +5,10 @@ import type { BacktestResult } from '../../../lib/stores/momentum';
 import CellInfoTip from './CellInfoTip';
 import CollapsibleCard from './CollapsibleCard';
 import TickerTimelineModal from './TickerTimelineModal';
+import { buildFeeMap, computeNetStats, parenPct } from './feeStats';
 import { EXCHANGE_NAMES, displayExchange, fmtPct, fmtPrice, guruFocusUrl } from './utils';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 type HeldCompany = { company_id: number; ticker: string; company_name: string };
 
@@ -56,6 +59,43 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
     }
     return Array.from(seen.values()).sort((a, b) => a.ticker.localeCompare(b.ticker));
   }, [result]);
+
+  // Per-exchange fees (bps) for the (net) parentheticals in the Return /
+  // Cumulative columns. Fetched once on mount; null when the user hasn't
+  // configured any non-zero fees, in which case every parenPct(...) call
+  // below renders as the empty string (no parens, no visual noise).
+  const [feesByExchange, setFeesByExchange] = useState<Map<string, number> | null>(null);
+  useEffect(() => {
+    fetch(`${API_URL}/api/exchange-fees`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => {
+        const m = buildFeeMap(rows ?? []);
+        setFeesByExchange(m.size > 0 ? m : null);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Net per-period + cumulative returns for the active result, keyed by
+  // the same `r.date` the outer rows render. `computeNetStats` returns
+  // null when fees aren't configured OR when the parent passed an empty
+  // exchangeByCompany (e.g. ScheduleRunDetail) — both fall through to
+  // gross-only display below.
+  const netStats = useMemo(() => {
+    if (!feesByExchange || exchangeByCompany.size === 0) return null;
+    return computeNetStats(result.monthly_records, feesByExchange, exchangeByCompany, result.daily_records);
+  }, [feesByExchange, exchangeByCompany, result.monthly_records, result.daily_records]);
+
+  const netByDate = useMemo<Map<string, { portRet: number; cumRet: number }>>(() => {
+    const m = new Map<string, { portRet: number; cumRet: number }>();
+    if (!netStats) return m;
+    for (let i = 0; i < netStats.dates.length; i++) {
+      m.set(netStats.dates[i], {
+        portRet: netStats.period_returns[i],
+        cumRet: (netStats.cum_factors[i] - 1) * 100,
+      });
+    }
+    return m;
+  }, [netStats]);
 
   // One-way turnover per month: % of current holdings that weren't held
   // last month. First month has no prior portfolio → null.
@@ -145,12 +185,14 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
                   <td className="text-right px-3 py-2.5 text-gray-400 font-mono">{r.holdings.length}</td>
                   <td className={`text-right px-3 py-2.5 font-mono ${r.portfolio_return_pct != null ? (r.portfolio_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
                     {fmtPct(r.portfolio_return_pct)}
+                    <span className="text-gray-500">{parenPct(netByDate.get(r.date)?.portRet)}</span>
                   </td>
                   <td className="text-right px-3 py-2.5 font-mono text-gray-400">
                     {turnoverByDate[r.date] != null ? `${turnoverByDate[r.date]!.toFixed(1)}%` : '—'}
                   </td>
                   <td className={`text-right px-5 py-2.5 font-mono ${r.cumulative_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                     {fmtPct(r.cumulative_return_pct)}
+                    <span className="text-gray-500">{parenPct(netByDate.get(r.date)?.cumRet)}</span>
                   </td>
                 </tr>
                 {expandedMonth === r.date && r.holdings.length > 0 && (

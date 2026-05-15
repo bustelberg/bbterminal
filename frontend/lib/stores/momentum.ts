@@ -264,6 +264,10 @@ export type BacktestStartConfig = {
   top_n_sectors: number;
   top_n_per_sector: number;
   max_companies: number;
+  /** Optional 0-100 floor on each candidate's `score_price`. When set,
+   * the long bucket only picks companies whose price-category score
+   * strictly exceeds this value. Null disables the filter. */
+  min_price_score?: number | null;
   universe_label: string | null;
   index_universe: string | null;
   selection_mode: 'momentum' | 'random' | 'all' | 'sector_etf';

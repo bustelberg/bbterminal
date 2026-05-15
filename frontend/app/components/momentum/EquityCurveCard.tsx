@@ -36,6 +36,12 @@ type Props = {
    * `feeStats.ts`. Optional so the card stays usable when the parent
    * doesn't pipe it through (e.g. saved-bundle reload flows). */
   exchangeByCompany?: Map<number, string>;
+  /** Full label for the active strategy row — same format as a saved
+   * comparison's label (e.g. "ACWI-mei · Momentum · 2002-2026 · Every
+   * 12 months · Long-only"). Parent computes this from the actual
+   * strategy params + active variant key so the row reads like a saved
+   * backtest rather than a generic "Strategy" placeholder. */
+  activeStrategyLabel?: string;
 };
 
 /** "Equity Curve" card cluster: comparison pill row, summary stats,
@@ -43,7 +49,7 @@ type Props = {
  * own benchmark/saved comparison state and all the chart-derived memos
  * — the parent only feeds it the active strategy plus the saved-run
  * list. */
-export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchangeByCompany }: Props) {
+export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchangeByCompany, activeStrategyLabel }: Props) {
   const [benchmarkOptions, setBenchmarkOptions] = useState<BenchmarkOption[]>([]);
   const [comparisons, setComparisons] = useState<ComparisonItem[]>([]);
   // Per-exchange fees (bps) for the (net) parenthetical. Fetched once
@@ -80,15 +86,29 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
       .catch(() => {});
   }, []);
 
-  // Net stats for the active strategy. We deliberately only compute the
-  // parenthetical for the active strategy — comparison saved runs may be
-  // on different universes whose company → exchange map we don't have
-  // loaded, and benchmarks have no holdings to trade. Active = the
-  // information the user actually configured fees against.
+  // Net stats for the active strategy + every saved comparison. We
+  // reuse the parent's `exchangeByCompany` as the lookup for all of
+  // them — its fallback fetch hits `/api/companies` which covers the
+  // entire directory, so a saved run on a different universe still
+  // resolves its holdings' exchanges. Benchmarks have no holdings to
+  // trade so they always sit out (net == gross by definition).
   const activeNetStats = useMemo<NetStats | null>(() => {
     if (!feesByExchange || !exchangeByCompany) return null;
-    return computeNetStats(result.monthly_records, feesByExchange, exchangeByCompany);
-  }, [feesByExchange, exchangeByCompany, result.monthly_records]);
+    return computeNetStats(result.monthly_records, feesByExchange, exchangeByCompany, result.daily_records);
+  }, [feesByExchange, exchangeByCompany, result.monthly_records, result.daily_records]);
+
+  /** Map of comparison series id → NetStats. Computed per-comparison so
+   * saved runs added via "Add series" get the same `gross (net)` treatment
+   * the active row does. Benchmarks aren't keyed here at all. */
+  const comparisonNetStats = useMemo<Map<string, NetStats | null>>(() => {
+    const m = new Map<string, NetStats | null>();
+    if (!feesByExchange || !exchangeByCompany) return m;
+    for (const c of comparisons) {
+      if (c.kind !== 'saved') continue;
+      m.set(c.id, computeNetStats(c.monthly, feesByExchange, exchangeByCompany, c.daily));
+    }
+    return m;
+  }, [comparisons, feesByExchange, exchangeByCompany]);
 
   // Close "add series" dropdown on outside click
   useEffect(() => {
@@ -301,9 +321,14 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
     };
 
     const { map, months } = fromResult(result);
-    const activeName = loadedRunId != null
+    // Label precedence: the parent's computed full label (which folds in
+    // the active variant suffix + uses defaultVariantsBundleName for
+    // unsaved runs), then the loaded saved-run name on its own, then a
+    // generic placeholder.
+    const loadedName = loadedRunId != null
       ? savedRuns.find((r) => r.run_id === loadedRunId)?.name
       : undefined;
+    const activeName = activeStrategyLabel || loadedName;
     out.push({
       id: 'active',
       label: activeName || 'Strategy',
@@ -344,7 +369,7 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
       }
     }
     return out;
-  }, [result, comparisons, loadedRunId, savedRuns]);
+  }, [result, comparisons, loadedRunId, savedRuns, activeStrategyLabel]);
 
   // Determine the [maxStart, minEnd] alignment window over all series and
   // compute per-series aligned points + summary stats, rebased so each series
@@ -556,8 +581,38 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
     for (const s of series) {
       for (const y of years) if (!(y in bySeries[s.id])) bySeries[s.id][y] = null;
     }
-    return { years, bySeries };
-  }, [alignedSeries]);
+
+    // Calendar-aligned net yearly per series with holdings (active +
+    // every saved comparison). Anchoring on each row's gross yearly
+    // value guarantees `net ≤ gross` per row: each closed period
+    // contributes a `fee_factor ≤ 1`, and we multiply gross_yearly_Y by
+    // the product of fee_factors for periods whose exit_date lands in
+    // calendar year Y. Using period-start-bucketed `yearly` straight
+    // from NetStats could drift above gross when rebalances don't
+    // align to Jan 1 (e.g., monthly cadence rebalancing on day 5).
+    const netYearlyBySeries: Record<string, Record<string, number | null>> = {};
+    const seriesNetMap: Record<string, NetStats | null> = { active: activeNetStats };
+    for (const c of comparisons) {
+      if (c.kind === 'saved') seriesNetMap[c.id] = comparisonNetStats.get(c.id) ?? null;
+    }
+    for (const [seriesId, ns] of Object.entries(seriesNetMap)) {
+      const row = bySeries[seriesId];
+      if (!row || !ns?.period_drag_factors?.length) continue;
+      const dragByYear = new Map<string, number>();
+      for (const pdf of ns.period_drag_factors) {
+        const y = pdf.exit_date.slice(0, 4);
+        dragByYear.set(y, (dragByYear.get(y) ?? 1) * pdf.fee_factor);
+      }
+      const netRow: Record<string, number | null> = {};
+      for (const y of years) {
+        const grossY = row[y];
+        const drag = dragByYear.get(y) ?? 1;
+        netRow[y] = grossY == null ? null : ((1 + grossY / 100) * drag - 1) * 100;
+      }
+      netYearlyBySeries[seriesId] = netRow;
+    }
+    return { years, bySeries, netYearlyBySeries };
+  }, [alignedSeries, activeNetStats, comparisons, comparisonNetStats]);
 
   // Cumulative return from customFromMonth through end of aligned window, per series.
   const customRangeReturn = useMemo(() => {
@@ -565,23 +620,26 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
     if (!customFromMonth || series.length === 0) return null;
     const last = series[0].points[series[0].points.length - 1];
     if (!last) return null;
-    // Walk the active strategy's net cumulative chain for the same
-    // window, so the active row gets its (net) parenthetical alongside
-    // the gross figure. Mirrors the gross math: start factor = cum at
-    // the last date < fromMonth (or 1.0 if none), end factor = cum at
-    // the final date.
-    let netRet: number | null = null;
-    if (activeNetStats) {
+    // Walk each holdings-bearing series' net cumulative chain for the
+    // window so both the active row and every saved comparison get a
+    // (net) parenthetical alongside their gross figure. Mirrors the
+    // gross math: start factor = cum at the last date < fromMonth (or
+    // 1.0 if none), end factor = cum at the final date.
+    const netRetById = new Map<string, number | null>();
+    const walkNet = (ns: NetStats | null | undefined): number | null => {
+      if (!ns) return null;
       let startFactor = 1.0;
       let endFactor: number | null = null;
-      for (let i = 0; i < activeNetStats.dates.length; i++) {
-        const d = activeNetStats.dates[i];
-        if (d < customFromMonth) startFactor = activeNetStats.cum_factors[i];
-        endFactor = activeNetStats.cum_factors[i];
+      for (let i = 0; i < ns.dates.length; i++) {
+        if (ns.dates[i] < customFromMonth) startFactor = ns.cum_factors[i];
+        endFactor = ns.cum_factors[i];
       }
-      if (endFactor != null && startFactor > 0) {
-        netRet = (endFactor / startFactor - 1) * 100;
-      }
+      if (endFactor == null || startFactor <= 0) return null;
+      return (endFactor / startFactor - 1) * 100;
+    };
+    netRetById.set('active', walkNet(activeNetStats));
+    for (const c of comparisons) {
+      if (c.kind === 'saved') netRetById.set(c.id, walkNet(comparisonNetStats.get(c.id)));
     }
     const perSeries = series.map((s) => {
       let start: number | null = null;
@@ -598,11 +656,11 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
         label: s.label,
         color: s.color,
         ret: ((1 + end / 100) / (1 + s0 / 100) - 1) * 100,
-        netRet: s.kind === 'active' ? netRet : null,
+        netRet: s.kind !== 'benchmark' ? netRetById.get(s.id) ?? null : null,
       };
     });
     return { perSeries, fromDate: customFromMonth, toDate: last.date };
-  }, [alignedSeries, customFromMonth, activeNetStats]);
+  }, [alignedSeries, customFromMonth, activeNetStats, comparisons, comparisonNetStats]);
 
   // Chart data — wide-format per month, one key per series id, plus a 0%
   // origin row so every line starts from the same reference point.
@@ -836,13 +894,16 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
           </thead>
           <tbody>
             {alignedSeries.series.map((s) => {
-              // The (net) parenthetical only applies to the ACTIVE
-              // strategy — comparison saved runs may belong to a
-              // different universe whose company→exchange map we
-              // don't have loaded, and benchmarks have no holdings
-              // to trade. `activeNetStats` is null when fees aren't
-              // configured at all, in which case parenPct renders ''.
-              const net = s.kind === 'active' ? activeNetStats : null;
+              // The (net) parenthetical applies to the active strategy
+              // AND every saved comparison — both have holdings whose
+              // exchanges we can resolve via `exchangeByCompany`.
+              // Benchmarks (kind === 'benchmark') have no holdings to
+              // trade so they always render gross-only.
+              const net = s.kind === 'active'
+                ? activeNetStats
+                : s.kind === 'saved'
+                  ? comparisonNetStats.get(s.id) ?? null
+                  : null;
               return (
               <tr key={s.id} className="border-b border-gray-800/30">
                 <td className="px-4 py-2.5 font-medium flex items-center gap-2">
@@ -975,10 +1036,18 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
                     <td className="px-5 py-2 text-gray-200 font-mono">{y}</td>
                     {alignedSeries.series.map((s) => {
                       const v = yearlyBreakdown.bySeries[s.id]?.[y];
-                      // Active-strategy column gets the (net) parenthetical
-                      // when fees are configured; other columns stay
-                      // gross-only (see activeNetStats memo for why).
-                      const netY = s.kind === 'active' ? activeNetStats?.yearly[y] : undefined;
+                      // Active strategy + saved comparisons both get
+                      // the (net) parenthetical when fees are
+                      // configured; benchmarks stay gross-only.
+                      // Uses `netYearlyBySeries` (gross × per-year
+                      // fee-factor drag) rather than NetStats.yearly so
+                      // the parenthetical can never exceed displayed
+                      // gross — the period-start-bucketed `yearly` could
+                      // drift above gross for rebalances that don't
+                      // align to Jan 1.
+                      const netY = s.kind !== 'benchmark'
+                        ? yearlyBreakdown.netYearlyBySeries?.[s.id]?.[y]
+                        : undefined;
                       return (
                         <td
                           key={s.id}

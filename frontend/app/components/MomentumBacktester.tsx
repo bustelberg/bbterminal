@@ -79,6 +79,10 @@ export default function MomentumBacktester() {
   const [topPerSector, setTopPerSector] = useState(6);
   const [noCache, setNoCache] = useState(false);
   const [maxCompanies, setMaxCompanies] = useState(0);
+  // Optional price-score floor for long selection. Empty string = no
+  // filter (sent to backend as null); a number sets a strict
+  // greater-than gate, so e.g. 30 means "must beat 30/100".
+  const [minPriceScore, setMinPriceScore] = useState<string>('');
   const [selectionMode, setSelectionMode] = useState<'momentum' | 'random' | 'all' | 'sector_etf'>('momentum');
   const [randomSeed, setRandomSeed] = useState<number>(42);
   const [nTrials, setNTrials] = useState<number>(1);
@@ -414,6 +418,7 @@ export default function MomentumBacktester() {
         top_n_sectors: topSectors,
         top_n_per_sector: topPerSector,
         max_companies: maxCompanies,
+        min_price_score: minPriceScore.trim() === '' ? null : Number(minPriceScore),
         universe_label: null,
         index_universe: selectedIndexUniverse || null,
         selection_mode: selectionMode,
@@ -486,7 +491,9 @@ export default function MomentumBacktester() {
     const startYear = startDate.slice(0, 4);
     const endYear = endDate.slice(0, 4);
     const range = startYear === endYear ? startYear : `${startYear}-${endYear}`;
-    return `${universe} · ${strategyLabel} · ${range}`;
+    const trimmedFloor = minPriceScore.trim();
+    const floorPart = trimmedFloor === '' ? '' : ` · price≥${trimmedFloor}`;
+    return `${universe} · ${strategyLabel}${floorPart} · ${range}`;
   };
 
   const saveVariantsBundle = async (overrideName?: string) => {
@@ -511,6 +518,7 @@ export default function MomentumBacktester() {
             category_weights: categoryWeights,
             top_n_sectors: topSectors,
             top_n_per_sector: topPerSector,
+            min_price_score: minPriceScore.trim() === '' ? null : Number(minPriceScore),
             universe_label: null,
             index_universe: selectedIndexUniverse || null,
             // Persist the actual selection_mode used for this sweep —
@@ -587,6 +595,11 @@ export default function MomentumBacktester() {
       if (cfg.category_weights) setCategoryWeights(cfg.category_weights);
       if (cfg.top_n_sectors) setTopSectors(cfg.top_n_sectors);
       if (cfg.top_n_per_sector) setTopPerSector(cfg.top_n_per_sector);
+      // min_price_score may be null/undefined (no floor) or a number 0-100.
+      // Convert to a string so the input's empty/zero distinction round-trips.
+      setMinPriceScore(
+        cfg.min_price_score == null ? '' : String(cfg.min_price_score)
+      );
       if (
         cfg.selection_mode === 'random'
         || cfg.selection_mode === 'momentum'
@@ -1209,6 +1222,21 @@ export default function MomentumBacktester() {
               <span className="text-gray-600 text-xs ml-1">0 = all</span>
             </div>
             <div>
+              <label className="text-gray-500 text-xs block mb-1">Min Price Score</label>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                placeholder="off"
+                value={minPriceScore}
+                onChange={(e) => setMinPriceScore(e.target.value)}
+                className="w-20 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                title="Optional 0-100 floor on each candidate's price-category score. Only companies whose score_price strictly exceeds this value are eligible for the long bucket. Empty = no filter. Common default: 30."
+              />
+              <span className="text-gray-600 text-xs ml-1">{minPriceScore.trim() === '' ? 'off' : '>'}</span>
+            </div>
+            <div>
               <label className="text-gray-500 text-xs block mb-1">Strategy</label>
               <select
                 value={selectionMode}
@@ -1822,13 +1850,33 @@ export default function MomentumBacktester() {
         {/* Results — either the single-run `result` or, when a variant is
             active, that variant's BacktestResult. The detail components
             don't care which path the data came from. */}
-        {displayResult && (
+        {displayResult && (() => {
+          // Full label for the active strategy row in EquityCurveCard's
+          // Summary table. Matches the format a saved comparison would
+          // show: "{base name} · {variant label}" — e.g. "ACWI-mei ·
+          // Momentum · 2002-2026 · Every 12 months · Long-only". Base
+          // comes from the loaded saved-run name when one is loaded,
+          // otherwise from defaultVariantsBundleName() (the same name
+          // the auto-save would pick). Variant suffix is folded in
+          // whenever a sweep variant is active.
+          const baseName = loadedRunId != null
+            ? savedRuns.find((r) => r.run_id === loadedRunId)?.name
+            : undefined;
+          const labelBase = baseName ?? defaultVariantsBundleName();
+          const variantLabel = activeVariantKey
+            ? VARIANT_DEFS.find((v) => v.key === activeVariantKey)?.label
+            : undefined;
+          const activeStrategyLabel = variantLabel
+            ? `${labelBase} · ${variantLabel}`
+            : labelBase;
+          return (
           <>
             <EquityCurveCard
               result={displayResult}
               loadedRunId={activeVariantResult ? null : loadedRunId}
               savedRuns={savedRuns}
               exchangeByCompany={exchangeByCompany}
+              activeStrategyLabel={activeStrategyLabel}
             />
 
             <SectorTimelineChart result={displayResult} />
@@ -1874,7 +1922,8 @@ export default function MomentumBacktester() {
               Note: Uses current company universe applied retroactively (survivorship bias). Returns are hypothetical and do not account for transaction costs.
             </p>
           </>
-        )}
+          );
+        })()}
       </div>
     </div>
   );

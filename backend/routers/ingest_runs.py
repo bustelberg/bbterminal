@@ -53,9 +53,33 @@ _VALID_JOB_NAMES = {"weekly_price_volume", "monthly_price_volume", "manual"}
 # weekly run under ~10 minutes for ~1,800 companies without 429s.
 _MAX_WORKERS = 4
 # Checkpoint frequency — write progress to the row every N companies so
-# the /schedule page sees the bar move during a long run. Inside the
-# counters lock so the snapshot is consistent.
-_CHECKPOINT_EVERY = 100
+# the /schedule page sees the bar move during a long run. Tuned low
+# enough that the first checkpoint arrives within seconds (so the UI
+# never sits on "starting…" for long) but not so low that every
+# completion triggers a DB write.
+_CHECKPOINT_EVERY = 25
+# Minimum interval between `current_message` writes for the ACWI and
+# momentum phases (which emit many events per second). Prevents
+# hammering the DB while still keeping the live status fresh.
+_MESSAGE_THROTTLE_SECONDS = 1.0
+
+
+class _Throttle:
+    """Wall-clock throttle for `current_message` writes. Phases create
+    one per invocation; the first call always passes, subsequent calls
+    skip until `min_interval` has elapsed."""
+    def __init__(self, min_interval: float = _MESSAGE_THROTTLE_SECONDS):
+        import time as _t
+        self._time = _t
+        self.min_interval = min_interval
+        self.last_at = 0.0
+
+    def should_write(self) -> bool:
+        now = self._time.time()
+        if now - self.last_at < self.min_interval:
+            return False
+        self.last_at = now
+        return True
 
 
 def _now_utc_iso() -> str:
@@ -130,7 +154,9 @@ def _run_pipeline_sync(run_id: int) -> None:
     accumulated_errors: list[str] = []
 
     # ── Phase 1: ACWI universe refresh ─────────────────────────
-    _update_run(run_id, current_phase="acwi")
+    # Clear the message from the previous phase (a re-run of the same
+    # ingest_run id would otherwise carry stale text across phases).
+    _update_run(run_id, current_phase="acwi", current_message="Starting ACWI refresh…")
     try:
         _run_acwi_phase(run_id)
     except Exception as e:
@@ -139,7 +165,7 @@ def _run_pipeline_sync(run_id: int) -> None:
         accumulated_errors.append(msg)
 
     # ── Phase 2: price + volume refresh ────────────────────────
-    _update_run(run_id, current_phase="prices")
+    _update_run(run_id, current_phase="prices", current_message="Loading company list…")
     try:
         _run_prices_phase(run_id, accumulated_errors)
     except Exception as e:
@@ -148,7 +174,7 @@ def _run_pipeline_sync(run_id: int) -> None:
         accumulated_errors.append(msg)
 
     # ── Phase 3: momentum compute ──────────────────────────────
-    _update_run(run_id, current_phase="momentum")
+    _update_run(run_id, current_phase="momentum", current_message="Preparing momentum compute…")
     try:
         _run_momentum_phase(run_id)
     except Exception as e:
@@ -187,7 +213,21 @@ def _run_acwi_phase(run_id: int) -> None:
     this_month = today.strftime("%Y-%m")
     prev_month = prev_month_start.strftime("%Y-%m")
 
-    run_acwi_save_universe("ACWI", prev_month_start.isoformat(), today.isoformat())
+    # Throttle on_progress writes so the company-reconciliation loop
+    # (which emits one event every ~200 companies) doesn't hammer the DB.
+    throttle = _Throttle()
+
+    def _on_acwi_progress(message: str, _pct: int | None = None) -> None:
+        if message and throttle.should_write():
+            _update_run(run_id, current_message=message)
+
+    run_acwi_save_universe(
+        "ACWI",
+        prev_month_start.isoformat(),
+        today.isoformat(),
+        on_progress=_on_acwi_progress,
+    )
+    _update_run(run_id, current_message="Computing ACWI diff vs previous month…")
 
     # Look up the universe row by label so we can stamp the FK + filter
     # the membership diff. The save step always uses the same label.
@@ -333,7 +373,17 @@ def _run_prices_phase(run_id: int, accumulated_errors: list[str]) -> None:
 
     if not companies:
         # Empty universe — still considered a successful prices phase.
+        _update_run(run_id, current_message="No companies to refresh.")
         return
+
+    total = len(companies)
+    # Surface the denominator immediately so the UI shows "0 of N"
+    # instead of "starting…" while the first 25 companies process.
+    _update_run(
+        run_id,
+        companies_total=total,
+        current_message=f"Refreshing 0 of {total} companies (concurrency {_MAX_WORKERS})…",
+    )
 
     def _refresh_one(c: dict) -> None:
         cid = c["cid"]
@@ -351,7 +401,7 @@ def _run_prices_phase(run_id: int, accumulated_errors: list[str]) -> None:
                 if counters["processed"] % _CHECKPOINT_EVERY == 0:
                     checkpoint = dict(counters)
             if checkpoint:
-                _checkpoint(run_id, checkpoint)
+                _checkpoint(run_id, checkpoint, total)
                 checkpoint = None
         if exch in forbidden_exchanges:
             return
@@ -369,7 +419,7 @@ def _run_prices_phase(run_id: int, accumulated_errors: list[str]) -> None:
                 if counters["processed"] % _CHECKPOINT_EVERY == 0:
                     checkpoint = dict(counters)
             if checkpoint:
-                _checkpoint(run_id, checkpoint)
+                _checkpoint(run_id, checkpoint, total)
             return
 
         if r_p.is_forbidden:
@@ -380,7 +430,7 @@ def _run_prices_phase(run_id: int, accumulated_errors: list[str]) -> None:
                 if counters["processed"] % _CHECKPOINT_EVERY == 0:
                     checkpoint = dict(counters)
             if checkpoint:
-                _checkpoint(run_id, checkpoint)
+                _checkpoint(run_id, checkpoint, total)
             return
         if r_p.is_delisted:
             with lock:
@@ -389,7 +439,7 @@ def _run_prices_phase(run_id: int, accumulated_errors: list[str]) -> None:
                 if counters["processed"] % _CHECKPOINT_EVERY == 0:
                     checkpoint = dict(counters)
             if checkpoint:
-                _checkpoint(run_id, checkpoint)
+                _checkpoint(run_id, checkpoint, total)
             return
 
         try:
@@ -407,7 +457,7 @@ def _run_prices_phase(run_id: int, accumulated_errors: list[str]) -> None:
                 if counters["processed"] % _CHECKPOINT_EVERY == 0:
                     checkpoint = dict(counters)
             if checkpoint:
-                _checkpoint(run_id, checkpoint)
+                _checkpoint(run_id, checkpoint, total)
             return
 
         with lock:
@@ -419,7 +469,7 @@ def _run_prices_phase(run_id: int, accumulated_errors: list[str]) -> None:
             if counters["processed"] % _CHECKPOINT_EVERY == 0:
                 checkpoint = dict(counters)
         if checkpoint:
-            _checkpoint(run_id, checkpoint)
+            _checkpoint(run_id, checkpoint, total)
 
     with ThreadPoolExecutor(
         max_workers=_MAX_WORKERS, thread_name_prefix=f"ingest-{run_id}"
@@ -435,6 +485,11 @@ def _run_prices_phase(run_id: int, accumulated_errors: list[str]) -> None:
         forbidden_count=counters["forbidden"],
         delisted_count=counters["delisted"],
         error_count=counters["errors"],
+        current_message=(
+            f"Prices phase done: {counters['processed']} of {total} processed · "
+            f"{counters['prices']} prices / {counters['volumes']} volumes refreshed · "
+            f"{counters['forbidden']} forbidden, {counters['errors']} errors"
+        ),
     )
     if error_examples:
         accumulated_errors.append(
@@ -505,6 +560,10 @@ def _run_momentum_phase(run_id: int) -> None:
     error_msg: str | None = None
     holdings_count = 0
     latest_price_date: str | None = None
+    # Throttle current_message writes so the inner stream's per-month
+    # signal-compute progress (many events per second on a long
+    # backtest) doesn't generate a write storm.
+    msg_throttle = _Throttle()
 
     async def _drain() -> None:
         nonlocal snapshot_id, error_msg, holdings_count, latest_price_date
@@ -516,7 +575,15 @@ def _run_momentum_phase(run_id: int) -> None:
             except _json.JSONDecodeError:
                 continue
             t = evt.get("type")
-            if t == "current_portfolio":
+            if t == "progress":
+                # Surface the inner backtest's live status to /schedule
+                # so the momentum phase shows the same level of detail
+                # /momentum does ("Loading universe", "Computing signals
+                # for 2025-04…", "Building backtest result", etc.).
+                m = evt.get("message")
+                if m and msg_throttle.should_write():
+                    await asyncio.to_thread(_update_run, run_id, current_message=m)
+            elif t == "current_portfolio":
                 payload = evt.get("data") or {}
                 snapshot_id = payload.get("snapshot_id")
                 holdings_count = len(payload.get("holdings") or [])
@@ -562,10 +629,24 @@ def _run_momentum_phase(run_id: int) -> None:
     )
 
 
-def _checkpoint(run_id: int, snap: dict) -> None:
+def _checkpoint(run_id: int, snap: dict, total: int | None = None) -> None:
     """Periodic progress write. Best-effort — a transient blip on the
     checkpoint is harmless; the next one (or the final summary) will
-    catch up."""
+    catch up. Includes a `current_message` summarizing per-class
+    counters so /schedule renders an actionable status line between
+    structured-counter updates."""
+    if total is not None:
+        msg = (
+            f"Refreshing {snap['processed']} of {total} companies · "
+            f"{snap['prices']}p / {snap['volumes']}v refreshed · "
+            f"{snap['forbidden']} forbidden, {snap['errors']} errors"
+        )
+    else:
+        msg = (
+            f"{snap['processed']} processed · "
+            f"{snap['prices']}p / {snap['volumes']}v refreshed · "
+            f"{snap['forbidden']} forbidden, {snap['errors']} errors"
+        )
     _update_run(
         run_id,
         companies_processed=snap["processed"],
@@ -574,6 +655,7 @@ def _checkpoint(run_id: int, snap: dict) -> None:
         forbidden_count=snap["forbidden"],
         delisted_count=snap["delisted"],
         error_count=snap["errors"],
+        current_message=msg,
     )
 
 
