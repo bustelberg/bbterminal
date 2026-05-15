@@ -206,8 +206,8 @@ export default function FxRates() {
       const ratesData = await ratesRes.json();
       setLatestRates(ratesData.rates);
       setLatestSource(ratesData.source ?? null);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   }, []);
 
@@ -238,8 +238,8 @@ export default function FxRates() {
           : `Synced ${synced} currencies`,
       );
       await reload();
-    } catch (e: any) {
-      setSyncMessage(`Sync failed: ${e.message}`);
+    } catch (e) {
+      setSyncMessage(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setSyncing(false);
     }

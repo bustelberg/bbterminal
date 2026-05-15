@@ -23,7 +23,11 @@ export default function CellInfoTip({ children }: { children: React.ReactNode })
   const margin = 8;
 
   // createPortal needs `document` which is undefined during SSR — defer
-  // portal rendering until after first client-side mount.
+  // portal rendering until after first client-side mount. This IS the
+  // canonical "am I client-side?" pattern; React 19's set-state-in-effect
+  // lint flags it but the alternatives (useSyncExternalStore boilerplate,
+  // or an impure useState initializer that touches `window`) are worse.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setMounted(true), []);
 
   const handleEnter = () => {

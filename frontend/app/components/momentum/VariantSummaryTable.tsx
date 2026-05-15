@@ -102,8 +102,14 @@ function SweepStatus({ run }: { run: VariantsRunState }) {
   // rule rightly flags it).
   const [now, setNow] = useState<number>(() => run.startedAt);
   const isRunning = run.current != null;
+  // The leading setNow snaps the elapsed counter to "live time" the
+  // instant a sweep starts (otherwise it lags by up to one full second
+  // before the first interval tick). React 19's set-state-in-effect
+  // lint dislikes this synchronous setter, but the alternative — a
+  // ref-based "first tick" toggle — adds more noise than it saves.
   useEffect(() => {
     if (!isRunning) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setNow(Date.now());
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);

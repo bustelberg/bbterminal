@@ -77,10 +77,15 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
   }, [result]);
 
   // When the active result changes (new run / loaded saved run) collapse
-  // any open month so the user starts at a clean view.
-  useEffect(() => {
+  // any open month so the user starts at a clean view. React 19's
+  // recommended pattern for "reset state when a prop changes" is to
+  // track the prior value and reset during render — no effect needed.
+  // https://react.dev/reference/react/useState#storing-information-from-previous-renders
+  const [lastResult, setLastResult] = useState(result);
+  if (result !== lastResult) {
+    setLastResult(result);
     setExpandedMonth(null);
-  }, [result]);
+  }
 
   return (
     <>
@@ -418,10 +423,14 @@ function CompanySearch({
     return scored.slice(0, 30);
   }, [query, companies]);
 
-  // Reset highlighted index whenever the filter set changes.
-  useEffect(() => {
+  // Reset highlighted index whenever the filter set changes. Same
+  // "track prior value, reset during render" pattern the parent uses
+  // above so the React 19 lint stays clean.
+  const [lastQuery, setLastQuery] = useState(query);
+  if (query !== lastQuery) {
+    setLastQuery(query);
     setActiveIdx(0);
-  }, [query]);
+  }
 
   // Close on outside click.
   useEffect(() => {

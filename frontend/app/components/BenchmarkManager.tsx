@@ -72,7 +72,8 @@ export default function BenchmarkManager() {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.detail ?? `HTTP ${res.status}`);
       }
-      const result = await res.json();
+      // POST returns the new row but we just need the side effect — reload below.
+      await res.json().catch(() => undefined);
       setTicker('');
       setName('');
       await load();

@@ -419,7 +419,9 @@ export default function AcwiUniverse() {
       groups[key].push({ announcement: a, detail: d });
     }
     return groups;
-  }, [announcements, manualDetails, getDetail]);
+    // `getDetail` already closes over `manualDetails`, so listing both is
+    // a redundant dep that ESLint flags. Drop `manualDetails`.
+  }, [announcements, getDetail]);
 
   const otherCountryCoded = useMemo(() => {
     return announcements.filter(a => a.is_other_country_coded);

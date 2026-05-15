@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { dialog } from '../../lib/dialog';
 import ProgressTimeline from './ProgressTimeline';
 import {

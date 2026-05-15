@@ -5,7 +5,6 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   airsScanStore,
   startAirsScan,
-  INITIAL_STEPS,
   type ScanSteps,
   type StepStatus,
   type Portfolio,

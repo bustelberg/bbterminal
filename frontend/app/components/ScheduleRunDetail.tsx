@@ -274,8 +274,15 @@ function MomentumHoldingsSection({ run }: { run: IngestRun }) {
 
   const snapshotId = run.momentum_snapshot_id;
 
+  // Fetch the snapshot when the expander mounts (or snapshotId changes).
+  // setLoading(true) inside the effect is the React 19 set-state-in-effect
+  // antipattern; the canonical alternatives (use the `use()` hook, or
+  // derive loading from `snapshot === null`) are either unstable or
+  // racy when snapshotId changes mid-fetch. The explicit setLoading
+  // flag is the lesser evil here.
   useEffect(() => {
     if (snapshotId == null) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     fetch(`${API_URL}/api/momentum/current-picks/${snapshotId}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))

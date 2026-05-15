@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import ScheduleRunDetail from './ScheduleRunDetail';
-import ProgressTimeline, { type StepDef, type StepState } from './ProgressTimeline';
+import { type StepDef, type StepState } from './ProgressTimeline';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
