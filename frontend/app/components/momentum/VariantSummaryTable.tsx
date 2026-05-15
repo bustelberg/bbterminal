@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   momentumStore,
   setActiveVariant,
@@ -11,6 +11,9 @@ import {
 } from '../../../lib/stores/momentum';
 import CollapsibleCard from './CollapsibleCard';
 import { fmtPct } from './utils';
+import { buildFeeMap, computeNetStats, parenPct } from './feeStats';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 // One row per VARIANT_DEFS entry. Click to make that variant the active one
 // (the detail views below — equity curve, holdings table, sector timeline —
@@ -21,10 +24,31 @@ import { fmtPct } from './utils';
 // active row is highlighted and clickable, everything else is muted but
 // stays visible so the running sweep is observable.
 
-export default function VariantSummaryTable() {
+type Props = {
+  /** Per-company exchange lookup, needed to compute the (net) parenthetical
+   * for each variant's stats. Optional — when omitted the table just shows
+   * gross figures. */
+  exchangeByCompany?: Map<number, string>;
+};
+
+export default function VariantSummaryTable({ exchangeByCompany }: Props) {
   const variants = momentumStore.use((s) => s.variants);
   const active = momentumStore.use((s) => s.activeVariantKey);
   const run = momentumStore.use((s) => s.variantsRun);
+
+  // Fetch per-exchange fees once so each variant row can append a
+  // `(net X%)` parenthetical to its return / Sharpe / DD. Null when the
+  // user hasn't configured any non-zero fees on /fees.
+  const [feesByExchange, setFeesByExchange] = useState<Map<string, number> | null>(null);
+  useEffect(() => {
+    fetch(`${API_URL}/api/exchange-fees`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => {
+        const m = buildFeeMap(rows ?? []);
+        setFeesByExchange(m.size > 0 ? m : null);
+      })
+      .catch(() => {});
+  }, []);
 
   // Hide entirely when no sweep has ever run. The wrapper component decides
   // when to render us based on whether `variants` has any entries.
@@ -61,6 +85,8 @@ export default function VariantSummaryTable() {
               label={v.label}
               outcome={variants[v.key]}
               isActive={active === v.key}
+              feesByExchange={feesByExchange}
+              exchangeByCompany={exchangeByCompany}
             />
           ))}
         </tbody>
@@ -106,11 +132,15 @@ function VariantRow({
   label,
   outcome,
   isActive,
+  feesByExchange,
+  exchangeByCompany,
 }: {
   variantKey: VariantKey;
   label: string;
   outcome: VariantOutcome | undefined;
   isActive: boolean;
+  feesByExchange: Map<string, number> | null;
+  exchangeByCompany: Map<number, string> | undefined;
 }) {
   const status = outcome?.status ?? 'pending';
   const clickable = status === 'ok';
@@ -143,15 +173,34 @@ function VariantRow({
           <div className="text-[10px] text-rose-400 mt-0.5 font-mono">{outcome.message}</div>
         )}
       </td>
-      <SummaryCells outcome={outcome} />
+      <SummaryCells
+        outcome={outcome}
+        feesByExchange={feesByExchange}
+        exchangeByCompany={exchangeByCompany}
+      />
     </tr>
   );
 }
 
-function SummaryCells({ outcome }: { outcome: VariantOutcome | undefined }) {
+function SummaryCells({
+  outcome,
+  feesByExchange,
+  exchangeByCompany,
+}: {
+  outcome: VariantOutcome | undefined;
+  feesByExchange: Map<string, number> | null;
+  exchangeByCompany: Map<number, string> | undefined;
+}) {
+  // 6 placeholder cells (Start, End, Annualized, Sharpe, Total, DD) so the
+  // row width stays stable across statuses.
+  // Note: hooks must be called unconditionally — `net` is computed before
+  // any early return.
+  const net = useMemo(() => {
+    if (outcome?.status !== 'ok' || !feesByExchange || !exchangeByCompany) return null;
+    return computeNetStats(outcome.result.monthly_records, feesByExchange, exchangeByCompany);
+  }, [outcome, feesByExchange, exchangeByCompany]);
+
   if (outcome?.status !== 'ok') {
-    // 6 placeholder cells (Start, End, Annualized, Sharpe, Total, DD) so the
-    // row width stays stable across statuses.
     return (
       <>
         {[0, 1, 2, 3, 4, 5].map((i) => (
@@ -176,15 +225,19 @@ function SummaryCells({ outcome }: { outcome: VariantOutcome | undefined }) {
       <td className="px-3 py-2 text-right font-mono text-gray-400">{lastDate}</td>
       <td className={`px-3 py-2 text-right font-mono ${colorize(s.annualized_return_pct)}`}>
         {fmtPct(s.annualized_return_pct)}
+        <span className="text-gray-500">{parenPct(net?.annualized_return_pct)}</span>
       </td>
       <td className="px-3 py-2 text-right font-mono text-gray-200">
         {s.sharpe_ratio != null ? s.sharpe_ratio.toFixed(2) : '—'}
+        <span className="text-gray-500">{net?.sharpe_ratio != null ? ` (${net.sharpe_ratio.toFixed(2)})` : ''}</span>
       </td>
       <td className={`px-3 py-2 text-right font-mono ${colorize(s.total_return_pct)}`}>
         {fmtPct(s.total_return_pct)}
+        <span className="text-gray-500">{parenPct(net?.total_return_pct)}</span>
       </td>
       <td className="px-3 py-2 text-right font-mono text-rose-400">
         {fmtPct(s.max_drawdown_pct)}
+        <span className="text-gray-500">{parenPct(net?.max_drawdown_pct)}</span>
       </td>
     </>
   );

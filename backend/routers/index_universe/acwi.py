@@ -110,189 +110,210 @@ class AcwiSaveUniverseRequest(BaseModel):
     end_date: str
 
 
+def run_acwi_save_universe(
+    name: str,
+    start_date: str,
+    end_date: str,
+    on_progress=None,
+) -> dict:
+    """Sync core of `POST /api/acwi/save-universe`. Walks the feasible
+    ACWI holdings, reconciles companies, reconstructs monthly
+    memberships, persists them through `store_index_membership`, and
+    returns the same `stats` dict the SSE endpoint emits in its `done`
+    event. `on_progress(message: str, pct: int | None)` is called from
+    this thread; the SSE wrapper bridges those calls to its event queue.
+
+    Lives at module scope (rather than nested in the endpoint) so the
+    in-process scheduler pipeline in `routers/ingest_runs.py` can call
+    it directly without going through HTTP.
+    """
+    def emit(message: str, pct: int | None = None):
+        if on_progress is not None:
+            on_progress(message, pct)
+
+    emit("Loading feasible ACWI holdings from iShares XLS...", 3)
+    feasible = acwi_feasible_holdings_for_db()
+    emit(f"Found {len(feasible)} feasible holdings", 5)
+
+    exch_resp = supabase.table("gurufocus_exchange").select("exchange_id, exchange_code").execute()
+    exch_id_map = {r["exchange_code"]: r["exchange_id"] for r in (exch_resp.data or [])}
+
+    needed_exchanges = {fh["db_exchange"] for fh in feasible}
+    needed_eids = [exch_id_map[e] for e in needed_exchanges if e in exch_id_map]
+    existing_by_key: dict[tuple[int, str], int] = {}
+    existing_by_name: dict[tuple[int, str], list[int]] = {}
+    if needed_eids:
+        offset = 0
+        page_size = 1000
+        while True:
+            c_resp = (
+                supabase.table("company")
+                .select("company_id, gurufocus_ticker, exchange_id, company_name")
+                .in_("exchange_id", needed_eids)
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            batch = c_resp.data or []
+            for c in batch:
+                if c.get("gurufocus_ticker") and c.get("exchange_id") is not None:
+                    existing_by_key[(c["exchange_id"], c["gurufocus_ticker"])] = c["company_id"]
+                name_norm = (c.get("company_name") or "").strip().upper()
+                if name_norm and c.get("exchange_id") is not None:
+                    existing_by_name.setdefault((c["exchange_id"], name_norm), []).append(c["company_id"])
+            if len(batch) < page_size:
+                break
+            offset += page_size
+    emit(f"Loaded {len(existing_by_key)} existing company rows across {len(needed_eids)} exchanges", 10)
+
+    company_lookup: dict[str, int] = {}
+    sector_lookup: dict[str, str] = {
+        fh["symbol"]: fh["sector"] for fh in feasible if fh.get("sector")
+    }
+    created = 0
+    already = 0
+    renamed = 0
+    skipped = 0
+    unknown_exchanges: set[str] = set()
+    for idx, fh in enumerate(feasible):
+        eid = exch_id_map.get(fh["db_exchange"])
+        if eid is None:
+            skipped += 1
+            unknown_exchanges.add(fh["db_exchange"])
+            continue
+        key = (eid, fh["gf_ticker"])
+        cid = existing_by_key.get(key)
+        if cid is not None:
+            company_lookup[fh["symbol"]] = cid
+            already += 1
+            continue
+
+        name_norm = (fh.get("company_name") or "").strip().upper()
+        rename_target: int | None = None
+        if name_norm:
+            candidates = existing_by_name.get((eid, name_norm))
+            if candidates and len(candidates) == 1:
+                rename_target = candidates[0]
+
+        if rename_target is not None:
+            try:
+                supabase.table("company").update({
+                    "gurufocus_ticker": fh["gf_ticker"],
+                    "company_name": fh["company_name"] or None,
+                }).eq("company_id", rename_target).execute()
+                existing_by_key[key] = rename_target
+                company_lookup[fh["symbol"]] = rename_target
+                renamed += 1
+                emit(
+                    f"  renamed {fh['db_exchange']}:* → {fh['symbol']} "
+                    f"({fh['company_name']}, company_id={rename_target})",
+                    None,
+                )
+            except Exception as e:
+                skipped += 1
+                emit(f"  failed to rename to {fh['symbol']} ({fh['company_name']}): {e}", None)
+            continue
+
+        try:
+            ins = supabase.table("company").insert({
+                "gurufocus_ticker": fh["gf_ticker"],
+                "exchange_id": eid,
+                "company_name": fh["company_name"] or None,
+            }).execute()
+            if ins.data:
+                cid = ins.data[0]["company_id"]
+                existing_by_key[key] = cid
+                company_lookup[fh["symbol"]] = cid
+                created += 1
+        except Exception as e:
+            skipped += 1
+            emit(f"  failed to create {fh['symbol']} ({fh['company_name']}): {e}", None)
+            continue
+
+        try:
+            supabase.table("company_source").upsert(
+                {"company_id": cid, "source_code": "acwi"},
+                on_conflict="company_id,source_code",
+                ignore_duplicates=True,
+            ).execute()
+        except Exception:
+            pass
+
+        if (idx + 1) % 200 == 0 or idx == len(feasible) - 1:
+            pct = 10 + round((idx + 1) / len(feasible) * 30)
+            emit(
+                f"Companies: {created} created, {renamed} renamed, "
+                f"{already} existing, {skipped} skipped ({idx + 1}/{len(feasible)})",
+                pct,
+            )
+
+    if unknown_exchanges:
+        emit(f"Unknown exchanges (missing from gurufocus_exchange): {sorted(unknown_exchanges)}", None)
+    emit(
+        f"Company sync done: {created} new, {renamed} renamed, "
+        f"{already} existing, {skipped} skipped",
+        42,
+    )
+
+    emit(f"Reconstructing monthly holdings {start_date}..{end_date}...", 45)
+    monthly, stats = reconstruct_acwi_monthly_holdings(start_date, end_date)
+    emit(
+        f"Built {stats['months']} months: {stats['feasible_count']} feasible tickers "
+        f"({stats['with_addition']} with matched addition, {stats['grandfathered']} grandfathered)",
+        55,
+    )
+
+    emit(f"Writing universe '{name}' to database...", 60)
+    store_stats = store_index_membership(
+        supabase, name, monthly, [], company_lookup,
+        on_progress=lambda m: emit(m, None),
+        sector_lookup=sector_lookup,
+    )
+    return {
+        "name": name,
+        "months": store_stats["months"],
+        "total_rows": store_stats["total_rows"],
+        "unique_tickers": store_stats["unique_tickers"],
+        "matched_companies": store_stats["matched_companies"],
+        "companies_created": created,
+        "companies_renamed": renamed,
+        "companies_existing": already,
+        "companies_skipped": skipped,
+        "feasible_count": stats["feasible_count"],
+        "grandfathered": stats["grandfathered"],
+        "with_addition": stats["with_addition"],
+    }
+
+
 @router.post("/api/acwi/save-universe")
 async def acwi_save_universe(req: AcwiSaveUniverseRequest):
     """Reconstruct monthly ACWI feasible-universe holdings + save as a universe.
-    SSE; result selectable as `index_universe` in the momentum backtester."""
+    SSE; result selectable as `index_universe` in the momentum backtester.
+
+    Thin wrapper over `run_acwi_save_universe` — the sync worker holds the
+    actual logic so the scheduled pipeline (`routers/ingest_runs.py`) can
+    invoke it directly without round-tripping through HTTP."""
     def _run(q: _queue.Queue):
-        def emit(message: str, pct: int | None = None):
+        def on_progress(message: str, pct: int | None = None):
             payload = {"type": "progress", "message": message}
             if pct is not None:
                 payload["pct"] = pct
             q.put(json.dumps(payload))
 
         try:
-            emit("Loading feasible ACWI holdings from iShares XLS...", 3)
-            feasible = acwi_feasible_holdings_for_db()
-            emit(f"Found {len(feasible)} feasible holdings", 5)
-
-            exch_resp = supabase.table("gurufocus_exchange").select("exchange_id, exchange_code").execute()
-            exch_id_map = {r["exchange_code"]: r["exchange_id"] for r in (exch_resp.data or [])}
-
-            # Bulk-load existing company rows for every needed exchange in
-            # one paginated fetch. Two indexes off the same data:
-            #   existing_by_key[(eid, gf_ticker)]    → cid (primary)
-            #   existing_by_name[(eid, NAME_UPPER)]  → list[cid] (rename fallback)
-            # The name index catches override renames (WAR:SPL → WAR:EBP) and
-            # prevents the duplicate-row bug that fired when the PK changed
-            # but the company is still the same iShares row underneath.
-            needed_exchanges = {fh["db_exchange"] for fh in feasible}
-            needed_eids = [exch_id_map[e] for e in needed_exchanges if e in exch_id_map]
-            existing_by_key: dict[tuple[int, str], int] = {}
-            existing_by_name: dict[tuple[int, str], list[int]] = {}
-            if needed_eids:
-                offset = 0
-                page_size = 1000
-                while True:
-                    c_resp = (
-                        supabase.table("company")
-                        .select("company_id, gurufocus_ticker, exchange_id, company_name")
-                        .in_("exchange_id", needed_eids)
-                        .range(offset, offset + page_size - 1)
-                        .execute()
-                    )
-                    batch = c_resp.data or []
-                    for c in batch:
-                        if c.get("gurufocus_ticker") and c.get("exchange_id") is not None:
-                            existing_by_key[(c["exchange_id"], c["gurufocus_ticker"])] = c["company_id"]
-                        name_norm = (c.get("company_name") or "").strip().upper()
-                        if name_norm and c.get("exchange_id") is not None:
-                            existing_by_name.setdefault((c["exchange_id"], name_norm), []).append(c["company_id"])
-                    if len(batch) < page_size:
-                        break
-                    offset += page_size
-            emit(f"Loaded {len(existing_by_key)} existing company rows across {len(needed_eids)} exchanges", 10)
-
-            company_lookup: dict[str, int] = {}
-            sector_lookup: dict[str, str] = {
-                fh["symbol"]: fh["sector"] for fh in feasible if fh.get("sector")
-            }
-            created = 0
-            already = 0
-            renamed = 0
-            skipped = 0
-            unknown_exchanges: set[str] = set()
-            for idx, fh in enumerate(feasible):
-                eid = exch_id_map.get(fh["db_exchange"])
-                if eid is None:
-                    skipped += 1
-                    unknown_exchanges.add(fh["db_exchange"])
-                    continue
-                key = (eid, fh["gf_ticker"])
-                cid = existing_by_key.get(key)
-                if cid is not None:
-                    company_lookup[fh["symbol"]] = cid
-                    already += 1
-                    continue
-
-                # PK miss → try name-based rename fallback. Only honor it
-                # when name → cid is unique on this exchange; ambiguous
-                # matches fall through to insert.
-                name_norm = (fh.get("company_name") or "").strip().upper()
-                rename_target: int | None = None
-                if name_norm:
-                    candidates = existing_by_name.get((eid, name_norm))
-                    if candidates and len(candidates) == 1:
-                        rename_target = candidates[0]
-
-                if rename_target is not None:
-                    try:
-                        supabase.table("company").update({
-                            "gurufocus_ticker": fh["gf_ticker"],
-                            "company_name": fh["company_name"] or None,
-                        }).eq("company_id", rename_target).execute()
-                        existing_by_key[key] = rename_target
-                        company_lookup[fh["symbol"]] = rename_target
-                        renamed += 1
-                        emit(
-                            f"  renamed {fh['db_exchange']}:* → {fh['symbol']} "
-                            f"({fh['company_name']}, company_id={rename_target})",
-                            None,
-                        )
-                    except Exception as e:
-                        skipped += 1
-                        emit(f"  failed to rename to {fh['symbol']} ({fh['company_name']}): {e}", None)
-                    continue
-
-                # Genuinely new row.
-                try:
-                    ins = supabase.table("company").insert({
-                        "gurufocus_ticker": fh["gf_ticker"],
-                        "exchange_id": eid,
-                        "company_name": fh["company_name"] or None,
-                    }).execute()
-                    if ins.data:
-                        cid = ins.data[0]["company_id"]
-                        existing_by_key[key] = cid
-                        company_lookup[fh["symbol"]] = cid
-                        created += 1
-                except Exception as e:
-                    skipped += 1
-                    emit(f"  failed to create {fh['symbol']} ({fh['company_name']}): {e}", None)
-                    continue
-
-                try:
-                    supabase.table("company_source").upsert(
-                        {"company_id": cid, "source_code": "acwi"},
-                        on_conflict="company_id,source_code",
-                        ignore_duplicates=True,
-                    ).execute()
-                except Exception:
-                    pass
-
-                if (idx + 1) % 200 == 0 or idx == len(feasible) - 1:
-                    pct = 10 + round((idx + 1) / len(feasible) * 30)
-                    emit(
-                        f"Companies: {created} created, {renamed} renamed, "
-                        f"{already} existing, {skipped} skipped ({idx + 1}/{len(feasible)})",
-                        pct,
-                    )
-
-            if unknown_exchanges:
-                emit(f"Unknown exchanges (missing from gurufocus_exchange): {sorted(unknown_exchanges)}", None)
-            emit(
-                f"Company sync done: {created} new, {renamed} renamed, "
-                f"{already} existing, {skipped} skipped",
-                42,
+            result_stats = run_acwi_save_universe(
+                req.name, req.start_date, req.end_date, on_progress=on_progress,
             )
-
-            emit(f"Reconstructing monthly holdings {req.start_date}..{req.end_date}...", 45)
-            monthly, stats = reconstruct_acwi_monthly_holdings(req.start_date, req.end_date)
-            emit(
-                f"Built {stats['months']} months: {stats['feasible_count']} feasible tickers "
-                f"({stats['with_addition']} with matched addition, {stats['grandfathered']} grandfathered)",
-                55,
-            )
-
-            emit(f"Writing universe '{req.name}' to database...", 60)
-            store_stats = store_index_membership(
-                supabase, req.name, monthly, [], company_lookup,
-                on_progress=lambda m: emit(m, None),
-                sector_lookup=sector_lookup,
-            )
-
             q.put(json.dumps({
                 "type": "done",
                 "message": (
-                    f"Saved '{req.name}': {store_stats['months']} months, "
-                    f"{store_stats['total_rows']} rows, "
-                    f"{store_stats['matched_companies']}/{store_stats['unique_tickers']} tickers matched "
-                    f"({created} new companies created, {renamed} renamed, {already} existing)"
+                    f"Saved '{result_stats['name']}': {result_stats['months']} months, "
+                    f"{result_stats['total_rows']} rows, "
+                    f"{result_stats['matched_companies']}/{result_stats['unique_tickers']} tickers matched "
+                    f"({result_stats['companies_created']} new companies created, "
+                    f"{result_stats['companies_renamed']} renamed, "
+                    f"{result_stats['companies_existing']} existing)"
                 ),
-                "stats": {
-                    "name": req.name,
-                    "months": store_stats["months"],
-                    "total_rows": store_stats["total_rows"],
-                    "unique_tickers": store_stats["unique_tickers"],
-                    "matched_companies": store_stats["matched_companies"],
-                    "companies_created": created,
-                    "companies_renamed": renamed,
-                    "companies_existing": already,
-                    "companies_skipped": skipped,
-                    "feasible_count": stats["feasible_count"],
-                    "grandfathered": stats["grandfathered"],
-                    "with_addition": stats["with_addition"],
-                },
+                "stats": result_stats,
             }))
         except Exception as e:
             q.put(json.dumps({"type": "error", "message": f"{e}\n{traceback.format_exc()}"}))

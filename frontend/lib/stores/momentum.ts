@@ -38,6 +38,11 @@ export type PeriodRecord = {
   // tag the row visually so users can tell it's a YTD snapshot rather than
   // a closed period.
   is_open?: boolean;
+  // Effective end date for an open period: the most recent date common to
+  // every held company (min of per-holding max trade dates). Surfaced next
+  // to the "open" badge so users see how stale the displayed return is
+  // when some names stopped reporting earlier than others.
+  as_of_date?: string;
 };
 
 export type DrawdownPeriod = {

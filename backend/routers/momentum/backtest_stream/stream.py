@@ -90,6 +90,17 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         yield _emit({"type": "error", "message": "Variants sweep is not supported with mode='current_portfolio'"})
         return
 
+    # Backtests are unconditionally DB-only — the canonical refresher is the
+    # scheduled-refresh cron (`/api/ingest/scheduled-refresh`, surfaced on
+    # the /schedule page). This makes backtest runs predictable, fast, and
+    # never side-effecting: no GuruFocus calls, no ECB FX sync, no self-heal
+    # round-trips. If the data isn't current, the user triggers a refresh
+    # via /schedule and reruns. Current-portfolio mode keeps its own narrow
+    # refresh path (current_picks cron self-heals its ~30 holdings before
+    # snapshotting) — that's a separate concern from broad data freshness.
+    if req.mode != "current_portfolio":
+        req.db_only = True
+
     # current_portfolio mode runs against today only; coerce the date range
     # so price loading covers ~14 months of history (12m momentum + buffer)
     # without requiring the caller to pick the right window.
@@ -159,6 +170,50 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             yield _emit({"type": "error", "message": "No companies found in database"})
             return
         yield _emit({"type": "progress", "pct": 5, "message": f"Found {len(universe_df)} companies"})
+
+        # Drop any company on an exchange the user flagged as
+        # broker-unsupported on /fees. Missing rows in `exchange_fee`
+        # default to supported, so the user only has to opt OUT of the
+        # exchanges their broker can't actually trade. Done after
+        # load_universe so the unfiltered count is visible to the
+        # progress log first.
+        def _unsupported_exchanges() -> set[str]:
+            try:
+                r = (
+                    supabase.table("exchange_fee")
+                    .select("exchange_code")
+                    .eq("is_broker_supported", False)
+                    .execute()
+                )
+                return {row["exchange_code"] for row in (r.data or []) if row.get("exchange_code")}
+            except Exception:
+                # Don't fail the backtest if the lookup hiccups — default
+                # to "no filter applied" so a transient DB blip can't
+                # silently produce an empty universe.
+                return set()
+        unsupported = await asyncio.to_thread(_unsupported_exchanges)
+        if unsupported and "gurufocus_exchange" in universe_df.columns:
+            pre = len(universe_df)
+            universe_df = universe_df[~universe_df["gurufocus_exchange"].isin(unsupported)].reset_index(drop=True)
+            dropped = pre - len(universe_df)
+            if dropped > 0:
+                yield _emit({
+                    "type": "warning",
+                    "scope": "data",
+                    "message": (
+                        f"Dropped {dropped} companies on {len(unsupported)} broker-unsupported "
+                        f"exchange(s) ({', '.join(sorted(unsupported))}) — adjust on /fees."
+                    ),
+                })
+            if universe_df.empty:
+                yield _emit({
+                    "type": "error",
+                    "message": (
+                        "Every company in the universe is on a broker-unsupported exchange. "
+                        "Re-enable some exchanges on /fees and re-run."
+                    ),
+                })
+                return
 
         # Pre-flight DB-staleness check.
         latest_price_date = await asyncio.to_thread(_latest_db_price_date)

@@ -237,14 +237,18 @@ def gurufocus_ticker_normalized(ticker: str, exchange: str) -> tuple[str, str] |
     return (db_exchange, t)
 
 
-# GuruFocus exchange prefixes considered "feasible" (USA + Europe + Asia, ex-Russia/AU/NZ).
-# Mirror of the frontend's FEASIBLE_GF_EXCHANGES set. Empty string = US.
+# GuruFocus exchange prefixes considered "feasible" — the regions covered by
+# the current GuruFocus subscription: USA + Europe + Asia (incl. Middle East),
+# excluding Russia / AU / NZ / Africa / LatAm. Mirror of the frontend's
+# FEASIBLE_GF_EXCHANGES set. Empty string = US.
 FEASIBLE_GF_EXCHANGES = frozenset([
     "",  # US (NYSE, NASDAQ, Cboe BZX)
     # Europe
     "LSE", "XTER", "XPAR", "XAMS", "XBRU", "XLIS", "MIL", "XMAD", "XSWX",
     "OSTO", "OCSE", "OSL", "OHEL", "WAR", "XPRA", "ATH", "DUB", "BUD", "IST",
-    # Asia
+    # Asia (East / SE / South)
     "TSE", "HKSE", "SHSE", "SZSE", "TPE", "ROCO", "XKRX",
     "NSE", "BSE", "SGX", "XKLS", "ISX", "BKK", "PHS",
+    # Middle East
+    "SAU", "DSMD", "KUW", "XTAE", "ADX", "DFM",
 ])

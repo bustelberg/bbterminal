@@ -537,12 +537,13 @@ export default function MomentumBacktester() {
             monthly_records: selectionMode === 'all'
               ? r.monthly_records.map((rec) => ({ ...rec, holdings: [] }))
               : r.monthly_records,
-            // daily_records intentionally omitted — for a 24-year × 10-variant
-            // bundle they total several MB, which exceeds Supabase's
-            // statement_timeout when squeezed into a single JSONB insert.
-            // The chart falls back to monthly_records on reload; max-DD /
-            // Sharpe / drawdown periods are still in `summary` so headline
-            // stats survive. Re-run if the daily-resolution line is needed.
+            // Keep the daily equity curve so the chart line, intra-period
+            // max-DD overlays, and the √252 Sharpe recompute survive reload.
+            // The backend compacts these into a `{dates, returns}`
+            // parallel-array form before insert (~3× smaller JSONB) and
+            // re-expands them on load, so even a 24y × 14-variant bundle
+            // fits comfortably under Supabase's statement_timeout.
+            daily_records: r.daily_records ?? [],
           })),
           universe,
         }),
@@ -1816,7 +1817,7 @@ export default function MomentumBacktester() {
         {/* Variant sweep summary — appears as soon as one variant outcome
             lands and stays visible alongside the active variant's detail
             views below. Hidden entirely when no sweep has run. */}
-        {hasVariants && <VariantSummaryTable />}
+        {hasVariants && <VariantSummaryTable exchangeByCompany={exchangeByCompany} />}
 
         {/* Results — either the single-run `result` or, when a variant is
             active, that variant's BacktestResult. The detail components
@@ -1827,6 +1828,7 @@ export default function MomentumBacktester() {
               result={displayResult}
               loadedRunId={activeVariantResult ? null : loadedRunId}
               savedRuns={savedRuns}
+              exchangeByCompany={exchangeByCompany}
             />
 
             <SectorTimelineChart result={displayResult} />

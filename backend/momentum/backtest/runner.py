@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from ._period import (
+    adjust_open_period_holdings,
     compute_selection_period,
     compute_sector_etf_period,
 )
@@ -250,6 +251,21 @@ def run_backtest(
             for w in outcome.warnings:
                 send_event("warning", scope="backtest", message=w)
 
+        # Open-period re-pricing: replace the universe-wide last_avail_ts
+        # exit with the most recent date common to every held company.
+        # Without this, holdings whose last close is earlier than the
+        # global max get None for forward_return_pct and silently drop
+        # out of the open-period portfolio return.
+        open_as_of: date | None = None
+        if is_open_iter and outcome.empty_reason is None:
+            outcome, open_as_of = adjust_open_period_holdings(
+                outcome,
+                price_index=price_index,
+                local_price_index=local_price_index,
+                benchmark_price_index=benchmark_price_index,
+                strategy_type=config.strategy_type,
+            )
+
         # Empty-holdings branch: forward the empty_reason as both a record
         # and a warning, then move on.
         if outcome.empty_reason is not None:
@@ -303,6 +319,7 @@ def run_backtest(
             portfolio_return_pct=outcome.port_return,
             cumulative_return_pct=round(record_cum, 2),
             is_open=is_open_iter,
+            as_of_date=open_as_of.isoformat() if open_as_of else None,
         ))
 
     if send_event:

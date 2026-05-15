@@ -12,6 +12,13 @@ earlier version included the full result blob — for variant bundles that
 ballooned the response to >50 MB and made the dropdown unusable. Full
 payload is fetched on demand via the per-run GET when the user clicks
 into a saved run.
+
+`daily_records` are transparently re-encoded into a parallel-array
+`{dates, returns}` form on save and re-expanded to the verbose
+`[{date, cumulative_return_pct}, ...]` shape on load. For a 24y × 14-variant
+bundle this drops the JSONB blob from ~5.6 MB to ~2 MB — well under
+Supabase's statement_timeout — so the daily equity curve survives a save
++ reload instead of falling back to the period-step line.
 """
 
 from __future__ import annotations
@@ -24,6 +31,68 @@ from pydantic import BaseModel
 from deps import supabase
 
 router = APIRouter(tags=["momentum"])
+
+
+def _compact_daily_records(records):
+    """Encode a verbose `[{date, cumulative_return_pct}, ...]` list as the
+    parallel-array `{dates: [...], returns: [...]}` form. Returns the input
+    untouched if it isn't a list (already compact, or missing)."""
+    if not isinstance(records, list):
+        return records
+    dates: list[str] = []
+    returns: list[float] = []
+    for r in records:
+        if not isinstance(r, dict):
+            continue
+        d = r.get("date")
+        v = r.get("cumulative_return_pct")
+        if d is None or v is None:
+            continue
+        dates.append(d)
+        returns.append(v)
+    return {"dates": dates, "returns": returns}
+
+
+def _expand_daily_records(value):
+    """Inverse of `_compact_daily_records`. Accepts either compact dict form
+    or verbose list form (legacy rows) and always returns the verbose list
+    shape the frontend expects."""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        dates = value.get("dates") or []
+        returns = value.get("returns") or []
+        n = min(len(dates), len(returns))
+        return [
+            {"date": dates[i], "cumulative_return_pct": returns[i]}
+            for i in range(n)
+        ]
+    return []
+
+
+def _compact_in_place(blob: dict) -> None:
+    """Compact every `daily_records` field inside a result blob — both the
+    top-level (single-run shape) and per-variant copies (variant-bundle
+    shape). Mutates the blob in place; safe to call on either shape."""
+    if "daily_records" in blob:
+        blob["daily_records"] = _compact_daily_records(blob["daily_records"])
+    variants = blob.get("variants")
+    if isinstance(variants, list):
+        for v in variants:
+            if isinstance(v, dict) and "daily_records" in v:
+                v["daily_records"] = _compact_daily_records(v["daily_records"])
+
+
+def _expand_in_place(blob: dict) -> None:
+    """Inverse of `_compact_in_place`. Handles legacy verbose rows
+    transparently (passthrough)."""
+    if "daily_records" in blob:
+        blob["daily_records"] = _expand_daily_records(blob["daily_records"])
+    variants = blob.get("variants")
+    if isinstance(variants, list):
+        for v in variants:
+            if isinstance(v, dict) and "daily_records" in v:
+                v["daily_records"] = _expand_daily_records(v["daily_records"])
 
 
 class SaveBacktestRequest(BaseModel):
@@ -46,7 +115,13 @@ class RenameBacktestRequest(BaseModel):
 
 @router.post("/api/momentum/backtests")
 async def save_backtest(req: SaveBacktestRequest):
-    """Save a backtest run. Accepts single-run or variant-bundle shape."""
+    """Save a backtest run. Accepts single-run or variant-bundle shape.
+
+    `daily_records` on the inbound payload — verbose
+    `[{date, cumulative_return_pct}, ...]` from the frontend — is encoded
+    into the compact parallel-array form before insert so the JSONB blob
+    stays small enough to clear Supabase's statement_timeout for
+    multi-decade × N-variant bundles."""
     if req.variants is not None:
         result_blob = {
             "kind": "variants",
@@ -64,6 +139,7 @@ async def save_backtest(req: SaveBacktestRequest):
             "monthly_records": req.monthly_records,
             "universe": req.universe,
         }
+    _compact_in_place(result_blob)
     row = {
         "name": req.name.strip(),
         "config": req.config,
@@ -97,7 +173,10 @@ async def list_backtests():
 
 @router.get("/api/momentum/backtests/{run_id}")
 async def load_backtest(run_id: int):
-    """Full backtest payload for one run."""
+    """Full backtest payload for one run. Re-expands compact `daily_records`
+    back to the verbose `[{date, cumulative_return_pct}, ...]` shape so the
+    frontend can keep treating saved runs identically to in-memory ones.
+    Legacy rows (verbose-on-disk) pass through unchanged."""
     resp = await asyncio.to_thread(
         lambda: supabase.table("backtest_run")
         .select("*")
@@ -106,7 +185,11 @@ async def load_backtest(run_id: int):
     )
     if not resp.data:
         raise HTTPException(404, "Backtest not found")
-    return resp.data[0]
+    row = resp.data[0]
+    result = row.get("result")
+    if isinstance(result, dict):
+        _expand_in_place(result)
+    return row
 
 
 @router.delete("/api/momentum/backtests/{run_id}")

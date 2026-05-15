@@ -186,6 +186,12 @@ class PeriodRecord:
     # excluded from Sharpe and annualization stats since they represent a
     # partial holding period.
     is_open: bool = False
+    # Effective exit date for an open period — set to the most recent date
+    # common to every held company (min of per-holding max trade dates).
+    # The frontend surfaces this so it's clear how stale the "current
+    # holding" return is when some names stopped reporting earlier than
+    # others. Null on closed periods.
+    as_of_date: str | None = None
 
 
 @dataclass
@@ -346,6 +352,7 @@ class BacktestResult:
                     "cumulative_return_pct": r.cumulative_return_pct,
                     **({"empty_reason": r.empty_reason} if r.empty_reason else {}),
                     **({"is_open": True} if r.is_open else {}),
+                    **({"as_of_date": r.as_of_date} if r.as_of_date else {}),
                 }
                 for r in self.monthly_records
             ],

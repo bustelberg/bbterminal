@@ -16,6 +16,7 @@ straight function call instead of a captured local.
 """
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -29,11 +30,12 @@ from ..scoring import (
     random_select,
     score_and_select,
 )
-from .indices import _date_on_or_after, _price_on_or_after
+from .indices import _date_on_or_after, _price_on_or_after, _price_on_or_before
 from .types import (
     BacktestConfig,
     HoldingSide,
     PeriodHolding,
+    StrategyType,
     _norm_sector,
 )
 
@@ -47,6 +49,119 @@ class _PeriodOutcome:
     # Warnings the branch raised — emitted by the main loop after each
     # period so the order remains stable across refactors.
     warnings: list[str] = field(default_factory=list)
+
+
+def adjust_open_period_holdings(
+    outcome: _PeriodOutcome,
+    *,
+    price_index: dict[int, pd.Series],
+    local_price_index: dict[int, pd.Series] | None,
+    benchmark_price_index: dict[int, pd.Series] | None,
+    strategy_type: StrategyType,
+) -> tuple[_PeriodOutcome, date | None]:
+    """Re-price the *open* period's exits at the most recent date common to
+    every held company.
+
+    The runner picks `last_avail_ts` from the universe-wide max in
+    `price_index`, which is fine for the entry-pricing pass but leaks
+    nulls into the open period when some held companies stopped updating
+    earlier (e.g. an EU stock that stopped reporting before a US stock
+    did). `_price_on_or_after(stale_series, last_avail_ts)` then returns
+    None for those holdings — so their `forward_return_pct`,
+    `exit_price`, and `exit_date` all become null and they're silently
+    omitted from the portfolio return.
+
+    This post-processor walks the selected holdings, computes
+    `common_max = min(price_index[h.cid].index.max())` across them, and
+    re-prices every exit at that date with `_price_on_or_before` (which
+    handles the rare case where the common date isn't a trading day for
+    a particular holding — it falls back to the prior available close).
+    The portfolio return is recomputed from the adjusted forward
+    returns and the actual common-date is returned so the runner can
+    surface it on the period record. Sector-ETF holdings (negative
+    company_id) are routed through `benchmark_price_index` if supplied.
+    """
+    if not outcome.holdings:
+        return outcome, None
+
+    def _series_for(cid: int) -> pd.Series | None:
+        if cid < 0 and benchmark_price_index is not None:
+            return benchmark_price_index.get(-cid)
+        return price_index.get(cid)
+
+    def _local_series_for(cid: int) -> pd.Series | None:
+        if cid < 0:
+            return None  # benchmarks are EUR/USD only — no local series
+        return local_price_index.get(cid) if local_price_index is not None else None
+
+    holding_max_dates: list[pd.Timestamp] = []
+    for h in outcome.holdings:
+        s = _series_for(h.company_id)
+        if s is None or s.empty:
+            continue
+        holding_max_dates.append(s.index.max())
+    if not holding_max_dates:
+        return outcome, None
+
+    common_max_ts = min(holding_max_dates)
+    common_max_date = common_max_ts.date()
+
+    long_returns: list[float] = []
+    short_returns: list[float] = []
+    new_holdings: list[PeriodHolding] = []
+    for h in outcome.holdings:
+        s = _series_for(h.company_id)
+        if s is None:
+            new_holdings.append(h)
+            continue
+        exit_pair = _price_on_or_before(s, common_max_ts)
+        if exit_pair is None:
+            new_holdings.append(h)
+            continue
+        exit_price, exit_actual_ts = exit_pair
+
+        local_s = _local_series_for(h.company_id)
+        exit_local_pair = (
+            _price_on_or_before(local_s, common_max_ts)
+            if local_s is not None
+            else None
+        )
+        exit_local = exit_local_pair[0] if exit_local_pair is not None else None
+
+        new_fwd_return: float | None = None
+        if h.entry_price_eur and exit_price and h.entry_price_eur > 0:
+            new_fwd_return = round((exit_price / h.entry_price_eur - 1) * 100, 2)
+
+        new_h = dataclasses.replace(
+            h,
+            exit_price_eur=round(exit_price, 4),
+            exit_price_local=round(exit_local, 4) if exit_local is not None else None,
+            exit_date=exit_actual_ts.strftime("%Y-%m-%d"),
+            forward_return_pct=new_fwd_return,
+        )
+        new_holdings.append(new_h)
+        if new_fwd_return is not None:
+            if new_h.side == "long":
+                long_returns.append(new_fwd_return)
+            else:
+                short_returns.append(new_fwd_return)
+
+    if strategy_type == "long_short":
+        long_avg = float(np.mean(long_returns)) if long_returns else None
+        short_avg = float(np.mean(short_returns)) if short_returns else None
+        if long_avg is not None and short_avg is not None:
+            port_return: float | None = round(long_avg - short_avg, 2)
+        elif long_avg is not None:
+            port_return = round(long_avg, 2)
+        elif short_avg is not None:
+            port_return = round(-short_avg, 2)
+        else:
+            port_return = None
+    else:
+        port_return = round(float(np.mean(long_returns)), 2) if long_returns else None
+
+    adjusted = dataclasses.replace(outcome, holdings=new_holdings, port_return=port_return)
+    return adjusted, common_max_date
 
 
 def make_period_holding(

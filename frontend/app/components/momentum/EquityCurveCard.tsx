@@ -16,6 +16,7 @@ import CellInfoTip from './CellInfoTip';
 import CollapsibleCard from './CollapsibleCard';
 import { SERIES_COLORS, computeTopDrawdowns, fmtPct, tooltipStyle } from './utils';
 import type { BenchmarkOption, BenchmarkPrice, ComparisonItem, SavedRun, SavedVariant } from './types';
+import { buildFeeMap, computeNetStats, parenPct, type NetStats } from './feeStats';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -29,6 +30,12 @@ type Props = {
   loadedRunId: number | null;
   /** Saved backtests available for comparison. */
   savedRuns: SavedRun[];
+  /** Per-company exchange lookup. When provided alongside non-zero
+   * `/api/exchange-fees`, every stat surfaced on the active strategy
+   * gets a `gross (net)` parenthetical computed from the fee model in
+   * `feeStats.ts`. Optional so the card stays usable when the parent
+   * doesn't pipe it through (e.g. saved-bundle reload flows). */
+  exchangeByCompany?: Map<number, string>;
 };
 
 /** "Equity Curve" card cluster: comparison pill row, summary stats,
@@ -36,9 +43,12 @@ type Props = {
  * own benchmark/saved comparison state and all the chart-derived memos
  * — the parent only feeds it the active strategy plus the saved-run
  * list. */
-export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Props) {
+export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchangeByCompany }: Props) {
   const [benchmarkOptions, setBenchmarkOptions] = useState<BenchmarkOption[]>([]);
   const [comparisons, setComparisons] = useState<ComparisonItem[]>([]);
+  // Per-exchange fees (bps) for the (net) parenthetical. Fetched once
+  // on mount; null when the user hasn't configured any non-zero fees.
+  const [feesByExchange, setFeesByExchange] = useState<Map<string, number> | null>(null);
   const [addSeriesOpen, setAddSeriesOpen] = useState(false);
   const addSeriesRef = useRef<HTMLDivElement>(null);
   const [logScale, setLogScale] = useState(false);
@@ -56,6 +66,29 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
       .then((data) => setBenchmarkOptions(data))
       .catch(() => {});
   }, []);
+
+  // Load per-exchange fees once on mount. Stays null when nothing is
+  // configured so all the `parenPct(...)` calls below render as empty
+  // strings (no parens, no visual noise).
+  useEffect(() => {
+    fetch(`${API_URL}/api/exchange-fees`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => {
+        const m = buildFeeMap(rows ?? []);
+        setFeesByExchange(m.size > 0 ? m : null);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Net stats for the active strategy. We deliberately only compute the
+  // parenthetical for the active strategy — comparison saved runs may be
+  // on different universes whose company → exchange map we don't have
+  // loaded, and benchmarks have no holdings to trade. Active = the
+  // information the user actually configured fees against.
+  const activeNetStats = useMemo<NetStats | null>(() => {
+    if (!feesByExchange || !exchangeByCompany) return null;
+    return computeNetStats(result.monthly_records, feesByExchange, exchangeByCompany);
+  }, [feesByExchange, exchangeByCompany, result.monthly_records]);
 
   // Close "add series" dropdown on outside click
   useEffect(() => {
@@ -532,6 +565,24 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
     if (!customFromMonth || series.length === 0) return null;
     const last = series[0].points[series[0].points.length - 1];
     if (!last) return null;
+    // Walk the active strategy's net cumulative chain for the same
+    // window, so the active row gets its (net) parenthetical alongside
+    // the gross figure. Mirrors the gross math: start factor = cum at
+    // the last date < fromMonth (or 1.0 if none), end factor = cum at
+    // the final date.
+    let netRet: number | null = null;
+    if (activeNetStats) {
+      let startFactor = 1.0;
+      let endFactor: number | null = null;
+      for (let i = 0; i < activeNetStats.dates.length; i++) {
+        const d = activeNetStats.dates[i];
+        if (d < customFromMonth) startFactor = activeNetStats.cum_factors[i];
+        endFactor = activeNetStats.cum_factors[i];
+      }
+      if (endFactor != null && startFactor > 0) {
+        netRet = (endFactor / startFactor - 1) * 100;
+      }
+    }
     const perSeries = series.map((s) => {
       let start: number | null = null;
       let end: number | null = null;
@@ -540,12 +591,18 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
         if (p.date < customFromMonth) start = p.cumReturnPct;
         end = p.cumReturnPct;
       }
-      if (end == null) return { id: s.id, label: s.label, color: s.color, ret: null };
+      if (end == null) return { id: s.id, label: s.label, color: s.color, ret: null, netRet: null };
       const s0 = start ?? 0;
-      return { id: s.id, label: s.label, color: s.color, ret: ((1 + end / 100) / (1 + s0 / 100) - 1) * 100 };
+      return {
+        id: s.id,
+        label: s.label,
+        color: s.color,
+        ret: ((1 + end / 100) / (1 + s0 / 100) - 1) * 100,
+        netRet: s.kind === 'active' ? netRet : null,
+      };
     });
     return { perSeries, fromDate: customFromMonth, toDate: last.date };
-  }, [alignedSeries, customFromMonth]);
+  }, [alignedSeries, customFromMonth, activeNetStats]);
 
   // Chart data — wide-format per month, one key per series id, plus a 0%
   // origin row so every line starts from the same reference point.
@@ -778,19 +835,28 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
             </tr>
           </thead>
           <tbody>
-            {alignedSeries.series.map((s) => (
+            {alignedSeries.series.map((s) => {
+              // The (net) parenthetical only applies to the ACTIVE
+              // strategy — comparison saved runs may belong to a
+              // different universe whose company→exchange map we
+              // don't have loaded, and benchmarks have no holdings
+              // to trade. `activeNetStats` is null when fees aren't
+              // configured at all, in which case parenPct renders ''.
+              const net = s.kind === 'active' ? activeNetStats : null;
+              return (
               <tr key={s.id} className="border-b border-gray-800/30">
                 <td className="px-4 py-2.5 font-medium flex items-center gap-2">
                   <span className="inline-block w-2 h-2 rounded-full" style={{ background: s.color }} />
                   <span className="text-gray-200">{s.label}</span>
                 </td>
-                <td className={`px-3 py-2.5 text-right font-mono ${s.stats.totalReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(s.stats.totalReturn)}</td>
-                <td className={`px-3 py-2.5 text-right font-mono ${s.stats.annualized >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(s.stats.annualized)}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-rose-400">{fmtPct(s.stats.maxDd)}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-white">{s.stats.sharpe != null ? s.stats.sharpe.toFixed(2) : '—'}</td>
+                <td className={`px-3 py-2.5 text-right font-mono ${s.stats.totalReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(s.stats.totalReturn)}<span className="text-gray-500">{parenPct(net?.total_return_pct)}</span></td>
+                <td className={`px-3 py-2.5 text-right font-mono ${s.stats.annualized >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(s.stats.annualized)}<span className="text-gray-500">{parenPct(net?.annualized_return_pct)}</span></td>
+                <td className="px-3 py-2.5 text-right font-mono text-rose-400">{fmtPct(s.stats.maxDd)}<span className="text-gray-500">{parenPct(net?.max_drawdown_pct)}</span></td>
+                <td className="px-3 py-2.5 text-right font-mono text-white">{s.stats.sharpe != null ? s.stats.sharpe.toFixed(2) : '—'}<span className="text-gray-500">{net?.sharpe_ratio != null ? ` (${net.sharpe_ratio.toFixed(2)})` : ''}</span></td>
                 <td className="px-3 py-2.5 text-right font-mono text-gray-300">{s.stats.months}</td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
         {/* Active strategy — raw (non-aligned) metrics, including turnover + holdings */}
@@ -909,12 +975,17 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
                     <td className="px-5 py-2 text-gray-200 font-mono">{y}</td>
                     {alignedSeries.series.map((s) => {
                       const v = yearlyBreakdown.bySeries[s.id]?.[y];
+                      // Active-strategy column gets the (net) parenthetical
+                      // when fees are configured; other columns stay
+                      // gross-only (see activeNetStats memo for why).
+                      const netY = s.kind === 'active' ? activeNetStats?.yearly[y] : undefined;
                       return (
                         <td
                           key={s.id}
                           className={`px-3 py-2 text-right font-mono ${v != null ? (v >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}
                         >
                           {v != null ? fmtPct(v) : '—'}
+                          {netY != null && <span className="text-gray-500">{parenPct(netY)}</span>}
                         </td>
                       );
                     })}
@@ -951,6 +1022,7 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns }: Prop
                     {s.ret != null ? (
                       <span className={`font-mono ${s.ret >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {fmtPct(s.ret)}
+                        {s.netRet != null && <span className="text-gray-500">{parenPct(s.netRet)}</span>}
                       </span>
                     ) : (
                       <span className="font-mono text-gray-600">—</span>
