@@ -138,6 +138,7 @@ async def run_variants_sweep(
             "rebalance_frequency": vspec.frequency,
             "strategy_type": vspec.strategy_type,
             "sector_etfs": req.sector_etfs,
+            "min_price_score": req.min_price_score,
         })
 
         v_progress_queue: _queue.Queue = _queue.Queue()

@@ -87,8 +87,8 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
   // information the user actually configured fees against.
   const activeNetStats = useMemo<NetStats | null>(() => {
     if (!feesByExchange || !exchangeByCompany) return null;
-    return computeNetStats(result.monthly_records, feesByExchange, exchangeByCompany);
-  }, [feesByExchange, exchangeByCompany, result.monthly_records]);
+    return computeNetStats(result.monthly_records, feesByExchange, exchangeByCompany, result.daily_records);
+  }, [feesByExchange, exchangeByCompany, result.monthly_records, result.daily_records]);
 
   // Close "add series" dropdown on outside click
   useEffect(() => {
@@ -556,8 +556,43 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
     for (const s of series) {
       for (const y of years) if (!(y in bySeries[s.id])) bySeries[s.id][y] = null;
     }
-    return { years, bySeries };
-  }, [alignedSeries]);
+
+    // Calendar-aligned net yearly for the ACTIVE strategy.
+    //
+    // Anchoring on the gross yearly (the calendar-year-baselined value
+    // in `bySeries[active][y]`) guarantees `net ≤ gross` per row: each
+    // closed period contributes a `fee_factor ≤ 1`, and we multiply
+    // gross_yearly_Y by the product of fee_factors for periods whose
+    // exit_date lands in calendar year Y. Previously the parenthetical
+    // came from `activeNetStats.yearly`, which buckets net period
+    // returns by the period's START date — for rebalances that don't
+    // align to Jan 1 (e.g., monthly cadence rebalancing on day 5),
+    // those buckets shift the net span by ~5 days relative to the
+    // calendar-year gross span, and a volatile patch around year-end
+    // could push displayed net above displayed gross.
+    const netYearlyActive: Record<string, number | null> = {};
+    if (activeNetStats?.period_drag_factors?.length) {
+      const dragByYear = new Map<string, number>();
+      for (const pdf of activeNetStats.period_drag_factors) {
+        const y = pdf.exit_date.slice(0, 4);
+        dragByYear.set(y, (dragByYear.get(y) ?? 1) * pdf.fee_factor);
+      }
+      const activeRow = bySeries['active'];
+      if (activeRow) {
+        for (const y of years) {
+          const grossY = activeRow[y];
+          const drag = dragByYear.get(y) ?? 1;
+          if (grossY == null) {
+            netYearlyActive[y] = null;
+          } else {
+            // (1 + gross/100) * drag - 1, expressed as a percentage.
+            netYearlyActive[y] = ((1 + grossY / 100) * drag - 1) * 100;
+          }
+        }
+      }
+    }
+    return { years, bySeries, netYearlyActive };
+  }, [alignedSeries, activeNetStats]);
 
   // Cumulative return from customFromMonth through end of aligned window, per series.
   const customRangeReturn = useMemo(() => {
@@ -978,7 +1013,13 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
                       // Active-strategy column gets the (net) parenthetical
                       // when fees are configured; other columns stay
                       // gross-only (see activeNetStats memo for why).
-                      const netY = s.kind === 'active' ? activeNetStats?.yearly[y] : undefined;
+                      // Uses `yearlyBreakdown.netYearlyActive` (gross × per-year
+                      // fee-factor drag) rather than `activeNetStats.yearly`
+                      // so the parenthetical can never exceed the displayed
+                      // gross — the period-start-bucketed `yearly` could
+                      // drift above gross for rebalances that don't align
+                      // to Jan 1.
+                      const netY = s.kind === 'active' ? yearlyBreakdown.netYearlyActive?.[y] : undefined;
                       return (
                         <td
                           key={s.id}

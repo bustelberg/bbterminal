@@ -203,7 +203,7 @@ function SummaryCells({
   // any early return.
   const net = useMemo(() => {
     if (outcome?.status !== 'ok' || !feesByExchange || !exchangeByCompany) return null;
-    return computeNetStats(outcome.result.monthly_records, feesByExchange, exchangeByCompany);
+    return computeNetStats(outcome.result.monthly_records, feesByExchange, exchangeByCompany, outcome.result.daily_records);
   }, [outcome, feesByExchange, exchangeByCompany]);
 
   if (outcome?.status !== 'ok') {

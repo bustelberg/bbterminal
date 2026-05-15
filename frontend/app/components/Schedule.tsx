@@ -24,12 +24,21 @@ export type IngestRun = {
   momentum_summary: MomentumSummary | null;
   // Price/volume counters from the prices phase.
   companies_processed: number;
+  /** Total companies the prices phase plans to walk — written once at
+   * phase start so the UI can render "X of Y processed" before the
+   * first checkpoint. Null on older rows + non-prices phases. */
+  companies_total: number | null;
   prices_refreshed: number;
   volumes_refreshed: number;
   forbidden_count: number;
   delisted_count: number;
   error_count: number;
   error_summary: string | null;
+  /** Live free-text status the active phase is emitting. ACWI passes
+   * its on_progress messages here; prices renders "X of Y processed";
+   * momentum routes the inner backtest stream's progress events
+   * through so the user sees "Computing signals for 2025-04…" etc. */
+  current_message: string | null;
 };
 
 export type AcwiSummary = {
@@ -154,6 +163,12 @@ export function runToTimelineProps(run: IngestRun): {
     momentum: { status: 'pending' },
   };
 
+  // When the active phase has streamed a `current_message`, prefer it
+  // over the count-based fallback — gives the user the same level of
+  // detail /momentum's ProgressTimeline shows ("Loading universe…",
+  // "Computing signals for 2025-04…", etc.).
+  const liveMessage = run.current_message ?? undefined;
+
   // Phase 1 — ACWI
   if (run.acwi_summary || run.acwi_target_month) {
     const s = run.acwi_summary;
@@ -164,7 +179,10 @@ export function runToTimelineProps(run: IngestRun): {
         : undefined,
     };
   } else if (phase === 'acwi') {
-    state.acwi = { status: 'in_progress', message: 'reconstructing ACWI universe…' };
+    state.acwi = {
+      status: 'in_progress',
+      message: liveMessage ?? 'reconstructing ACWI universe…',
+    };
   } else if (finished) {
     // Pipeline ended without ACWI landing → must have errored. The
     // accumulated error_summary at the bottom has the detail.
@@ -173,17 +191,24 @@ export function runToTimelineProps(run: IngestRun): {
 
   // Phase 2 — Prices
   if (run.companies_processed > 0 && (phase === 'momentum' || phase === 'done' || finished)) {
+    const denominator = run.companies_total ? ` of ${run.companies_total}` : '';
     state.prices = {
       status: 'done',
-      message: `${run.companies_processed} processed · ${run.prices_refreshed}p / ${run.volumes_refreshed}v · ${run.forbidden_count} forbidden`,
+      message: `${run.companies_processed}${denominator} processed · ${run.prices_refreshed}p / ${run.volumes_refreshed}v · ${run.forbidden_count} forbidden`,
     };
   } else if (phase === 'prices') {
-    state.prices = {
-      status: 'in_progress',
-      message: run.companies_processed > 0
-        ? `${run.companies_processed} processed so far…`
-        : 'starting…',
-    };
+    // Backend writes a per-checkpoint current_message that already
+    // includes the X of Y / counter summary; surface it verbatim. If
+    // it hasn't arrived yet (the very first ms of the phase), build a
+    // best-effort message from whatever counters we have.
+    let msg = liveMessage;
+    if (!msg) {
+      const denom = run.companies_total ? ` of ${run.companies_total}` : '';
+      msg = run.companies_processed > 0
+        ? `${run.companies_processed}${denom} processed…`
+        : `starting${denom}…`;
+    }
+    state.prices = { status: 'in_progress', message: msg };
   } else if (finished) {
     state.prices = { status: 'error', message: 'failed' };
   }
@@ -198,7 +223,10 @@ export function runToTimelineProps(run: IngestRun): {
         : 'snapshot saved',
     };
   } else if (phase === 'momentum') {
-    state.momentum = { status: 'in_progress', message: 'computing holdings…' };
+    state.momentum = {
+      status: 'in_progress',
+      message: liveMessage ?? 'computing holdings…',
+    };
   } else if (finished) {
     // No snapshot but pipeline finished — most often "no strategy
     // selected, skip this phase". Mark as done with a clarifying note.
@@ -550,14 +578,21 @@ export default function Schedule() {
                           phase pips already convey final state. */}
                       {r.status === 'running' && (
                         <div className="pl-9 pr-1 w-full">
-                          <div className="flex items-center justify-between text-[10px] text-gray-500 mb-0.5">
-                            <span>
-                              {r.current_phase === 'acwi' ? 'ACWI universe refresh' :
-                               r.current_phase === 'prices' ? 'Price + volume refresh' :
-                               r.current_phase === 'momentum' ? 'Momentum compute' :
-                               'starting…'}
+                          <div className="flex items-center justify-between gap-3 text-[10px] text-gray-500 mb-0.5">
+                            {/* Prefer the live current_message so the
+                                collapsed row reads as "Refreshing 320
+                                of 1837 companies · 250p / 250v
+                                refreshed · 0 forbidden, 0 errors"
+                                rather than the static phase label. */}
+                            <span className="truncate">
+                              {r.current_message ?? (
+                                r.current_phase === 'acwi' ? 'ACWI universe refresh' :
+                                r.current_phase === 'prices' ? 'Price + volume refresh' :
+                                r.current_phase === 'momentum' ? 'Momentum compute' :
+                                'starting…'
+                              )}
                             </span>
-                            <span className="font-mono">{tp.pct}%</span>
+                            <span className="font-mono shrink-0">{tp.pct}%</span>
                           </div>
                           <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
                             <div
@@ -610,6 +645,7 @@ function StrategyConfigDetail({ cfg }: { cfg: Record<string, unknown> }) {
   const topNSectors = cfg.top_n_sectors as number | undefined;
   const topNPerSector = cfg.top_n_per_sector as number | undefined;
   const maxCompanies = cfg.max_companies as number | null | undefined;
+  const minPriceScore = cfg.min_price_score as number | null | undefined;
   const rebalanceFrequency = (cfg.rebalance_frequency as string | undefined) ?? 'monthly';
   const randomSeed = cfg.random_seed as number | null | undefined;
   const nTrials = cfg.n_trials as number | undefined;
@@ -636,6 +672,7 @@ function StrategyConfigDetail({ cfg }: { cfg: Record<string, unknown> }) {
         <ConfigRow label="Top N sectors" value={topNSectors != null ? String(topNSectors) : '—'} />
         <ConfigRow label="Top N per sector" value={topNPerSector != null ? String(topNPerSector) : '—'} />
         <ConfigRow label="Max companies" value={maxCompanies != null ? String(maxCompanies) : 'unlimited'} />
+        <ConfigRow label="Min price score" value={minPriceScore != null ? `> ${minPriceScore}` : 'off'} />
         {selection === 'random' && (
           <>
             <ConfigRow label="Random seed" value={randomSeed != null ? String(randomSeed) : '—'} />

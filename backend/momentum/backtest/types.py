@@ -118,6 +118,14 @@ class BacktestConfig:
     sector_etfs: dict[str, int] | None = None
     rebalance_frequency: RebalanceFrequency = _DEFAULT_FREQUENCY
     strategy_type: StrategyType = _DEFAULT_STRATEGY
+    # Optional gate: drop any company whose `score_price` (the 0-100
+    # price-category score) is at or below this threshold before
+    # sector aggregation. Applied only to the long bucket
+    # (`direction="top"` in score_and_select) — the short bucket of a
+    # long-short strategy intentionally targets low-scoring names.
+    # None disables the filter (default), matching pre-feature
+    # behavior.
+    min_price_score: float | None = None
     # When True, run_backtest appends one trailing "open" period record
     # whose entry is the last scheduled rebalance date and whose exit is
     # the most recent available close. The open period appears in
@@ -144,6 +152,7 @@ class BacktestConfig:
             sector_etfs=d.get("sector_etfs"),
             rebalance_frequency=d.get("rebalance_frequency", _DEFAULT_FREQUENCY),
             strategy_type=d.get("strategy_type", _DEFAULT_STRATEGY),
+            min_price_score=d.get("min_price_score"),
             include_open_period=d.get("include_open_period", True),
         )
 
