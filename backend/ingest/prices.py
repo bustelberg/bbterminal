@@ -48,13 +48,15 @@ US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX", "CBOE"}
 
 # Keep in sync with `earnings/_api_client.py::_IMPERSONATE`. Cloudflare's
 # bot allowlist for "real Chrome" includes recent versions only; older
-# JA3/JA4 fingerprints aged out of the allowlist around mid-2025.
-_IMPERSONATE = "chrome131"
+# JA3/JA4 fingerprints aged out roughly every few months (chrome120 → Apr,
+# chrome131 → May). Bumping to the newest Chrome target curl_cffi ships
+# is the standard workaround.
+_IMPERSONATE = "chrome146"
 
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/131.0.0.0 Safari/537.36"
+    "Chrome/146.0.0.0 Safari/537.36"
 )
 
 

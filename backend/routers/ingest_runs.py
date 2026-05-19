@@ -11,11 +11,13 @@ Backs the /schedule page. Each run executes three phases in order:
      `ensure_prices_for_company` + `ensure_volume_for_company`,
      tallying forbidden / delisted / errors silently. This is the
      phase that used to be the whole job pre-pipeline.
-  3. Momentum compute — when a "scheduled strategy" is selected via
-     `schedule_config`, drains `_momentum_backtest_stream` with
-     `mode=current_portfolio` and the selected backtest run's config.
-     Persists the resulting `current_picks_snapshot` and links it on
-     `ingest_run.momentum_snapshot_id`.
+  3. Momentum compute — loops over every enabled row in
+     `scheduled_strategy`. For each, drains `_momentum_backtest_stream`
+     with `mode=current_portfolio` and that strategy's backtest config,
+     persisting one `current_picks_snapshot` per strategy. The inverse
+     FK `current_picks_snapshot.ingest_run_id` ties snapshots back to
+     this run; `ingest_run.momentum_summary` JSONB holds an array of
+     per-strategy result entries (status, holdings_count, etc.).
 
 Phases run independently — a failure in one is captured in
 `error_summary` (first ~5 errors across all phases) but the next phase
@@ -504,43 +506,39 @@ def _run_prices_phase(run_id: int, accumulated_errors: list[str]) -> None:
 
 
 def _run_momentum_phase(run_id: int) -> None:
-    """Phase 3 — compute current-portfolio holdings using the scheduled
-    strategy's config. Skipped silently when no strategy is selected on
-    /schedule (the row stays with `momentum_snapshot_id=NULL`)."""
+    """Phase 3 — compute current-portfolio holdings for every enabled row
+    in `scheduled_strategy`. Each strategy gets its own
+    `current_picks_snapshot` tagged with `ingest_run_id` +
+    `backtest_run_id`, so the /schedule per-strategy detail view can
+    JOIN them back to this run.
+
+    Per-strategy isolation: a single failing strategy doesn't abort the
+    phase. Each result is recorded in `momentum_summary` (now a list)
+    with status='ok' or status='error'. If ANY strategy errored, the
+    phase raises a summarized error so the outer pipeline marks the run
+    `error` — but every successful snapshot is still persisted."""
     log = logging.getLogger(__name__)
-    cfg_resp = (
-        supabase.table("schedule_config")
-        .select("selected_run_id")
-        .eq("id", 1)
-        .limit(1)
+    sched_resp = (
+        supabase.table("scheduled_strategy")
+        .select("id, backtest_run_id, enabled")
+        .eq("enabled", True)
+        .order("created_at")
         .execute()
     )
-    selected = (cfg_resp.data or [{}])[0].get("selected_run_id")
-    if selected is None:
-        log.info("[pipeline.momentum] run_id=%s no strategy selected — skipping", run_id)
+    scheduled = sched_resp.data or []
+    if not scheduled:
+        log.info("[pipeline.momentum] run_id=%s no scheduled strategies — skipping", run_id)
+        _update_run(run_id, momentum_summary=[])
         return
 
-    # Pull the saved backtest's config blob. We override mode +
-    # force_recompute and strip variants — the cron always computes a
-    # single current-portfolio snapshot, never a sweep.
+    bt_ids = [s["backtest_run_id"] for s in scheduled]
     bt_resp = (
         supabase.table("backtest_run")
-        .select("config, name")
-        .eq("run_id", selected)
-        .limit(1)
+        .select("run_id, name, config")
+        .in_("run_id", bt_ids)
         .execute()
     )
-    if not bt_resp.data:
-        raise RuntimeError(f"Selected backtest run #{selected} not found")
-    cfg = dict(bt_resp.data[0].get("config") or {})
-    cfg["mode"] = "current_portfolio"
-    cfg["force_recompute"] = True
-    # Pipeline's prices phase just refreshed everything; still allow self-
-    # heal so any leftover gaps surface a clear warning instead of
-    # silently dropping companies from the snapshot.
-    cfg["db_only"] = False
-    cfg.pop("variants", None)
-    cfg.pop("n_trials", None)
+    bt_by_id = {r["run_id"]: r for r in (bt_resp.data or [])}
 
     # Imports are local so the module loads cheaply at boot — the momentum
     # stream pulls in pandas/numpy etc.
@@ -549,84 +547,130 @@ def _run_momentum_phase(run_id: int) -> None:
         _momentum_backtest_stream,
     )
 
-    try:
-        req = BacktestRequest(**cfg)
-    except Exception as e:
-        raise RuntimeError(
-            f"Selected backtest config doesn't validate as a BacktestRequest: {e}"
+    summaries: list[dict] = []
+    errors: list[str] = []
+    total = len(scheduled)
+
+    for idx, sched in enumerate(scheduled, start=1):
+        strategy_id = sched["id"]
+        bt_run_id = sched["backtest_run_id"]
+        bt = bt_by_id.get(bt_run_id) or {}
+        strategy_name = bt.get("name") or f"Strategy #{strategy_id}"
+        _update_run(
+            run_id,
+            current_message=f"Computing strategy {idx} of {total}: {strategy_name}…",
         )
 
-    snapshot_id: int | None = None
-    error_msg: str | None = None
-    holdings_count = 0
-    latest_price_date: str | None = None
-    # Throttle current_message writes so the inner stream's per-month
-    # signal-compute progress (many events per second on a long
-    # backtest) doesn't generate a write storm.
-    msg_throttle = _Throttle()
+        entry: dict = {
+            "strategy_id": strategy_id,
+            "backtest_run_id": bt_run_id,
+            "strategy_name": strategy_name,
+            "snapshot_id": None,
+            "holdings_count": 0,
+            "latest_price_date": None,
+            "status": "error",
+            "error_message": None,
+        }
 
-    async def _drain() -> None:
-        nonlocal snapshot_id, error_msg, holdings_count, latest_price_date
-        async for chunk in _momentum_backtest_stream(req):
-            if not isinstance(chunk, str) or not chunk.startswith("data: "):
-                continue
+        try:
+            cfg = dict(bt.get("config") or {})
+            if not cfg:
+                raise RuntimeError(f"Backtest run #{bt_run_id} has no config")
+            cfg["mode"] = "current_portfolio"
+            cfg["force_recompute"] = True
+            # Pipeline's prices phase just refreshed everything; still
+            # allow self-heal so any leftover gaps surface a clear
+            # warning instead of silently dropping companies.
+            cfg["db_only"] = False
+            cfg.pop("variants", None)
+            cfg.pop("n_trials", None)
             try:
-                evt = _json.loads(chunk[len("data: "):].strip())
-            except _json.JSONDecodeError:
-                continue
-            t = evt.get("type")
-            if t == "progress":
-                # Surface the inner backtest's live status to /schedule
-                # so the momentum phase shows the same level of detail
-                # /momentum does ("Loading universe", "Computing signals
-                # for 2025-04…", "Building backtest result", etc.).
-                m = evt.get("message")
-                if m and msg_throttle.should_write():
-                    await asyncio.to_thread(_update_run, run_id, current_message=m)
-            elif t == "current_portfolio":
-                payload = evt.get("data") or {}
-                snapshot_id = payload.get("snapshot_id")
-                holdings_count = len(payload.get("holdings") or [])
-                latest_price_date = payload.get("latest_price_date")
-            elif t == "error":
-                error_msg = evt.get("message") or "unknown error"
+                req = BacktestRequest(**cfg)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Backtest config doesn't validate as BacktestRequest: {e}"
+                )
 
-    # asyncio.run gives us a fresh event loop for the drain — we're on a
-    # daemon thread, no existing loop to clash with.
-    asyncio.run(_drain())
+            snapshot_id: int | None = None
+            stream_err: str | None = None
+            holdings_count = 0
+            latest_price_date: str | None = None
+            msg_throttle = _Throttle()
 
-    if error_msg:
-        raise RuntimeError(error_msg)
-    if snapshot_id is None:
-        raise RuntimeError("Momentum compute finished without persisting a snapshot")
+            async def _drain() -> None:
+                nonlocal snapshot_id, stream_err, holdings_count, latest_price_date
+                async for chunk in _momentum_backtest_stream(req):
+                    if not isinstance(chunk, str) or not chunk.startswith("data: "):
+                        continue
+                    try:
+                        evt = _json.loads(chunk[len("data: "):].strip())
+                    except _json.JSONDecodeError:
+                        continue
+                    t = evt.get("type")
+                    if t == "progress":
+                        m = evt.get("message")
+                        if m and msg_throttle.should_write():
+                            await asyncio.to_thread(
+                                _update_run,
+                                run_id,
+                                current_message=f"[{idx}/{total} {strategy_name}] {m}",
+                            )
+                    elif t == "current_portfolio":
+                        payload = evt.get("data") or {}
+                        snapshot_id = payload.get("snapshot_id")
+                        holdings_count = len(payload.get("holdings") or [])
+                        latest_price_date = payload.get("latest_price_date")
+                    elif t == "error":
+                        stream_err = evt.get("message") or "unknown error"
 
-    # The SSE flow tags the snapshot triggered_by='manual'. Re-tag as
-    # 'auto' since the pipeline writes it on behalf of the cron, so the
-    # /momentum saved-picks list correctly attributes provenance.
-    try:
-        supabase.table("current_picks_snapshot").update(
-            {"triggered_by": "auto"}
-        ).eq("snapshot_id", snapshot_id).execute()
-    except Exception as e:
-        log.warning(
-            "[pipeline.momentum] run_id=%s failed to re-tag snapshot=%s: %s: %s",
-            run_id, snapshot_id, type(e).__name__, e,
+            asyncio.run(_drain())
+
+            if stream_err:
+                raise RuntimeError(stream_err)
+            if snapshot_id is None:
+                raise RuntimeError("Momentum compute finished without persisting a snapshot")
+
+            # Tag the snapshot with the pipeline run + backtest it came
+            # from, and re-tag as 'auto' (the SSE flow inside the stream
+            # writes 'manual').
+            try:
+                supabase.table("current_picks_snapshot").update({
+                    "triggered_by": "auto",
+                    "ingest_run_id": run_id,
+                    "backtest_run_id": bt_run_id,
+                }).eq("snapshot_id", snapshot_id).execute()
+            except Exception as e:
+                log.warning(
+                    "[pipeline.momentum] run_id=%s failed to tag snapshot=%s: %s: %s",
+                    run_id, snapshot_id, type(e).__name__, e,
+                )
+
+            entry["snapshot_id"] = snapshot_id
+            entry["holdings_count"] = holdings_count
+            entry["latest_price_date"] = latest_price_date
+            entry["status"] = "ok"
+            log.info(
+                "[pipeline.momentum] run_id=%s strategy=%s snapshot=%s holdings=%s",
+                run_id, strategy_name, snapshot_id, holdings_count,
+            )
+        except Exception as e:
+            msg = f"{type(e).__name__}: {e}"
+            entry["error_message"] = msg
+            errors.append(f"[{strategy_name}] {msg}")
+            log.warning(
+                "[pipeline.momentum] run_id=%s strategy=%s failed: %s",
+                run_id, strategy_name, msg,
+            )
+
+        summaries.append(entry)
+        # Persist incremental progress so the UI sees each strategy
+        # land as it completes, not only after the whole phase is done.
+        _update_run(run_id, momentum_summary=summaries)
+
+    if errors:
+        raise RuntimeError(
+            f"{len(errors)} of {total} strategies failed: " + " | ".join(errors[:3])
         )
-
-    _update_run(
-        run_id,
-        momentum_snapshot_id=snapshot_id,
-        momentum_summary={
-            "holdings_count": holdings_count,
-            "latest_price_date": latest_price_date,
-            "strategy_run_id": selected,
-            "strategy_name": bt_resp.data[0].get("name"),
-        },
-    )
-    log.info(
-        "[pipeline.momentum] run_id=%s snapshot=%s holdings=%s",
-        run_id, snapshot_id, holdings_count,
-    )
 
 
 def _checkpoint(run_id: int, snap: dict, total: int | None = None) -> None:

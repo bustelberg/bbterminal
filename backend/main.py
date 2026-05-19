@@ -38,7 +38,7 @@ from routers import (
     ingest_runs as _ingest_runs_router,
     longequity as _longequity_router,
     momentum as _momentum_pkg,
-    schedule_config as _schedule_config_router,
+    scheduled_strategies as _scheduled_strategies_router,
     system as _system_router,
     universe as _universe_router,
 )
@@ -81,7 +81,7 @@ for _r in (
     _index_universe_router.router,
     _ingest_runs_router.router,
     _exchange_fees_router.router,
-    _schedule_config_router.router,
+    _scheduled_strategies_router.router,
     _admin_router.router,
     # Momentum splits into four sub-routers (signals, backtest_stream,
     # backtest_crud, current_picks); `routers.momentum.routers` is the

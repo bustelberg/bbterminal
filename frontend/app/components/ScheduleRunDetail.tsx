@@ -1,11 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { IngestRun } from './Schedule';
+import type { IngestRun, MomentumStrategyResult } from './Schedule';
 import { runToTimelineProps, PIPELINE_STEPS } from './Schedule';
 import ProgressTimeline from './ProgressTimeline';
-import MonthlyHoldingsTable from './momentum/MonthlyHoldingsTable';
-import type { BacktestResult, Holding, PeriodRecord, Summary } from '../../lib/stores/momentum';
+import SnapshotHoldings from './SnapshotHoldings';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -17,18 +16,7 @@ type MembershipRow = {
   sector: string | null;
 };
 
-type SnapshotResponse = {
-  snapshot_id: number;
-  as_of_date: string;
-  latest_price_date: string | null;
-  config: Record<string, unknown> | null;
-  holdings: Holding[];
-  daily_picks: unknown[];
-};
-
-/** Per-section collapsible card with consistent styling — keeps the
- * three subsections of a run row (ACWI / membership / momentum) visually
- * uniform without dragging in CollapsibleCard's full chrome. */
+/** Per-section collapsible card. */
 function Section({
   title,
   children,
@@ -59,9 +47,6 @@ function Section({
   );
 }
 
-/** Lists additions / removals / renames in expandable triplets. Counts
- * stay visible on the section header; the actual rows live behind a
- * click so the page doesn't render hundreds of names eagerly. */
 function AcwiDiffSection({ run }: { run: IngestRun }) {
   const summary = run.acwi_summary;
   if (!summary) {
@@ -164,9 +149,6 @@ function DiffList({
   );
 }
 
-/** Searchable membership viewer — fetches on first open, filters client-
- * side. Capped at 500 rows; ACWI typically has 2,500+ holdings but the
- * 500 cap is plenty for "find a specific name" use. */
 function MembershipSection({ run }: { run: IngestRun }) {
   const [rows, setRows] = useState<MembershipRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -232,9 +214,7 @@ function MembershipSection({ run }: { run: IngestRun }) {
           {loading ? 'loading…' : `${filtered.length} / ${rows.length}`}
         </span>
       </div>
-      {error && (
-        <div className="text-xs text-rose-300">{error}</div>
-      )}
+      {error && <div className="text-xs text-rose-300">{error}</div>}
       {filtered.length > 0 && (
         <div className="max-h-80 overflow-auto border border-gray-800/40 rounded-lg">
           <table className="w-full text-xs">
@@ -263,147 +243,75 @@ function MembershipSection({ run }: { run: IngestRun }) {
   );
 }
 
-/** Loads the momentum snapshot for this run and renders the holdings
- * via the existing /momentum table. Synthesizes a single-period
- * BacktestResult so MonthlyHoldingsTable can be used as-is without
- * modification. */
-function MomentumHoldingsSection({ run }: { run: IngestRun }) {
-  const [snapshot, setSnapshot] = useState<SnapshotResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+/** One collapsible per scheduled strategy that ran this pipeline tick.
+ * Successful strategies expand to their snapshot's holdings; failed
+ * strategies show the error message instead. */
+function MomentumStrategyEntry({ result }: { result: MomentumStrategyResult }) {
+  const [open, setOpen] = useState(false);
+  const isError = result.status === 'error';
+  const statusCls = isError
+    ? 'bg-rose-500/10 text-rose-300 border-rose-500/30'
+    : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+  return (
+    <div className="bg-[#151821] border border-gray-800/40 rounded-lg overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        disabled={isError && result.snapshot_id == null}
+        className="w-full px-3 py-2 flex items-center gap-3 hover:bg-white/[0.02] transition-colors disabled:cursor-default disabled:hover:bg-transparent"
+      >
+        <span className="text-gray-500 font-mono text-xs w-4">
+          {(isError && result.snapshot_id == null) ? '·' : (open ? '▾' : '▸')}
+        </span>
+        <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${statusCls}`}>
+          {result.status}
+        </span>
+        <span className="text-sm text-gray-200 font-medium truncate">{result.strategy_name}</span>
+        <span className="text-xs text-gray-500 font-mono ml-auto">
+          {result.holdings_count > 0 && `${result.holdings_count} holdings · `}
+          {result.latest_price_date && `as of ${result.latest_price_date}`}
+        </span>
+      </button>
+      {open && (
+        <div className="px-3 py-3 border-t border-gray-800/40 bg-[#0f1117]">
+          {isError ? (
+            <div className="text-xs text-rose-300 font-mono whitespace-pre-wrap">
+              {result.error_message ?? 'Unknown error'}
+            </div>
+          ) : result.snapshot_id != null ? (
+            <SnapshotHoldings snapshotId={result.snapshot_id} />
+          ) : (
+            <div className="text-xs text-gray-500">No snapshot saved.</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
-  const snapshotId = run.momentum_snapshot_id;
-
-  // Fetch the snapshot when the expander mounts (or snapshotId changes).
-  // setLoading(true) inside the effect is the React 19 set-state-in-effect
-  // antipattern; the canonical alternatives (use the `use()` hook, or
-  // derive loading from `snapshot === null`) are either unstable or
-  // racy when snapshotId changes mid-fetch. The explicit setLoading
-  // flag is the lesser evil here.
-  useEffect(() => {
-    if (snapshotId == null) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoading(true);
-    fetch(`${API_URL}/api/momentum/current-picks/${snapshotId}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((data: SnapshotResponse) => {
-        setSnapshot(data);
-        setError(null);
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false));
-  }, [snapshotId]);
-
-  // Build a synthetic single-period BacktestResult from the snapshot so
-  // MonthlyHoldingsTable renders one collapsible row whose "Holdings"
-  // expansion shows the current picks with the same columns / search /
-  // timeline modal as /momentum.
-  const { result, categories, scoringConfig } = useMemo(() => {
-    if (!snapshot) {
-      return {
-        result: null as BacktestResult | null,
-        categories: [] as string[],
-        scoringConfig: null as { universe_label: string | null; index_universe: string | null; signal_weights: Record<string, number>; category_weights: Record<string, number> } | null,
-      };
-    }
-    const cfg = (snapshot.config ?? {}) as Record<string, unknown>;
-    const signalWeights = (cfg.signal_weights as Record<string, number>) ?? {};
-    const categoryWeights = (cfg.category_weights as Record<string, number>) ?? {};
-    const cats = Object.keys(categoryWeights);
-    const fallbackCats = cats.length > 0 ? cats : ['price', 'volume'];
-
-    const holdings = (snapshot.holdings ?? []) as Holding[];
-    // Aggregate stats from the holdings — equal-weighted mean of
-    // forward_return_pct for the period return.
-    const validReturns = holdings
-      .map((h) => h.forward_return_pct)
-      .filter((v): v is number => v != null && Number.isFinite(v));
-    const meanReturn = validReturns.length > 0
-      ? validReturns.reduce((a, b) => a + b, 0) / validReturns.length
-      : null;
-
-    const period: PeriodRecord = {
-      date: snapshot.as_of_date,
-      holdings,
-      portfolio_return_pct: meanReturn,
-      cumulative_return_pct: meanReturn ?? 0,
-      is_open: true,
-      as_of_date: snapshot.latest_price_date ?? undefined,
-    };
-    const summary: Summary = {
-      total_return_pct: meanReturn ?? 0,
-      annualized_return_pct: 0,
-      max_drawdown_pct: 0,
-      sharpe_ratio: null,
-      avg_monthly_turnover_pct: 0,
-      total_months: 1,
-      avg_holdings: holdings.length,
-      top_drawdowns: [],
-    };
-    const res: BacktestResult = {
-      monthly_records: [period],
-      summary,
-      daily_records: [],
-    };
-    return {
-      result: res,
-      categories: fallbackCats,
-      scoringConfig: {
-        universe_label: (cfg.universe_label as string | null) ?? null,
-        index_universe: (cfg.index_universe as string | null) ?? null,
-        signal_weights: signalWeights,
-        category_weights: categoryWeights,
-      },
-    };
-  }, [snapshot]);
-
-  if (snapshotId == null) {
+function MomentumSection({ run }: { run: IngestRun }) {
+  const results = run.momentum_summary ?? [];
+  if (results.length === 0) {
     const phase = run.current_phase;
     if (phase === 'momentum' && run.status === 'running') {
       return <div className="text-xs text-gray-500">Momentum phase running…</div>;
     }
     return (
       <div className="text-xs text-gray-500">
-        No momentum snapshot for this run. Pick a strategy in the &quot;Scheduled strategy&quot; card above to enable the momentum phase.
+        No strategies were scheduled when this pipeline ran. Add one to the schedule above and the next run will compute holdings for it.
       </div>
     );
   }
-  if (loading) {
-    return <div className="text-xs text-gray-500">Loading snapshot…</div>;
-  }
-  if (error) {
-    return <div className="text-xs text-rose-300">Failed to load snapshot: {error}</div>;
-  }
-  if (!result || !scoringConfig) {
-    return <div className="text-xs text-gray-500">No data.</div>;
-  }
   return (
     <div className="space-y-2">
-      {run.momentum_summary && (
-        <div className="text-xs text-gray-400 font-mono">
-          {run.momentum_summary.holdings_count} holdings · strategy: {run.momentum_summary.strategy_name ?? '—'} (#{run.momentum_summary.strategy_run_id ?? '—'}) · latest {run.momentum_summary.latest_price_date ?? '—'}
-        </div>
-      )}
-      {/* MonthlyHoldingsTable is the same component /momentum uses — we
-          pass a 1-period synthetic result, and the user gets the same
-          per-holding expansion with the company-search box and the
-          timeline modal on click. exchangeByCompany is empty for now
-          (we don't have a per-snapshot exchange map yet) so the
-          exchange column reads blank, but everything else works. */}
-      <MonthlyHoldingsTable
-        result={result}
-        categories={categories}
-        exchangeByCompany={new Map()}
-        scoringConfig={scoringConfig}
-      />
+      {results.map((r, idx) => (
+        <MomentumStrategyEntry key={`${r.strategy_id ?? 'x'}-${r.backtest_run_id}-${idx}`} result={r} />
+      ))}
     </div>
   );
 }
 
 export default function ScheduleRunDetail({ run }: { run: IngestRun }) {
-  // Derive ProgressTimeline props from the run's per-phase state — same
-  // helper the row's inline bar uses, so the two stay perfectly in
-  // sync. Re-derives each render so polling updates animate naturally.
   const tp = runToTimelineProps(run);
   return (
     <div className="px-5 py-3 bg-[#0b0d13] space-y-3 border-t border-gray-800/30">
@@ -423,8 +331,8 @@ export default function ScheduleRunDetail({ run }: { run: IngestRun }) {
       <Section title={`ACWI membership (${run.acwi_target_month ?? '—'})`} defaultOpen={false}>
         <MembershipSection run={run} />
       </Section>
-      <Section title="Momentum holdings" defaultOpen={true}>
-        <MomentumHoldingsSection run={run} />
+      <Section title={`Momentum holdings (${run.momentum_summary?.length ?? 0} strateg${(run.momentum_summary?.length ?? 0) === 1 ? 'y' : 'ies'})`} defaultOpen={true}>
+        <MomentumSection run={run} />
       </Section>
     </div>
   );
