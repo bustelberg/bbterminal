@@ -14,31 +14,29 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-try:
-    from curl_cffi import requests as cf_requests  # type: ignore[import-not-found]
-    _HAS_CURL_CFFI = True
-    _CURL_CFFI_IMPORT_ERROR: str | None = None
-except ImportError as _e:
-    _HAS_CURL_CFFI = False
-    _CURL_CFFI_IMPORT_ERROR = f"{type(_e).__name__}: {_e}"
-
 from supabase import Client
 
+from ingest._gurufocus_http import (
+    cf_get,
+    current_preferred_target,
+    is_available as _cf_is_available,
+    ladder as _cf_ladder,
+)
 from ingest.staleness import is_cache_fresh, is_daily_data_fresh
 from ingest.api_usage import track_api_call
 
-# Mirrors the diagnostic in `earnings/_api_client.py`. The prices path
-# and the earnings path each have their own copy of the curl_cffi client
-# — both must succeed on Cloudflare-protected endpoints.
-if _HAS_CURL_CFFI:
+# Boot-time diagnostic. Same line both clients log — grepping the
+# Railway logs for `gurufocus` immediately shows which fingerprint
+# ladder is in play.
+if _cf_is_available():
     logging.getLogger(__name__).warning(
-        "gurufocus prices client: using curl_cffi (Chrome impersonation)"
+        "gurufocus prices client: curl_cffi ladder %s (preferred=%s)",
+        _cf_ladder(), current_preferred_target(),
     )
 else:
     logging.getLogger(__name__).error(
-        "gurufocus prices client: FALLBACK to urllib (curl_cffi import failed: %s) — "
-        "Cloudflare will block production calls",
-        _CURL_CFFI_IMPORT_ERROR,
+        "gurufocus prices client: FALLBACK to urllib (curl_cffi unavailable) — "
+        "Cloudflare will block production calls"
     )
 
 _BUCKET = "gurufocus-raw"
@@ -46,13 +44,8 @@ _PRICE_CUTOFF = date(1998, 1, 1)
 
 US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX", "CBOE"}
 
-# Keep in sync with `earnings/_api_client.py::_IMPERSONATE`. Cloudflare's
-# bot allowlist for "real Chrome" includes recent versions only; older
-# JA3/JA4 fingerprints aged out roughly every few months (chrome120 → Apr,
-# chrome131 → May). Bumping to the newest Chrome target curl_cffi ships
-# is the standard workaround.
-_IMPERSONATE = "chrome146"
-
+# Modern Chrome UA. Defense-in-depth — the real fingerprint signal
+# is the TLS handshake (handled by curl_cffi via `_gurufocus_http`).
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -192,25 +185,30 @@ def _fetch_indicator_from_api(ticker: str, exchange: str, indicator: str = "pric
     url = f"{base}/public/user/{api_key}/stock/{quote(symbol, safe=':')}/{indicator}"
     masked_url = url.replace(api_key, api_key[:4] + "***")
 
-    if _HAS_CURL_CFFI:
-        try:
-            resp = cf_requests.get(
-                url,
-                headers={"User-Agent": _USER_AGENT, "Accept": "application/json"},
-                timeout=timeout,
-                impersonate=_IMPERSONATE,
+    if _cf_is_available():
+        resp = cf_get(
+            url,
+            headers={"User-Agent": _USER_AGENT, "Accept": "application/json"},
+            timeout=timeout,
+        )
+        if resp.error is not None and resp.status_code is None:
+            return None, f"API error for {symbol}: {resp.error}", None
+        status = resp.status_code or 0
+        body = resp.text or ""
+        if status >= 400 or resp.error is not None:
+            attempted = ",".join(resp.attempted) if resp.attempted else "n/a"
+            return (
+                None,
+                f"API HTTP {status} via curl_cffi/{resp.used_target} "
+                f"(tried={attempted}) for {symbol} body={body[:200]} ({masked_url})",
+                status,
             )
-            status = resp.status_code
-            body = resp.text or ""
-            if status >= 400:
-                return None, f"API HTTP {status} via curl_cffi/{_IMPERSONATE} for {symbol} body={body[:200]} ({masked_url})", status
-            if not body:
-                return None, f"API returned empty response for {symbol} ({masked_url})", status
+        if not body:
+            return None, f"API returned empty response for {symbol} ({masked_url})", status
+        try:
             return json.loads(body), f"API OK for {symbol} ({masked_url})", status
         except json.JSONDecodeError as e:
             return None, f"API returned invalid JSON for {symbol}: {e} ({masked_url})", None
-        except Exception as e:
-            return None, f"API error for {symbol}: {type(e).__name__}: {e}", None
     else:
         req = Request(url, headers={"User-Agent": _USER_AGENT, "Accept": "application/json"})
         try:
