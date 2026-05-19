@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import ScheduleRunDetail from './ScheduleRunDetail';
+import ScheduledStrategyDetail from './ScheduledStrategyDetail';
 import { type StepDef, type StepState } from './ProgressTimeline';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
@@ -13,20 +14,13 @@ export type IngestRun = {
   started_at: string;
   finished_at: string | null;
   status: 'running' | 'ok' | 'error';
-  // Phase tracking added with the pipeline expansion. Older pre-pipeline
-  // rows (only price/volume) won't have these populated.
   current_phase: 'acwi' | 'prices' | 'momentum' | 'done' | null;
-  // Per-phase results — each phase writes its own column(s) as it lands.
   acwi_universe_id: number | null;
   acwi_target_month: string | null;
   acwi_summary: AcwiSummary | null;
-  momentum_snapshot_id: number | null;
-  momentum_summary: MomentumSummary | null;
-  // Price/volume counters from the prices phase.
+  // Now an array — one entry per scheduled strategy the pipeline tried.
+  momentum_summary: MomentumStrategyResult[] | null;
   companies_processed: number;
-  /** Total companies the prices phase plans to walk — written once at
-   * phase start so the UI can render "X of Y processed" before the
-   * first checkpoint. Null on older rows + non-prices phases. */
   companies_total: number | null;
   prices_refreshed: number;
   volumes_refreshed: number;
@@ -34,10 +28,6 @@ export type IngestRun = {
   delisted_count: number;
   error_count: number;
   error_summary: string | null;
-  /** Live free-text status the active phase is emitting. ACWI passes
-   * its on_progress messages here; prices renders "X of Y processed";
-   * momentum routes the inner backtest stream's progress events
-   * through so the user sees "Computing signals for 2025-04…" etc. */
   current_message: string | null;
 };
 
@@ -52,23 +42,40 @@ export type AcwiSummary = {
   renames: Array<{ company_id: number; old_ticker: string; new_ticker: string; name: string | null }>;
 };
 
-export type MomentumSummary = {
+/** One entry per scheduled strategy in `ingest_run.momentum_summary`. */
+export type MomentumStrategyResult = {
+  strategy_id: number | null;
+  backtest_run_id: number;
+  strategy_name: string;
+  snapshot_id: number | null;
   holdings_count: number;
   latest_price_date: string | null;
-  strategy_run_id: number | null;
-  strategy_name: string | null;
+  status: 'ok' | 'error';
+  error_message: string | null;
 };
 
-type ScheduleConfig = {
-  selected_run_id: number | null;
-  selected_run_name: string | null;
-  /** Full config blob of the currently-selected backtest. Shaped like a
-   * BacktestRequest but with arbitrary keys — we cast to a permissive
-   * record and read the fields we display below. Null when no run is
-   * selected. */
-  selected_run_config: Record<string, unknown> | null;
-  updated_at: string | null;
-  available_runs: Array<{ run_id: number; name: string; created_at: string }>;
+export type ScheduledStrategy = {
+  id: number;
+  backtest_run_id: number;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  backtest_name: string | null;
+  backtest_config: Record<string, unknown> | null;
+  last_snapshot: {
+    snapshot_id: number;
+    ingest_run_id: number | null;
+    created_at: string;
+    latest_price_date: string | null;
+    holdings_count: number;
+  } | null;
+};
+
+type AvailableBacktest = {
+  run_id: number;
+  name: string;
+  created_at: string;
+  config: Record<string, unknown>;
 };
 
 type JobSpec = {
@@ -84,17 +91,17 @@ const JOBS: JobSpec[] = [
     key: 'weekly_price_volume',
     label: 'Weekly pipeline',
     cron: 'Tue 02:00 UTC',
-    cronExplain: 'APScheduler in-process',
+    cronExplain: 'after Monday global close',
     description:
-      "Three phases: ACWI universe refresh → price + volume refresh → momentum compute. Captures the previous Monday's worldwide closes.",
+      "Three phases: ACWI universe refresh → price + volume refresh → momentum compute for every scheduled strategy. Captures the previous Monday's worldwide closes.",
   },
   {
     key: 'monthly_price_volume',
     label: 'Monthly pipeline',
     cron: '2nd of month 02:00 UTC',
-    cronExplain: 'APScheduler in-process',
+    cronExplain: 'after 1st-of-month global close',
     description:
-      "Same three phases. Captures the first trading day of the month. Weekends/holidays still fire but freshness checks no-op; the next weekly tick catches up.",
+      "Same three phases. Captures the first trading day of the month's closes. Weekends/holidays still fire but freshness checks no-op.",
   },
 ];
 
@@ -118,6 +125,17 @@ function fmtTimestamp(iso: string | null): string {
   }
 }
 
+function fmtDate(iso: string | null): string {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleDateString(undefined, {
+      year: 'numeric', month: 'short', day: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
+}
+
 function StatusBadge({ status }: { status: IngestRun['status'] }) {
   const cls = status === 'ok'
     ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
@@ -131,22 +149,12 @@ function StatusBadge({ status }: { status: IngestRun['status'] }) {
   );
 }
 
-/** The three pipeline phases the /schedule UI knows about. Same labels
- * the backend writes to `ingest_run.current_phase`. Exported so the
- * detail expander can render the same step list with messages. */
 export const PIPELINE_STEPS: StepDef[] = [
   { key: 'acwi', label: 'ACWI universe refresh' },
   { key: 'prices', label: 'Price + volume refresh' },
   { key: 'momentum', label: 'Momentum compute' },
 ];
 
-/** Translate an `ingest_run` row into the shape `ProgressTimeline` wants.
- * Each phase's status comes from the row's own per-phase columns: data
- * present → `done`, `current_phase` matches → `in_progress`, pipeline
- * finished without that phase's data → either `done` (with a "skipped"
- * message, e.g. momentum when no strategy is selected) or pending.
- * The percentage is derived linearly from those statuses so a running
- * pipeline animates through 33% / 50% / 66% / 100% as phases land. */
 export function runToTimelineProps(run: IngestRun): {
   state: Record<string, StepState>;
   pct: number;
@@ -163,10 +171,6 @@ export function runToTimelineProps(run: IngestRun): {
     momentum: { status: 'pending' },
   };
 
-  // When the active phase has streamed a `current_message`, prefer it
-  // over the count-based fallback — gives the user the same level of
-  // detail /momentum's ProgressTimeline shows ("Loading universe…",
-  // "Computing signals for 2025-04…", etc.).
   const liveMessage = run.current_message ?? undefined;
 
   // Phase 1 — ACWI
@@ -179,13 +183,8 @@ export function runToTimelineProps(run: IngestRun): {
         : undefined,
     };
   } else if (phase === 'acwi') {
-    state.acwi = {
-      status: 'in_progress',
-      message: liveMessage ?? 'reconstructing ACWI universe…',
-    };
+    state.acwi = { status: 'in_progress', message: liveMessage ?? 'reconstructing ACWI universe…' };
   } else if (finished) {
-    // Pipeline ended without ACWI landing → must have errored. The
-    // accumulated error_summary at the bottom has the detail.
     state.acwi = { status: 'error', message: 'failed' };
   }
 
@@ -197,10 +196,6 @@ export function runToTimelineProps(run: IngestRun): {
       message: `${run.companies_processed}${denominator} processed · ${run.prices_refreshed}p / ${run.volumes_refreshed}v · ${run.forbidden_count} forbidden`,
     };
   } else if (phase === 'prices') {
-    // Backend writes a per-checkpoint current_message that already
-    // includes the X of Y / counter summary; surface it verbatim. If
-    // it hasn't arrived yet (the very first ms of the phase), build a
-    // best-effort message from whatever counters we have.
     let msg = liveMessage;
     if (!msg) {
       const denom = run.companies_total ? ` of ${run.companies_total}` : '';
@@ -213,31 +208,30 @@ export function runToTimelineProps(run: IngestRun): {
     state.prices = { status: 'error', message: 'failed' };
   }
 
-  // Phase 3 — Momentum (skippable when no strategy is selected)
-  if (run.momentum_snapshot_id != null) {
-    const m = run.momentum_summary;
+  // Phase 3 — Momentum
+  const mom = run.momentum_summary ?? [];
+  const successCount = mom.filter((m) => m.status === 'ok').length;
+  const errorCount = mom.filter((m) => m.status === 'error').length;
+  if (mom.length > 0 && (phase === 'done' || finished)) {
+    const parts = [`${successCount} ok`];
+    if (errorCount > 0) parts.push(`${errorCount} failed`);
     state.momentum = {
-      status: 'done',
-      message: m
-        ? `${m.holdings_count} holdings · ${m.strategy_name ?? 'unnamed strategy'}`
-        : 'snapshot saved',
+      status: errorCount > 0 && successCount === 0 ? 'error' : 'done',
+      message: `${parts.join(' · ')} of ${mom.length} strateg${mom.length === 1 ? 'y' : 'ies'}`,
     };
   } else if (phase === 'momentum') {
-    state.momentum = {
-      status: 'in_progress',
-      message: liveMessage ?? 'computing holdings…',
-    };
+    state.momentum = { status: 'in_progress', message: liveMessage ?? 'computing holdings…' };
   } else if (finished) {
-    // No snapshot but pipeline finished — most often "no strategy
-    // selected, skip this phase". Mark as done with a clarifying note.
-    state.momentum = { status: 'done', message: 'skipped (no scheduled strategy)' };
+    // Pipeline finished without producing any momentum results — usually
+    // means no scheduled strategies are enabled.
+    state.momentum = { status: 'done', message: 'skipped (no scheduled strategies)' };
   }
 
   let score = 0;
   for (const s of Object.values(state)) {
     if (s.status === 'done') score += 1;
     else if (s.status === 'in_progress') score += 0.5;
-    else if (s.status === 'error') score += 1; // counts toward "completed" even if errored
+    else if (s.status === 'error') score += 1;
   }
   const pct = Math.round((score / PIPELINE_STEPS.length) * 100);
 
@@ -254,25 +248,17 @@ export function runToTimelineProps(run: IngestRun): {
     state,
     pct,
     running: run.status === 'running',
-    doneSummary:
-      run.status === 'ok' && phase === 'done'
-        ? 'Pipeline complete'
-        : null,
-    errorMessage:
-      run.status === 'error' && run.error_summary
-        ? run.error_summary
-        : null,
+    doneSummary: run.status === 'ok' && phase === 'done' ? 'Pipeline complete' : null,
+    errorMessage: run.status === 'error' && run.error_summary ? run.error_summary : null,
     totalElapsedMs: elapsedMs,
   };
 }
 
-/** Three-dot phase indicator. Each dot reflects whether its phase has
- * landed (data written), is currently active, or hasn't run yet. */
 function PhasePips({ run }: { run: IngestRun }) {
   const phases = [
     { key: 'acwi' as const,     hasData: run.acwi_target_month != null || run.acwi_summary != null },
     { key: 'prices' as const,   hasData: run.companies_processed > 0 || run.prices_refreshed > 0 || run.volumes_refreshed > 0 },
-    { key: 'momentum' as const, hasData: run.momentum_snapshot_id != null },
+    { key: 'momentum' as const, hasData: (run.momentum_summary?.length ?? 0) > 0 },
   ];
   const currentPhase = run.current_phase;
   return (
@@ -282,22 +268,36 @@ function PhasePips({ run }: { run: IngestRun }) {
         let cls = 'bg-gray-700';
         if (p.hasData) cls = 'bg-emerald-500';
         if (isCurrent) cls = 'bg-amber-400 animate-pulse';
-        return (
-          <span key={p.key} className={`inline-block w-2 h-2 rounded-full ${cls}`} />
-        );
+        return <span key={p.key} className={`inline-block w-2 h-2 rounded-full ${cls}`} />;
       })}
     </span>
   );
 }
 
+/** Curated subset of the strategy config to display on the strategy list
+ * row + the add picker. The full breakdown lives in the detail view. */
+function strategySummary(cfg: Record<string, unknown> | null): string {
+  if (!cfg) return '';
+  const selection = (cfg.selection_mode as string | undefined) ?? 'momentum';
+  const universe = (cfg.index_universe as string | null | undefined) ?? (cfg.universe_label as string | null | undefined) ?? 'all';
+  const topSectors = cfg.top_n_sectors as number | undefined;
+  const topPer = cfg.top_n_per_sector as number | undefined;
+  const parts: string[] = [selection];
+  if (universe) parts.push(`${universe}`);
+  if (topSectors != null && topPer != null) parts.push(`top ${topSectors}×${topPer}`);
+  return parts.join(' · ');
+}
+
 export default function Schedule() {
   const [runs, setRuns] = useState<IngestRun[]>([]);
-  const [config, setConfig] = useState<ScheduleConfig | null>(null);
-  const [savingConfig, setSavingConfig] = useState(false);
+  const [strategies, setStrategies] = useState<ScheduledStrategy[]>([]);
+  const [strategiesLoading, setStrategiesLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedRunId, setExpandedRunId] = useState<number | null>(null);
+  const [expandedStrategyId, setExpandedStrategyId] = useState<number | null>(null);
+  const [addingPickerOpen, setAddingPickerOpen] = useState(false);
 
   const loadRuns = useCallback(async () => {
     try {
@@ -316,23 +316,24 @@ export default function Schedule() {
     }
   }, []);
 
-  const loadConfig = useCallback(async () => {
+  const loadStrategies = useCallback(async () => {
     try {
-      const r = await fetch(`${API_URL}/api/schedule-config`);
+      const r = await fetch(`${API_URL}/api/scheduled-strategies`);
       if (!r.ok) return;
-      const data = (await r.json()) as ScheduleConfig;
-      setConfig(data);
+      const data = (await r.json()) as ScheduledStrategy[];
+      setStrategies(Array.isArray(data) ? data : []);
     } catch {
-      // Silent — config card just won't render the dropdown
+      // Silent — strategies card just shows empty state
+    } finally {
+      setStrategiesLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void loadRuns();
-    void loadConfig();
-  }, [loadRuns, loadConfig]);
+    void loadStrategies();
+  }, [loadRuns, loadStrategies]);
 
-  // Poll while any run is in flight so the user sees per-phase progress.
   useEffect(() => {
     const anyRunning = runs.some((r) => r.status === 'running');
     if (!anyRunning && !triggering) return;
@@ -371,102 +372,157 @@ export default function Schedule() {
     }
   };
 
-  const setSelectedStrategy = async (runId: number | null) => {
-    setSavingConfig(true);
+  const toggleStrategy = useCallback(async (id: number, enabled: boolean) => {
     try {
-      const r = await fetch(`${API_URL}/api/schedule-config`, {
-        method: 'PUT',
+      const r = await fetch(`${API_URL}/api/scheduled-strategies/${id}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ selected_run_id: runId }),
+        body: JSON.stringify({ enabled }),
       });
       if (!r.ok) {
         const body = await r.text().catch(() => '');
-        setError(`Save failed: ${r.status} ${body.slice(0, 200)}`);
+        setError(`Toggle failed: ${r.status} ${body.slice(0, 200)}`);
         return;
       }
-      await loadConfig();
+      await loadStrategies();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSavingConfig(false);
     }
-  };
+  }, [loadStrategies]);
 
-  const selectedRunName = useMemo(() => {
-    if (!config?.selected_run_id || !config.available_runs) return null;
-    return config.available_runs.find((r) => r.run_id === config.selected_run_id)?.name ?? null;
-  }, [config]);
+  const removeStrategy = useCallback(async (id: number) => {
+    if (!confirm('Remove this strategy from the schedule? Existing snapshots will be preserved.')) return;
+    try {
+      const r = await fetch(`${API_URL}/api/scheduled-strategies/${id}`, { method: 'DELETE' });
+      if (!r.ok) {
+        const body = await r.text().catch(() => '');
+        setError(`Delete failed: ${r.status} ${body.slice(0, 200)}`);
+        return;
+      }
+      if (expandedStrategyId === id) setExpandedStrategyId(null);
+      await loadStrategies();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [expandedStrategyId, loadStrategies]);
 
   return (
     <div className="min-h-screen bg-[#0f1117] text-gray-200">
       <div className="px-8 py-5 border-b border-gray-800/40">
         <h1 className="text-xl font-semibold text-white">Schedule</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Pipeline: ACWI refresh → price/volume refresh → momentum compute. Backtests stay read-only against the DB; this is the canonical refresher.
+          The pipeline fires Tuesday 02:00 UTC (after Monday global close) and the 2nd of each month 02:00 UTC (after 1st-of-month global close). Every strategy on the schedule below gets a fresh holdings snapshot on every tick.
         </p>
       </div>
 
       <div className="px-8 py-6 space-y-6 max-w-6xl">
         {error && (
-          <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg px-4 py-3 text-sm text-rose-300">
-            {error}
+          <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg px-4 py-3 text-sm text-rose-300 flex items-center justify-between">
+            <span>{error}</span>
+            <button type="button" onClick={() => setError(null)} className="text-rose-200 hover:text-white text-xs">dismiss</button>
           </div>
         )}
 
-        {/* Scheduled strategy picker — drives the momentum phase. */}
-        <div className="bg-[#151821] rounded-xl border border-gray-800/40 px-5 py-4">
-          <div className="min-w-0">
-            <h3 className="text-sm font-medium text-white">Which strategy should the pipeline compute today&apos;s holdings for?</h3>
-            <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-              Every time the pipeline runs (scheduled or manual), the final phase calculates &quot;what would this strategy be holding right now?&quot; against the freshly-refreshed data. Pick one of your saved backtests below — its signal weights, sectors, and top-N config will be used. The result is saved as a new current-picks snapshot, viewable in the run row below.
-              {' '}
-              <span className="text-gray-600">Pick &quot;(none)&quot; if you only want the pipeline to refresh data and skip the holdings computation.</span>
-            </p>
-          </div>
-          <div className="mt-3 flex items-center gap-3 flex-wrap">
-            <select
-              value={config?.selected_run_id ?? ''}
-              disabled={savingConfig || !config}
-              onChange={(e) => {
-                const v = e.target.value;
-                void setSelectedStrategy(v === '' ? null : Number(v));
-              }}
-              className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 focus:outline-none min-w-[320px]"
+        {/* Scheduled strategies */}
+        <div className="bg-[#151821] rounded-xl border border-gray-800/40">
+          <div className="px-5 py-3 border-b border-gray-800/40 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-medium text-white">Scheduled strategies</h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Each pipeline run computes a fresh holdings snapshot for every enabled strategy. Click a strategy to see its run history.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAddingPickerOpen((v) => !v)}
+              className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
             >
-              <option value="">(none — only refresh data, skip holdings compute)</option>
-              {(config?.available_runs ?? []).map((r) => (
-                <option key={r.run_id} value={r.run_id}>
-                  {r.name} (#{r.run_id})
-                </option>
-              ))}
-            </select>
-            {savingConfig && <span className="text-xs text-gray-500">Saving…</span>}
-            {!savingConfig && selectedRunName && (
-              <span className="text-xs text-emerald-400">
-                ✓ Pipeline will compute holdings for <span className="text-gray-200 font-medium">{selectedRunName}</span>
-              </span>
-            )}
-            {!savingConfig && config && config.selected_run_id == null && (config.available_runs?.length ?? 0) > 0 && (
-              <span className="text-xs text-amber-400">
-                Pick one of your {config.available_runs.length} saved backtests above to enable holdings computation.
-              </span>
-            )}
-            {!savingConfig && config && (config.available_runs?.length ?? 0) === 0 && (
-              <span className="text-xs text-amber-400">
-                No saved backtests yet — go to <a href="/momentum" className="text-indigo-400 hover:underline">/momentum</a>, run a backtest you like, and it&apos;ll appear here.
-              </span>
-            )}
+              {addingPickerOpen ? 'Cancel' : '+ Add strategy'}
+            </button>
           </div>
 
-          {/* Once a strategy is selected, render its full config so the
-              user can verify weights / sectors / top-N match what they
-              expect before letting it auto-run on a schedule. */}
-          {!savingConfig && config?.selected_run_config && (
-            <StrategyConfigDetail cfg={config.selected_run_config} />
+          {addingPickerOpen && (
+            <AddStrategyPicker
+              onAdded={async () => {
+                setAddingPickerOpen(false);
+                await loadStrategies();
+              }}
+              onCancel={() => setAddingPickerOpen(false)}
+            />
+          )}
+
+          {strategiesLoading ? (
+            <div className="px-5 py-5 text-sm text-gray-500">Loading…</div>
+          ) : strategies.length === 0 ? (
+            <div className="px-5 py-6 text-sm text-gray-500">
+              No strategies scheduled yet. Click <span className="text-gray-300">+ Add strategy</span> to pin one of your saved backtests from <a href="/momentum" className="text-indigo-400 hover:underline">/momentum</a>.
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-800/30">
+              {strategies.map((s) => {
+                const isExpanded = expandedStrategyId === s.id;
+                return (
+                  <div key={s.id}>
+                    <div className="px-5 py-3 flex items-center gap-3 hover:bg-white/[0.02] transition-colors">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedStrategyId(isExpanded ? null : s.id)}
+                        className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                      >
+                        <span className="text-gray-500 font-mono text-xs w-4 shrink-0">{isExpanded ? '▾' : '▸'}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`text-sm font-medium truncate ${s.enabled ? 'text-white' : 'text-gray-500'}`}>
+                              {s.backtest_name ?? `Backtest #${s.backtest_run_id}`}
+                            </span>
+                            {!s.enabled && (
+                              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-gray-500/10 text-gray-400 border-gray-500/30">
+                                paused
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-gray-500 mt-0.5 font-mono">
+                            {strategySummary(s.backtest_config)}
+                            {s.last_snapshot && (
+                              <span className="text-gray-600">
+                                {' · '}last run {fmtDate(s.last_snapshot.created_at)} · {s.last_snapshot.holdings_count} holdings
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                      <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={s.enabled}
+                          onChange={(e) => void toggleStrategy(s.id, e.target.checked)}
+                          className="accent-indigo-500"
+                        />
+                        enabled
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => void removeStrategy(s.id)}
+                        className="text-xs px-2 py-1 rounded-lg text-rose-300 hover:bg-rose-500/10 transition-colors"
+                        title="Remove from schedule"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    {isExpanded && (
+                      <ScheduledStrategyDetail
+                        strategyId={s.id}
+                        onMutated={() => void loadStrategies()}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
 
-        {/* Scheduled job cards */}
+        {/* Pipeline job cards */}
         <div className="grid gap-4 md:grid-cols-2">
           {JOBS.map((job) => {
             const last = lastByJob[job.key];
@@ -491,7 +547,6 @@ export default function Schedule() {
                   </button>
                 </div>
                 <p className="text-xs text-gray-500 mt-2">{job.description}</p>
-
                 <div className="mt-4 pt-3 border-t border-gray-800/40 text-xs space-y-1.5">
                   {last ? (
                     <>
@@ -510,14 +565,12 @@ export default function Schedule() {
                       <div className="text-gray-400 font-mono">
                         Prices: {last.companies_processed} processed · {last.prices_refreshed}p / {last.volumes_refreshed}v
                       </div>
-                      {last.momentum_summary && (
+                      {last.momentum_summary && last.momentum_summary.length > 0 && (
                         <div className="text-gray-400 font-mono">
-                          Momentum: {last.momentum_summary.holdings_count} holdings · latest {last.momentum_summary.latest_price_date ?? '—'}
+                          Momentum: {last.momentum_summary.filter((m) => m.status === 'ok').length} of {last.momentum_summary.length} strateg{last.momentum_summary.length === 1 ? 'y' : 'ies'} ok
                         </div>
                       )}
-                      <div className="text-gray-500 font-mono">
-                        {fmtDuration(last.started_at, last.finished_at)}
-                      </div>
+                      <div className="text-gray-500 font-mono">{fmtDuration(last.started_at, last.finished_at)}</div>
                     </>
                   ) : (
                     <div className="text-gray-500">No runs yet.</div>
@@ -528,7 +581,7 @@ export default function Schedule() {
           })}
         </div>
 
-        {/* Recent runs list */}
+        {/* Recent runs */}
         <div className="bg-[#151821] rounded-xl border border-gray-800/40">
           <div className="px-5 py-3 border-b border-gray-800/40 flex items-center justify-between">
             <h3 className="text-sm font-medium text-white">Recent runs</h3>
@@ -547,6 +600,7 @@ export default function Schedule() {
               {runs.map((r) => {
                 const isExpanded = expandedRunId === r.run_id;
                 const tp = runToTimelineProps(r);
+                const momCount = r.momentum_summary?.length ?? 0;
                 return (
                   <div key={r.run_id}>
                     <button
@@ -566,24 +620,15 @@ export default function Schedule() {
                             <span>ACWI +{r.acwi_summary.additions_count}/−{r.acwi_summary.removals_count}</span>
                           )}
                           <span>{r.companies_processed} co</span>
-                          {r.momentum_summary && (
-                            <span>{r.momentum_summary.holdings_count} hldg</span>
+                          {momCount > 0 && (
+                            <span>{momCount} strateg{momCount === 1 ? 'y' : 'ies'}</span>
                           )}
                           <span>{fmtDuration(r.started_at, r.finished_at)}</span>
                         </span>
                       </div>
-                      {/* Inline progress bar for running rows — same
-                          look as /momentum's ProgressTimeline. Hidden
-                          for done/error rows since the status badge +
-                          phase pips already convey final state. */}
                       {r.status === 'running' && (
                         <div className="pl-9 pr-1 w-full">
                           <div className="flex items-center justify-between gap-3 text-[10px] text-gray-500 mb-0.5">
-                            {/* Prefer the live current_message so the
-                                collapsed row reads as "Refreshing 320
-                                of 1837 companies · 250p / 250v
-                                refreshed · 0 forbidden, 0 errors"
-                                rather than the static phase label. */}
                             <span className="truncate">
                               {r.current_message ?? (
                                 r.current_phase === 'acwi' ? 'ACWI universe refresh' :
@@ -630,12 +675,125 @@ export default function Schedule() {
   );
 }
 
-/** Renders the selected backtest's config so the user can verify what
- * the pipeline will actually compute. We curate to the fields that
- * matter operationally (selection mode, universe, top-N, signal +
- * category weights); the underlying blob may have extra fields from
- * older runs which we just ignore. */
-function StrategyConfigDetail({ cfg }: { cfg: Record<string, unknown> }) {
+/** Inline picker: list of available (not-yet-scheduled) backtests with
+ * params preview, plus a confirm button. Shows the config blob for the
+ * currently-selected backtest so the user can verify weights / sectors
+ * / top-N before adding it to the schedule. */
+function AddStrategyPicker({
+  onAdded,
+  onCancel,
+}: {
+  onAdded: () => Promise<void> | void;
+  onCancel: () => void;
+}) {
+  const [available, setAvailable] = useState<AvailableBacktest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await fetch(`${API_URL}/api/scheduled-strategies/available-backtests`);
+        if (!r.ok) {
+          if (!cancelled) setError(`Failed to load (${r.status})`);
+          return;
+        }
+        const data = (await r.json()) as AvailableBacktest[];
+        if (cancelled) return;
+        setAvailable(data);
+        if (data.length > 0) setSelectedRunId(data[0].run_id);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const selected = useMemo(
+    () => available.find((b) => b.run_id === selectedRunId) ?? null,
+    [available, selectedRunId],
+  );
+
+  const confirm = async () => {
+    if (selectedRunId == null) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const r = await fetch(`${API_URL}/api/scheduled-strategies`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ backtest_run_id: selectedRunId }),
+      });
+      if (!r.ok) {
+        const body = await r.text().catch(() => '');
+        setError(`Add failed: ${r.status} ${body.slice(0, 200)}`);
+        return;
+      }
+      await onAdded();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="px-5 py-4 border-b border-gray-800/40 bg-[#0f1117]">
+      <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">Pick a saved backtest to put on schedule</div>
+      {loading ? (
+        <div className="text-xs text-gray-500">Loading available backtests…</div>
+      ) : available.length === 0 ? (
+        <div className="text-xs text-gray-400">
+          No saved backtests to add. All your saved backtests are already on schedule, or you don&apos;t have any yet — head over to <a href="/momentum" className="text-indigo-400 hover:underline">/momentum</a>, run a backtest, and save it.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <select
+            value={selectedRunId ?? ''}
+            disabled={saving}
+            onChange={(e) => setSelectedRunId(Number(e.target.value))}
+            className="bg-[#151821] border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 focus:outline-none w-full max-w-md"
+          >
+            {available.map((b) => (
+              <option key={b.run_id} value={b.run_id}>
+                {b.name} (#{b.run_id})
+              </option>
+            ))}
+          </select>
+          {selected && <StrategyConfigDetail cfg={selected.config} />}
+          {error && <div className="text-xs text-rose-300">{error}</div>}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void confirm()}
+              disabled={saving || selectedRunId == null}
+              className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors"
+            >
+              {saving ? 'Adding…' : 'Confirm + add to schedule'}
+            </button>
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={saving}
+              className="text-xs px-3 py-1.5 rounded-lg text-gray-400 hover:bg-white/5 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Read-only breakdown of a backtest's config blob. Re-used by the add
+ * picker and the per-strategy detail view. */
+export function StrategyConfigDetail({ cfg }: { cfg: Record<string, unknown> }) {
   const selection = (cfg.selection_mode as string | undefined) ?? 'momentum';
   const strategy = (cfg.strategy_type as string | undefined) ?? 'long_only';
   const indexUniverse = (cfg.index_universe as string | null | undefined) ?? null;
@@ -647,22 +805,15 @@ function StrategyConfigDetail({ cfg }: { cfg: Record<string, unknown> }) {
   const maxCompanies = cfg.max_companies as number | null | undefined;
   const minPriceScore = cfg.min_price_score as number | null | undefined;
   const rebalanceFrequency = (cfg.rebalance_frequency as string | undefined) ?? 'monthly';
-  const randomSeed = cfg.random_seed as number | null | undefined;
-  const nTrials = cfg.n_trials as number | undefined;
   const signalWeights = (cfg.signal_weights as Record<string, number> | undefined) ?? {};
   const categoryWeights = (cfg.category_weights as Record<string, number> | undefined) ?? {};
 
   const universe = indexUniverse ?? universeLabel ?? 'All companies (no universe filter)';
-  // Signal-weight grouping is a nicety for the user; the actual weights
-  // are flat so we just sort high-to-low for visual clarity.
   const sortedSignals = Object.entries(signalWeights).sort((a, b) => b[1] - a[1]);
   const sortedCategories = Object.entries(categoryWeights).sort((a, b) => b[1] - a[1]);
 
   return (
-    <div className="mt-4 pt-4 border-t border-gray-800/40">
-      <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">
-        Selected strategy config
-      </div>
+    <div className="bg-[#151821] border border-gray-800/40 rounded-lg p-3">
       <div className="grid gap-x-6 gap-y-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 text-xs">
         <ConfigRow label="Selection mode" value={selection} />
         <ConfigRow label="Strategy type" value={strategy} />
@@ -673,22 +824,16 @@ function StrategyConfigDetail({ cfg }: { cfg: Record<string, unknown> }) {
         <ConfigRow label="Top N per sector" value={topNPerSector != null ? String(topNPerSector) : '—'} />
         <ConfigRow label="Max companies" value={maxCompanies != null ? String(maxCompanies) : 'unlimited'} />
         <ConfigRow label="Min price score" value={minPriceScore != null ? `> ${minPriceScore}` : 'off'} />
-        {selection === 'random' && (
-          <>
-            <ConfigRow label="Random seed" value={randomSeed != null ? String(randomSeed) : '—'} />
-            <ConfigRow label="Trials" value={nTrials != null ? String(nTrials) : '1'} />
-          </>
-        )}
       </div>
 
       {sortedCategories.length > 0 && (
-        <div className="mt-4">
+        <div className="mt-3">
           <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Category weights</div>
-          <div className="flex flex-wrap gap-3 text-xs">
+          <div className="flex flex-wrap gap-2 text-xs">
             {sortedCategories.map(([cat, w]) => (
-              <span key={cat} className="bg-[#0f1117] border border-gray-800/60 rounded px-2.5 py-1">
+              <span key={cat} className="bg-[#0f1117] border border-gray-800/60 rounded px-2 py-0.5">
                 <span className="text-gray-400 capitalize">{cat}</span>
-                <span className="text-gray-500 mx-2">·</span>
+                <span className="text-gray-500 mx-1.5">·</span>
                 <span className="font-mono text-gray-200">{w.toFixed(2)}</span>
               </span>
             ))}

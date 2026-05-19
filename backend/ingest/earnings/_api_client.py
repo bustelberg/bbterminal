@@ -52,16 +52,19 @@ else:
         _CURL_CFFI_IMPORT_ERROR,
     )
 
-# chrome131 is the newest desktop profile shipped in curl_cffi 0.15.0 and
-# matches a current real-world Chrome TLS handshake. Older targets like
-# chrome120 are still accepted by the library but their JA3/JA4 fingerprint
-# is aged out of Cloudflare's "real browser" allowlist on stricter sites.
-_IMPERSONATE = "chrome131"
+# chrome146 is the newest desktop Chrome profile shipped in curl_cffi 0.15.0.
+# Cloudflare ages older JA3/JA4 fingerprints out of its "real Chrome"
+# allowlist roughly every few months — chrome120 stopped working in Apr,
+# chrome131 stopped working in May. If chrome146 also gets rejected,
+# check `BrowserType` in your installed curl_cffi for a newer target,
+# or switch to a non-Chrome family (firefox147 / safari260) to dodge the
+# chrome-cluster entirely.
+_IMPERSONATE = "chrome146"
 
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/131.0.0.0 Safari/537.36"
+    "Chrome/146.0.0.0 Safari/537.36"
 )
 
 _last_api_call: float = 0.0
@@ -90,8 +93,9 @@ class ApiResult:
 
 
 def _api_request_cf(url: str, timeout: int = 30) -> ApiResult:
-    """Fetch via curl_cffi with Chrome120 impersonation to bypass
-    Cloudflare TLS-fingerprint inspection on the GuruFocus edge."""
+    """Fetch via curl_cffi with current Chrome impersonation (see
+    `_IMPERSONATE`) to bypass Cloudflare TLS-fingerprint inspection
+    on the GuruFocus edge."""
     masked_url = url
     api_key = os.environ.get("GURUFOCUS_API_KEY", "")
     if api_key:

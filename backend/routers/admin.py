@@ -187,7 +187,16 @@ def _summarize_run(row: dict) -> dict:
     for monitoring endpoints where the caller wants a quick health
     snapshot, not the full diff."""
     acwi = row.get("acwi_summary") or {}
-    mom = row.get("momentum_summary") or {}
+    # `momentum_summary` is a list — one entry per scheduled strategy
+    # that ran. Older pre-rebuild rows held a single dict; coerce them
+    # to a list so consumers can iterate uniformly.
+    mom_raw = row.get("momentum_summary")
+    if isinstance(mom_raw, list):
+        mom_list = mom_raw
+    elif isinstance(mom_raw, dict):
+        mom_list = [mom_raw]
+    else:
+        mom_list = []
     return {
         "run_id": row.get("run_id"),
         "job_name": row.get("job_name"),
@@ -210,12 +219,18 @@ def _summarize_run(row: dict) -> dict:
             "delisted": row.get("delisted_count") or 0,
             "errors": row.get("error_count") or 0,
         },
-        "momentum": {
-            "snapshot_id": row.get("momentum_snapshot_id"),
-            "holdings_count": mom.get("holdings_count"),
-            "strategy_name": mom.get("strategy_name"),
-            "latest_price_date": mom.get("latest_price_date"),
-        } if row.get("momentum_snapshot_id") is not None else None,
+        "momentum": [
+            {
+                "strategy_id": m.get("strategy_id"),
+                "strategy_name": m.get("strategy_name"),
+                "snapshot_id": m.get("snapshot_id"),
+                "holdings_count": m.get("holdings_count"),
+                "latest_price_date": m.get("latest_price_date"),
+                "status": m.get("status"),
+                "error_message": m.get("error_message"),
+            }
+            for m in mom_list
+        ],
         "error_summary": row.get("error_summary"),
     }
 
@@ -501,7 +516,7 @@ async def sanity_check(authorization: str = Header(...)):
             "backtest_run",
             "ingest_run",
             "current_picks_snapshot",
-            "schedule_config",
+            "scheduled_strategy",
         ]:
             try:
                 r = supabase.table(table).select("*", count="exact").limit(0).execute()
@@ -509,17 +524,18 @@ async def sanity_check(authorization: str = Header(...)):
             except Exception as e:
                 out[f"{table}_count"] = f"ERR: {type(e).__name__}: {e}"
 
-        # Schedule config — is a strategy selected?
+        # Schedule strategies — how many enabled / total?
         sc = (
-            supabase.table("schedule_config")
-            .select("selected_run_id")
-            .eq("id", 1)
-            .limit(1)
+            supabase.table("scheduled_strategy")
+            .select("id, enabled, backtest_run_id")
             .execute()
         )
-        out["selected_strategy_run_id"] = (
-            sc.data[0]["selected_run_id"] if sc.data else None
-        )
+        rows = sc.data or []
+        out["scheduled_strategies"] = {
+            "total": len(rows),
+            "enabled": sum(1 for r in rows if r.get("enabled")),
+            "backtest_run_ids": [r["backtest_run_id"] for r in rows if r.get("enabled")],
+        }
 
         # ACWI universe presence
         acwi = (
