@@ -1,19 +1,11 @@
-"""GuruFocus HTTP client — curl_cffi-first with urllib fallback.
+"""GuruFocus HTTP client for the earnings ingest path.
 
-Cloudflare on the GuruFocus edge does TLS-fingerprint inspection (JA3),
-not just User-Agent header matching. Python's stock urllib presents a
-fingerprint Cloudflare flags as a bot; subprocess'ing to the system
-`curl` works on Windows (Schannel) but fails on Linux containers
-(OpenSSL) — Linux curl's fingerprint is also in the bot bucket.
+The actual Cloudflare-bypass plumbing (curl_cffi + auto-fingerprint
+ladder) lives in `ingest/_gurufocus_http.py` and is shared with the
+prices ingest. This module is now thin: URL building, key masking,
+JSON parsing, rate limit, urllib fallback.
 
-`curl_cffi` is a Python binding to libcurl-impersonate that replays a
-real Chrome TLS handshake — the same ALPN/cipher order, GREASE values,
-and extension layout a current Chrome build sends. That gets us through
-the same Cloudflare edge the real browser does. We fall back to urllib
-only when curl_cffi can't be imported (e.g. wheel missing for the host
-arch).
-
-A 1.5s per-process rate limit protects us against bursting the API in
+The 1.5s per-process rate limit protects us against bursting the API in
 parallel-fetch scenarios — the worker pool in the backtest stream can
 launch dozens of tasks concurrently, and a bare-bursting client trips
 the GuruFocus daily call cap fast."""
@@ -28,39 +20,32 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from ingest._gurufocus_http import (
+    cf_get,
+    current_preferred_target,
+    is_available as _cf_is_available,
+    ladder as _cf_ladder,
+)
+
 log = logging.getLogger(__name__)
 
-try:
-    from curl_cffi import requests as cf_requests  # type: ignore[import-not-found]
-    _HAS_CURL_CFFI = True
-    _CURL_CFFI_IMPORT_ERROR: str | None = None
-except ImportError as _e:
-    _HAS_CURL_CFFI = False
-    _CURL_CFFI_IMPORT_ERROR = f"{type(_e).__name__}: {_e}"
-
-# Logged once at module load. In Railway / Vercel build logs this is the
-# easiest place to confirm the GuruFocus client is wired correctly — if
-# this prints `urllib`, Cloudflare's TLS-fingerprint check will block every
-# request on the production edge and you'll see HTML challenge pages in
-# the 403 bodies (the IE6/oldie HTML).
-if _HAS_CURL_CFFI:
-    log.warning("gurufocus client: using curl_cffi (Chrome impersonation)")
+# Boot-time diagnostic — same line both clients write so a grep through
+# the Railway logs immediately shows what's going to be tried.
+if _cf_is_available():
+    log.warning(
+        "gurufocus client: curl_cffi ladder %s (preferred=%s)",
+        _cf_ladder(), current_preferred_target(),
+    )
 else:
     log.error(
-        "gurufocus client: FALLBACK to urllib (curl_cffi import failed: %s) — "
-        "Cloudflare will block production calls",
-        _CURL_CFFI_IMPORT_ERROR,
+        "gurufocus client: FALLBACK to urllib (curl_cffi unavailable) — "
+        "Cloudflare will block production calls"
     )
 
-# chrome146 is the newest desktop Chrome profile shipped in curl_cffi 0.15.0.
-# Cloudflare ages older JA3/JA4 fingerprints out of its "real Chrome"
-# allowlist roughly every few months — chrome120 stopped working in Apr,
-# chrome131 stopped working in May. If chrome146 also gets rejected,
-# check `BrowserType` in your installed curl_cffi for a newer target,
-# or switch to a non-Chrome family (firefox147 / safari260) to dodge the
-# chrome-cluster entirely.
-_IMPERSONATE = "chrome146"
-
+# Plain Chrome UA string. Modern enough to match a real browser; the
+# important fingerprint signal is the TLS handshake (handled by
+# curl_cffi), not this header. Kept reasonably current as a no-cost
+# defense-in-depth.
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -92,46 +77,50 @@ class ApiResult:
         return False
 
 
-def _api_request_cf(url: str, timeout: int = 30) -> ApiResult:
-    """Fetch via curl_cffi with current Chrome impersonation (see
-    `_IMPERSONATE`) to bypass Cloudflare TLS-fingerprint inspection
-    on the GuruFocus edge."""
-    masked_url = url
+def _mask(url: str) -> str:
     api_key = os.environ.get("GURUFOCUS_API_KEY", "")
-    if api_key:
-        masked_url = url.replace(api_key, api_key[:4] + "***")
+    return url.replace(api_key, api_key[:4] + "***") if api_key else url
 
-    try:
-        resp = cf_requests.get(
-            url,
-            headers={"User-Agent": _USER_AGENT, "Accept": "application/json"},
-            timeout=timeout,
-            impersonate=_IMPERSONATE,
+
+def _api_request_cf(url: str, timeout: int = 30) -> ApiResult:
+    """Fetch via the shared Cloudflare-aware client (auto-fingerprint
+    ladder). The shared client handles 403-with-HTML retries on its own;
+    we just parse what comes back."""
+    masked_url = _mask(url)
+    resp = cf_get(
+        url,
+        headers={"User-Agent": _USER_AGENT, "Accept": "application/json"},
+        timeout=timeout,
+    )
+
+    if resp.error is not None and resp.status_code is None:
+        # Network / library error before we got a response at all.
+        return ApiResult(None, f"curl_cffi error: {resp.error} ({masked_url})")
+
+    status_code = resp.status_code or 0
+    body = resp.text or ""
+    if status_code >= 400 or resp.error is not None:
+        attempted = ",".join(resp.attempted) if resp.attempted else "n/a"
+        return ApiResult(
+            None,
+            f"API HTTP {status_code} via curl_cffi/{resp.used_target} "
+            f"(tried={attempted}) body={body[:200]} ({masked_url})",
+            status_code,
         )
-        status_code = resp.status_code
-        body = resp.text or ""
-        if status_code >= 400:
-            return ApiResult(
-                None,
-                f"API HTTP {status_code} via curl_cffi/{_IMPERSONATE} body={body[:200]} ({masked_url})",
-                status_code,
-            )
-        if not body:
-            return ApiResult(None, f"API empty response ({masked_url})", status_code)
+    if not body:
+        return ApiResult(None, f"API empty response ({masked_url})", status_code)
+    try:
         return ApiResult(json.loads(body), f"API OK ({masked_url})", status_code)
     except json.JSONDecodeError as e:
         return ApiResult(None, f"API returned invalid JSON: {e} ({masked_url})")
-    except Exception as e:
-        return ApiResult(None, f"curl_cffi error: {type(e).__name__}: {e} ({masked_url})")
 
 
 def _api_request_urllib(url: str, timeout: int = 30) -> ApiResult:
-    """Fetch via urllib (fallback if curl not available)."""
-    masked_url = url
-    api_key = os.environ.get("GURUFOCUS_API_KEY", "")
-    if api_key:
-        masked_url = url.replace(api_key, api_key[:4] + "***")
-
+    """Fetch via urllib (fallback if curl_cffi isn't installed). On
+    Cloudflare-protected endpoints this gets 403'd — but it's correct
+    for non-protected paths in dev environments where curl_cffi might
+    be missing."""
+    masked_url = _mask(url)
     req = Request(url, headers={"User-Agent": _USER_AGENT, "Accept": "application/json"})
     try:
         with urlopen(req, timeout=timeout) as resp:
@@ -163,16 +152,13 @@ def _api_request(url: str, timeout: int = 30) -> ApiResult:
         time.sleep(_API_MIN_INTERVAL - elapsed)
     _last_api_call = time.time()
 
-    if _HAS_CURL_CFFI:
+    if _cf_is_available():
         return _api_request_cf(url, timeout)
     return _api_request_urllib(url, timeout)
 
 
 def _mask_url(url: str) -> str:
-    api_key = os.environ.get("GURUFOCUS_API_KEY", "")
-    if api_key:
-        return url.replace(api_key, api_key[:4] + "***")
-    return url
+    return _mask(url)
 
 
 def _build_api_url(path: str, query: dict[str, str] | None = None) -> str:
