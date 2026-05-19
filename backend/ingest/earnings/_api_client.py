@@ -20,6 +20,7 @@ the GuruFocus daily call cap fast."""
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from typing import Any
@@ -27,17 +28,40 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+log = logging.getLogger(__name__)
+
 try:
     from curl_cffi import requests as cf_requests  # type: ignore[import-not-found]
     _HAS_CURL_CFFI = True
-except ImportError:
+    _CURL_CFFI_IMPORT_ERROR: str | None = None
+except ImportError as _e:
     _HAS_CURL_CFFI = False
+    _CURL_CFFI_IMPORT_ERROR = f"{type(_e).__name__}: {_e}"
 
+# Logged once at module load. In Railway / Vercel build logs this is the
+# easiest place to confirm the GuruFocus client is wired correctly — if
+# this prints `urllib`, Cloudflare's TLS-fingerprint check will block every
+# request on the production edge and you'll see HTML challenge pages in
+# the 403 bodies (the IE6/oldie HTML).
+if _HAS_CURL_CFFI:
+    log.warning("gurufocus client: using curl_cffi (Chrome impersonation)")
+else:
+    log.error(
+        "gurufocus client: FALLBACK to urllib (curl_cffi import failed: %s) — "
+        "Cloudflare will block production calls",
+        _CURL_CFFI_IMPORT_ERROR,
+    )
+
+# chrome131 is the newest desktop profile shipped in curl_cffi 0.15.0 and
+# matches a current real-world Chrome TLS handshake. Older targets like
+# chrome120 are still accepted by the library but their JA3/JA4 fingerprint
+# is aged out of Cloudflare's "real browser" allowlist on stricter sites.
+_IMPERSONATE = "chrome131"
 
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/120.0.0.0 Safari/537.36"
+    "Chrome/131.0.0.0 Safari/537.36"
 )
 
 _last_api_call: float = 0.0
@@ -78,13 +102,15 @@ def _api_request_cf(url: str, timeout: int = 30) -> ApiResult:
             url,
             headers={"User-Agent": _USER_AGENT, "Accept": "application/json"},
             timeout=timeout,
-            impersonate="chrome120",
+            impersonate=_IMPERSONATE,
         )
         status_code = resp.status_code
         body = resp.text or ""
         if status_code >= 400:
             return ApiResult(
-                None, f"API HTTP {status_code} body={body[:200]} ({masked_url})", status_code
+                None,
+                f"API HTTP {status_code} via curl_cffi/{_IMPERSONATE} body={body[:200]} ({masked_url})",
+                status_code,
             )
         if not body:
             return ApiResult(None, f"API empty response ({masked_url})", status_code)
@@ -115,7 +141,11 @@ def _api_request_urllib(url: str, timeout: int = 30) -> ApiResult:
             body = e.read().decode("utf-8", errors="replace")[:200]
         except Exception:
             pass
-        return ApiResult(None, f"API HTTP {e.code}: {e.reason} body={body} ({masked_url})", e.code)
+        return ApiResult(
+            None,
+            f"API HTTP {e.code} via urllib (curl_cffi unavailable): {e.reason} body={body} ({masked_url})",
+            e.code,
+        )
     except URLError as e:
         return ApiResult(None, f"API URL error: {e.reason}")
     except Exception as e:

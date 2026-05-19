@@ -1,14 +1,16 @@
 """FX rate endpoints — ECB-fed daily rates, with DB cache.
 
 Endpoints:
-    GET  /api/fx/coverage           ACWI currencies vs ECB availability matrix
-    GET  /api/fx/latest             latest daily rate per currency
-    GET  /api/fx/history/{currency} daily history (paginated)
-    POST /api/fx/sync               persist ECB + pegged + TWD into fx_rate
+    GET  /api/fx/coverage                       ACWI currencies vs ECB availability matrix
+    GET  /api/fx/latest                         latest daily rate per currency
+    GET  /api/fx/history/{currency}             daily history from cache (instant)
+    POST /api/fx/history/{currency}/refresh     fetch gap to today, upsert, return full series
+    POST /api/fx/sync                           persist ECB + pegged + TWD into fx_rate
 
-Each read first tries the local `fx_rate` table for speed; falls back to
-live ECB only when the cache has no data for that currency (so a fresh
-install works without a manual sync step).
+History uses stale-while-revalidate: the GET returns whatever is cached so
+the chart renders instantly; the POST is fired in the background by the
+frontend when the cache is stale or empty, and replaces the chart data
+once new rows roll in.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ from __future__ import annotations
 import asyncio
 from datetime import date as _date
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from deps import supabase
 from fx_rates import (
@@ -29,6 +31,11 @@ from fx_rates import (
 from momentum.data import sync_fx_rates_to_db
 
 router = APIRouter(tags=["fx"])
+
+# Currencies we have no upstream source for (not ECB, not USD-pegged, not on
+# Yahoo) — skip refresh attempts so we don't hammer ECB with 4xx misses.
+_UNFETCHABLE = {"CLP", "COP", "EGP", "RUB"}
+_FETCHABLE = set(ECB_CURRENCIES) | set(_USD_PEGS.keys()) | {"TWD"}
 
 
 @router.get("/api/fx/coverage")
@@ -56,16 +63,60 @@ async def fx_latest():
 
 @router.get("/api/fx/history/{currency}")
 async def fx_history(currency: str, start_date: str | None = None):
-    """Daily historical FX rates for one currency. Same DB-first /
-    ECB-fallback pattern as /latest."""
+    """Daily historical FX rates for one currency from the local cache.
+
+    Returns DB-only so the chart can render instantly. The frontend fires
+    POST /refresh in the background when `max_date < today` to fill the
+    gap; this endpoint never hits ECB itself.
+    """
     currency = currency.upper()
     rates = await asyncio.to_thread(fetch_history_from_db, supabase, currency, start_date)
-    source = "db"
-    if not rates:
-        from fx_rates import fetch_history
-        rates = await asyncio.to_thread(fetch_history, currency, start_date)
-        source = "ecb_live"
-    return {"currency": currency, "rates": rates, "count": len(rates), "source": source}
+    max_date = rates[-1]["date"] if rates else None
+    is_fetchable = currency in _FETCHABLE
+    today_iso = _date.today().isoformat()
+    is_stale = (not max_date) or (str(max_date) < today_iso)
+    return {
+        "currency": currency,
+        "rates": rates,
+        "count": len(rates),
+        "max_date": max_date,
+        "is_fetchable": is_fetchable,
+        "is_stale": is_stale,
+        "source": "db",
+    }
+
+
+@router.post("/api/fx/history/{currency}/refresh")
+async def fx_history_refresh(currency: str, start_date: str | None = None):
+    """Stale-while-revalidate refresh for one currency.
+
+    Fetches the gap from `fx_rate.max(rate_date) + 1 day` to today, upserts
+    new rows, and returns the full history so the UI can swap the chart
+    once new data rolls in. The frontend calls this in the background after
+    the GET so the user never waits on ECB.
+    """
+    currency = currency.upper()
+    if currency in _UNFETCHABLE or currency not in _FETCHABLE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{currency} has no upstream source (ECB / pegs / Yahoo do not cover it)",
+        )
+
+    start = _date.fromisoformat(start_date) if start_date else _date(2000, 1, 1)
+    end = _date.today()
+    status = await asyncio.to_thread(
+        sync_fx_rates_to_db, supabase, [currency], start, end,
+    )
+    rates = await asyncio.to_thread(fetch_history_from_db, supabase, currency, start_date)
+    max_date = rates[-1]["date"] if rates else None
+    return {
+        "currency": currency,
+        "rates": rates,
+        "count": len(rates),
+        "max_date": max_date,
+        "sync": status.get(currency, {}),
+        "source": "db",
+    }
 
 
 @router.post("/api/fx/sync")

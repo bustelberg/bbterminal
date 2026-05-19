@@ -36,10 +36,11 @@ type HistoryPoint = {
   rate: number;
 };
 
-function FxHistoryChart({ currency, history, loading, onClose }: {
+function FxHistoryChart({ currency, history, loading, refreshing, onClose }: {
   currency: string;
   history: HistoryPoint[];
   loading: boolean;
+  refreshing: boolean;
   onClose: () => void;
 }) {
   const [inverted, setInverted] = useState(false);
@@ -94,6 +95,9 @@ function FxHistoryChart({ currency, history, loading, onClose }: {
         <div className="flex items-center gap-3">
           <h2 className="text-sm font-medium text-white">{label} History (from 2000)</h2>
           <span className="text-xs text-gray-500">{description}</span>
+          {refreshing && (
+            <span className="text-xs text-indigo-400 animate-pulse">refreshing…</span>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -190,6 +194,7 @@ export default function FxRates() {
   const [selectedCurrency, setSelectedCurrency] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyRefreshing, setHistoryRefreshing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [latestSource, setLatestSource] = useState<string | null>(null);
@@ -248,18 +253,48 @@ export default function FxRates() {
   const loadHistory = useCallback(async (currency: string) => {
     setSelectedCurrency(currency);
     setHistoryLoading(true);
+    setHistoryRefreshing(false);
+
+    // Phase 1: render whatever is cached in our DB instantly.
+    let cached: { rates: HistoryPoint[]; is_stale?: boolean; is_fetchable?: boolean } = { rates: [] };
     try {
       const res = await trackedFetch(
         `Loading ${currency} history`,
         `${API_URL}/api/fx/history/${currency}?start_date=2000-01-01`,
       );
       if (!res.ok) throw new Error('Failed to fetch history');
-      const data = await res.json();
-      setHistory(data.rates);
+      cached = await res.json();
+      setHistory(cached.rates);
     } catch {
       setHistory([]);
     } finally {
       setHistoryLoading(false);
+    }
+
+    // Phase 2: stale-while-revalidate. If we have no rows or the latest row
+    // is older than today, fire a background refresh and swap in fresh data
+    // when ECB returns. Skip currencies the backend can't fetch.
+    if (cached.is_fetchable && cached.is_stale) {
+      setHistoryRefreshing(true);
+      try {
+        const res = await trackedFetch(
+          `Refreshing ${currency} from ECB`,
+          `${API_URL}/api/fx/history/${currency}/refresh?start_date=2000-01-01`,
+          { method: 'POST' },
+        );
+        if (res.ok) {
+          const data = await res.json();
+          // Bail out if the user switched currencies while we were waiting.
+          setSelectedCurrency(prev => {
+            if (prev === currency) setHistory(data.rates);
+            return prev;
+          });
+        }
+      } catch {
+        // leave the cached chart in place
+      } finally {
+        setHistoryRefreshing(false);
+      }
     }
   }, []);
 
@@ -466,6 +501,7 @@ export default function FxRates() {
           currency={selectedCurrency}
           history={history}
           loading={historyLoading}
+          refreshing={historyRefreshing}
           onClose={() => setSelectedCurrency(null)}
         />
       )}
