@@ -21,7 +21,6 @@ import asyncio
 import json
 import queue as _queue
 import threading
-import traceback
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse

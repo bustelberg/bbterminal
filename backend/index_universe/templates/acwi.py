@@ -26,7 +26,6 @@ from supabase import Client
 from .base import (
     ProgressCallback,
     RefreshResult,
-    TemplateDiff,
     UniverseTemplate,
 )
 

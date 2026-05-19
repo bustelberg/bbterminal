@@ -34,7 +34,6 @@ not here — this module is purely the scrape.
 from __future__ import annotations
 
 import logging
-import time
 from typing import Callable
 
 from playwright.sync_api import (
