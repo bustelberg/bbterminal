@@ -1,4 +1,5 @@
 import { createStore } from './store';
+import { apiFetch } from './apiFetch';
 
 export type LoadingItem = {
   id: number;
@@ -32,5 +33,6 @@ export function track<T>(label: string, p: Promise<T>): Promise<T> {
  * so callers can still call `.json()` / `.ok` etc.
  */
 export function trackedFetch(label: string, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  return track(label, fetch(input, init));
+  const urlStr = typeof input === 'string' ? input : input.toString();
+  return track(label, apiFetch(urlStr, init));
 }

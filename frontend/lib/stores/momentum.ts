@@ -1,5 +1,6 @@
 import { createStore } from '../store';
 import { runSSE } from '../stream';
+import { apiFetch } from '../apiFetch';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -688,7 +689,7 @@ export async function loadCurrentPicksSnapshot(snapshotId: number): Promise<void
 export async function deleteCurrentPicksSnapshot(snapshotId: number): Promise<void> {
   momentumStore.set({ deletingSnapshotId: snapshotId, error: null });
   try {
-    const resp = await fetch(`${API_URL}/api/momentum/current-picks/${snapshotId}`, {
+    const resp = await apiFetch(`${API_URL}/api/momentum/current-picks/${snapshotId}`, {
       method: 'DELETE',
     });
     if (!resp.ok) {
@@ -713,7 +714,7 @@ export async function renameCurrentPicksSnapshot(
 ): Promise<void> {
   momentumStore.set({ renamingSnapshotId: snapshotId, error: null });
   try {
-    const resp = await fetch(`${API_URL}/api/momentum/current-picks/${snapshotId}`, {
+    const resp = await apiFetch(`${API_URL}/api/momentum/current-picks/${snapshotId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
@@ -756,7 +757,7 @@ function maybeAutoRefreshCurrentMonthMTD(cp: CurrentPortfolio | null): void {
 export async function refreshCurrentPicksMTD(snapshotId: number): Promise<void> {
   momentumStore.set({ refreshingMTD: true, error: null });
   try {
-    const resp = await fetch(`${API_URL}/api/momentum/current-picks/${snapshotId}/refresh-mtd`, { method: 'POST' });
+    const resp = await apiFetch(`${API_URL}/api/momentum/current-picks/${snapshotId}/refresh-mtd`, { method: 'POST' });
     if (!resp.ok) {
       momentumStore.set({ error: `MTD refresh failed (${resp.status})`, refreshingMTD: false });
       return;

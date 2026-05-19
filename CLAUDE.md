@@ -178,7 +178,15 @@ The frontend follows Next.js convention: `.env.local` overrides `.env`. Vercel u
 - `POST /api/index-universe/import-sp500`, `GET /api/index-universe/{indexes,months,tickers,cumulative,changes}`
 - `POST /api/index-universe/check-gurufocus`, `DELETE /api/index-universe/indexes/{index_name}`
 - `GET /api/acwi/{holdings,announcements,announcement-detail,net-additions,fetch-all-details}`
-- `POST /api/acwi/announcement-details-bulk`, `POST /api/acwi/save-universe`
+- `POST /api/acwi/announcement-details-bulk`
+
+*Universe templates (self-updating canonical universes — see `backend/index_universe/templates/`)*
+- `GET /api/universe-templates` — every registered template with current state.
+- `GET /api/universe-templates/{key}` — single template summary + full months list (powers the /acwi date scrubber).
+- `GET /api/universe-templates/{key}/months` — months captured.
+- `GET /api/universe-templates/{key}/membership?date=YYYY-MM` — holdings on a date. Responds with strong `ETag`; honors `If-None-Match` → 304. Backed by an in-process LRU+TTL cache (`backend/index_universe/templates/_cache.py`) so repeat queries skip the DB roundtrip entirely.
+- `POST /api/universe-templates/{key}/refresh` — SSE: trigger refresh (replaces the old `/api/acwi/save-universe`).
+- `GET /api/universe-templates/{key}/all-companies.csv` — CSV of every company ever in the universe. Server-side aggregation via the `universe_all_companies_ever` SQL function (single round-trip). Columns: exchange_code, gurufocus_ticker, company_name, exchange_name, sector, gurufocus_url.
 
 *Benchmarks*
 - `GET|POST /api/benchmarks`, `POST /api/benchmarks/{id}/refresh`, `DELETE /api/benchmarks/{id}`
@@ -194,13 +202,12 @@ The frontend follows Next.js convention: `.env.local` overrides `.env`. Vercel u
 - `POST /api/ingest/scheduled-refresh/trigger?job_name=manual` — manual UI trigger (Run-now button on `/schedule`).
 - `GET /api/ingest/runs?limit=N` — recent pipeline runs (newest first).
 - `GET /api/ingest/runs/{run_id}` — one row including all per-phase result columns.
-- `GET /api/ingest/runs/{run_id}/acwi-membership?q=` — searchable membership for the ACWI snapshot the run captured.
-- `GET /api/scheduled-strategies` — every strategy on the schedule, with backtest name/config + last-pipeline-snapshot summary.
-- `GET /api/scheduled-strategies/available-backtests` — saved backtest_runs not yet on the schedule (powers the add picker).
-- `POST /api/scheduled-strategies` body `{backtest_run_id}` — pin a saved backtest to the schedule.
+- `GET /api/ingest/runs/{run_id}/templates/{template_key}/membership?q=` — searchable membership for the universe a given template captured during this run.
+- `GET /api/scheduled-strategies` — every strategy on the schedule with `{name, frequency, config, last_run_at, next_due_at, last_snapshot}` per entry.
+- `POST /api/scheduled-strategies` body `{name, frequency, config}` — add a self-contained schedule entry. `frequency` is one of daily/weekly/monthly/bimonthly/quarterly; `config` is a full BacktestRequest payload. The entry's `next_due_at` is set to the next upcoming Tuesday 02:00 UTC pipeline tick.
 - `PATCH /api/scheduled-strategies/{id}` body `{enabled}` — toggle without removing.
-- `DELETE /api/scheduled-strategies/{id}` — remove from schedule (past snapshots remain, tagged via `current_picks_snapshot.backtest_run_id`).
-- `GET /api/scheduled-strategies/{id}/runs?limit=N` — run history for one scheduled strategy (snapshots produced by pipeline runs, joined with the originating `ingest_run`).
+- `DELETE /api/scheduled-strategies/{id}` — remove from schedule (past snapshots remain, with `scheduled_strategy_id` set to NULL via cascade).
+- `GET /api/scheduled-strategies/{id}/runs?limit=N` — run history for one scheduled strategy (snapshots produced by pipeline runs, joined via `current_picks_snapshot.scheduled_strategy_id`).
 
 *Transaction fees*
 - `GET /api/exchange-fees` — every exchange (from `gurufocus_exchange`) joined with its configured `fee_bps` (0 when unset).
@@ -231,15 +238,15 @@ The frontend follows Next.js convention: `.env.local` overrides `.env`. Vercel u
 - `/longequity-universe` — LongEquity Insight: monthly snapshots of stock universe, grouped by region/country
 - `/airs-portfolio` — AIRS Portfolio: broker scanner + drag & drop Excel uploads, YTD returns table
 - `/companies` — Company management: searchable/filterable table, inline edit, add/delete
-- `/momentum` — Momentum Portfolio Backtester + Current Picks
+- `/backtest` (renamed from `/momentum` on 2026-05-19) — Strategy backtester + Current Picks. Universe dropdown lists only template-managed universes (currently ACWI). On universe select, the start-date input defaults to the template's hard backstop (`earliest_date`, e.g. 2002-01 for ACWI) and the end-date input defaults to the latest available close-price date (`GET /api/data/latest-price-date`). The only strategy implemented today is momentum; the URL is general so more strategies can land without another rename.
 - `/benchmarks` — Benchmark management (create/refresh/delete index benchmarks)
 - `/earnings` — Earnings dashboard
 - `/universe` — Universe screener (criteria-driven)
 - `/universe_index` — Index universe (S&P 500, ACWI) management
-- `/acwi` — ACWI holdings / MSCI announcement explorer
+- `/acwi` — Top: canonical ACWI universe (template-managed) with date scrubber + searchable membership + "Refresh now" button (calls `POST /api/universe-templates/ACWI/refresh`). Bottom: live iShares fund holdings + MSCI announcement explorer + net-additions explorer (diagnostics for the reconstruction). The "Save universe" form is gone — the canonical universe is continuously refreshed by the pipeline, no manual save needed.
 - `/fx-rates` — FX rate viewer + sync
 - `/request_gurufocus` — GuruFocus indicator fetch UI
-- `/schedule` — Scheduled pipeline (ACWI → prices → momentum). Top: **Scheduled strategies** list — each row is one saved backtest pinned to the schedule, clickable to expand into per-strategy run history (each row in the history is one pipeline snapshot, click-to-expand into its holdings via `MonthlyHoldingsTable`). Add picker shows full params of the candidate backtest before confirming. Middle: weekly + monthly job cards with "Run now". Bottom: recent runs list — each row has a three-dot phase pip, expands to show the ACWI diff, the searchable ACWI membership, and one collapsible holdings section per scheduled strategy that ran (success or error). Backed by `scheduled_strategy` + `ingest_run` + `current_picks_snapshot.{ingest_run_id, backtest_run_id}` FKs.
+- `/schedule` — Scheduled pipeline (ACWI → prices → momentum). Top: **Scheduled strategies** list — each row is one saved backtest pinned to the schedule, clickable to expand into per-strategy run history (each row in the history is one pipeline snapshot, click-to-expand into its holdings via `MonthlyHoldingsTable`). Add picker shows full params of the candidate backtest before confirming. Middle: weekly + monthly job cards with "Run now". Bottom: recent runs list — each row has a three-dot phase pip, expands to show one collapsible card per template universe that ran (with its diff + searchable membership) and one collapsible holdings section per scheduled strategy that ran (success or error). Backed by `scheduled_strategy` + `ingest_run` (`templates_summary` JSONB array + `momentum_summary` JSONB array) + `current_picks_snapshot.{ingest_run_id, backtest_run_id}` FKs.
 - `/api` — Admin-only interactive endpoint explorer. Lists each admin API endpoint as a card with description, params, "Try it" button, and "Copy as curl". Uses the user's current Supabase session as the Bearer token so the explorer hits the real endpoints exactly as an external script would.
 - `/documentation` — Admin-only reference for calling the admin API from external scripts. Includes the full `bbterminal_client.py` Python source (copy-pasteable), a curl quick-start, env-var setup, a PowerShell one-off variant, and an endpoint reference table cross-linking to `/api`.
 - `/fees` — Per-exchange one-way transaction fees + broker-support toggle. Each row has a "Supported" checkbox (default checked) plus a fee_bps input; changes are batched and committed via a sticky Save button (no auto-save). Unsupported exchanges are dropped from the backtest universe entirely — every company on that exchange is excluded before signals are computed (filter applied in `backtest_stream/stream.py` right after `load_universe`). Backtest stats (Total Return, Annualized, Sharpe, Max DD, yearly breakdown, custom range, variants table) render `gross (net)` using a trade-aware fee model: a holding pays the buy fee only when it first appears vs the previous period, the sell fee only when it doesn't roll into the next period, and the open period never pays sell. Net stats are computed client-side in `frontend/app/components/momentum/feeStats.ts` so adjusting fees updates parentheticals on the next backtest render without re-running. Backed by `exchange_fee` table (`fee_bps` + `is_broker_supported`).
@@ -267,7 +274,7 @@ The frontend follows Next.js convention: `.env.local` overrides `.env`. Vercel u
 
 See [`docs/schema.md`](docs/schema.md) for the full ERD and table descriptions.
 
-Key tables: `company`, `metric_data` (time-series for prices, volumes, derived metrics), `universe` + `universe_membership`, `backtest_run`, `benchmark` + `benchmark_price`, `gurufocus_exchange` + `country` + `currency` + `fx_rate`, `airs_performance`, `current_picks_snapshot` (one row per current-picks compute — locked-at-start holdings + current-month daily_picks blob, tagged with `strategy_hash`; pipeline-produced rows also carry `ingest_run_id` + `backtest_run_id` FKs so /schedule's per-strategy history is a clean JOIN), `current_picks_day` (per-day row keyed by `(strategy_hash, target_date)` — backs the cross-month "Daily picks history" view and the cache lookup), `ingest_run` (per-pipeline-run audit row backing `/schedule` — carries phase tracking + per-phase result columns: `acwi_universe_id` / `acwi_target_month` / `acwi_summary` jsonb / `momentum_summary` jsonb array of per-strategy results), `scheduled_strategy` (one row per saved backtest pinned to the pipeline's momentum phase — `{backtest_run_id, enabled}`), `exchange_fee` (per-exchange one-way bps backing `/fees`).
+Key tables: `company`, `metric_data` (time-series for prices, volumes, derived metrics), `universe` + `universe_membership`, `backtest_run`, `benchmark` + `benchmark_price`, `gurufocus_exchange` + `country` + `currency` + `fx_rate`, `airs_performance`, `current_picks_snapshot` (one row per current-picks compute — locked-at-start holdings + current-month daily_picks blob, tagged with `strategy_hash`; pipeline-produced rows also carry `ingest_run_id` + `backtest_run_id` FKs so /schedule's per-strategy history is a clean JOIN), `current_picks_day` (per-day row keyed by `(strategy_hash, target_date)` — backs the cross-month "Daily picks history" view and the cache lookup), `universe` (template-managed canonical universes carry `template_key` UNIQUE — one row per `UniverseTemplate`; user-created criteria universes leave it NULL), `ingest_run` (per-pipeline-run audit row backing `/schedule` — carries phase tracking + `templates_summary` JSONB array of per-template diffs + `momentum_summary` JSONB array of per-strategy results), `scheduled_strategy` (one row per saved backtest pinned to the pipeline's momentum phase — `{backtest_run_id, enabled}`), `exchange_fee` (per-exchange one-way bps backing `/fees`).
 
 ---
 
@@ -429,7 +436,7 @@ The scheduled refresh runs from an in-process APScheduler defined in `backend/sc
 
 Each fire calls `kick_off_refresh(job_name, "auto")` from `routers/ingest_runs.py`, which inserts an `ingest_run` row tagged `triggered_by='auto'` and spawns the daemon worker `_run_pipeline_sync` that executes:
 
-  **Phase 1 — ACWI refresh** via `run_acwi_save_universe()` (the sync core extracted from `/api/acwi/save-universe`). Reconstructs the last two months of ACWI membership, then diffs this month vs last month to produce `acwi_summary` JSONB with `{additions, removals, renames}` lists. Persisted on the run row as `acwi_universe_id` / `acwi_target_month` / `acwi_summary`.
+  **Phase 1 — Template universe refresh**. Iterates every registered `UniverseTemplate` (`backend/index_universe/templates/`; currently just `ACWITemplate`) and calls `template.refresh(supabase, on_progress)` on each. Each refresh ensures the canonical `universe` row (keyed by `template_key`) exists, reconstructs monthly memberships from the template's `earliest_date` (e.g. ACWI: 2002-01-01) to today, and produces a `TemplateDiff` (additions/removals/renames vs previous month). Per-template results land as entries in `ingest_run.templates_summary` (JSONB array — one entry per template). Per-template failures are isolated (the array entry carries an `error` field) so a single broken template doesn't abort the phase.
 
   **Phase 2 — price + volume refresh** (the original behavior pre-pipeline). Walks every row in `company` through `ensure_prices_for_company` + `ensure_volume_for_company`. Per-class counters checkpoint to the row every 100 companies. Forbidden / delisted / unexpected-error tallies surface on the same row.
 

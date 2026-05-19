@@ -2,11 +2,13 @@
 
 Backs the /schedule page. Each run executes three phases in order:
 
-  1. ACWI universe refresh — pulls the latest iShares ACWI XLS,
-     reconciles companies, persists this month's `universe_membership`
-     rows, and computes the diff vs the previous month (additions,
-     removals, renames). Result lands on `ingest_run.acwi_summary` /
-     `acwi_universe_id` / `acwi_target_month`.
+  1. Template-managed universe refresh — iterates every registered
+     `UniverseTemplate` (currently just ACWI; SP500 will plug in once
+     migrated). For each: calls `template.refresh()`, which reconstructs
+     monthly memberships in the canonical universe row and produces a
+     diff (additions/removals/renames) vs the previous month. Each
+     template's diff lands as one entry in `ingest_run.templates_summary`
+     (a JSONB array, one entry per template).
   2. Price + volume refresh — walks every company in `company` through
      `ensure_prices_for_company` + `ensure_volume_for_company`,
      tallying forbidden / delisted / errors silently. This is the
@@ -155,14 +157,15 @@ def _run_pipeline_sync(run_id: int) -> None:
     log = logging.getLogger(__name__)
     accumulated_errors: list[str] = []
 
-    # ── Phase 1: ACWI universe refresh ─────────────────────────
-    # Clear the message from the previous phase (a re-run of the same
-    # ingest_run id would otherwise carry stale text across phases).
-    _update_run(run_id, current_phase="acwi", current_message="Starting ACWI refresh…")
+    # ── Phase 1: template-managed universe refresh ─────────────
+    # Walks every registered `UniverseTemplate` (currently just ACWI;
+    # SP500 will plug in here once migrated). Each template's diff
+    # lands as one entry in `ingest_run.templates_summary`.
+    _update_run(run_id, current_phase="templates", current_message="Starting template refresh…")
     try:
-        _run_acwi_phase(run_id)
+        _run_templates_phase(run_id)
     except Exception as e:
-        msg = f"ACWI phase failed: {type(e).__name__}: {e}"
+        msg = f"Templates phase failed: {type(e).__name__}: {e}"
         log.warning("[pipeline] run_id=%s %s", run_id, msg)
         accumulated_errors.append(msg)
 
@@ -197,153 +200,67 @@ def _run_pipeline_sync(run_id: int) -> None:
     log.info("[pipeline] run_id=%s finished status=%s", run_id, final_status)
 
 
-def _run_acwi_phase(run_id: int) -> None:
-    """Phase 1 — refresh the ACWI universe via the extracted sync worker
-    in `routers/index_universe/acwi.py`. After the save lands, compute
-    the additions / removals / renames diff against the previous month
-    of `universe_membership` and persist as `acwi_summary` JSONB."""
-    from routers.index_universe.acwi import run_acwi_save_universe
+def _run_templates_phase(run_id: int) -> None:
+    """Phase 1 — refresh every registered `UniverseTemplate` (currently
+    just ACWI). Each template's `refresh()` is delegated to in turn;
+    per-template failures are captured in the result array as
+    `status='error'` entries (instead of bringing down the whole phase),
+    matching the per-strategy isolation pattern in the momentum phase.
 
-    # Two-month window — enough to reconstruct the previous month (the
-    # diff baseline) and the current month (the new state). A wider
-    # window would re-reconstruct earlier months unnecessarily.
-    today = date.today()
-    if today.month == 1:
-        prev_month_start = date(today.year - 1, 12, 1)
-    else:
-        prev_month_start = date(today.year, today.month - 1, 1)
-    this_month = today.strftime("%Y-%m")
-    prev_month = prev_month_start.strftime("%Y-%m")
+    The final `templates_summary` JSONB is the array of per-template
+    diff entries; `current_picks_snapshot.backtest_run_id` ties momentum
+    output back to its source strategy."""
+    from index_universe.templates import all_templates  # noqa: PLC0415
 
-    # Throttle on_progress writes so the company-reconciliation loop
-    # (which emits one event every ~200 companies) doesn't hammer the DB.
+    templates = all_templates()
+    if not templates:
+        _update_run(run_id, templates_summary=[])
+        return
+
     throttle = _Throttle()
+    summaries: list[dict] = []
+    errors: list[str] = []
 
-    def _on_acwi_progress(message: str, _pct: int | None = None) -> None:
-        if message and throttle.should_write():
-            _update_run(run_id, current_message=message)
+    for idx, t in enumerate(templates, start=1):
+        prefix = f"[{idx}/{len(templates)} {t.label}]"
+        _update_run(run_id, current_message=f"{prefix} starting refresh…")
 
-    run_acwi_save_universe(
-        "ACWI",
-        prev_month_start.isoformat(),
-        today.isoformat(),
-        on_progress=_on_acwi_progress,
-    )
-    _update_run(run_id, current_message="Computing ACWI diff vs previous month…")
+        def on_progress(message: str, _pct: int | None = None, _prefix=prefix) -> None:
+            if message and throttle.should_write():
+                _update_run(run_id, current_message=f"{_prefix} {message}")
 
-    # Look up the universe row by label so we can stamp the FK + filter
-    # the membership diff. The save step always uses the same label.
-    u_resp = (
-        supabase.table("universe")
-        .select("universe_id")
-        .eq("label", "ACWI")
-        .limit(1)
-        .execute()
-    )
-    if not u_resp.data:
-        raise RuntimeError("ACWI universe not found after save-universe call")
-    universe_id = int(u_resp.data[0]["universe_id"])
+        try:
+            result = t.refresh(supabase, on_progress=on_progress)
+            summaries.append(result.diff.to_summary_entry())
+        except Exception as e:
+            msg = f"{type(e).__name__}: {e}"
+            errors.append(f"[{t.label}] {msg}")
+            # Stub entry so the UI can still render which template
+            # was attempted, with an inline error.
+            summaries.append({
+                "template_key": t.template_key,
+                "universe_id": t.universe_id(supabase),
+                "this_month": None,
+                "prev_month": None,
+                "additions_count": 0,
+                "removals_count": 0,
+                "renames_count": 0,
+                "additions": [],
+                "removals": [],
+                "renames": [],
+                "error": msg,
+            })
 
-    diff = _compute_acwi_diff(universe_id, prev_month, this_month)
+        # Persist incrementally — multi-template runs let the UI see
+        # each template land independently rather than waiting for the
+        # whole phase to finish.
+        _update_run(run_id, templates_summary=summaries)
 
-    _update_run(
-        run_id,
-        acwi_universe_id=universe_id,
-        acwi_target_month=this_month,
-        acwi_summary=diff,
-    )
-
-
-def _compute_acwi_diff(universe_id: int, prev_month: str, this_month: str) -> dict:
-    """Compare two months of `universe_membership` for the ACWI universe.
-    Returns:
-      additions: companies present this month but not last month
-      removals: present last month but not this month
-      renames:  same company_id in both, but with a different
-                `universe_ticker` (most common case: cross-exchange
-                override remap, e.g. WAR:SPL → WAR:EBP)
-    Each entry carries company_id + ticker + name + sector so the UI
-    can render meaningful rows without an extra fetch.
-    """
-    def _load_month(month: str) -> dict[int, dict]:
-        out: dict[int, dict] = {}
-        offset = 0
-        while True:
-            r = (
-                supabase.table("universe_membership")
-                .select("company_id, universe_ticker, sector")
-                .eq("universe_id", universe_id)
-                .eq("target_month", month)
-                .range(offset, offset + 999)
-                .execute()
-            )
-            batch = r.data or []
-            for row in batch:
-                out[int(row["company_id"])] = row
-            if len(batch) < 1000:
-                break
-            offset += 1000
-        return out
-
-    old = _load_month(prev_month)
-    new = _load_month(this_month)
-
-    added_cids = sorted(set(new) - set(old))
-    removed_cids = sorted(set(old) - set(new))
-    rename_cids = sorted(
-        cid for cid in (set(old) & set(new))
-        if old[cid].get("universe_ticker") != new[cid].get("universe_ticker")
-    )
-
-    # One round-trip to fetch names for every cid involved (chunks of 50
-    # to stay under Cloudflare's URL length limits).
-    all_cids = list(set(added_cids) | set(removed_cids) | set(rename_cids))
-    names: dict[int, str] = {}
-    for chunk_start in range(0, len(all_cids), 50):
-        chunk = all_cids[chunk_start : chunk_start + 50]
-        n_resp = (
-            supabase.table("company")
-            .select("company_id, company_name")
-            .in_("company_id", chunk)
-            .execute()
+    if errors:
+        raise RuntimeError(
+            f"{len(errors)} of {len(templates)} templates failed: "
+            + " | ".join(errors[:3])
         )
-        for r in (n_resp.data or []):
-            names[int(r["company_id"])] = r.get("company_name") or ""
-
-    return {
-        "this_month": this_month,
-        "prev_month": prev_month,
-        "additions_count": len(added_cids),
-        "removals_count": len(removed_cids),
-        "renames_count": len(rename_cids),
-        "additions": [
-            {
-                "company_id": cid,
-                "ticker": new[cid].get("universe_ticker"),
-                "name": names.get(cid),
-                "sector": new[cid].get("sector"),
-            }
-            for cid in added_cids
-        ],
-        "removals": [
-            {
-                "company_id": cid,
-                "ticker": old[cid].get("universe_ticker"),
-                "name": names.get(cid),
-                "sector": old[cid].get("sector"),
-            }
-            for cid in removed_cids
-        ],
-        "renames": [
-            {
-                "company_id": cid,
-                "old_ticker": old[cid].get("universe_ticker"),
-                "new_ticker": new[cid].get("universe_ticker"),
-                "name": names.get(cid),
-            }
-            for cid in rename_cids
-        ],
-    }
 
 
 def _run_prices_phase(run_id: int, accumulated_errors: list[str]) -> None:
@@ -509,42 +426,57 @@ def _run_momentum_phase(run_id: int) -> None:
     """Phase 3 — compute current-portfolio holdings for every enabled row
     in `scheduled_strategy`. Each strategy gets its own
     `current_picks_snapshot` tagged with `ingest_run_id` +
-    `backtest_run_id`, so the /schedule per-strategy detail view can
-    JOIN them back to this run.
+    `scheduled_strategy_id`, so the /schedule per-strategy detail view
+    can JOIN them back to this run.
 
-    Per-strategy isolation: a single failing strategy doesn't abort the
-    phase. Each result is recorded in `momentum_summary` (now a list)
-    with status='ok' or status='error'. If ANY strategy errored, the
-    phase raises a summarized error so the outer pipeline marks the run
-    `error` — but every successful snapshot is still persisted."""
+    Each scheduled_strategy carries its own `config` (BacktestRequest
+    payload) and `frequency`. The phase only computes strategies whose
+    `next_due_at` is in the past (or NULL — fresh entries). After a
+    successful compute the row's `last_run_at` is set to now and
+    `next_due_at` is advanced per `frequency` (see
+    `routers.scheduled_strategies.compute_next_due_at`).
+
+    Per-strategy isolation: a single failing strategy doesn't abort
+    the phase. Each result lands as a `templates_summary`-style entry
+    in `ingest_run.momentum_summary` (with full Python traceback on
+    failure, for debugging from /schedule). If ANY strategy errored,
+    the phase raises a summarized error so the outer pipeline marks
+    the run `error` — but every successful snapshot is still
+    persisted, and every strategy's `next_due_at` is still bumped on
+    success."""
     log = logging.getLogger(__name__)
+    now_iso = _now_utc_iso()
+
+    # Pull EVERY enabled scheduled strategy. Each one will produce
+    # exactly one snapshot per tick — a fresh rebalance if it's due
+    # (`next_due_at` past), otherwise a `price_update` on the last
+    # rebalance's holdings.
     sched_resp = (
         supabase.table("scheduled_strategy")
-        .select("id, backtest_run_id, enabled")
+        .select("id, name, frequency, config, enabled, last_run_at, next_due_at")
         .eq("enabled", True)
         .order("created_at")
         .execute()
     )
     scheduled = sched_resp.data or []
     if not scheduled:
-        log.info("[pipeline.momentum] run_id=%s no scheduled strategies — skipping", run_id)
+        log.info(
+            "[pipeline.momentum] run_id=%s no scheduled strategies — skipping",
+            run_id,
+        )
         _update_run(run_id, momentum_summary=[])
         return
 
-    bt_ids = [s["backtest_run_id"] for s in scheduled]
-    bt_resp = (
-        supabase.table("backtest_run")
-        .select("run_id, name, config")
-        .in_("run_id", bt_ids)
-        .execute()
-    )
-    bt_by_id = {r["run_id"]: r for r in (bt_resp.data or [])}
-
     # Imports are local so the module loads cheaply at boot — the momentum
     # stream pulls in pandas/numpy etc.
+    import traceback as _traceback  # noqa: PLC0415
     from routers.momentum.backtest_stream.models import BacktestRequest  # noqa: PLC0415
     from routers.momentum.backtest_stream.stream import (  # noqa: PLC0415
         _momentum_backtest_stream,
+    )
+    from routers.scheduled_strategies import (  # noqa: PLC0415
+        compute_and_save_price_update as _compute_and_save_price_update,
+        compute_next_due_at as _compute_next_due_at,
     )
 
     summaries: list[dict] = []
@@ -553,34 +485,93 @@ def _run_momentum_phase(run_id: int) -> None:
 
     for idx, sched in enumerate(scheduled, start=1):
         strategy_id = sched["id"]
-        bt_run_id = sched["backtest_run_id"]
-        bt = bt_by_id.get(bt_run_id) or {}
-        strategy_name = bt.get("name") or f"Strategy #{strategy_id}"
+        strategy_name = sched.get("name") or f"Strategy #{strategy_id}"
+        frequency = sched.get("frequency")
+        next_due_iso = sched.get("next_due_at")
+        # "Due to rebalance" — first-run (next_due_at IS NULL) or its
+        # next-due tick has arrived. Otherwise the tick just does a
+        # price update on the last rebalance.
+        is_due_to_rebalance = (next_due_iso is None) or (next_due_iso <= now_iso)
+        kind = "rebalance" if is_due_to_rebalance else "price_update"
         _update_run(
             run_id,
-            current_message=f"Computing strategy {idx} of {total}: {strategy_name}…",
+            current_message=(
+                f"Strategy {idx} of {total} · "
+                f"{'rebalancing' if is_due_to_rebalance else 'price-updating'}: {strategy_name}…"
+            ),
         )
 
         entry: dict = {
             "strategy_id": strategy_id,
-            "backtest_run_id": bt_run_id,
             "strategy_name": strategy_name,
+            "frequency": frequency,
+            "kind": kind,
+            "config": sched.get("config") or {},
             "snapshot_id": None,
             "holdings_count": 0,
             "latest_price_date": None,
             "status": "error",
             "error_message": None,
+            "error_traceback": None,
         }
 
+        # ── Branch A: not due → price update on last rebalance ────
+        if not is_due_to_rebalance:
+            try:
+                snapshot_id = _compute_and_save_price_update(
+                    strategy_id=strategy_id,
+                    ingest_run_id=run_id,
+                    is_backfill=False,
+                )
+                if snapshot_id is None:
+                    # No prior rebalance to price-update from. The very
+                    # first tick after add should always be a rebalance,
+                    # so this is a strange-but-non-fatal state.
+                    entry["status"] = "ok"
+                    entry["error_message"] = "No prior rebalance to price-update from"
+                else:
+                    # Hydrate the entry summary from the fresh snapshot.
+                    pu_resp = supabase.table("current_picks_snapshot").select(
+                        "holdings, latest_price_date"
+                    ).eq("snapshot_id", snapshot_id).limit(1).execute()
+                    pu = (pu_resp.data or [{}])[0]
+                    entry["snapshot_id"] = snapshot_id
+                    entry["holdings_count"] = len(pu.get("holdings") or [])
+                    entry["latest_price_date"] = pu.get("latest_price_date")
+                    entry["status"] = "ok"
+                # Bump last_run_at (but NOT next_due_at — the strategy
+                # didn't actually rebalance, it just got re-priced).
+                supabase.table("scheduled_strategy").update({
+                    "last_run_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                    "updated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                }).eq("id", strategy_id).execute()
+            except Exception as e:
+                msg = f"{type(e).__name__}: {e}"
+                tb = _traceback.format_exc()
+                entry["error_message"] = msg
+                entry["error_traceback"] = tb
+                errors.append(f"[{strategy_name}] {msg}")
+                log.warning(
+                    "[pipeline.momentum] run_id=%s strategy=%s price_update failed: %s\n%s",
+                    run_id, strategy_name, msg, tb,
+                )
+
+            summaries.append(entry)
+            _update_run(run_id, momentum_summary=summaries)
+            continue
+
+        # ── Branch B: due → fresh rebalance ───────────────────────
         try:
-            cfg = dict(bt.get("config") or {})
+            cfg = dict(sched.get("config") or {})
             if not cfg:
-                raise RuntimeError(f"Backtest run #{bt_run_id} has no config")
+                raise RuntimeError(
+                    f"Scheduled strategy #{strategy_id} has no config"
+                )
+            # Pipeline-only overrides — the saved config is the user's
+            # intent; we only force the mode/cache flags so it computes
+            # a fresh current-portfolio snapshot.
             cfg["mode"] = "current_portfolio"
             cfg["force_recompute"] = True
-            # Pipeline's prices phase just refreshed everything; still
-            # allow self-heal so any leftover gaps surface a clear
-            # warning instead of silently dropping companies.
             cfg["db_only"] = False
             cfg.pop("variants", None)
             cfg.pop("n_trials", None)
@@ -588,7 +579,7 @@ def _run_momentum_phase(run_id: int) -> None:
                 req = BacktestRequest(**cfg)
             except Exception as e:
                 raise RuntimeError(
-                    f"Backtest config doesn't validate as BacktestRequest: {e}"
+                    f"Scheduled strategy config doesn't validate as BacktestRequest: {e}"
                 )
 
             snapshot_id: int | None = None
@@ -630,19 +621,40 @@ def _run_momentum_phase(run_id: int) -> None:
             if snapshot_id is None:
                 raise RuntimeError("Momentum compute finished without persisting a snapshot")
 
-            # Tag the snapshot with the pipeline run + backtest it came
-            # from, and re-tag as 'auto' (the SSE flow inside the stream
-            # writes 'manual').
+            # Tag the snapshot with the pipeline run + scheduled
+            # strategy it came from, and re-tag as 'auto' (the SSE flow
+            # inside the stream writes 'manual').
             try:
                 supabase.table("current_picks_snapshot").update({
                     "triggered_by": "auto",
                     "ingest_run_id": run_id,
-                    "backtest_run_id": bt_run_id,
+                    "scheduled_strategy_id": strategy_id,
                 }).eq("snapshot_id", snapshot_id).execute()
             except Exception as e:
                 log.warning(
                     "[pipeline.momentum] run_id=%s failed to tag snapshot=%s: %s: %s",
                     run_id, snapshot_id, type(e).__name__, e,
+                )
+
+            # Advance the schedule clock: mark this strategy as just
+            # ran + compute its next due tick from the frequency. Best-
+            # effort — a checkpoint write failure here doesn't roll back
+            # the snapshot.
+            try:
+                ran_at = datetime.now(timezone.utc).replace(microsecond=0)
+                next_due = (
+                    _compute_next_due_at(frequency, ran_at).isoformat()
+                    if frequency else None
+                )
+                supabase.table("scheduled_strategy").update({
+                    "last_run_at": ran_at.isoformat(),
+                    "next_due_at": next_due,
+                    "updated_at": ran_at.isoformat(),
+                }).eq("id", strategy_id).execute()
+            except Exception as e:
+                log.warning(
+                    "[pipeline.momentum] run_id=%s strategy=%s failed to bump schedule clock: %s: %s",
+                    run_id, strategy_name, type(e).__name__, e,
                 )
 
             entry["snapshot_id"] = snapshot_id
@@ -655,11 +667,13 @@ def _run_momentum_phase(run_id: int) -> None:
             )
         except Exception as e:
             msg = f"{type(e).__name__}: {e}"
+            tb = _traceback.format_exc()
             entry["error_message"] = msg
+            entry["error_traceback"] = tb
             errors.append(f"[{strategy_name}] {msg}")
             log.warning(
-                "[pipeline.momentum] run_id=%s strategy=%s failed: %s",
-                run_id, strategy_name, msg,
+                "[pipeline.momentum] run_id=%s strategy=%s failed: %s\n%s",
+                run_id, strategy_name, msg, tb,
             )
 
         summaries.append(entry)
@@ -796,33 +810,37 @@ async def get_ingest_run(run_id: int):
     return resp.data[0]
 
 
-@router.get("/api/ingest/runs/{run_id}/acwi-membership")
-async def get_acwi_membership_for_run(run_id: int, q: str = "", limit: int = 500):
-    """ACWI universe membership as of the run's `acwi_target_month`,
-    optionally filtered by `q` matching ticker or company_name.
-    Returns up to `limit` rows (capped at 5000) for the membership viewer
-    on /schedule. Returns 404 when the run didn't reach the ACWI phase."""
+@router.get("/api/ingest/runs/{run_id}/templates/{template_key}/membership")
+async def get_template_membership_for_run(
+    run_id: int, template_key: str, q: str = "", limit: int = 500,
+):
+    """Universe membership captured by this run's templates phase, for
+    the given `template_key`. Reads `universe_id` + `this_month` from
+    the run's `templates_summary` array entry (set by the templates
+    phase as each template's refresh completes). Returns 404 when the
+    run didn't include the requested template, or when its diff entry
+    failed (no `this_month`)."""
     limit = max(1, min(5000, limit))
 
     def _query() -> list[dict]:
         run_resp = (
             supabase.table("ingest_run")
-            .select("acwi_universe_id, acwi_target_month")
+            .select("templates_summary")
             .eq("run_id", run_id)
             .limit(1)
             .execute()
         )
         if not run_resp.data:
             raise HTTPException(404, "Run not found")
-        row = run_resp.data[0]
-        uid = row.get("acwi_universe_id")
-        month = row.get("acwi_target_month")
+        summaries = run_resp.data[0].get("templates_summary") or []
+        entry = next((s for s in summaries if s.get("template_key") == template_key), None)
+        if entry is None:
+            raise HTTPException(404, f"Run has no entry for template {template_key}")
+        uid = entry.get("universe_id")
+        month = entry.get("this_month")
         if uid is None or month is None:
-            raise HTTPException(404, "Run has no ACWI universe captured")
+            raise HTTPException(404, f"Run's {template_key} entry has no universe captured")
 
-        # Pull the membership rows + join to company for ticker / name /
-        # exchange. supabase-py's PostgREST nested-select syntax handles
-        # the join in one round-trip.
         mem_resp = (
             supabase.table("universe_membership")
             .select(
@@ -852,7 +870,6 @@ async def get_acwi_membership_for_run(run_id: int, q: str = "", limit: int = 500
                 "exchange": exchange,
                 "sector": r.get("sector"),
             })
-        # Stable sort by ticker for predictable display.
         out.sort(key=lambda x: (x.get("ticker") or "").upper())
         return out
 

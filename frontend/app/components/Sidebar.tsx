@@ -14,11 +14,12 @@ type NavItem = { href: string; label: string; userVisible?: true };
 const navItems: NavItem[] = [
   { href: '/', label: 'Welcome', userVisible: true },
   { href: '/earnings', label: 'Earnings Dashboard', userVisible: true },
-  { href: '/momentum', label: 'Momentum' },
+  { href: '/backtest', label: 'Backtest' },
   { href: '/universe', label: 'Universe Overview' },
   { href: '/longequity-universe', label: 'LongEquity Universe' },
   { href: '/universe_index', label: 'SP500 Universe' },
   { href: '/acwi', label: 'ACWI Universe' },
+  { href: '/leonteq', label: 'Leonteq Universe' },
   { href: '/fx-rates', label: 'FX Rates' },
   { href: '/airs-portfolio', label: 'AIRS Portfolio' },
   { href: '/request_gurufocus', label: 'Request GuruFocus' },

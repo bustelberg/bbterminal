@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { apiFetch } from '../../lib/apiFetch';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -125,7 +126,7 @@ export default function Fees() {
       const s = state[code];
       const feeNum = s.fee_bps.trim() === '' ? 0 : Number(s.fee_bps);
       try {
-        const r = await fetch(`${API_URL}/api/exchange-fees/${encodeURIComponent(code)}`, {
+        const r = await apiFetch(`${API_URL}/api/exchange-fees/${encodeURIComponent(code)}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

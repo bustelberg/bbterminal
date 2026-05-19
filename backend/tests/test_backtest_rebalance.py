@@ -48,19 +48,36 @@ class TestGenerateRebalanceDates:
     is an exit-only sentinel)."""
 
     def test_monthly(self):
+        # Engine now aligns calendar-stride rebalances to the first
+        # Monday of each month (matching /schedule's pipeline tick).
         dates = _generate_rebalance_dates(date(2024, 1, 1), date(2024, 6, 1), "monthly")
         assert dates == [
-            date(2024, 1, 1), date(2024, 2, 1), date(2024, 3, 1),
-            date(2024, 4, 1), date(2024, 5, 1), date(2024, 6, 1),
+            date(2024, 1, 1),  # 1st is Mon
+            date(2024, 2, 5),  # 1st is Thu → Mon Feb 5
+            date(2024, 3, 4),  # 1st is Fri → Mon Mar 4
+            date(2024, 4, 1),  # 1st is Mon
+            date(2024, 5, 6),  # 1st is Wed → Mon May 6
+            date(2024, 6, 3),  # 1st is Sat → Mon Jun 3
         ]
+        assert all(d.weekday() == 0 for d in dates)
 
     def test_every_2_months_strides_by_two(self):
         dates = _generate_rebalance_dates(date(2024, 1, 1), date(2024, 7, 1), "every_2_months")
-        assert dates == [date(2024, 1, 1), date(2024, 3, 1), date(2024, 5, 1), date(2024, 7, 1)]
+        # Take every-other first-Monday-of-month.
+        assert dates == [
+            date(2024, 1, 1), date(2024, 3, 4), date(2024, 5, 6), date(2024, 7, 1),
+        ]
+        assert all(d.weekday() == 0 for d in dates)
 
     def test_every_3_months_strides_by_three(self):
         dates = _generate_rebalance_dates(date(2024, 1, 1), date(2024, 12, 1), "every_3_months")
-        assert dates == [date(2024, 1, 1), date(2024, 4, 1), date(2024, 7, 1), date(2024, 10, 1)]
+        assert dates == [
+            date(2024, 1, 1),  # Mon
+            date(2024, 4, 1),  # Mon
+            date(2024, 7, 1),  # Mon
+            date(2024, 10, 7), # Oct 1 is Tue → first Mon = Oct 7
+        ]
+        assert all(d.weekday() == 0 for d in dates)
 
     def test_weekly_emits_mondays(self):
         # 2024-01-01 IS a Monday — first emitted date should equal start.
@@ -124,8 +141,13 @@ class TestEvery2MonthsBacktest:
         )
         result = run_backtest(config, prices, universe)
 
-        # Periods: [Jan, Mar, May, Jul]; iterates [:-1] → 3 records (Jan, Mar, May).
-        assert [r.date for r in result.monthly_records] == ["2024-01", "2024-03", "2024-05"]
+        # Engine emits the exact rebalance Monday (YYYY-MM-DD) for every
+        # frequency — first-Mondays-of-month for the calendar-stride
+        # variants. Periods: [Jan 1, Mar 4, May 6, Jul 1]; iterates [:-1]
+        # → 3 records (Jan 1 Mon, Mar 4 Mon, May 6 Mon).
+        assert [r.date for r in result.monthly_records] == [
+            "2024-01-01", "2024-03-04", "2024-05-06",
+        ]
 
         # All 4 picked each period (top_n_sectors=2 × top_n_per_sector=2 = 4).
         for rec in result.monthly_records:
@@ -133,7 +155,8 @@ class TestEvery2MonthsBacktest:
 
         # Forward returns derived against entry/exit pairs from periods[i] → periods[i+1].
         idx = _build_price_index(prices)
-        period_starts = [date(2024, 1, 1), date(2024, 3, 1), date(2024, 5, 1), date(2024, 7, 1)]
+        # Engine aligns to first-Monday-of-month now.
+        period_starts = [date(2024, 1, 1), date(2024, 3, 4), date(2024, 5, 6), date(2024, 7, 1)]
         for i, rec in enumerate(result.monthly_records):
             entry_ts = pd.Timestamp(period_starts[i])
             exit_ts = pd.Timestamp(period_starts[i + 1])

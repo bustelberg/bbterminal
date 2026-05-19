@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { IngestRun, MomentumStrategyResult } from './Schedule';
+import type { IngestRun, MomentumStrategyResult, TemplateDiff } from './Schedule';
 import { runToTimelineProps, PIPELINE_STEPS } from './Schedule';
 import ProgressTimeline from './ProgressTimeline';
 import SnapshotHoldings from './SnapshotHoldings';
@@ -16,7 +16,7 @@ type MembershipRow = {
   sector: string | null;
 };
 
-/** Per-section collapsible card. */
+/** Collapsible card matching the rest of the run-detail subsections. */
 function Section({
   title,
   children,
@@ -47,53 +47,60 @@ function Section({
   );
 }
 
-function AcwiDiffSection({ run }: { run: IngestRun }) {
-  const summary = run.acwi_summary;
-  if (!summary) {
-    if (run.current_phase === 'acwi' && run.status === 'running') {
-      return <div className="text-xs text-gray-500">ACWI phase running…</div>;
-    }
-    return <div className="text-xs text-gray-500">No ACWI data captured for this run.</div>;
-  }
+/** Diff + searchable membership viewer for one template entry in this
+ * run's `templates_summary`. Each template that ran in this pipeline
+ * tick gets its own card so multi-template runs (when SP500 lands) are
+ * visually unambiguous. */
+function TemplateRunSection({ run, t }: { run: IngestRun; t: TemplateDiff }) {
   return (
-    <div className="space-y-3 text-xs">
-      <div className="text-gray-400 font-mono">
-        Diff: {summary.this_month} vs {summary.prev_month}
+    <div className="bg-[#151821] border border-gray-800/40 rounded-lg overflow-hidden">
+      <div className="px-3 py-2 flex items-center gap-3 flex-wrap border-b border-gray-800/40">
+        <span className="text-sm font-medium text-gray-200">{t.template_key}</span>
+        {t.error ? (
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-rose-500/10 text-rose-300 border-rose-500/30">
+            error
+          </span>
+        ) : (
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-emerald-500/15 text-emerald-300 border-emerald-500/30">
+            ok
+          </span>
+        )}
+        <span className="text-xs text-gray-500 font-mono">
+          {t.this_month ?? '—'}{t.prev_month && <span className="text-gray-600"> vs {t.prev_month}</span>}
+        </span>
+        <span className="text-xs text-gray-400 font-mono ml-auto">
+          +{t.additions_count} / −{t.removals_count}{t.renames_count > 0 && <span> / r{t.renames_count}</span>}
+        </span>
       </div>
-      <div className="grid gap-3 md:grid-cols-3">
-        <DiffList
-          color="emerald"
-          label="Additions"
-          count={summary.additions_count}
-          items={summary.additions.map((a) => ({
-            company_id: a.company_id,
-            primary: a.ticker,
-            secondary: a.name,
-            sector: a.sector,
-          }))}
-        />
-        <DiffList
-          color="rose"
-          label="Removals"
-          count={summary.removals_count}
-          items={summary.removals.map((a) => ({
-            company_id: a.company_id,
-            primary: a.ticker,
-            secondary: a.name,
-            sector: a.sector,
-          }))}
-        />
-        <DiffList
-          color="amber"
-          label="Renames"
-          count={summary.renames_count}
-          items={summary.renames.map((r) => ({
-            company_id: r.company_id,
-            primary: `${r.old_ticker} → ${r.new_ticker}`,
-            secondary: r.name,
-            sector: null,
-          }))}
-        />
+      <div className="px-3 py-3 space-y-3">
+        {t.error && (
+          <div className="text-xs text-rose-300 font-mono whitespace-pre-wrap">{t.error}</div>
+        )}
+        {!t.error && (
+          <div className="grid gap-3 md:grid-cols-3">
+            <DiffList
+              color="emerald"
+              label="Additions"
+              count={t.additions_count}
+              items={t.additions.map((a) => ({ company_id: a.company_id, primary: a.ticker, secondary: a.name, sector: a.sector }))}
+            />
+            <DiffList
+              color="rose"
+              label="Removals"
+              count={t.removals_count}
+              items={t.removals.map((a) => ({ company_id: a.company_id, primary: a.ticker, secondary: a.name, sector: a.sector }))}
+            />
+            <DiffList
+              color="amber"
+              label="Renames"
+              count={t.renames_count}
+              items={t.renames.map((r) => ({ company_id: r.company_id, primary: `${r.old_ticker} → ${r.new_ticker}`, secondary: r.name, sector: null }))}
+            />
+          </div>
+        )}
+        {!t.error && t.universe_id != null && t.this_month && (
+          <TemplateMembership runId={run.run_id} templateKey={t.template_key} targetMonth={t.this_month} />
+        )}
       </div>
     </div>
   );
@@ -117,7 +124,7 @@ function DiffList({
     amber: 'text-amber-300 bg-amber-500/10 border-amber-500/30',
   };
   return (
-    <div className="bg-[#151821] rounded-lg border border-gray-800/40">
+    <div className="bg-[#0f1117] rounded-lg border border-gray-800/40">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -149,24 +156,26 @@ function DiffList({
   );
 }
 
-function MembershipSection({ run }: { run: IngestRun }) {
+/** Lazy-loaded searchable membership table for one template in this run.
+ * Fetches `/api/ingest/runs/{run_id}/templates/{template_key}/membership`.
+ * Capped at 5000 rows (ACWI typically has ~2,500-3,000). */
+function TemplateMembership({
+  runId, templateKey, targetMonth,
+}: { runId: number; templateKey: string; targetMonth: string }) {
   const [rows, setRows] = useState<MembershipRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (loaded || loading) return;
     setLoading(true);
     try {
-      const r = await fetch(`${API_URL}/api/ingest/runs/${run.run_id}/acwi-membership?limit=5000`);
+      const r = await fetch(`${API_URL}/api/ingest/runs/${runId}/templates/${encodeURIComponent(templateKey)}/membership?limit=5000`);
       if (!r.ok) {
-        if (r.status === 404) {
-          setError('No ACWI universe captured for this run.');
-        } else {
-          setError(`Failed to load (${r.status})`);
-        }
+        setError(`Failed to load (${r.status})`);
         return;
       }
       const data = (await r.json()) as MembershipRow[];
@@ -178,11 +187,11 @@ function MembershipSection({ run }: { run: IngestRun }) {
     } finally {
       setLoading(false);
     }
-  }, [run.run_id, loaded, loading]);
+  }, [runId, templateKey, loaded, loading]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (open && !loaded) void load();
+  }, [open, loaded, load]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -196,95 +205,169 @@ function MembershipSection({ run }: { run: IngestRun }) {
     );
   }, [rows, search]);
 
-  if (run.acwi_universe_id == null) {
-    return <div className="text-xs text-gray-500">No ACWI universe captured for this run.</div>;
-  }
-
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-3 flex-wrap">
-        <input
-          type="search"
-          placeholder="Search by ticker, name, exchange, sector…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="bg-[#151821] border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 focus:outline-none flex-1 min-w-[200px]"
-        />
-        <span className="text-xs text-gray-500 font-mono">
-          {loading ? 'loading…' : `${filtered.length} / ${rows.length}`}
+    <div className="border border-gray-800/40 rounded-lg overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full px-3 py-2 flex items-center justify-between text-left hover:bg-white/[0.02] transition-colors"
+      >
+        <span className="flex items-center gap-2">
+          <span className="text-gray-500 font-mono text-xs">{open ? '▾' : '▸'}</span>
+          <span className="text-sm text-gray-200">Membership ({targetMonth})</span>
         </span>
-      </div>
-      {error && <div className="text-xs text-rose-300">{error}</div>}
-      {filtered.length > 0 && (
-        <div className="max-h-80 overflow-auto border border-gray-800/40 rounded-lg">
-          <table className="w-full text-xs">
-            <thead className="text-gray-500 text-[10px] uppercase sticky top-0 bg-[#151821]">
-              <tr className="border-b border-gray-800/40">
-                <th className="text-left px-3 py-1.5 font-medium">Ticker</th>
-                <th className="text-left px-3 py-1.5 font-medium">Name</th>
-                <th className="text-left px-3 py-1.5 font-medium">Exchange</th>
-                <th className="text-left px-3 py-1.5 font-medium">Sector</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((r) => (
-                <tr key={r.company_id} className="border-b border-gray-800/20 hover:bg-white/[0.02]">
-                  <td className="px-3 py-1.5 font-mono text-gray-200">{r.ticker || '—'}</td>
-                  <td className="px-3 py-1.5 text-gray-300 truncate max-w-[280px]">{r.company_name || '—'}</td>
-                  <td className="px-3 py-1.5 font-mono text-gray-500">{r.exchange || '—'}</td>
-                  <td className="px-3 py-1.5 text-gray-400">{r.sector || '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <span className="text-xs text-gray-500 font-mono">{loaded ? `${rows.length} holdings` : 'click to load'}</span>
+      </button>
+      {open && (
+        <div className="px-3 py-2 border-t border-gray-800/40 space-y-2">
+          <div className="flex items-center gap-3 flex-wrap">
+            <input
+              type="search"
+              placeholder="Search by ticker, name, exchange, sector…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="bg-[#151821] border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 focus:outline-none flex-1 min-w-[200px]"
+            />
+            <span className="text-xs text-gray-500 font-mono">
+              {loading ? 'loading…' : `${filtered.length} / ${rows.length}`}
+            </span>
+          </div>
+          {error && <div className="text-xs text-rose-300">{error}</div>}
+          {filtered.length > 0 && (
+            <div className="max-h-80 overflow-auto border border-gray-800/40 rounded-lg">
+              <table className="w-full text-xs">
+                <thead className="text-gray-500 text-[10px] uppercase sticky top-0 bg-[#151821]">
+                  <tr className="border-b border-gray-800/40">
+                    <th className="text-left px-3 py-1.5 font-medium">Ticker</th>
+                    <th className="text-left px-3 py-1.5 font-medium">Name</th>
+                    <th className="text-left px-3 py-1.5 font-medium">Exchange</th>
+                    <th className="text-left px-3 py-1.5 font-medium">Sector</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((r) => (
+                    <tr key={r.company_id} className="border-b border-gray-800/20 hover:bg-white/[0.02]">
+                      <td className="px-3 py-1.5 font-mono text-gray-200">{r.ticker || '—'}</td>
+                      <td className="px-3 py-1.5 text-gray-300 truncate max-w-[280px]">{r.company_name || '—'}</td>
+                      <td className="px-3 py-1.5 font-mono text-gray-500">{r.exchange || '—'}</td>
+                      <td className="px-3 py-1.5 text-gray-400">{r.sector || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-/** One collapsible per scheduled strategy that ran this pipeline tick.
- * Successful strategies expand to their snapshot's holdings; failed
- * strategies show the error message instead. */
 function MomentumStrategyEntry({ result }: { result: MomentumStrategyResult }) {
   const [open, setOpen] = useState(false);
+  const [tbOpen, setTbOpen] = useState(false);
+  const [cfgOpen, setCfgOpen] = useState(false);
   const isError = result.status === 'error';
   const statusCls = isError
     ? 'bg-rose-500/10 text-rose-300 border-rose-500/30'
     : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+  // Always allow expansion — even on a hard error there's debug info to
+  // surface (error message, traceback, the config that ran).
   return (
     <div className="bg-[#151821] border border-gray-800/40 rounded-lg overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        disabled={isError && result.snapshot_id == null}
-        className="w-full px-3 py-2 flex items-center gap-3 hover:bg-white/[0.02] transition-colors disabled:cursor-default disabled:hover:bg-transparent"
+        className="w-full px-3 py-2 flex items-center gap-3 hover:bg-white/[0.02] transition-colors"
       >
-        <span className="text-gray-500 font-mono text-xs w-4">
-          {(isError && result.snapshot_id == null) ? '·' : (open ? '▾' : '▸')}
-        </span>
+        <span className="text-gray-500 font-mono text-xs w-4">{open ? '▾' : '▸'}</span>
         <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${statusCls}`}>
           {result.status}
         </span>
         <span className="text-sm text-gray-200 font-medium truncate">{result.strategy_name}</span>
+        {result.frequency && (
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-indigo-500/10 text-indigo-300 border-indigo-500/30">
+            {result.frequency}
+          </span>
+        )}
         <span className="text-xs text-gray-500 font-mono ml-auto">
           {result.holdings_count > 0 && `${result.holdings_count} holdings · `}
           {result.latest_price_date && `as of ${result.latest_price_date}`}
         </span>
       </button>
       {open && (
-        <div className="px-3 py-3 border-t border-gray-800/40 bg-[#0f1117]">
-          {isError ? (
-            <div className="text-xs text-rose-300 font-mono whitespace-pre-wrap">
-              {result.error_message ?? 'Unknown error'}
+        <div className="border-t border-gray-800/40 bg-[#0f1117] divide-y divide-gray-800/30">
+          {isError && (
+            <div className="px-3 py-3 space-y-2">
+              <div className="text-xs text-rose-300 font-mono whitespace-pre-wrap">
+                {result.error_message ?? 'Unknown error'}
+              </div>
+              {result.error_traceback && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setTbOpen((v) => !v)}
+                    className="text-[10px] uppercase tracking-wider text-gray-500 hover:text-gray-300 transition-colors"
+                  >
+                    {tbOpen ? '▾' : '▸'} Full traceback
+                  </button>
+                  {tbOpen && (
+                    <pre className="mt-2 bg-[#0b0d13] border border-gray-800/60 rounded-lg px-3 py-2 text-rose-200 text-[11px] font-mono whitespace-pre-wrap overflow-x-auto max-h-72 overflow-y-auto">
+                      {result.error_traceback}
+                    </pre>
+                  )}
+                </div>
+              )}
             </div>
-          ) : result.snapshot_id != null ? (
-            <SnapshotHoldings snapshotId={result.snapshot_id} />
-          ) : (
-            <div className="text-xs text-gray-500">No snapshot saved.</div>
+          )}
+          {!isError && result.snapshot_id != null && (
+            <div className="px-3 py-3">
+              <SnapshotHoldings snapshotId={result.snapshot_id} />
+            </div>
+          )}
+          {!isError && result.snapshot_id == null && (
+            <div className="px-3 py-3 text-xs text-gray-500">No snapshot saved.</div>
+          )}
+          {result.config && Object.keys(result.config).length > 0 && (
+            <div className="px-3 py-3">
+              <button
+                type="button"
+                onClick={() => setCfgOpen((v) => !v)}
+                className="text-[10px] uppercase tracking-wider text-gray-500 hover:text-gray-300 transition-colors"
+              >
+                {cfgOpen ? '▾' : '▸'} Raw stored config
+              </button>
+              {cfgOpen && (
+                <pre className="mt-2 bg-[#0b0d13] border border-gray-800/60 rounded-lg px-3 py-2 text-gray-300 text-[11px] font-mono whitespace-pre-wrap overflow-x-auto max-h-72 overflow-y-auto">
+                  {JSON.stringify(result.config, null, 2)}
+                </pre>
+              )}
+            </div>
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function TemplatesSection({ run }: { run: IngestRun }) {
+  const templates = run.templates_summary ?? [];
+  if (templates.length === 0) {
+    const phase = run.current_phase;
+    if (phase === 'templates' && run.status === 'running') {
+      return <div className="text-xs text-gray-500">Templates phase running…</div>;
+    }
+    return (
+      <div className="text-xs text-gray-500">
+        No template universes were refreshed for this run. (Are any registered?)
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      {templates.map((t, idx) => (
+        <TemplateRunSection key={`${t.template_key}-${idx}`} run={run} t={t} />
+      ))}
     </div>
   );
 }
@@ -305,7 +388,7 @@ function MomentumSection({ run }: { run: IngestRun }) {
   return (
     <div className="space-y-2">
       {results.map((r, idx) => (
-        <MomentumStrategyEntry key={`${r.strategy_id ?? 'x'}-${r.backtest_run_id}-${idx}`} result={r} />
+        <MomentumStrategyEntry key={`${r.strategy_id ?? 'x'}-${idx}`} result={r} />
       ))}
     </div>
   );
@@ -325,11 +408,8 @@ export default function ScheduleRunDetail({ run }: { run: IngestRun }) {
         errorMessage={tp.errorMessage}
         totalElapsedMs={tp.totalElapsedMs}
       />
-      <Section title="ACWI universe diff">
-        <AcwiDiffSection run={run} />
-      </Section>
-      <Section title={`ACWI membership (${run.acwi_target_month ?? '—'})`} defaultOpen={false}>
-        <MembershipSection run={run} />
+      <Section title={`Template universes (${run.templates_summary?.length ?? 0})`}>
+        <TemplatesSection run={run} />
       </Section>
       <Section title={`Momentum holdings (${run.momentum_summary?.length ?? 0} strateg${(run.momentum_summary?.length ?? 0) === 1 ? 'y' : 'ies'})`} defaultOpen={true}>
         <MomentumSection run={run} />

@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { apiFetch } from '../../lib/apiFetch';
 import { dialog } from '../../lib/dialog';
+import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
 import { trackedFetch } from '../../lib/loading';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
@@ -168,6 +170,9 @@ export default function CompanyManager() {
   } | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Mutation controls (Add / Edit / Delete) are admin-only. Read paths
+  // — sort, search, filters, universe chips — stay open to everyone.
+  const isAdmin = useIsAdmin();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -290,7 +295,7 @@ export default function CompanyManager() {
   async function handleSave(id: number, updated: Partial<Company>) {
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/companies/${id}`, {
+      const res = await apiFetch(`${API_URL}/api/companies/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updated),
@@ -317,7 +322,7 @@ export default function CompanyManager() {
     setConfirming(true);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/companies`, {
+      const res = await apiFetch(`${API_URL}/api/companies`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(pendingAdd),
@@ -340,7 +345,7 @@ export default function CompanyManager() {
     if (!(await dialog.confirm(`Delete "${name}"? This cannot be undone.`, { destructive: true, confirmLabel: 'Delete' }))) return;
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/companies/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`${API_URL}/api/companies/${id}`, { method: 'DELETE' });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail ?? `HTTP ${res.status}`);
@@ -381,12 +386,14 @@ export default function CompanyManager() {
             )}
           </p>
         </div>
-        <button
-          onClick={() => { setAdding(true); setEditingId(null); }}
-          className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
-        >
-          + Add company
-        </button>
+        {isAdmin && (
+          <button
+            onClick={() => { setAdding(true); setEditingId(null); }}
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+          >
+            + Add company
+          </button>
+        )}
       </div>
 
       <div className="px-8 py-3 border-b border-gray-800/60 flex items-center gap-3 flex-wrap">
@@ -536,20 +543,22 @@ export default function CompanyManager() {
                       )}
                     </td>
                     <td className="px-3 py-2.5">
-                      <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={() => { setEditingId(c.company_id); setAdding(false); }}
-                          className="px-2.5 py-1 rounded-lg text-xs text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => handleDelete(c.company_id, c.company_name ?? c.gurufocus_ticker)}
-                          className="px-2.5 py-1 rounded-lg text-xs text-gray-600 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                        >
-                          Delete
-                        </button>
-                      </div>
+                      {isAdmin && (
+                        <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => { setEditingId(c.company_id); setAdding(false); }}
+                            className="px-2.5 py-1 rounded-lg text-xs text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDelete(c.company_id, c.company_name ?? c.gurufocus_ticker)}
+                            className="px-2.5 py-1 rounded-lg text-xs text-gray-600 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ),

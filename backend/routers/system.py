@@ -61,3 +61,31 @@ def get_items():
 async def api_usage():
     """GuruFocus API usage counter for the current month."""
     return await asyncio.to_thread(get_usage, supabase)
+
+
+@router.get("/api/data/latest-price-date")
+async def latest_price_date():
+    """Most recent close-price observation across all companies. The
+    /backtest page uses this as the default end-date — "test up to
+    however current our data is." Cheap: an index-backed
+    `ORDER BY target_date DESC LIMIT 1` on `metric_data`."""
+    def _q() -> dict:
+        try:
+            resp = (
+                supabase.table("metric_data")
+                .select("target_date")
+                .eq("metric_code", "close_price")
+                .order("target_date", desc=True)
+                .limit(1)
+                .execute()
+            )
+        except Exception as e:
+            return {"date": None, "error": f"{type(e).__name__}: {e}"}
+        if not resp.data:
+            return {"date": None}
+        raw = resp.data[0].get("target_date")
+        # `target_date` is stored as YYYY-MM-DD; pass through verbatim
+        # (slice to 10 chars defensively in case a timestamp ever leaks
+        # through).
+        return {"date": str(raw)[:10] if raw else None}
+    return await asyncio.to_thread(_q)

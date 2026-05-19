@@ -107,7 +107,28 @@ async def list_company_memberships():
 
 @router.post("/api/companies")
 async def create_company(req: CreateCompanyRequest):
+    # Reject unresolvable exchanges loudly instead of silently inserting
+    # `exchange_id = NULL`. NULL-exchange rows render as blank columns in
+    # /backtest / /schedule and the frontend's GuruFocus link falls back
+    # to a bare-ticker URL that resolves to the wrong security for
+    # non-US listings — root cause of past ENI-style breakage. Use the
+    # /api/admin/companies/missing-exchange endpoint to triage existing
+    # NULL rows.
+    if not req.gurufocus_exchange or not req.gurufocus_exchange.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="gurufocus_exchange is required; companies must always carry an exchange.",
+        )
     exchange_id = _resolve_exchange_id(req.gurufocus_exchange)
+    if exchange_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unknown exchange_code {req.gurufocus_exchange!r}; add it to "
+                f"gurufocus_exchange first or use one of the known codes "
+                f"(GET /api/companies/field-options)."
+            ),
+        )
     row = {
         "company_name": req.company_name,
         "gurufocus_ticker": req.gurufocus_ticker.upper(),
@@ -127,7 +148,27 @@ async def update_company(company_id: int, req: UpdateCompanyRequest):
     if req.gurufocus_ticker is not None:
         updates["gurufocus_ticker"] = req.gurufocus_ticker.upper()
     if req.gurufocus_exchange is not None:
+        # Same loud-rejection rule as create_company — an explicit
+        # PUT with `gurufocus_exchange` set must resolve to a real
+        # exchange_id. Pass null in the request body to deliberately
+        # leave the field unchanged (Pydantic distinguishes
+        # `None`-default vs explicit `null` if the schema is set up
+        # for it; here None means "not provided", so this branch
+        # only fires when the caller passes a value).
+        if not req.gurufocus_exchange.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="gurufocus_exchange cannot be empty; omit the field to leave it unchanged.",
+            )
         exchange_id = _resolve_exchange_id(req.gurufocus_exchange)
+        if exchange_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unknown exchange_code {req.gurufocus_exchange!r}; "
+                    f"add it to gurufocus_exchange first or use a known code."
+                ),
+            )
         updates["exchange_id"] = exchange_id
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")

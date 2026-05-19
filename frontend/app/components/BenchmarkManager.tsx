@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { dialog } from '../../lib/dialog';
 import { trackedFetch } from '../../lib/loading';
+import { apiFetch } from '../../lib/apiFetch';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -106,7 +107,7 @@ export default function BenchmarkManager() {
   const handleSetSector = async (id: number, sector: string | null) => {
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/benchmarks/${id}`, {
+      const res = await apiFetch(`${API_URL}/api/benchmarks/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sector }),

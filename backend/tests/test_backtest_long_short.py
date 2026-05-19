@@ -103,7 +103,8 @@ class TestLongShortBacktest:
         # Re-derive from the same price index so the test pins the math, not
         # the magnitudes.
         idx = _build_price_index(prices)
-        month_starts = [date(2024, 12, 1), date(2025, 1, 1), date(2025, 2, 1), date(2025, 3, 1)]
+        # Engine aligns to first-Monday-of-month now (matches /schedule).
+        month_starts = [date(2024, 12, 2), date(2025, 1, 6), date(2025, 2, 3), date(2025, 3, 3)]
         for i, rec in enumerate(result.monthly_records):
             entry_ts = pd.Timestamp(month_starts[i])
             exit_ts = pd.Timestamp(month_starts[i + 1])

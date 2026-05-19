@@ -1,0 +1,642 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { apiFetch } from '../../lib/apiFetch';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+
+const FREQUENCIES: { value: string; label: string; description: string }[] = [
+  { value: 'daily', label: 'Daily', description: 'Runs every weekly tick (we only have Monday-close data today; effectively weekly).' },
+  { value: 'weekly', label: 'Weekly', description: 'Rebalances on every Tuesday tick (Monday close).' },
+  { value: 'monthly', label: 'Monthly', description: 'Rebalances on the Tuesday after the 1st of each new month.' },
+  { value: 'bimonthly', label: 'Bi-monthly', description: 'Rebalances every 2 months, on the Tuesday after that month\'s 1st.' },
+  { value: 'quarterly', label: 'Quarterly', description: 'Rebalances every 3 months, on the Tuesday after that month\'s 1st.' },
+];
+
+type SelectionMode = 'momentum' | 'random' | 'all';
+
+const SELECTION_MODES: { value: SelectionMode; label: string }[] = [
+  { value: 'momentum', label: 'Momentum' },
+  { value: 'random', label: 'Random (baseline)' },
+  { value: 'all', label: 'All universe (index proxy)' },
+];
+
+const STRATEGY_LABELS: Record<SelectionMode, string> = {
+  momentum: 'Momentum',
+  random: 'Random',
+  all: 'All universe',
+};
+
+const FREQUENCY_LABELS: Record<string, string> = {
+  daily: 'Daily',
+  weekly: 'Weekly',
+  monthly: 'Monthly',
+  bimonthly: 'Bi-monthly',
+  quarterly: 'Quarterly',
+};
+
+type SignalDef = {
+  key: string;
+  label: string;
+  description?: string;
+  default_weight: number;
+  group?: 'price' | 'volume';
+};
+
+type UniverseSummary = {
+  template_key: string;
+  label: string;
+  earliest_date: string;
+  earliest_captured_month: string | null;
+  latest_captured_month: string | null;
+};
+
+// ── Module-level caches (5-min TTL) ───────────────────────────────
+type _CacheEntry<T> = { value: T; expiresAt: number };
+const _CACHE_TTL_MS = 5 * 60 * 1000;
+let _universesCache: _CacheEntry<UniverseSummary[]> | null = null;
+let _signalsCache: _CacheEntry<{ signals: SignalDef[]; categories: string[] }> | null = null;
+
+async function _loadUniversesCached(): Promise<UniverseSummary[]> {
+  if (_universesCache && _universesCache.expiresAt > Date.now()) {
+    return _universesCache.value;
+  }
+  const r = await fetch(`${API_URL}/api/universe-templates`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const data = (await r.json()) as UniverseSummary[];
+  const filtered = data.filter((u) => u.earliest_captured_month && u.latest_captured_month);
+  _universesCache = { value: filtered, expiresAt: Date.now() + _CACHE_TTL_MS };
+  return filtered;
+}
+
+async function _loadSignalsCached(): Promise<{ signals: SignalDef[]; categories: string[] }> {
+  if (_signalsCache && _signalsCache.expiresAt > Date.now()) {
+    return _signalsCache.value;
+  }
+  const r = await fetch(`${API_URL}/api/momentum/signals`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const d = await r.json();
+  const value = {
+    signals: (d.signals ?? []) as SignalDef[],
+    categories: (d.categories ?? []) as string[],
+  };
+  _signalsCache = { value, expiresAt: Date.now() + _CACHE_TTL_MS };
+  return value;
+}
+
+/** Synchronous cache peek — returns the cached value if still fresh,
+ * otherwise null. Used by `useState` initializers so the form renders
+ * the dropdowns + sliders fully populated on first mount whenever the
+ * cache is warm (e.g. user deletes strategies, then immediately
+ * re-opens the picker — no "Loading…" flash). */
+function _readCached<T>(cache: _CacheEntry<T> | null): T | null {
+  if (cache && cache.expiresAt > Date.now()) return cache.value;
+  return null;
+}
+
+/** Inline "Add scheduled strategy" form. Multi-select on universes /
+ * strategies / frequencies; submitting creates one schedule entry per
+ * Cartesian-product permutation. Each entry's `config` carries the
+ * shared strategy parameters (top-N pair, min price score, signal +
+ * category weights, max companies) — those apply to every permutation. */
+export default function AddScheduledStrategyForm({
+  onAdded,
+  onCancel,
+}: {
+  onAdded: () => Promise<void> | void;
+  onCancel: () => void;
+}) {
+  // Seed from the module-level cache so a warm cache means no
+  // "Loading…" flash on mount — the dropdown + sliders render
+  // populated on the very first render.
+  const [universes, setUniverses] = useState<UniverseSummary[]>(
+    () => _readCached(_universesCache) ?? [],
+  );
+  const [universesLoading, setUniversesLoading] = useState(
+    () => _readCached(_universesCache) == null,
+  );
+  const [selectedUniverses, setSelectedUniverses] = useState<string[]>(() => {
+    const c = _readCached(_universesCache);
+    return c ? c.map((u) => u.template_key) : [];
+  });
+  const [selectedModes, setSelectedModes] = useState<SelectionMode[]>(['momentum']);
+  const [selectedFrequencies, setSelectedFrequencies] = useState<string[]>(['weekly']);
+
+  const [topNSectors, setTopNSectors] = useState(4);
+  const [topNPerSector, setTopNPerSector] = useState(6);
+  const [minPriceScore, setMinPriceScore] = useState<string>('');
+  const [maxCompanies, setMaxCompanies] = useState(0);
+  const [signalDefs, setSignalDefs] = useState<SignalDef[]>(
+    () => _readCached(_signalsCache)?.signals ?? [],
+  );
+  const [weights, setWeights] = useState<Record<string, number>>(() => {
+    const c = _readCached(_signalsCache);
+    if (!c) return {};
+    const w: Record<string, number> = {};
+    c.signals.forEach((s) => { w[s.key] = s.default_weight; });
+    return w;
+  });
+  const [categories, setCategories] = useState<string[]>(
+    () => _readCached(_signalsCache)?.categories ?? [],
+  );
+  const [categoryWeights, setCategoryWeights] = useState<Record<string, number>>(() => {
+    const c = _readCached(_signalsCache);
+    if (!c) return {};
+    const cw: Record<string, number> = {};
+    c.categories.forEach((cat) => { cw[cat] = 50; });
+    return cw;
+  });
+
+  // Name input only applies when there's exactly one permutation. With
+  // multi-select, each entry's name is auto-generated from its tuple.
+  const [name, setName] = useState('');
+  const [nameTouched, setNameTouched] = useState(false);
+
+  const [saving, setSaving] = useState(false);
+  const [savingProgress, setSavingProgress] = useState<{ done: number; total: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // ── Load universes + signals (cached) ───────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const filtered = await _loadUniversesCached();
+        if (cancelled) return;
+        setUniverses(filtered);
+        // Default: all available universes selected (today that's just
+        // ACWI — but the multi-select scales as we add more).
+        setSelectedUniverses(filtered.map((u) => u.template_key));
+      } catch (e) {
+        if (!cancelled) setError(`Failed to load universes: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        if (!cancelled) setUniversesLoading(false);
+      }
+    })();
+    void (async () => {
+      try {
+        const { signals: defs, categories: cats } = await _loadSignalsCached();
+        if (cancelled) return;
+        setSignalDefs(defs);
+        const w: Record<string, number> = {};
+        defs.forEach((s) => (w[s.key] = s.default_weight));
+        setWeights(w);
+        setCategories(cats);
+        const cw: Record<string, number> = {};
+        cats.forEach((c) => (cw[c] = 50));
+        setCategoryWeights(cw);
+      } catch {
+        // Silent — signal sliders just won't render.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // ── Permutation math ────────────────────────────────────────────
+  const permutations = useMemo(() => {
+    const out: Array<{ universe: string; mode: SelectionMode; frequency: string }> = [];
+    for (const u of selectedUniverses) {
+      for (const m of selectedModes) {
+        for (const f of selectedFrequencies) {
+          out.push({ universe: u, mode: m, frequency: f });
+        }
+      }
+    }
+    return out;
+  }, [selectedUniverses, selectedModes, selectedFrequencies]);
+
+  const permutationCount = permutations.length;
+  const isSinglePermutation = permutationCount === 1;
+
+  // What strategy modes are in the active selection? Some param
+  // sections only apply to certain modes (min price score → momentum,
+  // top-N pair → not 'all'). With multi-select we render a param if
+  // ANY chosen strategy needs it.
+  const needsTopNPair = selectedModes.some((m) => m !== 'all');
+  const needsMinPriceScore = selectedModes.includes('momentum');
+  const needsSignalWeights = selectedModes.includes('momentum');
+
+  // ── Name derivation ─────────────────────────────────────────────
+  /** Compose a name for a single permutation. */
+  const nameForPermutation = useCallback(
+    (perm: { universe: string; mode: SelectionMode; frequency: string }): string => {
+      const parts: string[] = [
+        perm.universe,
+        STRATEGY_LABELS[perm.mode],
+        FREQUENCY_LABELS[perm.frequency] ?? perm.frequency,
+      ];
+      if (perm.mode !== 'all') {
+        parts.push(`${topNSectors}×${topNPerSector}`);
+      }
+      if (perm.mode === 'momentum' && minPriceScore.trim() !== '') {
+        parts.push(`price≥${minPriceScore.trim()}`);
+      }
+      return parts.join(' · ');
+    },
+    [topNSectors, topNPerSector, minPriceScore],
+  );
+
+  const suggestedName = useMemo(() => {
+    if (!isSinglePermutation) return '';
+    return nameForPermutation(permutations[0]);
+  }, [isSinglePermutation, permutations, nameForPermutation]);
+
+  useEffect(() => {
+    if (!isSinglePermutation) {
+      // Multi-select: reset the touched flag so a future drop back to
+      // single-select re-enables auto-fill.
+      setNameTouched(false);
+      setName('');
+      return;
+    }
+    if (nameTouched) return;
+    setName(suggestedName);
+  }, [isSinglePermutation, suggestedName, nameTouched]);
+
+  const groupedSignals = useMemo(() => {
+    const groups: Record<string, SignalDef[]> = {};
+    for (const s of signalDefs) {
+      const g = s.group ?? 'price';
+      if (!groups[g]) groups[g] = [];
+      groups[g].push(s);
+    }
+    return groups;
+  }, [signalDefs]);
+
+  // ── Submit ──────────────────────────────────────────────────────
+  const buildConfig = useCallback(
+    (universe: string, mode: SelectionMode): Record<string, unknown> => {
+      const config: Record<string, unknown> = {
+        selection_mode: mode,
+        index_universe: universe,
+        universe_label: null,
+        max_companies: maxCompanies,
+        strategy_type: 'long_only',
+        rebalance_frequency: 'monthly',
+      };
+      if (mode !== 'all') {
+        config.top_n_sectors = topNSectors;
+        config.top_n_per_sector = topNPerSector;
+      }
+      if (mode === 'momentum') {
+        const ps = minPriceScore.trim();
+        config.min_price_score = ps === '' ? null : Number(ps);
+        config.signal_weights = weights;
+        config.category_weights = categoryWeights;
+      }
+      return config;
+    },
+    [topNSectors, topNPerSector, minPriceScore, maxCompanies, weights, categoryWeights],
+  );
+
+  const handleSubmit = useCallback(async () => {
+    setError(null);
+    if (permutationCount === 0) {
+      setError('Pick at least one universe, strategy, and frequency.');
+      return;
+    }
+    if (isSinglePermutation && !name.trim()) {
+      setError('Name is required (or clear the field to use the auto-suggestion).');
+      return;
+    }
+
+    setSaving(true);
+    setSavingProgress({ done: 0, total: permutationCount });
+    let failedAt: { perm: typeof permutations[number]; err: string } | null = null;
+    try {
+      for (let i = 0; i < permutations.length; i++) {
+        const perm = permutations[i];
+        const entryName = isSinglePermutation
+          ? name.trim()
+          : nameForPermutation(perm);
+        const config = buildConfig(perm.universe, perm.mode);
+        try {
+          const r = await apiFetch(`${API_URL}/api/scheduled-strategies`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: entryName, frequency: perm.frequency, config }),
+          });
+          if (!r.ok) {
+            const body = await r.text().catch(() => '');
+            failedAt = { perm, err: `${r.status} ${body.slice(0, 240)}` };
+            break;
+          }
+        } catch (e) {
+          failedAt = { perm, err: e instanceof Error ? e.message : String(e) };
+          break;
+        }
+        setSavingProgress({ done: i + 1, total: permutationCount });
+      }
+      if (failedAt) {
+        setError(
+          `Added ${savingProgress?.done ?? 0} of ${permutationCount}, then failed on ` +
+          `${nameForPermutation(failedAt.perm)}: ${failedAt.err}`,
+        );
+        // Refresh the parent list so it shows the entries that DID land.
+        await onAdded();
+        return;
+      }
+      await onAdded();
+    } finally {
+      setSaving(false);
+      setSavingProgress(null);
+    }
+  }, [permutations, permutationCount, isSinglePermutation, name, nameForPermutation, buildConfig, onAdded, savingProgress?.done]);
+
+  const toggle = (list: string[], setList: (xs: string[]) => void, value: string, on: boolean) => {
+    if (on) {
+      if (!list.includes(value)) setList([...list, value]);
+    } else {
+      setList(list.filter((v) => v !== value));
+    }
+  };
+
+  return (
+    <div className="px-5 py-4 border-b border-gray-800/40 bg-[#0f1117] space-y-5">
+      <div className="text-[10px] uppercase tracking-wider text-gray-500">
+        New scheduled strategy
+        <span className="ml-2 normal-case tracking-normal text-gray-600">
+          (multi-select to create one entry per universe × strategy × frequency permutation)
+        </span>
+      </div>
+
+      {/* Identity + scheduling */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div>
+          <label className="text-gray-500 text-xs block mb-1">
+            Universe{selectedUniverses.length === 1 ? '' : 's'}
+            <span className="text-gray-600 ml-1">({selectedUniverses.length})</span>
+          </label>
+          <div className="bg-[#151821] border border-gray-700 rounded-lg px-3 py-2 space-y-1 max-h-40 overflow-y-auto">
+            {universesLoading ? (
+              <div className="text-xs text-gray-500">Loading…</div>
+            ) : universes.length === 0 ? (
+              <div className="text-xs text-gray-400">
+                No template universes refreshed yet.
+              </div>
+            ) : universes.map((u) => {
+              const checked = selectedUniverses.includes(u.template_key);
+              return (
+                <label key={u.template_key} className="flex items-center gap-2 text-xs cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) => toggle(selectedUniverses, setSelectedUniverses, u.template_key, e.target.checked)}
+                    className="accent-indigo-500"
+                  />
+                  <span className={checked ? 'text-gray-200' : 'text-gray-400'}>{u.label}</span>
+                  <span className="text-gray-600 font-mono text-[10px]">
+                    {u.earliest_date.slice(0, 7)} – {u.latest_captured_month?.slice(0, 7)}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+        <div>
+          <label className="text-gray-500 text-xs block mb-1">
+            Strateg{selectedModes.length === 1 ? 'y' : 'ies'}
+            <span className="text-gray-600 ml-1">({selectedModes.length})</span>
+          </label>
+          <div className="bg-[#151821] border border-gray-700 rounded-lg px-3 py-2 space-y-1">
+            {SELECTION_MODES.map((m) => {
+              const checked = selectedModes.includes(m.value);
+              return (
+                <label key={m.value} className="flex items-center gap-2 text-xs cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) => toggle(selectedModes, setSelectedModes as (xs: string[]) => void, m.value, e.target.checked)}
+                    className="accent-indigo-500"
+                  />
+                  <span className={checked ? 'text-gray-200' : 'text-gray-400'}>{m.label}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+        <div>
+          <label className="text-gray-500 text-xs block mb-1">
+            Frequenc{selectedFrequencies.length === 1 ? 'y' : 'ies'}
+            <span className="text-gray-600 ml-1">({selectedFrequencies.length})</span>
+          </label>
+          <div className="bg-[#151821] border border-gray-700 rounded-lg px-3 py-2 space-y-1">
+            {FREQUENCIES.map((f) => {
+              const checked = selectedFrequencies.includes(f.value);
+              return (
+                <label key={f.value} className="flex items-center gap-2 text-xs cursor-pointer" title={f.description}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) => toggle(selectedFrequencies, setSelectedFrequencies, f.value, e.target.checked)}
+                    className="accent-indigo-500"
+                  />
+                  <span className={checked ? 'text-gray-200' : 'text-gray-400'}>{f.label}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+        <div>
+          <label className="text-gray-500 text-xs block mb-1">
+            Name
+            {!isSinglePermutation && (
+              <span className="text-gray-600 ml-1">(auto-named per entry)</span>
+            )}
+          </label>
+          <input
+            type="text"
+            value={isSinglePermutation ? name : ''}
+            onChange={(e) => {
+              const next = e.target.value;
+              setName(next);
+              setNameTouched(next.trim() !== '');
+            }}
+            placeholder={isSinglePermutation ? (suggestedName || 'e.g. ACWI weekly momentum') : 'auto-generated per permutation'}
+            disabled={!isSinglePermutation}
+            className="w-full bg-[#151821] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+          />
+          {isSinglePermutation && nameTouched && suggestedName && (
+            <button
+              type="button"
+              onClick={() => { setNameTouched(false); setName(suggestedName); }}
+              className="mt-1 text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors"
+              title="Reset to the auto-generated name"
+            >
+              ↻ reset to suggestion
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Strategy parameters — conditional per the union of selected modes. */}
+      <div className="pt-3 border-t border-gray-800/40">
+        <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-3">
+          Strategy parameters
+          <span className="text-gray-600 normal-case tracking-normal ml-2">
+            (shared across every permutation)
+          </span>
+        </div>
+
+        {needsTopNPair && (
+          <div className="flex flex-wrap items-end gap-6 mb-5">
+            <div>
+              <label className="text-gray-500 text-xs block mb-1">Top Sectors</label>
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={topNSectors}
+                onChange={(e) => setTopNSectors(Number(e.target.value))}
+                className="w-16 bg-[#151821] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-gray-500 text-xs block mb-1">Per Sector</label>
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={topNPerSector}
+                onChange={(e) => setTopNPerSector(Number(e.target.value))}
+                className="w-16 bg-[#151821] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-gray-500 text-xs block mb-1">Max Companies</label>
+              <input
+                type="number"
+                min={0}
+                max={500}
+                value={maxCompanies}
+                onChange={(e) => setMaxCompanies(Number(e.target.value))}
+                className="w-20 bg-[#151821] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                title="0 = no cap"
+              />
+              <span className="text-gray-600 text-xs ml-1">0 = all</span>
+            </div>
+            {needsMinPriceScore && (
+              <div>
+                <label className="text-gray-500 text-xs block mb-1">Min Price Score</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={1}
+                  placeholder="off"
+                  value={minPriceScore}
+                  onChange={(e) => setMinPriceScore(e.target.value)}
+                  className="w-20 bg-[#151821] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                  title="Optional 0-100 floor on each candidate's price-category score. Empty = no filter. (Applies only to momentum permutations.)"
+                />
+                <span className="text-gray-600 text-xs ml-1">{minPriceScore.trim() === '' ? 'off' : '>'}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {needsSignalWeights && signalDefs.length > 0 && (
+          <div className="space-y-4">
+            {(['price', 'volume'] as const).map((group) => {
+              const groupSignals = groupedSignals[group] || [];
+              if (groupSignals.length === 0) return null;
+              return (
+                <div key={group}>
+                  <h3 className="text-gray-400 text-xs font-medium mb-2.5 uppercase tracking-wider">
+                    {group === 'price' ? 'Price Momentum' : 'Volume Confirmation'}
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2.5">
+                    {groupSignals.map((s) => (
+                      <div key={s.key} className="flex items-center gap-3">
+                        <span className="text-gray-300 text-xs font-medium w-36 shrink-0 truncate" title={s.description}>
+                          {s.label}
+                        </span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={10}
+                          step={1}
+                          value={weights[s.key] ?? 0}
+                          onChange={(e) => setWeights((prev) => ({ ...prev, [s.key]: Number(e.target.value) }))}
+                          className="flex-1 h-1 accent-indigo-500 cursor-pointer"
+                        />
+                        <span className="text-gray-500 text-xs w-5 text-right font-mono shrink-0">{weights[s.key] ?? 0}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+            {categories.length > 1 && (
+              <div>
+                <h3 className="text-gray-400 text-xs font-medium mb-2.5 uppercase tracking-wider">Category Weights</h3>
+                <div className="flex items-center gap-6 flex-wrap">
+                  {categories.map((cat) => (
+                    <div key={cat} className="flex items-center gap-2">
+                      <span className="text-gray-300 text-xs font-medium w-28">
+                        {cat === 'price' ? 'Price Momentum' : cat === 'volume' ? 'Volume Confirmation' : cat}
+                      </span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={5}
+                        value={categoryWeights[cat] ?? 50}
+                        onChange={(e) => setCategoryWeights((prev) => ({ ...prev, [cat]: Number(e.target.value) }))}
+                        className="w-32 h-1 accent-indigo-500 cursor-pointer"
+                      />
+                      <span className="text-gray-500 text-xs w-8 text-right font-mono">{categoryWeights[cat] ?? 50}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Permutation preview */}
+      {permutationCount > 1 && (
+        <div className="pt-3 border-t border-gray-800/40">
+          <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">
+            Will create {permutationCount} entries
+          </div>
+          <div className="bg-[#151821] border border-gray-800/40 rounded-lg px-3 py-2 max-h-40 overflow-y-auto space-y-0.5">
+            {permutations.map((p, i) => (
+              <div key={i} className="text-[11px] text-gray-300 font-mono">
+                {nameForPermutation(p)}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {error && <div className="text-xs text-rose-300">{error}</div>}
+
+      <div className="flex items-center gap-3 pt-2">
+        <button
+          type="button"
+          onClick={() => void handleSubmit()}
+          disabled={saving || permutationCount === 0}
+          className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors"
+        >
+          {saving
+            ? (savingProgress
+                ? `Adding ${savingProgress.done + 1} of ${savingProgress.total}…`
+                : 'Adding…')
+            : permutationCount > 1
+              ? `Add ${permutationCount} to schedule`
+              : 'Add to schedule'}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          className="text-xs px-3 py-1.5 rounded-lg text-gray-400 hover:bg-white/5 transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}

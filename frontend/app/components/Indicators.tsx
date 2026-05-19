@@ -6,6 +6,7 @@ import {
   CartesianGrid,
 } from 'recharts';
 import DatePartsPicker from './DatePartsPicker';
+import { apiFetch } from '../../lib/apiFetch';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -78,7 +79,7 @@ export default function Indicators() {
     setLoading(true);
     setResult(null);
     try {
-      const res = await fetch(`${API_URL}/api/indicators/fetch`, {
+      const res = await apiFetch(`${API_URL}/api/indicators/fetch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

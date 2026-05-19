@@ -25,7 +25,6 @@ import traceback
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
 from deps import supabase
 from index_universe.acwi import (
@@ -102,12 +101,6 @@ async def acwi_net_additions():
     results = await asyncio.to_thread(compute_net_additions)
     matched = sum(1 for r in results if r["matched"])
     return {"net_additions": results, "total": len(results), "matched": matched}
-
-
-class AcwiSaveUniverseRequest(BaseModel):
-    name: str = "ACWI"
-    start_date: str
-    end_date: str
 
 
 def run_acwi_save_universe(
@@ -282,51 +275,6 @@ def run_acwi_save_universe(
         "grandfathered": stats["grandfathered"],
         "with_addition": stats["with_addition"],
     }
-
-
-@router.post("/api/acwi/save-universe")
-async def acwi_save_universe(req: AcwiSaveUniverseRequest):
-    """Reconstruct monthly ACWI feasible-universe holdings + save as a universe.
-    SSE; result selectable as `index_universe` in the momentum backtester.
-
-    Thin wrapper over `run_acwi_save_universe` — the sync worker holds the
-    actual logic so the scheduled pipeline (`routers/ingest_runs.py`) can
-    invoke it directly without round-tripping through HTTP."""
-    def _run(q: _queue.Queue):
-        def on_progress(message: str, pct: int | None = None):
-            payload = {"type": "progress", "message": message}
-            if pct is not None:
-                payload["pct"] = pct
-            q.put(json.dumps(payload))
-
-        try:
-            result_stats = run_acwi_save_universe(
-                req.name, req.start_date, req.end_date, on_progress=on_progress,
-            )
-            q.put(json.dumps({
-                "type": "done",
-                "message": (
-                    f"Saved '{result_stats['name']}': {result_stats['months']} months, "
-                    f"{result_stats['total_rows']} rows, "
-                    f"{result_stats['matched_companies']}/{result_stats['unique_tickers']} tickers matched "
-                    f"({result_stats['companies_created']} new companies created, "
-                    f"{result_stats['companies_renamed']} renamed, "
-                    f"{result_stats['companies_existing']} existing)"
-                ),
-                "stats": result_stats,
-            }))
-        except Exception as e:
-            q.put(json.dumps({"type": "error", "message": f"{e}\n{traceback.format_exc()}"}))
-        q.put(None)
-
-    q: _queue.Queue = _queue.Queue()
-    threading.Thread(target=_run, args=(q,), daemon=True).start()
-
-    async def generate():
-        async for chunk in drain_thread_queue(q):
-            yield chunk
-
-    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @router.get("/api/acwi/fetch-all-details")

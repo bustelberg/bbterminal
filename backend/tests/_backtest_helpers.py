@@ -20,10 +20,12 @@ PRICES_END = "2025-04-15"
 
 BACKTEST_START = date(2024, 12, 1)
 BACKTEST_END = date(2025, 3, 1)
-# `_generate_month_starts(2024-12-01, 2025-03-01)` →
-# [Dec, Jan, Feb, Mar]; `run_backtest` iterates `months[:-1]` (last month
-# has no forward return) so monthly_records has 3 entries.
-EXPECTED_MONTHS = ["2024-12", "2025-01", "2025-02"]
+# Engine aligns to first-Monday-of-month → entry dates are Dec 2,
+# Jan 6, Feb 3, Mar 3. `run_backtest` iterates the first 3 with the
+# 4th as the closing exit, so monthly_records has 3 entries — each
+# now labeled with the exact rebalance Monday (YYYY-MM-DD) so the
+# UI's period column shows the actual entry day.
+EXPECTED_MONTHS = ["2024-12-02", "2025-01-06", "2025-02-03"]
 
 
 def calendar_daily(start: str, end: str) -> pd.DatetimeIndex:

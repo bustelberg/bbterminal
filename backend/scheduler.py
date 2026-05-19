@@ -1,10 +1,14 @@
-"""In-process APScheduler for the scheduled price/volume ingest jobs.
+"""In-process APScheduler for the weekly pipeline tick.
 
-Replaces the previous Railway-Cron approach for this codebase. Two
-`BackgroundScheduler` cron triggers run inside the FastAPI process:
+A single `BackgroundScheduler` cron trigger runs inside the FastAPI
+process:
 
     weekly_price_volume   Tue 02:00 UTC   (cron: `day_of_week=tue, hour=2`)
-    monthly_price_volume  2nd at 02:00 UTC (cron: `day=2, hour=2`)
+
+(The previous monthly 2nd-of-month tick was retired: per-strategy
+`frequency` + `next_due_at` on `scheduled_strategy` now drives whether
+a strategy rebalances on a given Tuesday — there's no longer a need
+for a separate monthly cron. See `scheduled_strategies.py`.)
 
 Each fired tick calls `kick_off_refresh(job_name, "auto")`, which inserts
 an `ingest_run` row tagged `triggered_by='auto'` and starts the daemon
@@ -80,19 +84,6 @@ def register_scheduler(app) -> None:
             # right at 02:00 UTC), `coalesce=True` collapses any backlog
             # into a single run and `misfire_grace_time` gives us 10 min
             # of slack before we declare it skipped.
-            coalesce=True,
-            misfire_grace_time=600,
-        )
-        # Monthly: 2nd of every month at 02:00 UTC. Captures the first
-        # trading day's closes — if the 1st was a weekend/holiday the run
-        # still fires but the freshness check no-ops most companies and
-        # the next weekly tick catches up the actual first-trading-day close.
-        sched.add_job(
-            _fire_job,
-            CronTrigger(day=2, hour=2, minute=0, timezone="UTC"),
-            args=["monthly_price_volume"],
-            id="monthly_price_volume",
-            replace_existing=True,
             coalesce=True,
             misfire_grace_time=600,
         )

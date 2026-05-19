@@ -8,6 +8,7 @@ import {
 import { dialog } from '../../lib/dialog';
 import ProgressTimeline, { type StepDef, type StepState } from './ProgressTimeline';
 import { trackedFetch } from '../../lib/loading';
+import { apiFetch } from '../../lib/apiFetch';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -118,7 +119,7 @@ export default function UniverseScreener() {
     }
     setBusyLabel(u.label);
     try {
-      const r = await fetch(`${API_URL}/api/universe/labels/${encodeURIComponent(u.label)}`, {
+      const r = await apiFetch(`${API_URL}/api/universe/labels/${encodeURIComponent(u.label)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ new_label: newLabel }),
@@ -139,7 +140,7 @@ export default function UniverseScreener() {
   const deleteOne = async (label: string) => {
     setBusyLabel(label);
     try {
-      const r = await fetch(`${API_URL}/api/universe/labels/${encodeURIComponent(label)}`, {
+      const r = await apiFetch(`${API_URL}/api/universe/labels/${encodeURIComponent(label)}`, {
         method: 'DELETE',
       });
       if (!r.ok) throw new Error(`${r.status}`);
@@ -158,7 +159,7 @@ export default function UniverseScreener() {
   const deleteAll = async () => {
     setBusyLabel('__all__');
     try {
-      const r = await fetch(`${API_URL}/api/universe/labels`, { method: 'DELETE' });
+      const r = await apiFetch(`${API_URL}/api/universe/labels`, { method: 'DELETE' });
       if (!r.ok) throw new Error(`${r.status}`);
       setConfirmDeleteAll(false);
       await loadUniverses();
@@ -599,7 +600,7 @@ function TightenPanel({ base, specs, defaults, onClose, onCreated }: TightenPane
     setPreviewing(true);
     setErrMsg(null);
     try {
-      const r = await fetch(`${API_URL}/api/universe/derive/preview`, {
+      const r = await apiFetch(`${API_URL}/api/universe/derive/preview`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ base_universe_id: base.universe_id, filter_config: config }),
@@ -624,7 +625,7 @@ function TightenPanel({ base, specs, defaults, onClose, onCreated }: TightenPane
     setDetailLog([]);
     setDoneSummary(null);
     try {
-      const resp = await fetch(`${API_URL}/api/universe/derive`, {
+      const resp = await apiFetch(`${API_URL}/api/universe/derive`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

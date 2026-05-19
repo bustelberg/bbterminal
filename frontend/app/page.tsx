@@ -21,9 +21,9 @@ const tiles: Tile[] = [
     userVisible: true,
   },
   {
-    href: '/momentum',
-    label: 'Momentum',
-    description: 'Backtest momentum strategies and inspect Current Picks — locked monthly holdings plus a daily-picks history.',
+    href: '/backtest',
+    label: 'Backtest',
+    description: 'Test a strategy on a template-managed universe over a date range. Start defaults to the universe\'s hard backstop, end defaults to the latest available price data.',
   },
   {
     href: '/universe',
@@ -44,6 +44,11 @@ const tiles: Tile[] = [
     href: '/acwi',
     label: 'ACWI Universe',
     description: 'iShares ACWI holdings and MSCI announcement explorer — review additions, deletions, and net changes.',
+  },
+  {
+    href: '/leonteq',
+    label: 'Leonteq Universe',
+    description: 'Equities Leonteq lists as underlyings for structured products, grouped by sector → industry with GuruFocus links.',
   },
   {
     href: '/fx-rates',

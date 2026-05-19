@@ -4,6 +4,7 @@ import { Fragment, useState, useEffect, useMemo, useRef } from 'react';
 
 import ApiUsageBadge from './ApiUsageBadge';
 import { dialog } from '../../lib/dialog';
+import { apiFetch } from '../../lib/apiFetch';
 import ProgressTimeline from './ProgressTimeline';
 import {
   momentumStore,
@@ -273,13 +274,34 @@ export default function MomentumBacktester() {
   const [bulkDeletingRuns, setBulkDeletingRuns] = useState(false);
   const [bulkDeletingSnapshots, setBulkDeletingSnapshots] = useState(false);
 
-  // Universe selection state — all universes live in the same table and are served
-  // by /api/index-universe/indexes with enriched metadata.
-  const [indexUniverses, setIndexUniverses] = useState<{ index_name: string; start_month: string; end_month: string; month_count: number; total_unique_tickers: number }[]>([]);
+  // Universe selection state — only TEMPLATE-MANAGED universes are
+  // listed here (currently just ACWI). User-created static snapshots
+  // and the SP500 legacy import are intentionally hidden: the only
+  // universes that backtests should run against are the ones the
+  // pipeline keeps continuously up-to-date.
+  // Source: GET /api/universe-templates — one entry per registered
+  // template, mapped into the {index_name, hard_backstop, ...} shape
+  // the rest of this page is wired for.
+  const [indexUniverses, setIndexUniverses] = useState<{
+    index_name: string;
+    /** The template's permanent earliest date (e.g. ACWI: 2002-01-01).
+     * Used as the default backtest start when this universe is picked.
+     * Different from `start_month` (latest data captured so far), which
+     * we ignore now that we have the proper hard-backstop value. */
+    hard_backstop: string;
+    start_month: string;
+    end_month: string;
+    month_count: number;
+    total_unique_tickers: number;
+  }[]>([]);
   const [selectedIndexUniverse, setSelectedIndexUniverse] = useState<string>('');
   const [universesLoading, setUniversesLoading] = useState(true);
   const [universesError, setUniversesError] = useState<string | null>(null);
   const [universesElapsed, setUniversesElapsed] = useState(0);
+  // Latest available close-price date, fed by GET /api/data/latest-price-date.
+  // Cached for the lifetime of the page mount — the data refresh runs
+  // weekly, so revalidating per-render is wasteful.
+  const [latestPriceDate, setLatestPriceDate] = useState<string | null>(null);
 
   // Load signal definitions + saved runs
   useEffect(() => {
@@ -305,30 +327,69 @@ export default function MomentumBacktester() {
     const tick = setInterval(() => setUniversesElapsed(Math.round((Date.now() - universesStart) / 1000)), 500);
     setUniversesLoading(true);
     setUniversesError(null);
-    fetch(`${API_URL}/api/index-universe/indexes`)
+    fetch(`${API_URL}/api/universe-templates`)
       .then((r) => {
         if (!r.ok) throw new Error(`${r.status}`);
         return r.json();
       })
-      .then((data) => setIndexUniverses(data))
+      .then((data: Array<{
+        template_key: string;
+        earliest_date: string;
+        earliest_captured_month: string | null;
+        latest_captured_month: string | null;
+        months_captured: number;
+        latest_membership_count: number;
+      }>) => {
+        // Map the template-summary shape into the dropdown's existing
+        // contract. Templates that have never been refreshed (no
+        // captured months yet) are filtered out — they'd render a
+        // dropdown row with no usable data.
+        const mapped = data
+          .filter((t) => t.earliest_captured_month && t.latest_captured_month)
+          .map((t) => ({
+            index_name: t.template_key,
+            hard_backstop: t.earliest_date,
+            start_month: t.earliest_captured_month!,
+            end_month: t.latest_captured_month!,
+            month_count: t.months_captured,
+            // No cheap COUNT DISTINCT yet for "ever in this universe",
+            // so the dropdown shows the latest month's count as a
+            // representative number. Good enough for "is this the
+            // right universe?".
+            total_unique_tickers: t.latest_membership_count,
+          }));
+        setIndexUniverses(mapped);
+      })
       .catch((e) => setUniversesError(e instanceof Error ? e.message : String(e)))
       .finally(() => {
         clearInterval(tick);
         setUniversesLoading(false);
       });
+    // Latest available price date — used as the default backtest
+    // end-date. Fire in parallel with the universes fetch; either can
+    // resolve first.
+    fetch(`${API_URL}/api/data/latest-price-date`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${r.status}`))))
+      .then((d: { date: string | null }) => setLatestPriceDate(d.date))
+      .catch(() => { /* silent — the user can still pick a date manually */ });
     return () => clearInterval(tick);
   }, []);
 
-  // When universe selection changes, auto-set start/end dates from the range.
-  // Some universes store start/end as YYYY-MM-DD instead of YYYY-MM — slice so
-  // the <input type="month"> can accept the value.
+  // When universe selection changes, auto-set start/end dates per the
+  // /backtest convention: start = the universe's hard backstop (its
+  // permanent earliest date — e.g. ACWI: 2002-01), end = the latest
+  // close-price date we have data for (independent of universe).
+  // Both are stored as YYYY-MM-DD on the server; the `<input
+  // type="month">` wants YYYY-MM, so slice.
   const handleUniverseChange = (value: string) => {
     setSelectedIndexUniverse(value);
     if (value) {
       const entry = indexUniverses.find(i => i.index_name === value);
       if (entry) {
-        setStartDate(entry.start_month.slice(0, 7));
-        setEndDate(entry.end_month.slice(0, 7));
+        setStartDate(entry.hard_backstop.slice(0, 7));
+        // Fall back to the universe's latest captured month if the
+        // global price-date probe hasn't resolved yet.
+        setEndDate((latestPriceDate ?? entry.end_month).slice(0, 7));
       }
     }
   };
@@ -506,7 +567,7 @@ export default function MomentumBacktester() {
     if (okEntries.length === 0) return;
     setSaving(true);
     try {
-      const resp = await fetch(`${API_URL}/api/momentum/backtests`, {
+      const resp = await apiFetch(`${API_URL}/api/momentum/backtests`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -692,7 +753,7 @@ export default function MomentumBacktester() {
     setDeletingRunId(runId);
     if (loadedRunId === runId) momentumStore.set({ loadedRunId: null });
     try {
-      await fetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' });
+      await apiFetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' });
       setSavedRuns(prev => prev.filter(r => r.run_id !== runId));
     } catch {
       loadSavedRuns();
@@ -743,7 +804,7 @@ export default function MomentumBacktester() {
     try {
       await Promise.all(
         ids.map((runId) =>
-          fetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' }).catch(() => {})
+          apiFetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' }).catch(() => {})
         ),
       );
       setSavedRuns((prev) => prev.filter((r) => !selectedRunIds.has(r.run_id)));
@@ -842,7 +903,7 @@ export default function MomentumBacktester() {
     if (!next || next.trim() === '' || next === currentName) return;
     setRenamingRunId(runId);
     try {
-      const resp = await fetch(`${API_URL}/api/momentum/backtests/${runId}`, {
+      const resp = await apiFetch(`${API_URL}/api/momentum/backtests/${runId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: next.trim() }),
@@ -1187,28 +1248,6 @@ export default function MomentumBacktester() {
               />
             </div>
             <div>
-              <label className="text-gray-500 text-xs block mb-1">Top Sectors</label>
-              <input
-                type="number"
-                min={1}
-                max={20}
-                value={topSectors}
-                onChange={(e) => setTopSectors(Number(e.target.value))}
-                className="w-16 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-gray-500 text-xs block mb-1">Per Sector</label>
-              <input
-                type="number"
-                min={1}
-                max={20}
-                value={topPerSector}
-                onChange={(e) => setTopPerSector(Number(e.target.value))}
-                className="w-16 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-              />
-            </div>
-            <div>
               <label className="text-gray-500 text-xs block mb-1">Max Companies</label>
               <input
                 type="number"
@@ -1221,21 +1260,12 @@ export default function MomentumBacktester() {
               />
               <span className="text-gray-600 text-xs ml-1">0 = all</span>
             </div>
-            <div>
-              <label className="text-gray-500 text-xs block mb-1">Min Price Score</label>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                step={1}
-                placeholder="off"
-                value={minPriceScore}
-                onChange={(e) => setMinPriceScore(e.target.value)}
-                className="w-20 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-                title="Optional 0-100 floor on each candidate's price-category score. Only companies whose score_price strictly exceeds this value are eligible for the long bucket. Empty = no filter. Common default: 30."
-              />
-              <span className="text-gray-600 text-xs ml-1">{minPriceScore.trim() === '' ? 'off' : '>'}</span>
-            </div>
+            {/* Top Sectors / Per Sector / Min Price Score moved to the
+                Strategy parameters section below — they only apply to
+                certain strategies (e.g. min_price_score is momentum-
+                only; top-N pair is meaningless for "all universe").
+                Keeping them out of the universe/date row leaves only
+                strategy-agnostic inputs at the top level. */}
             <div>
               <label className="text-gray-500 text-xs block mb-1">Strategy</label>
               <select
@@ -1421,9 +1451,65 @@ export default function MomentumBacktester() {
                   ? 'Random baseline · trials run independently with sequential seeds'
                   : selectionMode === 'all'
                     ? 'All universe · holds every eligible name each rebalance, equal-weighted'
-                    : 'Momentum · ranks the universe by signal-weighted score'}
+                    : selectionMode === 'sector_etf'
+                      ? 'Sector ETF · picks top N sectors by aggregate score, holds the mapped ETF per sector'
+                      : 'Momentum · ranks the universe by signal-weighted score'}
               </span>
             </div>
+
+            {/* Selection-size + filter inputs. Conditionally rendered
+                per strategy: top-N sectors applies to momentum / random
+                / sector_etf; per-sector pick count applies to momentum
+                + random only; min price score is momentum-specific.
+                "All universe" hides this whole row (it holds every
+                eligible name regardless). */}
+            {selectionMode !== 'all' && (
+              <div className="flex flex-wrap items-end gap-6 mb-5 pb-5 border-b border-gray-800/40">
+                <div>
+                  <label className="text-gray-500 text-xs block mb-1">Top Sectors</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={topSectors}
+                    onChange={(e) => setTopSectors(Number(e.target.value))}
+                    className="w-16 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                    title="How many sectors to pick per rebalance, ranked by aggregate score (or randomly in random mode)."
+                  />
+                </div>
+                {selectionMode !== 'sector_etf' && (
+                  <div>
+                    <label className="text-gray-500 text-xs block mb-1">Per Sector</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={topPerSector}
+                      onChange={(e) => setTopPerSector(Number(e.target.value))}
+                      className="w-16 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                      title="Per picked sector, how many top-ranked companies to hold (or random sample for random mode)."
+                    />
+                  </div>
+                )}
+                {selectionMode === 'momentum' && (
+                  <div>
+                    <label className="text-gray-500 text-xs block mb-1">Min Price Score</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={1}
+                      placeholder="off"
+                      value={minPriceScore}
+                      onChange={(e) => setMinPriceScore(e.target.value)}
+                      className="w-20 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                      title="Optional 0-100 floor on each candidate's price-category score. Only companies whose score_price strictly exceeds this value are eligible for the long bucket. Empty = no filter. Common default: 30."
+                    />
+                    <span className="text-gray-600 text-xs ml-1">{minPriceScore.trim() === '' ? 'off' : '>'}</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {selectionMode === 'momentum' && (
               <div className="space-y-4">
@@ -1529,7 +1615,7 @@ export default function MomentumBacktester() {
                 <div className="text-gray-300 font-medium mb-1">No tunable parameters.</div>
                 Each rebalance period holds every company in the selected universe&apos;s month-snapshot,
                 equal-weighted. Use this as an index-proxy benchmark to compare against the momentum
-                strategy. Top-N sectors and signal weights above are ignored. Only <span className="text-gray-300">long-only</span> is supported — long-short would need a top/bottom split that doesn&apos;t exist in this mode.
+                strategy. Only <span className="text-gray-300">long-only</span> is supported — long-short would need a top/bottom split that doesn&apos;t exist in this mode.
               </div>
             )}
           </div>

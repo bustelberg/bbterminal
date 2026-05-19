@@ -183,13 +183,12 @@ async def get_portfolio_by_id(snapshot_id: int, authorization: str = Header(...)
 
 def _summarize_run(row: dict) -> dict:
     """Compact summary of an ingest_run row, dropping the verbose
-    additions/removals lists from acwi_summary (counts only). Useful
-    for monitoring endpoints where the caller wants a quick health
-    snapshot, not the full diff."""
-    acwi = row.get("acwi_summary") or {}
-    # `momentum_summary` is a list — one entry per scheduled strategy
-    # that ran. Older pre-rebuild rows held a single dict; coerce them
-    # to a list so consumers can iterate uniformly.
+    additions/removals lists from templates_summary (counts only).
+    Useful for monitoring endpoints where the caller wants a quick
+    health snapshot, not the full diff."""
+    templates_raw = row.get("templates_summary") or []
+    if not isinstance(templates_raw, list):
+        templates_raw = []
     mom_raw = row.get("momentum_summary")
     if isinstance(mom_raw, list):
         mom_list = mom_raw
@@ -205,12 +204,18 @@ def _summarize_run(row: dict) -> dict:
         "finished_at": row.get("finished_at"),
         "status": row.get("status"),
         "current_phase": row.get("current_phase"),
-        "acwi": {
-            "target_month": row.get("acwi_target_month"),
-            "additions": acwi.get("additions_count"),
-            "removals": acwi.get("removals_count"),
-            "renames": acwi.get("renames_count"),
-        } if acwi else None,
+        "templates": [
+            {
+                "template_key": t.get("template_key"),
+                "universe_id": t.get("universe_id"),
+                "target_month": t.get("this_month"),
+                "additions": t.get("additions_count"),
+                "removals": t.get("removals_count"),
+                "renames": t.get("renames_count"),
+                "error": t.get("error"),
+            }
+            for t in templates_raw
+        ],
         "prices": {
             "companies_processed": row.get("companies_processed") or 0,
             "prices_refreshed": row.get("prices_refreshed") or 0,
@@ -537,17 +542,17 @@ async def sanity_check(authorization: str = Header(...)):
             "backtest_run_ids": [r["backtest_run_id"] for r in rows if r.get("enabled")],
         }
 
-        # ACWI universe presence
-        acwi = (
+        # Template-managed universes presence: every registered
+        # template's canonical row (or None if not yet refreshed).
+        tmpl = (
             supabase.table("universe")
-            .select("universe_id, label")
-            .eq("label", "ACWI")
-            .limit(1)
+            .select("universe_id, template_key, label")
+            .not_.is_("template_key", "null")
             .execute()
         )
-        out["acwi_universe_id"] = (
-            acwi.data[0]["universe_id"] if acwi.data else None
-        )
+        out["template_universes"] = {
+            r["template_key"]: r["universe_id"] for r in (tmpl.data or [])
+        }
 
         # Recent run status distribution (last 20)
         runs = (
@@ -585,3 +590,223 @@ async def sanity_check(authorization: str = Header(...)):
         return out
 
     return await asyncio.to_thread(_query)
+
+
+# ─── Data integrity: companies missing exchange ───────────────────
+
+
+@router.get("/api/admin/companies/missing-exchange")
+async def list_companies_missing_exchange(authorization: str = Header(None)):
+    """Companies whose `exchange_id` is NULL — they show up with an empty
+    exchange column in /backtest + /schedule + /companies, and the
+    frontend's GuruFocus link falls back to a bare-ticker URL that
+    silently lands on the wrong security (or 404s) for non-US names.
+    Returns `{count, companies: [{company_id, name, ticker, country}]}`.
+    The country comes from any universe-membership rows on the row;
+    useful as a hint for the bulk-resolve endpoint's OpenFIGI call."""
+    _require_admin(authorization)
+
+    def _query() -> dict:
+        # company table has no native country; look it up via the
+        # company's most-recent universe_membership row when the
+        # exchange-derived country (via gurufocus_exchange.country)
+        # is NULL by definition (no exchange_id).
+        resp = (
+            supabase.table("company")
+            .select("company_id, company_name, gurufocus_ticker")
+            .is_("exchange_id", "null")
+            .order("company_name")
+            .limit(5000)
+            .execute()
+        )
+        rows = resp.data or []
+        cids = [r["company_id"] for r in rows]
+        # Pull the universe_ticker / sector from membership for context.
+        # No country in universe_membership today, but the universe label
+        # often hints at it (e.g. ACWI-Italy memberships → Italian).
+        mem_by_cid: dict[int, list[dict]] = {}
+        for i in range(0, len(cids), 50):
+            chunk = cids[i:i + 50]
+            m_resp = (
+                supabase.table("universe_membership")
+                .select("company_id, universe_ticker, sector, target_month, universe_id")
+                .in_("company_id", chunk)
+                .order("target_month", desc=True)
+                .execute()
+            )
+            for m in (m_resp.data or []):
+                mem_by_cid.setdefault(m["company_id"], []).append(m)
+        out = []
+        for r in rows:
+            cid = r["company_id"]
+            mems = mem_by_cid.get(cid, [])
+            latest = mems[0] if mems else None
+            out.append({
+                "company_id": cid,
+                "company_name": r.get("company_name"),
+                "gurufocus_ticker": r.get("gurufocus_ticker"),
+                "latest_universe_ticker": latest.get("universe_ticker") if latest else None,
+                "latest_sector": latest.get("sector") if latest else None,
+                "universe_count": len(mems),
+            })
+        return {"count": len(out), "companies": out}
+
+    return await asyncio.to_thread(_query)
+
+
+@router.post("/api/admin/companies/resolve-missing-exchanges")
+async def resolve_missing_exchanges(
+    authorization: str = Header(None),
+    dry_run: bool = True,
+):
+    """For every `company.exchange_id IS NULL` row, run an OpenFIGI
+    lookup by `gurufocus_ticker` and update `exchange_id` to the
+    resolved exchange's id. Returns a per-company outcome so the
+    caller can audit:
+
+      `{count_total, count_resolved, count_unresolved, count_unmapped,
+        resolved: [...], unresolved: [...], unmapped: [...]}`
+
+    - `resolved`: OpenFIGI returned an exchange + we found it in
+      `gurufocus_exchange`. With `dry_run=true` (default), the row is
+      NOT updated — the response just shows what WOULD change. Pass
+      `dry_run=false` to commit.
+    - `unresolved`: OpenFIGI returned no match for the ticker (silent
+      skip; the row stays NULL and the user has to fix manually via
+      /companies).
+    - `unmapped`: OpenFIGI returned a match, but the exchange code
+      isn't in our `gurufocus_exchange` table — add the row first,
+      then re-run.
+
+    Ambiguous tickers (e.g. one ticker listed on multiple exchanges)
+    use OpenFIGI's first match. Cross-check `resolved[].openfigi_exchange`
+    against your expectation before committing."""
+    _require_admin(authorization)
+
+    def _resolve() -> dict:
+        # Fetch NULL-exchange rows.
+        rows_resp = (
+            supabase.table("company")
+            .select("company_id, gurufocus_ticker, company_name")
+            .is_("exchange_id", "null")
+            .limit(5000)
+            .execute()
+        )
+        rows = rows_resp.data or []
+        if not rows:
+            return {
+                "count_total": 0,
+                "count_resolved": 0,
+                "count_unresolved": 0,
+                "count_unmapped": 0,
+                "resolved": [],
+                "unresolved": [],
+                "unmapped": [],
+                "dry_run": dry_run,
+            }
+        # Load exchange_code → exchange_id map.
+        exch_resp = (
+            supabase.table("gurufocus_exchange")
+            .select("exchange_id, exchange_code")
+            .execute()
+        )
+        code_to_id = {
+            (r.get("exchange_code") or "").upper(): r["exchange_id"]
+            for r in (exch_resp.data or [])
+            if r.get("exchange_code")
+        }
+        # Build OpenFIGI input. We have no country signal on a NULL-
+        # exchange row, so OpenFIGI runs without exchCode hint (its
+        # exchange-disambiguation lookup uses the global ticker space
+        # and returns its best guess).
+        from ingest.resolve_tickers import resolve_via_openfigi  # noqa: PLC0415
+        unknowns = [
+            {"ticker": (r.get("gurufocus_ticker") or "").strip(), "country": "", "exchange": ""}
+            for r in rows
+            if (r.get("gurufocus_ticker") or "").strip()
+        ]
+        try:
+            openfigi_results = resolve_via_openfigi(unknowns)
+        except Exception as e:
+            raise HTTPException(
+                502,
+                f"OpenFIGI lookup failed: {type(e).__name__}: {e}",
+            )
+        # Index OpenFIGI's results by ticker for the row-level loop.
+        resolved_by_ticker = {r["ticker"].upper(): r for r in openfigi_results}
+
+        resolved: list[dict] = []
+        unresolved: list[dict] = []
+        unmapped: list[dict] = []
+        for r in rows:
+            cid = r["company_id"]
+            ticker = (r.get("gurufocus_ticker") or "").strip().upper()
+            name = r.get("company_name") or ""
+            if not ticker:
+                unresolved.append({
+                    "company_id": cid,
+                    "company_name": name,
+                    "gurufocus_ticker": None,
+                    "reason": "Empty ticker; manual fix required.",
+                })
+                continue
+            hit = resolved_by_ticker.get(ticker)
+            if not hit:
+                unresolved.append({
+                    "company_id": cid,
+                    "company_name": name,
+                    "gurufocus_ticker": ticker,
+                    "reason": "OpenFIGI returned no match.",
+                })
+                continue
+            new_exchange_code = (hit.get("gurufocus_exchange") or "").upper()
+            new_exchange_id = code_to_id.get(new_exchange_code)
+            if new_exchange_id is None:
+                unmapped.append({
+                    "company_id": cid,
+                    "company_name": name,
+                    "gurufocus_ticker": ticker,
+                    "openfigi_exchange": new_exchange_code,
+                    "reason": (
+                        f"OpenFIGI returned exchange {new_exchange_code!r} "
+                        f"but it's not in our gurufocus_exchange table. "
+                        f"Add the row first, then re-run."
+                    ),
+                })
+                continue
+            # We have a resolution. Commit (or stage) the update.
+            if not dry_run:
+                try:
+                    supabase.table("company").update({
+                        "exchange_id": new_exchange_id,
+                    }).eq("company_id", cid).execute()
+                except Exception as e:
+                    unresolved.append({
+                        "company_id": cid,
+                        "company_name": name,
+                        "gurufocus_ticker": ticker,
+                        "openfigi_exchange": new_exchange_code,
+                        "reason": f"DB update failed: {type(e).__name__}: {e}",
+                    })
+                    continue
+            resolved.append({
+                "company_id": cid,
+                "company_name": name,
+                "gurufocus_ticker": ticker,
+                "openfigi_exchange": new_exchange_code,
+                "exchange_id": new_exchange_id,
+                "openfigi_ticker": hit.get("gurufocus_ticker"),
+            })
+
+        return {
+            "count_total": len(rows),
+            "count_resolved": len(resolved),
+            "count_unresolved": len(unresolved),
+            "count_unmapped": len(unmapped),
+            "resolved": resolved,
+            "unresolved": unresolved,
+            "unmapped": unmapped,
+            "dry_run": dry_run,
+        }
+
+    return await asyncio.to_thread(_resolve)
