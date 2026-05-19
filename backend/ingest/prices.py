@@ -7,8 +7,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shutil
-import subprocess
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -16,20 +14,47 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
+try:
+    from curl_cffi import requests as cf_requests  # type: ignore[import-not-found]
+    _HAS_CURL_CFFI = True
+    _CURL_CFFI_IMPORT_ERROR: str | None = None
+except ImportError as _e:
+    _HAS_CURL_CFFI = False
+    _CURL_CFFI_IMPORT_ERROR = f"{type(_e).__name__}: {_e}"
+
 from supabase import Client
 
 from ingest.staleness import is_cache_fresh, is_daily_data_fresh
 from ingest.api_usage import track_api_call
+
+# Mirrors the diagnostic in `earnings/_api_client.py`. The prices path
+# and the earnings path each have their own copy of the curl_cffi client
+# — both must succeed on Cloudflare-protected endpoints.
+if _HAS_CURL_CFFI:
+    logging.getLogger(__name__).warning(
+        "gurufocus prices client: using curl_cffi (Chrome impersonation)"
+    )
+else:
+    logging.getLogger(__name__).error(
+        "gurufocus prices client: FALLBACK to urllib (curl_cffi import failed: %s) — "
+        "Cloudflare will block production calls",
+        _CURL_CFFI_IMPORT_ERROR,
+    )
 
 _BUCKET = "gurufocus-raw"
 _PRICE_CUTOFF = date(1998, 1, 1)
 
 US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX", "CBOE"}
 
+# Keep in sync with `earnings/_api_client.py::_IMPERSONATE`. Cloudflare's
+# bot allowlist for "real Chrome" includes recent versions only; older
+# JA3/JA4 fingerprints aged out of the allowlist around mid-2025.
+_IMPERSONATE = "chrome131"
+
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/120.0.0.0 Safari/537.36"
+    "Chrome/131.0.0.0 Safari/537.36"
 )
 
 
@@ -144,11 +169,12 @@ def _upload_to_storage(supabase: Client, path: str, data: list) -> None:
             )
 
 
-_HAS_CURL = shutil.which("curl") is not None
-
-
 def _fetch_indicator_from_api(ticker: str, exchange: str, indicator: str = "price", timeout: int = 30) -> tuple[list | None, str, int | None]:
-    """Fetch an indicator from GuruFocus API. Returns (raw_data, log_message, http_status)."""
+    """Fetch an indicator from GuruFocus API. Returns (raw_data, log_message, http_status).
+
+    Uses curl_cffi with Chrome120 impersonation to bypass GuruFocus's
+    Cloudflare TLS-fingerprint check (urllib's fingerprint gets
+    blocked). Falls back to urllib only when curl_cffi can't import."""
     base_url = os.environ.get("GURUFOCUS_BASE_URL", "")
     api_key = os.environ.get("GURUFOCUS_API_KEY", "")
     if not base_url:
@@ -164,27 +190,23 @@ def _fetch_indicator_from_api(ticker: str, exchange: str, indicator: str = "pric
     url = f"{base}/public/user/{api_key}/stock/{quote(symbol, safe=':')}/{indicator}"
     masked_url = url.replace(api_key, api_key[:4] + "***")
 
-    if _HAS_CURL:
+    if _HAS_CURL_CFFI:
         try:
-            result = subprocess.run(
-                ["curl", "-s", "--max-time", str(timeout),
-                 "-w", "\n%{http_code}",
-                 "-H", f"User-Agent: {_USER_AGENT}",
-                 "-H", "Accept: application/json",
-                 url],
-                capture_output=True, text=True, timeout=timeout + 5,
+            resp = cf_requests.get(
+                url,
+                headers={"User-Agent": _USER_AGENT, "Accept": "application/json"},
+                timeout=timeout,
+                impersonate=_IMPERSONATE,
             )
-            output = result.stdout.rsplit("\n", 1)
-            body = output[0] if len(output) > 1 else result.stdout
-            status = int(output[-1]) if len(output) > 1 and output[-1].isdigit() else None
-
-            if status and status >= 400:
-                return None, f"API HTTP {status} for {symbol} body={body[:200]} ({masked_url})", status
-            if result.returncode != 0:
-                return None, f"API error for {symbol}: curl exit {result.returncode} ({masked_url})", status
+            status = resp.status_code
+            body = resp.text or ""
+            if status >= 400:
+                return None, f"API HTTP {status} via curl_cffi/{_IMPERSONATE} for {symbol} body={body[:200]} ({masked_url})", status
             if not body:
                 return None, f"API returned empty response for {symbol} ({masked_url})", status
             return json.loads(body), f"API OK for {symbol} ({masked_url})", status
+        except json.JSONDecodeError as e:
+            return None, f"API returned invalid JSON for {symbol}: {e} ({masked_url})", None
         except Exception as e:
             return None, f"API error for {symbol}: {type(e).__name__}: {e}", None
     else:
@@ -201,7 +223,7 @@ def _fetch_indicator_from_api(ticker: str, exchange: str, indicator: str = "pric
                 body = e.read().decode("utf-8", errors="replace")[:200]
             except Exception:
                 pass
-            return None, f"API HTTP {e.code} for {symbol}: {e.reason} body={body} ({masked_url})", e.code
+            return None, f"API HTTP {e.code} via urllib (curl_cffi unavailable) for {symbol}: {e.reason} body={body} ({masked_url})", e.code
         except URLError as e:
             return None, f"API URL error for {symbol}: {e.reason}", None
         except Exception as e:
