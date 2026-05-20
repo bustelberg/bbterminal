@@ -9,8 +9,8 @@ import {
 import AcwiCanonicalView from './AcwiCanonicalView';
 import ProgressTimeline from './ProgressTimeline';
 import { trackedFetch } from '../../lib/loading';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import LoadingDots from './LoadingDots';
+import { API_URL } from '../../lib/apiUrl';
 
 // GuruFocus exchange prefixes considered "feasible" — regions covered by the
 // current GuruFocus subscription: USA + Europe + Asia (incl. Middle East),
@@ -451,7 +451,7 @@ export default function AcwiUniverse() {
       )}
 
       {loading ? (
-        <div className="text-gray-400 text-sm">Loading holdings...</div>
+        <div className="text-gray-400 text-sm"><LoadingDots label="Loading holdings" /></div>
       ) : (
         <>
           {/* Summary cards */}
@@ -692,7 +692,7 @@ export default function AcwiUniverse() {
               </div>
             )}
             {annLoading ? (
-              <div className="px-5 py-4 text-gray-400 text-sm">Loading announcements...</div>
+              <div className="px-5 py-4 text-gray-400 text-sm"><LoadingDots label="Loading announcements" /></div>
             ) : (
               <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
                 <table className="w-full text-sm">

@@ -7,10 +7,11 @@ import TableDownloadButton from '../TableDownloadButton';
 import CellInfoTip from './CellInfoTip';
 import CollapsibleCard from './CollapsibleCard';
 import TickerTimelineModal from './TickerTimelineModal';
-import { buildFeeMap, computeNetStats, parenPct } from './feeStats';
+import { computeNetStats, parenPct } from './feeStats';
+import { useClickOutside } from '../../../lib/hooks/useClickOutside';
+import { useExchangeFeeMap } from '../../../lib/hooks/apiData';
 import { EXCHANGE_NAMES, displayExchange, fmtPct, fmtPrice, guruFocusUrl } from './utils';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { API_URL } from '../../../lib/apiUrl';
 
 type HeldCompany = { company_id: number; ticker: string; company_name: string };
 
@@ -66,16 +67,7 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
   // Cumulative columns. Fetched once on mount; null when the user hasn't
   // configured any non-zero fees, in which case every parenPct(...) call
   // below renders as the empty string (no parens, no visual noise).
-  const [feesByExchange, setFeesByExchange] = useState<Map<string, number> | null>(null);
-  useEffect(() => {
-    fetch(`${API_URL}/api/exchange-fees`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((rows) => {
-        const m = buildFeeMap(rows ?? []);
-        setFeesByExchange(m.size > 0 ? m : null);
-      })
-      .catch(() => {});
-  }, []);
+  const feesByExchange = useExchangeFeeMap();
 
   // Net per-period + cumulative returns for the active result, keyed by
   // the same `r.date` the outer rows render. `computeNetStats` returns
@@ -569,16 +561,7 @@ function CompanySearch({
     setActiveIdx(0);
   }
 
-  // Close on outside click.
-  useEffect(() => {
-    const onDocClick = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, []);
+  useClickOutside(containerRef, () => setOpen(false));
 
   const choose = (cid: number) => {
     onPick(cid);

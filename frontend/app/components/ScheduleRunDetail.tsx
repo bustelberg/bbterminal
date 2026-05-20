@@ -8,7 +8,7 @@ import SnapshotHoldings from './SnapshotHoldings';
 import type { Column } from '../../lib/tableExport';
 import TableDownloadButton from './TableDownloadButton';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { API_URL } from '../../lib/apiUrl';
 
 type MembershipRow = {
   company_id: number;

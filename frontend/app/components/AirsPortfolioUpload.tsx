@@ -12,6 +12,9 @@ import {
 import ProgressTimeline, { type StepDef, type StepState } from './ProgressTimeline';
 import type { Column } from '../../lib/tableExport';
 import TableDownloadButton from './TableDownloadButton';
+import Spinner from './Spinner';
+import LoadingDots from './LoadingDots';
+import { API_URL } from '../../lib/apiUrl';
 
 const AIRS_STEPS: StepDef[] = [
   { key: 'login', label: 'Log in to AirSPMS' },
@@ -20,7 +23,7 @@ const AIRS_STEPS: StepDef[] = [
   { key: 'ytd', label: 'Load YTD returns' },
 ];
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+// API_URL imported from lib/apiUrl above — single source of truth.
 
 type PerfRow = {
   periode: string;
@@ -76,14 +79,7 @@ function returnColor(v: number | null): string {
 
 // ─── Spinner ─────────────────────────────────────────────────────────────────
 
-function Spinner({ className = 'h-3.5 w-3.5' }: { className?: string }) {
-  return (
-    <svg className={`animate-spin ${className}`} viewBox="0 0 24 24" fill="none">
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-    </svg>
-  );
-}
+// Spinner moved to ./Spinner — shared with MomentumBacktester (and future call sites).
 
 // ─── Detail view ─────────────────────────────────────────────────────────────
 
@@ -510,7 +506,7 @@ export default function AirsPortfolioUpload() {
         {initialLoading && (
           <div className="flex items-center justify-center py-20 gap-3 text-gray-400">
             <Spinner className="h-5 w-5" />
-            <span className="text-sm">Loading portfolios...</span>
+            <span className="text-sm"><LoadingDots label="Loading portfolios" /></span>
           </div>
         )}
       </div>

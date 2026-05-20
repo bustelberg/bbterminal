@@ -11,7 +11,12 @@ from typing import Generator
 
 from supabase import Client
 
-from ingest.prices import _build_symbol, _ensure_bucket, _upload_to_storage
+from ingest.prices import (
+    _build_symbol,
+    _ensure_bucket,
+    _upload_to_storage,
+    normalize_gurufocus_ticker,
+)
 from ingest.earnings import _build_api_url, _api_request
 from ingest.api_usage import track_api_call
 from universe.criteria import evaluate_criteria
@@ -20,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 def _storage_path(ticker: str, exchange: str) -> str:
+    ticker = normalize_gurufocus_ticker(ticker, exchange)
     return f"{exchange.upper()}_{ticker.upper()}/financials.json"
 
 

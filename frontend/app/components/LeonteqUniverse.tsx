@@ -6,8 +6,8 @@ import { apiFetch } from '../../lib/apiFetch';
 import { colorForSector } from '../../lib/sectorColors';
 import type { Column } from '../../lib/tableExport';
 import TableDownloadButton from './TableDownloadButton';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import LoadingDots from './LoadingDots';
+import { API_URL } from '../../lib/apiUrl';
 const TEMPLATE_KEY = 'LEONTEQ';
 
 type Company = {
@@ -321,7 +321,7 @@ export default function LeonteqUniverse() {
         )}
 
         {loading && !data ? (
-          <div className="text-sm text-gray-500">Loading Leonteq universe…</div>
+          <div className="text-sm text-gray-500"><LoadingDots label="Loading Leonteq universe" /></div>
         ) : !data || data.total_equities === 0 ? (
           <div className="bg-[#151821] rounded-xl border border-gray-800/40 px-5 py-6 text-sm text-gray-400">
             No equities scraped yet. Click <span className="text-gray-200">Refresh now</span> to scrape the Leonteq page.

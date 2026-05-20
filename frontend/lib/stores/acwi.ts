@@ -1,6 +1,5 @@
 import { createStore } from '../store';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { API_URL } from '../apiUrl';
 
 // ─── fetch-all-details (EventSource) ────────────────────────────────────────
 

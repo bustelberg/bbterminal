@@ -9,8 +9,8 @@ import { dialog } from '../../lib/dialog';
 import ProgressTimeline, { type StepDef, type StepState } from './ProgressTimeline';
 import { trackedFetch } from '../../lib/loading';
 import { apiFetch } from '../../lib/apiFetch';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import LoadingDots from './LoadingDots';
+import { API_URL } from '../../lib/apiUrl';
 
 type CriterionDef = { key: string; label: string; description?: string; min_years?: number };
 
@@ -246,7 +246,7 @@ export default function UniverseScreener() {
 
         {loading ? (
           <div className="bg-[#151821] rounded-xl border border-gray-800/40 px-5 py-8 text-sm text-gray-500">
-            Loading...
+            <LoadingDots label="Loading" />
           </div>
         ) : error ? (
           <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg px-5 py-4 text-sm text-rose-400">

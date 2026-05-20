@@ -8,8 +8,9 @@ import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
 import { trackedFetch } from '../../lib/loading';
 import type { Column } from '../../lib/tableExport';
 import TableDownloadButton from './TableDownloadButton';
+import LoadingDots from './LoadingDots';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { API_URL } from '../../lib/apiUrl';
 
 type Company = {
   company_id: number;
@@ -18,6 +19,11 @@ type Company = {
   gurufocus_exchange: string;
   country: string | null;
   universes: string[];
+  /** ISO timestamp set by the price phase when GuruFocus returns "delisted"
+   * or "stock not found" for this (ticker, exchange). Companies with a
+   * non-null value are excluded from the backtest gap warning and the
+   * pipeline skips them entirely on subsequent runs. */
+  delisted_at?: string | null;
 };
 
 type SortField = 'company_name' | 'gurufocus_ticker' | 'gurufocus_exchange' | 'country';
@@ -477,7 +483,7 @@ export default function CompanyManager() {
         <div>
           <h1 className="text-lg font-semibold text-white">Companies</h1>
           <p className="text-xs text-gray-500 mt-0.5">
-            {loading ? 'Loading...' : `${filtered.length} of ${companies.length} companies`}
+            {loading ? <LoadingDots label="Loading" /> : `${filtered.length} of ${companies.length} companies`}
             {!loading && duplicateCount > 0 && (
               <>
                 {' · '}
@@ -619,8 +625,16 @@ export default function CompanyManager() {
                 ) : (
                   <tr key={c.company_id} className="border-b border-gray-800/30 hover:bg-white/[0.02] transition-colors group">
                     <td className="px-4 py-2.5 text-gray-600 text-xs">{c.company_id}</td>
-                    <td className="px-3 py-2.5 text-gray-200 font-medium">
-                      {c.company_name ?? '—'}
+                    <td className={`px-3 py-2.5 font-medium ${c.delisted_at ? 'text-gray-500' : 'text-gray-200'}`}>
+                      <span className={c.delisted_at ? 'line-through' : ''}>{c.company_name ?? '—'}</span>
+                      {c.delisted_at && (
+                        <span
+                          className="ml-2 px-1.5 py-0.5 text-[10px] font-medium bg-rose-500/15 text-rose-300 border border-rose-500/25 rounded"
+                          title={`Marked delisted on ${new Date(c.delisted_at).toLocaleString()} — GuruFocus returned no fetchable data. Excluded from backtests.`}
+                        >
+                          DELISTED
+                        </span>
+                      )}
                       {c.company_name && duplicateNames.has(c.company_name.toLowerCase().trim()) && (
                         <span className="ml-2 px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/15 text-amber-400 border border-amber-500/25 rounded" title="Duplicate company name">
                           DUPE

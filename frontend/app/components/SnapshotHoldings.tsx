@@ -2,9 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import MonthlyHoldingsTable from './momentum/MonthlyHoldingsTable';
+import LoadingDots from './LoadingDots';
 import type { BacktestResult, Holding, PeriodRecord, Summary } from '../../lib/stores/momentum';
+import { useCompanyExchangeMap } from '../../lib/hooks/apiData';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { API_URL } from '../../lib/apiUrl';
 
 type SnapshotResponse = {
   snapshot_id: number;
@@ -26,26 +28,9 @@ export default function SnapshotHoldings({ snapshotId }: { snapshotId: number })
   // Snapshot holdings JSON doesn't include `gurufocus_exchange` per
   // company, so MonthlyHoldingsTable would render "—" in the Exchange
   // column and a bare-ticker GuruFocus URL for everything (which 404s
-  // for non-US names). Same pattern as MomentumBacktester: load the
-  // live company directory once and build the lookup map. ~3k rows on
-  // a single fetch, cheap.
-  const [exchangeByCompany, setExchangeByCompany] = useState<Map<number, string>>(new Map());
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`${API_URL}/api/companies`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: { company_id: number; gurufocus_exchange: string | null }[]) => {
-        if (cancelled) return;
-        const m = new Map<number, string>();
-        for (const c of data) {
-          const exch = (c.gurufocus_exchange ?? '').trim();
-          if (exch) m.set(c.company_id, exch);
-        }
-        setExchangeByCompany(m);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
+  // Company → exchange map shared via the cached `useCompanies` hook
+  // so this page reuses MomentumBacktester's fetch when both render.
+  const exchangeByCompany = useCompanyExchangeMap();
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -122,7 +107,7 @@ export default function SnapshotHoldings({ snapshotId }: { snapshotId: number })
     };
   }, [snapshot]);
 
-  if (loading) return <div className="text-xs text-gray-500">Loading snapshot…</div>;
+  if (loading) return <div className="text-xs text-gray-500"><LoadingDots label="Loading snapshot" /></div>;
   if (error) return <div className="text-xs text-rose-300">Failed to load snapshot: {error}</div>;
   if (!result || !scoringConfig) return <div className="text-xs text-gray-500">No data.</div>;
 

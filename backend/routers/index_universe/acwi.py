@@ -153,6 +153,44 @@ def run_acwi_save_universe(
     feasible = acwi_feasible_holdings_for_db()
     emit(f"Found {len(feasible)} feasible holdings", 5)
 
+    # Cross-exchange dedup pass — iShares lists dual-listed names (e.g.
+    # ICBC on HKSE:01398 AND SHSE:601398) as separate holdings. Without
+    # this we'd insert both as distinct `company` rows. Group by
+    # canonical name, keep the highest-priority exchange (HKSE > SHSE
+    # for Chinese names; see EXCHANGE_PRIORITY in ingest.dedupe).
+    from collections import defaultdict  # noqa: PLC0415
+    from ingest.dedupe import canonical_name, exchange_priority  # noqa: PLC0415
+
+    _by_name: dict[str, list[dict]] = defaultdict(list)
+    for fh in feasible:
+        nm = canonical_name(fh.get("company_name"))
+        if nm:
+            _by_name[nm].append(fh)
+    _winners: dict[str, dict] = {}
+    for nm, grp in _by_name.items():
+        if len(grp) > 1:
+            _winners[nm] = min(grp, key=lambda h: exchange_priority(h.get("db_exchange")))
+    _dropped_log: list[str] = []
+    _deduped: list[dict] = []
+    for fh in feasible:
+        nm = canonical_name(fh.get("company_name"))
+        if not nm or nm not in _winners:
+            _deduped.append(fh)
+            continue
+        if fh is _winners[nm]:
+            _deduped.append(fh)
+        else:
+            _dropped_log.append(
+                f"{fh.get('db_exchange')}:{fh.get('gf_ticker')} -> "
+                f"{_winners[nm].get('db_exchange')}:{_winners[nm].get('gf_ticker')} "
+                f"({fh.get('company_name')})"
+            )
+    if _dropped_log:
+        sample = ", ".join(_dropped_log[:5])
+        more = f" (+{len(_dropped_log) - 5} more)" if len(_dropped_log) > 5 else ""
+        emit(f"Dedup: dropped {len(_dropped_log)} cross-exchange dupe(s), kept higher-priority listing: {sample}{more}", None)
+    feasible = _deduped
+
     exch_resp = supabase.table("gurufocus_exchange").select("exchange_id, exchange_code").execute()
     exch_id_map = {r["exchange_code"]: r["exchange_id"] for r in (exch_resp.data or [])}
 

@@ -14,8 +14,8 @@ import {
 import { trackedFetch } from '../../lib/loading';
 import type { Column } from '../../lib/tableExport';
 import TableDownloadButton from './TableDownloadButton';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import LoadingDots from './LoadingDots';
+import { API_URL } from '../../lib/apiUrl';
 
 type IndexEntry = {
   index_name: string;
@@ -339,7 +339,7 @@ export default function IndexUniverse() {
                   </div>
                   <div className="p-5">
                     {months.length === 0 ? (
-                      <p className="text-sm text-gray-500">Loading months...</p>
+                      <p className="text-sm text-gray-500"><LoadingDots label="Loading months" /></p>
                     ) : (
                       <div className="flex flex-wrap gap-1.5">
                         {months.map(m => (
@@ -453,7 +453,7 @@ export default function IndexUniverse() {
                     </div>
                     <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
                       {loadingMonth ? (
-                        <div className="px-5 py-8 text-center text-gray-500 text-sm">Loading...</div>
+                        <div className="px-5 py-8 text-center text-gray-500 text-sm"><LoadingDots label="Loading" /></div>
                       ) : (
                         <table className="w-full text-sm">
                           <thead className="sticky top-0 bg-[#151821]">
@@ -583,7 +583,7 @@ export default function IndexUniverse() {
                 </div>
                 <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
                   {loadingCumulative ? (
-                    <div className="px-5 py-8 text-center text-gray-500 text-sm">Loading...</div>
+                    <div className="px-5 py-8 text-center text-gray-500 text-sm"><LoadingDots label="Loading" /></div>
                   ) : (
                     <table className="w-full text-sm">
                       <thead className="sticky top-0 bg-[#151821]">

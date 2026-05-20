@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import AddScheduledStrategyForm from './AddScheduledStrategyForm';
+import DailyMtdRefreshCard from './DailyMtdRefreshCard';
 import ScheduledStrategyDetail, { type StrategyRunHistory } from './ScheduledStrategyDetail';
+import LoadingDots from './LoadingDots';
 import { type StepDef, type StepState } from './ProgressTimeline';
 import { apiFetch } from '../../lib/apiFetch';
 import { dialog } from '../../lib/dialog';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { API_URL } from '../../lib/apiUrl';
 
 export type IngestRun = {
   run_id: number;
@@ -367,6 +369,8 @@ export default function Schedule() {
           </div>
         )}
 
+        <DailyMtdRefreshCard />
+
         {/* Scheduled strategies */}
         <div className="bg-[#151821] rounded-xl border border-gray-800/40">
           <div className="px-5 py-3 border-b border-gray-800/40 flex items-center justify-between">
@@ -408,7 +412,7 @@ export default function Schedule() {
           )}
 
           {strategiesLoading ? (
-            <div className="px-5 py-5 text-sm text-gray-500">Loading…</div>
+            <div className="px-5 py-5 text-sm text-gray-500"><LoadingDots label="Loading" /></div>
           ) : strategies.length === 0 ? (
             <div className="px-5 py-6 text-sm text-gray-500">
               No strategies scheduled yet. Click <span className="text-gray-300">+ Add strategy</span> to add one inline.

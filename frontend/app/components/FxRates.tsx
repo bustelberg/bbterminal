@@ -8,8 +8,8 @@ import {
 import { trackedFetch } from '../../lib/loading';
 import type { Column } from '../../lib/tableExport';
 import TableDownloadButton from './TableDownloadButton';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import LoadingDots from './LoadingDots';
+import { API_URL } from '../../lib/apiUrl';
 
 type CurrencyMeta = { name: string; country: string };
 
@@ -112,7 +112,7 @@ function FxHistoryChart({ currency, history, loading, refreshing, onClose }: {
         </div>
       </div>
       {loading ? (
-        <p className="text-gray-400 text-sm">Loading history...</p>
+        <p className="text-gray-400 text-sm"><LoadingDots label="Loading history" /></p>
       ) : history.length === 0 ? (
         <p className="text-gray-500 text-sm">No data available</p>
       ) : stats && (
@@ -371,7 +371,7 @@ export default function FxRates() {
     return (
       <div className="px-8 py-5">
         <h1 className="text-xl font-semibold text-white mb-4">FX Rates</h1>
-        <p className="text-gray-400">Loading ECB exchange rates...</p>
+        <p className="text-gray-400"><LoadingDots label="Loading ECB exchange rates" /></p>
       </div>
     );
   }

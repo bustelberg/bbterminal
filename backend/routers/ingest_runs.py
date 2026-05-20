@@ -56,7 +56,16 @@ from deps import supabase
 
 router = APIRouter(tags=["ingest"])
 
-_VALID_JOB_NAMES = {"weekly_price_volume", "monthly_price_volume", "manual"}
+_VALID_JOB_NAMES = {
+    "weekly_price_volume",
+    "monthly_price_volume",
+    "manual",
+    # Daily MTD refresh: fires Wed-Sat 02:00 UTC. Refreshes prices for the
+    # pooled set of held companies across all enabled scheduled strategies,
+    # then recomputes + persists MTD on each strategy's latest snapshot so
+    # the /schedule UI shows fresh "to-date" stats every trading day.
+    "daily_holdings_refresh",
+}
 # Concurrency cap — same as self_heal. GuruFocus is rate-limit-sensitive
 # and the ensure_* helpers short-circuit on fresh DB rows, so the bound
 # only matters when we're actually pulling fresh data. 12 keeps a typical
@@ -65,12 +74,13 @@ _VALID_JOB_NAMES = {"weekly_price_volume", "monthly_price_volume", "manual"}
 # Cloudflare ladder handles 12-wide comfortably; bump further only if 429s
 # stay absent across multiple runs.
 _MAX_WORKERS = 12
-# Checkpoint frequency — write progress to the row every N companies so
-# the /schedule page sees the bar move during a long run. Tuned low
-# enough that the first checkpoint arrives within seconds (so the UI
-# never sits on "starting…" for long) but not so low that every
-# completion triggers a DB write.
-_CHECKPOINT_EVERY = 25
+# Checkpoint frequency — write progress to the row every N companies.
+# Previously 25, which produced visibly "chunky" progress jumps
+# (0 → 25 → 50 → …). 1 = write on every company so the UI reflects
+# real-time progress; the wall-clock throttle on `current_message`
+# (_MESSAGE_THROTTLE_SECONDS) bounds total DB write volume regardless,
+# and the counter-only update is cheap enough to do per-row.
+_CHECKPOINT_EVERY = 1
 # Minimum interval between `current_message` writes for the ACWI and
 # momentum phases (which emit many events per second). Prevents
 # hammering the DB while still keeping the live status fresh.
@@ -142,9 +152,10 @@ def _load_all_companies() -> list[dict]:
         resp = (
             supabase.table("company")
             .select(
-                "company_id, gurufocus_ticker, "
+                "company_id, gurufocus_ticker, delisted_at, "
                 "gurufocus_exchange:gurufocus_exchange(exchange_code)"
             )
+            .is_("delisted_at", "null")
             .range(offset, offset + page - 1)
             .execute()
         )
@@ -435,13 +446,21 @@ def _run_prune_phase(run_id: int) -> None:
     log.info("[pipeline.prune] run_id=%s %s", run_id, msg)
 
 
-def _run_prices_phase(run_id: int, accumulated_errors: list[str]) -> None:
+def _run_prices_phase(
+    run_id: int,
+    accumulated_errors: list[str],
+    companies_override: list[dict] | None = None,
+) -> None:
     """Phase 3 — the price/volume refresh that used to be the whole job.
     Walks every row in `company`, parallel-pumps each through
     `ensure_prices_for_company` + `ensure_volume_for_company`, and
     updates `ingest_run` with the per-class counters every
     `_CHECKPOINT_EVERY` companies. Forbidden / delisted are tallied
-    silently; the first 5 unexpected errors land in `error_summary`."""
+    silently; the first 5 unexpected errors land in `error_summary`.
+
+    `companies_override` short-circuits `_load_all_companies()`; pass the
+    pooled held-company list for the daily MTD refresh so we don't churn
+    through the full ~2000-company universe."""
     from ingest.prices import (  # noqa: PLC0415
         ensure_prices_for_company,
         ensure_volume_for_company,
@@ -460,7 +479,7 @@ def _run_prices_phase(run_id: int, accumulated_errors: list[str]) -> None:
     error_examples: list[str] = []
     lock = threading.Lock()
 
-    companies = _load_all_companies()
+    companies = companies_override if companies_override is not None else _load_all_companies()
 
     if not companies:
         # Empty universe — still considered a successful prices phase.
@@ -531,10 +550,49 @@ def _run_prices_phase(run_id: int, accumulated_errors: list[str]) -> None:
                     checkpoint = dict(counters)
             if checkpoint:
                 _checkpoint(run_id, checkpoint, total)
+            # Persist the delisted-at marker so the next run + the audit
+            # path can short-circuit instead of re-probing. Best-effort —
+            # a transient blip here just means we re-probe next run.
+            try:
+                supabase.table("company").update(
+                    {"delisted_at": _now_utc_iso()}
+                ).eq("company_id", cid).is_("delisted_at", "null").execute()
+            except Exception as e:
+                logging.getLogger(__name__).warning(
+                    "[prices_phase] failed to mark cid=%s delisted: %s: %s",
+                    cid, type(e).__name__, e,
+                )
             return
 
+        # If the price fetch had to fall through to a different exchange
+        # (e.g. XTER:D7C 404 → STU:D7C 200), use the resolved one for
+        # the volume call AND repoint the company row so future runs
+        # skip the dead primary. This is the place we trust the
+        # iShares-derived `XTER` claim was wrong; the actual home is
+        # whatever GuruFocus served.
+        effective_exch = r_p.resolved_exchange or exch
+        if r_p.resolved_exchange and r_p.resolved_exchange != exch:
+            try:
+                exch_row = (
+                    supabase.table("gurufocus_exchange")
+                    .select("exchange_id")
+                    .eq("exchange_code", r_p.resolved_exchange)
+                    .limit(1)
+                    .execute()
+                )
+                if exch_row.data:
+                    new_eid = exch_row.data[0]["exchange_id"]
+                    supabase.table("company").update(
+                        {"exchange_id": new_eid}
+                    ).eq("company_id", cid).execute()
+            except Exception as e:
+                logging.getLogger(__name__).warning(
+                    "[prices_phase] failed to repoint cid=%s exchange %s -> %s: %s: %s",
+                    cid, exch, r_p.resolved_exchange, type(e).__name__, e,
+                )
+
         try:
-            r_v = ensure_volume_for_company(supabase, cid, ticker, exch)
+            r_v = ensure_volume_for_company(supabase, cid, ticker, effective_exch)
         except Exception as e:
             with lock:
                 counters["processed"] += 1
@@ -889,9 +947,316 @@ def _checkpoint(run_id: int, snap: dict, total: int | None = None) -> None:
     )
 
 
-def _spawn_ingest(run_id: int) -> None:
+def _collect_held_companies(run_id: int) -> list[dict]:
+    """Pool company_ids across the latest snapshot of every enabled
+    scheduled strategy. Returns the list shape `_run_prices_phase`
+    expects: `[{"cid", "ticker", "exchange"}]`. Duplicates across
+    strategies collapse into a single entry."""
+    strat_resp = (
+        supabase.table("scheduled_strategy")
+        .select("id")
+        .eq("enabled", True)
+        .execute()
+    )
+    sched_ids = [r["id"] for r in (strat_resp.data or [])]
+    if not sched_ids:
+        return []
+
+    snap_resp = (
+        supabase.table("current_picks_snapshot")
+        .select("scheduled_strategy_id, holdings, created_at")
+        .in_("scheduled_strategy_id", sched_ids)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    company_ids: set[int] = set()
+    seen: set[int] = set()
+    for s in (snap_resp.data or []):
+        sid = s.get("scheduled_strategy_id")
+        if sid is None or sid in seen:
+            continue
+        seen.add(sid)
+        for h in (s.get("holdings") or []):
+            cid = h.get("company_id")
+            if cid is not None:
+                company_ids.add(int(cid))
+
+    if not company_ids:
+        return []
+
+    # Batch the IN(...) lookup in chunks of 50 to stay under the
+    # Cloudflare-502 URL-length window — same convention as the rest of
+    # the codebase.
+    out: list[dict] = []
+    cids_list = list(company_ids)
+    for start in range(0, len(cids_list), 50):
+        batch = cids_list[start : start + 50]
+        meta_resp = (
+            supabase.table("company")
+            .select(
+                "company_id, gurufocus_ticker, "
+                "gurufocus_exchange:gurufocus_exchange(exchange_code)"
+            )
+            .in_("company_id", batch)
+            .execute()
+        )
+        for r in (meta_resp.data or []):
+            exch = (r.get("gurufocus_exchange") or {}).get("exchange_code") or ""
+            ticker = r.get("gurufocus_ticker") or ""
+            if not ticker or not exch:
+                continue
+            out.append({
+                "cid": int(r["company_id"]),
+                "ticker": ticker,
+                "exchange": exch,
+            })
+    return out
+
+
+def _run_daily_mtd_phase(run_id: int) -> None:
+    """Phase 'momentum' for the daily MTD refresh. For each enabled
+    scheduled strategy, INSERTS a fresh `kind='price_update'` snapshot
+    that re-prices the most-recent rebalance's holdings against the
+    latest available closes. Mirrors the weekly pipeline's Branch A
+    (`_run_momentum_phase` → `compute_and_save_price_update`) — same
+    primitive, just fired daily instead of weekly.
+
+    Why insert rather than mutate? Past snapshots (rebalances, prior
+    price_updates, backfill rows) are immutable history. The freshest
+    "to-date" view becomes the newest row at the top of the run
+    history; the UI naturally picks it up on the next fetch.
+
+    Dedup: a fresh price_update for `(strategy, as_of, lpd)` is treated
+    as identical noise if a row with the SAME triple already exists
+    (excluding the row we just inserted). The new row is deleted again
+    so running the daily job twice the same day, or on a day with no
+    new prices, doesn't grow the history.
+
+    Why match on `as_of` AND `lpd` rather than just lpd-vs-most-recent?
+    Backfills insert N rebalance rows for the strategy at once, and
+    earlier buggy code could have left one of them with a misleading
+    lpd. Scoping dedup to "same open period" (same `as_of_date`)
+    isolates the comparison to the row representing the strategy's
+    current period, which is what the dedup actually cares about."""
+    import traceback as _traceback  # noqa: PLC0415
+    from routers.scheduled_strategies import (  # noqa: PLC0415
+        compute_and_save_price_update as _compute_and_save_price_update,
+    )
+
+    log = logging.getLogger(__name__)
+
+    strat_resp = (
+        supabase.table("scheduled_strategy")
+        .select("id, name, frequency, config")
+        .eq("enabled", True)
+        .execute()
+    )
+    strategies = strat_resp.data or []
+    if not strategies:
+        _update_run(run_id, current_message="No enabled strategies — nothing to refresh.")
+        return
+
+    summaries: list[dict] = []
+    errors: list[str] = []
+    total = len(strategies)
+    for idx, strat in enumerate(strategies, 1):
+        sid = strat["id"]
+        sname = strat.get("name") or f"Strategy #{sid}"
+        entry: dict = {
+            "strategy_id": sid,
+            "strategy_name": sname,
+            "frequency": strat.get("frequency"),
+            "kind": "price_update",
+            "config": strat.get("config") or {},
+            "snapshot_id": None,
+            "holdings_count": 0,
+            "latest_price_date": None,
+            "status": "ok",
+            "error_message": None,
+            "error_traceback": None,
+        }
+
+        try:
+            new_snapshot_id = _compute_and_save_price_update(
+                strategy_id=sid,
+                ingest_run_id=run_id,
+                is_backfill=False,
+            )
+            if new_snapshot_id is None:
+                # No prior rebalance to price-update from — strategy
+                # has never produced a real picks row (and has no
+                # backfill rebalance either). Skip silently.
+                entry["error_message"] = "no rebalance to price-update from"
+                summaries.append(entry)
+                _update_run(
+                    run_id,
+                    momentum_summary=summaries,
+                    current_message=f"MTD refresh: {idx}/{total} ({sname}: skipped)",
+                )
+                continue
+
+            # Read back the newly-inserted row so we can (a) report
+            # accurate counts and (b) check whether an identical
+            # snapshot already exists for the same open period.
+            new_resp = (
+                supabase.table("current_picks_snapshot")
+                .select("snapshot_id, as_of_date, latest_price_date, holdings")
+                .eq("snapshot_id", new_snapshot_id)
+                .limit(1)
+                .execute()
+            )
+            new_row = (new_resp.data or [None])[0]
+            new_as_of = (new_row or {}).get("as_of_date") if new_row else None
+            new_lpd = (new_row or {}).get("latest_price_date") if new_row else None
+
+            # Same-period dedup: is there ALREADY a snapshot for this
+            # strategy + open period + lpd? If yes, the new row is
+            # identical noise.
+            dup_existing_id: int | None = None
+            if new_as_of and new_lpd:
+                dup_resp = (
+                    supabase.table("current_picks_snapshot")
+                    .select("snapshot_id, created_at")
+                    .eq("scheduled_strategy_id", sid)
+                    .eq("as_of_date", new_as_of)
+                    .eq("latest_price_date", new_lpd)
+                    .neq("snapshot_id", new_snapshot_id)
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if dup_resp.data:
+                    dup_existing_id = dup_resp.data[0]["snapshot_id"]
+
+            if dup_existing_id is not None:
+                # Identical snapshot for this open period already exists
+                # — delete the redundant new one and point the summary
+                # at the surviving row.
+                supabase.table("current_picks_snapshot").delete().eq(
+                    "snapshot_id", new_snapshot_id,
+                ).execute()
+                entry["snapshot_id"] = dup_existing_id
+                entry["latest_price_date"] = new_lpd
+                entry["error_message"] = (
+                    f"no change since prior snapshot for period "
+                    f"as_of={new_as_of} (lpd={new_lpd}) — skipped"
+                )
+                log.info(
+                    "[daily_mtd] run_id=%s strategy=%s dedup: as_of=%s lpd=%s "
+                    "matched existing snapshot=%s",
+                    run_id, sname, new_as_of, new_lpd, dup_existing_id,
+                )
+            else:
+                entry["snapshot_id"] = new_snapshot_id
+                entry["holdings_count"] = (
+                    len(new_row.get("holdings") or []) if new_row else 0
+                )
+                entry["latest_price_date"] = new_lpd
+                log.info(
+                    "[daily_mtd] run_id=%s strategy=%s snapshot=%s as_of=%s "
+                    "lpd=%s",
+                    run_id, sname, new_snapshot_id, new_as_of, new_lpd,
+                )
+        except Exception as e:
+            msg = f"{type(e).__name__}: {e}"
+            tb = _traceback.format_exc()
+            entry["status"] = "error"
+            entry["error_message"] = msg
+            entry["error_traceback"] = tb
+            errors.append(f"[{sname}] {msg}")
+            log.warning(
+                "[daily_mtd] run_id=%s strategy=%s failed: %s\n%s",
+                run_id, sname, msg, tb,
+            )
+
+        summaries.append(entry)
+        _update_run(
+            run_id,
+            momentum_summary=summaries,
+            current_message=f"MTD refresh: {idx}/{total} ({sname})",
+        )
+
+    if errors:
+        raise RuntimeError(
+            f"{len(errors)} of {total} strategies failed: " + " | ".join(errors[:3])
+        )
+
+
+def _run_daily_mtd_pipeline_sync(run_id: int) -> None:
+    """Two-phase daily orchestrator. Cheaper sibling of
+    `_run_pipeline_sync`: skips acquisition/templates/prune entirely —
+    only the price+volume refresh (limited to held companies) and the
+    per-strategy MTD persist. Runs Wed-Sat at 02:00 UTC."""
+    log = logging.getLogger(__name__)
+    accumulated_errors: list[str] = []
+
+    # Phase 'prices' — pooled refresh across all held companies.
+    _update_run(
+        run_id,
+        current_phase="prices",
+        current_message="Collecting held companies across enabled strategies…",
+    )
+    try:
+        companies = _collect_held_companies(run_id)
+        if not companies:
+            _update_run(
+                run_id,
+                companies_total=0,
+                current_message="No enabled strategies with snapshots — skipping prices phase.",
+            )
+        else:
+            _update_run(
+                run_id,
+                companies_total=len(companies),
+                current_message=f"Refreshing {len(companies)} held companies…",
+            )
+            _run_prices_phase(
+                run_id, accumulated_errors, companies_override=companies,
+            )
+    except Exception as e:
+        msg = f"Prices phase failed: {type(e).__name__}: {e}"
+        log.warning("[daily_mtd] run_id=%s %s", run_id, msg)
+        accumulated_errors.append(msg)
+
+    # Phase 'momentum' — refresh-MTD + persist per strategy.
+    _update_run(
+        run_id,
+        current_phase="momentum",
+        current_message="Recomputing MTD on latest snapshots…",
+    )
+    try:
+        _run_daily_mtd_phase(run_id)
+    except Exception as e:
+        msg = f"MTD persist phase failed: {type(e).__name__}: {e}"
+        log.warning("[daily_mtd] run_id=%s %s", run_id, msg)
+        accumulated_errors.append(msg)
+
+    final_status = "error" if accumulated_errors else "ok"
+    summary = (
+        ("First errors:\n" + "\n".join(accumulated_errors[:5]))[:1000]
+        if accumulated_errors else None
+    )
+    _update_run(
+        run_id,
+        current_phase="done",
+        status=final_status,
+        error_summary=summary,
+        finished_at=_now_utc_iso(),
+    )
+    log.info("[daily_mtd] run_id=%s finished status=%s", run_id, final_status)
+
+
+def _spawn_ingest(run_id: int, job_name: str) -> None:
+    """Dispatch by `job_name`. The full pipeline (acquisition → … →
+    momentum) runs for the weekly/monthly/manual jobs; the lightweight
+    daily orchestrator runs for `daily_holdings_refresh`."""
+    target = (
+        _run_daily_mtd_pipeline_sync
+        if job_name == "daily_holdings_refresh"
+        else _run_pipeline_sync
+    )
     threading.Thread(
-        target=_run_pipeline_sync,
+        target=target,
         args=(run_id,),
         daemon=True,
         name=f"pipeline-run-{run_id}",
@@ -909,7 +1274,7 @@ def kick_off_refresh(job_name: str, triggered_by: str) -> int:
     if triggered_by not in ("auto", "manual"):
         raise ValueError(f"triggered_by must be 'auto' or 'manual', got {triggered_by!r}")
     run_id = _create_run(job_name, triggered_by)
-    _spawn_ingest(run_id)
+    _spawn_ingest(run_id, job_name)
     return run_id
 
 
@@ -934,7 +1299,7 @@ async def cron_scheduled_refresh(
         )
 
     run_id = await asyncio.to_thread(_create_run, job_name, "auto")
-    _spawn_ingest(run_id)
+    _spawn_ingest(run_id, job_name)
     return {"run_id": run_id, "status": "running", "job_name": job_name}
 
 
@@ -949,22 +1314,29 @@ async def trigger_scheduled_refresh(job_name: str = "manual"):
             f"Unknown job_name {job_name!r}; expected one of {sorted(_VALID_JOB_NAMES)}",
         )
     run_id = await asyncio.to_thread(_create_run, job_name, "manual")
-    _spawn_ingest(run_id)
+    _spawn_ingest(run_id, job_name)
     return {"run_id": run_id, "status": "running", "job_name": job_name}
 
 
 @router.get("/api/ingest/runs")
-async def list_ingest_runs(limit: int = 25):
-    """Recent ingest runs (newest first). Caps `limit` to 200."""
+async def list_ingest_runs(limit: int = 25, job_name: str | None = None):
+    """Recent ingest runs (newest first). Caps `limit` to 200. Pass
+    `job_name=...` to filter to a single job type — the /schedule
+    daily-MTD card uses this to fetch only its own runs."""
     limit = max(1, min(200, limit))
-    resp = await asyncio.to_thread(
-        lambda: supabase.table("ingest_run")
-        .select("*")
-        .order("started_at", desc=True)
-        .limit(limit)
-        .execute()
-    )
-    return resp.data or []
+
+    def _query() -> list[dict]:
+        q = (
+            supabase.table("ingest_run")
+            .select("*")
+            .order("started_at", desc=True)
+            .limit(limit)
+        )
+        if job_name:
+            q = q.eq("job_name", job_name)
+        return q.execute().data or []
+
+    return await asyncio.to_thread(_query)
 
 
 @router.get("/api/ingest/runs/{run_id}")

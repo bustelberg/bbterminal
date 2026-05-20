@@ -5,8 +5,8 @@ import ProgressTimeline from './ProgressTimeline';
 import { apiFetch } from '../../lib/apiFetch';
 import type { Column } from '../../lib/tableExport';
 import TableDownloadButton from './TableDownloadButton';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import LoadingDots from './LoadingDots';
+import { API_URL } from '../../lib/apiUrl';
 const TEMPLATE_KEY = 'ACWI';
 
 type Summary = {
@@ -169,7 +169,7 @@ export default function AcwiCanonicalView() {
   if (summaryLoading && !summary) {
     return (
       <div className="bg-[#151821] rounded-xl border border-gray-800/40 px-5 py-4 text-sm text-gray-500">
-        Loading canonical ACWI universe…
+        <LoadingDots label="Loading canonical ACWI universe" />
       </div>
     );
   }
@@ -270,7 +270,7 @@ export default function AcwiCanonicalView() {
               className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 focus:outline-none flex-1 min-w-[200px]"
             />
             <span className="text-xs text-gray-500 font-mono">
-              {membershipLoading ? 'loading…' : `${filtered.length} / ${membership.length}`}
+              {membershipLoading ? <LoadingDots label="loading" /> : `${filtered.length} / ${membership.length}`}
             </span>
             <TableDownloadButton
               rows={filtered}

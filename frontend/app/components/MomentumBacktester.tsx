@@ -3,9 +3,20 @@
 import { Fragment, useState, useEffect, useMemo, useRef } from 'react';
 
 import ApiUsageBadge from './ApiUsageBadge';
+import LoadingDots from './LoadingDots';
+import Spinner from './Spinner';
 import { dialog } from '../../lib/dialog';
 import { apiFetch } from '../../lib/apiFetch';
+import { API_URL } from '../../lib/apiUrl';
 import ProgressTimeline from './ProgressTimeline';
+import NotificationsPanel from './momentum/NotificationsPanel';
+import { useClickOutside } from '../../lib/hooks/useClickOutside';
+import {
+  useBenchmarks,
+  useCompanyExchangeMap,
+  useMomentumSignals,
+  useUniverseTemplates,
+} from '../../lib/hooks/apiData';
 import {
   momentumStore,
   startBacktest,
@@ -41,27 +52,6 @@ import type {
   SignalDef,
 } from './momentum/types';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
-
-/** Inline spinner used everywhere a small async indicator is needed in this
- * page (per-row dropdown loads, delete/rename in flight, etc.). The 12-px
- * variant fits inline next to text or in icon-button slots without bumping
- * the row height. */
-function Spinner({ size = 12 }: { size?: number }) {
-  return (
-    <svg
-      className="animate-spin text-indigo-400"
-      style={{ width: size, height: size }}
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-label="Loading"
-    >
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-    </svg>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -96,25 +86,27 @@ export default function MomentumBacktester() {
   const [sectorEtfs, setSectorEtfs] = useState<Record<string, number>>({});
   const [sectorEtfsLoading, setSectorEtfsLoading] = useState(false);
   const [sectorEtfsError, setSectorEtfsError] = useState<string | null>(null);
+  // Sector-ETF map (sector name → benchmark_id) derived from the shared
+  // benchmarks fetch. Only fires the network call when sector_etf mode
+  // is active; otherwise the hook idles.
+  const {
+    data: _bmRows,
+    loading: _bmLoading,
+    error: _bmError,
+  } = useBenchmarks({ enabled: selectionMode === 'sector_etf' });
   useEffect(() => {
-    if (selectionMode !== 'sector_etf') return;
-    let cancelled = false;
-    setSectorEtfsLoading(true);
-    setSectorEtfsError(null);
-    fetch(`${API_URL}/api/benchmarks`)
-      .then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
-      .then((rows: Array<{ benchmark_id: number; ticker: string; sector: string | null }>) => {
-        if (cancelled) return;
-        const map: Record<string, number> = {};
-        for (const r of rows) {
-          if (r.sector) map[r.sector] = r.benchmark_id;
-        }
-        setSectorEtfs(map);
-      })
-      .catch((e) => { if (!cancelled) setSectorEtfsError(String(e?.message ?? e)); })
-      .finally(() => { if (!cancelled) setSectorEtfsLoading(false); });
-    return () => { cancelled = true; };
-  }, [selectionMode]);
+    setSectorEtfsLoading(_bmLoading);
+    setSectorEtfsError(_bmError);
+    if (!_bmRows) {
+      if (selectionMode !== 'sector_etf') setSectorEtfs({});
+      return;
+    }
+    const map: Record<string, number> = {};
+    for (const r of _bmRows) {
+      if (r.sector) map[r.sector] = r.benchmark_id;
+    }
+    setSectorEtfs(map);
+  }, [_bmRows, _bmLoading, _bmError, selectionMode]);
 
   // Variant sweep selection — which (frequency × strategy) combos to run.
   // Default to all selected so the "Run variants" button matches its
@@ -201,23 +193,8 @@ export default function MomentumBacktester() {
   // fix carry empty/None exchange strings, so ORCL/NYSE etc. would
   // otherwise render as "—" in the holdings table even though the GF
   // URL helper still resolves correctly via the bare-ticker fallback).
-  const [companyExchangeMap, setCompanyExchangeMap] = useState<Map<number, string>>(new Map());
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`${API_URL}/api/companies`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: { company_id: number; gurufocus_exchange: string | null }[]) => {
-        if (cancelled) return;
-        const m = new Map<number, string>();
-        for (const c of data) {
-          const exch = (c.gurufocus_exchange ?? '').trim();
-          if (exch) m.set(c.company_id, exch);
-        }
-        setCompanyExchangeMap(m);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
+  // Shared cached fetch (deduped with SnapshotHoldings when both render).
+  const companyExchangeMap = useCompanyExchangeMap();
 
   const exchangeByCompany = useMemo(() => {
     const m = new Map<number, string>();
@@ -304,71 +281,60 @@ export default function MomentumBacktester() {
   // weekly, so revalidating per-render is wasteful.
   const [latestPriceDate, setLatestPriceDate] = useState<string | null>(null);
 
-  // Load signal definitions + saved runs
+  // Signal definitions — shared cached hook.
+  const { data: _signalsData } = useMomentumSignals();
   useEffect(() => {
-    fetch(`${API_URL}/api/momentum/signals`)
-      .then((r) => r.json())
-      .then((d) => {
-        const defs: SignalDef[] = d.signals ?? [];
-        setSignalDefs(defs);
-        const w: Record<string, number> = {};
-        defs.forEach((s) => (w[s.key] = s.default_weight));
-        setWeights(w);
-        const cats: string[] = d.categories ?? [];
-        setCategories(cats);
-        const cw: Record<string, number> = {};
-        cats.forEach((c) => (cw[c] = 50));
-        setCategoryWeights(cw);
-      })
-      .catch(() => {});
+    if (!_signalsData) return;
+    const defs = _signalsData.signals;
+    setSignalDefs(defs);
+    const w: Record<string, number> = {};
+    defs.forEach((s) => (w[s.key] = s.default_weight));
+    setWeights(w);
+    const cats = _signalsData.categories;
+    setCategories(cats);
+    const cw: Record<string, number> = {};
+    cats.forEach((c) => (cw[c] = 50));
+    setCategoryWeights(cw);
+  }, [_signalsData]);
+
+  // Universe templates — shared cached hook. The dropdown wants a
+  // slightly different shape, so map locally.
+  const {
+    data: _utRaw,
+    loading: _utLoading,
+    error: _utError,
+  } = useUniverseTemplates();
+  useEffect(() => {
+    setUniversesLoading(_utLoading);
+    setUniversesError(_utError);
+    if (!_utRaw) return;
+    setIndexUniverses(
+      _utRaw.map((t) => ({
+        index_name: t.template_key,
+        hard_backstop: t.earliest_date,
+        start_month: t.earliest_captured_month!,
+        end_month: t.latest_captured_month!,
+        month_count: t.months_captured,
+        // No cheap COUNT DISTINCT yet for "ever in this universe", so
+        // the dropdown shows the latest month's count as a representative
+        // number. Good enough for "is this the right universe?".
+        total_unique_tickers: t.latest_membership_count,
+      })),
+    );
+  }, [_utRaw, _utLoading, _utError]);
+
+  // One-time bookkeeping at mount: saved runs, current-picks snapshots,
+  // the universe-load elapsed-seconds ticker, and the latest-price-date
+  // fetch. The endpoint hooks above own all the recurring fetches.
+  useEffect(() => {
     loadSavedRuns();
     setPicksListLoading(true);
     loadCurrentPicksSnapshots().finally(() => setPicksListLoading(false));
     const universesStart = Date.now();
-    const tick = setInterval(() => setUniversesElapsed(Math.round((Date.now() - universesStart) / 1000)), 500);
-    setUniversesLoading(true);
-    setUniversesError(null);
-    fetch(`${API_URL}/api/universe-templates`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`${r.status}`);
-        return r.json();
-      })
-      .then((data: Array<{
-        template_key: string;
-        earliest_date: string;
-        earliest_captured_month: string | null;
-        latest_captured_month: string | null;
-        months_captured: number;
-        latest_membership_count: number;
-      }>) => {
-        // Map the template-summary shape into the dropdown's existing
-        // contract. Templates that have never been refreshed (no
-        // captured months yet) are filtered out — they'd render a
-        // dropdown row with no usable data.
-        const mapped = data
-          .filter((t) => t.earliest_captured_month && t.latest_captured_month)
-          .map((t) => ({
-            index_name: t.template_key,
-            hard_backstop: t.earliest_date,
-            start_month: t.earliest_captured_month!,
-            end_month: t.latest_captured_month!,
-            month_count: t.months_captured,
-            // No cheap COUNT DISTINCT yet for "ever in this universe",
-            // so the dropdown shows the latest month's count as a
-            // representative number. Good enough for "is this the
-            // right universe?".
-            total_unique_tickers: t.latest_membership_count,
-          }));
-        setIndexUniverses(mapped);
-      })
-      .catch((e) => setUniversesError(e instanceof Error ? e.message : String(e)))
-      .finally(() => {
-        clearInterval(tick);
-        setUniversesLoading(false);
-      });
-    // Latest available price date — used as the default backtest
-    // end-date. Fire in parallel with the universes fetch; either can
-    // resolve first.
+    const tick = setInterval(
+      () => setUniversesElapsed(Math.round((Date.now() - universesStart) / 1000)),
+      500,
+    );
     fetch(`${API_URL}/api/data/latest-price-date`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${r.status}`))))
       .then((d: { date: string | null }) => setLatestPriceDate(d.date))
@@ -397,16 +363,9 @@ export default function MomentumBacktester() {
 
   const universeDropdownValue = selectedIndexUniverse;
 
-  useEffect(() => {
-    if (!savedDropdownOpen) return;
-    const handleClick = (e: MouseEvent) => {
-      if (savedDropdownRef.current && !savedDropdownRef.current.contains(e.target as Node)) {
-        setSavedDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [savedDropdownOpen]);
+  useClickOutside(savedDropdownRef, () => setSavedDropdownOpen(false), savedDropdownOpen);
+  useClickOutside(picksDropdownRef, () => setPicksDropdownOpen(false), picksDropdownOpen);
+  useClickOutside(variantsPickerRef, () => setVariantsPickerOpen(false), variantsPickerOpen);
 
   // Reset multi-select when either dropdown closes — selection should
   // not persist across opens, otherwise users land on a stale "5
@@ -414,32 +373,9 @@ export default function MomentumBacktester() {
   useEffect(() => {
     if (!savedDropdownOpen) setSelectedRunIds(new Set());
   }, [savedDropdownOpen]);
-
-  useEffect(() => {
-    if (!picksDropdownOpen) return;
-    const handleClick = (e: MouseEvent) => {
-      if (picksDropdownRef.current && !picksDropdownRef.current.contains(e.target as Node)) {
-        setPicksDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [picksDropdownOpen]);
-
   useEffect(() => {
     if (!picksDropdownOpen) setSelectedSnapshotIds(new Set());
   }, [picksDropdownOpen]);
-
-  useEffect(() => {
-    if (!variantsPickerOpen) return;
-    const handleClick = (e: MouseEvent) => {
-      if (variantsPickerRef.current && !variantsPickerRef.current.contains(e.target as Node)) {
-        setVariantsPickerOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [variantsPickerOpen]);
 
   // null = first fetch in flight; [] = loaded but empty; non-empty array =
   // populated. The header dropdown reads this to show a spinner + "Loading
@@ -933,7 +869,7 @@ export default function MomentumBacktester() {
         {(() => {
           const picksEmpty = !picksListLoading && currentPicksSnapshots.length === 0;
           const triggerLabel = picksListLoading
-            ? 'Loading saved current picks…'
+            ? <LoadingDots label="Loading saved current picks" />
             : picksEmpty
               ? 'No saved current picks yet'
               : currentPortfolio?.snapshot_id != null
@@ -1064,7 +1000,7 @@ export default function MomentumBacktester() {
         {(() => {
           const runsEmpty = !savedRunsLoading && savedRuns.length === 0;
           const runsLabel = savedRunsLoading
-            ? 'Loading saved backtests…'
+            ? <LoadingDots label="Loading saved backtests" />
             : runsEmpty
               ? 'No saved backtests yet'
               : (loadedRunId
@@ -1637,62 +1573,15 @@ export default function MomentumBacktester() {
         )}
 
         {/* Notifications — warnings on top (critical), info below (expected) */}
-        {(warnings.length > 0 || infos.length > 0) && (
-          <div className="bg-[#151821] border border-gray-800/40 rounded-lg overflow-hidden divide-y divide-gray-800/40">
-            {warnings.length > 0 && (
-              <div className="bg-amber-500/10">
-                <button
-                  type="button"
-                  onClick={() => setShowWarnings((v) => !v)}
-                  className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-amber-500/5 transition-colors"
-                >
-                  <span className="text-amber-300 text-sm font-medium">
-                    {warnings.length} warning{warnings.length === 1 ? '' : 's'}
-                  </span>
-                  <span className="text-amber-400/70 text-xs font-mono">{showWarnings ? '▾' : '▸'}</span>
-                </button>
-                {showWarnings && (
-                  <ul className="max-h-64 overflow-auto border-t border-amber-500/20 divide-y divide-amber-500/10">
-                    {warnings.map((w, i) => (
-                      <li key={i} className="px-4 py-2 text-xs text-amber-200 flex gap-2">
-                        <span className="uppercase text-[10px] tracking-wider font-mono text-amber-400/70 shrink-0 w-16">
-                          {w.scope}
-                        </span>
-                        <span className="break-words">{w.message}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-            {infos.length > 0 && (
-              <div className="bg-sky-500/10">
-                <button
-                  type="button"
-                  onClick={() => setShowInfos((v) => !v)}
-                  className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-sky-500/5 transition-colors"
-                >
-                  <span className="text-sky-300 text-sm font-medium">
-                    {infos.length} note{infos.length === 1 ? '' : 's'}
-                  </span>
-                  <span className="text-sky-400/70 text-xs font-mono">{showInfos ? '▾' : '▸'}</span>
-                </button>
-                {showInfos && (
-                  <ul className="max-h-64 overflow-auto border-t border-sky-500/20 divide-y divide-sky-500/10">
-                    {infos.map((n, i) => (
-                      <li key={i} className="px-4 py-2 text-xs text-sky-200 flex gap-2">
-                        <span className="uppercase text-[10px] tracking-wider font-mono text-sky-400/70 shrink-0 w-16">
-                          {n.scope}
-                        </span>
-                        <span className="break-words">{n.message}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+        <NotificationsPanel
+          warnings={warnings}
+          infos={infos}
+          showWarnings={showWarnings}
+          showInfos={showInfos}
+          onToggleWarnings={() => setShowWarnings((v) => !v)}
+          onToggleInfos={() => setShowInfos((v) => !v)}
+        />
+
 
         {/* Current Portfolio (MTD) — shown above backtest results, independent */}
         {currentPortfolio && (() => {

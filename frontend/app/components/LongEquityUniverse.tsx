@@ -6,8 +6,8 @@ import type { Snapshot } from '../longequity-universe/page';
 import { ingestStore, startIngest } from '../../lib/stores/ingest';
 import ProgressTimeline from './ProgressTimeline';
 import { trackedFetch } from '../../lib/loading';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import LoadingDots from './LoadingDots';
+import { API_URL } from '../../lib/apiUrl';
 
 type Company = {
   company_id: number;
@@ -339,7 +339,7 @@ export default function LongEquityUniverse() {
             disabled={snapshotsLoading || loadingAvailable}
             className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-700/60 text-gray-300 hover:text-white hover:border-gray-600 disabled:opacity-50 transition-colors whitespace-nowrap"
           >
-            {snapshotsLoading || loadingAvailable ? 'Loading...' : hasLoaded ? 'Refresh' : 'Load'}
+            {snapshotsLoading || loadingAvailable ? <LoadingDots label="Loading" /> : hasLoaded ? 'Refresh' : 'Load'}
           </button>
           <button
             onClick={runIngest}
@@ -422,7 +422,7 @@ export default function LongEquityUniverse() {
                 ))}
               </div>
 
-              {loading && <p className="text-sm text-gray-500">Loading...</p>}
+              {loading && <p className="text-sm text-gray-500"><LoadingDots label="Loading" /></p>}
 
               {!loading && data && (
                 <>

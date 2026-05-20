@@ -2,8 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
+import LoadingDots from './LoadingDots';
+import { useMomentumSignals, useUniverseTemplates } from '../../lib/hooks/apiData';
+import { API_URL } from '../../lib/apiUrl';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+// API_URL imported from lib/apiUrl above — single source of truth.
 
 const FREQUENCIES: { value: string; label: string; description: string }[] = [
   { value: 'daily', label: 'Daily', description: 'Runs every weekly tick (we only have Monday-close data today; effectively weekly).' },
@@ -51,48 +54,8 @@ type UniverseSummary = {
   latest_captured_month: string | null;
 };
 
-// ── Module-level caches (5-min TTL) ───────────────────────────────
-type _CacheEntry<T> = { value: T; expiresAt: number };
-const _CACHE_TTL_MS = 5 * 60 * 1000;
-let _universesCache: _CacheEntry<UniverseSummary[]> | null = null;
-let _signalsCache: _CacheEntry<{ signals: SignalDef[]; categories: string[] }> | null = null;
-
-async function _loadUniversesCached(): Promise<UniverseSummary[]> {
-  if (_universesCache && _universesCache.expiresAt > Date.now()) {
-    return _universesCache.value;
-  }
-  const r = await fetch(`${API_URL}/api/universe-templates`);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const data = (await r.json()) as UniverseSummary[];
-  const filtered = data.filter((u) => u.earliest_captured_month && u.latest_captured_month);
-  _universesCache = { value: filtered, expiresAt: Date.now() + _CACHE_TTL_MS };
-  return filtered;
-}
-
-async function _loadSignalsCached(): Promise<{ signals: SignalDef[]; categories: string[] }> {
-  if (_signalsCache && _signalsCache.expiresAt > Date.now()) {
-    return _signalsCache.value;
-  }
-  const r = await fetch(`${API_URL}/api/momentum/signals`);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const d = await r.json();
-  const value = {
-    signals: (d.signals ?? []) as SignalDef[],
-    categories: (d.categories ?? []) as string[],
-  };
-  _signalsCache = { value, expiresAt: Date.now() + _CACHE_TTL_MS };
-  return value;
-}
-
-/** Synchronous cache peek — returns the cached value if still fresh,
- * otherwise null. Used by `useState` initializers so the form renders
- * the dropdowns + sliders fully populated on first mount whenever the
- * cache is warm (e.g. user deletes strategies, then immediately
- * re-opens the picker — no "Loading…" flash). */
-function _readCached<T>(cache: _CacheEntry<T> | null): T | null {
-  if (cache && cache.expiresAt > Date.now()) return cache.value;
-  return null;
-}
+// (Universe + signal caches now live in `lib/hooks/apiData.ts` and are
+// shared with MomentumBacktester via the same module-level TTL cache.)
 
 /** Inline "Add scheduled strategy" form. Multi-select on universes /
  * strategies / frequencies; submitting creates one schedule entry per
@@ -106,19 +69,16 @@ export default function AddScheduledStrategyForm({
   onAdded: () => Promise<void> | void;
   onCancel: () => void;
 }) {
-  // Seed from the module-level cache so a warm cache means no
-  // "Loading…" flash on mount — the dropdown + sliders render
-  // populated on the very first render.
-  const [universes, setUniverses] = useState<UniverseSummary[]>(
-    () => _readCached(_universesCache) ?? [],
+  // Data sources — shared cached hooks. Both read synchronously from
+  // the module-level cache when it's warm, so the form renders fully
+  // populated on first paint when the user has seen this data before.
+  const { data: _utData, loading: universesLoading, error: _utError } = useUniverseTemplates();
+  const { data: _sigData } = useMomentumSignals();
+  const universes = (_utData ?? []) as UniverseSummary[];
+
+  const [selectedUniverses, setSelectedUniverses] = useState<string[]>(
+    () => universes.map((u) => u.template_key),
   );
-  const [universesLoading, setUniversesLoading] = useState(
-    () => _readCached(_universesCache) == null,
-  );
-  const [selectedUniverses, setSelectedUniverses] = useState<string[]>(() => {
-    const c = _readCached(_universesCache);
-    return c ? c.map((u) => u.template_key) : [];
-  });
   const [selectedModes, setSelectedModes] = useState<SelectionMode[]>(['momentum']);
   const [selectedFrequencies, setSelectedFrequencies] = useState<string[]>(['weekly']);
 
@@ -127,23 +87,21 @@ export default function AddScheduledStrategyForm({
   const [minPriceScore, setMinPriceScore] = useState<string>('');
   const [maxCompanies, setMaxCompanies] = useState(0);
   const [signalDefs, setSignalDefs] = useState<SignalDef[]>(
-    () => _readCached(_signalsCache)?.signals ?? [],
+    () => _sigData?.signals ?? [],
   );
   const [weights, setWeights] = useState<Record<string, number>>(() => {
-    const c = _readCached(_signalsCache);
-    if (!c) return {};
+    if (!_sigData) return {};
     const w: Record<string, number> = {};
-    c.signals.forEach((s) => { w[s.key] = s.default_weight; });
+    _sigData.signals.forEach((s) => { w[s.key] = s.default_weight; });
     return w;
   });
   const [categories, setCategories] = useState<string[]>(
-    () => _readCached(_signalsCache)?.categories ?? [],
+    () => _sigData?.categories ?? [],
   );
   const [categoryWeights, setCategoryWeights] = useState<Record<string, number>>(() => {
-    const c = _readCached(_signalsCache);
-    if (!c) return {};
+    if (!_sigData) return {};
     const cw: Record<string, number> = {};
-    c.categories.forEach((cat) => { cw[cat] = 50; });
+    _sigData.categories.forEach((cat) => { cw[cat] = 50; });
     return cw;
   });
 
@@ -156,41 +114,37 @@ export default function AddScheduledStrategyForm({
   const [savingProgress, setSavingProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // ── Load universes + signals (cached) ───────────────────────────
+  // Reflect universe-list errors into the form's error banner.
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const filtered = await _loadUniversesCached();
-        if (cancelled) return;
-        setUniverses(filtered);
-        // Default: all available universes selected (today that's just
-        // ACWI — but the multi-select scales as we add more).
-        setSelectedUniverses(filtered.map((u) => u.template_key));
-      } catch (e) {
-        if (!cancelled) setError(`Failed to load universes: ${e instanceof Error ? e.message : String(e)}`);
-      } finally {
-        if (!cancelled) setUniversesLoading(false);
-      }
-    })();
-    void (async () => {
-      try {
-        const { signals: defs, categories: cats } = await _loadSignalsCached();
-        if (cancelled) return;
-        setSignalDefs(defs);
-        const w: Record<string, number> = {};
-        defs.forEach((s) => (w[s.key] = s.default_weight));
-        setWeights(w);
-        setCategories(cats);
-        const cw: Record<string, number> = {};
-        cats.forEach((c) => (cw[c] = 50));
-        setCategoryWeights(cw);
-      } catch {
-        // Silent — signal sliders just won't render.
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+    if (_utError) setError(`Failed to load universes: ${_utError}`);
+  }, [_utError]);
+
+  // Default-select all universes when the data lands. Skipped if the
+  // user has already touched the selection (non-empty + not equal to
+  // the previous default).
+  useEffect(() => {
+    if (!_utData) return;
+    setSelectedUniverses((prev) => (prev.length === 0 ? _utData.map((u) => u.template_key) : prev));
+  }, [_utData]);
+
+  // Populate signal/category defaults when the signals fetch lands.
+  useEffect(() => {
+    if (!_sigData) return;
+    setSignalDefs(_sigData.signals);
+    setWeights((prev) => {
+      if (Object.keys(prev).length > 0) return prev;
+      const w: Record<string, number> = {};
+      _sigData.signals.forEach((s) => (w[s.key] = s.default_weight));
+      return w;
+    });
+    setCategories(_sigData.categories);
+    setCategoryWeights((prev) => {
+      if (Object.keys(prev).length > 0) return prev;
+      const cw: Record<string, number> = {};
+      _sigData.categories.forEach((c) => (cw[c] = 50));
+      return cw;
+    });
+  }, [_sigData]);
 
   // ── Permutation math ────────────────────────────────────────────
   const permutations = useMemo(() => {
@@ -369,7 +323,7 @@ export default function AddScheduledStrategyForm({
           </label>
           <div className="bg-[#151821] border border-gray-700 rounded-lg px-3 py-2 space-y-1 max-h-40 overflow-y-auto">
             {universesLoading ? (
-              <div className="text-xs text-gray-500">Loading…</div>
+              <div className="text-xs text-gray-500"><LoadingDots label="Loading" /></div>
             ) : universes.length === 0 ? (
               <div className="text-xs text-gray-400">
                 No template universes refreshed yet.

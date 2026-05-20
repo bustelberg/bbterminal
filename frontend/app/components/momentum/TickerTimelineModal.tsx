@@ -6,8 +6,7 @@ import CellInfoTip from './CellInfoTip';
 import type { ScoringConfig } from './MonthlyHoldingsTable';
 import { annualize, displayExchange, fmtPct, guruFocusUrl, EXCHANGE_NAMES } from './utils';
 import { runSSE } from '../../../lib/stream';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { API_URL } from '../../../lib/apiUrl';
 
 type Props = {
   result: BacktestResult;

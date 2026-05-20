@@ -156,11 +156,20 @@ def compute_and_save_price_update(
       - the backfill flow, for past Tuesdays where the strategy
         wouldn't have rebalanced (`is_backfill=True`).
     """
+    # Order by `as_of_date` (the rebalance date itself), NOT `created_at`.
+    # Backfill inserts every historical period's rebalance row in one
+    # batch, so all 5 of them share a created_at within milliseconds of
+    # each other — `created_at desc` then picks an essentially random
+    # row, often the OLDEST as_of_date (the period inserted last by the
+    # backfill loop). Ordering by `as_of_date desc` deterministically
+    # picks the most-recent rebalance, which is what "the strategy's
+    # current open period" actually means.
     rebal_resp = (
         supabase.table("current_picks_snapshot")
         .select("*")
         .eq("scheduled_strategy_id", strategy_id)
         .eq("kind", "rebalance")
+        .order("as_of_date", desc=True)
         .order("created_at", desc=True)
         .limit(1)
         .execute()
@@ -184,7 +193,7 @@ def compute_and_save_price_update(
             chunk = cids[i:i + 50]
             p_resp = (
                 supabase.table("metric_data")
-                .select("company_id, target_date, value")
+                .select("company_id, target_date, numeric_value")
                 .eq("metric_code", "close_price")
                 .in_("company_id", chunk)
                 .order("target_date", desc=True)
@@ -206,7 +215,7 @@ def compute_and_save_price_update(
         weight = float(h.get("weight") or 0.0)
         latest = latest_by_cid.get(cid)
         if latest and entry_local:
-            current_local = float(latest["value"])
+            current_local = float(latest["numeric_value"])
             target_d = str(latest["target_date"])[:10]
             new_h["exit_price_local"] = current_local
             new_h["exit_date"] = target_d

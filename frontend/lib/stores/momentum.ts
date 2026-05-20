@@ -1,8 +1,7 @@
 import { createStore } from '../store';
 import { runSSE } from '../stream';
 import { apiFetch } from '../apiFetch';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { API_URL } from '../apiUrl';
 
 export type Holding = {
   company_id: number;

@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import SnapshotHoldings from './SnapshotHoldings';
+import LoadingDots from './LoadingDots';
 import { StrategyConfigDetail, type IngestRun } from './Schedule';
 import { colorForSector } from '../../lib/sectorColors';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { API_URL } from '../../lib/apiUrl';
 
 type RunHistoryEntry = {
   snapshot_id: number;
@@ -203,7 +204,7 @@ export default function ScheduledStrategyDetail({
   }, [data?.backfill?.status, load]);
 
   if (loading) {
-    return <div className="px-5 py-4 bg-[#0b0d13] text-xs text-gray-500 border-t border-gray-800/30">Loading run history…</div>;
+    return <div className="px-5 py-4 bg-[#0b0d13] text-xs text-gray-500 border-t border-gray-800/30"><LoadingDots label="Loading run history" /></div>;
   }
   if (error) {
     return <div className="px-5 py-4 bg-[#0b0d13] text-xs text-rose-300 border-t border-gray-800/30">{error}</div>;

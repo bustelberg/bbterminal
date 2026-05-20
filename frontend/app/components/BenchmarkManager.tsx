@@ -6,8 +6,8 @@ import { trackedFetch } from '../../lib/loading';
 import { apiFetch } from '../../lib/apiFetch';
 import type { Column } from '../../lib/tableExport';
 import TableDownloadButton from './TableDownloadButton';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import LoadingDots from './LoadingDots';
+import { API_URL } from '../../lib/apiUrl';
 
 type Benchmark = {
   benchmark_id: number;
@@ -228,7 +228,7 @@ export default function BenchmarkManager() {
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={5} className="px-5 py-8 text-center text-gray-600">Loading...</td></tr>
+                <tr><td colSpan={5} className="px-5 py-8 text-center text-gray-600"><LoadingDots label="Loading" /></td></tr>
               )}
               {!loading && benchmarks.length === 0 && (
                 <tr><td colSpan={5} className="px-5 py-8 text-center text-gray-600">No benchmarks yet. Add one above.</td></tr>

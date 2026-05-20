@@ -71,7 +71,7 @@ async def list_companies():
     def _query():
         resp = (
             supabase.table("company")
-            .select("company_id,company_name,gurufocus_ticker,exchange_id,gurufocus_exchange:gurufocus_exchange(exchange_code,country:country(country_name))")
+            .select("company_id,company_name,gurufocus_ticker,exchange_id,delisted_at,gurufocus_exchange:gurufocus_exchange(exchange_code,country:country(country_name))")
             .order("company_name")
             .limit(10000)
             .execute()

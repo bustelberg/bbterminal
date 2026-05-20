@@ -5,6 +5,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { createClient } from '../../lib/supabase/client';
 import { dialog } from '../../lib/dialog';
+import { useClickOutside } from '../../lib/hooks/useClickOutside';
+import { API_URL } from '../../lib/apiUrl';
 
 type NavItem = { href: string; label: string; userVisible?: true };
 
@@ -31,7 +33,6 @@ const navItems: NavItem[] = [
   { href: '/documentation', label: 'Documentation' },
 ];
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 const AUTH_PAGES = ['/login', '/set-password'];
 
 function readViewAsCookie(): boolean {
@@ -204,17 +205,7 @@ export default function Sidebar({ initialUser }: Props) {
     return () => subscription.unsubscribe();
   }, [initialUser]);
 
-  // Close the account menu on outside click.
-  useEffect(() => {
-    if (!accountMenuOpen) return;
-    function onDoc(e: MouseEvent) {
-      if (accountMenuRef.current && !accountMenuRef.current.contains(e.target as Node)) {
-        setAccountMenuOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [accountMenuOpen]);
+  useClickOutside(accountMenuRef, () => setAccountMenuOpen(false), accountMenuOpen);
 
   // When the admin opens the menu, fetch the user list once so we know who
   // we can switch to. Skipped for non-admins (they can't list users) and

@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { createClient } from '../../lib/supabase/client';
 import { dialog } from '../../lib/dialog';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import LoadingDots from '../components/LoadingDots';
+import { API_URL } from '../../lib/apiUrl';
 
 type User = {
   id: string;
@@ -201,7 +202,7 @@ export default function UsersPage() {
             className="text-xs text-gray-400 hover:text-white"
             disabled={loading}
           >
-            {loading ? 'Loading…' : 'Refresh'}
+            {loading ? <LoadingDots label="Loading" /> : 'Refresh'}
           </button>
         </div>
         {error && (

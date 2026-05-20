@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Column, exportToCsv, exportToXlsx } from '../../lib/tableExport';
+import { useClickOutside, useEscapeKey } from '../../lib/hooks/useClickOutside';
 
 type Props<T> = {
   /** Rows to export — pass the same already-filtered/sorted array the
@@ -27,23 +28,8 @@ export default function TableDownloadButton<T>({
   const [busy, setBusy] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Close the menu on outside click + Escape.
-  useEffect(() => {
-    const onDoc = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('mousedown', onDoc);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDoc);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, []);
+  useClickOutside(containerRef, () => setOpen(false), open);
+  useEscapeKey(() => setOpen(false), open);
 
   const disabled = rows.length === 0 || busy;
 

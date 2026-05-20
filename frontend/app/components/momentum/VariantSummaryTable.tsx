@@ -13,9 +13,9 @@ import type { Column } from '../../../lib/tableExport';
 import TableDownloadButton from '../TableDownloadButton';
 import CollapsibleCard from './CollapsibleCard';
 import { fmtPct } from './utils';
-import { buildFeeMap, computeNetStats, parenPct } from './feeStats';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { computeNetStats, parenPct } from './feeStats';
+import { useExchangeFeeMap } from '../../../lib/hooks/apiData';
+import { API_URL } from '../../../lib/apiUrl';
 
 // One row per VARIANT_DEFS entry. Click to make that variant the active one
 // (the detail views below — equity curve, holdings table, sector timeline —
@@ -38,19 +38,9 @@ export default function VariantSummaryTable({ exchangeByCompany }: Props) {
   const active = momentumStore.use((s) => s.activeVariantKey);
   const run = momentumStore.use((s) => s.variantsRun);
 
-  // Fetch per-exchange fees once so each variant row can append a
-  // `(net X%)` parenthetical to its return / Sharpe / DD. Null when the
-  // user hasn't configured any non-zero fees on /fees.
-  const [feesByExchange, setFeesByExchange] = useState<Map<string, number> | null>(null);
-  useEffect(() => {
-    fetch(`${API_URL}/api/exchange-fees`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((rows) => {
-        const m = buildFeeMap(rows ?? []);
-        setFeesByExchange(m.size > 0 ? m : null);
-      })
-      .catch(() => {});
-  }, []);
+  // Per-exchange fees — shared cached hook, null when no non-zero fees
+  // are configured so each variant row just shows gross figures.
+  const feesByExchange = useExchangeFeeMap();
 
   // Hide entirely when no sweep has ever run. The wrapper component decides
   // when to render us based on whether `variants` has any entries.

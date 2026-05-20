@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '../../lib/supabase/client';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { API_URL } from '../../lib/apiUrl';
 
 /** Catalog entry for one endpoint. Each entry produces a card on the
  * page; the user fills in path/query params, hits Try, and sees the
@@ -69,6 +69,28 @@ const ENDPOINTS: Endpoint[] = [
     desc: 'Specific snapshot by id, same shape as /latest.',
     pathParams: [
       { name: 'snapshot_id', type: 'integer', required: true, hint: 'snapshot_id from /portfolio/latest or /runs/latest' },
+    ],
+  },
+
+  // ─── Admin: schedules ───────────────────────────────────────────
+  {
+    id: 'admin-schedules-list',
+    group: 'Admin · schedules',
+    method: 'GET',
+    path: '/api/admin/schedules',
+    desc: 'Every scheduled strategy + its full latest portfolio. The intended one-shot for an external buyer: list of strategies, next rebalancing date (next_due_at), and full IBKR-ready holdings (ticker / exchange / currency / target_weight / entry_price_local).',
+    queryParams: [
+      { name: 'enabled_only', type: 'string', default: 'true', hint: '"true" hides paused strategies; "false" returns everything' },
+    ],
+  },
+  {
+    id: 'admin-schedule-by-id',
+    group: 'Admin · schedules',
+    method: 'GET',
+    path: '/api/admin/schedules/{strategy_id}',
+    desc: 'One scheduled strategy with its latest portfolio + next_due_at. Same shape as one entry from the list endpoint.',
+    pathParams: [
+      { name: 'strategy_id', type: 'integer', required: true, hint: 'id from the list endpoint' },
     ],
   },
 

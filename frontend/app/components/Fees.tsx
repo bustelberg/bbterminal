@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import type { Column } from '../../lib/tableExport';
 import TableDownloadButton from './TableDownloadButton';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import LoadingDots from './LoadingDots';
+import { API_URL } from '../../lib/apiUrl';
 
 type ExchangeFee = {
   exchange_code: string;
@@ -262,7 +262,7 @@ export default function Fees() {
           {/* Header: stats + filters + save controls */}
           <div className="px-5 py-3 border-b border-gray-800/40 flex items-center justify-between gap-3 flex-wrap">
             <div className="text-sm text-gray-400 flex items-center gap-4 flex-wrap">
-              {loading ? 'Loading exchanges…' : (
+              {loading ? <LoadingDots label="Loading exchanges" /> : (
                 <>
                   <span><span className="text-gray-200 font-mono">{rows.length}</span> exchanges</span>
                   <span className="text-emerald-400">{totals.supported} supported</span>

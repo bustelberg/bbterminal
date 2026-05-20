@@ -9,8 +9,8 @@ import DatePartsPicker from './DatePartsPicker';
 import { apiFetch } from '../../lib/apiFetch';
 import { guruFocusUrl } from '../../lib/gurufocusUrl';
 import TableDownloadButton from './TableDownloadButton';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import LoadingDots from './LoadingDots';
+import { API_URL } from '../../lib/apiUrl';
 
 type DataPoint = { date: string; value: number };
 
@@ -391,7 +391,7 @@ export default function Indicators() {
               disabled={currencyMapLoading}
               className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 bg-[#0f1117] border border-gray-700 text-gray-300 hover:border-indigo-500 hover:text-indigo-400"
             >
-              {currencyMapLoading ? 'Loading...' : currencyMapLoaded ? 'Currencies loaded' : 'Load currencies'}
+              {currencyMapLoading ? <LoadingDots label="Loading" /> : currencyMapLoaded ? 'Currencies loaded' : 'Load currencies'}
             </button>
             {currencyMapLoaded && (
               <button
@@ -439,7 +439,7 @@ export default function Indicators() {
           </div>
         </div>
         {exchangesLoading ? (
-          <div className="px-5 py-4 text-gray-400 text-sm">Loading exchanges...</div>
+          <div className="px-5 py-4 text-gray-400 text-sm"><LoadingDots label="Loading exchanges" /></div>
         ) : exchanges ? (
           <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
             <table className="w-full text-sm">

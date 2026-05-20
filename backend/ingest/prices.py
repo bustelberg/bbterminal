@@ -44,6 +44,18 @@ _PRICE_CUTOFF = date(1998, 1, 1)
 
 US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX", "CBOE"}
 
+# When GuruFocus returns 404 "Stock not found" for a (ticker, exchange)
+# pair, try these alternative exchanges before giving up. iShares ACWI
+# often lists German cross-listings on Xetra (XTER) but GuruFocus only
+# covers Stuttgart (STU) for the same ticker — those need a fallback to
+# get any data at all. Listed in priority order (first match wins). If
+# all fallbacks 404 too, the company stays in "no data" state without
+# being marked delisted — we genuinely don't know whether it's gone or
+# just on yet another German exchange we haven't tried.
+FALLBACK_EXCHANGES: dict[str, list[str]] = {
+    "XTER": ["STU"],
+}
+
 # Modern Chrome UA. Defense-in-depth — the real fingerprint signal
 # is the TLS handshake (handled by curl_cffi via `_gurufocus_http`).
 _USER_AGENT = (
@@ -62,16 +74,47 @@ class PriceResult:
     error: str | None = None
     is_forbidden: bool = False  # True if 403 / unsubscribed region
     is_delisted: bool = False   # True if 403 / delisted stock
+    # When the primary exchange 404s and a fallback succeeds, this is
+    # the exchange the data was actually fetched from. The caller uses
+    # it to (a) update `company.exchange_id` so future runs go straight
+    # to the working exchange, and (b) pass the same exchange to the
+    # subsequent volume fetch so it doesn't re-try the dead primary.
+    resolved_exchange: str | None = None
     api_calls: int = 0  # Number of GuruFocus API requests made
 
 
+def normalize_gurufocus_ticker(ticker: str, exchange: str) -> str:
+    """Apply per-exchange normalization required by GuruFocus before
+    we send the ticker out (API URL or storage path).
+
+    Currently the only rule is HKSE: numeric tickers must be 5 digits
+    with leading zeros (`1288` → `01288`, `241` → `00241`). The
+    upstream LongEquity / OpenFIGI sources sometimes hand us the
+    stripped form, and old `company.gurufocus_ticker` rows from before
+    the ingest-side `canonical_ticker` fix can still hold the short
+    form — applying the same normalization here makes the read side
+    resilient regardless. Idempotent: a ticker already in canonical
+    form passes through unchanged.
+
+    Mirrors `ingest.dedupe.canonical_ticker` for HKSE, but stays
+    narrower (no Nordic share-class collapsing) — those transforms are
+    for dupe detection, not for GuruFocus URL form."""
+    t = (ticker or "").strip()
+    exch = (exchange or "").strip().upper()
+    if exch == "HKSE" and t.isdigit() and len(t) < 5:
+        return t.zfill(5)
+    return t
+
+
 def _build_symbol(ticker: str, exchange: str) -> str:
+    ticker = normalize_gurufocus_ticker(ticker, exchange)
     if exchange.upper() in US_EXCHANGES:
         return ticker
     return f"{exchange}:{ticker}"
 
 
 def _storage_path(ticker: str, exchange: str, indicator: str = "price") -> str:
+    ticker = normalize_gurufocus_ticker(ticker, exchange)
     return f"{exchange.upper()}_{ticker.upper()}/indicator__{indicator}.json"
 
 
@@ -235,6 +278,71 @@ def _fetch_price_from_api(ticker: str, exchange: str, timeout: int = 30) -> tupl
     return _fetch_indicator_from_api(ticker, exchange, "price", timeout)
 
 
+def _try_with_fallbacks(
+    ticker: str,
+    exchange: str,
+    indicator: str,
+    *,
+    on_log=None,
+) -> tuple[list | None, str, int | None, str]:
+    """Fetch (ticker, exchange) on GuruFocus, falling through to entries
+    in `FALLBACK_EXCHANGES[exchange]` when the primary returns 404
+    "Stock not found".
+
+    Returns (data, log, http_status, used_exchange) — `used_exchange` is
+    the exchange that actually produced data (or the original exchange
+    if every attempt failed). Anything other than 404 (200, 403, network
+    error, …) short-circuits the fallback chain — it's only the
+    "wrong-exchange" symptom we're trying to recover from."""
+    def _log(msg: str):
+        if on_log:
+            on_log(msg)
+    data, api_log, status = _fetch_indicator_from_api(ticker, exchange, indicator)
+    if data is not None:
+        return data, api_log, status, exchange
+    not_found = bool(api_log and "stock not found" in api_log.lower())
+    if not not_found:
+        # 403 / network error / etc — fallbacks won't help, return as-is.
+        return data, api_log, status, exchange
+
+    # Remember a fallback that signals "delisted" so we can propagate it
+    # instead of the primary's bare 404. The primary returned "Stock
+    # not found" (unknown listing on that exchange), but if the same
+    # ticker on a fallback exchange explicitly reports as delisted,
+    # that's the more informative classification — the caller's
+    # `is_delisted` detection reads `api_log`, so propagating the
+    # delisted body is what flips the flag.
+    delisted_fallback: tuple[list | None, str, int | None, str] | None = None
+
+    for alt in FALLBACK_EXCHANGES.get(exchange, []):
+        _log(f"{exchange}:{ticker} 404 — trying fallback {alt}:{ticker}")
+        d2, l2, s2 = _fetch_indicator_from_api(ticker, alt, indicator)
+        if d2 is not None:
+            _log(f"  fallback {alt}:{ticker} succeeded (status {s2})")
+            # Combine logs so the caller sees both attempts in the
+            # PriceResult log trail.
+            return d2, f"{api_log} || fallback OK on {alt}: {l2}", s2, alt
+        if l2 and "delisted" in l2.lower() and delisted_fallback is None:
+            _log(f"  fallback {alt}:{ticker} returned delisted signal")
+            # Stash but keep iterating — a later fallback might return
+            # data, which we'd prefer. If none does, this delisted
+            # response wins over the primary's 404.
+            delisted_fallback = (
+                None,
+                f"{api_log} || fallback delisted on {alt}: {l2}",
+                s2,
+                exchange,  # keep primary exchange — there's no data to repoint to
+            )
+
+    if delisted_fallback is not None:
+        return delisted_fallback
+
+    # All fallbacks exhausted with no useful signal — return the
+    # original 404 so the caller records the actual failure mode (not
+    # the last fallback's).
+    return data, api_log, status, exchange
+
+
 def _parse_price_series(data: list | dict) -> list[tuple[date, float]]:
     """Parse GuruFocus price response into [(date, price)] pairs."""
     results: list[tuple[date, float]] = []
@@ -389,11 +497,18 @@ def ensure_volume_for_company(
                 result.rows_loaded = load_volume_into_db(supabase, company_id, parsed)
                 return result
 
-    # 2. Fetch from API
-    data, api_log, http_status = _fetch_indicator_from_api(ticker, exchange, "volume")
-    track_api_call(supabase, exchange)
+    # 2. Fetch from API (with fallback exchange resolution on 404).
+    data, api_log, http_status, used_exchange = _try_with_fallbacks(
+        ticker, exchange, "volume", on_log=lambda m: result.logs.append(m),
+    )
+    track_api_call(supabase, used_exchange)
     result.api_calls += 1
     result.logs.append(api_log)
+    if used_exchange != exchange:
+        result.resolved_exchange = used_exchange
+        # Repoint the volume Storage cache at the resolved exchange too
+        # so subsequent runs hit the right path.
+        path = _storage_path(ticker, used_exchange, "volume")
 
     if data is None:
         # Fall back to stale cache
@@ -488,17 +603,25 @@ def ensure_prices_for_company(
         else:
             _log(f"no cache at {path}")
 
-    # 2. Fetch from API
+    # 2. Fetch from API (with fallback exchange resolution on 404).
     base_url = os.environ.get("GURUFOCUS_BASE_URL", "").strip().rstrip("/")
     if base_url.endswith("/data"):
         base_url = base_url[: -len("/data")]
     api_key = os.environ.get("GURUFOCUS_API_KEY", "")
     raw_url = f"{base_url}/public/user/{api_key}/stock/{quote(symbol, safe=':')}/price"
     _log(f"Calling {_mask_url(raw_url)} ...")
-    data, api_log, http_status = _fetch_price_from_api(ticker, exchange)
-    track_api_call(supabase, exchange)
+    data, api_log, http_status, used_exchange = _try_with_fallbacks(
+        ticker, exchange, "price", on_log=_log,
+    )
+    track_api_call(supabase, used_exchange)
     result.api_calls += 1
     _log(api_log)
+    if used_exchange != exchange:
+        result.resolved_exchange = used_exchange
+        # Repoint storage cache to the resolved exchange so subsequent
+        # runs hit the right path immediately.
+        path = _storage_path(ticker, used_exchange)
+        symbol = _build_symbol(ticker, used_exchange)
 
     # Detect unsubscribed region (check body, not just status code —
     # a bare 403 can mean a specific ticker is restricted/delisted)
@@ -515,7 +638,28 @@ def ensure_prices_for_company(
         result.is_delisted = True
         result.error = f"delisted: {symbol}"
         _log(f"Delisted — {symbol}")
+        # Persist the marker so every caller picks it up (the prices
+        # phase has its own write too — that path stays idempotent
+        # because we filter on `delisted_at IS NULL`). Best-effort —
+        # a transient DB blip just means a later run will re-detect
+        # and re-mark.
+        try:
+            import datetime as _dt  # noqa: PLC0415
+            supabase.table("company").update(
+                {"delisted_at": _dt.datetime.now(_dt.timezone.utc).isoformat()}
+            ).eq("company_id", company_id).is_("delisted_at", "null").execute()
+        except Exception as e:
+            logging.getLogger(__name__).warning(
+                "[ensure_prices] failed to mark cid=%s delisted: %s: %s",
+                company_id, type(e).__name__, e,
+            )
         return result
+
+    # NOTE: 404 "Stock not found" is NOT treated as delisted here. iShares
+    # ACWI often lists German cross-listings on XTER but GuruFocus only has
+    # the same ticker on STU (Stuttgart) — a 404 might just mean wrong
+    # exchange. The caller is expected to retry via `FALLBACK_EXCHANGES`
+    # before declaring the listing dead. See `_try_with_fallbacks` below.
 
     if data is None:
         # Fall back to stale cache

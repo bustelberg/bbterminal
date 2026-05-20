@@ -336,11 +336,22 @@ class LeonteqTemplate(UniverseTemplate):
         return by_ticker, by_id
 
     def _match_company(self, row: dict, by_ticker: dict[str, dict]) -> int | None:
-        """Best-effort ticker match. Returns the company_id or None."""
+        """Best-effort ticker match. Returns the company_id or None.
+
+        Tries the raw scraped ticker first, then the HKSE 5-digit
+        zero-padded form. Without the second pass, Leonteq's `2628`
+        (China Life) would miss the existing `HKSE:02628` row and trip
+        OpenFIGI auto-resolution into a German depositary listing
+        (`XTER:CHL`) — silently duplicating the issuer."""
         tkr = (row.get("ticker") or "").strip().upper()
         if not tkr:
             return None
         match = by_ticker.get(tkr)
+        if match is None and tkr.isdigit() and len(tkr) < 5:
+            # HKSE canonical form is 5-digit zero-padded — see
+            # `ingest.prices.normalize_gurufocus_ticker`. The same DB
+            # row will be keyed under the padded ticker.
+            match = by_ticker.get(tkr.zfill(5))
         if match is None:
             return None
         return int(match["company_id"])

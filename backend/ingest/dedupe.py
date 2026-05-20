@@ -75,6 +75,9 @@ def canonical_ticker(ticker: str | None, exchange_code: str | None) -> str:
       * HKSE numeric tickers zero-padded to 5 digits.
       * Nordic share-class delimiters normalized to a single space
         (`NOVO.B`, `NOVO-B`, `NOVO B` → `NOVO B`).
+      * US class-share separator normalized to a dot
+        (`BRK/B` → `BRK.B`; iShares + Bloomberg write the slash form,
+        GuruFocus uses the dot).
 
     Add more rules here as new dupe patterns surface — this is the
     one place every ingest path consults."""
@@ -89,6 +92,9 @@ def canonical_ticker(ticker: str | None, exchange_code: str | None) -> str:
         m = re.match(r'^(.+)[.\-]([A-Z])$', t)
         if m:
             return f'{m.group(1)} {m.group(2)}'
+    # US class-share: BRK/B and BRK.B collapse to the same canonical.
+    if exch in ('', 'NYSE', 'NASDAQ', 'AMEX', 'CBOE', 'TSX') and '/' in t:
+        t = t.replace('/', '.')
     return t
 
 

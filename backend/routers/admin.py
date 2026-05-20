@@ -18,13 +18,16 @@ Then call admin endpoints with:
          "https://<backend>/api/admin/portfolio/latest"
 
 Endpoints:
-    GET /api/admin/portfolio/latest    — target portfolio with IBKR-relevant fields
-    GET /api/admin/portfolio/{id}      — same shape, specific snapshot_id
-    GET /api/admin/runs/latest         — most recent pipeline run
-    GET /api/admin/pipeline-runs       — recent runs list (monitoring)
-    GET /api/admin/health              — composite freshness check
-    GET /api/admin/data-freshness      — per-source freshness breakdown
-    GET /api/admin/sanity-check        — pass/fail bundle of common checks
+    GET /api/admin/portfolio/latest      — target portfolio with IBKR-relevant fields
+    GET /api/admin/portfolio/{id}        — same shape, specific snapshot_id
+    GET /api/admin/schedules             — every scheduled strategy + full latest portfolio
+                                            (one-shot for external buyer scripts)
+    GET /api/admin/schedules/{id}        — one scheduled strategy + its latest portfolio
+    GET /api/admin/runs/latest           — most recent pipeline run
+    GET /api/admin/pipeline-runs         — recent runs list (monitoring)
+    GET /api/admin/health                — composite freshness check
+    GET /api/admin/data-freshness        — per-source freshness breakdown
+    GET /api/admin/sanity-check          — pass/fail bundle of common checks
 """
 from __future__ import annotations
 
@@ -174,6 +177,107 @@ async def get_portfolio_by_id(snapshot_id: int, authorization: str = Header(...)
         if not resp.data:
             raise HTTPException(404, f"Snapshot #{snapshot_id} not found")
         return _build_portfolio_payload(resp.data[0])
+
+    return await asyncio.to_thread(_query)
+
+
+# ─── Schedules ─────────────────────────────────────────────────────
+
+
+def _summarize_schedule(strat_row: dict, latest_snapshot_row: dict | None) -> dict:
+    """One row per scheduled strategy with everything an external caller
+    needs to act on it: identity, cadence, next/last run timestamps, and
+    the full latest holdings in the same IBKR-ready shape as
+    /api/admin/portfolio/{id}. `latest_snapshot_row` is the full snapshot
+    row from `current_picks_snapshot` (or None if the strategy has never
+    produced one yet)."""
+    portfolio = _build_portfolio_payload(latest_snapshot_row) if latest_snapshot_row else None
+    return {
+        "id": strat_row["id"],
+        "name": strat_row.get("name") or f"Strategy #{strat_row['id']}",
+        "frequency": strat_row.get("frequency"),
+        "enabled": strat_row.get("enabled", True),
+        "last_run_at": strat_row.get("last_run_at"),
+        "next_due_at": strat_row.get("next_due_at"),
+        "config": strat_row.get("config") or {},
+        "latest_portfolio": portfolio,
+    }
+
+
+def _fetch_latest_snapshots_for(strategy_ids: list[int]) -> dict[int, dict]:
+    """For each strategy id, return its most-recent snapshot row (or omit
+    when none exists). Batches in chunks of 50 to dodge Cloudflare 502s
+    on Supabase, same convention as elsewhere."""
+    if not strategy_ids:
+        return {}
+    latest: dict[int, dict] = {}
+    for chunk_start in range(0, len(strategy_ids), 50):
+        chunk = strategy_ids[chunk_start : chunk_start + 50]
+        resp = (
+            supabase.table("current_picks_snapshot")
+            .select("*")
+            .in_("scheduled_strategy_id", chunk)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        for row in (resp.data or []):
+            sid = row.get("scheduled_strategy_id")
+            if sid is None or sid in latest:
+                continue
+            latest[int(sid)] = row
+    return latest
+
+
+@router.get("/api/admin/schedules")
+async def list_schedules(
+    enabled_only: bool = True,
+    authorization: str = Header(...),
+):
+    """Every scheduled strategy on the system with its latest portfolio
+    attached. Returns a list (newest-created last) so an external buyer
+    script can iterate strategies, see when each is due to rebalance
+    (`next_due_at`), and pull the holdings they should currently be
+    holding (`latest_portfolio.holdings`).
+
+    Query: `enabled_only=true` (default) hides paused strategies; pass
+    `false` to see everything."""
+    _require_admin(authorization)
+
+    def _query() -> list[dict]:
+        q = supabase.table("scheduled_strategy").select("*").order("created_at")
+        if enabled_only:
+            q = q.eq("enabled", True)
+        try:
+            resp = q.execute()
+        except APIError as e:
+            raise HTTPException(500, f"DB read failed: {e}")
+        rows = resp.data or []
+        latest = _fetch_latest_snapshots_for([r["id"] for r in rows])
+        return [_summarize_schedule(r, latest.get(r["id"])) for r in rows]
+
+    return await asyncio.to_thread(_query)
+
+
+@router.get("/api/admin/schedules/{strategy_id}")
+async def get_schedule(strategy_id: int, authorization: str = Header(...)):
+    """One scheduled strategy + its full latest portfolio. Same shape as
+    one entry of `/api/admin/schedules`. 404 when the strategy doesn't
+    exist."""
+    _require_admin(authorization)
+
+    def _query() -> dict:
+        resp = (
+            supabase.table("scheduled_strategy")
+            .select("*")
+            .eq("id", strategy_id)
+            .limit(1)
+            .execute()
+        )
+        if not resp.data:
+            raise HTTPException(404, f"Scheduled strategy #{strategy_id} not found")
+        strat = resp.data[0]
+        latest = _fetch_latest_snapshots_for([strategy_id]).get(strategy_id)
+        return _summarize_schedule(strat, latest)
 
     return await asyncio.to_thread(_query)
 
