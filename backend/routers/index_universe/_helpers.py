@@ -29,6 +29,7 @@ _UNIVERSE_STATS_TTL = 300.0
 
 def _enrich_tickers(rows: list[dict]) -> list[dict]:
     """Add company_name + exchange + GuruFocus URL to ticker rows."""
+    from ingest.gurufocus_url import gurufocus_url  # noqa: PLC0415
     company_ids = [r["company_id"] for r in rows if r["company_id"]]
     company_info: dict[int, dict] = {}
     for i in range(0, len(company_ids), 50):
@@ -47,12 +48,13 @@ def _enrich_tickers(rows: list[dict]) -> list[dict]:
     for r in rows:
         info = company_info.get(r["company_id"], {}) if r["company_id"] else {}
         ticker = r["ticker"]
+        exchange = info.get("exchange") or None
         result.append({
             "ticker": ticker,
             "company_id": r["company_id"],
             "company_name": info.get("company_name") or None,
-            "exchange": info.get("exchange") or None,
-            "gurufocus_url": f"https://www.gurufocus.com/stock/{ticker}/summary",
+            "exchange": exchange,
+            "gurufocus_url": gurufocus_url(ticker, exchange),
         })
     return result
 

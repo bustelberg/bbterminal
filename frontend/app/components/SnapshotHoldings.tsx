@@ -23,6 +23,30 @@ export default function SnapshotHoldings({ snapshotId }: { snapshotId: number })
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Snapshot holdings JSON doesn't include `gurufocus_exchange` per
+  // company, so MonthlyHoldingsTable would render "—" in the Exchange
+  // column and a bare-ticker GuruFocus URL for everything (which 404s
+  // for non-US names). Same pattern as MomentumBacktester: load the
+  // live company directory once and build the lookup map. ~3k rows on
+  // a single fetch, cheap.
+  const [exchangeByCompany, setExchangeByCompany] = useState<Map<number, string>>(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_URL}/api/companies`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: { company_id: number; gurufocus_exchange: string | null }[]) => {
+        if (cancelled) return;
+        const m = new Map<number, string>();
+        for (const c of data) {
+          const exch = (c.gurufocus_exchange ?? '').trim();
+          if (exch) m.set(c.company_id, exch);
+        }
+        setExchangeByCompany(m);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
@@ -106,7 +130,7 @@ export default function SnapshotHoldings({ snapshotId }: { snapshotId: number })
     <MonthlyHoldingsTable
       result={result}
       categories={categories}
-      exchangeByCompany={new Map()}
+      exchangeByCompany={exchangeByCompany}
       scoringConfig={scoringConfig}
     />
   );

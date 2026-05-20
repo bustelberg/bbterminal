@@ -8,9 +8,12 @@ Endpoints used:
   POST /website-api/underlyings        → name, sector, industry, country,
                                           ticker, ric, sophisInternalId,
                                           financials, earnings, indexMemberships
-  POST /website-api/feed/identifiers   → isin, valoren, wkn, ric,
-                                          bloombergTicker, currency,
-                                          sophisInternalId
+  POST /website-api/feed/identifiers   → isin, sophisInternalId, ric,
+                                          bloombergTicker, currency
+                                          (body shape: `{"sophisInternalIds":
+                                          [int, ...]}` — verified 2026-05-20
+                                          after the SPA migrated from
+                                          `{"identifiers": [...]}`)
 
 Joining on `sophisInternalId` gives every field the universe template
 needs, in 4–6 HTTP requests total at resultPerPage=500.
@@ -55,7 +58,8 @@ _PAGE_SIZE = 500
 _MAX_PAGES = 50      # Safety cap: 50 pages × 100 actual rows = 5000 rows.
 _REQUEST_TIMEOUT = 30
 _IDENTIFIERS_BATCH = 100  # /feed/identifiers caps input arrays to ~30 in
-                          # the SPA's call; 100 works in practice (verified).
+                          # the SPA's call; 100 works in practice (verified
+                          # 2026-05-20).
 
 # Same sanity floor as the scraper's: if we end with <1500 rows, raise
 # instead of persisting a partial universe.
@@ -172,10 +176,15 @@ def fetch_isins_for_sophis_ids(
 ) -> dict[int, str]:
     """Look up ISIN for each `sophisInternalId` via the
     /website-api/feed/identifiers endpoint. The endpoint isn't paginated
-    — it's a lookup that requires `{"identifiers": [...]}` in the body
-    and returns one row per requested id. We batch by `_IDENTIFIERS_BATCH`
-    to keep request bodies under ~10KB. Returns `{sophis_id: isin}` —
-    ids without an isin field are omitted."""
+    — it's a lookup. Body shape is `{"sophisInternalIds": [int, ...]}`
+    (the SPA migrated from `{"identifiers": [...]}` somewhere between
+    its initial capture and 2026-05-20 — the old shape now 500s with
+    a "NonEmpty" validation error from `FeedIdentifiersRequestValidator`).
+    We batch by `_IDENTIFIERS_BATCH` to keep request bodies under ~10KB.
+    Returns `{sophis_id: isin}` — ids without an isin field are omitted.
+
+    Per-batch failures are isolated so a single 5xx doesn't lose every
+    ISIN — we log the batch and continue."""
     def emit(msg: str, pct: int | None = None) -> None:
         _log.info("[leonteq.api] %s", msg)
         if on_progress is not None:
@@ -188,18 +197,28 @@ def fetch_isins_for_sophis_ids(
     isin_by_sid: dict[int, str] = {}
     unique_ids = [sid for sid in sophis_ids if sid is not None]
     total_batches = max(1, (len(unique_ids) + _IDENTIFIERS_BATCH - 1) // _IDENTIFIERS_BATCH)
+    failed_batches = 0
     for batch_idx in range(total_batches):
         batch = unique_ids[batch_idx * _IDENTIFIERS_BATCH : (batch_idx + 1) * _IDENTIFIERS_BATCH]
         if not batch:
             break
-        body = {"identifiers": batch}
+        body = {"sophisInternalIds": batch}
         pct = 50 + min(35, int((batch_idx + 1) * 35 / total_batches))
         emit(
             f"/feed/identifiers: batch {batch_idx + 1}/{total_batches} "
             f"({len(batch)} ids)",
             pct,
         )
-        data = _post_with_retry(url, body)
+        try:
+            data = _post_with_retry(url, body)
+        except Exception as e:
+            failed_batches += 1
+            emit(
+                f"/feed/identifiers: batch {batch_idx + 1} failed "
+                f"({type(e).__name__}: {str(e)[:120]}); continuing.",
+                None,
+            )
+            continue
         # Response is a bare array of identifier rows.
         rows = data if isinstance(data, list) else []
         for r in rows:
@@ -207,7 +226,8 @@ def fetch_isins_for_sophis_ids(
             isin = r.get("isin")
             if sid is not None and isin:
                 isin_by_sid[sid] = isin
-    emit(f"Resolved {len(isin_by_sid)} ISINs for {len(unique_ids)} ids.", 85)
+    suffix = f" ({failed_batches} batch(es) failed)" if failed_batches else ""
+    emit(f"Resolved {len(isin_by_sid)} ISINs for {len(unique_ids)} ids{suffix}.", 85)
     return isin_by_sid
 
 

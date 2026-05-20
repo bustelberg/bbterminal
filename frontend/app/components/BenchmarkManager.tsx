@@ -1,9 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { dialog } from '../../lib/dialog';
 import { trackedFetch } from '../../lib/loading';
 import { apiFetch } from '../../lib/apiFetch';
+import type { Column } from '../../lib/tableExport';
+import TableDownloadButton from './TableDownloadButton';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -139,6 +141,16 @@ export default function BenchmarkManager() {
     }
   };
 
+  const benchmarkExportColumns = useMemo<Column<Benchmark>[]>(() => [
+    { key: 'benchmark_id', header: 'ID', accessor: (b) => b.benchmark_id },
+    { key: 'ticker', header: 'Ticker', accessor: (b) => b.ticker },
+    { key: 'name', header: 'Name', accessor: (b) => b.name },
+    { key: 'sector', header: 'Sector ETF', accessor: (b) => b.sector ?? '' },
+    { key: 'price_from', header: 'Prices from', accessor: (b) => b.price_from ?? '' },
+    { key: 'price_to', header: 'Prices to', accessor: (b) => b.price_to ?? '' },
+    { key: 'created_at', header: 'Added', accessor: (b) => b.created_at },
+  ], []);
+
   return (
     <div className="flex flex-col h-full">
       <div className="px-8 py-5 border-b border-gray-800/60">
@@ -195,6 +207,15 @@ export default function BenchmarkManager() {
 
         {/* Benchmarks Table */}
         <div className="bg-[#151821] rounded-xl border border-gray-800/40 overflow-hidden">
+          <div className="px-5 py-2 border-b border-gray-800/40 flex items-center justify-between">
+            <span className="text-xs text-gray-500">{benchmarks.length} benchmark{benchmarks.length === 1 ? '' : 's'}</span>
+            <TableDownloadButton
+              rows={benchmarks}
+              columns={benchmarkExportColumns}
+              filename="benchmarks"
+              title={`Download ${benchmarks.length} benchmarks as CSV / XLSX`}
+            />
+          </div>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800/60 text-gray-500">

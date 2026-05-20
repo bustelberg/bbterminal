@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import AddScheduledStrategyForm from './AddScheduledStrategyForm';
-import ScheduledStrategyDetail from './ScheduledStrategyDetail';
+import ScheduledStrategyDetail, { type StrategyRunHistory } from './ScheduledStrategyDetail';
 import { type StepDef, type StepState } from './ProgressTimeline';
 import { apiFetch } from '../../lib/apiFetch';
 import { dialog } from '../../lib/dialog';
@@ -16,7 +16,7 @@ export type IngestRun = {
   started_at: string;
   finished_at: string | null;
   status: 'running' | 'ok' | 'error';
-  current_phase: 'templates' | 'prices' | 'momentum' | 'done' | null;
+  current_phase: 'acquisition' | 'templates' | 'prune' | 'prices' | 'momentum' | 'done' | null;
   // Array — one entry per template-managed universe the pipeline
   // refreshed in phase 1. Each entry carries that template's per-run
   // diff (additions/removals/renames). Empty when no templates are
@@ -143,7 +143,9 @@ function StatusBadge({ status }: { status: IngestRun['status'] }) {
 }
 
 export const PIPELINE_STEPS: StepDef[] = [
+  { key: 'acquisition', label: 'Source acquisition' },
   { key: 'templates', label: 'Template universe refresh' },
+  { key: 'prune', label: 'Orphan company prune' },
   { key: 'prices', label: 'Price + volume refresh' },
   { key: 'momentum', label: 'Momentum compute' },
 ];
@@ -159,18 +161,29 @@ export function runToTimelineProps(run: IngestRun): {
   const finished = run.status === 'ok' || run.status === 'error';
   const phase = run.current_phase;
   const state: Record<string, StepState> = {
+    acquisition: { status: 'pending' },
     templates: { status: 'pending' },
+    prune: { status: 'pending' },
     prices: { status: 'pending' },
     momentum: { status: 'pending' },
   };
 
   const liveMessage = run.current_message ?? undefined;
 
+  // Phase 0 — Acquisition. There's no per-run summary column on
+  // `ingest_run` for acquisition results — current_message carries the
+  // status line. Once we move past this phase we mark it done.
+  if (phase === 'templates' || phase === 'prune' || phase === 'prices' || phase === 'momentum' || phase === 'done' || finished) {
+    state.acquisition = { status: 'done', message: 'sources acquired' };
+  } else if (phase === 'acquisition') {
+    state.acquisition = { status: 'in_progress', message: liveMessage ?? 'probing upstream sources…' };
+  }
+
   // Phase 1 — Templates
   const templates = run.templates_summary ?? [];
   const tplErr = templates.filter((t) => t.error).length;
   const tplOk = templates.length - tplErr;
-  if (templates.length > 0 && (phase === 'prices' || phase === 'momentum' || phase === 'done' || finished)) {
+  if (templates.length > 0 && (phase === 'prune' || phase === 'prices' || phase === 'momentum' || phase === 'done' || finished)) {
     // Aggregate diff across templates for the inline message.
     const totAdd = templates.reduce((a, t) => a + (t.additions_count || 0), 0);
     const totRem = templates.reduce((a, t) => a + (t.removals_count || 0), 0);
@@ -185,7 +198,16 @@ export function runToTimelineProps(run: IngestRun): {
     state.templates = { status: 'error', message: 'failed' };
   }
 
-  // Phase 2 — Prices
+  // Phase 2 — Prune (no per-run summary column; current_message
+  // carries the count line. Once we move past prune the step is done
+  // unless the phase errored, which would land in error_summary).
+  if (phase === 'prices' || phase === 'momentum' || phase === 'done' || finished) {
+    state.prune = { status: 'done', message: 'orphan companies pruned' };
+  } else if (phase === 'prune') {
+    state.prune = { status: 'in_progress', message: liveMessage ?? 'pruning orphan companies…' };
+  }
+
+  // Phase 3 — Prices
   if (run.companies_processed > 0 && (phase === 'momentum' || phase === 'done' || finished)) {
     const denominator = run.companies_total ? ` of ${run.companies_total}` : '';
     state.prices = {
@@ -205,7 +227,7 @@ export function runToTimelineProps(run: IngestRun): {
     state.prices = { status: 'error', message: 'failed' };
   }
 
-  // Phase 3 — Momentum
+  // Phase 4 — Momentum
   const mom = run.momentum_summary ?? [];
   const successCount = mom.filter((m) => m.status === 'ok').length;
   const errorCount = mom.filter((m) => m.status === 'error').length;
@@ -252,14 +274,32 @@ export function runToTimelineProps(run: IngestRun): {
 }
 
 function PhasePips({ run }: { run: IngestRun }) {
+  // Phases with no per-run column on `ingest_run` (acquisition, prune)
+  // are marked "done" once the run has advanced past them. Without a
+  // `hasData` proxy, the pip otherwise stays gray forever even on
+  // successful runs.
+  const acquisitionPassed = run.current_phase === 'templates'
+    || run.current_phase === 'prune'
+    || run.current_phase === 'prices'
+    || run.current_phase === 'momentum'
+    || run.current_phase === 'done'
+    || run.status === 'ok'
+    || run.status === 'error';
+  const prunePassed = run.current_phase === 'prices'
+    || run.current_phase === 'momentum'
+    || run.current_phase === 'done'
+    || run.status === 'ok'
+    || run.status === 'error';
   const phases = [
-    { key: 'templates' as const, hasData: (run.templates_summary?.length ?? 0) > 0 },
-    { key: 'prices' as const,    hasData: run.companies_processed > 0 || run.prices_refreshed > 0 || run.volumes_refreshed > 0 },
-    { key: 'momentum' as const,  hasData: (run.momentum_summary?.length ?? 0) > 0 },
+    { key: 'acquisition' as const, hasData: acquisitionPassed },
+    { key: 'templates' as const,   hasData: (run.templates_summary?.length ?? 0) > 0 },
+    { key: 'prune' as const,       hasData: prunePassed },
+    { key: 'prices' as const,      hasData: run.companies_processed > 0 || run.prices_refreshed > 0 || run.volumes_refreshed > 0 },
+    { key: 'momentum' as const,    hasData: (run.momentum_summary?.length ?? 0) > 0 },
   ];
   const currentPhase = run.current_phase;
   return (
-    <span className="inline-flex items-center gap-1" title={`Phases: templates · prices · momentum (current: ${currentPhase ?? '—'})`}>
+    <span className="inline-flex items-center gap-1" title={`Phases: acquisition · templates · prune · prices · momentum (current: ${currentPhase ?? '—'})`}>
       {phases.map((p) => {
         const isCurrent = run.status === 'running' && currentPhase === p.key;
         let cls = 'bg-gray-700';
@@ -291,6 +331,17 @@ export default function Schedule() {
   const [error, setError] = useState<string | null>(null);
   const [expandedStrategyId, setExpandedStrategyId] = useState<number | null>(null);
   const [addingPickerOpen, setAddingPickerOpen] = useState(false);
+  // Per-strategy run-history cache. Survives collapse/re-expand so the
+  // detail view renders instantly on a second click; the detail still
+  // fires a silent revalidate fetch on every mount to pick up updates.
+  const [historyCache, setHistoryCache] = useState<Map<number, StrategyRunHistory>>(new Map());
+  const cacheRunHistory = useCallback((id: number, data: StrategyRunHistory) => {
+    setHistoryCache((prev) => {
+      const next = new Map(prev);
+      next.set(id, data);
+      return next;
+    });
+  }, []);
 
   const loadStrategies = useCallback(async () => {
     try {
@@ -378,7 +429,7 @@ export default function Schedule() {
         </p>
       </div>
 
-      <div className="px-8 py-6 space-y-6 max-w-6xl">
+      <div className="px-8 py-6 space-y-6 max-w-screen-2xl">
         {error && (
           <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg px-4 py-3 text-sm text-rose-300 flex items-center justify-between">
             <span>{error}</span>
@@ -499,6 +550,8 @@ export default function Schedule() {
                     {isExpanded && (
                       <ScheduledStrategyDetail
                         strategyId={s.id}
+                        initialData={historyCache.get(s.id) ?? null}
+                        onLoaded={(d) => cacheRunHistory(s.id, d)}
                         onMutated={() => void loadStrategies()}
                       />
                     )}

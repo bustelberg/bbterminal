@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
+import type { Column } from '../../lib/tableExport';
+import TableDownloadButton from './TableDownloadButton';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -226,6 +228,20 @@ export default function Fees() {
     return { supported, unsupported, withFee };
   }, [rows, state]);
 
+  // Export the server-known values, not the (possibly invalid) editable
+  // input strings. Users downloading from this page generally want the
+  // currently-saved configuration, not their unsaved draft.
+  const exportColumns = useMemo<Column<ExchangeFee>[]>(() => [
+    { key: 'exchange_code', header: 'Code', accessor: (r) => r.exchange_code },
+    { key: 'exchange_name', header: 'Name', accessor: (r) => r.exchange_name ?? '' },
+    { key: 'country_code', header: 'Country', accessor: (r) => r.country_code ?? '' },
+    { key: 'currency_code', header: 'Currency', accessor: (r) => r.currency_code ?? '' },
+    { key: 'is_supported', header: 'Supported', accessor: (r) => (r.is_broker_supported ? 'yes' : 'no') },
+    { key: 'fee_bps', header: 'Fee (bps)', accessor: (r) => r.fee_bps },
+    { key: 'fee_pct', header: 'Fee (%)', accessor: (r) => r.fee_bps / 100 },
+    { key: 'is_us', header: 'US', accessor: (r) => (r.is_us ? 'yes' : 'no') },
+  ], []);
+
   return (
     <div className="min-h-screen bg-[#0f1117] text-gray-200">
       <div className="px-8 py-5 border-b border-gray-800/40">
@@ -271,6 +287,12 @@ export default function Fees() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 focus:outline-none w-56"
+              />
+              <TableDownloadButton
+                rows={filtered}
+                columns={exportColumns}
+                filename="exchange_fees"
+                title={`Download ${filtered.length} exchange fees as CSV / XLSX`}
               />
             </div>
           </div>

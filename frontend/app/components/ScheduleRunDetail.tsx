@@ -5,6 +5,8 @@ import type { IngestRun, MomentumStrategyResult, TemplateDiff } from './Schedule
 import { runToTimelineProps, PIPELINE_STEPS } from './Schedule';
 import ProgressTimeline from './ProgressTimeline';
 import SnapshotHoldings from './SnapshotHoldings';
+import type { Column } from '../../lib/tableExport';
+import TableDownloadButton from './TableDownloadButton';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -205,6 +207,14 @@ function TemplateMembership({
     );
   }, [rows, search]);
 
+  const membershipExportColumns = useMemo<Column<MembershipRow>[]>(() => [
+    { key: 'ticker', header: 'Ticker', accessor: (r) => r.ticker },
+    { key: 'company_name', header: 'Name', accessor: (r) => r.company_name },
+    { key: 'exchange', header: 'Exchange', accessor: (r) => r.exchange },
+    { key: 'sector', header: 'Sector', accessor: (r) => r.sector ?? '' },
+    { key: 'company_id', header: 'Company ID', accessor: (r) => r.company_id },
+  ], []);
+
   return (
     <div className="border border-gray-800/40 rounded-lg overflow-hidden">
       <button
@@ -231,6 +241,12 @@ function TemplateMembership({
             <span className="text-xs text-gray-500 font-mono">
               {loading ? 'loading…' : `${filtered.length} / ${rows.length}`}
             </span>
+            <TableDownloadButton
+              rows={filtered}
+              columns={membershipExportColumns}
+              filename={`run_${runId}_${templateKey}_${targetMonth}`}
+              title={`Download ${filtered.length} holdings as CSV / XLSX`}
+            />
           </div>
           {error && <div className="text-xs text-rose-300">{error}</div>}
           {filtered.length > 0 && (

@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import ProgressTimeline from './ProgressTimeline';
 import { apiFetch } from '../../lib/apiFetch';
+import type { Column } from '../../lib/tableExport';
+import TableDownloadButton from './TableDownloadButton';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 const TEMPLATE_KEY = 'ACWI';
@@ -104,6 +106,15 @@ export default function AcwiCanonicalView() {
     );
   }, [membership, search]);
 
+  const membershipExportColumns = useMemo<Column<MembershipRow>[]>(() => [
+    { key: 'ticker', header: 'Ticker', accessor: (r) => r.ticker },
+    { key: 'company_name', header: 'Name', accessor: (r) => r.company_name },
+    { key: 'exchange', header: 'Exchange', accessor: (r) => r.exchange },
+    { key: 'sector', header: 'Sector', accessor: (r) => r.sector ?? '' },
+    { key: 'company_id', header: 'Company ID', accessor: (r) => r.company_id },
+    { key: 'gurufocus_url', header: 'GuruFocus URL', accessor: (r) => r.gurufocus_url ?? '' },
+  ], []);
+
   // SSE refresh — same event shape the pipeline phase emits.
   const triggerRefresh = useCallback(async () => {
     if (refreshing) return;
@@ -187,6 +198,7 @@ export default function AcwiCanonicalView() {
             Data starts <span className="font-mono text-gray-400">{summary.earliest_date}</span>.
             Refreshed automatically on every pipeline tick (weekly + monthly) — no manual creation needed.
           </p>
+          <XlsAgeBadge />
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <a
@@ -260,6 +272,12 @@ export default function AcwiCanonicalView() {
             <span className="text-xs text-gray-500 font-mono">
               {membershipLoading ? 'loading…' : `${filtered.length} / ${membership.length}`}
             </span>
+            <TableDownloadButton
+              rows={filtered}
+              columns={membershipExportColumns}
+              filename={`acwi_${selectedMonth || 'membership'}`}
+              title={`Download ${filtered.length} ACWI members as CSV / XLSX`}
+            />
           </div>
           <div className="max-h-[600px] overflow-auto">
             <table className="w-full text-xs">
@@ -308,5 +326,34 @@ function Stat({ label, value }: { label: string; value: string }) {
       <div className="text-[10px] uppercase tracking-wider text-gray-500">{label}</div>
       <div className="font-mono text-sm text-gray-200 mt-0.5">{value}</div>
     </div>
+  );
+}
+
+
+/** Bundled iShares ACWI XLS age. iShares blocks automated downloads,
+ * so the file lives in the repo and updates only when someone commits
+ * a fresh one. Stale = the reconstruction is operating against
+ * yesterday's holdings. Shown only when actually stale (>= 14 days)
+ * to avoid cluttering the page on a healthy install. */
+function XlsAgeBadge() {
+  const [age, setAge] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_URL}/api/acwi/xls-age`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { available?: boolean; age_days?: number } | null) => {
+        if (cancelled || !d?.available || d.age_days == null) return;
+        setAge(d.age_days);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  if (age == null || age < 14) return null;
+  return (
+    <p className="text-xs text-amber-300 mt-2 max-w-3xl">
+      ⚠ Bundled iShares XLS is <span className="font-mono">{age}</span> day{age === 1 ? '' : 's'} old.
+      iShares blocks automated downloads, so the reconstruction runs against this stale file until
+      someone manually commits a fresh <span className="font-mono">iShares-MSCI-ACWI-ETF_fund.xls</span>.
+    </p>
   );
 }

@@ -73,6 +73,32 @@ async def acwi_holdings():
     return await asyncio.to_thread(work)
 
 
+@router.get("/api/acwi/xls-age")
+async def acwi_xls_age():
+    """Age of the bundled `iShares-MSCI-ACWI-ETF_fund.xls` file.
+
+    iShares blocks automated downloads (region-cookie + JS challenge),
+    so the XLS file lives in the repo and updates only when someone
+    commits a fresh one. This endpoint surfaces the file's mtime so
+    the UI can warn when it gets too old. Threshold lives client-side;
+    the backend just reports the raw age."""
+    import os  # noqa: PLC0415
+    from datetime import datetime, timezone  # noqa: PLC0415
+    from index_universe.acwi.holdings import _FILE  # noqa: PLC0415
+    try:
+        mtime = os.path.getmtime(_FILE)
+    except OSError as e:
+        return {"available": False, "error": str(e)}
+    mtime_dt = datetime.fromtimestamp(mtime, timezone.utc)
+    age_days = (datetime.now(timezone.utc) - mtime_dt).days
+    return {
+        "available": True,
+        "path": _FILE,
+        "mtime": mtime_dt.isoformat(),
+        "age_days": age_days,
+    }
+
+
 @router.get("/api/acwi/announcements")
 async def acwi_announcements(refresh: bool = False):
     """MSCI index announcements (cached locally, 24h TTL)."""

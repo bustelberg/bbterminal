@@ -1,6 +1,6 @@
 """Scheduled refresh pipeline.
 
-Backs the /schedule page. Each run executes three phases in order:
+Backs the /schedule page. Each run executes four phases in order:
 
   1. Template-managed universe refresh — iterates every registered
      `UniverseTemplate` (currently just ACWI; SP500 will plug in once
@@ -9,11 +9,17 @@ Backs the /schedule page. Each run executes three phases in order:
      diff (additions/removals/renames) vs the previous month. Each
      template's diff lands as one entry in `ingest_run.templates_summary`
      (a JSONB array, one entry per template).
-  2. Price + volume refresh — walks every company in `company` through
+  2. Orphan prune — delete any `company` row that's no longer a member
+     of one of the three source universes (LongEquity / ACWI / Leonteq).
+     The invariant: every row in `company` must come from one of these
+     three sources. Runs AFTER the template refresh so the kept-set
+     reflects the latest universe state, and BEFORE the price phase so
+     we don't waste GuruFocus API calls on rows we're about to delete.
+  3. Price + volume refresh — walks every company in `company` through
      `ensure_prices_for_company` + `ensure_volume_for_company`,
      tallying forbidden / delisted / errors silently. This is the
      phase that used to be the whole job pre-pipeline.
-  3. Momentum compute — loops over every enabled row in
+  4. Momentum compute — loops over every enabled row in
      `scheduled_strategy`. For each, drains `_momentum_backtest_stream`
      with `mode=current_portfolio` and that strategy's backtest config,
      persisting one `current_picks_snapshot` per strategy. The inverse
@@ -53,9 +59,12 @@ router = APIRouter(tags=["ingest"])
 _VALID_JOB_NAMES = {"weekly_price_volume", "monthly_price_volume", "manual"}
 # Concurrency cap — same as self_heal. GuruFocus is rate-limit-sensitive
 # and the ensure_* helpers short-circuit on fresh DB rows, so the bound
-# only matters when we're actually pulling fresh data. 4 keeps a typical
-# weekly run under ~10 minutes for ~1,800 companies without 429s.
-_MAX_WORKERS = 4
+# only matters when we're actually pulling fresh data. 12 keeps a typical
+# weekly run roughly in line with the ~10-minute target now that the universe
+# is ~2.8k companies (instead of ~1.8k when 4 was chosen). curl_cffi's
+# Cloudflare ladder handles 12-wide comfortably; bump further only if 429s
+# stay absent across multiple runs.
+_MAX_WORKERS = 12
 # Checkpoint frequency — write progress to the row every N companies so
 # the /schedule page sees the bar move during a long run. Tuned low
 # enough that the first checkpoint arrives within seconds (so the UI
@@ -116,7 +125,16 @@ def _update_run(run_id: int, **fields) -> None:
 
 def _load_all_companies() -> list[dict]:
     """Paginate the `company` table, returning rows usable by ensure_*. Rows
-    without a ticker or an exchange code are dropped (nothing to fetch)."""
+    without a ticker or an exchange code are dropped (nothing to fetch).
+
+    Result is sorted "most-stale first": companies with NO close_price data
+    come first, then companies whose latest close_price target_date is
+    oldest. This guarantees that on every run the genuinely-missing data
+    (the rows that drive the /backtest "N companies have NO price data"
+    warning) gets fetched in the first few minutes rather than after the
+    full universe has been re-checked. Already-fresh companies still get
+    touched at the end of the run via the fast db_max freshness short-circuit
+    in `ensure_*_for_company`, so this ordering doesn't drop any work."""
     out: list[dict] = []
     offset = 0
     page = 1000
@@ -146,16 +164,53 @@ def _load_all_companies() -> list[dict]:
         if len(batch) < page:
             break
         offset += page
+
+    # Most-stale-first ordering. One RPC fetches the latest close_price
+    # target_date per company; companies with no row come back with NULL
+    # which we map to the empty string so they sort lexicographically
+    # before any real date. Failure here just falls back to insertion
+    # order — the phase still works, just without prioritization.
+    try:
+        latest_resp = supabase.rpc("company_latest_close_price_dates", {}).execute()
+        latest_by_cid: dict[int, str] = {
+            int(row["company_id"]): (row.get("latest_target_date") or "")
+            for row in (latest_resp.data or [])
+        }
+        out.sort(key=lambda c: latest_by_cid.get(c["cid"], ""))
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            "[_load_all_companies] could not fetch latest close_price dates, "
+            "falling back to insertion order: %s: %s",
+            type(e).__name__, e,
+        )
     return out
 
 
 def _run_pipeline_sync(run_id: int) -> None:
-    """Orchestrate the three-phase pipeline. Each phase is independent —
+    """Orchestrate the five-phase pipeline. Each phase is independent —
     a failure is recorded in `accumulated_errors` but doesn't abort the
     rest of the run. Runs in a daemon thread spawned by the trigger
     endpoint / scheduler."""
     log = logging.getLogger(__name__)
     accumulated_errors: list[str] = []
+
+    # ── Phase 0: source acquisition ────────────────────────────
+    # Probes upstream sources for new data and pulls it in. Currently:
+    # LongEquity (auto-ingest if upstream has a newer month than what
+    # we've loaded). Leonteq is API-driven and refreshes from inside
+    # Phase 1 already; ACWI's iShares XLS is gated behind region
+    # cookies that we can't bypass server-side so it's left manual —
+    # see /api/acwi/xls-age for the staleness probe. Acquisition
+    # failures don't abort the run: Phase 1 still reconstructs ACWI /
+    # Leonteq against whatever the existing iShares XLS + Leonteq API
+    # produce.
+    _update_run(run_id, current_phase="acquisition", current_message="Probing upstream sources…")
+    try:
+        _run_acquisition_phase(run_id)
+    except Exception as e:
+        msg = f"Acquisition phase failed: {type(e).__name__}: {e}"
+        log.warning("[pipeline] run_id=%s %s", run_id, msg)
+        accumulated_errors.append(msg)
 
     # ── Phase 1: template-managed universe refresh ─────────────
     # Walks every registered `UniverseTemplate` (currently just ACWI;
@@ -169,7 +224,20 @@ def _run_pipeline_sync(run_id: int) -> None:
         log.warning("[pipeline] run_id=%s %s", run_id, msg)
         accumulated_errors.append(msg)
 
-    # ── Phase 2: price + volume refresh ────────────────────────
+    # ── Phase 2: orphan prune ──────────────────────────────────
+    # Delete `company` rows that no longer belong to LongEquity, ACWI,
+    # or Leonteq. Runs here so the kept-set reflects the latest
+    # universe state AND the price phase doesn't refresh rows we're
+    # about to delete.
+    _update_run(run_id, current_phase="prune", current_message="Pruning orphan companies…")
+    try:
+        _run_prune_phase(run_id)
+    except Exception as e:
+        msg = f"Prune phase failed: {type(e).__name__}: {e}"
+        log.warning("[pipeline] run_id=%s %s", run_id, msg)
+        accumulated_errors.append(msg)
+
+    # ── Phase 3: price + volume refresh ────────────────────────
     _update_run(run_id, current_phase="prices", current_message="Loading company list…")
     try:
         _run_prices_phase(run_id, accumulated_errors)
@@ -178,7 +246,7 @@ def _run_pipeline_sync(run_id: int) -> None:
         log.warning("[pipeline] run_id=%s %s", run_id, msg)
         accumulated_errors.append(msg)
 
-    # ── Phase 3: momentum compute ──────────────────────────────
+    # ── Phase 4: momentum compute ──────────────────────────────
     _update_run(run_id, current_phase="momentum", current_message="Preparing momentum compute…")
     try:
         _run_momentum_phase(run_id)
@@ -198,6 +266,78 @@ def _run_pipeline_sync(run_id: int) -> None:
         finished_at=_now_utc_iso(),
     )
     log.info("[pipeline] run_id=%s finished status=%s", run_id, final_status)
+
+
+def _run_acquisition_phase(run_id: int) -> None:
+    """Phase 0 — pull fresh source data from upstream before Phase 1
+    rebuilds universes against it.
+
+    LongEquity: probe `check_latest_available_month` and run the sync
+    ingest only when a newer month is available than what's loaded.
+    Skipping when nothing new is the dominant happy-path on a weekly
+    tick. Result lands in `current_message` so /schedule shows whether
+    a new month was loaded or "nothing new".
+
+    ACWI: the iShares XLS gating prevents an automated download
+    (region-cookie + JS challenge). Stale-file warning lives at
+    /api/acwi/xls-age; this phase just records the age in the run
+    message so it surfaces in /schedule recent-runs.
+
+    Leonteq: nothing to do — the template refresh in Phase 1 hits the
+    Leonteq API directly, no separate acquisition step needed.
+    """
+    log = logging.getLogger(__name__)
+    throttle = _Throttle()
+    log_lines: list[str] = []
+
+    def emit(msg: str) -> None:
+        log_lines.append(msg)
+        if msg and throttle.should_write():
+            _update_run(run_id, current_message=f"[acquisition] {msg}")
+
+    # ── LongEquity ────────────────────────────────────────────
+    try:
+        from routers.longequity import run_longequity_ingest_sync  # noqa: PLC0415
+        emit("LongEquity: probing upstream…")
+        le_result = run_longequity_ingest_sync(supabase, on_progress=emit)
+        if le_result.get("status") == "no_new_data":
+            emit("LongEquity: nothing new upstream.")
+        elif le_result.get("status") == "ok":
+            months = le_result.get("months_loaded") or []
+            emit(
+                f"LongEquity: ingested {le_result.get('files_processed', 0)} month(s) — "
+                f"{', '.join(months) or 'none'} "
+                f"({le_result.get('companies_inserted', 0)} new companies, "
+                f"{le_result.get('metric_rows_inserted', 0)} metric rows)"
+            )
+        else:
+            emit(f"LongEquity: failed — {le_result.get('error')}")
+    except Exception as e:
+        msg = f"LongEquity acquisition crashed: {type(e).__name__}: {e}"
+        log.warning("[pipeline.acquisition] run_id=%s %s", run_id, msg)
+        emit(msg)
+
+    # ── ACWI XLS age check ────────────────────────────────────
+    try:
+        from index_universe.acwi.holdings import _FILE as _ACWI_XLS_PATH  # noqa: PLC0415
+        import os as _os  # noqa: PLC0415
+        from datetime import datetime as _dt, timezone as _tz  # noqa: PLC0415
+        mtime = _os.path.getmtime(_ACWI_XLS_PATH)
+        age_days = (_dt.now(_tz.utc) - _dt.fromtimestamp(mtime, _tz.utc)).days
+        if age_days >= 14:
+            emit(
+                f"ACWI XLS is {age_days} days old — commit a fresh "
+                f"`iShares-MSCI-ACWI-ETF_fund.xls` (iShares blocks "
+                f"automated downloads)."
+            )
+        else:
+            emit(f"ACWI XLS age: {age_days} day(s).")
+    except Exception as e:
+        emit(f"ACWI XLS age check failed: {type(e).__name__}: {e}")
+
+    # Final phase message picks up the last log line.
+    if log_lines:
+        _update_run(run_id, current_message=f"[acquisition done] {log_lines[-1]}")
 
 
 def _run_templates_phase(run_id: int) -> None:
@@ -263,8 +403,40 @@ def _run_templates_phase(run_id: int) -> None:
         )
 
 
+def _run_prune_phase(run_id: int) -> None:
+    """Phase 2 — delete `company` rows that no longer belong to any
+    source universe (LongEquity / ACWI / Leonteq). The kept-set is the
+    union of `universe_membership` rows joined to the three canonical
+    universes, plus a `metric_data.source_code='longequity'` fallback
+    for the months ingested before universe_membership existed. See
+    `ingest.prune_companies` for the full definition.
+
+    Lands a short summary string in `current_message` (no separate
+    column on `ingest_run` — orphan churn is normally <10 per week and
+    the message is enough for the /schedule UI to surface)."""
+    from ingest.prune_companies import (  # noqa: PLC0415 (heavy module)
+        prune_orphan_companies,
+    )
+
+    log = logging.getLogger(__name__)
+    _update_run(run_id, current_message="Computing orphan set…")
+    result = prune_orphan_companies(supabase, dry_run=False)
+
+    msg = (
+        f"Prune done: deleted {result.companies_deleted} orphan companies "
+        f"({result.metric_data_deleted} metric_data, "
+        f"{result.portfolio_weight_deleted} portfolio_weight rows). "
+        f"Kept {result.kept_count} "
+        f"(LongEquity {result.longequity_kept}, ACWI {result.acwi_kept}, "
+        f"Leonteq {result.leonteq_kept}). "
+        f"Company table: {result.company_count_before} → {result.company_count_after}."
+    )
+    _update_run(run_id, current_message=msg)
+    log.info("[pipeline.prune] run_id=%s %s", run_id, msg)
+
+
 def _run_prices_phase(run_id: int, accumulated_errors: list[str]) -> None:
-    """Phase 2 — the price/volume refresh that used to be the whole job.
+    """Phase 3 — the price/volume refresh that used to be the whole job.
     Walks every row in `company`, parallel-pumps each through
     `ensure_prices_for_company` + `ensure_volume_for_company`, and
     updates `ingest_run` with the per-class counters every

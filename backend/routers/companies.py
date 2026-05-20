@@ -28,6 +28,10 @@ class CreateCompanyRequest(BaseModel):
     company_name: str
     gurufocus_ticker: str
     gurufocus_exchange: str  # exchange_code, resolved to exchange_id
+    # When the dupe check fires, the frontend re-submits with
+    # force=True to override (e.g. the user inspected the existing
+    # match and confirmed this is a genuinely different security).
+    force: bool = False
 
 
 class UpdateCompanyRequest(BaseModel):
@@ -105,6 +109,35 @@ async def list_company_memberships():
     return {"memberships": memberships}
 
 
+@router.get("/api/companies/check-duplicates")
+async def check_duplicates(name: str = "", ticker: str = "", exchange: str = ""):
+    """Pre-add dupe probe. Returns any existing rows that would
+    canonically match the proposed `(name, ticker, exchange)` triple —
+    HKSE zero-pad collapsed, name case-insensitive, also catches the
+    cross-exchange H-share/A-share/GDR collisions.
+
+    The frontend calls this on input change (debounced) to surface
+    warnings inline before the user clicks Add."""
+    from ingest.dedupe import find_canonical_match, canonical_ticker  # noqa: PLC0415
+
+    def _query():
+        matches = find_canonical_match(supabase, name, ticker, exchange)
+        return {
+            "matches": [
+                {
+                    "company_id": m.company_id,
+                    "company_name": m.company_name,
+                    "gurufocus_ticker": m.gurufocus_ticker,
+                    "gurufocus_exchange": m.exchange_code,
+                }
+                for m in matches
+            ],
+            "canonical_ticker": canonical_ticker(ticker, exchange),
+        }
+
+    return await asyncio.to_thread(_query)
+
+
 @router.post("/api/companies")
 async def create_company(req: CreateCompanyRequest):
     # Reject unresolvable exchanges loudly instead of silently inserting
@@ -129,9 +162,51 @@ async def create_company(req: CreateCompanyRequest):
                 f"(GET /api/companies/field-options)."
             ),
         )
+
+    # Canonicalize the ticker before insert so dupes can't accumulate
+    # through ticker-format drift (HKSE `700` vs `00700` was the
+    # original culprit — see backend/ingest/dedupe.py).
+    from ingest.dedupe import (  # noqa: PLC0415
+        canonical_ticker,
+        find_canonical_match,
+    )
+    norm_ticker = canonical_ticker(req.gurufocus_ticker, req.gurufocus_exchange)
+
+    # Block obvious dupes unless `force=True` is explicit. The frontend
+    # is expected to call /api/companies/check-duplicates first and
+    # only POST with force=True after a user explicitly chooses to
+    # create a new row rather than reuse the existing match.
+    if not req.force:
+        def _check():
+            return find_canonical_match(
+                supabase, req.company_name, norm_ticker, req.gurufocus_exchange,
+            )
+        matches = await asyncio.to_thread(_check)
+        if matches:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": (
+                        f"A company with this name or canonical ticker already "
+                        f"exists ({len(matches)} match(es)). Pass force=true to "
+                        f"override after reviewing."
+                    ),
+                    "matches": [
+                        {
+                            "company_id": m.company_id,
+                            "company_name": m.company_name,
+                            "gurufocus_ticker": m.gurufocus_ticker,
+                            "gurufocus_exchange": m.exchange_code,
+                        }
+                        for m in matches
+                    ],
+                    "canonical_ticker": norm_ticker,
+                },
+            )
+
     row = {
         "company_name": req.company_name,
-        "gurufocus_ticker": req.gurufocus_ticker.upper(),
+        "gurufocus_ticker": norm_ticker,
         "exchange_id": exchange_id,
     }
     resp = supabase.table("company").insert(row).execute()

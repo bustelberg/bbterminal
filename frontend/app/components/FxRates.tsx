@@ -6,6 +6,8 @@ import {
   CartesianGrid,
 } from 'recharts';
 import { trackedFetch } from '../../lib/loading';
+import type { Column } from '../../lib/tableExport';
+import TableDownloadButton from './TableDownloadButton';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -320,6 +322,66 @@ export default function FxRates() {
   const ci = (code: string) => coverage?.currency_info?.[code] ?? { name: code, country: '' };
   const rateDate = latestRates[0]?.date ?? '';
 
+  // Flatten the on-screen rate table (EUR + covered ACWI + missing) into
+  // a single export. Status mirrors the column label: base / ecb /
+  // yahoo / pegged / missing.
+  type RateExportRow = {
+    currency: string;
+    name: string;
+    country: string;
+    rate_per_eur: number | null;
+    eur_per_unit: number | null;
+    acwi_holdings: number;
+    status: string;
+  };
+  const exportRows = useMemo<RateExportRow[]>(() => {
+    const out: RateExportRow[] = [
+      {
+        currency: 'EUR',
+        name: 'Euro',
+        country: 'Eurozone',
+        rate_per_eur: 1,
+        eur_per_unit: 1,
+        acwi_holdings: coverage?.currency_counts['EUR'] ?? 0,
+        status: 'base',
+      },
+    ];
+    for (const c of coverage?.covered ?? []) {
+      const r = rateMap[c];
+      out.push({
+        currency: c,
+        name: ci(c).name,
+        country: ci(c).country,
+        rate_per_eur: r?.rate ?? null,
+        eur_per_unit: r ? 1 / r.rate : null,
+        acwi_holdings: coverage?.currency_counts[c] ?? 0,
+        status: r?.source ?? 'ecb',
+      });
+    }
+    for (const c of coverage?.missing ?? []) {
+      out.push({
+        currency: c,
+        name: ci(c).name,
+        country: ci(c).country,
+        rate_per_eur: null,
+        eur_per_unit: null,
+        acwi_holdings: coverage?.currency_counts[c] ?? 0,
+        status: 'missing',
+      });
+    }
+    return out;
+  }, [coverage, rateMap]);
+  const exportColumns = useMemo<Column<RateExportRow>[]>(() => [
+    { key: 'currency', header: 'Currency', accessor: (r) => r.currency },
+    { key: 'name', header: 'Name', accessor: (r) => r.name },
+    { key: 'country', header: 'Country', accessor: (r) => r.country },
+    { key: 'rate_per_eur', header: 'Rate (per 1 EUR)', accessor: (r) => r.rate_per_eur },
+    { key: 'eur_per_unit', header: 'Inverse (EUR per 1)', accessor: (r) => r.eur_per_unit },
+    { key: 'acwi_holdings', header: 'ACWI Holdings', accessor: (r) => r.acwi_holdings },
+    { key: 'status', header: 'Status', accessor: (r) => r.status },
+    { key: 'as_of', header: 'As of', accessor: () => rateDate },
+  ], [rateDate]);
+
   const totalAcwi = coverage ? Object.values(coverage.currency_counts).reduce((a, b) => a + b, 0) : 0;
   const coveredCount = coverage ? coverage.covered.reduce((sum, c) => sum + (coverage.currency_counts[c] || 0), 0) : 0;
   const eurCount = coverage?.eur_count ?? 0;
@@ -404,7 +466,15 @@ export default function FxRates() {
       <div className="bg-[#151821] rounded-xl border border-gray-800/40">
         <div className="px-5 py-3 border-b border-gray-800/40 flex items-center justify-between">
           <h2 className="text-sm font-medium text-white">Latest ECB Rates vs EUR</h2>
-          <span className="text-xs text-gray-500">as of {rateDate}</span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-gray-500">as of {rateDate}</span>
+            <TableDownloadButton
+              rows={exportRows}
+              columns={exportColumns}
+              filename="fx_rates"
+              title={`Download ${exportRows.length} FX rates as CSV / XLSX`}
+            />
+          </div>
         </div>
         <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
           <table className="w-full text-sm">

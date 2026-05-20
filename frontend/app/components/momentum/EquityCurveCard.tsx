@@ -12,6 +12,8 @@ import type {
   PeriodRecord,
   Summary,
 } from '../../../lib/stores/momentum';
+import type { Column } from '../../../lib/tableExport';
+import TableDownloadButton from '../TableDownloadButton';
 import CellInfoTip from './CellInfoTip';
 import CollapsibleCard from './CollapsibleCard';
 import { SERIES_COLORS, computeTopDrawdowns, fmtPct, tooltipStyle } from './utils';
@@ -614,6 +616,41 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
     return { years, bySeries, netYearlyBySeries };
   }, [alignedSeries, activeNetStats, comparisons, comparisonNetStats]);
 
+  // Export columns for the Summary stats table. One row per aligned
+  // series; columns mirror what's visible.
+  type AlignedSeriesItem = (typeof alignedSeries)['series'][number];
+  const summaryExportColumns = useMemo<Column<AlignedSeriesItem>[]>(() => [
+    { key: 'label', header: 'Series', accessor: (s) => s.label },
+    { key: 'kind', header: 'Kind', accessor: (s) => s.kind },
+    { key: 'total_return_pct', header: 'Total Return (%)', accessor: (s) => s.stats.totalReturn },
+    { key: 'annualized_pct', header: 'Annualized (%)', accessor: (s) => s.stats.annualized },
+    { key: 'max_drawdown_pct', header: 'Max Drawdown (%)', accessor: (s) => s.stats.maxDd },
+    { key: 'sharpe', header: 'Sharpe', accessor: (s) => s.stats.sharpe ?? null },
+    { key: 'months', header: 'Periods', accessor: (s) => s.stats.months },
+  ], []);
+
+  // Export rows for the Yearly Performance table — one row per
+  // (year × series). Long format > wide format for spreadsheets.
+  type YearlyExportRow = { year: string; series: string; return_pct: number | null };
+  const yearlyExportRows = useMemo<YearlyExportRow[]>(() => {
+    const out: YearlyExportRow[] = [];
+    for (const y of yearlyBreakdown.years) {
+      for (const s of alignedSeries.series) {
+        out.push({
+          year: y,
+          series: s.label,
+          return_pct: yearlyBreakdown.bySeries[s.id]?.[y] ?? null,
+        });
+      }
+    }
+    return out;
+  }, [yearlyBreakdown, alignedSeries]);
+  const yearlyExportColumns = useMemo<Column<YearlyExportRow>[]>(() => [
+    { key: 'year', header: 'Year', accessor: (r) => r.year },
+    { key: 'series', header: 'Series', accessor: (r) => r.series },
+    { key: 'return_pct', header: 'Return (%)', accessor: (r) => r.return_pct },
+  ], []);
+
   // Cumulative return from customFromMonth through end of aligned window, per series.
   const customRangeReturn = useMemo(() => {
     const { series } = alignedSeries;
@@ -870,7 +907,17 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
       </div>
 
       {/* Summary Stats */}
-      <CollapsibleCard title="Summary">
+      <CollapsibleCard
+        title="Summary"
+        rightSlot={
+          <TableDownloadButton
+            rows={alignedSeries.series}
+            columns={summaryExportColumns}
+            filename="backtest_summary"
+            title={`Download ${alignedSeries.series.length} series as CSV / XLSX`}
+          />
+        }
+      >
         <table className="w-full text-sm border-t border-gray-800/40">
           <thead>
             <tr className="border-b border-gray-800/40 text-gray-500 text-xs">
@@ -1011,7 +1058,17 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
 
       {/* Yearly Performance + Custom Range */}
       {yearlyBreakdown.years.length > 0 && (
-        <CollapsibleCard title="Yearly Performance">
+        <CollapsibleCard
+          title="Yearly Performance"
+          rightSlot={
+            <TableDownloadButton
+              rows={yearlyExportRows}
+              columns={yearlyExportColumns}
+              filename="backtest_yearly_performance"
+              title={`Download ${yearlyExportRows.length} years × ${alignedSeries.series.length} series as CSV / XLSX`}
+            />
+          }
+        >
           <div className="overflow-auto">
             <table className="w-full text-sm">
               <thead>

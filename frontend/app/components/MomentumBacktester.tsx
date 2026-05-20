@@ -28,6 +28,7 @@ import DailyPicksHistory from './momentum/DailyPicksHistory';
 import EquityCurveCard from './momentum/EquityCurveCard';
 import MonthlyHoldingsTable from './momentum/MonthlyHoldingsTable';
 import SectorTimelineChart from './momentum/SectorTimelineChart';
+import TableDownloadButton from './TableDownloadButton';
 import VariantSummaryTable from './momentum/VariantSummaryTable';
 import {
   EXCHANGE_NAMES,
@@ -1749,6 +1750,40 @@ export default function MomentumBacktester() {
                     </div>
                   </div>
                 )}
+                <TableDownloadButton
+                  rows={currentPortfolio.holdings.map((h) => ({
+                    ...h,
+                    exchange: exchangeByCompany.get(h.company_id) ?? '',
+                  }))}
+                  columns={(() => {
+                    const cols: import('../../lib/tableExport').Column<typeof currentPortfolio.holdings[number] & { exchange: string }>[] = [
+                      { key: 'ticker', header: 'Ticker', accessor: (h) => h.ticker },
+                      { key: 'exchange', header: 'Exchange', accessor: (h) => h.exchange },
+                      { key: 'company_name', header: 'Company', accessor: (h) => h.company_name },
+                      { key: 'sector', header: 'Sector', accessor: (h) => h.sector },
+                    ];
+                    for (const cat of categories) {
+                      cols.push({
+                        key: `score_${cat}`,
+                        header: cat === 'price' ? 'Price score' : cat === 'volume' ? 'Volume score' : `${cat} score`,
+                        accessor: (h) => h.category_scores?.[cat] ?? null,
+                      });
+                    }
+                    cols.push(
+                      { key: 'total_score', header: 'Total score', accessor: (h) => h.score },
+                      { key: 'currency', header: 'Currency', accessor: (h) => h.currency ?? '' },
+                      { key: 'entry_price_local', header: 'Start (local)', accessor: (h) => h.entry_price_local ?? null },
+                      { key: 'exit_price_local', header: 'End (local)', accessor: (h) => h.exit_price_local ?? null },
+                      { key: 'entry_price_eur', header: 'Start (EUR)', accessor: (h) => h.entry_price_eur ?? null },
+                      { key: 'exit_price_eur', header: 'End (EUR)', accessor: (h) => h.exit_price_eur ?? null },
+                      { key: 'return_pct', header: 'Return (%)', accessor: (h) => h.forward_return_pct ?? null },
+                      { key: 'gurufocus_url', header: 'GuruFocus URL', accessor: (h) => guruFocusUrl(h.ticker, h.exchange) },
+                    );
+                    return cols;
+                  })()}
+                  filename={`current_picks_${currentPortfolio.as_of_date}`}
+                  title={`Download ${currentPortfolio.holdings.length} current picks as CSV / XLSX`}
+                />
               </>
             }
           >

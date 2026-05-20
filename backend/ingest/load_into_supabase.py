@@ -211,6 +211,7 @@ def load_prepared_into_supabase(
     # would reject them anyway. Surface the skip count + a sample so
     # the operator knows which exchanges to add to gurufocus_exchange
     # before re-ingesting.
+    from .dedupe import canonical_ticker  # noqa: PLC0415
     skipped_no_exchange: list[dict] = []
     resolved_rows: list[dict] = []
     for row in company_rows:
@@ -231,6 +232,13 @@ def load_prepared_into_supabase(
                 ),
             })
             continue
+        # Normalize the ticker before insert so `(gurufocus_ticker,
+        # exchange_id)`'s unique constraint catches all dupes, not
+        # just exact string equality. HKSE:700 vs HKSE:00700 was the
+        # original break — see ingest/dedupe.py for the full ruleset.
+        row["gurufocus_ticker"] = canonical_ticker(
+            row.get("gurufocus_ticker"), gf_exchange,
+        )
         row["exchange_id"] = exchange_id
         resolved_rows.append(row)
 
@@ -302,6 +310,7 @@ def load_prepared_into_supabase(
                 "target_month": target_month,
                 "universe_ticker": row.get("universe_ticker"),
                 "sector": row.get("sector"),
+                "industry": row.get("industry"),
             })
 
         # Clear any existing rows for this (universe, target_month) before

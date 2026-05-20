@@ -182,33 +182,16 @@ class UniverseTemplate(ABC):
     def available_months(self, supabase: Client) -> list[str]:
         """Distinct `target_month` values for this template's canonical
         universe, ascending. Empty list when no membership exists yet
-        (template not yet refreshed)."""
+        (template not yet refreshed). One RPC round-trip via
+        `universe_available_months` — the previous Python paginate-then-dedupe
+        was O(holdings) when only the O(months) distinct values matter."""
         uid = self.universe_id(supabase)
         if uid is None:
             return []
-        months: set[str] = set()
-        offset = 0
-        page = 1000
-        while True:
-            # Cheap distinct probe — pull `target_month` only. Even at
-            # ~290 months × ~2500 holdings the result fits in a few
-            # round-trips. We dedupe in-process.
-            resp = (
-                supabase.table("universe_membership")
-                .select("target_month")
-                .eq("universe_id", uid)
-                .range(offset, offset + page - 1)
-                .execute()
-            )
-            batch = resp.data or []
-            for r in batch:
-                m = (r.get("target_month") or "")[:7]
-                if m:
-                    months.add(m)
-            if len(batch) < page:
-                break
-            offset += page
-        return sorted(months)
+        resp = supabase.rpc(
+            "universe_available_months", {"p_universe_id": uid}
+        ).execute()
+        return [(r.get("target_month") or "")[:7] for r in (resp.data or []) if r.get("target_month")]
 
     def membership_at(
         self, supabase: Client, target_month: str,
@@ -258,6 +241,7 @@ class UniverseTemplate(ABC):
                 .range(offset, offset + page - 1)
                 .execute()
             )
+            from ingest.gurufocus_url import gurufocus_url  # noqa: PLC0415
             batch = resp.data or []
             for r in batch:
                 company = r.get("company") or {}
@@ -271,9 +255,8 @@ class UniverseTemplate(ABC):
                     "company_name": company.get("company_name") or "",
                     "exchange": exchange,
                     "sector": r.get("sector"),
-                    "gurufocus_url": (
-                        f"https://www.gurufocus.com/stock/{exchange}:{company.get('gurufocus_ticker')}/summary"
-                        if exchange and company.get("gurufocus_ticker") else None
+                    "gurufocus_url": gurufocus_url(
+                        company.get("gurufocus_ticker"), exchange,
                     ),
                 })
             if len(batch) < page:
@@ -299,16 +282,14 @@ class UniverseTemplate(ABC):
             "universe_all_companies_ever",
             {"p_universe_id": uid},
         ).execute()
+        from ingest.gurufocus_url import gurufocus_url  # noqa: PLC0415
         rows = resp.data or []
         # Decorate with the GuruFocus URL so the CSV is "complete" —
         # callers don't have to rebuild URLs from ticker+exchange.
         out: list[dict] = []
         for r in rows:
-            exch = r.get("exchange_code") or ""
-            gf = r.get("gurufocus_ticker") or ""
-            r["gurufocus_url"] = (
-                f"https://www.gurufocus.com/stock/{exch}:{gf}/summary"
-                if exch and gf else None
+            r["gurufocus_url"] = gurufocus_url(
+                r.get("gurufocus_ticker"), r.get("exchange_code"),
             )
             out.append(r)
         return out

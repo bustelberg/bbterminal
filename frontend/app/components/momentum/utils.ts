@@ -34,52 +34,11 @@ export const fmtPrice = (v: number | null | undefined) => {
   return v.toFixed(d);
 };
 
-// US-listed exchanges per GuruFocus's URL convention: `/stock/TICKER/summary`
-// without a prefix. Non-US (XTER, HKSE, LSE, TSE, …) need `EXCHANGE:TICKER`.
-// Aligned with `backend/ingest/prices.py::US_EXCHANGES` so the click-through
-// link and the actual API request resolve to the same security. `US` is
-// kept as a catch-all some loaders use for OTC/pink sheets.
-const GURUFOCUS_US_EXCHANGES = new Set(['NYSE', 'NASDAQ', 'AMEX', 'CBOE', 'US']);
-
-// Strings that show up in the frontend payload when an exchange link is
-// missing on the backend side (pandas/JSON sometimes serializes None/NaN
-// as the literal "None"/"nan", and saved variant bundles from before the
-// snapshot-normalization fix still carry them). Treat them as no-exchange
-// so we don't synthesize broken `None:TICKER`-style URLs.
-const EMPTY_EXCHANGE_TOKENS = new Set(['', 'NONE', 'NAN', 'NULL', 'UNDEFINED']);
-
-/** Heuristic: when the exchange link is genuinely missing (saved-bundle
- * universes from before the snapshot-normalization fix carry empty or
- * "None" strings), guess the exchange from the ticker's shape so the
- * GuruFocus URL still resolves to the right security. Returns '' when no
- * confident guess is possible — caller should fall back to the bare
- * ticker.
- *  - 4-5 digit numeric → HKSE (Hong Kong: `01988` Bank of China,
- *    `00700` Tencent, `03690` Meituan, etc.).
- * Other patterns (LSE `.L` suffixes, SHSE/SZSE 6-digit numerics, …) are
- * left to expand later — most real-world breakage comes from HKSE.
- */
-function inferExchangeFromTicker(ticker: string): string {
-  if (/^\d{4,5}$/.test(ticker)) return 'HKSE';
-  return '';
-}
-
-export function guruFocusUrl(ticker: string, exchange: string): string {
-  const t = ticker.toUpperCase();
-  let e = (exchange ?? '').toUpperCase();
-  if (GURUFOCUS_US_EXCHANGES.has(e)) {
-    return `https://www.gurufocus.com/stock/${t}/summary`;
-  }
-  if (EMPTY_EXCHANGE_TOKENS.has(e)) {
-    e = inferExchangeFromTicker(t);
-    if (!e) {
-      // No exchange and no confident guess — bare ticker is the safest
-      // bet (works for US-listed names).
-      return `https://www.gurufocus.com/stock/${t}/summary`;
-    }
-  }
-  return `https://www.gurufocus.com/stock/${e}:${t}/summary`;
-}
+// Re-export the canonical builder. Kept here as a re-export (not a
+// direct import at the call sites) for backwards-compat with the many
+// places in momentum/* that already pull it from this module.
+import { guruFocusUrl, EMPTY_EXCHANGE_TOKENS, inferExchangeFromTicker } from '../../../lib/gurufocusUrl';
+export { guruFocusUrl };
 
 /** Returns the exchange label fit for display (e.g. inside `(NYSE)` parens
  * after a ticker, or as the value in an Exchange column). When the raw

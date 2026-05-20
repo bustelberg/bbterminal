@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import SnapshotHoldings from './SnapshotHoldings';
 import { StrategyConfigDetail, type IngestRun } from './Schedule';
 import { colorForSector } from '../../lib/sectorColors';
@@ -41,7 +41,7 @@ type BackfillState = {
   finished_at: string | null;
 };
 
-type StrategyRunHistory = {
+export type StrategyRunHistory = {
   id: number;
   name: string;
   frequency: string | null;
@@ -84,14 +84,29 @@ function StatusBadge({ status }: { status: 'running' | 'ok' | 'error' }) {
  * — click to expand the snapshot's holdings inline. */
 export default function ScheduledStrategyDetail({
   strategyId,
+  initialData,
+  onLoaded,
   onMutated: _onMutated,
 }: {
   strategyId: number;
+  /** Parent-supplied cache hit. When non-null we render immediately and
+   * fetch silently in the background (stale-while-revalidate). */
+  initialData?: StrategyRunHistory | null;
+  /** Called after every successful fetch so the parent can update its
+   * cache. */
+  onLoaded?: (data: StrategyRunHistory) => void;
   onMutated?: () => void;
 }) {
-  const [data, setData] = useState<StrategyRunHistory | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<StrategyRunHistory | null>(initialData ?? null);
+  // Only show the spinner on a cold load. Cache hits render the previous
+  // payload immediately while the silent revalidate runs.
+  const [loading, setLoading] = useState(initialData == null);
   const [error, setError] = useState<string | null>(null);
+  // Latest onLoaded held in a ref so its identity changing on every
+  // parent render doesn't invalidate `load` and re-trigger the fetch
+  // effect — that would loop, since onLoaded mutates parent state.
+  const onLoadedRef = useRef(onLoaded);
+  useEffect(() => { onLoadedRef.current = onLoaded; }, [onLoaded]);
   const [expandedSnapshotId, setExpandedSnapshotId] = useState<number | null>(null);
   const [showConfig, setShowConfig] = useState(false);
 
@@ -178,6 +193,7 @@ export default function ScheduledStrategyDetail({
       const body = (await r.json()) as StrategyRunHistory;
       setData(body);
       setError(null);
+      onLoadedRef.current?.(body);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

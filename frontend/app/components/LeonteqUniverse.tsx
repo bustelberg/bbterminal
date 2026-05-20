@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import ProgressTimeline from './ProgressTimeline';
 import { apiFetch } from '../../lib/apiFetch';
 import { colorForSector } from '../../lib/sectorColors';
+import type { Column } from '../../lib/tableExport';
+import TableDownloadButton from './TableDownloadButton';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 const TEMPLATE_KEY = 'LEONTEQ';
@@ -88,6 +90,19 @@ export default function LeonteqUniverse() {
   // company-name. The sector is included regardless if the query
   // matches the sector name; otherwise only matching industries +
   // companies survive.
+  // Flatten the hierarchical sector/industry/company tree into one row per
+  // company for the download. Walks the *currently filtered* tree so the
+  // export matches what the user sees on screen.
+  type FlatLeonteqRow = {
+    sector: string;
+    industry: string;
+    name: string;
+    ticker: string;
+    isin: string;
+    company_id: number | null;
+    gurufocus_url: string;
+  };
+
   const filtered = useMemo<Sector[]>(() => {
     if (!data) return [];
     const q = search.trim().toLowerCase();
@@ -124,6 +139,35 @@ export default function LeonteqUniverse() {
       })
       .filter((x): x is Sector => x !== null);
   }, [data, search]);
+
+  const flatLeonteqRows = useMemo<FlatLeonteqRow[]>(() => {
+    const out: FlatLeonteqRow[] = [];
+    for (const sec of filtered) {
+      for (const ind of sec.industries) {
+        for (const c of ind.companies) {
+          out.push({
+            sector: sec.name,
+            industry: ind.name,
+            name: c.name,
+            ticker: c.ticker ?? '',
+            isin: c.isin ?? '',
+            company_id: c.company_id,
+            gurufocus_url: c.gurufocus_url ?? '',
+          });
+        }
+      }
+    }
+    return out;
+  }, [filtered]);
+  const leonteqExportColumns = useMemo<Column<FlatLeonteqRow>[]>(() => [
+    { key: 'sector', header: 'Sector', accessor: (r) => r.sector },
+    { key: 'industry', header: 'Industry', accessor: (r) => r.industry },
+    { key: 'name', header: 'Name', accessor: (r) => r.name },
+    { key: 'ticker', header: 'Ticker', accessor: (r) => r.ticker },
+    { key: 'isin', header: 'ISIN', accessor: (r) => r.isin },
+    { key: 'company_id', header: 'Company ID', accessor: (r) => r.company_id ?? '' },
+    { key: 'gurufocus_url', header: 'GuruFocus URL', accessor: (r) => r.gurufocus_url },
+  ], []);
 
   // SSE refresh — same event shape as /acwi's canonical-refresh path.
   const triggerRefresh = useCallback(async () => {
@@ -187,7 +231,7 @@ export default function LeonteqUniverse() {
   return (
     <div className="min-h-screen bg-[#0f1117] text-gray-200">
       <div className="px-8 py-5 border-b border-gray-800/40">
-        <h1 className="text-xl font-semibold text-white">Leonteq Underlyings</h1>
+        <h1 className="text-xl font-semibold text-white">Leonteq</h1>
         <p className="text-sm text-gray-500 mt-1">
           Equities Leonteq lists as underlyings for their structured products. Scraped from{' '}
           <a
@@ -265,6 +309,14 @@ export default function LeonteqUniverse() {
             >
               Collapse all
             </button>
+            <div className="ml-auto">
+              <TableDownloadButton
+                rows={flatLeonteqRows}
+                columns={leonteqExportColumns}
+                filename="leonteq_underlyings"
+                title={`Download ${flatLeonteqRows.length} Leonteq underlyings as CSV / XLSX`}
+              />
+            </div>
           </div>
         )}
 
@@ -312,8 +364,17 @@ export default function LeonteqUniverse() {
                             <span className="text-[10px] text-gray-500 font-mono">{ind.company_count}</span>
                           </div>
                           <div className="flex flex-wrap gap-1.5">
-                            {ind.companies.map((c) => (
-                              <CompanyChip key={`${c.company_id ?? c.isin ?? c.name}-${c.ticker ?? ''}`} c={c} />
+                            {ind.companies.map((c, idx) => (
+                              // ISIN is unique per listing — different listings of the
+                              // same company (BHP on LSE vs ASX, Shell on LSE vs NYSE,
+                              // Samsung's share classes, …) collapse to one company_id
+                              // but keep distinct ISINs. Using ISIN as the primary key
+                              // prevents the React duplicate-key warning. idx is the
+                              // last-resort fallback for the ~5 rows with no ISIN.
+                              <CompanyChip
+                                key={c.isin ?? `${c.company_id ?? 'noid'}-${c.ticker ?? c.name ?? ''}-${idx}`}
+                                c={c}
+                              />
                             ))}
                           </div>
                         </div>
