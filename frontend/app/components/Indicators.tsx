@@ -8,7 +8,6 @@ import {
 import DatePartsPicker from './DatePartsPicker';
 import { apiFetch } from '../../lib/apiFetch';
 import { guruFocusUrl } from '../../lib/gurufocusUrl';
-import type { Column } from '../../lib/tableExport';
 import TableDownloadButton from './TableDownloadButton';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';

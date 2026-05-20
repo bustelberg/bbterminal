@@ -300,26 +300,10 @@ export default function FxRates() {
     }
   }, []);
 
-  if (loading) {
-    return (
-      <div className="px-8 py-5">
-        <h1 className="text-xl font-semibold text-white mb-4">FX Rates</h1>
-        <p className="text-gray-400">Loading ECB exchange rates...</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="px-8 py-5">
-        <h1 className="text-xl font-semibold text-white mb-4">FX Rates</h1>
-        <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg px-4 py-3 text-rose-400">{error}</div>
-      </div>
-    );
-  }
-
-  const rateMap = Object.fromEntries(latestRates.map(r => [r.currency, r]));
-  const ci = (code: string) => coverage?.currency_info?.[code] ?? { name: code, country: '' };
+  const rateMap = useMemo(
+    () => Object.fromEntries(latestRates.map(r => [r.currency, r])),
+    [latestRates],
+  );
   const rateDate = latestRates[0]?.date ?? '';
 
   // Flatten the on-screen rate table (EUR + covered ACWI + missing) into
@@ -335,6 +319,7 @@ export default function FxRates() {
     status: string;
   };
   const exportRows = useMemo<RateExportRow[]>(() => {
+    const ci = (code: string) => coverage?.currency_info?.[code] ?? { name: code, country: '' };
     const out: RateExportRow[] = [
       {
         currency: 'EUR',
@@ -381,6 +366,26 @@ export default function FxRates() {
     { key: 'status', header: 'Status', accessor: (r) => r.status },
     { key: 'as_of', header: 'As of', accessor: () => rateDate },
   ], [rateDate]);
+
+  if (loading) {
+    return (
+      <div className="px-8 py-5">
+        <h1 className="text-xl font-semibold text-white mb-4">FX Rates</h1>
+        <p className="text-gray-400">Loading ECB exchange rates...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="px-8 py-5">
+        <h1 className="text-xl font-semibold text-white mb-4">FX Rates</h1>
+        <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg px-4 py-3 text-rose-400">{error}</div>
+      </div>
+    );
+  }
+
+  const ci = (code: string) => coverage?.currency_info?.[code] ?? { name: code, country: '' };
 
   const totalAcwi = coverage ? Object.values(coverage.currency_counts).reduce((a, b) => a + b, 0) : 0;
   const coveredCount = coverage ? coverage.covered.reduce((sum, c) => sum + (coverage.currency_counts[c] || 0), 0) : 0;

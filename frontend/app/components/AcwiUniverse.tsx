@@ -77,8 +77,6 @@ type NetAddition = {
 
 export default function AcwiUniverse() {
   const [holdings, setHoldings] = useState<Holding[]>([]);
-  const [count, setCount] = useState(0);
-  const [asOf, setAsOf] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
@@ -140,8 +138,6 @@ export default function AcwiUniverse() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setHoldings(data.holdings);
-        setCount(data.count);
-        setAsOf(data.as_of || '');
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to load');
       }

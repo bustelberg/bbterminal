@@ -499,8 +499,8 @@ def merge_existing_duplicates(
             f'merge "{name}" -- keep cid={winner.company_id} '
             f'({winner.exchange_code}:{winner.gurufocus_ticker}), '
             f'merge: ' + ', '.join(
-                f'cid={l.company_id} ({l.exchange_code}:{l.gurufocus_ticker})'
-                for l in losers
+                f'cid={loser.company_id} ({loser.exchange_code}:{loser.gurufocus_ticker})'
+                for loser in losers
             )
         ]
 

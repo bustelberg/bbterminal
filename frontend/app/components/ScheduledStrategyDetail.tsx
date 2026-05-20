@@ -54,18 +54,6 @@ export type StrategyRunHistory = {
   runs: RunHistoryEntry[];
 };
 
-function fmtTimestamp(iso: string | null): string {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      year: 'numeric', month: 'short', day: '2-digit',
-      hour: '2-digit', minute: '2-digit',
-    });
-  } catch {
-    return iso;
-  }
-}
-
 function StatusBadge({ status }: { status: 'running' | 'ok' | 'error' }) {
   const cls = status === 'ok'
     ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
@@ -86,7 +74,6 @@ export default function ScheduledStrategyDetail({
   strategyId,
   initialData,
   onLoaded,
-  onMutated: _onMutated,
 }: {
   strategyId: number;
   /** Parent-supplied cache hit. When non-null we render immediately and

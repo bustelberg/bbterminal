@@ -98,14 +98,6 @@ export type ScheduledStrategy = {
 // have been removed — each scheduled strategy's run history is shown
 // in its own expandable detail view (see ScheduledStrategyDetail).
 
-function fmtDuration(startIso: string, endIso: string | null): string {
-  if (!endIso) return '—';
-  const secs = Math.max(0, Math.round((Date.parse(endIso) - Date.parse(startIso)) / 1000));
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  return m > 0 ? `${m}m ${s}s` : `${s}s`;
-}
-
 function fmtTimestamp(iso: string | null): string {
   if (!iso) return '—';
   try {
@@ -116,30 +108,6 @@ function fmtTimestamp(iso: string | null): string {
   } catch {
     return iso;
   }
-}
-
-function fmtDate(iso: string | null): string {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleDateString(undefined, {
-      year: 'numeric', month: 'short', day: '2-digit',
-    });
-  } catch {
-    return iso;
-  }
-}
-
-function StatusBadge({ status }: { status: IngestRun['status'] }) {
-  const cls = status === 'ok'
-    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-    : status === 'error'
-      ? 'bg-rose-500/10 text-rose-300 border-rose-500/30'
-      : 'bg-amber-500/15 text-amber-300 border-amber-500/30';
-  return (
-    <span className={`inline-flex items-center text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${cls}`}>
-      {status}
-    </span>
-  );
 }
 
 export const PIPELINE_STEPS: StepDef[] = [
@@ -271,44 +239,6 @@ export function runToTimelineProps(run: IngestRun): {
     errorMessage: run.status === 'error' && run.error_summary ? run.error_summary : null,
     totalElapsedMs: elapsedMs,
   };
-}
-
-function PhasePips({ run }: { run: IngestRun }) {
-  // Phases with no per-run column on `ingest_run` (acquisition, prune)
-  // are marked "done" once the run has advanced past them. Without a
-  // `hasData` proxy, the pip otherwise stays gray forever even on
-  // successful runs.
-  const acquisitionPassed = run.current_phase === 'templates'
-    || run.current_phase === 'prune'
-    || run.current_phase === 'prices'
-    || run.current_phase === 'momentum'
-    || run.current_phase === 'done'
-    || run.status === 'ok'
-    || run.status === 'error';
-  const prunePassed = run.current_phase === 'prices'
-    || run.current_phase === 'momentum'
-    || run.current_phase === 'done'
-    || run.status === 'ok'
-    || run.status === 'error';
-  const phases = [
-    { key: 'acquisition' as const, hasData: acquisitionPassed },
-    { key: 'templates' as const,   hasData: (run.templates_summary?.length ?? 0) > 0 },
-    { key: 'prune' as const,       hasData: prunePassed },
-    { key: 'prices' as const,      hasData: run.companies_processed > 0 || run.prices_refreshed > 0 || run.volumes_refreshed > 0 },
-    { key: 'momentum' as const,    hasData: (run.momentum_summary?.length ?? 0) > 0 },
-  ];
-  const currentPhase = run.current_phase;
-  return (
-    <span className="inline-flex items-center gap-1" title={`Phases: acquisition · templates · prune · prices · momentum (current: ${currentPhase ?? '—'})`}>
-      {phases.map((p) => {
-        const isCurrent = run.status === 'running' && currentPhase === p.key;
-        let cls = 'bg-gray-700';
-        if (p.hasData) cls = 'bg-emerald-500';
-        if (isCurrent) cls = 'bg-amber-400 animate-pulse';
-        return <span key={p.key} className={`inline-block w-2 h-2 rounded-full ${cls}`} />;
-      })}
-    </span>
-  );
 }
 
 /** Curated subset of the strategy config to display on the strategy list
