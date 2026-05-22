@@ -44,9 +44,10 @@ export type CompanyRow = {
 
 export type SignalDef = {
   key: string;
-  name: string;
-  group?: string;
+  label: string;
+  description: string;
   default_weight: number;
+  group?: string;
 };
 
 export type ExchangeFeeRow = {

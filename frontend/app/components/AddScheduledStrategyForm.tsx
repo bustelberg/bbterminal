@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import LoadingDots from './LoadingDots';
-import { useMomentumSignals, useUniverseTemplates } from '../../lib/hooks/apiData';
+import { useMomentumSignals, useUniverseTemplates, type SignalDef } from '../../lib/hooks/apiData';
 import { API_URL } from '../../lib/apiUrl';
 
 // API_URL imported from lib/apiUrl above — single source of truth.
@@ -36,14 +36,6 @@ const FREQUENCY_LABELS: Record<string, string> = {
   monthly: 'Monthly',
   bimonthly: 'Bi-monthly',
   quarterly: 'Quarterly',
-};
-
-type SignalDef = {
-  key: string;
-  label: string;
-  description?: string;
-  default_weight: number;
-  group?: 'price' | 'volume';
 };
 
 type UniverseSummary = {

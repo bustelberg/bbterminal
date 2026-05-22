@@ -13,6 +13,7 @@ import { trackedFetch } from '../../lib/loading';
 import { API_URL } from '../../lib/apiUrl';
 import InfoTip from './InfoTip';
 import SectionLoader from './SectionLoader';
+import Spinner from './Spinner';
 import CompanyPicker from './earnings/CompanyPicker';
 import RefreshButton from './earnings/RefreshButton';
 import LogPanel from './earnings/LogPanel';
@@ -20,9 +21,8 @@ import SnapshotStats from './earnings/SnapshotStats';
 import ForwardPEChart from './earnings/ForwardPEChart';
 import RelativeGrowthChart from './earnings/RelativeGrowthChart';
 import FCFShareChart from './earnings/FCFShareChart';
-import EGMCalculator from './earnings/EGMCalculator';
-import ReverseDCF from './earnings/ReverseDCF';
 import type { Company, MetricRow } from './earnings/types';
+import { expectedStaleSources } from './earnings/utils';
 
 // Metric codes (`MC`), types (`Company`, `MetricRow`, `Cadence`), and pure
 // helpers (extractors, time-series builders, statistical helpers, number
@@ -118,38 +118,71 @@ export default function EarningsDashboard() {
       .catch(() => {});
   }, []);
 
-  const loadMetrics = useCallback(() => {
-    if (!selected) return;
-    setLoadingMetrics(true);
-    trackedFetch(
+  const autoRefreshedFor = useRef<number | null>(null);
+  const [refreshingSources, setRefreshingSources] = useState<Set<string>>(new Set());
+
+  const loadMetrics = useCallback((opts?: { silent?: boolean }) => {
+    if (!selected) return Promise.resolve<MetricRow[]>([]);
+    const silent = opts?.silent ?? false;
+    if (!silent) setLoadingMetrics(true);
+    return trackedFetch(
       `Loading earnings metrics for ${selected.gurufocus_ticker}`,
       `${API_URL}/api/earnings/${selected.company_id}/metrics`,
     )
       .then((r) => r.json())
-      .then((data) => setMetrics(Array.isArray(data) ? data : []))
-      .catch(() => setMetrics([]))
-      .finally(() => setLoadingMetrics(false));
+      .then((data) => {
+        const rows: MetricRow[] = Array.isArray(data) ? data : [];
+        setMetrics(rows);
+        return rows;
+      })
+      .catch(() => {
+        if (!silent) setMetrics([]);
+        return [] as MetricRow[];
+      })
+      .finally(() => { if (!silent) setLoadingMetrics(false); });
   }, [selected]);
+
+  const refresh = useCallback((
+    source: string,
+    force = true,
+    silent = false,
+    trackedSources?: string[],
+  ) => {
+    if (!selected) return;
+    const endpoint = source === 'all' ? 'refresh-all' : `refresh/${source}`;
+    const tracking = trackedSources
+      ?? (source === 'all'
+        ? ['prices', 'indicators', 'financials', 'analyst_estimates']
+        : [source]);
+    setRefreshingSources(new Set(tracking));
+    sse.start(`${API_URL}/api/earnings/${selected.company_id}/${endpoint}?force=${force}`, () => {
+      loadMetrics({ silent });
+      usageBadgeRef.current?.refresh();
+      setRefreshingSources(new Set());
+    });
+  }, [selected, sse, loadMetrics]);
 
   // Run on every (selected â†’ loadMetrics) change: wipe the SSE log
   // panel from the previous company's refresh and re-fetch metrics for
-  // the new one. Both calls are intentional side effects.
-  // The lint flags two things: `sse.clearLogs()` is a setState call
-  // inside an effect (intentional â€” we WANT to clear the log when
-  // switching companies, that's an external-state sync), and `sse` is
-  // missing from deps (the SSE handle is stable across renders, so
-  // re-running on its identity would just thrash for no benefit).
+  // the new one. After the initial DB read settles, kick off a silent
+  // `refresh-all` (force=false) when today's date implies any source is
+  // due for new data — old values stay on screen until the SSE round-trip
+  // replaces them.
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
-  useEffect(() => { sse.clearLogs(); loadMetrics(); }, [loadMetrics]);
-
-  const refresh = (source: string, force = true) => {
-    if (!selected) return;
-    const endpoint = source === 'all' ? 'refresh-all' : `refresh/${source}`;
-    sse.start(`${API_URL}/api/earnings/${selected.company_id}/${endpoint}?force=${force}`, () => {
-      loadMetrics();
-      usageBadgeRef.current?.refresh();
+  useEffect(() => {
+    sse.clearLogs();
+    setRefreshingSources(new Set());
+    if (!selected) { autoRefreshedFor.current = null; return; }
+    const companyId = selected.company_id;
+    loadMetrics().then((rows) => {
+      if (autoRefreshedFor.current === companyId) return;
+      autoRefreshedFor.current = companyId;
+      const stale = expectedStaleSources(rows);
+      if (stale.length > 0) {
+        refresh('all', false, true, stale);
+      }
     });
-  };
+  }, [loadMetrics]);
 
   return (
     <div className="px-8 py-5 space-y-6">
@@ -196,7 +229,7 @@ export default function EarningsDashboard() {
               <h2 className="text-white font-medium">Snapshot Stats</h2>
               <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('indicators')} />
             </div>
-            {loadingMetrics ? <SectionLoader label="snapshot stats" /> : <SnapshotStats metrics={metrics} />}
+            {loadingMetrics ? <SectionLoader label="snapshot stats" /> : <SnapshotStats metrics={metrics} refreshingSources={refreshingSources} />}
           </section>
 
           {/* Charts container */}
@@ -234,7 +267,7 @@ export default function EarningsDashboard() {
               {/* FCF Yield */}
               <div className="bg-[#0f1117] rounded-lg border border-indigo-500/20 p-4 space-y-2 overflow-hidden min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-white text-sm font-medium flex items-center gap-1.5"><span className="truncate">Forward P/E</span> <InfoTip text="Forward Price-to-Earnings ratio over time. Shows how much investors pay per dollar of expected earnings. Compare to the period average (red dashed) to spot relative cheapness or richness." /></h3>
+                  <h3 className="text-white text-sm font-medium flex items-center gap-1.5"><span className="truncate">Forward P/E</span> <InfoTip text="Forward Price-to-Earnings ratio over time. Shows how much investors pay per dollar of expected earnings. Compare to the period average (red dashed) to spot relative cheapness or richness." />{refreshingSources.has('indicators') && <Spinner size={10} />}</h3>
                   <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('indicators')} />
                 </div>
                 {loadingMetrics ? <SectionLoader label="Forward P/E" /> : <ForwardPEChart metrics={chartMetrics} />}
@@ -243,7 +276,7 @@ export default function EarningsDashboard() {
               {/* Relative Growth */}
               <div className="bg-[#0f1117] rounded-lg border border-indigo-500/20 p-4 space-y-2 overflow-hidden min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-white text-sm font-medium flex items-center gap-1.5"><span className="truncate">Relative Growth (log)</span> <InfoTip text="Tracks whether the share price is growing in line with Owner Earnings (EPS + Dividends). On a log scale, parallel lines mean the valuation multiple is stable. Divergence signals re-rating." /></h3>
+                  <h3 className="text-white text-sm font-medium flex items-center gap-1.5"><span className="truncate">Relative Growth (log)</span> <InfoTip text="Tracks whether the share price is growing in line with Owner Earnings (EPS + Dividends). On a log scale, parallel lines mean the valuation multiple is stable. Divergence signals re-rating." />{refreshingSources.has('prices') && <Spinner size={10} />}</h3>
                   <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('prices')} />
                 </div>
                 {loadingMetrics ? <SectionLoader label="Relative Growth" /> : <RelativeGrowthChart metrics={chartMetrics} />}
@@ -252,24 +285,12 @@ export default function EarningsDashboard() {
               {/* FCF/share Growth */}
               <div className="bg-[#0f1117] rounded-lg border border-indigo-500/20 p-4 space-y-2 overflow-hidden min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-white text-sm font-medium flex items-center gap-1.5"><span className="truncate">FCF/share Growth</span> <InfoTip text="Free Cash Flow per share over time. Shows the trajectory of cash generation. Negative values are highlighted with red dots." /></h3>
+                  <h3 className="text-white text-sm font-medium flex items-center gap-1.5"><span className="truncate">FCF/share Growth</span> <InfoTip text="Free Cash Flow per share over time. Shows the trajectory of cash generation. Negative values are highlighted with red dots." />{refreshingSources.has('financials') && <Spinner size={10} />}</h3>
                   <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('financials')} />
                 </div>
                 {loadingMetrics ? <SectionLoader label="FCF/share" /> : <FCFShareChart metrics={chartMetrics} />}
               </div>
             </div>
-          </section>
-
-          {/* EGM Calculator */}
-          <section className="bg-[#151821] rounded-xl border border-indigo-500/20 p-5 space-y-4">
-            <h2 className="text-white font-medium flex items-center gap-1.5">Expected Return (EGM) <InfoTip text="Earnings Growth Multiple â€” the projected year-over-year EPS growth from the current fiscal year to the next (FY1 estimate). Compares analyst expectations to the stock's actual recent EPS growth rate." /></h2>
-            {loadingMetrics ? <SectionLoader label="EGM calculator" /> : <EGMCalculator metrics={metrics} />}
-          </section>
-
-          {/* Reverse DCF */}
-          <section className="bg-[#151821] rounded-xl border border-indigo-500/20 p-5 space-y-4">
-            <h2 className="text-white font-medium flex items-center gap-1.5">Reverse DCF <InfoTip text="Reverse Discounted Cash Flow â€” instead of estimating a fair value, it solves for the FCF growth rate the market is currently pricing in. If implied growth exceeds historic growth, the market expects acceleration (or the stock may be overvalued)." /></h2>
-            {loadingMetrics ? <SectionLoader label="Reverse DCF" /> : <ReverseDCF metrics={metrics} />}
           </section>
         </>
       )}

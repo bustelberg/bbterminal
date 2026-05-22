@@ -107,6 +107,65 @@ export function cadenceHoverText(c: Cadence): string {
   return `${c.label} (~${c.medianDays} days between observations). ${c.count} observations from ${c.firstDate} to ${c.lastDate}.`;
 }
 
+// ─── Staleness ─────────────────────────────────────────────────────
+
+/** Mirror of backend/ingest/staleness.py:is_cache_fresh — true when today's
+ * date suggests at least one new observation should be available beyond
+ * what's currently in `metrics` for this code. No history at all → stale. */
+export function isMetricStale(metrics: MetricRow[], code: string, today: Date = new Date()): boolean {
+  const dates = metrics.filter((m) => m.metric_code === code).map((m) => m.target_date).sort();
+  if (dates.length === 0) return true;
+  const last = new Date(dates[dates.length - 1] + 'T00:00:00Z');
+  const todayMs = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const ageDays = (todayMs - last.getTime()) / 86400000;
+
+  if (dates.length < 2) return ageDays > 7;
+
+  const gaps: number[] = [];
+  for (let i = 1; i < dates.length; i++) {
+    const d = (new Date(dates[i] + 'T00:00:00Z').getTime() - new Date(dates[i - 1] + 'T00:00:00Z').getTime()) / 86400000;
+    if (d > 0) gaps.push(d);
+  }
+  if (gaps.length === 0) return true;
+  gaps.sort((a, b) => a - b);
+  const median = gaps[Math.floor(gaps.length / 2)];
+
+  if (median <= 2) {
+    // Daily cadence: previous weekday strictly before today should be present.
+    const mostRecent = new Date(todayMs);
+    mostRecent.setUTCDate(mostRecent.getUTCDate() - 1);
+    while (mostRecent.getUTCDay() === 0 || mostRecent.getUTCDay() === 6) {
+      mostRecent.setUTCDate(mostRecent.getUTCDate() - 1);
+    }
+    return last < mostRecent;
+  }
+  const buffer = Math.max(1, Math.floor(median * 0.5));
+  return ageDays > median + buffer;
+}
+
+/** Representative metric_code per earnings refresh source. If ALL representatives
+ * for a source look stale, that source is due for a refresh. */
+const SOURCE_REPRESENTATIVE_CODES: Record<string, string[]> = {
+  prices: ['close_price'],
+  indicators: ['indicator_q_forward_pe_ratio'],
+  financials: [
+    'quarterly__Income Statement__Revenue',
+    'annuals__Income Statement__Revenue',
+  ],
+  analyst_estimates: ['annual_per_share_eps_estimate'],
+};
+
+/** Which earnings refresh sources look due for new data given today's date.
+ * Returns a subset of {prices, indicators, financials, analyst_estimates}. */
+export function expectedStaleSources(metrics: MetricRow[], today: Date = new Date()): string[] {
+  const stale: string[] = [];
+  for (const [source, codes] of Object.entries(SOURCE_REPRESENTATIVE_CODES)) {
+    const anyFresh = codes.some((code) => !isMetricStale(metrics, code, today));
+    if (!anyFresh) stale.push(source);
+  }
+  return stale;
+}
+
 // ─── Time-series builders ──────────────────────────────────────────
 
 /** Collapse annual metrics to one point per calendar year (last date in each year). */

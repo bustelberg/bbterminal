@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo } from 'react';
 import InfoTip from '../InfoTip';
+import Spinner from '../Spinner';
 import { MC, type Cadence, type MetricRow } from './types';
 import {
   cadenceHoverText,
@@ -25,7 +26,15 @@ import {
  * Growth / Outlook / Valuation on the right). Each row shows the latest
  * value, its anchor date, an info tooltip, and a cadence tooltip on the
  * value indicating the publication frequency of the underlying source. */
-export default function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
+type EarningsSource = 'prices' | 'indicators' | 'financials' | 'analyst_estimates';
+
+export default function SnapshotStats({
+  metrics,
+  refreshingSources,
+}: {
+  metrics: MetricRow[];
+  refreshingSources?: Set<string>;
+}) {
   // For any `annuals__X` code, prefer the `quarterly__X` twin whenever it
   // exists — quarterly is the always-correct read for point-in-time / ratio
   // metrics (Debt-to-Equity, Interest Coverage, CAPEX/Revenue, ROE, …) since
@@ -140,7 +149,7 @@ export default function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
     };
   }, [metrics]);
 
-  type StatRow = { label: string; value: string; date?: string | null; info?: string; cadence?: Cadence | null };
+  type StatRow = { label: string; value: string; date?: string | null; info?: string; cadence?: Cadence | null; source: EarningsSource };
 
   // Cadence sources for the computed Value-Creation / Historical-Growth rows.
   // The displayed metric is derived (CAGR, R², SD), but the user wants to know
@@ -169,31 +178,31 @@ export default function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
     {
       title: 'Balance Sheet',
       rows: [
-        { label: 'Interest Coverage', value: fmtNum(interestCoverage?.value ?? null), date: interestCoverage?.date, cadence: interestCoverageCadence, info: `EBIT / Interest Expense. Higher = more capacity to service debt. Below 3 is a warning sign. ${interestCoverage?.computed ? 'Computed from quarterly Operating Income ÷ Interest Expense — uses GuruFocus\'s pre-computed series only when raw fields are missing.' : 'Sourced from GuruFocus\'s Valuation & Quality > Interest Coverage (raw Income Statement components weren\'t both populated).'}` },
-        { label: 'Debt / Equity', value: fmtNum(lv(MC.DEBT_TO_EQUITY)?.value ?? null), date: lv(MC.DEBT_TO_EQUITY)?.date, cadence: cadenceFor(MC.DEBT_TO_EQUITY), info: 'Total Debt / Total Equity. Lower = less leverage. Above 2 warrants scrutiny.' },
+        { label: 'Interest Coverage', value: fmtNum(interestCoverage?.value ?? null), date: interestCoverage?.date, cadence: interestCoverageCadence, source: 'financials', info: `EBIT / Interest Expense. Higher = more capacity to service debt. Below 3 is a warning sign. ${interestCoverage?.computed ? 'Computed from quarterly Operating Income ÷ Interest Expense — uses GuruFocus\'s pre-computed series only when raw fields are missing.' : 'Sourced from GuruFocus\'s Valuation & Quality > Interest Coverage (raw Income Statement components weren\'t both populated).'}` },
+        { label: 'Debt / Equity', value: fmtNum(lv(MC.DEBT_TO_EQUITY)?.value ?? null), date: lv(MC.DEBT_TO_EQUITY)?.date, cadence: cadenceFor(MC.DEBT_TO_EQUITY), source: 'financials', info: 'Total Debt / Total Equity. Lower = less leverage. Above 2 warrants scrutiny.' },
       ],
     },
     {
       title: 'Capital Intensity',
       rows: [
-        { label: 'CAPEX / Revenue', value: fmtNum(lv(MC.CAPEX_TO_REV)?.value ?? null), date: lv(MC.CAPEX_TO_REV)?.date, cadence: cadenceFor(MC.CAPEX_TO_REV), info: 'Capital expenditure as a share of revenue. Lower = more capital-light business model.' },
-        { label: 'CAPEX / OCF', value: fmtNum(lv(MC.CAPEX_TO_OCF)?.value ?? null), date: lv(MC.CAPEX_TO_OCF)?.date, cadence: cadenceFor(MC.CAPEX_TO_OCF), info: 'Capital expenditure as a share of operating cash flow. Lower = more cash left after reinvestment.' },
+        { label: 'CAPEX / Revenue', value: fmtNum(lv(MC.CAPEX_TO_REV)?.value ?? null), date: lv(MC.CAPEX_TO_REV)?.date, cadence: cadenceFor(MC.CAPEX_TO_REV), source: 'financials', info: 'Capital expenditure as a share of revenue. Lower = more capital-light business model.' },
+        { label: 'CAPEX / OCF', value: fmtNum(lv(MC.CAPEX_TO_OCF)?.value ?? null), date: lv(MC.CAPEX_TO_OCF)?.date, cadence: cadenceFor(MC.CAPEX_TO_OCF), source: 'financials', info: 'Capital expenditure as a share of operating cash flow. Lower = more cash left after reinvestment.' },
       ],
     },
     {
       title: 'Capital Allocation',
       rows: [
-        { label: 'ROE', value: fmtPctPoints(lv(MC.ROE)?.value ?? null), date: lv(MC.ROE)?.date, cadence: cadenceFor(MC.ROE), info: 'Return on Equity = Net Income / Shareholders\' Equity. Measures profit generated per dollar of equity.' },
-        { label: 'ROIC', value: fmtPctPoints(lv(MC.ROIC)?.value ?? null), date: lv(MC.ROIC)?.date, cadence: cadenceFor(MC.ROIC), info: 'Return on Invested Capital = NOPAT / Invested Capital. Measures efficiency of all capital deployed.' },
+        { label: 'ROE', value: fmtPctPoints(lv(MC.ROE)?.value ?? null), date: lv(MC.ROE)?.date, cadence: cadenceFor(MC.ROE), source: 'financials', info: 'Return on Equity = Net Income / Shareholders\' Equity. Measures profit generated per dollar of equity.' },
+        { label: 'ROIC', value: fmtPctPoints(lv(MC.ROIC)?.value ?? null), date: lv(MC.ROIC)?.date, cadence: cadenceFor(MC.ROIC), source: 'financials', info: 'Return on Invested Capital = NOPAT / Invested Capital. Measures efficiency of all capital deployed.' },
       ],
     },
     {
       title: 'Value Creation',
       rows: [
-        { label: 'Price 5Y CAGR', value: fmtPct(valueGrowth.price5YCAGR), date: valueGrowth.priceDate, cadence: priceCadence, info: 'Compound Annual Growth Rate of share price over the last 5 years, from GuruFocus daily close prices.' },
-        { label: 'Price 5Y R²', value: fmtNum(valueGrowth.price5YR2), date: valueGrowth.priceDate, cadence: priceCadence, info: 'R-squared of log-linear regression of share price vs time over the last 5 years. Higher = more consistent growth.' },
-        { label: 'Price 10Y CAGR', value: fmtPct(valueGrowth.price10YCAGR), date: valueGrowth.priceDate, cadence: priceCadence, info: 'Compound Annual Growth Rate of share price over the last 10 years, from GuruFocus daily close prices.' },
-        { label: 'Price 10Y R²', value: fmtNum(valueGrowth.price10YR2), date: valueGrowth.priceDate, cadence: priceCadence, info: 'R-squared of log-linear regression of share price vs time over the last 10 years. Higher = more consistent growth.' },
+        { label: 'Price 5Y CAGR', value: fmtPct(valueGrowth.price5YCAGR), date: valueGrowth.priceDate, cadence: priceCadence, source: 'prices', info: 'Compound Annual Growth Rate of share price over the last 5 years, from GuruFocus daily close prices.' },
+        { label: 'Price 5Y R²', value: fmtNum(valueGrowth.price5YR2), date: valueGrowth.priceDate, cadence: priceCadence, source: 'prices', info: 'R-squared of log-linear regression of share price vs time over the last 5 years. Higher = more consistent growth.' },
+        { label: 'Price 10Y CAGR', value: fmtPct(valueGrowth.price10YCAGR), date: valueGrowth.priceDate, cadence: priceCadence, source: 'prices', info: 'Compound Annual Growth Rate of share price over the last 10 years, from GuruFocus daily close prices.' },
+        { label: 'Price 10Y R²', value: fmtNum(valueGrowth.price10YR2), date: valueGrowth.priceDate, cadence: priceCadence, source: 'prices', info: 'R-squared of log-linear regression of share price vs time over the last 10 years. Higher = more consistent growth.' },
       ],
     },
   ];
@@ -202,32 +211,32 @@ export default function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
     {
       title: 'Profitability',
       rows: [
-        { label: 'Gross Margin', value: fmtPctPoints(lv(MC.GROSS_MARGIN)?.value ?? null), date: lv(MC.GROSS_MARGIN)?.date, cadence: cadenceFor(MC.GROSS_MARGIN), info: 'Gross Profit / Revenue. Indicates pricing power and cost of goods sold efficiency.' },
-        { label: 'Net Margin', value: fmtPctPoints(lv(MC.NET_MARGIN)?.value ?? null), date: lv(MC.NET_MARGIN)?.date, cadence: cadenceFor(MC.NET_MARGIN), info: 'Net Income / Revenue. Bottom-line profitability after all expenses.' },
-        { label: 'FCF / Net Income', value: fmtPct(fcfOverNi), date: lv(MC.FCF)?.date, cadence: cadenceFor(MC.FCF), info: 'Free Cash Flow / Net Income. Above 1 means cash earnings exceed accounting earnings (high quality).' },
+        { label: 'Gross Margin', value: fmtPctPoints(lv(MC.GROSS_MARGIN)?.value ?? null), date: lv(MC.GROSS_MARGIN)?.date, cadence: cadenceFor(MC.GROSS_MARGIN), source: 'financials', info: 'Gross Profit / Revenue. Indicates pricing power and cost of goods sold efficiency.' },
+        { label: 'Net Margin', value: fmtPctPoints(lv(MC.NET_MARGIN)?.value ?? null), date: lv(MC.NET_MARGIN)?.date, cadence: cadenceFor(MC.NET_MARGIN), source: 'financials', info: 'Net Income / Revenue. Bottom-line profitability after all expenses.' },
+        { label: 'FCF / Net Income', value: fmtPct(fcfOverNi), date: lv(MC.FCF)?.date, cadence: cadenceFor(MC.FCF), source: 'financials', info: 'Free Cash Flow / Net Income. Above 1 means cash earnings exceed accounting earnings (high quality).' },
       ],
     },
     {
       title: 'Historical Growth',
       rows: [
-        { label: 'Revenue 5Y Growth', value: fmtPct(valueGrowth.rev5YCAGR), date: valueGrowth.revDate, cadence: revenueCadence, info: '5-year revenue CAGR. Anchored to the latest quarter\'s trailing-twelve-months revenue when quarterly data is available, otherwise to annual revenue.' },
-        { label: 'Revenue R²', value: fmtNum(valueGrowth.rev5YR2), date: valueGrowth.revDate, cadence: revenueCadence, info: 'R-squared of log-linear regression of TTM revenue vs time over the last 5 years. Higher = more consistent growth.' },
-        { label: 'FCF 5Y Growth', value: fmtPct(valueGrowth.fcf5YCAGR), date: valueGrowth.fcfDate, cadence: fcfCadence, info: '5-year FCF CAGR. Same TTM-quarterly construction as Revenue. Null if FCF was negative at either endpoint.' },
-        { label: 'FCF Growth R²', value: fmtNum(valueGrowth.fcf5YR2), date: valueGrowth.fcfDate, cadence: fcfCadence, info: 'R-squared of log-linear regression of TTM FCF vs time over the last 5 years. Null if any FCF in the window was non-positive.' },
-        { label: 'FCF Growth SD', value: fmtPct(valueGrowth.fcfGrowthSD), date: valueGrowth.fcfDate, cadence: fcfCadence, info: 'Standard deviation of 4-quarter-lag TTM FCF growth rates over the last 5 years (or annual YoY rates when quarterly data is sparse). Lower = more predictable.' },
+        { label: 'Revenue 5Y Growth', value: fmtPct(valueGrowth.rev5YCAGR), date: valueGrowth.revDate, cadence: revenueCadence, source: 'financials', info: '5-year revenue CAGR. Anchored to the latest quarter\'s trailing-twelve-months revenue when quarterly data is available, otherwise to annual revenue.' },
+        { label: 'Revenue R²', value: fmtNum(valueGrowth.rev5YR2), date: valueGrowth.revDate, cadence: revenueCadence, source: 'financials', info: 'R-squared of log-linear regression of TTM revenue vs time over the last 5 years. Higher = more consistent growth.' },
+        { label: 'FCF 5Y Growth', value: fmtPct(valueGrowth.fcf5YCAGR), date: valueGrowth.fcfDate, cadence: fcfCadence, source: 'financials', info: '5-year FCF CAGR. Same TTM-quarterly construction as Revenue. Null if FCF was negative at either endpoint.' },
+        { label: 'FCF Growth R²', value: fmtNum(valueGrowth.fcf5YR2), date: valueGrowth.fcfDate, cadence: fcfCadence, source: 'financials', info: 'R-squared of log-linear regression of TTM FCF vs time over the last 5 years. Null if any FCF in the window was non-positive.' },
+        { label: 'FCF Growth SD', value: fmtPct(valueGrowth.fcfGrowthSD), date: valueGrowth.fcfDate, cadence: fcfCadence, source: 'financials', info: 'Standard deviation of 4-quarter-lag TTM FCF growth rates over the last 5 years (or annual YoY rates when quarterly data is sparse). Lower = more predictable.' },
       ],
     },
     {
       title: 'Outlook',
       rows: [
-        { label: 'EPS LT Growth EST', value: fmtPctPoints(lv(MC.EPS_EST)?.value ?? null), date: lv(MC.EPS_EST)?.date, cadence: cadenceFor(MC.EPS_EST), info: 'Analyst consensus long-term EPS growth rate estimate (3-5 years forward).' },
+        { label: 'EPS LT Growth EST', value: fmtPctPoints(lv(MC.EPS_EST)?.value ?? null), date: lv(MC.EPS_EST)?.date, cadence: cadenceFor(MC.EPS_EST), source: 'analyst_estimates', info: 'Analyst consensus long-term EPS growth rate estimate (3-5 years forward).' },
       ],
     },
     {
       title: 'Valuation',
       rows: [
-        { label: 'Forward P/E', value: fmtNum(lv(MC.FWD_PE)?.value ?? null), date: lv(MC.FWD_PE)?.date, cadence: cadenceFor(MC.FWD_PE), info: 'Price / Forward EPS estimate. Lower = cheaper relative to expected earnings.' },
-        { label: 'PEG', value: fmtNum(lv(MC.PEG)?.value ?? null), date: lv(MC.PEG)?.date, cadence: cadenceFor(MC.PEG), info: 'P/E / EPS Growth Rate. Below 1 suggests undervalued relative to growth; above 2 may be expensive.' },
+        { label: 'Forward P/E', value: fmtNum(lv(MC.FWD_PE)?.value ?? null), date: lv(MC.FWD_PE)?.date, cadence: cadenceFor(MC.FWD_PE), source: 'indicators', info: 'Price / Forward EPS estimate. Lower = cheaper relative to expected earnings.' },
+        { label: 'PEG', value: fmtNum(lv(MC.PEG)?.value ?? null), date: lv(MC.PEG)?.date, cadence: cadenceFor(MC.PEG), source: 'financials', info: 'P/E / EPS Growth Rate. Below 1 suggests undervalued relative to growth; above 2 may be expensive.' },
       ],
     },
   ];
@@ -247,6 +256,7 @@ export default function SnapshotStats({ metrics }: { metrics: MetricRow[] }) {
                   </span>
                   <span className="text-right">
                     <span className="inline-flex items-center justify-end gap-1.5">
+                      {refreshingSources?.has(r.source) && <Spinner size={10} />}
                       <span className="text-white font-mono text-sm">{r.value}</span>
                       {r.cadence && <InfoTip text={cadenceHoverText(r.cadence)} />}
                     </span>
