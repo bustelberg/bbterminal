@@ -182,12 +182,16 @@ def check_storage(sb, ticker: str, exchange: str):
     # Check cached files for this ticker
     prefix = f"{exchange.upper()}_{ticker.upper()}"
     expected_files = ["financials", "analyst_estimate", "indicator_q_roe", "indicator__price"]
+    import gzip  # noqa: PLC0415
     for f in expected_files:
         path = f"{prefix}/{f}.json"
         try:
             raw = sb.storage.from_(bucket).download(path)
-            data = json.loads(raw)
+            # `size` is the on-disk (possibly gzipped) byte count -- the
+            # useful number for storage cost. Decompress before parsing.
             size = len(raw)
+            buf = gzip.decompress(raw) if raw[:2] == b"\x1f\x8b" else raw
+            data = json.loads(buf)
             if isinstance(data, dict):
                 desc = f"dict with {len(data)} keys"
             elif isinstance(data, list):

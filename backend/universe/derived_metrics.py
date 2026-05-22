@@ -262,10 +262,15 @@ def compute_per_fy(annuals: dict) -> list[tuple[date, dict[str, float]]]:
 # ---------------------------------------------------------------------------
 
 def _fetch_financials_cached(supabase: Client, ticker: str, exchange: str) -> dict | None:
-    """Load cached GuruFocus financials JSON from Supabase Storage. None if absent."""
+    """Load cached GuruFocus financials JSON from Supabase Storage. None if absent.
+    Gzip-aware: writes from ingest.earnings._common._upload_to_storage are
+    gzipped; legacy objects stay raw JSON. Magic-byte sniff handles both."""
+    import gzip  # noqa: PLC0415
     path = f"{exchange.upper()}_{ticker.upper()}/financials.json"
     try:
         raw = supabase.storage.from_("gurufocus-raw").download(path)
+        if raw[:2] == b"\x1f\x8b":
+            raw = gzip.decompress(raw)
         return json.loads(raw)
     except Exception:
         return None

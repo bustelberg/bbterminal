@@ -34,10 +34,15 @@ def _fetch_financials_cached(
     ticker: str,
     exchange: str,
 ) -> dict | None:
-    """Fetch financials from Supabase Storage cache."""
+    """Fetch financials from Supabase Storage cache. Gzip-aware: new writes
+    (see ingest.earnings._common._upload_to_storage) are gzipped; legacy
+    objects are raw JSON. Magic-byte sniff handles both transparently."""
+    import gzip  # noqa: PLC0415 -- local import keeps module-load cheap
     path = _storage_path(ticker, exchange)
     try:
         raw = supabase.storage.from_("gurufocus-raw").download(path)
+        if raw[:2] == b"\x1f\x8b":
+            raw = gzip.decompress(raw)
         return json.loads(raw)
     except Exception:
         return None
