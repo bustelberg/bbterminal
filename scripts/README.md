@@ -8,13 +8,19 @@ are PowerShell + Docker.
 ## Prereqs
 
 - Local Supabase running (`npx supabase start`)
-- `$env:PROD_DB_URL` set to your prod direct-connection URI:
-  ```
-  $env:PROD_DB_URL = 'postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres'
-  ```
-  Get this from Supabase Dashboard → Database settings → Connect → Direct
-  connection. The password is the DB password (separate from your Supabase
-  account login). Reset it under the same page if you forgot it.
+- `PROD_DB_URL` available to the scripts. Three ways, picked in this order
+  of precedence — first one set wins:
+  1. `-ProdDbUrl '<uri>'` passed on the command line
+  2. `$env:PROD_DB_URL` exported in your shell
+  3. `scripts/.env.local` (gitignored, auto-loaded) — copy
+     `scripts/.env.local.example` to `scripts/.env.local` and edit the
+     value once. Easiest for day-to-day use.
+
+  Get the URI from Supabase Dashboard → Project Settings → Database →
+  Connection string → URI (**Direct connection**, not pooler — pooler
+  doesn't accept the bulk `COPY` commands `pg_dump` emits). The password
+  is the DB password (separate from your Supabase account login). Reset
+  it under the same page if you forgot it or if it's been exposed.
 
 ## Scripts
 
@@ -33,6 +39,13 @@ and the Supabase project itself intact.
 Use only while the project has no real users — it nukes every prod row.
 After it runs, prod's `schema_migrations` matches local's, so
 `supabase migration list` reports clean.
+
+The script also re-grants Supabase's stock privileges (`anon`,
+`authenticated`, `service_role`) on the freshly restored tables. Without
+this step the backend's `service_role` key gets `permission denied`
+errors on every query, because `pg_restore --no-privileges` strips ACLs
+and Supabase's auto-grant event trigger doesn't fire on bulk restores.
+Mirror of `supabase/migrations/20260522000000_restore_supabase_default_grants.sql`.
 
 ### `apply-migration.ps1` — additive migration
 
