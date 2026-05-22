@@ -28,12 +28,29 @@ type HeldCompany = {
   exchange: string;
   company_name: string | null;
   sector: string | null;
+  /** Max(target_date) in metric_data.close_price for this company.
+   * Null when no close_price observation exists yet (newly added
+   * ticker the prices phase hasn't reached). */
+  latest_close_price_date: string | null;
   held_by: HeldByEntry[];
+};
+
+/** Aggregate freshness across all held companies, surfaced as a
+ * top-of-card "Data freshness" panel so the user can answer the
+ * "are we missing today's data?" question at a glance. */
+type FreshnessSummary = {
+  /** Max(latest_close_price_date) across the held set. The freshest
+   * close-price observation that exists for any company we hold. */
+  latest_close_date: string | null;
+  fresh_count: number;    // companies whose latest matches latest_close_date
+  stale_count: number;    // companies with an older latest target_date
+  missing_count: number;  // companies with no close_price observation at all
 };
 
 type HeldCompaniesResponse = {
   total_companies: number;
   total_strategies: number;
+  freshness_summary?: FreshnessSummary;
   companies: HeldCompany[];
 };
 
@@ -144,6 +161,17 @@ export default function DailyMtdRefreshCard() {
     return () => clearInterval(id);
   }, [lastStatus, load]);
 
+  // Also revalidate held companies + freshness while a run is active.
+  // 10s cadence — heavier query than the runs probe but still cheap;
+  // makes the freshness panel actually extend as the prices phase
+  // writes new closes into metric_data. Only fires when the card is
+  // expanded so we don't waste round-trips when no one's looking.
+  useEffect(() => {
+    if (!expanded || lastStatus !== 'running') return;
+    const id = setInterval(() => void loadHeld(), 10_000);
+    return () => clearInterval(id);
+  }, [expanded, lastStatus, loadHeld]);
+
   const runNow = useCallback(async () => {
     setTriggering(true);
     setError(null);
@@ -233,6 +261,16 @@ export default function DailyMtdRefreshCard() {
       )}
       {expanded && (
         <div className="border-t border-gray-800/30 divide-y divide-gray-800/30">
+          {/* ── In-flight live progress (only while a run is active) ── */}
+          {last && last.status === 'running' && (
+            <LiveProgressPanel run={last} />
+          )}
+          {/* ── Data freshness summary ─────────────────────────── */}
+          <DataFreshnessPanel
+            summary={held?.freshness_summary ?? null}
+            companyCount={held?.total_companies ?? null}
+            loading={heldLoading && !held}
+          />
           {/* ── Sub-section 1: Currently held companies ───────── */}
           <div>
             <div className="px-5 py-3 flex items-baseline justify-between gap-3">
@@ -337,6 +375,7 @@ function HeldCompaniesTable({
     );
   }
 
+  const latestCloseDate = data.freshness_summary?.latest_close_date ?? null;
   return (
     <div className="px-5 pb-4">
       <div className="overflow-x-auto rounded-lg border border-gray-800/40">
@@ -345,6 +384,7 @@ function HeldCompaniesTable({
             <tr className="border-b border-gray-800/40 text-gray-500 text-left">
               <th className="px-3 py-2 font-medium">Company</th>
               <th className="px-3 py-2 font-medium w-32">Sector</th>
+              <th className="px-3 py-2 font-medium w-28">Latest price</th>
               <th className="px-3 py-2 font-medium">Held by</th>
             </tr>
           </thead>
@@ -361,6 +401,12 @@ function HeldCompaniesTable({
                 </td>
                 <td className="px-3 py-2 align-top text-gray-400 text-[11px]">
                   {c.sector ?? '—'}
+                </td>
+                <td className="px-3 py-2 align-top">
+                  <LatestPriceCell
+                    latestDate={c.latest_close_price_date}
+                    freshestAcrossSet={latestCloseDate}
+                  />
                 </td>
                 <td className="px-3 py-2 align-top">
                   <div className="flex flex-wrap gap-1">
@@ -482,12 +528,19 @@ function CounterCell({
 }: {
   label: string;
   value: string;
-  tone?: 'rose';
+  tone?: 'rose' | 'amber' | 'emerald';
 }) {
+  const valueCls = tone === 'rose'
+    ? 'text-rose-300'
+    : tone === 'amber'
+    ? 'text-amber-300'
+    : tone === 'emerald'
+    ? 'text-emerald-300'
+    : 'text-gray-200';
   return (
     <div className="bg-[#151821] border border-gray-800/40 rounded-lg px-3 py-2">
       <div className="text-[10px] uppercase tracking-wider text-gray-500">{label}</div>
-      <div className={`font-mono text-sm mt-0.5 ${tone === 'rose' ? 'text-rose-300' : 'text-gray-200'}`}>{value}</div>
+      <div className={`font-mono text-sm mt-0.5 ${valueCls}`}>{value}</div>
     </div>
   );
 }
@@ -558,5 +611,189 @@ function PerStrategyResult({
         </div>
       )}
     </div>
+  );
+}
+
+/** Live progress panel shown at the top of the expanded card while a
+ * run is in-flight. Surfaces the phase, current message, and counter
+ * progress so the user can SEE the run advancing instead of staring
+ * at a static summary line. Re-renders every 5s via the parent's
+ * polling effect. */
+function LiveProgressPanel({ run }: { run: IngestRun }) {
+  const phase = run.current_phase ?? 'starting';
+  const phaseLabel = ({
+    starting: 'starting',
+    acquisition: 'acquiring sources',
+    templates: 'refreshing templates',
+    prune: 'pruning orphans',
+    prices: 'refreshing prices',
+    momentum: 'persisting MTD',
+    done: 'finishing',
+  } as Record<string, string>)[phase] ?? phase;
+
+  const denom = run.companies_total ?? 0;
+  const num = run.companies_processed ?? 0;
+  const pctCompanies = denom > 0 ? Math.min(100, Math.round((num / denom) * 100)) : 0;
+
+  // Elapsed seconds since the run started — gives an "is this stuck?"
+  // signal even when current_message hasn't changed in a while.
+  const elapsedSec = (() => {
+    try { return Math.max(0, Math.round((Date.now() - Date.parse(run.started_at)) / 1000)); }
+    catch { return null; }
+  })();
+
+  return (
+    <div className="px-5 py-3 bg-amber-500/5">
+      <div className="flex items-center gap-2 mb-2">
+        <Spinner size={12} className="h-3 w-3 text-amber-400" />
+        <span className="text-xs font-medium text-amber-300">
+          Run #{run.run_id} in progress · phase: {phaseLabel}
+        </span>
+        {elapsedSec != null && (
+          <span className="text-[10px] text-gray-500 ml-auto">
+            elapsed {elapsedSec < 60 ? `${elapsedSec}s` : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`}
+          </span>
+        )}
+      </div>
+      {run.current_message && (
+        <div className="text-[11px] text-gray-300 font-mono mb-2 break-words">
+          {run.current_message}
+        </div>
+      )}
+      {denom > 0 && (
+        <>
+          <div className="h-1.5 bg-gray-800/60 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-amber-400/70 transition-all duration-500"
+              style={{ width: `${pctCompanies}%` }}
+            />
+          </div>
+          <div className="flex items-center gap-4 text-[10px] text-gray-500 mt-1.5">
+            <span><span className="font-mono text-gray-300">{num}/{denom}</span> companies</span>
+            <span><span className="font-mono text-gray-300">{run.prices_refreshed}</span> prices refreshed</span>
+            <span><span className="font-mono text-gray-300">{run.volumes_refreshed}</span> volumes refreshed</span>
+            {run.error_count > 0 && (
+              <span className="text-rose-400">
+                <span className="font-mono">{run.error_count}</span> errors
+              </span>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Top-of-expanded panel summarizing what close-price data we have
+ * across the held set, so the user can tell at a glance whether the
+ * daily refresh job is filling in the gap to today. */
+function DataFreshnessPanel({
+  summary,
+  companyCount,
+  loading,
+}: {
+  summary: FreshnessSummary | null;
+  companyCount: number | null;
+  loading: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="px-5 py-3 text-xs text-gray-500 inline-flex items-center gap-2">
+        <Spinner size={10} className="h-2.5 w-2.5 text-gray-500" />
+        <span>Computing data freshness…</span>
+      </div>
+    );
+  }
+  if (!summary || summary.latest_close_date == null) {
+    return (
+      <div className="px-5 py-3 text-xs text-gray-500">
+        <div className="font-medium uppercase tracking-wider text-gray-400 mb-1">Data freshness</div>
+        No close-price data found for any held company yet.
+      </div>
+    );
+  }
+
+  const total = companyCount ?? (summary.fresh_count + summary.stale_count + summary.missing_count);
+  // Gap to today: how many calendar days behind the freshest observation
+  // is. Doesn't account for weekends/holidays but answers "is this very
+  // out of date?" cleanly. Counts negative when latest > today (e.g.
+  // timezone edge); clamp at 0.
+  let calDaysBehind: number | null = null;
+  try {
+    const latestMs = Date.parse(`${summary.latest_close_date}T00:00:00Z`);
+    const todayMs = Date.parse(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
+    calDaysBehind = Math.max(0, Math.round((todayMs - latestMs) / (1000 * 60 * 60 * 24)));
+  } catch { /* leave null */ }
+
+  return (
+    <div className="px-5 py-3">
+      <div className="flex items-baseline justify-between gap-3 mb-2">
+        <div>
+          <h4 className="text-xs font-medium text-gray-300 uppercase tracking-wider">
+            Data freshness
+          </h4>
+          <p className="text-[11px] text-gray-500 mt-0.5">
+            Latest close-price observation across held companies. Daily refresh extends this by one trading day.
+          </p>
+        </div>
+        {calDaysBehind != null && (
+          <div className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border shrink-0 ${
+            calDaysBehind <= 1
+              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+              : calDaysBehind <= 4
+              ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+              : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+          }`}>
+            {calDaysBehind === 0 ? "today's date" : `${calDaysBehind} day${calDaysBehind === 1 ? '' : 's'} behind`}
+          </div>
+        )}
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[11px]">
+        <CounterCell label="Latest close" value={summary.latest_close_date} />
+        <CounterCell
+          label="At latest date"
+          value={`${summary.fresh_count} / ${total}`}
+          tone={summary.fresh_count === total ? 'emerald' : undefined}
+        />
+        <CounterCell
+          label="Stale"
+          value={String(summary.stale_count)}
+          tone={summary.stale_count > 0 ? 'amber' : undefined}
+        />
+        <CounterCell
+          label="Missing"
+          value={String(summary.missing_count)}
+          tone={summary.missing_count > 0 ? 'rose' : undefined}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Per-row "Latest price" cell. Renders the date with a colored dot
+ * indicating freshness relative to the held set's max date. */
+function LatestPriceCell({
+  latestDate,
+  freshestAcrossSet,
+}: {
+  latestDate: string | null;
+  freshestAcrossSet: string | null;
+}) {
+  if (!latestDate) {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+        <span className="text-rose-300 text-[10px] font-mono">no data</span>
+      </span>
+    );
+  }
+  const isFresh = freshestAcrossSet != null && latestDate === freshestAcrossSet;
+  return (
+    <span className="inline-flex items-center gap-1.5" title={isFresh ? 'At latest date' : `Stale vs latest (${freshestAcrossSet ?? '—'})`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${isFresh ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+      <span className={`text-[10px] font-mono ${isFresh ? 'text-emerald-300' : 'text-amber-300'}`}>
+        {latestDate}
+      </span>
+    </span>
   );
 }

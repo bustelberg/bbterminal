@@ -178,6 +178,14 @@ class PeriodHolding:
     # return; the period-level aggregator uses `side` to decide the sign of
     # the contribution. Long-only backtests emit "long" everywhere.
     side: HoldingSide = "long"
+    # 1-indexed rank of this holding's sector within the period's
+    # chosen sectors (1 = best-scoring sector picked, N = Nth-best).
+    # Set by score_and_select; None for sector-ETF mode + legacy
+    # snapshots persisted before the rank columns existed.
+    sector_rank: int | None = None
+    # 1-indexed rank of this company within its sector (1 = best-scoring
+    # company in the sector, M = Mth-best). None when unavailable.
+    company_rank: int | None = None
 
 
 @dataclass

@@ -16,6 +16,7 @@ Adding a new template
 from __future__ import annotations
 
 from .acwi import ACWITemplate
+from .acwi_leonteq import ACWILeonteqTemplate
 from .base import (
     ProgressCallback,
     RefreshResult,
@@ -24,9 +25,14 @@ from .base import (
 )
 from .leonteq import LeonteqTemplate
 
+# Order matters: ACWI_LEONTEQ is a derived template that reads from
+# the ACWI and LEONTEQ universe_membership rows. Register it AFTER its
+# two parents so the pipeline's templates phase refreshes the parents
+# first; otherwise the intersection lags by one tick.
 TEMPLATES: dict[str, type[UniverseTemplate]] = {
     ACWITemplate.template_key: ACWITemplate,
     LeonteqTemplate.template_key: LeonteqTemplate,
+    ACWILeonteqTemplate.template_key: ACWILeonteqTemplate,
 }
 
 
@@ -48,6 +54,7 @@ def all_templates() -> list[UniverseTemplate]:
 
 __all__ = [
     "ACWITemplate",
+    "ACWILeonteqTemplate",
     "LeonteqTemplate",
     "ProgressCallback",
     "RefreshResult",

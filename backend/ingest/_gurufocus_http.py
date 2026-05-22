@@ -46,19 +46,25 @@ except ImportError as _e:
 def _enumerate_targets() -> list[str]:
     """Ordered preference of impersonation profiles to try.
 
-    Strategy: top-3 newest desktop Chrome (most likely to pass), then
-    newest Firefox + newest Safari as a different-fingerprint-family
-    fallback in case Cloudflare blocks the entire Chrome cluster.
+    Strategy: a wide multi-family ladder. When Cloudflare flips its
+    fingerprint detection (which has happened multiple times) it usually
+    flags the most-popular *cluster* (e.g. the 3 newest Chromes), so the
+    only way to keep working is to have un-popular fallbacks in reserve.
+
+    Top-6 Chromes first (newest is statistically the best bet on any
+    given day), then top-3 Firefoxes + top-3 Safaris (different TLS
+    families — survive Chrome-cluster blocks), then newest Edge as a
+    last-ditch (rare but distinct fingerprint).
 
     Skips `_android` / `_ios` suffixed variants (different TLS stacks,
-    rarely useful), suffixed builds like `chrome133a` (experimental
-    versions of the same fingerprint), and Edge/Tor (rare; unlikely to
-    score higher than the Chrome/Firefox/Safari trio)."""
+    rarely useful) and suffixed builds like `chrome133a` (experimental).
+    Tor is skipped because exit nodes are pre-blocked by Cloudflare."""
     if not _HAS_CURL_CFFI:
         return []
     chromes: list[tuple[int, str]] = []
     firefoxes: list[tuple[int, str]] = []
     safaris: list[tuple[int, str]] = []
+    edges: list[tuple[int, str]] = []
     for name in dir(BrowserType):
         if name.startswith("_") or not isinstance(name, str):
             continue
@@ -77,13 +83,19 @@ def _enumerate_targets() -> list[str]:
         if m:
             safaris.append((int(m.group(1)), name))
             continue
+        m = re.fullmatch(r"edge(\d+)", name)
+        if m:
+            edges.append((int(m.group(1)), name))
+            continue
     chromes.sort(reverse=True)
     firefoxes.sort(reverse=True)
     safaris.sort(reverse=True)
+    edges.sort(reverse=True)
     out: list[str] = []
-    out.extend(name for _, name in chromes[:3])
-    out.extend(name for _, name in firefoxes[:1])
-    out.extend(name for _, name in safaris[:1])
+    out.extend(name for _, name in chromes[:6])
+    out.extend(name for _, name in firefoxes[:3])
+    out.extend(name for _, name in safaris[:3])
+    out.extend(name for _, name in edges[:1])
     return out
 
 
@@ -190,6 +202,16 @@ def cf_get(
     for t in _TARGETS:
         if t not in order:
             order.append(t)
+
+    # Strip any caller-supplied User-Agent (case-insensitively). curl_cffi's
+    # `impersonate=` sets a *full* set of browser-matching headers including
+    # User-Agent + Sec-CH-UA + Accept-Language. If the caller pins a Chrome/146
+    # UA but we end up impersonating chrome142 or safari2601, the TLS
+    # fingerprint disagrees with the UA -- Cloudflare's bot scorer flags
+    # exactly this kind of inconsistency. Let curl_cffi own the browser
+    # headers; the caller can still supply Accept, Accept-Encoding, etc.
+    if headers:
+        headers = {k: v for k, v in headers.items() if k.lower() != "user-agent"}
 
     attempted: list[str] = []
     last: CfResponse | None = None

@@ -262,6 +262,11 @@ export default function MomentumBacktester() {
   // the rest of this page is wired for.
   const [indexUniverses, setIndexUniverses] = useState<{
     index_name: string;
+    /** Human-readable display name (template.label). Falls back to
+     * `index_name` when the API doesn't provide one. The dropdown
+     * shows this; the form value still uses `index_name`
+     * (= template_key) so the backend lookup is stable. */
+    display_label: string;
     /** The template's permanent earliest date (e.g. ACWI: 2002-01-01).
      * Used as the default backtest start when this universe is picked.
      * Different from `start_month` (latest data captured so far), which
@@ -311,6 +316,7 @@ export default function MomentumBacktester() {
     setIndexUniverses(
       _utRaw.map((t) => ({
         index_name: t.template_key,
+        display_label: t.label || t.template_key,
         hard_backstop: t.earliest_date,
         start_month: t.earliest_captured_month!,
         end_month: t.latest_captured_month!,
@@ -1158,7 +1164,7 @@ export default function MomentumBacktester() {
                     <option value="">All companies</option>
                     {indexUniverses.map(i => (
                       <option key={i.index_name} value={i.index_name}>
-                        {i.index_name} ({i.start_month.slice(0, 7)} – {i.end_month.slice(0, 7)}, {i.total_unique_tickers} tickers)
+                        {i.display_label}{i.start_month && i.end_month ? ` (${i.start_month.slice(0, 7)} – ${i.end_month.slice(0, 7)}, ${i.total_unique_tickers} tickers)` : ' (not yet populated)'}
                       </option>
                     ))}
                   </>
