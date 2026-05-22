@@ -115,4 +115,46 @@ def invalidate_template(template_key: str) -> dict:
     next TTL expiry)."""
     n_mem = membership_cache.invalidate_prefix((template_key,))
     n_full = full_universe_cache.invalidate_prefix((template_key,))
+    # Any refresh changes the list-summary payload (latest month, member
+    # count). Drop the cached payload so the next list-endpoint hit
+    # recomputes.
+    list_summary_invalidate()
     return {"membership_cleared": n_mem, "full_universe_cleared": n_full}
+
+
+# ----------------------------------------------------------------------------
+# List-summary cache: a single global slot holding the `/api/universe-templates`
+# response. The handler computes 4 Supabase queries per template, which adds up
+# to a noticeable dropdown lag on the /backtest page. Data only changes when a
+# template's refresh() runs (which calls `invalidate_template` -> wipes this).
+# ----------------------------------------------------------------------------
+_LIST_SUMMARY_TTL_SECONDS = 300.0  # 5 min safety net for missed invalidations
+_list_summary_lock = threading.Lock()
+_list_summary_entry: tuple[float, list[dict]] | None = None
+
+
+def list_summary_get() -> list[dict] | None:
+    """Return the cached list-summary payload, or None when missing/expired."""
+    global _list_summary_entry
+    with _list_summary_lock:
+        if _list_summary_entry is None:
+            return None
+        ts, data = _list_summary_entry
+        if time.time() - ts > _LIST_SUMMARY_TTL_SECONDS:
+            _list_summary_entry = None
+            return None
+        return data
+
+
+def list_summary_set(data: list[dict]) -> None:
+    """Store the freshly-computed list-summary payload."""
+    global _list_summary_entry
+    with _list_summary_lock:
+        _list_summary_entry = (time.time(), data)
+
+
+def list_summary_invalidate() -> None:
+    """Drop the cached payload. Called from `invalidate_template`."""
+    global _list_summary_entry
+    with _list_summary_lock:
+        _list_summary_entry = None

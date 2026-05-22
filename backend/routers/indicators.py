@@ -17,10 +17,11 @@ import asyncio
 import os
 from datetime import date
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
 from deps import supabase
+from routers._cache_headers import CACHE_STATIC
 from ingest.api_usage import track_api_call
 from ingest.prices import (
     _PRICE_CUTOFF,
@@ -208,8 +209,12 @@ def _gf_creds():
 
 
 @router.get("/api/gurufocus/exchanges")
-async def gurufocus_exchanges(force_refresh: bool = False):
+async def gurufocus_exchanges(response: Response, force_refresh: bool = False):
     """Supported GuruFocus exchanges. Raw response cached in Supabase Storage."""
+    # Exchange list is essentially immutable -- GuruFocus may add/remove exchanges
+    # but never within the duration of a normal user session. Long browser cache
+    # is safe; a hard refresh on the frontend bypasses it.
+    response.headers["Cache-Control"] = CACHE_STATIC
     def work():
         path = "meta/exchange_list.json"
         _ensure_bucket(supabase)
@@ -232,9 +237,10 @@ async def gurufocus_exchanges(force_refresh: bool = False):
 
 
 @router.get("/api/gurufocus/exchange-currencies")
-async def gurufocus_exchange_currencies(force_refresh: bool = False):
+async def gurufocus_exchange_currencies(response: Response, force_refresh: bool = False):
     """Build exchange_code → currency map by joining exchange_list with
     country_currency from GuruFocus. Raw responses cached in Storage."""
+    response.headers["Cache-Control"] = CACHE_STATIC
     def work():
         _ensure_bucket(supabase)
         import requests as req

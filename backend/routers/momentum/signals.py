@@ -20,20 +20,24 @@ from collections import OrderedDict
 from datetime import date, timedelta
 
 import pandas as pd
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from deps import supabase
 from momentum.data import load_all_prices, load_all_volumes, load_universe
 from momentum.signals import PRICE_SIGNAL_DEFS
+from routers._cache_headers import CACHE_STATIC
 
 router = APIRouter(tags=["momentum"])
 
 
 @router.get("/api/momentum/signals")
-async def get_momentum_signals():
+async def get_momentum_signals(response: Response):
     """Available signal definitions + the category buckets used by scoring."""
+    # Signal defs are code-defined (PRICE_SIGNAL_DEFS in momentum.signals) and
+    # only change with a backend deploy -- safe to cache aggressively.
+    response.headers["Cache-Control"] = CACHE_STATIC
     from momentum.scoring import _get_category_keys
     return {"signals": PRICE_SIGNAL_DEFS, "categories": list(_get_category_keys().keys())}
 

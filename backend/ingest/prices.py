@@ -4,6 +4,7 @@ and load into metric_data (only dates >= 2023-01-01).
 """
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 import os
@@ -165,23 +166,52 @@ def _ensure_bucket(supabase: Client) -> None:
     _BUCKET_READY = True
 
 
+# Magic bytes for the gzip file format (RFC 1952). Used to detect whether a
+# downloaded blob is gzipped (new format) or raw JSON (legacy format), so
+# this layer stays backward compatible with objects written before the gzip
+# rollout. Storage backfill is implicit: every refresh that overwrites an
+# object now writes the gzipped form.
+_GZIP_MAGIC = b"\x1f\x8b"
+
+
+def _decode_storage_payload(raw: bytes) -> list:
+    """Parse a downloaded blob as JSON, transparently decompressing if it
+    starts with gzip magic bytes. Returns the parsed JSON payload (which for
+    GuruFocus price/volume responses is always a list-of-rows)."""
+    if raw.startswith(_GZIP_MAGIC):
+        raw = gzip.decompress(raw)
+    return json.loads(raw)
+
+
 def _fetch_from_storage(supabase: Client, path: str) -> list | None:
     try:
         raw = _retry_transient(
             lambda: supabase.storage.from_(_BUCKET).download(path),
             description=f"storage.download({path})",
         )
-        return json.loads(raw)
+        return _decode_storage_payload(raw)
     except Exception:
         return None
 
 
 def _upload_to_storage(supabase: Client, path: str, data: list) -> None:
-    content = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    # Gzip the JSON before upload. Typical GuruFocus price/volume responses
+    # for a single ticker are 50-300 KB of JSON; gzip cuts that by 8-12x
+    # because most of the payload is tiny floats and repeated date strings.
+    # `content-encoding: gzip` is the HTTP-standard signal -- anything that
+    # downloads via a signed URL with an HTTP-aware client auto-decompresses;
+    # the supabase-py `.download()` path returns raw bytes regardless, so we
+    # rely on `_decode_storage_payload`'s magic-byte sniff on read.
+    json_bytes = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    content = gzip.compress(json_bytes, compresslevel=6)
+    file_options = {
+        "content-type": "application/json",
+        "content-encoding": "gzip",
+    }
     try:
         _retry_transient(
             lambda: supabase.storage.from_(_BUCKET).upload(
-                path, content, file_options={"content-type": "application/json"}
+                path, content, file_options=file_options,
             ),
             description=f"storage.upload({path})",
         )
@@ -192,7 +222,7 @@ def _upload_to_storage(supabase: Client, path: str, data: list) -> None:
         try:
             _retry_transient(
                 lambda: supabase.storage.from_(_BUCKET).update(
-                    path, content, file_options={"content-type": "application/json"}
+                    path, content, file_options=file_options,
                 ),
                 description=f"storage.update({path})",
             )

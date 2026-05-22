@@ -17,10 +17,11 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from deps import supabase
+from routers._cache_headers import CACHE_USER
 
 router = APIRouter(tags=["fees"])
 
@@ -39,11 +40,12 @@ class ExchangeFeeIn(BaseModel):
 
 
 @router.get("/api/exchange-fees")
-async def list_exchange_fees():
+async def list_exchange_fees(response: Response):
     """Every exchange with its currently-configured fee. Exchanges with no
     `exchange_fee` row return `fee_bps=0` so the UI shows them as
     not-yet-set rather than missing. Sorted by exchange_code for stable
     display order."""
+    response.headers["Cache-Control"] = CACHE_USER
     def _query() -> list[dict]:
         # Pull every exchange (including those without a fee row) — Supabase
         # doesn't expose a clean LEFT JOIN through the REST client, so do

@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import queue as _queue
 
-from deps import supabase
+from deps import supabase, IN_CHUNK_SIZE
 
 
 # Module-level cache for the universe-stats list. The underlying view does
@@ -32,8 +32,8 @@ def _enrich_tickers(rows: list[dict]) -> list[dict]:
     from ingest.gurufocus_url import gurufocus_url  # noqa: PLC0415
     company_ids = [r["company_id"] for r in rows if r["company_id"]]
     company_info: dict[int, dict] = {}
-    for i in range(0, len(company_ids), 50):
-        chunk = company_ids[i:i + 50]
+    for i in range(0, len(company_ids), IN_CHUNK_SIZE):
+        chunk = company_ids[i:i + IN_CHUNK_SIZE]
         resp = supabase.table("company").select(
             "company_id, company_name, gurufocus_exchange:gurufocus_exchange(exchange_code)"
         ).in_("company_id", chunk).execute()

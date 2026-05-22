@@ -52,7 +52,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Header, HTTPException
 
-from deps import supabase
+from deps import supabase, IN_CHUNK_SIZE
 
 router = APIRouter(tags=["ingest"])
 
@@ -1008,13 +1008,13 @@ def _collect_held_companies(run_id: int) -> list[dict]:
     if not company_ids:
         return []
 
-    # Batch the IN(...) lookup in chunks of 50 to stay under the
-    # Cloudflare-502 URL-length window — same convention as the rest of
-    # the codebase.
+    # Batch the IN(...) lookup to stay under the Cloudflare-502
+    # URL-length window. IN_CHUNK_SIZE is the codebase-wide constant from
+    # deps.py.
     out: list[dict] = []
     cids_list = list(company_ids)
-    for start in range(0, len(cids_list), 50):
-        batch = cids_list[start : start + 50]
+    for start in range(0, len(cids_list), IN_CHUNK_SIZE):
+        batch = cids_list[start : start + IN_CHUNK_SIZE]
         meta_resp = (
             supabase.table("company")
             .select(

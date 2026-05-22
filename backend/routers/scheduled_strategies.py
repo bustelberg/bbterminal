@@ -30,7 +30,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from deps import supabase
+from deps import supabase, IN_CHUNK_SIZE
 
 _log = logging.getLogger(__name__)
 
@@ -188,9 +188,9 @@ def compute_and_save_price_update(
     cids = [h.get("company_id") for h in holdings if h.get("company_id") is not None]
     latest_by_cid: dict[int, dict] = {}
     if cids:
-        # Chunk by 50 to stay under PostgREST URL limits.
-        for i in range(0, len(cids), 50):
-            chunk = cids[i:i + 50]
+        # Chunk by IN_CHUNK_SIZE to stay under PostgREST URL limits.
+        for i in range(0, len(cids), IN_CHUNK_SIZE):
+            chunk = cids[i:i + IN_CHUNK_SIZE]
             p_resp = (
                 supabase.table("metric_data")
                 .select("company_id, target_date, numeric_value")
@@ -779,12 +779,11 @@ async def list_held_companies():
 
         # Step 4 — exchange lookup. Holdings JSONB doesn't include the
         # GuruFocus exchange code; fetch it from `company` joined to
-        # `gurufocus_exchange`. Batched by 50 to stay under the
-        # PostgREST URL-length window — same convention as the rest of
-        # the codebase.
+        # `gurufocus_exchange`. Batched by IN_CHUNK_SIZE to stay under
+        # the PostgREST URL-length window.
         cids = list(pooled.keys())
-        for start in range(0, len(cids), 50):
-            chunk = cids[start : start + 50]
+        for start in range(0, len(cids), IN_CHUNK_SIZE):
+            chunk = cids[start : start + IN_CHUNK_SIZE]
             comp_resp = (
                 supabase.table("company")
                 .select(

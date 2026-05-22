@@ -10,6 +10,7 @@ from __future__ import annotations
 import pandas as pd
 from supabase import Client
 
+from deps import IN_CHUNK_SIZE
 from ._helpers import _query_with_retry
 
 
@@ -125,7 +126,7 @@ def load_company_currency(
         return {}
 
     result: dict[int, str | None] = {}
-    chunk_size = 50
+    chunk_size = IN_CHUNK_SIZE
     for chunk_start in range(0, len(company_ids), chunk_size):
         chunk = company_ids[chunk_start : chunk_start + chunk_size]
         resp = _query_with_retry(

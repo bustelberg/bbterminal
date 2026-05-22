@@ -37,7 +37,7 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, Header, HTTPException
 from postgrest.exceptions import APIError
 
-from deps import supabase
+from deps import supabase, IN_CHUNK_SIZE
 from routers.auth import _require_admin
 
 router = APIRouter(tags=["admin"])
@@ -80,8 +80,8 @@ def _build_portfolio_payload(snapshot_row: dict) -> dict:
     cids = [int(h["company_id"]) for h in raw_holdings if h.get("company_id") is not None]
     exchange_by_cid: dict[int, str] = {}
     if cids:
-        for chunk_start in range(0, len(cids), 50):
-            chunk = cids[chunk_start : chunk_start + 50]
+        for chunk_start in range(0, len(cids), IN_CHUNK_SIZE):
+            chunk = cids[chunk_start : chunk_start + IN_CHUNK_SIZE]
             resp = (
                 supabase.table("company")
                 .select(
@@ -206,13 +206,13 @@ def _summarize_schedule(strat_row: dict, latest_snapshot_row: dict | None) -> di
 
 def _fetch_latest_snapshots_for(strategy_ids: list[int]) -> dict[int, dict]:
     """For each strategy id, return its most-recent snapshot row (or omit
-    when none exists). Batches in chunks of 50 to dodge Cloudflare 502s
-    on Supabase, same convention as elsewhere."""
+    when none exists). Batches in IN_CHUNK_SIZE chunks to dodge
+    Cloudflare 502s on Supabase, same convention as elsewhere."""
     if not strategy_ids:
         return {}
     latest: dict[int, dict] = {}
-    for chunk_start in range(0, len(strategy_ids), 50):
-        chunk = strategy_ids[chunk_start : chunk_start + 50]
+    for chunk_start in range(0, len(strategy_ids), IN_CHUNK_SIZE):
+        chunk = strategy_ids[chunk_start : chunk_start + IN_CHUNK_SIZE]
         resp = (
             supabase.table("current_picks_snapshot")
             .select("*")
@@ -729,8 +729,8 @@ async def list_companies_missing_exchange(authorization: str = Header(None)):
         # No country in universe_membership today, but the universe label
         # often hints at it (e.g. ACWI-Italy memberships → Italian).
         mem_by_cid: dict[int, list[dict]] = {}
-        for i in range(0, len(cids), 50):
-            chunk = cids[i:i + 50]
+        for i in range(0, len(cids), IN_CHUNK_SIZE):
+            chunk = cids[i:i + IN_CHUNK_SIZE]
             m_resp = (
                 supabase.table("universe_membership")
                 .select("company_id, universe_ticker, sector, target_month, universe_id")

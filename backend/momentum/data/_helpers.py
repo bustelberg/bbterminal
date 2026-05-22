@@ -14,6 +14,8 @@ from datetime import date
 
 from supabase import Client
 
+from deps import IN_CHUNK_SIZE
+
 
 _logger = logging.getLogger(__name__)
 
@@ -65,15 +67,15 @@ def _load_metric_chunks(
     """Bulk-load metric_data rows for the given (metric_code, company_ids,
     date range), running chunk loads in parallel for ~N× wall-time speedup.
 
-    Returns the raw row list (un-deduped, unsorted). Chunks of 50 keep
-    .in_() URLs short enough for Cloudflare; chunks run on a small worker
-    pool so we get the benefit of overlapped network RTT without saturating
-    the connection pool or upstream rate limits."""
+    Returns the raw row list (un-deduped, unsorted). Chunks of IN_CHUNK_SIZE
+    keep .in_() URLs short enough for Cloudflare; chunks run on a small
+    worker pool so we get the benefit of overlapped network RTT without
+    saturating the connection pool or upstream rate limits."""
     if not company_ids:
         return []
 
     page_size = 1000
-    chunk_size = 50
+    chunk_size = IN_CHUNK_SIZE
     chunks = [
         company_ids[i : i + chunk_size]
         for i in range(0, len(company_ids), chunk_size)

@@ -18,6 +18,7 @@ from datetime import date
 import pandas as pd
 from supabase import Client
 
+from deps import IN_CHUNK_SIZE
 from ._helpers import _FX_SYNC_PARALLELISM, _query_with_retry
 
 
@@ -160,7 +161,7 @@ def load_fx_rates(
 
     rows: list[dict] = []
     page_size = 1000
-    chunk_size = 50
+    chunk_size = IN_CHUNK_SIZE
     for chunk_start in range(0, len(needed), chunk_size):
         chunk = needed[chunk_start : chunk_start + chunk_size]
         offset = 0

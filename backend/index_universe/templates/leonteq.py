@@ -200,13 +200,17 @@ class LeonteqTemplate(UniverseTemplate):
                 supabase.table("universe_membership").delete().eq(
                     "universe_id", universe_id,
                 ).execute()
+                # Existence check, not count -- a `SELECT 1 LIMIT 1` short-
+                # circuits as soon as one row is found, whereas
+                # `count="exact"` runs a full COUNT(*) over the matched set.
                 check = (
                     supabase.table("universe_membership")
-                    .select("company_id", count="exact", head=True)
+                    .select("company_id")
                     .eq("universe_id", universe_id)
+                    .limit(1)
                     .execute()
                 )
-                if (check.count or 0) == 0:
+                if not check.data:
                     break
         except Exception as e:
             log.warning(

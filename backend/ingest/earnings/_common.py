@@ -6,6 +6,7 @@ imports from here, and nothing in here imports from the submodules.
 from __future__ import annotations
 
 import calendar
+import gzip
 import json
 from dataclasses import dataclass, field
 from datetime import date
@@ -70,19 +71,35 @@ def _ensure_bucket(supabase: Client) -> None:
         pass
 
 
+# Magic bytes for gzip (RFC 1952). Magic-byte sniff on read keeps this
+# layer backward compatible with already-stored uncompressed objects --
+# new writes are gzipped, legacy reads still decode.
+_GZIP_MAGIC = b"\x1f\x8b"
+
+
 def _fetch_from_storage(supabase: Client, path: str) -> dict | list | None:
     try:
         raw = supabase.storage.from_(_BUCKET).download(path)
+        if raw.startswith(_GZIP_MAGIC):
+            raw = gzip.decompress(raw)
         return json.loads(raw)
     except Exception:
         return None
 
 
 def _upload_to_storage(supabase: Client, path: str, data: Any) -> None:
-    content = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    # Same gzip rationale as ingest.prices._upload_to_storage: earnings JSON
+    # is highly compressible (repeated keys, numeric values). 8-12x size cut
+    # is typical, which adds up across the per-ticker x per-endpoint cache.
+    json_bytes = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    content = gzip.compress(json_bytes, compresslevel=6)
+    file_options = {
+        "content-type": "application/json",
+        "content-encoding": "gzip",
+    }
     try:
         supabase.storage.from_(_BUCKET).upload(
-            path, content, file_options={"content-type": "application/json"}
+            path, content, file_options=file_options,
         )
     except Exception as e:
         msg = str(e).lower()
@@ -90,7 +107,7 @@ def _upload_to_storage(supabase: Client, path: str, data: Any) -> None:
             raise
         try:
             supabase.storage.from_(_BUCKET).update(
-                path, content, file_options={"content-type": "application/json"}
+                path, content, file_options=file_options,
             )
         except Exception:
             pass

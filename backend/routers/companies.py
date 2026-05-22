@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
+
+from routers._cache_headers import CACHE_USER
 
 from deps import supabase
 
@@ -53,8 +55,9 @@ def _resolve_exchange_id(exchange_code: str) -> int | None:
 
 
 @router.get("/api/companies/field-options")
-async def get_company_field_options():
+async def get_company_field_options(response: Response):
     """Dropdown options for the companies page — exchanges, countries, sectors."""
+    response.headers["Cache-Control"] = CACHE_USER
     exch_resp = supabase.table("gurufocus_exchange").select("exchange_code").limit(1000).execute()
     exchanges = sorted({r["exchange_code"] for r in (exch_resp.data or [])})
     country_resp = supabase.table("country").select("country_name").limit(1000).execute()
@@ -67,16 +70,39 @@ async def get_company_field_options():
 @router.get("/api/companies")
 async def list_companies():
     """Company list. Memberships are fetched separately via
-    /api/companies/memberships so a slow aggregate can't block the table render."""
+    /api/companies/memberships so a slow aggregate can't block the table render.
+
+    Pagination: PostgREST `db-max-rows` caps the cloud project at 1000 by
+    default — `.limit(10000)` alone won't lift the cap. We page via
+    `.range()` so the company list comes through whole even when the
+    project setting hasn't been bumped to match local (10000 in
+    `supabase/config.toml`). See `project_postgrest_max_rows_trap`."""
     def _query():
-        resp = (
-            supabase.table("company")
-            .select("company_id,company_name,gurufocus_ticker,exchange_id,delisted_at,gurufocus_exchange:gurufocus_exchange(exchange_code,country:country(country_name))")
-            .order("company_name")
-            .limit(10000)
-            .execute()
-        )
-        rows = resp.data or []
+        rows: list[dict] = []
+        page = 1000
+        offset = 0
+        # 20-page hard cap (~20k companies) — universe is ~2800 today,
+        # the cap is purely a safety against an infinite loop if
+        # `.range()` is ever silently ignored.
+        for _attempt in range(20):
+            resp = (
+                supabase.table("company")
+                .select(
+                    "company_id,company_name,gurufocus_ticker,exchange_id,"
+                    "delisted_at,gurufocus_exchange:gurufocus_exchange("
+                    "exchange_code,country:country(country_name))"
+                )
+                .order("company_name")
+                .range(offset, offset + page - 1)
+                .execute()
+            )
+            batch = resp.data or []
+            if not batch:
+                break
+            rows.extend(batch)
+            if len(batch) < page:
+                break
+            offset += page
         for r in rows:
             exch_info = r.pop("gurufocus_exchange", None) or {}
             country_info = exch_info.pop("country", None) or {}

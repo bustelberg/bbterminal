@@ -16,7 +16,7 @@ from collections import Counter
 
 from fastapi import APIRouter, HTTPException
 
-from deps import supabase
+from deps import supabase, IN_CHUNK_SIZE
 
 from ._models import UniverseRenameRequest
 
@@ -115,8 +115,8 @@ async def universe_month_detail(month: str, label: str = "default"):
 
         cids = [r["company_id"] for r in membership_rows]
         company_map: dict[int, dict] = {}
-        for i in range(0, len(cids), 50):
-            batch = cids[i:i + 50]
+        for i in range(0, len(cids), IN_CHUNK_SIZE):
+            batch = cids[i:i + IN_CHUNK_SIZE]
             cr = supabase.table("company").select(
                 "company_id, gurufocus_ticker, company_name, gurufocus_exchange:gurufocus_exchange(exchange_code, country:country(country_name))"
             ).in_("company_id", batch).execute()
@@ -212,8 +212,8 @@ async def universe_delete_all():
         ids = [r["universe_id"] for r in (resp.data or [])]
         if not ids:
             return {"deleted": 0}
-        for i in range(0, len(ids), 50):
-            batch = ids[i:i + 50]
+        for i in range(0, len(ids), IN_CHUNK_SIZE):
+            batch = ids[i:i + IN_CHUNK_SIZE]
             supabase.table("universe").delete().in_("universe_id", batch).execute()
         return {"deleted": len(ids)}
     return await asyncio.to_thread(_run)

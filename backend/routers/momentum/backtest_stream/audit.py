@@ -44,12 +44,12 @@ def _load_delisted_cids(candidate_cids: list[int]) -> set[int]:
     set on any error so the audit still runs."""
     if not candidate_cids:
         return set()
-    from deps import supabase  # noqa: PLC0415 (lazy import; module imported elsewhere)
+    from deps import supabase, IN_CHUNK_SIZE  # noqa: PLC0415
 
     out: set[int] = set()
     try:
-        for start in range(0, len(candidate_cids), 50):
-            chunk = candidate_cids[start : start + 50]
+        for start in range(0, len(candidate_cids), IN_CHUNK_SIZE):
+            chunk = candidate_cids[start : start + IN_CHUNK_SIZE]
             resp = (
                 supabase.table("company")
                 .select("company_id, delisted_at")
