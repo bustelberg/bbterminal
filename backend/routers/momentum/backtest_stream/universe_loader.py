@@ -13,10 +13,19 @@ import json
 from deps import supabase
 
 
-def _load_universe_membership(label: str) -> dict[str, dict[int, str | None]]:
+def _load_universe_membership(
+    label: str, grouping_field: str = "sector",
+) -> dict[str, dict[int, str | None]]:
     """Sync read of `universe_membership` for a label. Paginates past
     Supabase's silent 1000-row default. Returns
-    {YYYY-MM: {company_id: sector | None}}. Empty dict if label not found."""
+    {YYYY-MM: {company_id: <grouping_value> | None}}. Empty dict if label
+    not found.
+
+    `grouping_field` selects which column carries the grouping label that
+    `top_n_sectors` will bucket by. "sector" is universal; "industry" only
+    has values on LEONTEQ memberships (callers MUST guard the request)."""
+    if grouping_field not in ("sector", "industry"):
+        raise ValueError(f"invalid grouping_field={grouping_field!r}")
     u_resp = supabase.table("universe").select("universe_id").eq("label", label).limit(1).execute()
     if not u_resp.data:
         return {}
@@ -26,7 +35,7 @@ def _load_universe_membership(label: str) -> dict[str, dict[int, str | None]]:
     page_size = 1000
     while True:
         resp = supabase.table("universe_membership").select(
-            "target_month, company_id, sector"
+            f"target_month, company_id, {grouping_field}"
         ).eq("universe_id", universe_id).order(
             "target_month"
         ).order("company_id").range(offset, offset + page_size - 1).execute()
@@ -46,11 +55,13 @@ def _load_universe_membership(label: str) -> dict[str, dict[int, str | None]]:
             continue
         if m not in result:
             result[m] = {}
-        result[m][r["company_id"]] = r.get("sector")
+        result[m][r["company_id"]] = r.get(grouping_field)
     return result
 
 
-def _load_index_universe(label: str) -> dict[str, dict[int, str | None]]:
+def _load_index_universe(
+    label: str, grouping_field: str = "sector",
+) -> dict[str, dict[int, str | None]]:
     """Same shape as `_load_universe_membership` — index universes are
     stored as regular universes so the read is structurally identical.
     Kept as a separate function so the calling progress messages can read
@@ -62,13 +73,25 @@ def _load_index_universe(label: str) -> dict[str, dict[int, str | None]]:
     the old static-snapshot model (SP500 today).
 
     Cached: subsequent backtests against the same template/label re-use
-    the indexed `{month: {company_id: sector}}` dict without a 700k-row
-    re-fetch, until `UniverseTemplate.refresh()` invalidates the cache
-    (or the 60s TTL safety net fires). For a ~290-month ACWI universe
-    this turns repeat backtest startup from ~2s into ~5ms."""
+    the indexed `{month: {company_id: <grouping_value>}}` dict without a
+    700k-row re-fetch, until `UniverseTemplate.refresh()` invalidates the
+    cache (or the 60s TTL safety net fires). The cache key includes
+    `grouping_field` so a sector-grouped fetch doesn't accidentally serve
+    an industry-grouped request (or vice versa).
+
+    Special-case ACWI_LEONTEQ + industry: the ACWI_LEONTEQ template wipes
+    sector during the intersection build but doesn't propagate Leonteq's
+    industry value -- meaning `universe_membership.industry` is NULL for
+    every ACWI_LEONTEQ row. Since every company in ACWI_LEONTEQ is by
+    construction also in LEONTEQ, we backfill the industry from the
+    LEONTEQ membership for the same (month, company_id). Falls back to
+    the company's most-recent-known LEONTEQ industry when the parent
+    universe doesn't have a row for that specific month."""
+    if grouping_field not in ("sector", "industry"):
+        raise ValueError(f"invalid grouping_field={grouping_field!r}")
     from index_universe.templates._cache import full_universe_cache  # noqa: PLC0415
 
-    cache_key = (label,)
+    cache_key = (label, grouping_field)
     cached = full_universe_cache.get(cache_key)
     if cached is not None:
         # cached is (last_refreshed_at, dict). Validate against the DB's
@@ -113,7 +136,7 @@ def _load_index_universe(label: str) -> dict[str, dict[int, str | None]]:
     while True:
         resp = (
             supabase.table("universe_membership")
-            .select("target_month, company_id, sector")
+            .select(f"target_month, company_id, {grouping_field}")
             .eq("universe_id", universe_id)
             .order("target_month")
             .range(offset, offset + page_size - 1)
@@ -131,7 +154,28 @@ def _load_index_universe(label: str) -> dict[str, dict[int, str | None]]:
             continue
         if m not in result:
             result[m] = {}
-        result[m][r["company_id"]] = r.get("sector")
+        result[m][r["company_id"]] = r.get(grouping_field)
+
+    # ACWI_LEONTEQ + industry: ACWI_LEONTEQ rows don't carry industry,
+    # so the values above are all None. Backfill from LEONTEQ.
+    if grouping_field == "industry" and label == "ACWI_LEONTEQ":
+        leonteq_map = _load_index_universe("LEONTEQ", grouping_field="industry")
+        # Latest-known industry per company (for months where LEONTEQ
+        # doesn't have a matching row). LEONTEQ data is monthly-snapshotted
+        # but practically the industry classification is stable.
+        latest_industry: dict[int, str] = {}
+        for m in sorted(leonteq_map.keys()):
+            for cid, ind in leonteq_map[m].items():
+                if ind:
+                    latest_industry[cid] = ind
+        for m, by_cid in result.items():
+            leon_month = leonteq_map.get(m, {})
+            for cid in list(by_cid.keys()):
+                if by_cid[cid] is not None:
+                    continue
+                # Try same-month LEONTEQ first, then last-known.
+                ind = leon_month.get(cid) or latest_industry.get(cid)
+                by_cid[cid] = ind
 
     # Stash for the next backtest. Tuple shape matches the cache
     # contract: `(last_refreshed_at, dict)`.
@@ -141,6 +185,9 @@ def _load_index_universe(label: str) -> dict[str, dict[int, str | None]]:
 
 def _emit(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
+
+
+_LEONTEQ_GROUPED_UNIVERSES = ("LEONTEQ", "ACWI_LEONTEQ")
 
 
 async def load_monthly_eligible(req):
@@ -156,9 +203,31 @@ async def load_monthly_eligible(req):
     """
     monthly_eligible: dict[str, dict[int, str | None]] | None = None
 
+    # `grouping_field` defaults to the regular sector column. Only LEONTEQ-
+    # backed universes carry an industry value -- enforce that here so the
+    # request fails fast rather than producing an all-None grouping silently.
+    grouping_field = getattr(req, "grouping", "sector") or "sector"
+    if grouping_field == "industry":
+        chosen_universe = req.universe_label or req.index_universe
+        if chosen_universe not in _LEONTEQ_GROUPED_UNIVERSES:
+            yield _emit({
+                "type": "error",
+                "message": (
+                    "grouping='industry' is only available for the Leonteq "
+                    "universes (LEONTEQ, ACWI_LEONTEQ). Selected universe "
+                    f"is {chosen_universe!r}."
+                ),
+            })
+            yield ("__result__", None, True)
+            return
+
+    grouping_label = "industry" if grouping_field == "industry" else "sector"
+
     if req.universe_label:
         yield _emit({"type": "progress", "pct": 6, "message": f"Loading universe '{req.universe_label}'..."})
-        monthly_eligible = await asyncio.to_thread(_load_universe_membership, req.universe_label)
+        monthly_eligible = await asyncio.to_thread(
+            _load_universe_membership, req.universe_label, grouping_field,
+        )
         n_months = len(monthly_eligible)
         if n_months == 0:
             yield _emit({"type": "error", "message": f"No universe data for label '{req.universe_label}'"})
@@ -167,21 +236,23 @@ async def load_monthly_eligible(req):
         avg_pass = sum(len(v) for v in monthly_eligible.values()) // n_months
         yield _emit({"type": "progress", "pct": 7, "message": f"Universe: {n_months} months, ~{avg_pass} companies/month"})
 
-        # Diagnose missing sector data: if no membership row has a sector
-        # value, sector-based selection will silently pick zero companies.
-        # Fail loudly so the user knows to re-save the universe.
+        # Diagnose missing grouping data: if no membership row has a
+        # sector/industry value, selection will silently pick zero
+        # companies. Fail loudly.
         total_sec = sum(
             1 for month_map in monthly_eligible.values()
             for s in month_map.values() if s
         )
         if total_sec == 0:
-            yield _emit({"type": "error", "message": f"Universe '{req.universe_label}' has no sector data in universe_membership — re-save this universe from its source page so sectors are populated."})
+            yield _emit({"type": "error", "message": f"Universe '{req.universe_label}' has no {grouping_label} data in universe_membership — re-save this universe from its source page so {grouping_label}s are populated."})
             yield ("__result__", None, True)
             return
 
     if req.index_universe and monthly_eligible is None:
         yield _emit({"type": "progress", "pct": 6, "message": f"Loading index universe '{req.index_universe}'..."})
-        monthly_eligible = await asyncio.to_thread(_load_index_universe, req.index_universe)
+        monthly_eligible = await asyncio.to_thread(
+            _load_index_universe, req.index_universe, grouping_field,
+        )
         n_months = len(monthly_eligible)
         if n_months == 0:
             yield _emit({"type": "error", "message": f"No index universe data for '{req.index_universe}'"})
@@ -195,7 +266,7 @@ async def load_monthly_eligible(req):
             for s in month_map.values() if s
         )
         if total_sec == 0:
-            yield _emit({"type": "error", "message": f"Index universe '{req.index_universe}' has no sector data — re-save this universe from its source page so sectors are populated."})
+            yield _emit({"type": "error", "message": f"Index universe '{req.index_universe}' has no {grouping_label} data — re-save this universe from its source page so {grouping_label}s are populated."})
             yield ("__result__", None, True)
             return
 

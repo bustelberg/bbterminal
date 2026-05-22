@@ -41,6 +41,14 @@ class BacktestRequest(BaseModel):
     min_price_score: float | None = None
     universe_label: str | None = None  # if set, use universe_membership for per-month filtering
     index_universe: str | None = None  # if set, use universe_membership for per-month filtering (e.g. "SP500")
+    # How `top_n_sectors` buckets companies. "sector" is the universe-level
+    # sector tag (works for every universe). "industry" is the finer Leonteq
+    # taxonomy and is only meaningful when the universe is one that carries
+    # industry data -- LEONTEQ or ACWI_LEONTEQ today. The label of the
+    # top_n_sectors slider in the UI flips with this; the downstream scoring
+    # code groups by whatever string lives in the panel's `sector` column
+    # so a request boundary swap is enough.
+    grouping: Literal["sector", "industry"] = "sector"
     # Literal values reject typos at the request boundary so a misspelled
     # value never silently routes through a default branch downstream
     # (e.g. an unknown `mode` quietly behaving like "backtest"). New

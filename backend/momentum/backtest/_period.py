@@ -204,6 +204,8 @@ def make_period_holding(
             cat_scores[cat] = None
 
     score_val = row.get("momentum_score")
+    sec_rank = row.get("sector_rank")
+    co_rank = row.get("company_rank")
     return PeriodHolding(
         company_id=cid,
         ticker=str(row.get("gurufocus_ticker", "")),
@@ -221,6 +223,8 @@ def make_period_holding(
         entry_date=entry_dt,
         exit_date=exit_dt,
         side=side,
+        sector_rank=int(sec_rank) if pd.notna(sec_rank) else None,
+        company_rank=int(co_rank) if pd.notna(co_rank) else None,
     ), fwd_return
 
 

@@ -52,6 +52,13 @@ const ENDPOINTS: Endpoint[] = [
     path: '/api/admin/sanity-check',
     desc: 'Coarse table counts (company / ingest_run / current_picks_snapshot / …) + recent-run status distribution + latest snapshot summary. For eyeball "is everything basically wired up?" checks.',
   },
+  {
+    id: 'admin-egress-ip',
+    group: 'Admin · health',
+    method: 'GET',
+    path: '/api/admin/egress-ip',
+    desc: 'The public IP this backend currently appears to egress from (queried via ifconfig.me with fallbacks). Hit it a few times across deploys/restarts to see if Railway is giving you a stable IP — if yes, paste it into the AirSPMS allowlist. If it rotates, you either need Railway\'s Static Outbound IP add-on or a small static-IP proxy in front.',
+  },
 
   // ─── Admin: portfolio ────────────────────────────────────────────
   {

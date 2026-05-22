@@ -95,6 +95,18 @@ export type ScheduledStrategy = {
     created_at: string;
     latest_price_date: string | null;
     holdings_count: number;
+    /** Distinct sectors held in the latest snapshot, ordered by count desc
+     * (ties broken alphabetically). Empty list when no sectors are populated
+     * on the holdings (e.g. very early backfill rows). */
+    sectors: { sector: string; count: number }[];
+    /** Month-to-date / year-to-date return for the strategy as of `as_of_date`,
+     * computed server-side from the snapshot equity curve. Null when there
+     * isn't enough history (e.g. brand-new strategy with no closed period). */
+    mtd_return_pct: number | null;
+    ytd_return_pct: number | null;
+    /** The latest_price_date of the newest snapshot — i.e. the date these
+     * returns are "as of". Hoisted out for easy display. */
+    as_of_date: string | null;
   } | null;
 };
 
@@ -479,6 +491,44 @@ export default function Schedule() {
                               </span>
                             )}
                           </div>
+                          {s.last_snapshot && (
+                            <div className="text-xs text-gray-500 mt-0.5 font-mono flex flex-wrap items-center gap-x-2 gap-y-1">
+                              {s.last_snapshot.sectors.length > 0 && (
+                                <span className="text-gray-400">
+                                  {s.last_snapshot.sectors
+                                    .map((sec) => `${sec.sector} ×${sec.count}`)
+                                    .join(' · ')}
+                                </span>
+                              )}
+                              {(s.last_snapshot.mtd_return_pct != null
+                                || s.last_snapshot.ytd_return_pct != null) && (
+                                <span className="text-gray-600">|</span>
+                              )}
+                              {s.last_snapshot.mtd_return_pct != null && (
+                                <span>
+                                  <span className="text-gray-500">MTD </span>
+                                  <span className={s.last_snapshot.mtd_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                                    {s.last_snapshot.mtd_return_pct >= 0 ? '+' : ''}
+                                    {s.last_snapshot.mtd_return_pct.toFixed(2)}%
+                                  </span>
+                                </span>
+                              )}
+                              {s.last_snapshot.ytd_return_pct != null && (
+                                <span>
+                                  <span className="text-gray-500">YTD </span>
+                                  <span className={s.last_snapshot.ytd_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                                    {s.last_snapshot.ytd_return_pct >= 0 ? '+' : ''}
+                                    {s.last_snapshot.ytd_return_pct.toFixed(2)}%
+                                  </span>
+                                </span>
+                              )}
+                              {s.last_snapshot.as_of_date && (
+                                <span className="text-gray-600">
+                                  (as of {s.last_snapshot.as_of_date})
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </button>
                       <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">

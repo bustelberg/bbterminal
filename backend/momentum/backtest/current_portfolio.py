@@ -203,6 +203,8 @@ def run_current_portfolio(
                 cat_scores[cat] = None
 
         score_val = row.get("momentum_score")
+        sec_rank = row.get("sector_rank")
+        co_rank = row.get("company_rank")
         holdings.append(PeriodHolding(
             company_id=cid,
             ticker=str(row.get("gurufocus_ticker", "")),
@@ -219,6 +221,8 @@ def run_current_portfolio(
             exit_price_eur=round(exit_price, 4) if exit_price is not None else None,
             entry_date=entry_dt,
             exit_date=exit_dt,
+            sector_rank=int(sec_rank) if pd.notna(sec_rank) else None,
+            company_rank=int(co_rank) if pd.notna(co_rank) else None,
         ))
 
     if send_event:
@@ -335,6 +339,8 @@ def run_current_portfolio(
                 else:
                     cat_scores[cat] = None
 
+            sec_rank = drow.get("sector_rank")
+            co_rank = drow.get("company_rank")
             day_holdings.append(PeriodHolding(
                 company_id=cid,
                 ticker=str(drow.get("gurufocus_ticker", "")),
@@ -354,6 +360,8 @@ def run_current_portfolio(
                 exit_price_eur=None,
                 entry_date=entry_dt,
                 exit_date=None,
+                sector_rank=int(sec_rank) if pd.notna(sec_rank) else None,
+                company_rank=int(co_rank) if pd.notna(co_rank) else None,
             ))
 
         # Pre-rebalance chain link: today's contribution to cum MTD is the

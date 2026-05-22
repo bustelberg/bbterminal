@@ -178,6 +178,14 @@ class PeriodHolding:
     # return; the period-level aggregator uses `side` to decide the sign of
     # the contribution. Long-only backtests emit "long" everywhere.
     side: HoldingSide = "long"
+    # 1-indexed rank of this holding's sector within the period's
+    # chosen sectors (1 = best-scoring sector picked, N = Nth-best).
+    # Set by score_and_select; None for sector-ETF mode + legacy
+    # snapshots persisted before the rank columns existed.
+    sector_rank: int | None = None
+    # 1-indexed rank of this company within its sector (1 = best-scoring
+    # company in the sector, M = Mth-best). None when unavailable.
+    company_rank: int | None = None
 
 
 @dataclass
@@ -281,6 +289,8 @@ class CurrentPortfolio:
                     "exit_price_eur": h.exit_price_eur,
                     "entry_date": h.entry_date,
                     "exit_date": h.exit_date,
+                    "sector_rank": h.sector_rank,
+                    "company_rank": h.company_rank,
                 }
                 for h in self.holdings
             ],
@@ -308,6 +318,8 @@ class CurrentPortfolio:
                             "exit_price_eur": h.exit_price_eur,
                             "entry_date": h.entry_date,
                             "exit_date": h.exit_date,
+                            "sector_rank": h.sector_rank,
+                            "company_rank": h.company_rank,
                         }
                         for h in d.holdings
                     ],
@@ -354,6 +366,8 @@ class BacktestResult:
                             "entry_date": h.entry_date,
                             "exit_date": h.exit_date,
                             "side": h.side,
+                            "sector_rank": h.sector_rank,
+                            "company_rank": h.company_rank,
                         }
                         for h in r.holdings
                     ],

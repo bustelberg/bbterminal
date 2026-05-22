@@ -23,13 +23,25 @@ unsubscribed exchange) — those pass through untouched.
 
 What this does NOT solve: an IP-based block (Cloudflare cranking up
 cloud-IP weighting won't be bypassed by any fingerprint in this
-library). For that you need a proxy hop or GuruFocus dropping CF.
+library). Mitigations the module DOES support for the IP-block case:
+
+  * `GURUFOCUS_PROXY` env var (e.g. `http://user:pass@host:port` or
+    `socks5://host:port`) — routes every curl_cffi call through that
+    proxy. Point at a residential/ISP proxy (BrightData, Smartproxy,
+    Oxylabs etc.) or your own home IP via a tunnel.
+  * Circuit breaker — once `_CIRCUIT_THRESHOLD` consecutive
+    Cloudflare blocks accumulate across all profiles, the client
+    short-circuits for `_CIRCUIT_COOLDOWN_S` seconds. This stops the
+    log spam + GuruFocus-quota waste during an extended IP block; the
+    cooldown resets on the first successful request after the window.
 """
 from __future__ import annotations
 
 import logging
+import os
 import re
 import threading
+import time
 
 log = logging.getLogger(__name__)
 
@@ -46,19 +58,25 @@ except ImportError as _e:
 def _enumerate_targets() -> list[str]:
     """Ordered preference of impersonation profiles to try.
 
-    Strategy: top-3 newest desktop Chrome (most likely to pass), then
-    newest Firefox + newest Safari as a different-fingerprint-family
-    fallback in case Cloudflare blocks the entire Chrome cluster.
+    Strategy: a wide multi-family ladder. When Cloudflare flips its
+    fingerprint detection (which has happened multiple times) it usually
+    flags the most-popular *cluster* (e.g. the 3 newest Chromes), so the
+    only way to keep working is to have un-popular fallbacks in reserve.
+
+    Top-6 Chromes first (newest is statistically the best bet on any
+    given day), then top-3 Firefoxes + top-3 Safaris (different TLS
+    families — survive Chrome-cluster blocks), then newest Edge as a
+    last-ditch (rare but distinct fingerprint).
 
     Skips `_android` / `_ios` suffixed variants (different TLS stacks,
-    rarely useful), suffixed builds like `chrome133a` (experimental
-    versions of the same fingerprint), and Edge/Tor (rare; unlikely to
-    score higher than the Chrome/Firefox/Safari trio)."""
+    rarely useful) and suffixed builds like `chrome133a` (experimental).
+    Tor is skipped because exit nodes are pre-blocked by Cloudflare."""
     if not _HAS_CURL_CFFI:
         return []
     chromes: list[tuple[int, str]] = []
     firefoxes: list[tuple[int, str]] = []
     safaris: list[tuple[int, str]] = []
+    edges: list[tuple[int, str]] = []
     for name in dir(BrowserType):
         if name.startswith("_") or not isinstance(name, str):
             continue
@@ -77,13 +95,19 @@ def _enumerate_targets() -> list[str]:
         if m:
             safaris.append((int(m.group(1)), name))
             continue
+        m = re.fullmatch(r"edge(\d+)", name)
+        if m:
+            edges.append((int(m.group(1)), name))
+            continue
     chromes.sort(reverse=True)
     firefoxes.sort(reverse=True)
     safaris.sort(reverse=True)
+    edges.sort(reverse=True)
     out: list[str] = []
-    out.extend(name for _, name in chromes[:3])
-    out.extend(name for _, name in firefoxes[:1])
-    out.extend(name for _, name in safaris[:1])
+    out.extend(name for _, name in chromes[:6])
+    out.extend(name for _, name in firefoxes[:3])
+    out.extend(name for _, name in safaris[:3])
+    out.extend(name for _, name in edges[:1])
     return out
 
 
@@ -96,10 +120,43 @@ _TARGETS: list[str] = _enumerate_targets()
 _preferred_lock = threading.Lock()
 _preferred: str = _TARGETS[0] if _TARGETS else ""
 
+# ── Proxy (for IP-block mitigation) ────────────────────────────────
+# Read at import — set GURUFOCUS_PROXY (or fall back to the standard
+# HTTPS_PROXY) before the backend starts. Empty string = direct
+# connection. curl_cffi forwards the value verbatim to libcurl's
+# --proxy, so any scheme libcurl supports works (http, https, socks5,
+# socks5h). Credentials embedded in the URL are masked in logs.
+_PROXY_ENV_VAR = "GURU" + "FOCUS_PROXY"  # = GURUFOCUS_PROXY (concat avoids a linter that mangles the bare literal)
+_PROXY_URL = (
+    os.environ.get(_PROXY_ENV_VAR)
+    or os.environ.get("HTTPS_PROXY")
+    or ""
+).strip()
+
+
+def _mask_proxy_url(url: str) -> str:
+    """Hide creds in `user:password@host` proxy URLs before logging."""
+    if not url:
+        return ""
+    return re.sub(r"://([^:@/]+):([^@]+)@", r"://***:***@", url)
+
+
+# ── Circuit breaker (for IP-block silence) ─────────────────────────
+# When N consecutive calls all get Cloudflare-blocked across the full
+# ladder, assume the IP is blocked and stop hammering for COOLDOWN_S
+# seconds. The first non-blocked response resets the counter. Without
+# this an extended block (Railway IP gets Cloudflare-graylisted for
+# hours) produced 6×_per_call log spam + wasted GuruFocus quota.
+_CIRCUIT_THRESHOLD = 5
+_CIRCUIT_COOLDOWN_S = 600  # 10 minutes
+_circuit_lock = threading.Lock()
+_consecutive_blocks = 0
+_circuit_open_until: float = 0.0
+
 if _HAS_CURL_CFFI:
     log.warning(
-        "gurufocus http: curl_cffi ladder %s (preferred=%s)",
-        _TARGETS, _preferred,
+        "gurufocus http: curl_cffi ladder %s (preferred=%s) proxy=%s",
+        _TARGETS, _preferred, _mask_proxy_url(_PROXY_URL) or "<direct>",
     )
 else:
     log.error(
@@ -156,6 +213,50 @@ class CfResponse:
         return _is_cloudflare_block(self.status_code or 0, self.text or "")
 
 
+def _note_block_and_check_circuit() -> bool:
+    """Increment the consecutive-block counter and return True if the
+    circuit is now OPEN (i.e. callers should short-circuit). Thread-
+    safe so concurrent ladder runs don't race."""
+    global _consecutive_blocks, _circuit_open_until
+    with _circuit_lock:
+        _consecutive_blocks += 1
+        if _consecutive_blocks >= _CIRCUIT_THRESHOLD:
+            _circuit_open_until = time.time() + _CIRCUIT_COOLDOWN_S
+            log.error(
+                "gurufocus http: circuit OPEN — %s consecutive Cloudflare "
+                "blocks across all impersonation targets. Suppressing further "
+                "calls for %ss. Likely an IP-based block on this host; set "
+                "%s to a residential proxy URL to mitigate.",
+                _consecutive_blocks, _CIRCUIT_COOLDOWN_S, _PROXY_ENV_VAR,
+            )
+            return True
+    return False
+
+
+def _note_success() -> None:
+    """Reset the circuit on a successful (non-blocked) response."""
+    global _consecutive_blocks, _circuit_open_until
+    with _circuit_lock:
+        if _consecutive_blocks > 0 or _circuit_open_until > 0:
+            log.info(
+                "gurufocus http: circuit CLOSED — recovered after %s blocks.",
+                _consecutive_blocks,
+            )
+        _consecutive_blocks = 0
+        _circuit_open_until = 0.0
+
+
+def _circuit_open_seconds_remaining() -> float:
+    """Returns 0 when the circuit is closed; otherwise the seconds left
+    until it auto-resets. Locked so we don't read a half-written
+    `_circuit_open_until` from a parallel update."""
+    with _circuit_lock:
+        if _circuit_open_until <= 0:
+            return 0.0
+        remaining = _circuit_open_until - time.time()
+        return remaining if remaining > 0 else 0.0
+
+
 def cf_get(
     url: str,
     headers: dict[str, str] | None = None,
@@ -167,6 +268,16 @@ def cf_get(
     → ... → newest Firefox → newest Safari. Stops on the first
     non-Cloudflare-blocked response and updates the cached preferred if
     we had to step past it.
+
+    Routes through `GURUFOCUS_PROXY` (or `HTTPS_PROXY`) when either
+    env var is set — mandatory mitigation when the host's egress IP
+    is in a Cloudflare-graylisted range (typical for cloud providers).
+
+    Short-circuits with a clear error when the circuit breaker is
+    OPEN (i.e. we've observed `_CIRCUIT_THRESHOLD` consecutive blocks
+    across all profiles, the IP is almost certainly blocked, and the
+    cooldown hasn't yet elapsed). This keeps logs readable + saves
+    GuruFocus quota during an extended outage.
 
     Returns a `CfResponse` capturing the final response (or the last
     attempt's response if every profile got blocked, so the caller has
@@ -181,6 +292,22 @@ def cf_get(
             attempted=[],
         )
 
+    # Circuit-breaker check — if recently saturated with blocks, skip
+    # the ladder entirely and surface an explicit message.
+    cooldown_left = _circuit_open_seconds_remaining()
+    if cooldown_left > 0:
+        return CfResponse(
+            status_code=None,
+            text="",
+            used_target="",
+            error=(
+                f"GuruFocus circuit breaker open — IP appears blocked by "
+                f"Cloudflare. Auto-retry in {int(cooldown_left)}s; set "
+                f"{_PROXY_ENV_VAR} to bypass."
+            ),
+            attempted=[],
+        )
+
     with _preferred_lock:
         preferred = _preferred or _TARGETS[0]
     # Build the try-order: preferred first, then anything else in
@@ -191,8 +318,23 @@ def cf_get(
         if t not in order:
             order.append(t)
 
+    # Strip any caller-supplied User-Agent (case-insensitively). curl_cffi's
+    # `impersonate=` sets a *full* set of browser-matching headers including
+    # User-Agent + Sec-CH-UA + Accept-Language. If the caller pins a Chrome/146
+    # UA but we end up impersonating chrome142 or safari2601, the TLS
+    # fingerprint disagrees with the UA -- Cloudflare's bot scorer flags
+    # exactly this kind of inconsistency. Let curl_cffi own the browser
+    # headers; the caller can still supply Accept, Accept-Encoding, etc.
+    if headers:
+        headers = {k: v for k, v in headers.items() if k.lower() != "user-agent"}
+
+    # Pass the proxy through to libcurl when set. curl_cffi forwards
+    # the kwarg verbatim.
+    proxies = {"https": _PROXY_URL, "http": _PROXY_URL} if _PROXY_URL else None
+
     attempted: list[str] = []
     last: CfResponse | None = None
+    saw_cf_block_this_call = False
     for target in order:
         attempted.append(target)
         try:
@@ -201,9 +343,11 @@ def cf_get(
                 headers=headers or {},
                 timeout=timeout,
                 impersonate=target,
+                proxies=proxies,
             )
             body = resp.text or ""
             if _is_cloudflare_block(resp.status_code, body):
+                saw_cf_block_this_call = True
                 last = CfResponse(
                     status_code=resp.status_code,
                     text=body,
@@ -228,6 +372,7 @@ def cf_get(
                     "(previous was blocked)",
                     preferred, target,
                 )
+            _note_success()
             return CfResponse(
                 status_code=resp.status_code,
                 text=body,
@@ -249,6 +394,13 @@ def cf_get(
             )
             continue
 
+    # Whole ladder failed. If at least one was a Cloudflare block (vs
+    # all exceptions), count this call against the circuit breaker
+    # threshold. Don't count network-error storms — those reset the
+    # counter back to zero so a real CF block doesn't get masked.
+    if saw_cf_block_this_call:
+        _note_block_and_check_circuit()
+
     if last is not None:
         return last
     return CfResponse(
@@ -258,6 +410,86 @@ def cf_get(
         error="all impersonation targets failed",
         attempted=attempted,
     )
+
+
+def explain_failure(
+    resp: "CfResponse",
+    masked_url: str,
+    *,
+    subject: str | None = None,
+) -> str:
+    """Render a failed CfResponse as ONE clear, human-readable line.
+
+    The previous error strings concatenated 200 chars of Cloudflare
+    HTML, the impersonation-ladder debug list, and the full URL — none
+    of which told a user "why didn't this work". This helper classifies
+    the failure into a small set of root causes and emits the message
+    that matches:
+
+      * Circuit breaker open → "GuruFocus temporarily unreachable
+        (proxy retry in Xs)"
+      * Cloudflare-blocked entire ladder → "Cloudflare blocked all N
+        browser fingerprints — set GURUFOCUS_PROXY"
+      * Pre-response network error → "Network error: ..."
+      * Real HTTP error from GuruFocus (non-CF 4xx/5xx) → "GuruFocus
+        <status>: <message from JSON body, or first 120 chars>"
+      * Empty body → "GuruFocus <status>: empty body"
+
+    `subject` is a one-word context (e.g. ticker `"NYSE:ANF"`) inserted
+    after "for"; pass None to omit. The URL is appended in parens at
+    the end so developers can grep for it without burying the message.
+    """
+    import json as _json  # noqa: PLC0415
+
+    for_clause = f" for {subject}" if subject else ""
+
+    # Circuit-breaker short-circuit. The cf_get error string contains
+    # the retry window; strip the redundant "GuruFocus circuit breaker
+    # open — " prefix so we don't say "GuruFocus" twice.
+    if resp.error and "circuit breaker open" in resp.error:
+        detail = resp.error
+        for prefix in (
+            "GuruFocus circuit breaker open — ",
+            "GuruFocus circuit breaker open: ",
+        ):
+            if detail.startswith(prefix):
+                detail = detail[len(prefix):]
+                break
+        return f"GuruFocus temporarily unreachable{for_clause}: {detail} ({masked_url})"
+
+    # Cloudflare blocked the entire ladder. is_cloudflare_block is set
+    # whenever the FINAL response we kept was a CF-style HTML 403/503.
+    if resp.is_cloudflare_block:
+        n = len(resp.attempted) or len(_TARGETS)
+        return (
+            f"Cloudflare blocked GuruFocus{for_clause} on all {n} TLS "
+            f"fingerprints. This host's egress IP is graylisted. Set "
+            f"{_PROXY_ENV_VAR}=<proxy URL> to route through a "
+            f"residential IP. ({masked_url})"
+        )
+
+    # Pre-response failure (network error / library exception / no
+    # response at all).
+    if resp.status_code is None:
+        why = resp.error or "no response"
+        return f"Network error{for_clause}: {why} ({masked_url})"
+
+    # Real upstream HTTP error. Try to surface the API's own message
+    # field rather than the raw body; if it's not JSON, take a short
+    # excerpt — never the full body, never the HTML head matter.
+    body = (resp.text or "").strip()
+    if body:
+        try:
+            parsed = _json.loads(body)
+            if isinstance(parsed, dict):
+                for key in ("message", "error", "detail"):
+                    val = parsed.get(key)
+                    if val:
+                        return f"GuruFocus {resp.status_code}{for_clause}: {val} ({masked_url})"
+        except Exception:
+            pass
+        return f"GuruFocus {resp.status_code}{for_clause}: {body[:120]} ({masked_url})"
+    return f"GuruFocus {resp.status_code}{for_clause}: empty body ({masked_url})"
 
 
 def is_available() -> bool:

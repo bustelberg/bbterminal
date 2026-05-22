@@ -178,7 +178,10 @@ def score_and_select(
         chosen_sectors = sector_scores.head(top_n_sectors)["sector"].tolist()
         ascending_within = False
     else:
-        chosen_sectors = sector_scores.tail(top_n_sectors)["sector"].tolist()
+        # Bottom: reverse the tail so chosen_sectors[0] is the worst (rank 1
+        # in the "worst sector" sense), matching the "top" convention where
+        # rank 1 is the best of what was picked.
+        chosen_sectors = list(reversed(sector_scores.tail(top_n_sectors)["sector"].tolist()))
         ascending_within = True
 
     in_chosen_sectors = scored[scored["sector"].isin(chosen_sectors)].copy()
@@ -192,6 +195,23 @@ def score_and_select(
         .head(top_n_per_sector)
         .reset_index(drop=True)
     )
+
+    # Attach sector_rank (1..N over chosen_sectors order) and
+    # company_rank (1..M within each sector, by momentum_score). These
+    # are propagated through PeriodHolding so the UI can show "this is
+    # the 2nd best stock in the 1st best sector" without rederiving.
+    if not selected.empty:
+        sector_rank_map = {sec: i + 1 for i, sec in enumerate(chosen_sectors)}
+        selected["sector_rank"] = selected["sector"].map(sector_rank_map).astype("Int64")
+        # Rank within sector: sort by score in the same direction the
+        # selection used (desc for "top", asc for "bottom"), then enumerate.
+        selected = selected.sort_values(
+            ["sector_rank", "momentum_score"],
+            ascending=[True, ascending_within],
+        ).reset_index(drop=True)
+        selected["company_rank"] = (
+            selected.groupby("sector_rank").cumcount().astype("int64") + 1
+        )
 
     return selected
 

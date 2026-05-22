@@ -23,6 +23,7 @@ from urllib.request import Request, urlopen
 from ingest._gurufocus_http import (
     cf_get,
     current_preferred_target,
+    explain_failure,
     is_available as _cf_is_available,
     ladder as _cf_ladder,
 )
@@ -93,26 +94,23 @@ def _api_request_cf(url: str, timeout: int = 30) -> ApiResult:
         timeout=timeout,
     )
 
-    if resp.error is not None and resp.status_code is None:
-        # Network / library error before we got a response at all.
-        return ApiResult(None, f"curl_cffi error: {resp.error} ({masked_url})")
-
-    status_code = resp.status_code or 0
-    body = resp.text or ""
-    if status_code >= 400 or resp.error is not None:
-        attempted = ",".join(resp.attempted) if resp.attempted else "n/a"
+    # Any failure (pre-response error, Cloudflare block, real upstream
+    # 4xx/5xx) goes through `explain_failure` so the message tells the
+    # user the actual root cause rather than dumping HTML / debug noise.
+    if resp.error is not None or (resp.status_code or 0) >= 400:
         return ApiResult(
             None,
-            f"API HTTP {status_code} via curl_cffi/{resp.used_target} "
-            f"(tried={attempted}) body={body[:200]} ({masked_url})",
-            status_code,
+            explain_failure(resp, masked_url),
+            resp.status_code,
         )
+
+    body = resp.text or ""
     if not body:
-        return ApiResult(None, f"API empty response ({masked_url})", status_code)
+        return ApiResult(None, f"GuruFocus returned empty body ({masked_url})", resp.status_code)
     try:
-        return ApiResult(json.loads(body), f"API OK ({masked_url})", status_code)
+        return ApiResult(json.loads(body), f"OK ({masked_url})", resp.status_code)
     except json.JSONDecodeError as e:
-        return ApiResult(None, f"API returned invalid JSON: {e} ({masked_url})")
+        return ApiResult(None, f"GuruFocus returned non-JSON content: {e} ({masked_url})")
 
 
 def _api_request_urllib(url: str, timeout: int = 30) -> ApiResult:
