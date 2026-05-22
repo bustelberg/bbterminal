@@ -1,11 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import ScheduleRunDetail from './ScheduleRunDetail';
-import ScheduledStrategyDetail from './ScheduledStrategyDetail';
+import { useCallback, useEffect, useState } from 'react';
+import AddScheduledStrategyForm from './AddScheduledStrategyForm';
+import DailyMtdRefreshCard from './DailyMtdRefreshCard';
+import ScheduledStrategyDetail, { type StrategyRunHistory } from './ScheduledStrategyDetail';
+import LoadingDots from './LoadingDots';
 import { type StepDef, type StepState } from './ProgressTimeline';
+import { apiFetch } from '../../lib/apiFetch';
+import { dialog } from '../../lib/dialog';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { API_URL } from '../../lib/apiUrl';
 
 export type IngestRun = {
   run_id: number;
@@ -14,11 +18,13 @@ export type IngestRun = {
   started_at: string;
   finished_at: string | null;
   status: 'running' | 'ok' | 'error';
-  current_phase: 'acwi' | 'prices' | 'momentum' | 'done' | null;
-  acwi_universe_id: number | null;
-  acwi_target_month: string | null;
-  acwi_summary: AcwiSummary | null;
-  // Now an array — one entry per scheduled strategy the pipeline tried.
+  current_phase: 'acquisition' | 'templates' | 'prune' | 'prices' | 'momentum' | 'done' | null;
+  // Array — one entry per template-managed universe the pipeline
+  // refreshed in phase 1. Each entry carries that template's per-run
+  // diff (additions/removals/renames). Empty when no templates are
+  // registered for this run.
+  templates_summary: TemplateDiff[] | null;
+  // Array — one entry per scheduled strategy the pipeline tried.
   momentum_summary: MomentumStrategyResult[] | null;
   companies_processed: number;
   companies_total: number | null;
@@ -31,37 +37,54 @@ export type IngestRun = {
   current_message: string | null;
 };
 
-export type AcwiSummary = {
-  this_month: string;
-  prev_month: string;
+/** One entry per template-managed universe in `templates_summary`.
+ * Carries the universe identity (template_key + universe_id) and the
+ * per-run diff. `error` is set when the template's refresh failed for
+ * this run; in that case the count/list fields will be zero/empty. */
+export type TemplateDiff = {
+  template_key: string;
+  universe_id: number | null;
+  this_month: string | null;
+  prev_month: string | null;
   additions_count: number;
   removals_count: number;
   renames_count: number;
   additions: Array<{ company_id: number; ticker: string; name: string | null; sector: string | null }>;
   removals: Array<{ company_id: number; ticker: string; name: string | null; sector: string | null }>;
   renames: Array<{ company_id: number; old_ticker: string; new_ticker: string; name: string | null }>;
+  error?: string | null;
 };
 
 /** One entry per scheduled strategy in `ingest_run.momentum_summary`. */
 export type MomentumStrategyResult = {
   strategy_id: number | null;
-  backtest_run_id: number;
   strategy_name: string;
+  frequency: string | null;
+  /** Snapshot of the strategy's config at the time the pipeline ran it.
+   * Shown in the run-detail view so the user can verify what was
+   * actually computed — useful when the schedule entry has been edited
+   * after the run. */
+  config: Record<string, unknown>;
   snapshot_id: number | null;
   holdings_count: number;
   latest_price_date: string | null;
   status: 'ok' | 'error';
   error_message: string | null;
+  /** Full Python traceback captured server-side on failure. Long;
+   * rendered inside a collapsible <pre> on the run-detail view. */
+  error_traceback: string | null;
 };
 
 export type ScheduledStrategy = {
   id: number;
-  backtest_run_id: number;
+  name: string;
+  frequency: 'daily' | 'weekly' | 'monthly' | 'bimonthly' | 'quarterly' | null;
+  config: Record<string, unknown>;
   enabled: boolean;
   created_at: string;
   updated_at: string;
-  backtest_name: string | null;
-  backtest_config: Record<string, unknown> | null;
+  last_run_at: string | null;
+  next_due_at: string | null;
   last_snapshot: {
     snapshot_id: number;
     ingest_run_id: number | null;
@@ -71,47 +94,11 @@ export type ScheduledStrategy = {
   } | null;
 };
 
-type AvailableBacktest = {
-  run_id: number;
-  name: string;
-  created_at: string;
-  config: Record<string, unknown>;
-};
-
-type JobSpec = {
-  key: string;
-  label: string;
-  cron: string;
-  cronExplain: string;
-  description: string;
-};
-
-const JOBS: JobSpec[] = [
-  {
-    key: 'weekly_price_volume',
-    label: 'Weekly pipeline',
-    cron: 'Tue 02:00 UTC',
-    cronExplain: 'after Monday global close',
-    description:
-      "Three phases: ACWI universe refresh → price + volume refresh → momentum compute for every scheduled strategy. Captures the previous Monday's worldwide closes.",
-  },
-  {
-    key: 'monthly_price_volume',
-    label: 'Monthly pipeline',
-    cron: '2nd of month 02:00 UTC',
-    cronExplain: 'after 1st-of-month global close',
-    description:
-      "Same three phases. Captures the first trading day of the month's closes. Weekends/holidays still fire but freshness checks no-op.",
-  },
-];
-
-function fmtDuration(startIso: string, endIso: string | null): string {
-  if (!endIso) return '—';
-  const secs = Math.max(0, Math.round((Date.parse(endIso) - Date.parse(startIso)) / 1000));
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  return m > 0 ? `${m}m ${s}s` : `${s}s`;
-}
+// The pipeline still fires once a week (Tuesday 02:00 UTC) via the
+// in-process APScheduler in `backend/scheduler.py`. The per-job cards
+// and the global "Recent runs" view that used to live in this page
+// have been removed — each scheduled strategy's run history is shown
+// in its own expandable detail view (see ScheduledStrategyDetail).
 
 function fmtTimestamp(iso: string | null): string {
   if (!iso) return '—';
@@ -125,32 +112,10 @@ function fmtTimestamp(iso: string | null): string {
   }
 }
 
-function fmtDate(iso: string | null): string {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleDateString(undefined, {
-      year: 'numeric', month: 'short', day: '2-digit',
-    });
-  } catch {
-    return iso;
-  }
-}
-
-function StatusBadge({ status }: { status: IngestRun['status'] }) {
-  const cls = status === 'ok'
-    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-    : status === 'error'
-      ? 'bg-rose-500/10 text-rose-300 border-rose-500/30'
-      : 'bg-amber-500/15 text-amber-300 border-amber-500/30';
-  return (
-    <span className={`inline-flex items-center text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${cls}`}>
-      {status}
-    </span>
-  );
-}
-
 export const PIPELINE_STEPS: StepDef[] = [
-  { key: 'acwi', label: 'ACWI universe refresh' },
+  { key: 'acquisition', label: 'Source acquisition' },
+  { key: 'templates', label: 'Template universe refresh' },
+  { key: 'prune', label: 'Orphan company prune' },
   { key: 'prices', label: 'Price + volume refresh' },
   { key: 'momentum', label: 'Momentum compute' },
 ];
@@ -166,29 +131,53 @@ export function runToTimelineProps(run: IngestRun): {
   const finished = run.status === 'ok' || run.status === 'error';
   const phase = run.current_phase;
   const state: Record<string, StepState> = {
-    acwi: { status: 'pending' },
+    acquisition: { status: 'pending' },
+    templates: { status: 'pending' },
+    prune: { status: 'pending' },
     prices: { status: 'pending' },
     momentum: { status: 'pending' },
   };
 
   const liveMessage = run.current_message ?? undefined;
 
-  // Phase 1 — ACWI
-  if (run.acwi_summary || run.acwi_target_month) {
-    const s = run.acwi_summary;
-    state.acwi = {
-      status: 'done',
-      message: s
-        ? `+${s.additions_count} / −${s.removals_count}${s.renames_count > 0 ? ` / ${s.renames_count} renames` : ''}`
-        : undefined,
-    };
-  } else if (phase === 'acwi') {
-    state.acwi = { status: 'in_progress', message: liveMessage ?? 'reconstructing ACWI universe…' };
-  } else if (finished) {
-    state.acwi = { status: 'error', message: 'failed' };
+  // Phase 0 — Acquisition. There's no per-run summary column on
+  // `ingest_run` for acquisition results — current_message carries the
+  // status line. Once we move past this phase we mark it done.
+  if (phase === 'templates' || phase === 'prune' || phase === 'prices' || phase === 'momentum' || phase === 'done' || finished) {
+    state.acquisition = { status: 'done', message: 'sources acquired' };
+  } else if (phase === 'acquisition') {
+    state.acquisition = { status: 'in_progress', message: liveMessage ?? 'probing upstream sources…' };
   }
 
-  // Phase 2 — Prices
+  // Phase 1 — Templates
+  const templates = run.templates_summary ?? [];
+  const tplErr = templates.filter((t) => t.error).length;
+  const tplOk = templates.length - tplErr;
+  if (templates.length > 0 && (phase === 'prune' || phase === 'prices' || phase === 'momentum' || phase === 'done' || finished)) {
+    // Aggregate diff across templates for the inline message.
+    const totAdd = templates.reduce((a, t) => a + (t.additions_count || 0), 0);
+    const totRem = templates.reduce((a, t) => a + (t.removals_count || 0), 0);
+    const totRen = templates.reduce((a, t) => a + (t.renames_count || 0), 0);
+    state.templates = {
+      status: tplErr > 0 && tplOk === 0 ? 'error' : 'done',
+      message: `${tplOk}/${templates.length} ok · +${totAdd} / −${totRem}${totRen > 0 ? ` / r${totRen}` : ''}`,
+    };
+  } else if (phase === 'templates') {
+    state.templates = { status: 'in_progress', message: liveMessage ?? 'reconstructing template universes…' };
+  } else if (finished) {
+    state.templates = { status: 'error', message: 'failed' };
+  }
+
+  // Phase 2 — Prune (no per-run summary column; current_message
+  // carries the count line. Once we move past prune the step is done
+  // unless the phase errored, which would land in error_summary).
+  if (phase === 'prices' || phase === 'momentum' || phase === 'done' || finished) {
+    state.prune = { status: 'done', message: 'orphan companies pruned' };
+  } else if (phase === 'prune') {
+    state.prune = { status: 'in_progress', message: liveMessage ?? 'pruning orphan companies…' };
+  }
+
+  // Phase 3 — Prices
   if (run.companies_processed > 0 && (phase === 'momentum' || phase === 'done' || finished)) {
     const denominator = run.companies_total ? ` of ${run.companies_total}` : '';
     state.prices = {
@@ -208,7 +197,7 @@ export function runToTimelineProps(run: IngestRun): {
     state.prices = { status: 'error', message: 'failed' };
   }
 
-  // Phase 3 — Momentum
+  // Phase 4 — Momentum
   const mom = run.momentum_summary ?? [];
   const successCount = mom.filter((m) => m.status === 'ok').length;
   const errorCount = mom.filter((m) => m.status === 'error').length;
@@ -254,26 +243,6 @@ export function runToTimelineProps(run: IngestRun): {
   };
 }
 
-function PhasePips({ run }: { run: IngestRun }) {
-  const phases = [
-    { key: 'acwi' as const,     hasData: run.acwi_target_month != null || run.acwi_summary != null },
-    { key: 'prices' as const,   hasData: run.companies_processed > 0 || run.prices_refreshed > 0 || run.volumes_refreshed > 0 },
-    { key: 'momentum' as const, hasData: (run.momentum_summary?.length ?? 0) > 0 },
-  ];
-  const currentPhase = run.current_phase;
-  return (
-    <span className="inline-flex items-center gap-1" title={`Phases: ACWI · prices · momentum (current: ${currentPhase ?? '—'})`}>
-      {phases.map((p) => {
-        const isCurrent = run.status === 'running' && currentPhase === p.key;
-        let cls = 'bg-gray-700';
-        if (p.hasData) cls = 'bg-emerald-500';
-        if (isCurrent) cls = 'bg-amber-400 animate-pulse';
-        return <span key={p.key} className={`inline-block w-2 h-2 rounded-full ${cls}`} />;
-      })}
-    </span>
-  );
-}
-
 /** Curated subset of the strategy config to display on the strategy list
  * row + the add picker. The full breakdown lives in the detail view. */
 function strategySummary(cfg: Record<string, unknown> | null): string {
@@ -289,31 +258,21 @@ function strategySummary(cfg: Record<string, unknown> | null): string {
 }
 
 export default function Schedule() {
-  const [runs, setRuns] = useState<IngestRun[]>([]);
   const [strategies, setStrategies] = useState<ScheduledStrategy[]>([]);
   const [strategiesLoading, setStrategiesLoading] = useState(true);
-  const [loading, setLoading] = useState(true);
-  const [triggering, setTriggering] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [expandedRunId, setExpandedRunId] = useState<number | null>(null);
   const [expandedStrategyId, setExpandedStrategyId] = useState<number | null>(null);
   const [addingPickerOpen, setAddingPickerOpen] = useState(false);
-
-  const loadRuns = useCallback(async () => {
-    try {
-      const r = await fetch(`${API_URL}/api/ingest/runs?limit=50`);
-      if (!r.ok) {
-        setError(`Failed to load runs (${r.status})`);
-        return;
-      }
-      const data = (await r.json()) as IngestRun[];
-      setRuns(Array.isArray(data) ? data : []);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
+  // Per-strategy run-history cache. Survives collapse/re-expand so the
+  // detail view renders instantly on a second click; the detail still
+  // fires a silent revalidate fetch on every mount to pick up updates.
+  const [historyCache, setHistoryCache] = useState<Map<number, StrategyRunHistory>>(new Map());
+  const cacheRunHistory = useCallback((id: number, data: StrategyRunHistory) => {
+    setHistoryCache((prev) => {
+      const next = new Map(prev);
+      next.set(id, data);
+      return next;
+    });
   }, []);
 
   const loadStrategies = useCallback(async () => {
@@ -330,51 +289,12 @@ export default function Schedule() {
   }, []);
 
   useEffect(() => {
-    void loadRuns();
     void loadStrategies();
-  }, [loadRuns, loadStrategies]);
-
-  useEffect(() => {
-    const anyRunning = runs.some((r) => r.status === 'running');
-    if (!anyRunning && !triggering) return;
-    const interval = setInterval(() => {
-      void loadRuns();
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [runs, triggering, loadRuns]);
-
-  const lastByJob = useMemo<Record<string, IngestRun | undefined>>(() => {
-    const out: Record<string, IngestRun | undefined> = {};
-    for (const job of JOBS) {
-      out[job.key] = runs.find((r) => r.job_name === job.key);
-    }
-    out.manual = runs.find((r) => r.job_name === 'manual');
-    return out;
-  }, [runs]);
-
-  const triggerJob = async (jobKey: string) => {
-    setTriggering(jobKey);
-    try {
-      const r = await fetch(
-        `${API_URL}/api/ingest/scheduled-refresh/trigger?job_name=${encodeURIComponent(jobKey)}`,
-        { method: 'POST' },
-      );
-      if (!r.ok) {
-        const body = await r.text().catch(() => '');
-        setError(`Trigger failed: ${r.status} ${body.slice(0, 200)}`);
-        return;
-      }
-      await loadRuns();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setTriggering(null);
-    }
-  };
+  }, [loadStrategies]);
 
   const toggleStrategy = useCallback(async (id: number, enabled: boolean) => {
     try {
-      const r = await fetch(`${API_URL}/api/scheduled-strategies/${id}`, {
+      const r = await apiFetch(`${API_URL}/api/scheduled-strategies/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled }),
@@ -391,9 +311,13 @@ export default function Schedule() {
   }, [loadStrategies]);
 
   const removeStrategy = useCallback(async (id: number) => {
-    if (!confirm('Remove this strategy from the schedule? Existing snapshots will be preserved.')) return;
+    const ok = await dialog.confirm(
+      'Remove this strategy from the schedule? Existing snapshots will be preserved.',
+      { title: 'Remove scheduled strategy', confirmLabel: 'Remove', destructive: true },
+    );
+    if (!ok) return;
     try {
-      const r = await fetch(`${API_URL}/api/scheduled-strategies/${id}`, { method: 'DELETE' });
+      const r = await apiFetch(`${API_URL}/api/scheduled-strategies/${id}`, { method: 'DELETE' });
       if (!r.ok) {
         const body = await r.text().catch(() => '');
         setError(`Delete failed: ${r.status} ${body.slice(0, 200)}`);
@@ -406,22 +330,46 @@ export default function Schedule() {
     }
   }, [expandedStrategyId, loadStrategies]);
 
+  const removeAllStrategies = useCallback(async () => {
+    const count = strategies.length;
+    if (count === 0) return;
+    const ok = await dialog.confirm(
+      `Remove all ${count} scheduled strateg${count === 1 ? 'y' : 'ies'}? Existing snapshots will be preserved (their schedule-strategy link goes NULL via cascade, but the holdings stay inspectable).`,
+      { title: 'Remove all', confirmLabel: `Remove ${count}`, destructive: true },
+    );
+    if (!ok) return;
+    try {
+      const r = await apiFetch(`${API_URL}/api/scheduled-strategies`, { method: 'DELETE' });
+      if (!r.ok) {
+        const body = await r.text().catch(() => '');
+        setError(`Delete all failed: ${r.status} ${body.slice(0, 200)}`);
+        return;
+      }
+      setExpandedStrategyId(null);
+      await loadStrategies();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [strategies.length, loadStrategies]);
+
   return (
     <div className="min-h-screen bg-[#0f1117] text-gray-200">
       <div className="px-8 py-5 border-b border-gray-800/40">
         <h1 className="text-xl font-semibold text-white">Schedule</h1>
         <p className="text-sm text-gray-500 mt-1">
-          The pipeline fires Tuesday 02:00 UTC (after Monday global close) and the 2nd of each month 02:00 UTC (after 1st-of-month global close). Every strategy on the schedule below gets a fresh holdings snapshot on every tick.
+          The pipeline fires Tuesday 02:00 UTC (after Monday global close). Each strategy either rebalances (per its frequency) or has its prior holdings re-priced — every tick produces exactly one snapshot per strategy.
         </p>
       </div>
 
-      <div className="px-8 py-6 space-y-6 max-w-6xl">
+      <div className="px-8 py-6 space-y-6 max-w-screen-2xl">
         {error && (
           <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg px-4 py-3 text-sm text-rose-300 flex items-center justify-between">
             <span>{error}</span>
             <button type="button" onClick={() => setError(null)} className="text-rose-200 hover:text-white text-xs">dismiss</button>
           </div>
         )}
+
+        <DailyMtdRefreshCard />
 
         {/* Scheduled strategies */}
         <div className="bg-[#151821] rounded-xl border border-gray-800/40">
@@ -432,17 +380,29 @@ export default function Schedule() {
                 Each pipeline run computes a fresh holdings snapshot for every enabled strategy. Click a strategy to see its run history.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setAddingPickerOpen((v) => !v)}
-              className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
-            >
-              {addingPickerOpen ? 'Cancel' : '+ Add strategy'}
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              {strategies.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => void removeAllStrategies()}
+                  className="text-xs px-3 py-1.5 rounded-lg text-rose-300 hover:bg-rose-500/10 transition-colors"
+                  title="Delete every scheduled strategy (snapshots stay)"
+                >
+                  Remove all
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setAddingPickerOpen((v) => !v)}
+                className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+              >
+                {addingPickerOpen ? 'Cancel' : '+ Add strategy'}
+              </button>
+            </div>
           </div>
 
           {addingPickerOpen && (
-            <AddStrategyPicker
+            <AddScheduledStrategyForm
               onAdded={async () => {
                 setAddingPickerOpen(false);
                 await loadStrategies();
@@ -452,10 +412,10 @@ export default function Schedule() {
           )}
 
           {strategiesLoading ? (
-            <div className="px-5 py-5 text-sm text-gray-500">Loading…</div>
+            <div className="px-5 py-5 text-sm text-gray-500"><LoadingDots label="Loading" /></div>
           ) : strategies.length === 0 ? (
             <div className="px-5 py-6 text-sm text-gray-500">
-              No strategies scheduled yet. Click <span className="text-gray-300">+ Add strategy</span> to pin one of your saved backtests from <a href="/momentum" className="text-indigo-400 hover:underline">/momentum</a>.
+              No strategies scheduled yet. Click <span className="text-gray-300">+ Add strategy</span> to add one inline.
             </div>
           ) : (
             <div className="divide-y divide-gray-800/30">
@@ -473,8 +433,13 @@ export default function Schedule() {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className={`text-sm font-medium truncate ${s.enabled ? 'text-white' : 'text-gray-500'}`}>
-                              {s.backtest_name ?? `Backtest #${s.backtest_run_id}`}
+                              {s.name || `Strategy #${s.id}`}
                             </span>
+                            {s.frequency && (
+                              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-indigo-500/10 text-indigo-300 border-indigo-500/30">
+                                {s.frequency}
+                              </span>
+                            )}
                             {!s.enabled && (
                               <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-gray-500/10 text-gray-400 border-gray-500/30">
                                 paused
@@ -482,10 +447,17 @@ export default function Schedule() {
                             )}
                           </div>
                           <div className="text-xs text-gray-500 mt-0.5 font-mono">
-                            {strategySummary(s.backtest_config)}
-                            {s.last_snapshot && (
+                            {strategySummary(s.config)}
+                            {s.last_run_at ? (
                               <span className="text-gray-600">
-                                {' · '}last run {fmtDate(s.last_snapshot.created_at)} · {s.last_snapshot.holdings_count} holdings
+                                {' · '}last run {fmtTimestamp(s.last_run_at)}
+                              </span>
+                            ) : (
+                              <span className="text-gray-600">{' · '}not run yet</span>
+                            )}
+                            {s.next_due_at && (
+                              <span className="text-gray-600">
+                                {' · '}next {fmtTimestamp(s.next_due_at)}
                               </span>
                             )}
                           </div>
@@ -512,6 +484,8 @@ export default function Schedule() {
                     {isExpanded && (
                       <ScheduledStrategyDetail
                         strategyId={s.id}
+                        initialData={historyCache.get(s.id) ?? null}
+                        onLoaded={(d) => cacheRunHistory(s.id, d)}
                         onMutated={() => void loadStrategies()}
                       />
                     )}
@@ -522,271 +496,7 @@ export default function Schedule() {
           )}
         </div>
 
-        {/* Pipeline job cards */}
-        <div className="grid gap-4 md:grid-cols-2">
-          {JOBS.map((job) => {
-            const last = lastByJob[job.key];
-            const isTriggering = triggering === job.key;
-            const isRunning = last?.status === 'running';
-            return (
-              <div key={job.key} className="bg-[#151821] rounded-xl border border-gray-800/40 p-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h3 className="text-sm font-medium text-white">{job.label}</h3>
-                    <div className="text-xs text-gray-500 mt-0.5 font-mono">
-                      {job.cron} <span className="text-gray-600">·</span> {job.cronExplain}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => triggerJob(job.key)}
-                    disabled={isTriggering || isRunning}
-                    className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors shrink-0"
-                  >
-                    {isTriggering ? 'Starting…' : isRunning ? 'Running…' : 'Run now'}
-                  </button>
-                </div>
-                <p className="text-xs text-gray-500 mt-2">{job.description}</p>
-                <div className="mt-4 pt-3 border-t border-gray-800/40 text-xs space-y-1.5">
-                  {last ? (
-                    <>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-gray-500">Last run:</span>
-                        <span className="text-gray-300 font-mono">{fmtTimestamp(last.started_at)}</span>
-                        <StatusBadge status={last.status} />
-                        <PhasePips run={last} />
-                      </div>
-                      {last.acwi_summary && (
-                        <div className="text-gray-400 font-mono">
-                          ACWI: +{last.acwi_summary.additions_count} / −{last.acwi_summary.removals_count}
-                          {last.acwi_summary.renames_count > 0 && <span> / {last.acwi_summary.renames_count} renames</span>}
-                        </div>
-                      )}
-                      <div className="text-gray-400 font-mono">
-                        Prices: {last.companies_processed} processed · {last.prices_refreshed}p / {last.volumes_refreshed}v
-                      </div>
-                      {last.momentum_summary && last.momentum_summary.length > 0 && (
-                        <div className="text-gray-400 font-mono">
-                          Momentum: {last.momentum_summary.filter((m) => m.status === 'ok').length} of {last.momentum_summary.length} strateg{last.momentum_summary.length === 1 ? 'y' : 'ies'} ok
-                        </div>
-                      )}
-                      <div className="text-gray-500 font-mono">{fmtDuration(last.started_at, last.finished_at)}</div>
-                    </>
-                  ) : (
-                    <div className="text-gray-500">No runs yet.</div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Recent runs */}
-        <div className="bg-[#151821] rounded-xl border border-gray-800/40">
-          <div className="px-5 py-3 border-b border-gray-800/40 flex items-center justify-between">
-            <h3 className="text-sm font-medium text-white">Recent runs</h3>
-            <button
-              type="button"
-              onClick={() => void loadRuns()}
-              className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
-            >
-              {loading ? 'Loading…' : 'Refresh'}
-            </button>
-          </div>
-          {runs.length === 0 && !loading ? (
-            <div className="px-5 py-6 text-sm text-gray-500">No pipeline runs in history yet.</div>
-          ) : (
-            <div className="divide-y divide-gray-800/30">
-              {runs.map((r) => {
-                const isExpanded = expandedRunId === r.run_id;
-                const tp = runToTimelineProps(r);
-                const momCount = r.momentum_summary?.length ?? 0;
-                return (
-                  <div key={r.run_id}>
-                    <button
-                      type="button"
-                      onClick={() => setExpandedRunId(isExpanded ? null : r.run_id)}
-                      className="w-full px-5 py-2.5 flex flex-col gap-2 text-left hover:bg-white/[0.02] transition-colors"
-                    >
-                      <div className="flex items-center gap-4 w-full">
-                        <span className="text-gray-500 font-mono text-xs w-4 shrink-0">{isExpanded ? '▾' : '▸'}</span>
-                        <span className="text-gray-300 font-mono text-sm w-44 shrink-0">{fmtTimestamp(r.started_at)}</span>
-                        <PhasePips run={r} />
-                        <StatusBadge status={r.status} />
-                        <span className="text-gray-400 text-xs">{r.job_name}</span>
-                        <span className="text-gray-500 text-xs">{r.triggered_by}</span>
-                        <span className="text-gray-400 text-xs font-mono ml-auto flex items-center gap-4 flex-wrap justify-end">
-                          {r.acwi_summary && (
-                            <span>ACWI +{r.acwi_summary.additions_count}/−{r.acwi_summary.removals_count}</span>
-                          )}
-                          <span>{r.companies_processed} co</span>
-                          {momCount > 0 && (
-                            <span>{momCount} strateg{momCount === 1 ? 'y' : 'ies'}</span>
-                          )}
-                          <span>{fmtDuration(r.started_at, r.finished_at)}</span>
-                        </span>
-                      </div>
-                      {r.status === 'running' && (
-                        <div className="pl-9 pr-1 w-full">
-                          <div className="flex items-center justify-between gap-3 text-[10px] text-gray-500 mb-0.5">
-                            <span className="truncate">
-                              {r.current_message ?? (
-                                r.current_phase === 'acwi' ? 'ACWI universe refresh' :
-                                r.current_phase === 'prices' ? 'Price + volume refresh' :
-                                r.current_phase === 'momentum' ? 'Momentum compute' :
-                                'starting…'
-                              )}
-                            </span>
-                            <span className="font-mono shrink-0">{tp.pct}%</span>
-                          </div>
-                          <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-indigo-500 transition-all duration-300"
-                              style={{ width: `${tp.pct}%` }}
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </button>
-                    {isExpanded && <ScheduleRunDetail run={r} />}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {(() => {
-            const lastErrored = runs.find((r) => r.status === 'error' && r.error_summary);
-            if (!lastErrored) return null;
-            return (
-              <div className="px-5 py-3 border-t border-gray-800/40 text-xs">
-                <div className="text-gray-500 mb-1">
-                  Most recent failed run (#{lastErrored.run_id}, {lastErrored.job_name}):
-                </div>
-                <pre className="bg-[#0f1117] border border-gray-800/60 rounded-lg px-3 py-2 text-rose-300 whitespace-pre-wrap text-[11px] font-mono overflow-x-auto">
-                  {lastErrored.error_summary}
-                </pre>
-              </div>
-            );
-          })()}
-        </div>
       </div>
-    </div>
-  );
-}
-
-/** Inline picker: list of available (not-yet-scheduled) backtests with
- * params preview, plus a confirm button. Shows the config blob for the
- * currently-selected backtest so the user can verify weights / sectors
- * / top-N before adding it to the schedule. */
-function AddStrategyPicker({
-  onAdded,
-  onCancel,
-}: {
-  onAdded: () => Promise<void> | void;
-  onCancel: () => void;
-}) {
-  const [available, setAvailable] = useState<AvailableBacktest[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const r = await fetch(`${API_URL}/api/scheduled-strategies/available-backtests`);
-        if (!r.ok) {
-          if (!cancelled) setError(`Failed to load (${r.status})`);
-          return;
-        }
-        const data = (await r.json()) as AvailableBacktest[];
-        if (cancelled) return;
-        setAvailable(data);
-        if (data.length > 0) setSelectedRunId(data[0].run_id);
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  const selected = useMemo(
-    () => available.find((b) => b.run_id === selectedRunId) ?? null,
-    [available, selectedRunId],
-  );
-
-  const confirm = async () => {
-    if (selectedRunId == null) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const r = await fetch(`${API_URL}/api/scheduled-strategies`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ backtest_run_id: selectedRunId }),
-      });
-      if (!r.ok) {
-        const body = await r.text().catch(() => '');
-        setError(`Add failed: ${r.status} ${body.slice(0, 200)}`);
-        return;
-      }
-      await onAdded();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="px-5 py-4 border-b border-gray-800/40 bg-[#0f1117]">
-      <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">Pick a saved backtest to put on schedule</div>
-      {loading ? (
-        <div className="text-xs text-gray-500">Loading available backtests…</div>
-      ) : available.length === 0 ? (
-        <div className="text-xs text-gray-400">
-          No saved backtests to add. All your saved backtests are already on schedule, or you don&apos;t have any yet — head over to <a href="/momentum" className="text-indigo-400 hover:underline">/momentum</a>, run a backtest, and save it.
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <select
-            value={selectedRunId ?? ''}
-            disabled={saving}
-            onChange={(e) => setSelectedRunId(Number(e.target.value))}
-            className="bg-[#151821] border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 focus:outline-none w-full max-w-md"
-          >
-            {available.map((b) => (
-              <option key={b.run_id} value={b.run_id}>
-                {b.name} (#{b.run_id})
-              </option>
-            ))}
-          </select>
-          {selected && <StrategyConfigDetail cfg={selected.config} />}
-          {error && <div className="text-xs text-rose-300">{error}</div>}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void confirm()}
-              disabled={saving || selectedRunId == null}
-              className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors"
-            >
-              {saving ? 'Adding…' : 'Confirm + add to schedule'}
-            </button>
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={saving}
-              className="text-xs px-3 py-1.5 rounded-lg text-gray-400 hover:bg-white/5 transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

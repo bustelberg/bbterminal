@@ -1,10 +1,22 @@
-"""In-process APScheduler for the scheduled price/volume ingest jobs.
+"""In-process APScheduler for the weekly + daily pipeline ticks.
 
-Replaces the previous Railway-Cron approach for this codebase. Two
-`BackgroundScheduler` cron triggers run inside the FastAPI process:
+Two `BackgroundScheduler` cron triggers run inside the FastAPI process:
 
-    weekly_price_volume   Tue 02:00 UTC   (cron: `day_of_week=tue, hour=2`)
-    monthly_price_volume  2nd at 02:00 UTC (cron: `day=2, hour=2`)
+    weekly_price_volume     Tue 02:00 UTC          — full pipeline
+        (acquisition → templates → prune → prices → momentum)
+    daily_holdings_refresh  Wed-Sat 02:00 UTC      — lightweight MTD-only
+        (prices for held companies → MTD persist per strategy)
+
+The daily tick captures the prior trading day's close (Tue/Wed/Thu/Fri
+US close → next-day 02:00 UTC after ~5h GuruFocus settle) so the
+/schedule "Daily MTD refresh" card surfaces fresh to-date stats every
+trading day. Tuesday is intentionally skipped — the weekly full
+pipeline already does everything the daily would, plus more.
+
+(The previous monthly 2nd-of-month tick was retired: per-strategy
+`frequency` + `next_due_at` on `scheduled_strategy` now drives whether
+a strategy rebalances on a given Tuesday — there's no longer a need
+for a separate monthly cron. See `scheduled_strategies.py`.)
 
 Each fired tick calls `kick_off_refresh(job_name, "auto")`, which inserts
 an `ingest_run` row tagged `triggered_by='auto'` and starts the daemon
@@ -83,15 +95,19 @@ def register_scheduler(app) -> None:
             coalesce=True,
             misfire_grace_time=600,
         )
-        # Monthly: 2nd of every month at 02:00 UTC. Captures the first
-        # trading day's closes — if the 1st was a weekend/holiday the run
-        # still fires but the freshness check no-ops most companies and
-        # the next weekly tick catches up the actual first-trading-day close.
+        # Daily MTD refresh: Wed-Sat 02:00 UTC. Refreshes prices for the
+        # pooled set of held companies (~30-60 vs ~2000 in the weekly
+        # tick) and re-persists MTD on each strategy's latest snapshot.
+        # Skips Tue (weekly tick covers it) and Sun/Mon (weekend; no
+        # fresh closes to capture). Each fire takes minutes, not hours.
         sched.add_job(
             _fire_job,
-            CronTrigger(day=2, hour=2, minute=0, timezone="UTC"),
-            args=["monthly_price_volume"],
-            id="monthly_price_volume",
+            CronTrigger(
+                day_of_week="wed,thu,fri,sat",
+                hour=2, minute=0, timezone="UTC",
+            ),
+            args=["daily_holdings_refresh"],
+            id="daily_holdings_refresh",
             replace_existing=True,
             coalesce=True,
             misfire_grace_time=600,

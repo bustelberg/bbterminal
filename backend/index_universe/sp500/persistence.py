@@ -69,10 +69,23 @@ def store_index_membership(
     batch_size = 500
 
     for i, month in enumerate(months):
+        # Dedupe by company_id within the month. Multiple iShares
+        # tickers can resolve to the same `company_id` (e.g. when the
+        # rename path collapses two listings into one canonical row),
+        # which would otherwise put duplicate (universe_id, company_id,
+        # target_month) tuples into the same upsert batch — Postgres
+        # rejects the whole batch with "ON CONFLICT DO UPDATE command
+        # cannot affect row a second time" and silently loses all
+        # writes from that batch. First-ticker-wins by sort order is
+        # arbitrary but deterministic across runs.
+        seen_cids: set[int] = set()
         for ticker in sorted(monthly_holdings[month]):
             cid = company_lookup.get(ticker)
             if cid is None:
                 continue  # Can't store without a company_id (FK constraint)
+            if cid in seen_cids:
+                continue
+            seen_cids.add(cid)
             row: dict = {
                 "universe_id": universe_id,
                 "target_month": month,

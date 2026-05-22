@@ -260,14 +260,24 @@ def save_current_picks_snapshot(
     triggered_by: str,
     strategy_hash: str | None = None,
     name: str | None = None,
+    kind: str = "rebalance",
+    is_backfill: bool = False,
 ) -> int:
     """Insert a current_picks snapshot and return its snapshot_id.
     Synchronous (call via asyncio.to_thread from async paths). Auto-fills
     `name` with `default_snapshot_name(config)` when caller didn't supply
     one. Skips the `name` column entirely when the schema migration
-    hasn't been applied yet."""
+    hasn't been applied yet.
+
+    `kind` distinguishes 'rebalance' (fresh picks computed at this tick)
+    from 'price_update' (last rebalance's holdings re-priced because the
+    strategy wasn't due to rebalance on this tick). `is_backfill=True`
+    marks snapshots created synthetically on add — historical 'what
+    would have happened' views, NOT real pipeline runs."""
     if triggered_by not in ("auto", "manual"):
         raise ValueError(f"triggered_by must be 'auto' or 'manual', got {triggered_by!r}")
+    if kind not in ("rebalance", "price_update"):
+        raise ValueError(f"kind must be 'rebalance' or 'price_update', got {kind!r}")
     row = {
         "triggered_by": triggered_by,
         "as_of_date": payload["as_of_date"],
@@ -276,6 +286,8 @@ def save_current_picks_snapshot(
         "holdings": payload["holdings"],
         "daily_picks": payload.get("daily_picks") or [],
         "strategy_hash": strategy_hash,
+        "kind": kind,
+        "is_backfill": is_backfill,
     }
     if has_current_picks_name_column():
         row["name"] = name if name is not None else default_snapshot_name(config)

@@ -6,10 +6,11 @@ import {
   CartesianGrid,
 } from 'recharts';
 import DatePartsPicker from './DatePartsPicker';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
-
-const US_EXCHANGES = new Set(['NYSE', 'NASDAQ', 'AMEX']);
+import { apiFetch } from '../../lib/apiFetch';
+import { guruFocusUrl } from '../../lib/gurufocusUrl';
+import TableDownloadButton from './TableDownloadButton';
+import LoadingDots from './LoadingDots';
+import { API_URL } from '../../lib/apiUrl';
 
 type DataPoint = { date: string; value: number };
 
@@ -78,7 +79,7 @@ export default function Indicators() {
     setLoading(true);
     setResult(null);
     try {
-      const res = await fetch(`${API_URL}/api/indicators/fetch`, {
+      const res = await apiFetch(`${API_URL}/api/indicators/fetch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -196,7 +197,7 @@ export default function Indicators() {
           </button>
         </div>
         <p className="text-xs text-gray-500 mt-3">
-          GuruFocus URL: <span className="font-mono text-gray-400">https://www.gurufocus.com/stock/{US_EXCHANGES.has(exchange.trim().toUpperCase()) ? ticker : `${exchange}:${ticker}`}/summary</span>
+          GuruFocus URL: <span className="font-mono text-gray-400">{guruFocusUrl(ticker, exchange)}</span>
           {!fromDate && !toDate && (
             <span className="ml-3 text-gray-600">Tip: set From/To to see the full series per date.</span>
           )}
@@ -308,9 +309,20 @@ export default function Indicators() {
                 <h2 className="text-sm font-medium text-white">
                   Values per date <span className="text-gray-500 font-normal">({chartData.length.toLocaleString()} rows)</span>
                 </h2>
-                <span className="text-xs text-gray-500">
-                  {fromDate || toDate ? 'Filtered window' : 'Last 30 trading days (set From/To to widen)'}
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-gray-500">
+                    {fromDate || toDate ? 'Filtered window' : 'Last 30 trading days (set From/To to widen)'}
+                  </span>
+                  <TableDownloadButton
+                    rows={[...chartData].reverse()}
+                    columns={[
+                      { key: 'date', header: 'Date', accessor: (d: { date: string; value: number }) => d.date },
+                      { key: 'value', header: indicator === 'volume' ? 'Volume' : 'Price', accessor: (d: { date: string; value: number }) => d.value },
+                    ]}
+                    filename={`${exchange || 'X'}_${ticker || 'TKR'}_${indicator || 'price'}`}
+                    title={`Download ${chartData.length} rows as CSV / XLSX`}
+                  />
+                </div>
               </div>
               <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
                 <table className="w-full text-sm">
@@ -379,7 +391,7 @@ export default function Indicators() {
               disabled={currencyMapLoading}
               className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 bg-[#0f1117] border border-gray-700 text-gray-300 hover:border-indigo-500 hover:text-indigo-400"
             >
-              {currencyMapLoading ? 'Loading...' : currencyMapLoaded ? 'Currencies loaded' : 'Load currencies'}
+              {currencyMapLoading ? <LoadingDots label="Loading" /> : currencyMapLoaded ? 'Currencies loaded' : 'Load currencies'}
             </button>
             {currencyMapLoaded && (
               <button
@@ -397,10 +409,37 @@ export default function Indicators() {
               placeholder="Search..."
               className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white w-40 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
             />
+            <TableDownloadButton
+              rows={(() => {
+                const out: { country: string; exchange_code: string; currency: string | null }[] = [];
+                const q = exchangeSearch.toLowerCase();
+                for (const [country, codes] of Object.entries(exchanges ?? {})) {
+                  const passes = !q || country.toLowerCase().includes(q)
+                    || codes.some(c => c.toLowerCase().includes(q))
+                    || (currencyMapLoaded && codes.some(c => currencyMap[c]?.currency.toLowerCase().includes(q)));
+                  if (!passes) continue;
+                  for (const code of codes) {
+                    out.push({
+                      country,
+                      exchange_code: code,
+                      currency: currencyMapLoaded ? currencyMap[code]?.currency ?? null : null,
+                    });
+                  }
+                }
+                return out;
+              })()}
+              columns={[
+                { key: 'country', header: 'Country', accessor: (r) => r.country },
+                { key: 'exchange_code', header: 'Exchange', accessor: (r) => r.exchange_code },
+                { key: 'currency', header: 'Currency', accessor: (r) => r.currency ?? '' },
+              ]}
+              filename="gurufocus_exchanges"
+              title="Download supported exchanges as CSV / XLSX"
+            />
           </div>
         </div>
         {exchangesLoading ? (
-          <div className="px-5 py-4 text-gray-400 text-sm">Loading exchanges...</div>
+          <div className="px-5 py-4 text-gray-400 text-sm"><LoadingDots label="Loading exchanges" /></div>
         ) : exchanges ? (
           <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
             <table className="w-full text-sm">

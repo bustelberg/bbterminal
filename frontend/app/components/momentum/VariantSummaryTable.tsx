@@ -9,11 +9,13 @@ import {
   type VariantOutcome,
   type VariantsRunState,
 } from '../../../lib/stores/momentum';
+import type { Column } from '../../../lib/tableExport';
+import TableDownloadButton from '../TableDownloadButton';
 import CollapsibleCard from './CollapsibleCard';
 import { fmtPct } from './utils';
-import { buildFeeMap, computeNetStats, parenPct } from './feeStats';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { computeNetStats, parenPct } from './feeStats';
+import { useExchangeFeeMap } from '../../../lib/hooks/apiData';
+import { API_URL } from '../../../lib/apiUrl';
 
 // One row per VARIANT_DEFS entry. Click to make that variant the active one
 // (the detail views below — equity curve, holdings table, sector timeline —
@@ -36,23 +38,53 @@ export default function VariantSummaryTable({ exchangeByCompany }: Props) {
   const active = momentumStore.use((s) => s.activeVariantKey);
   const run = momentumStore.use((s) => s.variantsRun);
 
-  // Fetch per-exchange fees once so each variant row can append a
-  // `(net X%)` parenthetical to its return / Sharpe / DD. Null when the
-  // user hasn't configured any non-zero fees on /fees.
-  const [feesByExchange, setFeesByExchange] = useState<Map<string, number> | null>(null);
-  useEffect(() => {
-    fetch(`${API_URL}/api/exchange-fees`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((rows) => {
-        const m = buildFeeMap(rows ?? []);
-        setFeesByExchange(m.size > 0 ? m : null);
-      })
-      .catch(() => {});
-  }, []);
+  // Per-exchange fees — shared cached hook, null when no non-zero fees
+  // are configured so each variant row just shows gross figures.
+  const feesByExchange = useExchangeFeeMap();
 
   // Hide entirely when no sweep has ever run. The wrapper component decides
   // when to render us based on whether `variants` has any entries.
   const anyVariant = Object.values(variants).some((v) => v != null);
+
+  // Flatten each ready variant's summary into one row for the export.
+  type VariantExportRow = {
+    variant: string;
+    start: string;
+    end: string;
+    annualized_pct: number | null;
+    sharpe: number | null;
+    total_return_pct: number | null;
+    max_drawdown_pct: number | null;
+  };
+  const exportRows = useMemo<VariantExportRow[]>(() => {
+    const out: VariantExportRow[] = [];
+    for (const v of VARIANT_DEFS) {
+      const o = variants[v.key];
+      if (!o || o.status !== 'ok') continue;
+      const r = o.result;
+      const months = r.monthly_records ?? [];
+      out.push({
+        variant: v.label,
+        start: months[0]?.date ?? '',
+        end: months[months.length - 1]?.date ?? '',
+        annualized_pct: r.summary?.annualized_return_pct ?? null,
+        sharpe: r.summary?.sharpe_ratio ?? null,
+        total_return_pct: r.summary?.total_return_pct ?? null,
+        max_drawdown_pct: r.summary?.max_drawdown_pct ?? null,
+      });
+    }
+    return out;
+  }, [variants]);
+  const exportColumns = useMemo<Column<VariantExportRow>[]>(() => [
+    { key: 'variant', header: 'Variant', accessor: (r) => r.variant },
+    { key: 'start', header: 'Start', accessor: (r) => r.start },
+    { key: 'end', header: 'End', accessor: (r) => r.end },
+    { key: 'annualized_pct', header: 'Annualized return (%)', accessor: (r) => r.annualized_pct },
+    { key: 'sharpe', header: 'Sharpe', accessor: (r) => r.sharpe },
+    { key: 'total_return_pct', header: 'Total return (%)', accessor: (r) => r.total_return_pct },
+    { key: 'max_drawdown_pct', header: 'Max drawdown (%)', accessor: (r) => r.max_drawdown_pct },
+  ], []);
+
   if (!anyVariant) return null;
 
   return (
@@ -62,6 +94,12 @@ export default function VariantSummaryTable({ exchangeByCompany }: Props) {
         <div className="flex items-center gap-3">
           <span>Click a row to switch the equity curve, holdings, and sector timeline below.</span>
           {run && <SweepStatus run={run} />}
+          <TableDownloadButton
+            rows={exportRows}
+            columns={exportColumns}
+            filename="variant_summary"
+            title={`Download ${exportRows.length} variant rows as CSV / XLSX`}
+          />
         </div>
       }
     >

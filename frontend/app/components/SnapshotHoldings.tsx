@@ -2,9 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import MonthlyHoldingsTable from './momentum/MonthlyHoldingsTable';
+import LoadingDots from './LoadingDots';
 import type { BacktestResult, Holding, PeriodRecord, Summary } from '../../lib/stores/momentum';
+import { useCompanyExchangeMap } from '../../lib/hooks/apiData';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { API_URL } from '../../lib/apiUrl';
 
 type SnapshotResponse = {
   snapshot_id: number;
@@ -22,6 +24,13 @@ export default function SnapshotHoldings({ snapshotId }: { snapshotId: number })
   const [snapshot, setSnapshot] = useState<SnapshotResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Snapshot holdings JSON doesn't include `gurufocus_exchange` per
+  // company, so MonthlyHoldingsTable would render "—" in the Exchange
+  // column and a bare-ticker GuruFocus URL for everything (which 404s
+  // Company → exchange map shared via the cached `useCompanies` hook
+  // so this page reuses MomentumBacktester's fetch when both render.
+  const exchangeByCompany = useCompanyExchangeMap();
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -98,7 +107,7 @@ export default function SnapshotHoldings({ snapshotId }: { snapshotId: number })
     };
   }, [snapshot]);
 
-  if (loading) return <div className="text-xs text-gray-500">Loading snapshot…</div>;
+  if (loading) return <div className="text-xs text-gray-500"><LoadingDots label="Loading snapshot" /></div>;
   if (error) return <div className="text-xs text-rose-300">Failed to load snapshot: {error}</div>;
   if (!result || !scoringConfig) return <div className="text-xs text-gray-500">No data.</div>;
 
@@ -106,7 +115,7 @@ export default function SnapshotHoldings({ snapshotId }: { snapshotId: number })
     <MonthlyHoldingsTable
       result={result}
       categories={categories}
-      exchangeByCompany={new Map()}
+      exchangeByCompany={exchangeByCompany}
       scoringConfig={scoringConfig}
     />
   );

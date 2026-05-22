@@ -12,8 +12,10 @@ import {
   clearSp500GfCheck,
 } from '../../lib/stores/sp500';
 import { trackedFetch } from '../../lib/loading';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import type { Column } from '../../lib/tableExport';
+import TableDownloadButton from './TableDownloadButton';
+import LoadingDots from './LoadingDots';
+import { API_URL } from '../../lib/apiUrl';
 
 type IndexEntry = {
   index_name: string;
@@ -165,6 +167,24 @@ export default function IndexUniverse() {
         (t.company_name || '').toLowerCase().includes(tickerFilter.toLowerCase())
       )
     : tickers;
+
+  // Same shape powers both the per-month and cumulative ticker tables.
+  const tickerExportColumns = useMemo<Column<TickerEntry>[]>(() => [
+    { key: 'ticker', header: 'Ticker', accessor: (t) => t.ticker },
+    { key: 'exchange', header: 'Exchange', accessor: (t) => t.exchange ?? '' },
+    { key: 'company_id', header: 'Company ID', accessor: (t) => t.company_id ?? '' },
+    { key: 'company_name', header: 'Company', accessor: (t) => t.company_name ?? '' },
+    { key: 'gurufocus_url', header: 'GuruFocus URL', accessor: (t) => t.gurufocus_url },
+  ], []);
+  const filteredCumulative = useMemo(() => (
+    cumulativeFilter
+      ? cumulative.filter(t =>
+          t.ticker.toLowerCase().includes(cumulativeFilter.toLowerCase()) ||
+          (t.company_name || '').toLowerCase().includes(cumulativeFilter.toLowerCase()) ||
+          (t.exchange || '').toLowerCase().includes(cumulativeFilter.toLowerCase())
+        )
+      : cumulative
+  ), [cumulative, cumulativeFilter]);
 
   // Changelog: group by year
   const changesByYear = useMemo(() => {
@@ -319,7 +339,7 @@ export default function IndexUniverse() {
                   </div>
                   <div className="p-5">
                     {months.length === 0 ? (
-                      <p className="text-sm text-gray-500">Loading months...</p>
+                      <p className="text-sm text-gray-500"><LoadingDots label="Loading months" /></p>
                     ) : (
                       <div className="flex flex-wrap gap-1.5">
                         {months.map(m => (
@@ -424,10 +444,16 @@ export default function IndexUniverse() {
                         onChange={e => setTickerFilter(e.target.value)}
                         className="px-3 py-1.5 bg-[#0f1117] border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-600 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none w-48"
                       />
+                      <TableDownloadButton
+                        rows={filteredTickers}
+                        columns={tickerExportColumns}
+                        filename={`index_${selectedMonth ?? 'tickers'}`}
+                        title={`Download ${filteredTickers.length} tickers as CSV / XLSX`}
+                      />
                     </div>
                     <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
                       {loadingMonth ? (
-                        <div className="px-5 py-8 text-center text-gray-500 text-sm">Loading...</div>
+                        <div className="px-5 py-8 text-center text-gray-500 text-sm"><LoadingDots label="Loading" /></div>
                       ) : (
                         <table className="w-full text-sm">
                           <thead className="sticky top-0 bg-[#151821]">
@@ -539,17 +565,25 @@ export default function IndexUniverse() {
                       </>
                     )}
                   </h3>
-                  <input
-                    type="text"
-                    placeholder="Filter..."
-                    value={cumulativeFilter}
-                    onChange={e => setCumulativeFilter(e.target.value)}
-                    className="px-3 py-1.5 bg-[#0f1117] border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-600 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none w-48"
-                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Filter..."
+                      value={cumulativeFilter}
+                      onChange={e => setCumulativeFilter(e.target.value)}
+                      className="px-3 py-1.5 bg-[#0f1117] border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-600 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none w-48"
+                    />
+                    <TableDownloadButton
+                      rows={filteredCumulative}
+                      columns={tickerExportColumns}
+                      filename="index_all_tickers"
+                      title={`Download ${filteredCumulative.length} tickers as CSV / XLSX`}
+                    />
+                  </div>
                 </div>
                 <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
                   {loadingCumulative ? (
-                    <div className="px-5 py-8 text-center text-gray-500 text-sm">Loading...</div>
+                    <div className="px-5 py-8 text-center text-gray-500 text-sm"><LoadingDots label="Loading" /></div>
                   ) : (
                     <table className="w-full text-sm">
                       <thead className="sticky top-0 bg-[#151821]">

@@ -4,11 +4,10 @@ import { useState, useEffect, useMemo } from 'react';
 import type { Snapshot } from '../longequity-universe/page';
 
 import { ingestStore, startIngest } from '../../lib/stores/ingest';
-import DatePartsPicker from './DatePartsPicker';
-import ProgressTimeline, { type StepDef, type StepState } from './ProgressTimeline';
+import ProgressTimeline from './ProgressTimeline';
 import { trackedFetch } from '../../lib/loading';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import LoadingDots from './LoadingDots';
+import { API_URL } from '../../lib/apiUrl';
 
 type Company = {
   company_id: number;
@@ -202,13 +201,6 @@ function downloadCsv(companies: Company[], targetDate: string): void {
   URL.revokeObjectURL(url);
 }
 
-const SAVE_STEPS: StepDef[] = [
-  { key: 'load', label: 'Load LongEquity memberships' },
-  { key: 'build', label: 'Build cumulative set' },
-  { key: 'target', label: 'Prepare target universe' },
-  { key: 'insert', label: 'Insert membership rows' },
-];
-
 export default function LongEquityUniverse() {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [snapshotsLoading, setSnapshotsLoading] = useState(false);
@@ -223,19 +215,6 @@ export default function LongEquityUniverse() {
   const ingestLog = ingestStore.use((s) => s.log);
   const setIngestLog = (next: typeof ingestLog) => ingestStore.set({ log: next });
 
-  // Save-as-universe state
-  const [universeName, setUniverseName] = useState('longequity_cumulative');
-  const [description, setDescription] = useState('');
-  const [startDate, setStartDate] = useState('2002-01-01');
-  const [endDate, setEndDate] = useState(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
-  });
-  const [saving, setSaving] = useState(false);
-  const [saveStepMap, setSaveStepMap] = useState<Record<string, StepState>>({});
-  const [saveLog, setSaveLog] = useState<string[]>([]);
-  const [saveSummary, setSaveSummary] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
 
   async function refreshSnapshots() {
     try {
@@ -327,67 +306,6 @@ export default function LongEquityUniverse() {
     return regions;
   }, [data]);
 
-  async function saveUniverse() {
-    const name = universeName.trim();
-    if (!name) {
-      setSaveError('Universe name is required');
-      return;
-    }
-    setSaving(true);
-    setSaveError(null);
-    setSaveSummary(null);
-    setSaveStepMap({});
-    setSaveLog([]);
-    try {
-      const resp = await trackedFetch(`Saving universe ${name}`, `${API_URL}/api/longequity/save-universe`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          description: description.trim() || null,
-          start_date: startDate,
-          end_date: endDate,
-        }),
-      });
-      if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`);
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const chunks = buf.split('\n\n');
-        buf = chunks.pop() ?? '';
-        for (const chunk of chunks) {
-          for (const line of chunk.split('\n')) {
-            if (!line.startsWith('data:')) continue;
-            const payload = line.slice(5).trim();
-            if (!payload) continue;
-            let j: { type?: string; step?: string; status?: string; message?: string };
-            try { j = JSON.parse(payload); } catch { continue; }
-            if (j.type === 'progress' && j.step) {
-              const status = (j.status as StepState['status']) ?? 'in_progress';
-              setSaveStepMap(prev => ({
-                ...prev,
-                [j.step as string]: { status, message: j.message ?? '' },
-              }));
-              setSaveLog(prev => [...prev, `${j.step}: ${j.message ?? ''}`]);
-            } else if (j.type === 'done') {
-              setSaveSummary(j.message ?? 'Saved.');
-            } else if (j.type === 'error') {
-              setSaveError(j.message ?? 'Failed');
-            }
-          }
-        }
-      }
-    } catch (e) {
-      setSaveError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  }
-
   const selectedSnapshot = snapshots.find((s) => s.target_date === selectedDate);
 
   return (
@@ -397,7 +315,7 @@ export default function LongEquityUniverse() {
         <div>
           <h1 className="text-lg font-semibold text-white">LongEquity Universe</h1>
           <p className="text-xs text-gray-500 mt-0.5">
-            Save a cumulative universe from LongEquity snapshots; browse monthly stats below.
+            Per-month snapshots of LongEquity reports. The cumulative <span className="font-mono">LongEquity</span> universe (every company ever seen) is rebuilt automatically at the end of each ingest.
           </p>
         </div>
         <div className="flex items-center gap-4 shrink-0">
@@ -421,7 +339,7 @@ export default function LongEquityUniverse() {
             disabled={snapshotsLoading || loadingAvailable}
             className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-700/60 text-gray-300 hover:text-white hover:border-gray-600 disabled:opacity-50 transition-colors whitespace-nowrap"
           >
-            {snapshotsLoading || loadingAvailable ? 'Loading...' : hasLoaded ? 'Refresh' : 'Load'}
+            {snapshotsLoading || loadingAvailable ? <LoadingDots label="Loading" /> : hasLoaded ? 'Refresh' : 'Load'}
           </button>
           <button
             onClick={runIngest}
@@ -436,73 +354,6 @@ export default function LongEquityUniverse() {
       {/* Content */}
       <div className="flex-1 overflow-auto px-8 py-5 space-y-5">
 
-        {/* Save as Universe card */}
-        <div className="bg-[#151821] border border-gray-800/40 rounded-xl px-5 py-4 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-semibold text-white">Save as Cumulative Universe</h2>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Every month from start to end is filled with the same constant set: the union of every company
-                ever seen across all LongEquity snapshots. Ticker and sector come from each company&apos;s most
-                recent appearance.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-[1fr_2fr_auto] gap-3 items-end">
-            <div>
-              <label className="text-gray-500 text-[11px] uppercase tracking-wider">Universe label</label>
-              <input
-                value={universeName}
-                onChange={e => setUniverseName(e.target.value)}
-                disabled={saving}
-                className="mt-1 w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none disabled:opacity-60"
-              />
-            </div>
-            <div>
-              <label className="text-gray-500 text-[11px] uppercase tracking-wider">Description (optional)</label>
-              <input
-                value={description}
-                onChange={e => setDescription(e.target.value)}
-                disabled={saving}
-                className="mt-1 w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none disabled:opacity-60"
-              />
-            </div>
-            <button
-              onClick={saveUniverse}
-              disabled={saving || snapshots.length === 0}
-              className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 text-white transition-colors whitespace-nowrap"
-            >
-              {saving ? 'Saving…' : 'Save universe'}
-            </button>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
-            <label className="text-gray-500 text-[11px] uppercase tracking-wider">Start</label>
-            <DatePartsPicker
-              value={startDate}
-              onChange={setStartDate}
-              minYear={1990}
-              maxYear={new Date().getFullYear()}
-            />
-            <label className="text-gray-500 text-[11px] uppercase tracking-wider ml-2">End</label>
-            <DatePartsPicker
-              value={endDate}
-              onChange={setEndDate}
-              minYear={1990}
-              maxYear={new Date().getFullYear() + 1}
-            />
-          </div>
-
-          <ProgressTimeline
-            steps={SAVE_STEPS}
-            state={saveStepMap}
-            log={saveLog}
-            doneSummary={saveSummary}
-            errorMessage={saveError}
-            running={saving}
-          />
-        </div>
 
         {/* Ingest progress (shared store) */}
         {ingestLog.length > 0 && (() => {
@@ -571,7 +422,7 @@ export default function LongEquityUniverse() {
                 ))}
               </div>
 
-              {loading && <p className="text-sm text-gray-500">Loading...</p>}
+              {loading && <p className="text-sm text-gray-500"><LoadingDots label="Loading" /></p>}
 
               {!loading && data && (
                 <>

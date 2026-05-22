@@ -101,10 +101,11 @@ def run_backtest(
     # volume_index isn't used directly here — it was already incorporated
     # into the precomputed signal panel during _prepare_backtest.
     panel = prepared.panel
-    # Sub-monthly variants need full YYYY-MM-DD on each record so the UI can
-    # disambiguate same-month rows. Monthly/2m/3m keep "YYYY-MM" so saved
-    # results, the cache, and existing frontend charts stay backward-compatible.
-    sub_monthly = prepared.frequency in ("daily", "weekly")
+    # Every record carries the full YYYY-MM-DD of the rebalance — including
+    # monthly/2m/3m, which now align to first-Monday-of-month and so have a
+    # meaningful day component. The frontend's `.slice(0, 7)` callers still
+    # work (they just trim the day to bucket by month).
+    sub_monthly = prepared.frequency in ("daily", "weekly")  # noqa: F841 — retained for _record_label below
 
     # === Open-period extension ===========================================
     # If config requests it and there's real price data available beyond the
@@ -126,9 +127,16 @@ def run_backtest(
             open_iter_idx = len(periods) - 2  # index in periods[:-1] for the open entry
 
     def _record_date(d: date) -> str:
-        return d.isoformat() if sub_monthly else d.isoformat()[:7]
+        # Always the exact rebalance Monday — sub-monthly + calendar-stride
+        # frequencies all return YYYY-MM-DD. The previous YYYY-MM short
+        # form for monthly/Nm hid the actual day; with first-Monday
+        # alignment the day matters.
+        return d.isoformat()
 
     def _record_label(d: date) -> str:
+        # Friendly log label — sub-monthly shows the exact date, longer
+        # cadences round to month-name for progress lines like
+        # "Computing signals for May 2024…".
         return d.isoformat() if sub_monthly else d.strftime("%b %Y")
 
     period_records: list[PeriodRecord] = []

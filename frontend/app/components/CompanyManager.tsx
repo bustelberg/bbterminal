@@ -1,10 +1,16 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { apiFetch } from '../../lib/apiFetch';
 import { dialog } from '../../lib/dialog';
+import { guruFocusUrl } from '../../lib/gurufocusUrl';
+import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
 import { trackedFetch } from '../../lib/loading';
+import type { Column } from '../../lib/tableExport';
+import TableDownloadButton from './TableDownloadButton';
+import LoadingDots from './LoadingDots';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { API_URL } from '../../lib/apiUrl';
 
 type Company = {
   company_id: number;
@@ -13,18 +19,15 @@ type Company = {
   gurufocus_exchange: string;
   country: string | null;
   universes: string[];
+  /** ISO timestamp set by the price phase when GuruFocus returns "delisted"
+   * or "stock not found" for this (ticker, exchange). Companies with a
+   * non-null value are excluded from the backtest gap warning and the
+   * pipeline skips them entirely on subsequent runs. */
+  delisted_at?: string | null;
 };
 
 type SortField = 'company_name' | 'gurufocus_ticker' | 'gurufocus_exchange' | 'country';
 type SortDir = 'asc' | 'desc';
-
-function guruFocusUrl(ticker: string, exchange: string): string {
-  const USA = new Set(['NYSE', 'NASDAQ', 'US', 'AMEX']);
-  const t = ticker.toUpperCase();
-  const e = exchange.toUpperCase();
-  if (USA.has(e)) return `https://www.gurufocus.com/stock/${t}/summary`;
-  return `https://www.gurufocus.com/stock/${e}:${t}/summary`;
-}
 
 // Deterministic hue per universe label so the same universe always gets the
 // same chip colour across renders. Cheap string hash → 0-359 hue, with fixed
@@ -98,6 +101,13 @@ function EditRow({
 
 // ─── Add new company row ──────────────────────────────────────────────────────
 
+type DupeMatch = {
+  company_id: number;
+  company_name: string | null;
+  gurufocus_ticker: string;
+  gurufocus_exchange: string | null;
+};
+
 function AddRow({
   exchangeOptions,
   onAdd,
@@ -111,9 +121,45 @@ function AddRow({
   const [ticker, setTicker] = useState('');
   const [exchange, setExchange] = useState('');
   const [saving, setSaving] = useState(false);
+  // Inline duplicate-detection state. Empty = no probe yet; the API
+  // call fires when name AND (ticker OR exchange) are populated. The
+  // canonical_ticker echo shows the form the row would actually be
+  // stored as — `00700` rather than the `700` the user typed.
+  const [dupeMatches, setDupeMatches] = useState<DupeMatch[]>([]);
+  const [canonicalTicker, setCanonicalTicker] = useState<string>('');
+  const [dupesLoading, setDupesLoading] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { nameRef.current?.focus(); }, []);
+
+  // Debounced probe — 300ms so each keystroke doesn't hit the API.
+  useEffect(() => {
+    const n = name.trim();
+    const t = ticker.trim();
+    const e = exchange.trim();
+    if (!n && !t) {
+      setDupeMatches([]);
+      setCanonicalTicker('');
+      return;
+    }
+    const handle = window.setTimeout(async () => {
+      setDupesLoading(true);
+      try {
+        const params = new URLSearchParams({ name: n, ticker: t, exchange: e });
+        const res = await fetch(`${API_URL}/api/companies/check-duplicates?${params}`);
+        if (!res.ok) return;
+        const body = await res.json();
+        setDupeMatches(body.matches ?? []);
+        setCanonicalTicker(body.canonical_ticker ?? '');
+      } catch {
+        // Network or backend error — silently leave matches empty;
+        // the POST will surface a 409 if there's a real conflict.
+      } finally {
+        setDupesLoading(false);
+      }
+    }, 300);
+    return () => window.clearTimeout(handle);
+  }, [name, ticker, exchange]);
 
   async function handleAdd() {
     if (!name.trim() || !ticker.trim() || !exchange.trim()) return;
@@ -122,11 +168,22 @@ function AddRow({
     setSaving(false);
   }
 
+  const tickerLooksDifferent = canonicalTicker && canonicalTicker !== ticker.trim().toUpperCase();
+  const hasMatches = dupeMatches.length > 0;
+
   return (
+    <>
     <tr className="border-b border-emerald-800/20 bg-emerald-500/5">
       <td className="px-4 py-2 text-sm text-gray-600">new</td>
       <td className="px-3 py-2"><input ref={nameRef} value={name} onChange={(e) => setName(e.target.value)} placeholder="Company name" className={inputAddCls} /></td>
-      <td className="px-3 py-2"><input value={ticker} onChange={(e) => setTicker(e.target.value)} placeholder="TICKER" className={inputAddCls} /></td>
+      <td className="px-3 py-2">
+        <input value={ticker} onChange={(e) => setTicker(e.target.value)} placeholder="TICKER" className={inputAddCls} />
+        {tickerLooksDifferent && (
+          <div className="text-[10px] text-amber-400 font-mono mt-0.5" title="HKSE tickers are stored zero-padded to 5 digits">
+            → stored as {canonicalTicker}
+          </div>
+        )}
+      </td>
       <td className="px-3 py-2">
         <input list="add-exchange" value={exchange} onChange={(e) => setExchange(e.target.value)} placeholder="EXCHANGE" className={inputAddCls} />
         <datalist id="add-exchange">{exchangeOptions.map((o) => <option key={o} value={o} />)}</datalist>
@@ -136,7 +193,7 @@ function AddRow({
       <td className="px-3 py-2">
         <div className="flex gap-1.5">
           <button onClick={handleAdd} disabled={saving || !name.trim() || !ticker.trim() || !exchange.trim()} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 transition-colors">
-            {saving ? '...' : 'Add'}
+            {saving ? '...' : hasMatches ? 'Add anyway' : 'Add'}
           </button>
           <button onClick={onCancel} className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-colors">
             Cancel
@@ -144,6 +201,29 @@ function AddRow({
         </div>
       </td>
     </tr>
+    {hasMatches && (
+      <tr className="border-b border-amber-800/20 bg-amber-500/5">
+        <td colSpan={7} className="px-4 py-3">
+          <div className="text-xs text-amber-300 font-medium mb-2">
+            ⚠ {dupeMatches.length} possible duplicate{dupeMatches.length === 1 ? '' : 's'} already in the database
+            {dupesLoading && <span className="text-gray-500 ml-2">(re-checking…)</span>}
+          </div>
+          <ul className="space-y-1">
+            {dupeMatches.map((m) => (
+              <li key={m.company_id} className="text-xs text-gray-300 font-mono flex items-center gap-3">
+                <span className="text-gray-500">cid={m.company_id}</span>
+                <span className="text-gray-400">{m.gurufocus_exchange ?? '?'}:{m.gurufocus_ticker}</span>
+                <span className="text-gray-200">{m.company_name}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="text-[11px] text-gray-500 mt-2">
+            Click <span className="text-amber-300">Add anyway</span> to create a new row regardless, or <span className="text-gray-300">Cancel</span> and use the existing match.
+          </div>
+        </td>
+      </tr>
+    )}
+    </>
   );
 }
 
@@ -168,6 +248,9 @@ export default function CompanyManager() {
   } | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Mutation controls (Add / Edit / Delete) are admin-only. Read paths
+  // — sort, search, filters, universe chips — stay open to everyone.
+  const isAdmin = useIsAdmin();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -290,7 +373,7 @@ export default function CompanyManager() {
   async function handleSave(id: number, updated: Partial<Company>) {
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/companies/${id}`, {
+      const res = await apiFetch(`${API_URL}/api/companies/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updated),
@@ -317,11 +400,33 @@ export default function CompanyManager() {
     setConfirming(true);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/companies`, {
+      // First try without `force`. The backend's canonical dupe check
+      // returns 409 with the matching rows; on 409 we surface the
+      // matches through a confirm dialog and retry with `force=true`.
+      let res = await apiFetch(`${API_URL}/api/companies`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(pendingAdd),
       });
+      if (res.status === 409) {
+        const body = await res.json().catch(() => ({}));
+        type Match = { company_id: number; company_name: string | null; gurufocus_ticker: string; gurufocus_exchange: string | null };
+        const matches: Match[] = (body.detail?.matches ?? []) as Match[];
+        const lines = matches.map((m) => `  cid=${m.company_id} ${m.gurufocus_exchange ?? '?'}:${m.gurufocus_ticker}  ${m.company_name ?? ''}`).join('\n');
+        const proceed = await dialog.confirm(
+          `${matches.length} possible duplicate${matches.length === 1 ? '' : 's'} found:\n\n${lines}\n\nAdd as a new company anyway?`,
+          { destructive: true, confirmLabel: 'Add anyway' },
+        );
+        if (!proceed) {
+          setPendingAdd(null);
+          return;
+        }
+        res = await apiFetch(`${API_URL}/api/companies`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...pendingAdd, force: true }),
+        });
+      }
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail ?? `HTTP ${res.status}`);
@@ -340,7 +445,7 @@ export default function CompanyManager() {
     if (!(await dialog.confirm(`Delete "${name}"? This cannot be undone.`, { destructive: true, confirmLabel: 'Delete' }))) return;
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/companies/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`${API_URL}/api/companies/${id}`, { method: 'DELETE' });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail ?? `HTTP ${res.status}`);
@@ -356,6 +461,20 @@ export default function CompanyManager() {
     return sortDir === 'asc' ? ' \u25B4' : ' \u25BE';
   };
 
+  // Columns for the download button. Mirrors the visible data columns
+  // (ID, Name, Ticker, Exchange, Country, Memberships) and skips the
+  // Actions column (UI-only). `universes` is joined with ` | ` so each
+  // row is a single CSV/XLSX cell.
+  const exportColumns = useMemo<Column<Company>[]>(() => [
+    { key: 'company_id', header: 'ID', accessor: (c) => c.company_id },
+    { key: 'company_name', header: 'Name', accessor: (c) => c.company_name ?? '' },
+    { key: 'gurufocus_ticker', header: 'Ticker', accessor: (c) => c.gurufocus_ticker },
+    { key: 'gurufocus_exchange', header: 'Exchange', accessor: (c) => c.gurufocus_exchange },
+    { key: 'country', header: 'Country', accessor: (c) => c.country ?? '' },
+    { key: 'universes', header: 'Memberships', accessor: (c) => (c.universes ?? []).join(' | ') },
+    { key: 'gurufocus_url', header: 'GuruFocus URL', accessor: (c) => guruFocusUrl(c.gurufocus_ticker, c.gurufocus_exchange) },
+  ], []);
+
   const thCls = 'px-3 py-3 text-left text-xs font-medium cursor-pointer select-none hover:text-white transition-colors';
 
   return (
@@ -364,7 +483,7 @@ export default function CompanyManager() {
         <div>
           <h1 className="text-lg font-semibold text-white">Companies</h1>
           <p className="text-xs text-gray-500 mt-0.5">
-            {loading ? 'Loading...' : `${filtered.length} of ${companies.length} companies`}
+            {loading ? <LoadingDots label="Loading" /> : `${filtered.length} of ${companies.length} companies`}
             {!loading && duplicateCount > 0 && (
               <>
                 {' · '}
@@ -381,12 +500,14 @@ export default function CompanyManager() {
             )}
           </p>
         </div>
-        <button
-          onClick={() => { setAdding(true); setEditingId(null); }}
-          className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
-        >
-          + Add company
-        </button>
+        {isAdmin && (
+          <button
+            onClick={() => { setAdding(true); setEditingId(null); }}
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+          >
+            + Add company
+          </button>
+        )}
       </div>
 
       <div className="px-8 py-3 border-b border-gray-800/60 flex items-center gap-3 flex-wrap">
@@ -438,6 +559,14 @@ export default function CompanyManager() {
             Clear filters
           </button>
         )}
+        <div className="ml-auto">
+          <TableDownloadButton
+            rows={filtered}
+            columns={exportColumns}
+            filename="companies"
+            title={`Download ${filtered.length} companies as CSV / XLSX`}
+          />
+        </div>
       </div>
 
       {error && (
@@ -496,8 +625,16 @@ export default function CompanyManager() {
                 ) : (
                   <tr key={c.company_id} className="border-b border-gray-800/30 hover:bg-white/[0.02] transition-colors group">
                     <td className="px-4 py-2.5 text-gray-600 text-xs">{c.company_id}</td>
-                    <td className="px-3 py-2.5 text-gray-200 font-medium">
-                      {c.company_name ?? '—'}
+                    <td className={`px-3 py-2.5 font-medium ${c.delisted_at ? 'text-gray-500' : 'text-gray-200'}`}>
+                      <span className={c.delisted_at ? 'line-through' : ''}>{c.company_name ?? '—'}</span>
+                      {c.delisted_at && (
+                        <span
+                          className="ml-2 px-1.5 py-0.5 text-[10px] font-medium bg-rose-500/15 text-rose-300 border border-rose-500/25 rounded"
+                          title={`Marked delisted on ${new Date(c.delisted_at).toLocaleString()} — GuruFocus returned no fetchable data. Excluded from backtests.`}
+                        >
+                          DELISTED
+                        </span>
+                      )}
                       {c.company_name && duplicateNames.has(c.company_name.toLowerCase().trim()) && (
                         <span className="ml-2 px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/15 text-amber-400 border border-amber-500/25 rounded" title="Duplicate company name">
                           DUPE
@@ -536,20 +673,22 @@ export default function CompanyManager() {
                       )}
                     </td>
                     <td className="px-3 py-2.5">
-                      <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={() => { setEditingId(c.company_id); setAdding(false); }}
-                          className="px-2.5 py-1 rounded-lg text-xs text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => handleDelete(c.company_id, c.company_name ?? c.gurufocus_ticker)}
-                          className="px-2.5 py-1 rounded-lg text-xs text-gray-600 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                        >
-                          Delete
-                        </button>
-                      </div>
+                      {isAdmin && (
+                        <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => { setEditingId(c.company_id); setAdding(false); }}
+                            className="px-2.5 py-1 rounded-lg text-xs text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDelete(c.company_id, c.company_name ?? c.gurufocus_ticker)}
+                            className="px-2.5 py-1 rounded-lg text-xs text-gray-600 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ),

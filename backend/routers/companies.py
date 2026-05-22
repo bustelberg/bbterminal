@@ -28,6 +28,10 @@ class CreateCompanyRequest(BaseModel):
     company_name: str
     gurufocus_ticker: str
     gurufocus_exchange: str  # exchange_code, resolved to exchange_id
+    # When the dupe check fires, the frontend re-submits with
+    # force=True to override (e.g. the user inspected the existing
+    # match and confirmed this is a genuinely different security).
+    force: bool = False
 
 
 class UpdateCompanyRequest(BaseModel):
@@ -67,7 +71,7 @@ async def list_companies():
     def _query():
         resp = (
             supabase.table("company")
-            .select("company_id,company_name,gurufocus_ticker,exchange_id,gurufocus_exchange:gurufocus_exchange(exchange_code,country:country(country_name))")
+            .select("company_id,company_name,gurufocus_ticker,exchange_id,delisted_at,gurufocus_exchange:gurufocus_exchange(exchange_code,country:country(country_name))")
             .order("company_name")
             .limit(10000)
             .execute()
@@ -105,12 +109,104 @@ async def list_company_memberships():
     return {"memberships": memberships}
 
 
+@router.get("/api/companies/check-duplicates")
+async def check_duplicates(name: str = "", ticker: str = "", exchange: str = ""):
+    """Pre-add dupe probe. Returns any existing rows that would
+    canonically match the proposed `(name, ticker, exchange)` triple —
+    HKSE zero-pad collapsed, name case-insensitive, also catches the
+    cross-exchange H-share/A-share/GDR collisions.
+
+    The frontend calls this on input change (debounced) to surface
+    warnings inline before the user clicks Add."""
+    from ingest.dedupe import find_canonical_match, canonical_ticker  # noqa: PLC0415
+
+    def _query():
+        matches = find_canonical_match(supabase, name, ticker, exchange)
+        return {
+            "matches": [
+                {
+                    "company_id": m.company_id,
+                    "company_name": m.company_name,
+                    "gurufocus_ticker": m.gurufocus_ticker,
+                    "gurufocus_exchange": m.exchange_code,
+                }
+                for m in matches
+            ],
+            "canonical_ticker": canonical_ticker(ticker, exchange),
+        }
+
+    return await asyncio.to_thread(_query)
+
+
 @router.post("/api/companies")
 async def create_company(req: CreateCompanyRequest):
+    # Reject unresolvable exchanges loudly instead of silently inserting
+    # `exchange_id = NULL`. NULL-exchange rows render as blank columns in
+    # /backtest / /schedule and the frontend's GuruFocus link falls back
+    # to a bare-ticker URL that resolves to the wrong security for
+    # non-US listings — root cause of past ENI-style breakage. Use the
+    # /api/admin/companies/missing-exchange endpoint to triage existing
+    # NULL rows.
+    if not req.gurufocus_exchange or not req.gurufocus_exchange.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="gurufocus_exchange is required; companies must always carry an exchange.",
+        )
     exchange_id = _resolve_exchange_id(req.gurufocus_exchange)
+    if exchange_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unknown exchange_code {req.gurufocus_exchange!r}; add it to "
+                f"gurufocus_exchange first or use one of the known codes "
+                f"(GET /api/companies/field-options)."
+            ),
+        )
+
+    # Canonicalize the ticker before insert so dupes can't accumulate
+    # through ticker-format drift (HKSE `700` vs `00700` was the
+    # original culprit — see backend/ingest/dedupe.py).
+    from ingest.dedupe import (  # noqa: PLC0415
+        canonical_ticker,
+        find_canonical_match,
+    )
+    norm_ticker = canonical_ticker(req.gurufocus_ticker, req.gurufocus_exchange)
+
+    # Block obvious dupes unless `force=True` is explicit. The frontend
+    # is expected to call /api/companies/check-duplicates first and
+    # only POST with force=True after a user explicitly chooses to
+    # create a new row rather than reuse the existing match.
+    if not req.force:
+        def _check():
+            return find_canonical_match(
+                supabase, req.company_name, norm_ticker, req.gurufocus_exchange,
+            )
+        matches = await asyncio.to_thread(_check)
+        if matches:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": (
+                        f"A company with this name or canonical ticker already "
+                        f"exists ({len(matches)} match(es)). Pass force=true to "
+                        f"override after reviewing."
+                    ),
+                    "matches": [
+                        {
+                            "company_id": m.company_id,
+                            "company_name": m.company_name,
+                            "gurufocus_ticker": m.gurufocus_ticker,
+                            "gurufocus_exchange": m.exchange_code,
+                        }
+                        for m in matches
+                    ],
+                    "canonical_ticker": norm_ticker,
+                },
+            )
+
     row = {
         "company_name": req.company_name,
-        "gurufocus_ticker": req.gurufocus_ticker.upper(),
+        "gurufocus_ticker": norm_ticker,
         "exchange_id": exchange_id,
     }
     resp = supabase.table("company").insert(row).execute()
@@ -127,7 +223,27 @@ async def update_company(company_id: int, req: UpdateCompanyRequest):
     if req.gurufocus_ticker is not None:
         updates["gurufocus_ticker"] = req.gurufocus_ticker.upper()
     if req.gurufocus_exchange is not None:
+        # Same loud-rejection rule as create_company — an explicit
+        # PUT with `gurufocus_exchange` set must resolve to a real
+        # exchange_id. Pass null in the request body to deliberately
+        # leave the field unchanged (Pydantic distinguishes
+        # `None`-default vs explicit `null` if the schema is set up
+        # for it; here None means "not provided", so this branch
+        # only fires when the caller passes a value).
+        if not req.gurufocus_exchange.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="gurufocus_exchange cannot be empty; omit the field to leave it unchanged.",
+            )
         exchange_id = _resolve_exchange_id(req.gurufocus_exchange)
+        if exchange_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unknown exchange_code {req.gurufocus_exchange!r}; "
+                    f"add it to gurufocus_exchange first or use a known code."
+                ),
+            )
         updates["exchange_id"] = exchange_id
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")

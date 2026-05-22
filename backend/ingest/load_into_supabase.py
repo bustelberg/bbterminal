@@ -203,15 +203,59 @@ def load_prepared_into_supabase(
     # ------------------------------------------------------------------ #
     company_rows = _df_to_rows(prepared.company)
 
-    # Resolve gurufocus_exchange → exchange_id for each company row
+    # Resolve gurufocus_exchange → exchange_id for each company row.
+    # Rows whose gurufocus_exchange doesn't resolve to a known
+    # exchange_id are SKIPPED — committing NULL exchange_id is the
+    # bug behind empty-exchange columns in /backtest, broken GuruFocus
+    # links, and the upcoming NOT NULL constraint on company.exchange_id
+    # would reject them anyway. Surface the skip count + a sample so
+    # the operator knows which exchanges to add to gurufocus_exchange
+    # before re-ingesting.
+    from .dedupe import canonical_ticker  # noqa: PLC0415
+    skipped_no_exchange: list[dict] = []
+    resolved_rows: list[dict] = []
     for row in company_rows:
         gf_exchange = row.pop("gurufocus_exchange", None)
-        row["exchange_id"] = exchange_map.get(gf_exchange) if gf_exchange else None
-        # Remove fields that don't belong on the company table
+        exchange_id = exchange_map.get(gf_exchange) if gf_exchange else None
+        # Remove fields that don't belong on the company table.
         row.pop("universe_ticker", None)
         row.pop("sector", None)
         row.pop("country", None)
+        if exchange_id is None:
+            skipped_no_exchange.append({
+                "gurufocus_ticker": row.get("gurufocus_ticker"),
+                "gurufocus_exchange": gf_exchange,
+                "reason": (
+                    "Empty gurufocus_exchange field on the source row"
+                    if not gf_exchange
+                    else f"Exchange code {gf_exchange!r} not found in gurufocus_exchange table"
+                ),
+            })
+            continue
+        # Normalize the ticker before insert so `(gurufocus_ticker,
+        # exchange_id)`'s unique constraint catches all dupes, not
+        # just exact string equality. HKSE:700 vs HKSE:00700 was the
+        # original break — see ingest/dedupe.py for the full ruleset.
+        row["gurufocus_ticker"] = canonical_ticker(
+            row.get("gurufocus_ticker"), gf_exchange,
+        )
+        row["exchange_id"] = exchange_id
+        resolved_rows.append(row)
 
+    if skipped_no_exchange:
+        sample = ", ".join(
+            f"{s['gurufocus_ticker']}@{s['gurufocus_exchange']!r}"
+            for s in skipped_no_exchange[:10]
+        )
+        more = f" (+{len(skipped_no_exchange) - 10} more)" if len(skipped_no_exchange) > 10 else ""
+        import logging  # noqa: PLC0415
+        logging.getLogger(__name__).warning(
+            "[ingest] Skipped %s company row(s) with unresolvable exchange. "
+            "Add the missing codes to gurufocus_exchange then re-ingest. Sample: %s%s",
+            len(skipped_no_exchange), sample, more,
+        )
+
+    company_rows = resolved_rows
     company_inserted = _upsert_batched(
         supabase, "company", company_rows, on_conflict="gurufocus_ticker,exchange_id"
     )
@@ -266,6 +310,7 @@ def load_prepared_into_supabase(
                 "target_month": target_month,
                 "universe_ticker": row.get("universe_ticker"),
                 "sector": row.get("sector"),
+                "industry": row.get("industry"),
             })
 
         # Clear any existing rows for this (universe, target_month) before

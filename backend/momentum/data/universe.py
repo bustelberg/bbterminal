@@ -32,12 +32,15 @@ def load_universe(
     page_size = 1000
     offset = 0
 
-    # Load companies with exchange info
+    # Load companies with exchange info. Skip rows the pipeline has
+    # marked `delisted_at` — there's no fetchable price/volume data for
+    # them and they'd just clutter the universe + the audit gap list.
     while True:
         resp = _query_with_retry(
             lambda o=offset: (
                 supabase.table("company")
                 .select("company_id, company_name, gurufocus_ticker, exchange_id, gurufocus_exchange:gurufocus_exchange(exchange_code, country:country(country_name))")
+                .is_("delisted_at", "null")
                 .range(o, o + page_size - 1)
                 .execute()
             ),

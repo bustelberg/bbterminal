@@ -50,12 +50,16 @@ class EarningsResult:
 # ---------------------------------------------------------------------------
 
 def _build_symbol(ticker: str, exchange: str) -> str:
+    from ingest.prices import normalize_gurufocus_ticker  # noqa: PLC0415
+    ticker = normalize_gurufocus_ticker(ticker, exchange)
     if exchange.upper() in US_EXCHANGES:
         return ticker
     return f"{exchange}:{ticker}"
 
 
 def _storage_path(ticker: str, exchange: str, endpoint: str) -> str:
+    from ingest.prices import normalize_gurufocus_ticker  # noqa: PLC0415
+    ticker = normalize_gurufocus_ticker(ticker, exchange)
     return f"{exchange.upper()}_{ticker.upper()}/{endpoint}.json"
 
 

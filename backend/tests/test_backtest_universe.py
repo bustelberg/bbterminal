@@ -60,7 +60,8 @@ class TestMonthlyEligibleFilter:
             config, prices, universe, monthly_eligible=monthly_eligible,
         )
 
-        by_month = {r.date: r for r in result.monthly_records}
+        # Bucket by YYYY-MM — record dates are now full Mondays.
+        by_month = {r.date[:7]: r for r in result.monthly_records}
         assert {h.company_id for h in by_month["2024-12"].holdings} == {10, 11}
         assert {h.company_id for h in by_month["2025-01"].holdings} == {10, 11, 12, 13}
         assert {h.company_id for h in by_month["2025-02"].holdings} == {12, 13}
@@ -103,7 +104,9 @@ class TestEmptyMonthHandling:
             config, prices, universe, monthly_eligible=monthly_eligible,
         )
 
-        by_month = {r.date: r for r in result.monthly_records}
+        # Record dates are now exact rebalance Mondays — bucket by
+        # YYYY-MM so the test stays aligned to the eligibility map keys.
+        by_month = {r.date[:7]: r for r in result.monthly_records}
         # Dec: zero eligible → empty_reason populated, no holdings, no return.
         dec = by_month["2024-12"]
         assert dec.holdings == []

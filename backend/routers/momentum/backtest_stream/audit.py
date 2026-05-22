@@ -14,8 +14,55 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 
+# Exchanges we KNOW are outside the GuruFocus subscription, regardless
+# of what the per-backtest data tells us. The audit's normal heuristic
+# is "every company on this exchange has zero rows → unsubscribed", but
+# that fails when stale rows from before a subscription change linger,
+# or when a different universe momentarily contains one row with data.
+# Listing them explicitly makes the classification deterministic.
+#
+# Current subscription notes:
+#   - UK / LSE: NOT subscribed (separate from "Europe" — UK is out).
+#   - JSE / BSE / NSE / BMV / ASX / NZE / MOEX: out of scope per the
+#     same overall subscription (Africa, India, LatAm, AU/NZ, Russia).
+# Update this set when the subscription tier changes.
+_KNOWN_UNSUBSCRIBED_EXCHANGES = frozenset({
+    "LSE", "JSE", "BSE", "NSE", "BMV", "ASX", "NZE", "MOEX",
+})
+
+
 def _emit(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
+
+
+def _load_delisted_cids(candidate_cids: list[int]) -> set[int]:
+    """Look up which of the given company_ids the pipeline has marked
+    `delisted_at` in `company`. Used to exclude them from the
+    "missing price data" warning — surfacing tickers we already know
+    are dead would be pure noise. Batched in 50-id chunks to stay
+    under Supabase's Cloudflare row-limit threshold. Returns an empty
+    set on any error so the audit still runs."""
+    if not candidate_cids:
+        return set()
+    from deps import supabase  # noqa: PLC0415 (lazy import; module imported elsewhere)
+
+    out: set[int] = set()
+    try:
+        for start in range(0, len(candidate_cids), 50):
+            chunk = candidate_cids[start : start + 50]
+            resp = (
+                supabase.table("company")
+                .select("company_id, delisted_at")
+                .in_("company_id", chunk)
+                .not_.is_("delisted_at", "null")
+                .execute()
+            )
+            for row in (resp.data or []):
+                out.add(int(row["company_id"]))
+    except Exception:
+        # Audit is non-critical; swallow + return empty.
+        return set()
+    return out
 
 
 @dataclass
@@ -75,10 +122,24 @@ def audit_price_coverage(
         _exchange_totals[exch] = _exchange_totals.get(exch, 0) + 1
         if price_counts.get(int(cid), 0) == 0:
             _exchange_no_price[exch] = _exchange_no_price.get(exch, 0) + 1
-    res.unsubscribed_exchanges = sorted(
+    # Two routes into the unsubscribed bucket:
+    #   1. Heuristic: every company in THIS universe on the exchange has
+    #      zero rows. Picks up de-facto unsubscribed even if we haven't
+    #      explicitly listed it.
+    #   2. Known-unsubscribed: an exchange the operator has confirmed is
+    #      outside the GuruFocus subscription (see
+    #      _KNOWN_UNSUBSCRIBED_EXCHANGES). Still needs at least one
+    #      no-price row in this universe to surface in the message —
+    #      otherwise the count would be misleading.
+    _heuristic = {
         exch for exch, no_price in _exchange_no_price.items()
         if _exchange_totals.get(exch, 0) > 0 and no_price == _exchange_totals[exch]
-    )
+    }
+    _known_with_misses = {
+        exch for exch, no_price in _exchange_no_price.items()
+        if no_price > 0 and exch in _KNOWN_UNSUBSCRIBED_EXCHANGES
+    }
+    res.unsubscribed_exchanges = sorted(_heuristic | _known_with_misses)
     if res.unsubscribed_exchanges:
         parts = [f"{exch}({_exchange_no_price[exch]})" for exch in res.unsubscribed_exchanges]
         total_unsub = sum(_exchange_no_price[e] for e in res.unsubscribed_exchanges)
@@ -89,11 +150,22 @@ def audit_price_coverage(
         }))
 
     # Remaining no-price cases: exchanges where some companies have
-    # data but specific tickers don't — true one-off gaps.
+    # data but specific tickers don't — true one-off gaps. Also exclude
+    # rows the pipeline has already marked `delisted_at` (no data ever
+    # AND nothing we can do about it — surfacing them as a warning every
+    # backtest would be noise).
+    delisted_cids = _load_delisted_cids(_no_price)
     res.no_price_gap_cids = [
         cid for cid in _no_price
         if res.exchange_for_cid.get(int(cid), "UNKNOWN") not in res.unsubscribed_exchanges
+        and int(cid) not in delisted_cids
     ]
+    if delisted_cids:
+        res.events.append(_emit({
+            "type": "info",
+            "scope": "prices",
+            "message": f"Excluded {len(delisted_cids)} companies marked delisted (no fetchable data; see /companies for the list).",
+        }))
     if res.no_price_gap_cids:
         sample = ", ".join(_label(int(c)) for c in res.no_price_gap_cids[:10])
         more = f" (+{len(res.no_price_gap_cids) - 10} more)" if len(res.no_price_gap_cids) > 10 else ""

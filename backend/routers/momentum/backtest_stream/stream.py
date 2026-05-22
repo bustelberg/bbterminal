@@ -402,19 +402,24 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         audit.events.clear()
 
         # Self-heal: refetch missing data for subscribed-exchange gaps.
+        # Runs even in db_only mode (backtest path) — these are TRUE gaps
+        # (zero rows) on subscribed exchanges, which means the pipeline
+        # hasn't reached them yet. Healing them inline lets a backtest
+        # produce correct results without the user having to babysit the
+        # pipeline first. Cost is bounded: only fires for companies with
+        # ZERO data (audit.no_price_gap_cids / no_vol_gap_cids), not for
+        # stale-but-present data which remains the pipeline's job.
         gap_cids, info_events = compute_gap_cids(req, audit, pass1_transient, company_ids)
         for evt in info_events:
             yield evt
-        if req.db_only and gap_cids:
+        if gap_cids:
             sample = ", ".join(audit.label_for_cid.get(int(c), str(c)) for c in gap_cids[:8])
             more = f" (+{len(gap_cids) - 8} more)" if len(gap_cids) > 8 else ""
             yield _emit({
-                "type": "warning",
-                "scope": "data",
-                "message": f"DB-only mode: {len(gap_cids)} companies have missing price/volume data and will be excluded from this run: {sample}{more}",
+                "type": "info",
+                "scope": "self-heal",
+                "message": f"{len(gap_cids)} companies on subscribed exchanges have no data yet — fetching inline before the backtest: {sample}{more}",
             })
-            gap_cids = []
-        if gap_cids:
             async for evt in run_self_heal(
                 gap_cids, universe_df, audit,
                 prices_df, prices_local_df, volumes_df,

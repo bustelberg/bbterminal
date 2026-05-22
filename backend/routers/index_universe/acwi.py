@@ -21,11 +21,9 @@ import asyncio
 import json
 import queue as _queue
 import threading
-import traceback
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
 from deps import supabase
 from index_universe.acwi import (
@@ -75,6 +73,32 @@ async def acwi_holdings():
     return await asyncio.to_thread(work)
 
 
+@router.get("/api/acwi/xls-age")
+async def acwi_xls_age():
+    """Age of the bundled `iShares-MSCI-ACWI-ETF_fund.xls` file.
+
+    iShares blocks automated downloads (region-cookie + JS challenge),
+    so the XLS file lives in the repo and updates only when someone
+    commits a fresh one. This endpoint surfaces the file's mtime so
+    the UI can warn when it gets too old. Threshold lives client-side;
+    the backend just reports the raw age."""
+    import os  # noqa: PLC0415
+    from datetime import datetime, timezone  # noqa: PLC0415
+    from index_universe.acwi.holdings import _FILE  # noqa: PLC0415
+    try:
+        mtime = os.path.getmtime(_FILE)
+    except OSError as e:
+        return {"available": False, "error": str(e)}
+    mtime_dt = datetime.fromtimestamp(mtime, timezone.utc)
+    age_days = (datetime.now(timezone.utc) - mtime_dt).days
+    return {
+        "available": True,
+        "path": _FILE,
+        "mtime": mtime_dt.isoformat(),
+        "age_days": age_days,
+    }
+
+
 @router.get("/api/acwi/announcements")
 async def acwi_announcements(refresh: bool = False):
     """MSCI index announcements (cached locally, 24h TTL)."""
@@ -104,12 +128,6 @@ async def acwi_net_additions():
     return {"net_additions": results, "total": len(results), "matched": matched}
 
 
-class AcwiSaveUniverseRequest(BaseModel):
-    name: str = "ACWI"
-    start_date: str
-    end_date: str
-
-
 def run_acwi_save_universe(
     name: str,
     start_date: str,
@@ -134,6 +152,44 @@ def run_acwi_save_universe(
     emit("Loading feasible ACWI holdings from iShares XLS...", 3)
     feasible = acwi_feasible_holdings_for_db()
     emit(f"Found {len(feasible)} feasible holdings", 5)
+
+    # Cross-exchange dedup pass — iShares lists dual-listed names (e.g.
+    # ICBC on HKSE:01398 AND SHSE:601398) as separate holdings. Without
+    # this we'd insert both as distinct `company` rows. Group by
+    # canonical name, keep the highest-priority exchange (HKSE > SHSE
+    # for Chinese names; see EXCHANGE_PRIORITY in ingest.dedupe).
+    from collections import defaultdict  # noqa: PLC0415
+    from ingest.dedupe import canonical_name, exchange_priority  # noqa: PLC0415
+
+    _by_name: dict[str, list[dict]] = defaultdict(list)
+    for fh in feasible:
+        nm = canonical_name(fh.get("company_name"))
+        if nm:
+            _by_name[nm].append(fh)
+    _winners: dict[str, dict] = {}
+    for nm, grp in _by_name.items():
+        if len(grp) > 1:
+            _winners[nm] = min(grp, key=lambda h: exchange_priority(h.get("db_exchange")))
+    _dropped_log: list[str] = []
+    _deduped: list[dict] = []
+    for fh in feasible:
+        nm = canonical_name(fh.get("company_name"))
+        if not nm or nm not in _winners:
+            _deduped.append(fh)
+            continue
+        if fh is _winners[nm]:
+            _deduped.append(fh)
+        else:
+            _dropped_log.append(
+                f"{fh.get('db_exchange')}:{fh.get('gf_ticker')} -> "
+                f"{_winners[nm].get('db_exchange')}:{_winners[nm].get('gf_ticker')} "
+                f"({fh.get('company_name')})"
+            )
+    if _dropped_log:
+        sample = ", ".join(_dropped_log[:5])
+        more = f" (+{len(_dropped_log) - 5} more)" if len(_dropped_log) > 5 else ""
+        emit(f"Dedup: dropped {len(_dropped_log)} cross-exchange dupe(s), kept higher-priority listing: {sample}{more}", None)
+    feasible = _deduped
 
     exch_resp = supabase.table("gurufocus_exchange").select("exchange_id, exchange_code").execute()
     exch_id_map = {r["exchange_code"]: r["exchange_id"] for r in (exch_resp.data or [])}
@@ -282,51 +338,6 @@ def run_acwi_save_universe(
         "grandfathered": stats["grandfathered"],
         "with_addition": stats["with_addition"],
     }
-
-
-@router.post("/api/acwi/save-universe")
-async def acwi_save_universe(req: AcwiSaveUniverseRequest):
-    """Reconstruct monthly ACWI feasible-universe holdings + save as a universe.
-    SSE; result selectable as `index_universe` in the momentum backtester.
-
-    Thin wrapper over `run_acwi_save_universe` — the sync worker holds the
-    actual logic so the scheduled pipeline (`routers/ingest_runs.py`) can
-    invoke it directly without round-tripping through HTTP."""
-    def _run(q: _queue.Queue):
-        def on_progress(message: str, pct: int | None = None):
-            payload = {"type": "progress", "message": message}
-            if pct is not None:
-                payload["pct"] = pct
-            q.put(json.dumps(payload))
-
-        try:
-            result_stats = run_acwi_save_universe(
-                req.name, req.start_date, req.end_date, on_progress=on_progress,
-            )
-            q.put(json.dumps({
-                "type": "done",
-                "message": (
-                    f"Saved '{result_stats['name']}': {result_stats['months']} months, "
-                    f"{result_stats['total_rows']} rows, "
-                    f"{result_stats['matched_companies']}/{result_stats['unique_tickers']} tickers matched "
-                    f"({result_stats['companies_created']} new companies created, "
-                    f"{result_stats['companies_renamed']} renamed, "
-                    f"{result_stats['companies_existing']} existing)"
-                ),
-                "stats": result_stats,
-            }))
-        except Exception as e:
-            q.put(json.dumps({"type": "error", "message": f"{e}\n{traceback.format_exc()}"}))
-        q.put(None)
-
-    q: _queue.Queue = _queue.Queue()
-    threading.Thread(target=_run, args=(q,), daemon=True).start()
-
-    async def generate():
-        async for chunk in drain_thread_queue(q):
-            yield chunk
-
-    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @router.get("/api/acwi/fetch-all-details")

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { colorForSector } from '../../../lib/sectorColors';
 import type { BacktestResult, Holding, PeriodRecord } from '../../../lib/stores/momentum';
 import CollapsibleCard from './CollapsibleCard';
 import { annualize, fmtPct } from './utils';
@@ -23,28 +24,8 @@ type Props = {
   result: BacktestResult;
 };
 
-// Same hue-spread palette as before — each GICS sector gets a distinct hue
-// so two adjacent rows in the Gantt are easy to tell apart.
-const SECTOR_COLORS: Record<string, string> = {
-  'Information Technology': '#3b82f6',
-  'Communication Services': '#ec4899',
-  'Health Care': '#10b981',
-  'Financials': '#06b6d4',
-  'Consumer Discretionary': '#f97316',
-  'Consumer Staples': '#92400e',
-  'Industrials': '#a855f7',
-  'Energy': '#ef4444',
-  'Utilities': '#fbbf24',
-  'Materials': '#84cc16',
-  'Real Estate': '#14b8a6',
-};
-const FALLBACK_PALETTE = [
-  '#0891b2', '#7c3aed', '#16a34a', '#dc2626', '#d97706',
-  '#0284c7', '#c026d3', '#65a30d',
-];
-function colorForSector(sector: string, idx: number): string {
-  return SECTOR_COLORS[sector] ?? FALLBACK_PALETTE[idx % FALLBACK_PALETTE.length];
-}
+// Sector color palette lives in `lib/sectorColors.ts` so /schedule's
+// per-row sector chips share the exact same hue per sector.
 
 type Run = {
   sector: string;

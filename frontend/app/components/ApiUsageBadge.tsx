@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useImperativeHandle, useRef, forwardRef } from 'react';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { API_URL } from '../../lib/apiUrl';
 const LIMIT = 20000;
 
 type Usage = { usa: number; europe: number; asia: number; month: string };

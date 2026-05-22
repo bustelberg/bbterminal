@@ -1,7 +1,5 @@
 import { createStore } from '../store';
-import { runSSE } from '../stream';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { API_URL } from '../apiUrl';
 
 // ─── fetch-all-details (EventSource) ────────────────────────────────────────
 
@@ -107,69 +105,6 @@ export function startAcwiFetchDetails(onDone?: () => void): void {
   };
 }
 
-// ─── save-universe (fetch SSE) ──────────────────────────────────────────────
-
-export type AcwiSaveResult = { ok: boolean; message: string };
-
-export type AcwiSaveState = {
-  saving: boolean;
-  progress: string[];
-  result: AcwiSaveResult | null;
-};
-
-export const acwiSaveStore = createStore<AcwiSaveState>({
-  saving: false,
-  progress: [],
-  result: null,
-});
-
-let saveController: AbortController | null = null;
-
-export async function startAcwiSave(params: {
-  name: string;
-  start_date: string;
-  end_date: string;
-}): Promise<void> {
-  if (acwiSaveStore.get().saving) return;
-
-  saveController?.abort();
-  const controller = new AbortController();
-  saveController = controller;
-
-  acwiSaveStore.set({
-    saving: true,
-    progress: [`Starting save as "${params.name}"...`],
-    result: null,
-  });
-
-  try {
-    await runSSE(
-      `${API_URL}/api/acwi/save-universe`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
-      },
-      (raw) => {
-        const data = raw as { type: string; message?: string };
-        if (data.type === 'progress') {
-          acwiSaveStore.set((s) => ({ progress: [...s.progress, data.message ?? ''] }));
-        } else if (data.type === 'done') {
-          acwiSaveStore.set({ result: { ok: true, message: data.message ?? '' } });
-        } else if (data.type === 'error') {
-          acwiSaveStore.set({ result: { ok: false, message: data.message ?? '' } });
-        }
-      },
-      controller.signal,
-    );
-  } catch (e) {
-    if ((e as { name?: string })?.name !== 'AbortError') {
-      acwiSaveStore.set({
-        result: { ok: false, message: e instanceof Error ? e.message : 'Save failed' },
-      });
-    }
-  } finally {
-    acwiSaveStore.set({ saving: false });
-    if (saveController === controller) saveController = null;
-  }
-}
+// (save-universe removed: the `/api/acwi/save-universe` endpoint is
+// superseded by `POST /api/universe-templates/ACWI/refresh`, called
+// directly from `AcwiCanonicalView.tsx`.)

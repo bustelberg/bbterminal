@@ -2,6 +2,8 @@
 
 import { Fragment, useMemo, useState } from 'react';
 import type { CurrentPortfolio, DailyPick } from '../../../lib/stores/momentum';
+import type { Column } from '../../../lib/tableExport';
+import TableDownloadButton from '../TableDownloadButton';
 import CellInfoTip from './CellInfoTip';
 import { EXCHANGE_NAMES, displayExchange, fmtPct, fmtPrice, guruFocusUrl } from './utils';
 
@@ -43,15 +45,102 @@ export default function DailyPicksHistory({ currentPortfolio, categories, exchan
       }));
   }, [currentPortfolio]);
 
+  // Flatten months × days × holdings so the download is a single
+  // pivotable spreadsheet. One row per (date, ticker).
+  type FlatDailyRow = {
+    date: string;
+    ticker: string;
+    exchange: string;
+    company_name: string;
+    sector: string;
+    side: string;
+    score: number;
+    category_scores: Record<string, number | null>;
+    entry_price_local: number | null;
+    exit_price_local: number | null;
+    currency: string;
+    entry_price_eur: number | null;
+    exit_price_eur: number | null;
+    forward_return_pct: number | null;
+    portfolio_mtd_pct: number | null;
+    next_day_return_pct: number | null;
+  };
+  const flatDailyRows = useMemo<FlatDailyRow[]>(() => {
+    const out: FlatDailyRow[] = [];
+    for (const { days } of dailyPicksByMonth) {
+      for (const day of days) {
+        for (const h of day.holdings) {
+          out.push({
+            date: day.date,
+            ticker: h.ticker,
+            exchange: exchangeByCompany.get(h.company_id) ?? '',
+            company_name: h.company_name,
+            sector: h.sector,
+            side: 'long',
+            score: h.score,
+            category_scores: h.category_scores ?? {},
+            entry_price_local: h.entry_price_local ?? null,
+            exit_price_local: h.exit_price_local ?? null,
+            currency: h.currency ?? '',
+            entry_price_eur: h.entry_price_eur ?? null,
+            exit_price_eur: h.exit_price_eur ?? null,
+            forward_return_pct: h.forward_return_pct ?? null,
+            portfolio_mtd_pct: day.portfolio_return_pct ?? null,
+            next_day_return_pct: day.next_day_return_pct ?? null,
+          });
+        }
+      }
+    }
+    return out;
+  }, [dailyPicksByMonth, exchangeByCompany]);
+  const dailyExportColumns = useMemo<Column<FlatDailyRow>[]>(() => {
+    const cols: Column<FlatDailyRow>[] = [
+      { key: 'date', header: 'Date', accessor: (r) => r.date },
+      { key: 'side', header: 'Side', accessor: (r) => r.side },
+      { key: 'ticker', header: 'Ticker', accessor: (r) => r.ticker },
+      { key: 'exchange', header: 'Exchange', accessor: (r) => r.exchange },
+      { key: 'company_name', header: 'Company', accessor: (r) => r.company_name },
+      { key: 'sector', header: 'Sector', accessor: (r) => r.sector },
+    ];
+    for (const cat of categories) {
+      cols.push({
+        key: `score_${cat}`,
+        header: cat === 'price' ? 'Price score' : cat === 'volume' ? 'Volume score' : `${cat} score`,
+        accessor: (r) => r.category_scores[cat] ?? null,
+      });
+    }
+    cols.push(
+      { key: 'total_score', header: 'Total score', accessor: (r) => r.score },
+      { key: 'currency', header: 'Currency', accessor: (r) => r.currency },
+      { key: 'entry_price_local', header: 'Start (local)', accessor: (r) => r.entry_price_local },
+      { key: 'exit_price_local', header: 'End (local)', accessor: (r) => r.exit_price_local },
+      { key: 'entry_price_eur', header: 'Start (EUR)', accessor: (r) => r.entry_price_eur },
+      { key: 'exit_price_eur', header: 'End (EUR)', accessor: (r) => r.exit_price_eur },
+      { key: 'forward_return_pct', header: 'Return (%)', accessor: (r) => r.forward_return_pct },
+      { key: 'portfolio_mtd_pct', header: 'Portfolio MTD (%)', accessor: (r) => r.portfolio_mtd_pct },
+      { key: 'next_day_return_pct', header: 'Next-day return (%)', accessor: (r) => r.next_day_return_pct },
+      { key: 'gurufocus_url', header: 'GuruFocus URL', accessor: (r) => r.ticker ? guruFocusUrl(r.ticker, r.exchange) : '' },
+    );
+    return cols;
+  }, [categories]);
+
   if (dailyPicksByMonth.length === 0) return null;
 
   return (
     <div className="border-t border-gray-800/40">
-      <div className="px-4 py-3 border-b border-gray-800/40">
-        <div className="text-sm font-medium text-white">Daily picks history</div>
-        <div className="text-xs text-gray-500 mt-0.5">
-          Hypothetical: what the strategy would pick if rebalancing on each day. <span className="text-gray-400">MTD (chain)</span> is the cumulative return through that day, chain-linked across rebalances. <span className="text-gray-400">Next day</span> is that day&apos;s portfolio held one trading day forward. Past months are read-only — only days already saved are shown.
+      <div className="px-4 py-3 border-b border-gray-800/40 flex items-start justify-between gap-4">
+        <div>
+          <div className="text-sm font-medium text-white">Daily picks history</div>
+          <div className="text-xs text-gray-500 mt-0.5">
+            Hypothetical: what the strategy would pick if rebalancing on each day. <span className="text-gray-400">MTD (chain)</span> is the cumulative return through that day, chain-linked across rebalances. <span className="text-gray-400">Next day</span> is that day&apos;s portfolio held one trading day forward. Past months are read-only — only days already saved are shown.
+          </div>
         </div>
+        <TableDownloadButton
+          rows={flatDailyRows}
+          columns={dailyExportColumns}
+          filename="daily_picks_history"
+          title={`Download ${flatDailyRows.length} daily picks (across ${dailyPicksByMonth.length} months) as CSV / XLSX`}
+        />
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs min-w-max">

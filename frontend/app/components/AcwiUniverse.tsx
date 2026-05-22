@@ -5,14 +5,12 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   acwiFetchStore,
   startAcwiFetchDetails,
-  acwiSaveStore,
-  startAcwiSave,
 } from '../../lib/stores/acwi';
-import DatePartsPicker from './DatePartsPicker';
+import AcwiCanonicalView from './AcwiCanonicalView';
 import ProgressTimeline from './ProgressTimeline';
 import { trackedFetch } from '../../lib/loading';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import LoadingDots from './LoadingDots';
+import { API_URL } from '../../lib/apiUrl';
 
 // GuruFocus exchange prefixes considered "feasible" — regions covered by the
 // current GuruFocus subscription: USA + Europe + Asia (incl. Middle East),
@@ -79,8 +77,6 @@ type NetAddition = {
 
 export default function AcwiUniverse() {
   const [holdings, setHoldings] = useState<Holding[]>([]);
-  const [count, setCount] = useState(0);
-  const [asOf, setAsOf] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
@@ -88,21 +84,7 @@ export default function AcwiUniverse() {
   const [sortAsc, setSortAsc] = useState(true);
   const [feasibleFilter, setFeasibleFilter] = useState('');
   const [onePerExchange, setOnePerExchange] = useState(false);
-  const [histStart, setHistStart] = useState('2002-01-01');
-  const [histEnd, setHistEnd] = useState(() => {
-    const t = new Date();
-    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
-  });
   const [timelineSearch, setTimelineSearch] = useState('');
-  const [universeName, setUniverseName] = useState(() => {
-    const t = new Date();
-    return `ACWI-${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
-  });
-  // Save-universe state lives in a module-scoped store so the SSE stream keeps
-  // running when the user navigates away.
-  const saving = acwiSaveStore.use((s) => s.saving);
-  const saveProgress = acwiSaveStore.use((s) => s.progress);
-  const saveResult = acwiSaveStore.use((s) => s.result);
 
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [annLoading, setAnnLoading] = useState(true);
@@ -156,8 +138,6 @@ export default function AcwiUniverse() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setHoldings(data.holdings);
-        setCount(data.count);
-        setAsOf(data.as_of || '');
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to load');
       }
@@ -268,56 +248,6 @@ export default function AcwiUniverse() {
     }
     return result;
   }, [feasibleHoldings, feasibleFilter, onePerExchange]);
-
-  const historicalUniverse = useMemo(() => {
-    if (!feasibleHoldings.length) return [];
-
-    // Map of current feasible tickers for fast lookup
-    const feasibleTickers = new Set(feasibleHoldings.map(h => h.Ticker));
-
-    // Earliest effective date per ticker — if added multiple times, only the first addition counts
-    const earliestByTicker = new Map<string, number>();
-    for (const na of netAdditions) {
-      if (!na.matched || !na.matched_ticker || !na.effective_date) continue;
-      if (!feasibleTickers.has(na.matched_ticker)) continue;
-      const d = new Date(na.effective_date).getTime();
-      if (isNaN(d)) continue;
-      const prev = earliestByTicker.get(na.matched_ticker);
-      if (prev === undefined || d < prev) earliestByTicker.set(na.matched_ticker, d);
-    }
-    const effDates = Array.from(earliestByTicker.values()).sort((a, b) => a - b);
-
-    const start = new Date(histStart);
-    const end = new Date(histEnd);
-    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) return [];
-
-    const total = feasibleHoldings.length;
-    const months: { date: string; count: number; removed: number }[] = [];
-    const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
-    const endMs = new Date(end.getFullYear(), end.getMonth(), 1).getTime();
-
-    while (cursor.getTime() <= endMs) {
-      const asOf = cursor.getTime();
-      // Binary search: count of effDates >= asOf → "not yet in the index on this date"
-      let lo = 0, hi = effDates.length;
-      while (lo < hi) {
-        const mid = (lo + hi) >>> 1;
-        if (effDates[mid] < asOf) lo = mid + 1;
-        else hi = mid;
-      }
-      const removed = effDates.length - lo;
-      const iso = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-01`;
-      months.push({ date: iso, count: total - removed, removed });
-      cursor.setMonth(cursor.getMonth() + 1);
-    }
-    return months;
-  }, [feasibleHoldings, netAdditions, histStart, histEnd]);
-
-  const saveUniverse = useCallback(() => {
-    if (saving) return;
-    const name = universeName.trim() || 'ACWI';
-    return startAcwiSave({ name, start_date: histStart, end_date: histEnd });
-  }, [saving, universeName, histStart, histEnd]);
 
   const additionTimeline = useMemo(() => {
     if (!feasibleHoldings.length) return [];
@@ -459,10 +389,12 @@ export default function AcwiUniverse() {
       <div>
         <h1 className="text-2xl font-semibold text-white">MSCI ACWI Universe</h1>
         <p className="text-gray-400 text-sm mt-1">
-          iShares MSCI ACWI ETF holdings &mdash; {count.toLocaleString()} equities
-          {asOf && <> &mdash; as of {asOf}</>}
+          The canonical universe (template-managed) sits at the top — that&apos;s what backtests and the scheduled pipeline use.
+          Below: live iShares fund holdings + MSCI announcement explorer for diagnosing the reconstruction.
         </p>
       </div>
+
+      <AcwiCanonicalView />
 
       {error && (
         <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg px-4 py-3 text-rose-400 text-sm">
@@ -519,7 +451,7 @@ export default function AcwiUniverse() {
       )}
 
       {loading ? (
-        <div className="text-gray-400 text-sm">Loading holdings...</div>
+        <div className="text-gray-400 text-sm"><LoadingDots label="Loading holdings" /></div>
       ) : (
         <>
           {/* Summary cards */}
@@ -760,7 +692,7 @@ export default function AcwiUniverse() {
               </div>
             )}
             {annLoading ? (
-              <div className="px-5 py-4 text-gray-400 text-sm">Loading announcements...</div>
+              <div className="px-5 py-4 text-gray-400 text-sm"><LoadingDots label="Loading announcements" /></div>
             ) : (
               <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
                 <table className="w-full text-sm">
@@ -1049,93 +981,6 @@ export default function AcwiUniverse() {
                       <td className="px-3 py-2.5 text-indigo-400 font-mono text-xs">{h.gf_currency ?? <span className="text-gray-600">-</span>}</td>
                       <td className="px-3 py-2.5 text-gray-300 font-mono text-right">{fmtNum(h['Weight (%)'])}%</td>
                       <td className="px-3 py-2.5 text-gray-300 font-mono text-right">{fmtMv(h['Market Value'])}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Historical ACWI Universe */}
-          <div className="bg-[#151821] rounded-xl border border-gray-800/40">
-            <div className="px-5 py-4 border-b border-gray-800/40 flex items-center gap-4 flex-wrap">
-              <div>
-                <h2 className="text-sm font-medium text-gray-300">
-                  Historical ACWI Universe
-                  <span className="text-gray-500 font-normal ml-2">
-                    ({historicalUniverse.length} monthly snapshots)
-                  </span>
-                </h2>
-                <p className="text-gray-500 text-xs mt-0.5">
-                  Monthly feasible-universe snapshots. A holding is included on date D only if it was part of the index before D
-                  (derived from current holdings minus matched MSCI additions with effective_date &ge; D). Survivorship-biased &mdash; only handles additions, not deletions.
-                </p>
-              </div>
-              <div className="ml-auto flex items-center gap-2 text-xs text-gray-400 flex-wrap">
-                <label>Start</label>
-                <DatePartsPicker
-                  value={histStart}
-                  onChange={setHistStart}
-                  minYear={1990}
-                  maxYear={new Date().getFullYear()}
-                />
-                <label>End</label>
-                <DatePartsPicker
-                  value={histEnd}
-                  onChange={setHistEnd}
-                  minYear={1990}
-                  maxYear={new Date().getFullYear() + 1}
-                />
-                <div className="h-5 w-px bg-gray-700 mx-1" />
-                <label>Name</label>
-                <input
-                  type="text"
-                  value={universeName}
-                  onChange={e => setUniverseName(e.target.value)}
-                  placeholder="ACWI"
-                  disabled={saving}
-                  className="bg-[#0f1117] border border-gray-700 rounded-lg px-2 py-1.5 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none w-24"
-                />
-                <button
-                  onClick={saveUniverse}
-                  disabled={saving || !historicalUniverse.length}
-                  className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-xs px-3 py-1.5 rounded-lg transition-colors"
-                >
-                  {saving ? 'Saving…' : 'Save to Database'}
-                </button>
-              </div>
-            </div>
-            {(saveProgress.length > 0 || saveResult) && (
-              <div className="px-5 py-3 border-b border-gray-800/40">
-                <ProgressTimeline
-                  steps={[]}
-                  log={saveProgress}
-                  doneSummary={saveResult?.ok ? `${saveResult.message} — select "${universeName.trim() || 'ACWI'}" as Index Universe in /momentum to use it.` : null}
-                  errorMessage={saveResult && !saveResult.ok ? saveResult.message : null}
-                  running={saving}
-                  defaultLogOpen
-                  title="Save progress"
-                  onDismiss={() => acwiSaveStore.set({ result: null, progress: [] })}
-                />
-              </div>
-            )}
-            <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-[#151821] z-10">
-                  <tr className="text-gray-400 text-xs uppercase tracking-wider">
-                    <th className="text-left px-3 py-2.5 font-medium w-10">#</th>
-                    <th className="text-left px-3 py-2.5 font-medium">Date</th>
-                    <th className="text-right px-3 py-2.5 font-medium">Universe Count</th>
-                    <th className="text-right px-3 py-2.5 font-medium">Excluded (not yet added)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-800/30">
-                  {historicalUniverse.map((m, i) => (
-                    <tr key={m.date} className="hover:bg-white/[0.02]">
-                      <td className="px-3 py-2 text-gray-500 font-mono text-xs">{i + 1}</td>
-                      <td className="px-3 py-2 text-gray-200 font-mono text-xs">{m.date}</td>
-                      <td className="px-3 py-2 text-gray-300 font-mono text-right">{m.count.toLocaleString()}</td>
-                      <td className="px-3 py-2 text-gray-400 font-mono text-right">{m.removed.toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>

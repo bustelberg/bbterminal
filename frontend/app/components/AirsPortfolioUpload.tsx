@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 
 import {
   airsScanStore,
@@ -10,6 +10,11 @@ import {
   type Portfolio,
 } from '../../lib/stores/airsScan';
 import ProgressTimeline, { type StepDef, type StepState } from './ProgressTimeline';
+import type { Column } from '../../lib/tableExport';
+import TableDownloadButton from './TableDownloadButton';
+import Spinner from './Spinner';
+import LoadingDots from './LoadingDots';
+import { API_URL } from '../../lib/apiUrl';
 
 const AIRS_STEPS: StepDef[] = [
   { key: 'login', label: 'Log in to AirSPMS' },
@@ -18,7 +23,7 @@ const AIRS_STEPS: StepDef[] = [
   { key: 'ytd', label: 'Load YTD returns' },
 ];
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+// API_URL imported from lib/apiUrl above — single source of truth.
 
 type PerfRow = {
   periode: string;
@@ -74,19 +79,22 @@ function returnColor(v: number | null): string {
 
 // ─── Spinner ─────────────────────────────────────────────────────────────────
 
-function Spinner({ className = 'h-3.5 w-3.5' }: { className?: string }) {
-  return (
-    <svg className={`animate-spin ${className}`} viewBox="0 0 24 24" fill="none">
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-    </svg>
-  );
-}
+// Spinner moved to ./Spinner — shared with MomentumBacktester (and future call sites).
 
 // ─── Detail view ─────────────────────────────────────────────────────────────
 
 function PortfolioDetailView({ detail, onBack }: { detail: PortfolioDetail; onBack: () => void }) {
   const last = detail.rows[detail.rows.length - 1];
+  const perfRowExportColumns = useMemo<Column<PerfRow>[]>(() => [
+    { key: 'periode', header: 'Periode', accessor: (r) => r.periode },
+    { key: 'beginvermogen', header: 'Beginvermogen', accessor: (r) => r.beginvermogen },
+    { key: 'koersresultaat', header: 'Koersresultaat', accessor: (r) => r.koersresultaat },
+    { key: 'opbrengsten', header: 'Opbrengsten', accessor: (r) => r.opbrengsten },
+    { key: 'beleggingsresultaat', header: 'Beleggingsresultaat', accessor: (r) => r.beleggingsresultaat },
+    { key: 'eindvermogen', header: 'Eindvermogen', accessor: (r) => r.eindvermogen },
+    { key: 'rendement', header: 'Rendement (%)', accessor: (r) => r.rendement },
+    { key: 'cumulatief_rendement', header: 'Cumulatief (%)', accessor: (r) => r.cumulatief_rendement },
+  ], []);
 
   return (
     <div className="flex flex-col h-full">
@@ -117,6 +125,14 @@ function PortfolioDetailView({ detail, onBack }: { detail: PortfolioDetail; onBa
 
       <div className="flex-1 overflow-auto px-8 py-4">
         <div className="bg-[#151821] rounded-xl border border-gray-800/40 overflow-hidden">
+          <div className="px-4 py-2 border-b border-gray-800/40 flex items-center justify-end">
+            <TableDownloadButton
+              rows={detail.rows}
+              columns={perfRowExportColumns}
+              filename={`portfolio_${detail.portfolio_name}`}
+              title={`Download ${detail.rows.length} period rows as CSV / XLSX`}
+            />
+          </div>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800/60 text-gray-500 text-xs">
@@ -342,6 +358,21 @@ export default function AirsPortfolioUpload() {
     return dir * da.localeCompare(db);
   });
 
+  const portfolioListExportColumns = useMemo<Column<Portfolio>[]>(() => [
+    { key: 'portefeuille', header: 'Portefeuille', accessor: (p) => p.portefeuille },
+    { key: 'naam', header: 'Naam', accessor: (p) => p.naam },
+    { key: 'client', header: 'Client', accessor: (p) => p.client },
+    { key: 'depotbank', header: 'Depotbank', accessor: (p) => p.depotbank },
+    { key: 'ytd', header: 'YTD (%)', accessor: (p) => {
+      const s = ytdMap[p.portefeuille];
+      return s?.status === 'done' ? s.value ?? null : null;
+    }},
+    { key: 'as_of', header: 'As of', accessor: (p) => {
+      const s = ytdMap[p.portefeuille];
+      return s?.status === 'done' ? s.asOf ?? '' : '';
+    }},
+  ], [ytdMap]);
+
   const sortArrow = (key: string) => {
     if (sortKey !== key) return null;
     return <span className="ml-1 text-indigo-400">{sortAsc ? '\u25B2' : '\u25BC'}</span>;
@@ -410,10 +441,16 @@ export default function AirsPortfolioUpload() {
         {/* Portfolio table */}
         {portfolios.length > 0 && (
           <div className="bg-[#151821] rounded-xl border border-gray-800/40 overflow-hidden">
-            <div className="px-5 py-3 border-b border-gray-800/40">
+            <div className="px-5 py-3 border-b border-gray-800/40 flex items-center justify-between">
               <h2 className="text-sm font-medium text-gray-400">
                 Portfolios — click to view details
               </h2>
+              <TableDownloadButton
+                rows={sortedPortfolios}
+                columns={portfolioListExportColumns}
+                filename="airs_portfolios"
+                title={`Download ${sortedPortfolios.length} portfolios as CSV / XLSX`}
+              />
             </div>
             <table className="w-full text-sm">
               <thead>
@@ -469,7 +506,7 @@ export default function AirsPortfolioUpload() {
         {initialLoading && (
           <div className="flex items-center justify-center py-20 gap-3 text-gray-400">
             <Spinner className="h-5 w-5" />
-            <span className="text-sm">Loading portfolios...</span>
+            <span className="text-sm"><LoadingDots label="Loading portfolios" /></span>
           </div>
         )}
       </div>

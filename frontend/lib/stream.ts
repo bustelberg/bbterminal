@@ -1,3 +1,5 @@
+import { apiFetch } from './apiFetch';
+
 // Consumes an SSE stream from a fetch response body and invokes onEvent for
 // each parsed `data: ...` line. Throws on non-2xx or network errors so callers
 // can decide how to surface them.
@@ -7,7 +9,7 @@ export async function runSSE(
   onEvent: (data: unknown) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const resp = await fetch(url, { ...init, signal });
+  const resp = await apiFetch(url, { ...init, signal });
   if (!resp.ok || !resp.body) {
     throw new Error(`HTTP ${resp.status}`);
   }

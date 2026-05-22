@@ -74,8 +74,16 @@ def reconstruct_monthly_holdings(start_date: str, end_date: str) -> tuple[dict[s
     holdings, _ = load_acwi_holdings()
     additions = compute_net_additions()
 
-    # Filter to feasible holdings and build ishares_ticker -> "EXCH:TICK" symbol
-    feasible_by_ticker: dict[str, str] = {}
+    # Filter to feasible holdings as a LIST of (ishares_ticker, symbol) pairs.
+    # The previous dict-keyed-by-ticker approach silently dropped one of any
+    # two iShares listings that share a ticker (e.g. MRK = Merck & Co on
+    # NYSE AND Merck KGaA on Xetra, NEM = Newmont on NYSE AND Nemetschek
+    # on Xetra, TEL = TE Connectivity on NYSE AND Telenor on Oslo). The
+    # last-written entry won and the loser never made it into a single
+    # month of membership. There are ~38 such ticker collisions in the
+    # current iShares ACWI file, accounting for the visible gap between
+    # 2005 feasible holdings and ~1967 membership rows per month.
+    feasible_holdings: list[tuple[str, str]] = []
     for h in holdings:
         gf = _ISHARES_TO_GF.get(h["Exchange"])
         if gf is None or gf not in FEASIBLE_GF_EXCHANGES:
@@ -85,16 +93,21 @@ def reconstruct_monthly_holdings(start_date: str, end_date: str) -> tuple[dict[s
             continue
         db_exch, gf_tick = norm
         symbol = f"{db_exch}:{gf_tick}"
-        feasible_by_ticker[h["Ticker"]] = symbol
+        feasible_holdings.append((h["Ticker"], symbol))
 
-    # Earliest effective_date per iShares ticker (only for feasible holdings)
+    # Earliest effective_date per iShares ticker (only for tickers that
+    # appear in at least one feasible holding). When multiple listings
+    # share the ticker, all listings inherit the same earliest date —
+    # MSCI announcements identify the security by ticker only, so we
+    # can't attribute the addition to one specific listing.
+    feasible_tickers = {t for t, _ in feasible_holdings}
     earliest: dict[str, _date] = {}
     for na in additions:
         if not na.get("matched"):
             continue
         t = na.get("matched_ticker")
         eff = na.get("effective_date")
-        if not t or not eff or t not in feasible_by_ticker:
+        if not t or not eff or t not in feasible_tickers:
             continue
         d = _parse_effective_date(eff)
         if d is None:
@@ -111,16 +124,16 @@ def reconstruct_monthly_holdings(start_date: str, end_date: str) -> tuple[dict[s
     while cursor <= end_m:
         month_key = f"{cursor.year:04d}-{cursor.month:02d}"
         included = {
-            symbol for t, symbol in feasible_by_ticker.items()
+            symbol for t, symbol in feasible_holdings
             if (d := earliest.get(t)) is None or d < cursor
         }
         monthly[month_key] = included
         cursor = _date(cursor.year + 1, 1, 1) if cursor.month == 12 else _date(cursor.year, cursor.month + 1, 1)
 
     stats = {
-        "feasible_count": len(feasible_by_ticker),
-        "with_addition": len(earliest),
-        "grandfathered": len(feasible_by_ticker) - len(earliest),
+        "feasible_count": len(feasible_holdings),
+        "with_addition": sum(1 for t, _ in feasible_holdings if t in earliest),
+        "grandfathered": sum(1 for t, _ in feasible_holdings if t not in earliest),
         "months": len(monthly),
     }
     return monthly, stats

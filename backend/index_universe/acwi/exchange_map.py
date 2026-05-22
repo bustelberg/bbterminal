@@ -181,6 +181,13 @@ def _normalize_gf_ticker(ticker: str, gf_prefix: str) -> tuple[str, str]:
         t = t[:-2]
     if final_prefix == "XSGO":
         t = t.replace(".", "-")
+    # US class-share separator: iShares (and Bloomberg) writes
+    # "BRK/B" / "BF/B"; GuruFocus uses the dot form. Same rule applies
+    # to TSX (Canadian dual-class shares: "RCI/B" → "RCI.B") even
+    # though TSX is unsubscribed today — keep the normalization
+    # consistent so the company row matches when we get coverage.
+    if final_prefix in ("", "NYSE", "NASDAQ", "AMEX", "CBOE", "TSX") and "/" in t:
+        t = t.replace("/", ".")
     return (final_prefix, t)
 
 

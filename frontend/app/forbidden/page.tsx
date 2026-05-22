@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
+import LoadingDots from '../components/LoadingDots';
 
 function ForbiddenContent() {
   const params = useSearchParams();
@@ -52,7 +53,7 @@ function ForbiddenContent() {
 export default function Forbidden() {
   // useSearchParams() needs a Suspense boundary in app router.
   return (
-    <Suspense fallback={<div className="px-8 py-12 text-sm text-gray-500">Loading…</div>}>
+    <Suspense fallback={<div className="px-8 py-12 text-sm text-gray-500"><LoadingDots label="Loading" /></div>}>
       <ForbiddenContent />
     </Suspense>
   );

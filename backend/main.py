@@ -36,12 +36,15 @@ from routers import (
     index_universe as _index_universe_router,
     indicators as _indicators_router,
     ingest_runs as _ingest_runs_router,
+    leonteq as _leonteq_router,
     longequity as _longequity_router,
     momentum as _momentum_pkg,
     scheduled_strategies as _scheduled_strategies_router,
     system as _system_router,
     universe as _universe_router,
+    universe_templates as _universe_templates_router,
 )
+from routers._auth_middleware import admin_only_mutations as _admin_only_mutations
 from routers.momentum._helpers import register_startup_hooks as _register_momentum_hooks
 from scheduler import register_scheduler as _register_scheduler
 
@@ -65,6 +68,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Admin-only-mutations gate. Read-only methods skip this; POST/PUT/PATCH/
+# DELETE on non-exempt paths must carry an admin Bearer token. The
+# frontend's `apiFetch` helper auto-attaches the session JWT for every
+# /api/ call, so this is invisible to admin users.
+app.middleware("http")(_admin_only_mutations)
+
 # Domain routers. Order doesn't affect runtime behavior; kept grouped by
 # concern for readability when scanning the mount list.
 for _r in (
@@ -80,8 +89,10 @@ for _r in (
     _universe_router.router,
     _index_universe_router.router,
     _ingest_runs_router.router,
+    _leonteq_router.router,
     _exchange_fees_router.router,
     _scheduled_strategies_router.router,
+    _universe_templates_router.router,
     _admin_router.router,
     # Momentum splits into four sub-routers (signals, backtest_stream,
     # backtest_crud, current_picks); `routers.momentum.routers` is the
@@ -95,6 +106,14 @@ for _r in (
 # single source of truth even though the hook implementation lives in the
 # momentum package.
 _register_momentum_hooks(app)
+
+# Reset any `scheduled_strategy.backfill_status='running'` rows from the
+# previous boot — the in-memory lock + worker thread don't survive a
+# restart, so those rows would otherwise sit "running" forever and the
+# UI would poll them indefinitely.
+@app.on_event("startup")
+def _reset_stale_backfills() -> None:
+    _scheduled_strategies_router.reset_stale_backfills()
 
 # In-process APScheduler for the scheduled price/volume ingest jobs
 # (weekly Tue 02:00 UTC + monthly 2nd 02:00 UTC). See scheduler.py for

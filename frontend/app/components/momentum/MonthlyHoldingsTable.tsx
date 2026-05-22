@@ -2,13 +2,16 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { BacktestResult } from '../../../lib/stores/momentum';
+import type { Column } from '../../../lib/tableExport';
+import TableDownloadButton from '../TableDownloadButton';
 import CellInfoTip from './CellInfoTip';
 import CollapsibleCard from './CollapsibleCard';
 import TickerTimelineModal from './TickerTimelineModal';
-import { buildFeeMap, computeNetStats, parenPct } from './feeStats';
+import { computeNetStats, parenPct } from './feeStats';
+import { useClickOutside } from '../../../lib/hooks/useClickOutside';
+import { useExchangeFeeMap } from '../../../lib/hooks/apiData';
 import { EXCHANGE_NAMES, displayExchange, fmtPct, fmtPrice, guruFocusUrl } from './utils';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { API_URL } from '../../../lib/apiUrl';
 
 type HeldCompany = { company_id: number; ticker: string; company_name: string };
 
@@ -64,16 +67,7 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
   // Cumulative columns. Fetched once on mount; null when the user hasn't
   // configured any non-zero fees, in which case every parenPct(...) call
   // below renders as the empty string (no parens, no visual noise).
-  const [feesByExchange, setFeesByExchange] = useState<Map<string, number> | null>(null);
-  useEffect(() => {
-    fetch(`${API_URL}/api/exchange-fees`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((rows) => {
-        const m = buildFeeMap(rows ?? []);
-        setFeesByExchange(m.size > 0 ? m : null);
-      })
-      .catch(() => {});
-  }, []);
+  const feesByExchange = useExchangeFeeMap();
 
   // Net per-period + cumulative returns for the active result, keyed by
   // the same `r.date` the outer rows render. `computeNetStats` returns
@@ -127,15 +121,108 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
     setExpandedMonth(null);
   }
 
+  // Flatten the nested period × holdings tree into one row per holding.
+  // Each row carries its period label so a spreadsheet user can group/
+  // pivot without needing the visual indentation. Empty periods are
+  // skipped — they contribute nothing to a holdings export.
+  type FlatHolding = {
+    period: string;
+    is_open: boolean;
+    side: string;
+    ticker: string;
+    exchange: string;
+    company_name: string;
+    sector: string;
+    category_scores: Record<string, number | null>;
+    score: number;
+    entry_price_local: number | null;
+    exit_price_local: number | null;
+    currency: string;
+    entry_price_eur: number | null;
+    exit_price_eur: number | null;
+    entry_date: string;
+    exit_date: string;
+    forward_return_pct: number | null;
+  };
+  const flatHoldings = useMemo<FlatHolding[]>(() => {
+    const out: FlatHolding[] = [];
+    for (const r of result.monthly_records) {
+      for (const h of r.holdings) {
+        out.push({
+          period: r.date,
+          is_open: !!r.is_open,
+          side: h.side ?? 'long',
+          ticker: h.ticker ?? '',
+          exchange: exchangeByCompany.get(h.company_id) ?? '',
+          company_name: h.company_name ?? '',
+          sector: h.sector ?? '',
+          category_scores: h.category_scores ?? {},
+          score: h.score,
+          entry_price_local: h.entry_price_local ?? null,
+          exit_price_local: h.exit_price_local ?? null,
+          currency: h.currency ?? '',
+          entry_price_eur: h.entry_price_eur ?? null,
+          exit_price_eur: h.exit_price_eur ?? null,
+          entry_date: h.entry_date ?? '',
+          exit_date: h.exit_date ?? '',
+          forward_return_pct: h.forward_return_pct ?? null,
+        });
+      }
+    }
+    return out;
+  }, [result, exchangeByCompany]);
+
+  // Category-score columns are dynamic (price/volume usually; some
+  // strategies add more). Spread them between the fixed Score and
+  // price columns so the export mirrors the on-screen layout.
+  const exportColumns = useMemo<Column<FlatHolding>[]>(() => {
+    const cols: Column<FlatHolding>[] = [
+      { key: 'period', header: 'Period', accessor: (r) => r.period },
+      { key: 'side', header: 'Side', accessor: (r) => r.side },
+      { key: 'ticker', header: 'Ticker', accessor: (r) => r.ticker },
+      { key: 'exchange', header: 'Exchange', accessor: (r) => r.exchange },
+      { key: 'company_name', header: 'Company', accessor: (r) => r.company_name },
+      { key: 'sector', header: 'Sector', accessor: (r) => r.sector },
+    ];
+    for (const cat of categories) {
+      cols.push({
+        key: `score_${cat}`,
+        header: cat === 'price' ? 'Price score' : cat === 'volume' ? 'Volume score' : `${cat} score`,
+        accessor: (r) => r.category_scores[cat] ?? null,
+      });
+    }
+    cols.push(
+      { key: 'total_score', header: 'Total score', accessor: (r) => r.score },
+      { key: 'currency', header: 'Currency', accessor: (r) => r.currency },
+      { key: 'entry_price_local', header: 'Start (local)', accessor: (r) => r.entry_price_local },
+      { key: 'exit_price_local', header: 'End (local)', accessor: (r) => r.exit_price_local },
+      { key: 'entry_price_eur', header: 'Start (EUR)', accessor: (r) => r.entry_price_eur },
+      { key: 'exit_price_eur', header: 'End (EUR)', accessor: (r) => r.exit_price_eur },
+      { key: 'entry_date', header: 'Entry date', accessor: (r) => r.entry_date },
+      { key: 'exit_date', header: 'Exit date', accessor: (r) => r.exit_date },
+      { key: 'return_pct', header: 'Return (%)', accessor: (r) => r.forward_return_pct },
+      { key: 'gurufocus_url', header: 'GuruFocus URL', accessor: (r) => r.ticker ? guruFocusUrl(r.ticker, r.exchange) : '' },
+    );
+    return cols;
+  }, [categories]);
+
   return (
     <>
     <CollapsibleCard
       title="Portfolios"
       rightSlot={
-        <CompanySearch
-          companies={heldCompanies}
-          onPick={(cid) => setTimelineCompanyId(cid)}
-        />
+        <div className="flex items-center gap-2">
+          <CompanySearch
+            companies={heldCompanies}
+            onPick={(cid) => setTimelineCompanyId(cid)}
+          />
+          <TableDownloadButton
+            rows={flatHoldings}
+            columns={exportColumns}
+            filename="portfolio_holdings"
+            title={`Download ${flatHoldings.length} holdings (${result.monthly_records.length} periods) as CSV / XLSX`}
+          />
+        </div>
       }
     >
       <div className="max-h-[500px] overflow-auto border-t border-gray-800/40">
@@ -474,16 +561,7 @@ function CompanySearch({
     setActiveIdx(0);
   }
 
-  // Close on outside click.
-  useEffect(() => {
-    const onDocClick = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, []);
+  useClickOutside(containerRef, () => setOpen(false));
 
   const choose = (cid: number) => {
     onPick(cid);

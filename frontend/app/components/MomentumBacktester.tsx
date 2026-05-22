@@ -3,8 +3,20 @@
 import { Fragment, useState, useEffect, useMemo, useRef } from 'react';
 
 import ApiUsageBadge from './ApiUsageBadge';
+import LoadingDots from './LoadingDots';
+import Spinner from './Spinner';
 import { dialog } from '../../lib/dialog';
+import { apiFetch } from '../../lib/apiFetch';
+import { API_URL } from '../../lib/apiUrl';
 import ProgressTimeline from './ProgressTimeline';
+import NotificationsPanel from './momentum/NotificationsPanel';
+import { useClickOutside } from '../../lib/hooks/useClickOutside';
+import {
+  useBenchmarks,
+  useCompanyExchangeMap,
+  useMomentumSignals,
+  useUniverseTemplates,
+} from '../../lib/hooks/apiData';
 import {
   momentumStore,
   startBacktest,
@@ -27,6 +39,7 @@ import DailyPicksHistory from './momentum/DailyPicksHistory';
 import EquityCurveCard from './momentum/EquityCurveCard';
 import MonthlyHoldingsTable from './momentum/MonthlyHoldingsTable';
 import SectorTimelineChart from './momentum/SectorTimelineChart';
+import TableDownloadButton from './TableDownloadButton';
 import VariantSummaryTable from './momentum/VariantSummaryTable';
 import {
   EXCHANGE_NAMES,
@@ -38,27 +51,6 @@ import type {
   SavedRun,
   SignalDef,
 } from './momentum/types';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
-
-/** Inline spinner used everywhere a small async indicator is needed in this
- * page (per-row dropdown loads, delete/rename in flight, etc.). The 12-px
- * variant fits inline next to text or in icon-button slots without bumping
- * the row height. */
-function Spinner({ size = 12 }: { size?: number }) {
-  return (
-    <svg
-      className="animate-spin text-indigo-400"
-      style={{ width: size, height: size }}
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-label="Loading"
-    >
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-    </svg>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -94,25 +86,27 @@ export default function MomentumBacktester() {
   const [sectorEtfs, setSectorEtfs] = useState<Record<string, number>>({});
   const [sectorEtfsLoading, setSectorEtfsLoading] = useState(false);
   const [sectorEtfsError, setSectorEtfsError] = useState<string | null>(null);
+  // Sector-ETF map (sector name → benchmark_id) derived from the shared
+  // benchmarks fetch. Only fires the network call when sector_etf mode
+  // is active; otherwise the hook idles.
+  const {
+    data: _bmRows,
+    loading: _bmLoading,
+    error: _bmError,
+  } = useBenchmarks({ enabled: selectionMode === 'sector_etf' });
   useEffect(() => {
-    if (selectionMode !== 'sector_etf') return;
-    let cancelled = false;
-    setSectorEtfsLoading(true);
-    setSectorEtfsError(null);
-    fetch(`${API_URL}/api/benchmarks`)
-      .then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
-      .then((rows: Array<{ benchmark_id: number; ticker: string; sector: string | null }>) => {
-        if (cancelled) return;
-        const map: Record<string, number> = {};
-        for (const r of rows) {
-          if (r.sector) map[r.sector] = r.benchmark_id;
-        }
-        setSectorEtfs(map);
-      })
-      .catch((e) => { if (!cancelled) setSectorEtfsError(String(e?.message ?? e)); })
-      .finally(() => { if (!cancelled) setSectorEtfsLoading(false); });
-    return () => { cancelled = true; };
-  }, [selectionMode]);
+    setSectorEtfsLoading(_bmLoading);
+    setSectorEtfsError(_bmError);
+    if (!_bmRows) {
+      if (selectionMode !== 'sector_etf') setSectorEtfs({});
+      return;
+    }
+    const map: Record<string, number> = {};
+    for (const r of _bmRows) {
+      if (r.sector) map[r.sector] = r.benchmark_id;
+    }
+    setSectorEtfs(map);
+  }, [_bmRows, _bmLoading, _bmError, selectionMode]);
 
   // Variant sweep selection — which (frequency × strategy) combos to run.
   // Default to all selected so the "Run variants" button matches its
@@ -199,23 +193,8 @@ export default function MomentumBacktester() {
   // fix carry empty/None exchange strings, so ORCL/NYSE etc. would
   // otherwise render as "—" in the holdings table even though the GF
   // URL helper still resolves correctly via the bare-ticker fallback).
-  const [companyExchangeMap, setCompanyExchangeMap] = useState<Map<number, string>>(new Map());
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`${API_URL}/api/companies`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: { company_id: number; gurufocus_exchange: string | null }[]) => {
-        if (cancelled) return;
-        const m = new Map<number, string>();
-        for (const c of data) {
-          const exch = (c.gurufocus_exchange ?? '').trim();
-          if (exch) m.set(c.company_id, exch);
-        }
-        setCompanyExchangeMap(m);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
+  // Shared cached fetch (deduped with SnapshotHoldings when both render).
+  const companyExchangeMap = useCompanyExchangeMap();
 
   const exchangeByCompany = useMemo(() => {
     const m = new Map<number, string>();
@@ -273,78 +252,120 @@ export default function MomentumBacktester() {
   const [bulkDeletingRuns, setBulkDeletingRuns] = useState(false);
   const [bulkDeletingSnapshots, setBulkDeletingSnapshots] = useState(false);
 
-  // Universe selection state — all universes live in the same table and are served
-  // by /api/index-universe/indexes with enriched metadata.
-  const [indexUniverses, setIndexUniverses] = useState<{ index_name: string; start_month: string; end_month: string; month_count: number; total_unique_tickers: number }[]>([]);
+  // Universe selection state — only TEMPLATE-MANAGED universes are
+  // listed here (currently just ACWI). User-created static snapshots
+  // and the SP500 legacy import are intentionally hidden: the only
+  // universes that backtests should run against are the ones the
+  // pipeline keeps continuously up-to-date.
+  // Source: GET /api/universe-templates — one entry per registered
+  // template, mapped into the {index_name, hard_backstop, ...} shape
+  // the rest of this page is wired for.
+  const [indexUniverses, setIndexUniverses] = useState<{
+    index_name: string;
+    /** The template's permanent earliest date (e.g. ACWI: 2002-01-01).
+     * Used as the default backtest start when this universe is picked.
+     * Different from `start_month` (latest data captured so far), which
+     * we ignore now that we have the proper hard-backstop value. */
+    hard_backstop: string;
+    start_month: string;
+    end_month: string;
+    month_count: number;
+    total_unique_tickers: number;
+  }[]>([]);
   const [selectedIndexUniverse, setSelectedIndexUniverse] = useState<string>('');
   const [universesLoading, setUniversesLoading] = useState(true);
   const [universesError, setUniversesError] = useState<string | null>(null);
   const [universesElapsed, setUniversesElapsed] = useState(0);
+  // Latest available close-price date, fed by GET /api/data/latest-price-date.
+  // Cached for the lifetime of the page mount — the data refresh runs
+  // weekly, so revalidating per-render is wasteful.
+  const [latestPriceDate, setLatestPriceDate] = useState<string | null>(null);
 
-  // Load signal definitions + saved runs
+  // Signal definitions — shared cached hook.
+  const { data: _signalsData } = useMomentumSignals();
   useEffect(() => {
-    fetch(`${API_URL}/api/momentum/signals`)
-      .then((r) => r.json())
-      .then((d) => {
-        const defs: SignalDef[] = d.signals ?? [];
-        setSignalDefs(defs);
-        const w: Record<string, number> = {};
-        defs.forEach((s) => (w[s.key] = s.default_weight));
-        setWeights(w);
-        const cats: string[] = d.categories ?? [];
-        setCategories(cats);
-        const cw: Record<string, number> = {};
-        cats.forEach((c) => (cw[c] = 50));
-        setCategoryWeights(cw);
-      })
-      .catch(() => {});
+    if (!_signalsData) return;
+    const defs = _signalsData.signals;
+    setSignalDefs(defs);
+    const w: Record<string, number> = {};
+    defs.forEach((s) => (w[s.key] = s.default_weight));
+    setWeights(w);
+    const cats = _signalsData.categories;
+    setCategories(cats);
+    const cw: Record<string, number> = {};
+    cats.forEach((c) => (cw[c] = 50));
+    setCategoryWeights(cw);
+  }, [_signalsData]);
+
+  // Universe templates — shared cached hook. The dropdown wants a
+  // slightly different shape, so map locally.
+  const {
+    data: _utRaw,
+    loading: _utLoading,
+    error: _utError,
+  } = useUniverseTemplates();
+  useEffect(() => {
+    setUniversesLoading(_utLoading);
+    setUniversesError(_utError);
+    if (!_utRaw) return;
+    setIndexUniverses(
+      _utRaw.map((t) => ({
+        index_name: t.template_key,
+        hard_backstop: t.earliest_date,
+        start_month: t.earliest_captured_month!,
+        end_month: t.latest_captured_month!,
+        month_count: t.months_captured,
+        // No cheap COUNT DISTINCT yet for "ever in this universe", so
+        // the dropdown shows the latest month's count as a representative
+        // number. Good enough for "is this the right universe?".
+        total_unique_tickers: t.latest_membership_count,
+      })),
+    );
+  }, [_utRaw, _utLoading, _utError]);
+
+  // One-time bookkeeping at mount: saved runs, current-picks snapshots,
+  // the universe-load elapsed-seconds ticker, and the latest-price-date
+  // fetch. The endpoint hooks above own all the recurring fetches.
+  useEffect(() => {
     loadSavedRuns();
     setPicksListLoading(true);
     loadCurrentPicksSnapshots().finally(() => setPicksListLoading(false));
     const universesStart = Date.now();
-    const tick = setInterval(() => setUniversesElapsed(Math.round((Date.now() - universesStart) / 1000)), 500);
-    setUniversesLoading(true);
-    setUniversesError(null);
-    fetch(`${API_URL}/api/index-universe/indexes`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`${r.status}`);
-        return r.json();
-      })
-      .then((data) => setIndexUniverses(data))
-      .catch((e) => setUniversesError(e instanceof Error ? e.message : String(e)))
-      .finally(() => {
-        clearInterval(tick);
-        setUniversesLoading(false);
-      });
+    const tick = setInterval(
+      () => setUniversesElapsed(Math.round((Date.now() - universesStart) / 1000)),
+      500,
+    );
+    fetch(`${API_URL}/api/data/latest-price-date`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${r.status}`))))
+      .then((d: { date: string | null }) => setLatestPriceDate(d.date))
+      .catch(() => { /* silent — the user can still pick a date manually */ });
     return () => clearInterval(tick);
   }, []);
 
-  // When universe selection changes, auto-set start/end dates from the range.
-  // Some universes store start/end as YYYY-MM-DD instead of YYYY-MM — slice so
-  // the <input type="month"> can accept the value.
+  // When universe selection changes, auto-set start/end dates per the
+  // /backtest convention: start = the universe's hard backstop (its
+  // permanent earliest date — e.g. ACWI: 2002-01), end = the latest
+  // close-price date we have data for (independent of universe).
+  // Both are stored as YYYY-MM-DD on the server; the `<input
+  // type="month">` wants YYYY-MM, so slice.
   const handleUniverseChange = (value: string) => {
     setSelectedIndexUniverse(value);
     if (value) {
       const entry = indexUniverses.find(i => i.index_name === value);
       if (entry) {
-        setStartDate(entry.start_month.slice(0, 7));
-        setEndDate(entry.end_month.slice(0, 7));
+        setStartDate(entry.hard_backstop.slice(0, 7));
+        // Fall back to the universe's latest captured month if the
+        // global price-date probe hasn't resolved yet.
+        setEndDate((latestPriceDate ?? entry.end_month).slice(0, 7));
       }
     }
   };
 
   const universeDropdownValue = selectedIndexUniverse;
 
-  useEffect(() => {
-    if (!savedDropdownOpen) return;
-    const handleClick = (e: MouseEvent) => {
-      if (savedDropdownRef.current && !savedDropdownRef.current.contains(e.target as Node)) {
-        setSavedDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [savedDropdownOpen]);
+  useClickOutside(savedDropdownRef, () => setSavedDropdownOpen(false), savedDropdownOpen);
+  useClickOutside(picksDropdownRef, () => setPicksDropdownOpen(false), picksDropdownOpen);
+  useClickOutside(variantsPickerRef, () => setVariantsPickerOpen(false), variantsPickerOpen);
 
   // Reset multi-select when either dropdown closes — selection should
   // not persist across opens, otherwise users land on a stale "5
@@ -352,32 +373,9 @@ export default function MomentumBacktester() {
   useEffect(() => {
     if (!savedDropdownOpen) setSelectedRunIds(new Set());
   }, [savedDropdownOpen]);
-
-  useEffect(() => {
-    if (!picksDropdownOpen) return;
-    const handleClick = (e: MouseEvent) => {
-      if (picksDropdownRef.current && !picksDropdownRef.current.contains(e.target as Node)) {
-        setPicksDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [picksDropdownOpen]);
-
   useEffect(() => {
     if (!picksDropdownOpen) setSelectedSnapshotIds(new Set());
   }, [picksDropdownOpen]);
-
-  useEffect(() => {
-    if (!variantsPickerOpen) return;
-    const handleClick = (e: MouseEvent) => {
-      if (variantsPickerRef.current && !variantsPickerRef.current.contains(e.target as Node)) {
-        setVariantsPickerOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [variantsPickerOpen]);
 
   // null = first fetch in flight; [] = loaded but empty; non-empty array =
   // populated. The header dropdown reads this to show a spinner + "Loading
@@ -506,7 +504,7 @@ export default function MomentumBacktester() {
     if (okEntries.length === 0) return;
     setSaving(true);
     try {
-      const resp = await fetch(`${API_URL}/api/momentum/backtests`, {
+      const resp = await apiFetch(`${API_URL}/api/momentum/backtests`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -692,7 +690,7 @@ export default function MomentumBacktester() {
     setDeletingRunId(runId);
     if (loadedRunId === runId) momentumStore.set({ loadedRunId: null });
     try {
-      await fetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' });
+      await apiFetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' });
       setSavedRuns(prev => prev.filter(r => r.run_id !== runId));
     } catch {
       loadSavedRuns();
@@ -743,7 +741,7 @@ export default function MomentumBacktester() {
     try {
       await Promise.all(
         ids.map((runId) =>
-          fetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' }).catch(() => {})
+          apiFetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' }).catch(() => {})
         ),
       );
       setSavedRuns((prev) => prev.filter((r) => !selectedRunIds.has(r.run_id)));
@@ -842,7 +840,7 @@ export default function MomentumBacktester() {
     if (!next || next.trim() === '' || next === currentName) return;
     setRenamingRunId(runId);
     try {
-      const resp = await fetch(`${API_URL}/api/momentum/backtests/${runId}`, {
+      const resp = await apiFetch(`${API_URL}/api/momentum/backtests/${runId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: next.trim() }),
@@ -871,7 +869,7 @@ export default function MomentumBacktester() {
         {(() => {
           const picksEmpty = !picksListLoading && currentPicksSnapshots.length === 0;
           const triggerLabel = picksListLoading
-            ? 'Loading saved current picks…'
+            ? <LoadingDots label="Loading saved current picks" />
             : picksEmpty
               ? 'No saved current picks yet'
               : currentPortfolio?.snapshot_id != null
@@ -1002,7 +1000,7 @@ export default function MomentumBacktester() {
         {(() => {
           const runsEmpty = !savedRunsLoading && savedRuns.length === 0;
           const runsLabel = savedRunsLoading
-            ? 'Loading saved backtests…'
+            ? <LoadingDots label="Loading saved backtests" />
             : runsEmpty
               ? 'No saved backtests yet'
               : (loadedRunId
@@ -1187,28 +1185,6 @@ export default function MomentumBacktester() {
               />
             </div>
             <div>
-              <label className="text-gray-500 text-xs block mb-1">Top Sectors</label>
-              <input
-                type="number"
-                min={1}
-                max={20}
-                value={topSectors}
-                onChange={(e) => setTopSectors(Number(e.target.value))}
-                className="w-16 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-gray-500 text-xs block mb-1">Per Sector</label>
-              <input
-                type="number"
-                min={1}
-                max={20}
-                value={topPerSector}
-                onChange={(e) => setTopPerSector(Number(e.target.value))}
-                className="w-16 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-              />
-            </div>
-            <div>
               <label className="text-gray-500 text-xs block mb-1">Max Companies</label>
               <input
                 type="number"
@@ -1221,21 +1197,12 @@ export default function MomentumBacktester() {
               />
               <span className="text-gray-600 text-xs ml-1">0 = all</span>
             </div>
-            <div>
-              <label className="text-gray-500 text-xs block mb-1">Min Price Score</label>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                step={1}
-                placeholder="off"
-                value={minPriceScore}
-                onChange={(e) => setMinPriceScore(e.target.value)}
-                className="w-20 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-                title="Optional 0-100 floor on each candidate's price-category score. Only companies whose score_price strictly exceeds this value are eligible for the long bucket. Empty = no filter. Common default: 30."
-              />
-              <span className="text-gray-600 text-xs ml-1">{minPriceScore.trim() === '' ? 'off' : '>'}</span>
-            </div>
+            {/* Top Sectors / Per Sector / Min Price Score moved to the
+                Strategy parameters section below — they only apply to
+                certain strategies (e.g. min_price_score is momentum-
+                only; top-N pair is meaningless for "all universe").
+                Keeping them out of the universe/date row leaves only
+                strategy-agnostic inputs at the top level. */}
             <div>
               <label className="text-gray-500 text-xs block mb-1">Strategy</label>
               <select
@@ -1421,9 +1388,65 @@ export default function MomentumBacktester() {
                   ? 'Random baseline · trials run independently with sequential seeds'
                   : selectionMode === 'all'
                     ? 'All universe · holds every eligible name each rebalance, equal-weighted'
-                    : 'Momentum · ranks the universe by signal-weighted score'}
+                    : selectionMode === 'sector_etf'
+                      ? 'Sector ETF · picks top N sectors by aggregate score, holds the mapped ETF per sector'
+                      : 'Momentum · ranks the universe by signal-weighted score'}
               </span>
             </div>
+
+            {/* Selection-size + filter inputs. Conditionally rendered
+                per strategy: top-N sectors applies to momentum / random
+                / sector_etf; per-sector pick count applies to momentum
+                + random only; min price score is momentum-specific.
+                "All universe" hides this whole row (it holds every
+                eligible name regardless). */}
+            {selectionMode !== 'all' && (
+              <div className="flex flex-wrap items-end gap-6 mb-5 pb-5 border-b border-gray-800/40">
+                <div>
+                  <label className="text-gray-500 text-xs block mb-1">Top Sectors</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={topSectors}
+                    onChange={(e) => setTopSectors(Number(e.target.value))}
+                    className="w-16 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                    title="How many sectors to pick per rebalance, ranked by aggregate score (or randomly in random mode)."
+                  />
+                </div>
+                {selectionMode !== 'sector_etf' && (
+                  <div>
+                    <label className="text-gray-500 text-xs block mb-1">Per Sector</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={topPerSector}
+                      onChange={(e) => setTopPerSector(Number(e.target.value))}
+                      className="w-16 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                      title="Per picked sector, how many top-ranked companies to hold (or random sample for random mode)."
+                    />
+                  </div>
+                )}
+                {selectionMode === 'momentum' && (
+                  <div>
+                    <label className="text-gray-500 text-xs block mb-1">Min Price Score</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={1}
+                      placeholder="off"
+                      value={minPriceScore}
+                      onChange={(e) => setMinPriceScore(e.target.value)}
+                      className="w-20 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                      title="Optional 0-100 floor on each candidate's price-category score. Only companies whose score_price strictly exceeds this value are eligible for the long bucket. Empty = no filter. Common default: 30."
+                    />
+                    <span className="text-gray-600 text-xs ml-1">{minPriceScore.trim() === '' ? 'off' : '>'}</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {selectionMode === 'momentum' && (
               <div className="space-y-4">
@@ -1529,7 +1552,7 @@ export default function MomentumBacktester() {
                 <div className="text-gray-300 font-medium mb-1">No tunable parameters.</div>
                 Each rebalance period holds every company in the selected universe&apos;s month-snapshot,
                 equal-weighted. Use this as an index-proxy benchmark to compare against the momentum
-                strategy. Top-N sectors and signal weights above are ignored. Only <span className="text-gray-300">long-only</span> is supported — long-short would need a top/bottom split that doesn&apos;t exist in this mode.
+                strategy. Only <span className="text-gray-300">long-only</span> is supported — long-short would need a top/bottom split that doesn&apos;t exist in this mode.
               </div>
             )}
           </div>
@@ -1550,62 +1573,15 @@ export default function MomentumBacktester() {
         )}
 
         {/* Notifications — warnings on top (critical), info below (expected) */}
-        {(warnings.length > 0 || infos.length > 0) && (
-          <div className="bg-[#151821] border border-gray-800/40 rounded-lg overflow-hidden divide-y divide-gray-800/40">
-            {warnings.length > 0 && (
-              <div className="bg-amber-500/10">
-                <button
-                  type="button"
-                  onClick={() => setShowWarnings((v) => !v)}
-                  className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-amber-500/5 transition-colors"
-                >
-                  <span className="text-amber-300 text-sm font-medium">
-                    {warnings.length} warning{warnings.length === 1 ? '' : 's'}
-                  </span>
-                  <span className="text-amber-400/70 text-xs font-mono">{showWarnings ? '▾' : '▸'}</span>
-                </button>
-                {showWarnings && (
-                  <ul className="max-h-64 overflow-auto border-t border-amber-500/20 divide-y divide-amber-500/10">
-                    {warnings.map((w, i) => (
-                      <li key={i} className="px-4 py-2 text-xs text-amber-200 flex gap-2">
-                        <span className="uppercase text-[10px] tracking-wider font-mono text-amber-400/70 shrink-0 w-16">
-                          {w.scope}
-                        </span>
-                        <span className="break-words">{w.message}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-            {infos.length > 0 && (
-              <div className="bg-sky-500/10">
-                <button
-                  type="button"
-                  onClick={() => setShowInfos((v) => !v)}
-                  className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-sky-500/5 transition-colors"
-                >
-                  <span className="text-sky-300 text-sm font-medium">
-                    {infos.length} note{infos.length === 1 ? '' : 's'}
-                  </span>
-                  <span className="text-sky-400/70 text-xs font-mono">{showInfos ? '▾' : '▸'}</span>
-                </button>
-                {showInfos && (
-                  <ul className="max-h-64 overflow-auto border-t border-sky-500/20 divide-y divide-sky-500/10">
-                    {infos.map((n, i) => (
-                      <li key={i} className="px-4 py-2 text-xs text-sky-200 flex gap-2">
-                        <span className="uppercase text-[10px] tracking-wider font-mono text-sky-400/70 shrink-0 w-16">
-                          {n.scope}
-                        </span>
-                        <span className="break-words">{n.message}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+        <NotificationsPanel
+          warnings={warnings}
+          infos={infos}
+          showWarnings={showWarnings}
+          showInfos={showInfos}
+          onToggleWarnings={() => setShowWarnings((v) => !v)}
+          onToggleInfos={() => setShowInfos((v) => !v)}
+        />
+
 
         {/* Current Portfolio (MTD) — shown above backtest results, independent */}
         {currentPortfolio && (() => {
@@ -1663,6 +1639,40 @@ export default function MomentumBacktester() {
                     </div>
                   </div>
                 )}
+                <TableDownloadButton
+                  rows={currentPortfolio.holdings.map((h) => ({
+                    ...h,
+                    exchange: exchangeByCompany.get(h.company_id) ?? '',
+                  }))}
+                  columns={(() => {
+                    const cols: import('../../lib/tableExport').Column<typeof currentPortfolio.holdings[number] & { exchange: string }>[] = [
+                      { key: 'ticker', header: 'Ticker', accessor: (h) => h.ticker },
+                      { key: 'exchange', header: 'Exchange', accessor: (h) => h.exchange },
+                      { key: 'company_name', header: 'Company', accessor: (h) => h.company_name },
+                      { key: 'sector', header: 'Sector', accessor: (h) => h.sector },
+                    ];
+                    for (const cat of categories) {
+                      cols.push({
+                        key: `score_${cat}`,
+                        header: cat === 'price' ? 'Price score' : cat === 'volume' ? 'Volume score' : `${cat} score`,
+                        accessor: (h) => h.category_scores?.[cat] ?? null,
+                      });
+                    }
+                    cols.push(
+                      { key: 'total_score', header: 'Total score', accessor: (h) => h.score },
+                      { key: 'currency', header: 'Currency', accessor: (h) => h.currency ?? '' },
+                      { key: 'entry_price_local', header: 'Start (local)', accessor: (h) => h.entry_price_local ?? null },
+                      { key: 'exit_price_local', header: 'End (local)', accessor: (h) => h.exit_price_local ?? null },
+                      { key: 'entry_price_eur', header: 'Start (EUR)', accessor: (h) => h.entry_price_eur ?? null },
+                      { key: 'exit_price_eur', header: 'End (EUR)', accessor: (h) => h.exit_price_eur ?? null },
+                      { key: 'return_pct', header: 'Return (%)', accessor: (h) => h.forward_return_pct ?? null },
+                      { key: 'gurufocus_url', header: 'GuruFocus URL', accessor: (h) => guruFocusUrl(h.ticker, h.exchange) },
+                    );
+                    return cols;
+                  })()}
+                  filename={`current_picks_${currentPortfolio.as_of_date}`}
+                  title={`Download ${currentPortfolio.holdings.length} current picks as CSV / XLSX`}
+                />
               </>
             }
           >
