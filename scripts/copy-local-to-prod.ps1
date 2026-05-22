@@ -12,18 +12,22 @@
   the project has real users — every prod row gets nuked.
 
 .PARAMETER ProdDbUrl
-  Direct Postgres connection string to prod. Defaults to $env:PROD_DB_URL.
-  Format: postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres
+  Session-pooler Postgres connection string to prod. Defaults to
+  $env:PROD_DB_URL (which is auto-loaded from scripts/.env.local if set there).
+  Use the *Session pooler* URI from Supabase Dashboard — the direct-connection
+  hostname is IPv6-only and Docker Desktop on Windows can't reach it.
+  Format: postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+  The password is extracted automatically and passed to psql/pg_restore via
+  PGPASSWORD so it never appears in `ps`.
 
 .PARAMETER Force
   Skip the interactive confirmation prompt.
 
 .EXAMPLE
-  $env:PROD_DB_URL = 'postgresql://postgres:xxx@db.abc.supabase.co:5432/postgres'
   ./scripts/copy-local-to-prod.ps1
 
 .EXAMPLE
-  ./scripts/copy-local-to-prod.ps1 -ProdDbUrl '<uri>' -Force
+  ./scripts/copy-local-to-prod.ps1 -Force
 #>
 [CmdletBinding()]
 param(
@@ -57,6 +61,20 @@ if (-not $ProdDbUrl) {
     exit 1
 }
 
+# Split the password out of the URL so we can pass it via PGPASSWORD env var
+# instead of embedding it in the connection-string argv. With the password in
+# argv, anyone with shell access to the container (or anyone reading the
+# transcript of a `ps -ef`) can see it. With PGPASSWORD set via docker -e, it
+# only lives in the docker exec target process's env.
+if ($ProdDbUrl -notmatch '^(?<prefix>postgres(?:ql)?://[^:@/]+):(?<pw>[^@]+)@(?<rest>.+)$') {
+    Write-Host "ERROR: PROD_DB_URL doesn't match 'postgres://user:password@host...'." -ForegroundColor Red
+    Write-Host "See scripts/.env.local.example for the expected Supabase Session-pooler format."
+    exit 1
+}
+$prodPassword  = $Matches.pw
+$prodUrlNoPw   = "$($Matches.prefix)@$($Matches.rest)"
+$prodEnv       = @('-e', "PGPASSWORD=$prodPassword")
+
 # Sanity check: container running?
 $running = docker ps --filter "name=$Container" --format '{{.Names}}'
 if (-not $running) {
@@ -66,7 +84,7 @@ if (-not $running) {
 
 # Sanity check: prod reachable?
 Write-Host "[1/6] Verifying prod connection..."
-$probe = docker exec $Container psql $ProdDbUrl -tA -c "SELECT current_database(), version();" 2>&1
+$probe = docker exec @prodEnv $Container psql $prodUrlNoPw -tA -c "SELECT current_database(), version();" 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: could not connect to prod: $probe" -ForegroundColor Red
     exit 1
@@ -97,21 +115,20 @@ if ($LASTEXITCODE -ne 0) { Write-Host "pg_dump failed" -ForegroundColor Red; exi
 $dumpSize = docker exec $Container stat -c %s /tmp/copy_to_prod_dump.pgdump
 Write-Host "  OK: $([math]::Round([int64]$dumpSize/1MB,2)) MB" -ForegroundColor Green
 
-# 2. Wipe prod public
+# 2. Wipe prod public. DROP only — don't pre-create the schema, because the
+#    dump (made with pg_dump --schema=public) includes its own
+#    `CREATE SCHEMA public;` and pg_restore would error on conflict otherwise.
+#    Schema-level GRANTs come back in step 5 alongside the table grants.
 Write-Host "[3/6] Dropping prod public schema..."
-$sql = @"
-DROP SCHEMA public CASCADE;
-CREATE SCHEMA public;
-GRANT USAGE  ON SCHEMA public TO postgres, anon, authenticated, service_role;
-GRANT CREATE ON SCHEMA public TO postgres,                       service_role;
-"@
-docker exec $Container psql $ProdDbUrl -c $sql
+docker exec @prodEnv $Container psql $prodUrlNoPw -c "DROP SCHEMA IF EXISTS public CASCADE;"
 if ($LASTEXITCODE -ne 0) { Write-Host "drop schema failed" -ForegroundColor Red; exit 1 }
 Write-Host "  OK" -ForegroundColor Green
 
-# 3. Restore to prod
-Write-Host "[4/6] Restoring dump to prod (this can take several minutes)..."
-docker exec $Container pg_restore --no-owner --no-privileges --dbname=$ProdDbUrl /tmp/copy_to_prod_dump.pgdump
+# 3. Restore to prod. --verbose makes pg_restore print one line per object
+# (TABLE / INDEX / SEQUENCE / TABLE DATA …) so you can see continuous progress
+# instead of a silent multi-minute wait while metric_data COPYs.
+Write-Host "[4/6] Restoring dump to prod (verbose; tables + data + indexes)..."
+docker exec @prodEnv $Container pg_restore --no-owner --no-privileges --verbose --dbname=$prodUrlNoPw /tmp/copy_to_prod_dump.pgdump
 if ($LASTEXITCODE -ne 0) {
     Write-Host "WARNING: pg_restore reported non-zero exit. Inspect output above; pg_restore can warn-and-continue on harmless issues." -ForegroundColor Yellow
 }
@@ -127,7 +144,8 @@ Write-Host "  OK" -ForegroundColor Green
 #    so the script is self-healing whether or not that migration is in sync.
 Write-Host "[5/6] Restoring Supabase default GRANTs on public.* ..."
 $grantSql = @"
-GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT USAGE  ON SCHEMA public TO anon, authenticated, service_role;
+GRANT CREATE ON SCHEMA public TO postgres, service_role;
 GRANT ALL ON ALL TABLES    IN SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO anon, authenticated, service_role;
@@ -136,7 +154,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authen
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon, authenticated, service_role;
 NOTIFY pgrst, 'reload schema';
 "@
-docker exec $Container psql $ProdDbUrl -v ON_ERROR_STOP=1 -c $grantSql
+docker exec @prodEnv $Container psql $prodUrlNoPw -v ON_ERROR_STOP=1 -c $grantSql
 if ($LASTEXITCODE -ne 0) { Write-Host "grant step failed" -ForegroundColor Red; exit 1 }
 Write-Host "  OK" -ForegroundColor Green
 
@@ -144,14 +162,14 @@ Write-Host "  OK" -ForegroundColor Green
 Write-Host "[6/6] Aligning prod's schema_migrations to local..."
 # Copy local schema_migrations row(s) into prod verbatim.
 $rows = docker exec $Container psql -U postgres -d postgres -tA -F'|' -c "SELECT version, name FROM supabase_migrations.schema_migrations ORDER BY version;"
-docker exec $Container psql $ProdDbUrl -c "TRUNCATE supabase_migrations.schema_migrations;"
+docker exec @prodEnv $Container psql $prodUrlNoPw -c "TRUNCATE supabase_migrations.schema_migrations;"
 foreach ($line in $rows -split "`n") {
     $line = $line.Trim()
     if (-not $line) { continue }
     $parts = $line -split '\|', 2
     $ver = $parts[0]
     $nm  = if ($parts.Length -gt 1) { $parts[1] } else { '' }
-    docker exec $Container psql $ProdDbUrl -c "INSERT INTO supabase_migrations.schema_migrations (version, name, statements) VALUES ('$ver', '$nm', ARRAY['-- copied from local on $(Get-Date -Format yyyy-MM-dd)']);"
+    docker exec @prodEnv $Container psql $prodUrlNoPw -c "INSERT INTO supabase_migrations.schema_migrations (version, name, statements) VALUES ('$ver', '$nm', ARRAY['-- copied from local on $(Get-Date -Format yyyy-MM-dd)']);"
 }
 Write-Host "  OK" -ForegroundColor Green
 
@@ -160,4 +178,5 @@ docker exec $Container rm /tmp/copy_to_prod_dump.pgdump | Out-Null
 
 Write-Host ""
 Write-Host "DONE. Prod 'public' schema is now a byte-for-byte copy of local." -ForegroundColor Green
-Write-Host "Verify with: docker exec $Container psql `"`$env:PROD_DB_URL`" -c '\dt public.*'"
+Write-Host "Quick verify (run from another shell):"
+Write-Host "  docker exec -e PGPASSWORD=`$pw $Container psql '$prodUrlNoPw' -c '\dt public.*'"

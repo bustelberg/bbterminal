@@ -17,10 +17,21 @@ are PowerShell + Docker.
      value once. Easiest for day-to-day use.
 
   Get the URI from Supabase Dashboard → Project Settings → Database →
-  Connection string → URI (**Direct connection**, not pooler — pooler
-  doesn't accept the bulk `COPY` commands `pg_dump` emits). The password
-  is the DB password (separate from your Supabase account login). Reset
-  it under the same page if you forgot it or if it's been exposed.
+  Connection string → **Session pooler** tab. Format:
+  ```
+  postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+  ```
+  **Don't use the "Direct connection" tab** — that hostname
+  (`db.<ref>.supabase.co`) is IPv6-only and Docker Desktop on Windows
+  doesn't route IPv6, so the scripts fail with "Name or service not
+  known" from inside the container. **Don't use the "Transaction pooler"
+  tab either** — port 6543 rejects DDL like `CREATE SCHEMA` mid-session.
+  Session pooler (port 5432, IPv4) is the one that works for everything
+  these scripts do.
+
+  The password is the DB password (separate from your Supabase account
+  login). Reset it under the same page if you forgot it or if it's been
+  exposed.
 
 ## Scripts
 
