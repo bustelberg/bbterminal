@@ -51,6 +51,17 @@ export type PeriodRecord = {
   // to the "open" badge so users see how stale the displayed return is
   // when some names stopped reporting earlier than others.
   as_of_date?: string;
+  // "What if you held the entire eligible universe equal-weighted?" —
+  // the no-skill baseline this strategy compares itself against. Per-
+  // period return + chain-linked cumulative, computed over the SAME
+  // entry→exit window the strategy used. Null when no eligible company
+  // had usable prices for the window OR on legacy results predating
+  // this column.
+  universe_return_pct?: number | null;
+  universe_cumulative_return_pct?: number | null;
+  // Number of companies that actually contributed to universe_return_pct
+  // this period (signals minus missing-price drops). Diagnostic only.
+  universe_constituents?: number | null;
 };
 
 export type DrawdownPeriod = {
@@ -69,6 +80,12 @@ export type Summary = {
   total_months: number;
   avg_holdings: number;
   top_drawdowns?: DrawdownPeriod[];
+  // Universe (equal-weighted-everything) baseline. The "did we
+  // outperform?" reference. Chain-linked over closed periods using
+  // the same entry/exit windows as the strategy. Null on degenerate
+  // runs and on saved results from before this feature.
+  universe_total_return_pct?: number | null;
+  universe_annualized_return_pct?: number | null;
   // Populated only for multi-trial random backtests; headline stats above
   // are then means and these are the cross-trial std-devs.
   n_trials?: number | null;

@@ -137,6 +137,73 @@ def _build_portfolio_payload(snapshot_row: dict) -> dict:
     }
 
 
+@router.get("/api/admin/gurufocus-probe")
+async def gurufocus_probe(
+    authorization: str = Header(...),
+    symbol: str = "AAPL",
+    endpoint: str = "price",
+):
+    """One-shot diagnostic: hit a single GuruFocus URL through the same
+    `cf_get` + impersonation ladder the ingest pipeline uses, and return
+    the FULL response (status, response headers, body excerpt, attempted
+    fingerprints) so we can confirm whether a failure is actually a
+    Cloudflare IP block or something else (revoked key, vendor 403,
+    nginx misconfig, etc.).
+
+    Query params:
+        symbol   GuruFocus symbol form, e.g. "AAPL" or "XAMS:ABN" (default AAPL)
+        endpoint One of "price", "financials", "analyst_estimate",
+                 "forward_pe_ratio" (default "price")
+
+    Look for these in `headers` to confirm Cloudflare:
+        cf-ray            present → Cloudflare touched the response
+        server=cloudflare same signal
+        cf-mitigated      explicit "challenge" / "block" verdict
+    If those are absent on a 403, it's NOT Cloudflare — investigate the
+    upstream (likely a GuruFocus auth/quota issue).
+    """
+    _require_admin(authorization)
+    import os as _os  # noqa: PLC0415
+
+    from ingest._gurufocus_http import cf_get, ladder, current_preferred_target  # noqa: PLC0415
+
+    base_url = (_os.environ.get("GURUFOCUS_BASE_URL", "").strip().rstrip("/"))
+    if base_url.endswith("/data"):
+        base_url = base_url[: -len("/data")]
+    api_key = _os.environ.get("GURUFOCUS_API_KEY", "")
+    if not base_url or not api_key:
+        raise HTTPException(500, "GURUFOCUS_BASE_URL / GURUFOCUS_API_KEY not set")
+
+    safe_endpoint = endpoint.strip().lstrip("/")
+    url = f"{base_url}/public/user/{api_key}/stock/{symbol}/{safe_endpoint}"
+    masked_url = url.replace(api_key, api_key[:4] + "***") if api_key else url
+
+    def _q() -> dict:
+        resp = cf_get(
+            url,
+            headers={"Accept": "application/json"},
+            timeout=30,
+        )
+        return {
+            "url": masked_url,
+            "status_code": resp.status_code,
+            "used_target": resp.used_target,
+            "attempted": resp.attempted,
+            "ladder": ladder(),
+            "current_preferred": current_preferred_target(),
+            "error": resp.error,
+            "is_cloudflare_block": resp.is_cloudflare_block,
+            "diagnostic_headers": resp.diagnostic_headers(),
+            "all_response_headers": resp.headers,
+            "body_excerpt": (resp.text or "")[:2000],
+            "body_length": len(resp.text or ""),
+            "proxy_set": bool(_os.environ.get("GURUFOCUS_PROXY") or _os.environ.get("HTTPS_PROXY")),
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    return await asyncio.to_thread(_q)
+
+
 @router.get("/api/admin/egress-ip")
 async def get_egress_ip(authorization: str = Header(...)):
     """Return the IP this backend currently appears to egress from.

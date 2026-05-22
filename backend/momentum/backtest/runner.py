@@ -26,6 +26,7 @@ from ._period import (
     adjust_open_period_holdings,
     compute_selection_period,
     compute_sector_etf_period,
+    compute_universe_period_return,
 )
 from ._summary import _PeriodAccumulators, build_backtest_result
 from .preparation import _BacktestPrepared, _prepare_backtest
@@ -231,6 +232,20 @@ def run_backtest(
             ))
             continue
 
+        # Compute the universe-equal-weight baseline ONCE per period
+        # from the same `signals_df` the strategy will operate on. For
+        # closed periods the exit is `next_period`; for open periods we
+        # re-compute below after `adjust_open_period_holdings` resolves
+        # the effective `open_as_of`. Branches 1 and 2 above already
+        # `continue`d on empty `signals_df`, so we always have a non-
+        # empty candidate set here.
+        entry_ts = pd.Timestamp(period_date)
+        closed_exit_ts = pd.Timestamp(next_period)
+        universe_ret_closed, universe_n_closed = compute_universe_period_return(
+            signals_df, price_index,
+            entry_ts=entry_ts, exit_ts=closed_exit_ts,
+        )
+
         # Dispatch to the right per-period branch.
         if config.selection_mode == "sector_etf":
             outcome = compute_sector_etf_period(
@@ -274,14 +289,39 @@ def run_backtest(
                 strategy_type=config.strategy_type,
             )
 
+        # For the open period, redo the universe baseline using the
+        # SAME `open_as_of` exit the strategy used. Without this the
+        # baseline reads its exit as `next_period` (in the future) and
+        # silently returns None for every name, leaving the comparison
+        # blank exactly when the user most wants it.
+        if is_open_iter and open_as_of is not None:
+            universe_ret, universe_n = compute_universe_period_return(
+                signals_df, price_index,
+                entry_ts=entry_ts, exit_ts=pd.Timestamp(open_as_of),
+            )
+        else:
+            universe_ret, universe_n = universe_ret_closed, universe_n_closed
+
         # Empty-holdings branch: forward the empty_reason as both a record
-        # and a warning, then move on.
+        # and a warning, then move on. The universe baseline is still
+        # meaningful here (signals_df was non-empty; the strategy just
+        # couldn't pick anything) so we record + chain-link it.
         if outcome.empty_reason is not None:
             if send_event:
                 send_event(
                     "warning", scope="backtest",
                     message=f"{_record_label(period_date)}: {outcome.empty_reason}",
                 )
+            universe_cum_record = None
+            if universe_ret is not None:
+                if is_open_iter:
+                    universe_cum_record = (
+                        accum.universe_cumulative_factor * (1 + universe_ret / 100) - 1
+                    ) * 100
+                else:
+                    accum.universe_cumulative_factor *= (1 + universe_ret / 100)
+                    accum.universe_period_returns.append(universe_ret)
+                    universe_cum_record = (accum.universe_cumulative_factor - 1) * 100
             period_records.append(PeriodRecord(
                 date=_record_date(period_date),
                 holdings=[],
@@ -289,6 +329,11 @@ def run_backtest(
                 cumulative_return_pct=round(accum.cumulative, 2),
                 empty_reason=outcome.empty_reason,
                 is_open=is_open_iter,
+                universe_return_pct=universe_ret,
+                universe_cumulative_return_pct=(
+                    round(universe_cum_record, 2) if universe_cum_record is not None else None
+                ),
+                universe_constituents=universe_n if universe_ret is not None else None,
             ))
             continue
 
@@ -321,6 +366,21 @@ def run_backtest(
         if not is_open_iter:
             prev_holdings_set = current_set
 
+        # Chain-link the universe baseline using the same closed-vs-open
+        # split the strategy uses above: open period updates the
+        # display cumulative but does NOT bump the accumulator (so the
+        # summary headline stays apples-to-apples with closed periods).
+        universe_cum_record_v = None
+        if universe_ret is not None:
+            if is_open_iter:
+                universe_cum_record_v = (
+                    accum.universe_cumulative_factor * (1 + universe_ret / 100) - 1
+                ) * 100
+            else:
+                accum.universe_cumulative_factor *= (1 + universe_ret / 100)
+                accum.universe_period_returns.append(universe_ret)
+                universe_cum_record_v = (accum.universe_cumulative_factor - 1) * 100
+
         period_records.append(PeriodRecord(
             date=_record_date(period_date),
             holdings=outcome.holdings,
@@ -328,6 +388,11 @@ def run_backtest(
             cumulative_return_pct=round(record_cum, 2),
             is_open=is_open_iter,
             as_of_date=open_as_of.isoformat() if open_as_of else None,
+            universe_return_pct=universe_ret,
+            universe_cumulative_return_pct=(
+                round(universe_cum_record_v, 2) if universe_cum_record_v is not None else None
+            ),
+            universe_constituents=universe_n if universe_ret is not None else None,
         ))
 
     if send_event:

@@ -42,6 +42,12 @@ class _PeriodAccumulators:
     all_period_returns: list[float] = None
     turnover_values: list[float] = None
     holdings_counts: list[int] = None
+    # Universe (equal-weight-everything) baseline. Chain-linked the
+    # same way as the strategy's cumulative_factor, over closed
+    # periods only. Drives `universe_total_return_pct` on the summary
+    # so the user can compare strategy vs. universe at a glance.
+    universe_cumulative_factor: float = 1.0
+    universe_period_returns: list[float] = None
 
     def __post_init__(self):
         if self.all_period_returns is None:
@@ -50,6 +56,8 @@ class _PeriodAccumulators:
             self.turnover_values = []
         if self.holdings_counts is None:
             self.holdings_counts = []
+        if self.universe_period_returns is None:
+            self.universe_period_returns = []
 
 
 def build_backtest_result(
@@ -129,6 +137,21 @@ def build_backtest_result(
         if period_std > 0:
             sharpe = round((period_mean / period_std) * (_periods_per_year(rebalance_frequency) ** 0.5), 2)
 
+    # Universe headline — same chain-link arithmetic as the strategy's
+    # totals, computed over CLOSED periods only so the comparison is
+    # apples-to-apples (the open period would inflate the strategy with
+    # a partial window the universe doesn't share). Annualized uses
+    # the same n_years as the strategy.
+    if accumulators.universe_period_returns:
+        universe_total = round((accumulators.universe_cumulative_factor - 1) * 100, 2)
+        universe_annualized = (
+            round((accumulators.universe_cumulative_factor ** (1 / n_years) - 1) * 100, 2)
+            if n_years > 0 else 0.0
+        )
+    else:
+        universe_total = None
+        universe_annualized = None
+
     summary = BacktestSummary(
         total_return_pct=total_return,
         annualized_return_pct=annualized,
@@ -144,6 +167,8 @@ def build_backtest_result(
             if accumulators.holdings_counts else 0
         ),
         top_drawdowns=top_drawdowns,
+        universe_total_return_pct=universe_total,
+        universe_annualized_return_pct=universe_annualized,
     )
 
     return BacktestResult(

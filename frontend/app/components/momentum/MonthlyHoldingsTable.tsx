@@ -249,10 +249,19 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
                 Return<CellInfoTip>Equal-weighted portfolio return for this period in EUR. Long-only: mean of holdings&apos; (exit ÷ entry) − 1. Long-short: long-side mean minus short-side mean.</CellInfoTip>
               </th>
               <th className="text-right px-3 py-2.5 font-medium">
+                Universe<CellInfoTip>&quot;What if you held the entire eligible universe equal-weighted?&quot; — the no-skill baseline. Same entry→exit window as the strategy. Compare against Return to see whether the picks added value vs. just being in the market.</CellInfoTip>
+              </th>
+              <th className="text-right px-3 py-2.5 font-medium">
+                Alpha<CellInfoTip>Return minus Universe for this period. Positive = the picks beat the equal-weighted universe over the same window; negative = the universe would have done better. &quot;—&quot; when either side has no return for the period.</CellInfoTip>
+              </th>
+              <th className="text-right px-3 py-2.5 font-medium">
                 Turnover<CellInfoTip>Percentage of this period&apos;s holdings that weren&apos;t held in the previous period. 0% means the strategy held the same portfolio; 100% means it replaced everything.</CellInfoTip>
               </th>
-              <th className="text-right px-5 py-2.5 font-medium">
+              <th className="text-right px-3 py-2.5 font-medium">
                 Cumulative<CellInfoTip>Cumulative return through the end of this period, since the backtest start: chain-linked product of all prior period returns.</CellInfoTip>
+              </th>
+              <th className="text-right px-5 py-2.5 font-medium">
+                Universe cum<CellInfoTip>Cumulative universe-baseline return — chain-linked from the per-period &quot;Universe&quot; column. Compare against Cumulative: the difference is the strategy&apos;s alpha vs. holding everything.</CellInfoTip>
               </th>
             </tr>
           </thead>
@@ -284,17 +293,58 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
                     {fmtPct(r.portfolio_return_pct)}
                     <span className="text-gray-500">{parenPct(netByDate.get(r.date)?.portRet)}</span>
                   </td>
+                  <td
+                    className="text-right px-3 py-2.5 font-mono text-gray-500"
+                    title={
+                      r.universe_constituents != null
+                        ? `Equal-weight across ${r.universe_constituents} eligible companies for this period`
+                        : undefined
+                    }
+                  >
+                    {r.universe_return_pct != null ? fmtPct(r.universe_return_pct) : '—'}
+                  </td>
+                  {(() => {
+                    // Per-period alpha — render only when BOTH legs are
+                    // available. Render with explicit sign + emerald/rose
+                    // tint so the column reads as a verdict, not a raw
+                    // number.
+                    const alpha =
+                      r.portfolio_return_pct != null && r.universe_return_pct != null
+                        ? r.portfolio_return_pct - r.universe_return_pct
+                        : null;
+                    return (
+                      <td
+                        className={`text-right px-3 py-2.5 font-mono font-medium ${
+                          alpha == null
+                            ? 'text-gray-600'
+                            : alpha >= 0
+                            ? 'text-emerald-400'
+                            : 'text-rose-400'
+                        }`}
+                        title={
+                          alpha != null
+                            ? 'Strategy return minus universe return for this period.'
+                            : 'Alpha unavailable — either the strategy had no return or no eligible universe baseline for this period.'
+                        }
+                      >
+                        {alpha == null ? '—' : `${alpha >= 0 ? '+' : ''}${alpha.toFixed(2)}%`}
+                      </td>
+                    );
+                  })()}
                   <td className="text-right px-3 py-2.5 font-mono text-gray-400">
                     {turnoverByDate[r.date] != null ? `${turnoverByDate[r.date]!.toFixed(1)}%` : '—'}
                   </td>
-                  <td className={`text-right px-5 py-2.5 font-mono ${r.cumulative_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  <td className={`text-right px-3 py-2.5 font-mono ${r.cumulative_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                     {fmtPct(r.cumulative_return_pct)}
                     <span className="text-gray-500">{parenPct(netByDate.get(r.date)?.cumRet)}</span>
+                  </td>
+                  <td className="text-right px-5 py-2.5 font-mono text-gray-500">
+                    {r.universe_cumulative_return_pct != null ? fmtPct(r.universe_cumulative_return_pct) : '—'}
                   </td>
                 </tr>
                 {expandedMonth === r.date && r.holdings.length > 0 && (
                   <tr key={`${r.date}-detail`}>
-                    <td colSpan={5} className="bg-[#0f1117] px-5 py-3">
+                    <td colSpan={8} className="bg-[#0f1117] px-5 py-3">
                       <table className="w-full text-xs">
                         <thead>
                           <tr className="text-gray-600">
