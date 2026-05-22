@@ -9,6 +9,7 @@ import { trackedFetch } from '../../lib/loading';
 import type { Column } from '../../lib/tableExport';
 import TableDownloadButton from './TableDownloadButton';
 import LoadingDots from './LoadingDots';
+import Spinner from './Spinner';
 
 import { API_URL } from '../../lib/apiUrl';
 
@@ -87,8 +88,9 @@ function EditRow({
       <td className="px-3 py-2 text-gray-600 text-xs">—</td>
       <td className="px-3 py-2">
         <div className="flex gap-1.5">
-          <button onClick={handleSave} disabled={saving} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 transition-colors">
-            {saving ? '...' : 'Save'}
+          <button onClick={handleSave} disabled={saving} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 transition-colors inline-flex items-center gap-1.5">
+            {saving && <Spinner size={12} className="h-3 w-3 text-white" />}
+            {saving ? 'Saving…' : 'Save'}
           </button>
           <button onClick={onCancel} className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-colors">
             Cancel
@@ -174,7 +176,15 @@ function AddRow({
   return (
     <>
     <tr className="border-b border-emerald-800/20 bg-emerald-500/5">
-      <td className="px-4 py-2 text-sm text-gray-600">new</td>
+      <td className="px-4 py-2 text-sm text-gray-600">
+        {dupesLoading ? (
+          <span className="inline-flex items-center" title="Checking for duplicate companies…">
+            <Spinner size={10} className="h-2.5 w-2.5 text-emerald-500/80" />
+          </span>
+        ) : (
+          'new'
+        )}
+      </td>
       <td className="px-3 py-2"><input ref={nameRef} value={name} onChange={(e) => setName(e.target.value)} placeholder="Company name" className={inputAddCls} /></td>
       <td className="px-3 py-2">
         <input value={ticker} onChange={(e) => setTicker(e.target.value)} placeholder="TICKER" className={inputAddCls} />
@@ -192,8 +202,9 @@ function AddRow({
       <td className="px-3 py-2 text-sm text-gray-600">—</td>
       <td className="px-3 py-2">
         <div className="flex gap-1.5">
-          <button onClick={handleAdd} disabled={saving || !name.trim() || !ticker.trim() || !exchange.trim()} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 transition-colors">
-            {saving ? '...' : hasMatches ? 'Add anyway' : 'Add'}
+          <button onClick={handleAdd} disabled={saving || !name.trim() || !ticker.trim() || !exchange.trim()} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 transition-colors inline-flex items-center gap-1.5">
+            {saving && <Spinner size={12} className="h-3 w-3 text-white" />}
+            {saving ? 'Adding…' : hasMatches ? 'Add anyway' : 'Add'}
           </button>
           <button onClick={onCancel} className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-colors">
             Cancel
@@ -204,9 +215,16 @@ function AddRow({
     {hasMatches && (
       <tr className="border-b border-amber-800/20 bg-amber-500/5">
         <td colSpan={7} className="px-4 py-3">
-          <div className="text-xs text-amber-300 font-medium mb-2">
-            ⚠ {dupeMatches.length} possible duplicate{dupeMatches.length === 1 ? '' : 's'} already in the database
-            {dupesLoading && <span className="text-gray-500 ml-2">(re-checking…)</span>}
+          <div className="text-xs text-amber-300 font-medium mb-2 flex items-center gap-2">
+            <span>
+              ⚠ {dupeMatches.length} possible duplicate{dupeMatches.length === 1 ? '' : 's'} already in the database
+            </span>
+            {dupesLoading && (
+              <span className="inline-flex items-center gap-1 text-gray-500">
+                <Spinner size={10} className="h-2.5 w-2.5 text-gray-500" />
+                <span>re-checking…</span>
+              </span>
+            )}
           </div>
           <ul className="space-y-1">
             {dupeMatches.map((m) => (
@@ -232,6 +250,13 @@ function AddRow({
 export default function CompanyManager() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
+  // Universe memberships are fetched as a second, slower roundtrip after the
+  // companies list lands. While this is true, the Memberships column shows a
+  // small spinner instead of "—" so an empty chip cell isn't mistaken for
+  // "this company belongs to no universes".
+  const [membershipsLoading, setMembershipsLoading] = useState(true);
+  // company_id whose Delete request is currently in flight, or null.
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [filterExchange, setFilterExchange] = useState('');
   const [filterCountry, setFilterCountry] = useState('');
@@ -254,6 +279,7 @@ export default function CompanyManager() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setMembershipsLoading(true);
     try {
       const res = await trackedFetch('Loading companies', `${API_URL}/api/companies`);
       const data: Company[] = await res.json();
@@ -276,6 +302,8 @@ export default function CompanyManager() {
       );
     } catch {
       // Non-fatal — chips just don't render.
+    } finally {
+      setMembershipsLoading(false);
     }
   }, []);
 
@@ -444,6 +472,7 @@ export default function CompanyManager() {
   async function handleDelete(id: number, name: string) {
     if (!(await dialog.confirm(`Delete "${name}"? This cannot be undone.`, { destructive: true, confirmLabel: 'Delete' }))) return;
     setError(null);
+    setDeletingId(id);
     try {
       const res = await apiFetch(`${API_URL}/api/companies/${id}`, { method: 'DELETE' });
       if (!res.ok) {
@@ -453,6 +482,8 @@ export default function CompanyManager() {
       setCompanies((prev) => prev.filter((c) => c.company_id !== id));
     } catch (e) {
       setError(`Delete failed: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -613,6 +644,16 @@ export default function CompanyManager() {
                   onCancel={() => setAdding(false)}
                 />
               )}
+              {loading && (
+                <tr>
+                  <td colSpan={7} className="py-14 text-center">
+                    <span className="inline-flex items-center gap-2.5 text-gray-500 text-sm">
+                      <Spinner size={14} />
+                      <span>Loading companies…</span>
+                    </span>
+                  </td>
+                </tr>
+              )}
               {filtered.map((c) =>
                 editingId === c.company_id ? (
                   <EditRow
@@ -655,7 +696,11 @@ export default function CompanyManager() {
                     <td className="px-3 py-2.5 text-gray-400">{c.country ?? '—'}</td>
                     <td className="px-3 py-2.5">
                       {(c.universes ?? []).length === 0 ? (
-                        <span className="text-xs text-gray-600">—</span>
+                        membershipsLoading ? (
+                          <Spinner size={10} className="h-2.5 w-2.5 text-gray-600" />
+                        ) : (
+                          <span className="text-xs text-gray-600">—</span>
+                        )
                       ) : (
                         <div className="flex flex-wrap gap-1">
                           {c.universes.map((u) => (
@@ -674,20 +719,29 @@ export default function CompanyManager() {
                     </td>
                     <td className="px-3 py-2.5">
                       {isAdmin && (
-                        <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button
-                            onClick={() => { setEditingId(c.company_id); setAdding(false); }}
-                            className="px-2.5 py-1 rounded-lg text-xs text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => handleDelete(c.company_id, c.company_name ?? c.gurufocus_ticker)}
-                            className="px-2.5 py-1 rounded-lg text-xs text-gray-600 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                          >
-                            Delete
-                          </button>
-                        </div>
+                        deletingId === c.company_id ? (
+                          <span className="inline-flex items-center gap-1.5 text-xs text-rose-400">
+                            <Spinner size={12} className="h-3 w-3 text-rose-400" />
+                            Deleting…
+                          </span>
+                        ) : (
+                          <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={() => { setEditingId(c.company_id); setAdding(false); }}
+                              disabled={deletingId !== null}
+                              className="px-2.5 py-1 rounded-lg text-xs text-gray-400 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleDelete(c.company_id, c.company_name ?? c.gurufocus_ticker)}
+                              disabled={deletingId !== null}
+                              className="px-2.5 py-1 rounded-lg text-xs text-gray-600 hover:text-rose-400 hover:bg-rose-500/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        )
                       )}
                     </td>
                   </tr>
@@ -750,8 +804,9 @@ export default function CompanyManager() {
               <button
                 onClick={confirmAdd}
                 disabled={confirming}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50"
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 inline-flex items-center gap-2"
               >
+                {confirming && <Spinner size={14} className="h-3.5 w-3.5 text-white" />}
                 {confirming ? 'Adding…' : 'Yes, add this company'}
               </button>
             </div>

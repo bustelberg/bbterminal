@@ -661,6 +661,169 @@ def _hydrate(rows: list[dict]) -> list[dict]:
 # ─── Endpoints ────────────────────────────────────────────────────
 
 
+@router.get("/api/scheduled-strategies/held-companies")
+async def list_held_companies():
+    """Pooled set of companies currently held across every enabled
+    scheduled strategy. Drives the /schedule "Misc jobs → Currently held
+    companies" panel — gives the user full transparency over which
+    company is in which strategy's portfolio, when each position was
+    opened, and where the next daily price refresh will be writing data.
+
+    Aggregation: for each enabled strategy, take the most-recent
+    `current_picks_snapshot` (any kind — rebalance or price_update;
+    they share the same holdings shape). Pool the holdings, dedup by
+    `company_id`, and attach one `held_by` entry per strategy that holds
+    that company. Companies with no snapshot yet are skipped silently.
+
+    Returns:
+        {
+          "total_companies": int,           # distinct companies pooled
+          "total_strategies": int,          # strategies contributing
+          "companies": [{
+            "company_id", "ticker", "exchange",
+            "company_name", "sector",
+            "held_by": [{
+              "strategy_id", "strategy_name",
+              "snapshot_id", "snapshot_kind",  # "rebalance"|"price_update"
+              "as_of_date",                    # when this position was opened
+              "latest_price_date",             # most recent close seen for it
+              "target_weight",                 # fractional, 0..1
+              "score", "entry_price_local", "entry_date",
+            }]
+          }]
+        }
+    """
+    def _query() -> dict:
+        # Step 1 — every enabled scheduled strategy.
+        strat_resp = (
+            supabase.table("scheduled_strategy")
+            .select("id, name")
+            .eq("enabled", True)
+            .execute()
+        )
+        strategies = strat_resp.data or []
+        if not strategies:
+            return {"total_companies": 0, "total_strategies": 0, "companies": []}
+        strategy_name_by_id: dict[int, str] = {
+            int(s["id"]): (s.get("name") or f"Strategy #{s['id']}")
+            for s in strategies
+        }
+        sched_ids = list(strategy_name_by_id.keys())
+
+        # Step 2 — latest snapshot per strategy (regardless of kind).
+        snap_resp = (
+            supabase.table("current_picks_snapshot")
+            .select(
+                "snapshot_id, scheduled_strategy_id, kind, as_of_date, "
+                "latest_price_date, holdings, created_at"
+            )
+            .in_("scheduled_strategy_id", sched_ids)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        latest_by_sched: dict[int, dict] = {}
+        for s in (snap_resp.data or []):
+            sid = s.get("scheduled_strategy_id")
+            if sid is None or sid in latest_by_sched:
+                continue
+            latest_by_sched[int(sid)] = s
+
+        # Step 3 — pool holdings, attaching attribution per strategy.
+        # Keyed by company_id; each entry's held_by list grows as we
+        # iterate. Strategies with no snapshot yet are silently
+        # skipped (first-run before backfill or pipeline ever touched them).
+        pooled: dict[int, dict] = {}
+        for sched_id, snap in latest_by_sched.items():
+            for h in (snap.get("holdings") or []):
+                cid_raw = h.get("company_id")
+                if cid_raw is None:
+                    continue
+                cid = int(cid_raw)
+                bucket = pooled.setdefault(cid, {
+                    "company_id": cid,
+                    "ticker": h.get("ticker"),
+                    "company_name": h.get("company_name"),
+                    "sector": h.get("sector"),
+                    "exchange": "",  # filled in step 4 below
+                    "held_by": [],
+                })
+                # Holdings stored on the snapshot don't carry exchange;
+                # but they do carry ticker + name + sector. We pick the
+                # first non-null value across strategies for stability,
+                # then overwrite from the company table below.
+                if not bucket.get("ticker"):
+                    bucket["ticker"] = h.get("ticker")
+                if not bucket.get("company_name"):
+                    bucket["company_name"] = h.get("company_name")
+                if not bucket.get("sector"):
+                    bucket["sector"] = h.get("sector")
+                bucket["held_by"].append({
+                    "strategy_id": sched_id,
+                    "strategy_name": strategy_name_by_id[sched_id],
+                    "snapshot_id": snap.get("snapshot_id"),
+                    "snapshot_kind": snap.get("kind"),
+                    "as_of_date": snap.get("as_of_date"),
+                    "latest_price_date": snap.get("latest_price_date"),
+                    "target_weight": float(h.get("weight") or 0.0),
+                    "score": h.get("score"),
+                    "entry_price_local": h.get("entry_price_local"),
+                    "entry_date": h.get("entry_date") or snap.get("as_of_date"),
+                })
+
+        if not pooled:
+            return {
+                "total_companies": 0,
+                "total_strategies": len(latest_by_sched),
+                "companies": [],
+            }
+
+        # Step 4 — exchange lookup. Holdings JSONB doesn't include the
+        # GuruFocus exchange code; fetch it from `company` joined to
+        # `gurufocus_exchange`. Batched by 50 to stay under the
+        # PostgREST URL-length window — same convention as the rest of
+        # the codebase.
+        cids = list(pooled.keys())
+        for start in range(0, len(cids), 50):
+            chunk = cids[start : start + 50]
+            comp_resp = (
+                supabase.table("company")
+                .select(
+                    "company_id, company_name, gurufocus_ticker, "
+                    "gurufocus_exchange:gurufocus_exchange(exchange_code)"
+                )
+                .in_("company_id", chunk)
+                .execute()
+            )
+            for r in (comp_resp.data or []):
+                cid = int(r["company_id"])
+                if cid not in pooled:
+                    continue
+                exch = (r.get("gurufocus_exchange") or {}).get("exchange_code") or ""
+                pooled[cid]["exchange"] = exch
+                # Prefer the authoritative ticker/name from `company`
+                # — the snapshot's holdings can carry slightly stale
+                # values after a renamed-ticker override.
+                if r.get("gurufocus_ticker"):
+                    pooled[cid]["ticker"] = r["gurufocus_ticker"]
+                if r.get("company_name"):
+                    pooled[cid]["company_name"] = r["company_name"]
+
+        companies = list(pooled.values())
+        # Sort by (sector, ticker) for stable rendering. Empty sector
+        # bucket lands at the bottom.
+        companies.sort(key=lambda c: (
+            (c.get("sector") or "~"),  # ~ sorts after letters in ASCII
+            (c.get("ticker") or "").upper(),
+        ))
+
+        return {
+            "total_companies": len(companies),
+            "total_strategies": len(latest_by_sched),
+            "companies": companies,
+        }
+    return await asyncio.to_thread(_query)
+
+
 @router.get("/api/scheduled-strategies")
 async def list_scheduled_strategies():
     """Every scheduled strategy, newest first by created_at desc, with

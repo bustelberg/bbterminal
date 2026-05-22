@@ -93,14 +93,46 @@ async def list_company_memberships():
     `company_universe_labels` RPC; backed by an index on
     universe_membership(company_id) so the aggregate is fast even when the
     table holds millions of per-month rows. Returns
-    `{memberships: {company_id: [labels]}}`."""
+    `{memberships: {company_id: [labels]}}`.
+
+    Pagination: the cloud Supabase project caps PostgREST responses at
+    `db-max-rows=1000` per request (local Docker Supabase is bumped to
+    10000 in `supabase/config.toml`, which hides the cap during dev). The
+    RPC returns ~2800 rows in prod, so without paging we'd silently miss
+    the membership chips for every company past offset 1000 — see the
+    2G Energy AG / cid=4875 incident on 2026-05-22. The loop here pages
+    via `.range()` until a partial page comes back."""
     def _query():
         try:
-            resp = supabase.rpc("company_universe_labels").execute()
-            return {
-                str(r["company_id"]): (r.get("labels") or [])
-                for r in (resp.data or [])
-            }
+            page = 1000
+            offset = 0
+            collected: dict[str, list[str]] = {}
+            # Hard cap at 20 pages = 20k companies — far above the
+            # current universe (~2800). Guards against an infinite loop
+            # if `.range()` is ever silently ignored on the server.
+            for _attempt in range(20):
+                resp = (
+                    supabase.rpc("company_universe_labels")
+                    .range(offset, offset + page - 1)
+                    .execute()
+                )
+                batch = resp.data or []
+                if not batch:
+                    break
+                # If `.range()` is honored the batch is the next slice
+                # and `seen` dedups by company_id either way; the guard
+                # below also breaks once we see a slice with no NEW ids.
+                added = 0
+                for r in batch:
+                    cid = str(r["company_id"])
+                    if cid in collected:
+                        continue
+                    collected[cid] = r.get("labels") or []
+                    added += 1
+                if added == 0 or len(batch) < page:
+                    break
+                offset += page
+            return collected
         except Exception:
             # Migration may not be applied yet — return empty rather than 500.
             return {}

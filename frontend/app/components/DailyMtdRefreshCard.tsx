@@ -4,7 +4,38 @@ import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import type { IngestRun } from './Schedule';
 import LoadingDots from './LoadingDots';
+import Spinner from './Spinner';
 import { API_URL } from '../../lib/apiUrl';
+
+/** One strategy's attribution for a held company. The daily refresh
+ * will write fresh closes against the holdings on this snapshot. */
+type HeldByEntry = {
+  strategy_id: number;
+  strategy_name: string;
+  snapshot_id: number;
+  snapshot_kind: 'rebalance' | 'price_update' | string;
+  as_of_date: string | null;
+  latest_price_date: string | null;
+  target_weight: number;
+  score: number | null;
+  entry_price_local: number | null;
+  entry_date: string | null;
+};
+
+type HeldCompany = {
+  company_id: number;
+  ticker: string;
+  exchange: string;
+  company_name: string | null;
+  sector: string | null;
+  held_by: HeldByEntry[];
+};
+
+type HeldCompaniesResponse = {
+  total_companies: number;
+  total_strategies: number;
+  companies: HeldCompany[];
+};
 
 // Daily job fires Wed-Sat 02:00 UTC. UTC weekday: 0=Sun, 1=Mon, ... 6=Sat.
 const DAILY_TICK_DAYS = new Set([3, 4, 5, 6]);
@@ -53,6 +84,14 @@ export default function DailyMtdRefreshCard() {
   const [triggering, setTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  // Held-companies panel state. Fetched lazily on first expand to avoid
+  // the (still cheap, but extra) roundtrip when the user isn't looking.
+  const [held, setHeld] = useState<HeldCompaniesResponse | null>(null);
+  const [heldLoading, setHeldLoading] = useState(false);
+  const [heldError, setHeldError] = useState<string | null>(null);
+  // Which run is currently click-expanded for per-strategy detail.
+  // null = none. Survives revalidate fetches.
+  const [expandedRunId, setExpandedRunId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -67,9 +106,34 @@ export default function DailyMtdRefreshCard() {
     }
   }, []);
 
+  const loadHeld = useCallback(async () => {
+    setHeldLoading(true);
+    setHeldError(null);
+    try {
+      const r = await fetch(`${API_URL}/api/scheduled-strategies/held-companies`);
+      if (!r.ok) {
+        setHeldError(`Fetch failed: HTTP ${r.status}`);
+        return;
+      }
+      const data = (await r.json()) as HeldCompaniesResponse;
+      setHeld(data);
+    } catch (e) {
+      setHeldError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setHeldLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Fetch held companies the first time the user expands the card —
+  // and re-fetch on every subsequent expand so the panel stays current
+  // (cheap query, runs only when the panel is visible).
+  useEffect(() => {
+    if (expanded) void loadHeld();
+  }, [expanded, loadHeld]);
 
   // Poll every 5s while the last run is in 'running' so the UI moves
   // through the phases live. Idle otherwise.
@@ -168,34 +232,327 @@ export default function DailyMtdRefreshCard() {
         </div>
       )}
       {expanded && (
-        <div className="border-t border-gray-800/30">
-          {runs === null ? (
-            <div className="px-5 py-4 text-sm text-gray-500"><LoadingDots label="Loading" /></div>
-          ) : runs.length === 0 ? (
-            <div className="px-5 py-4 text-sm text-gray-500">No runs yet.</div>
-          ) : (
-            <div className="divide-y divide-gray-800/30">
-              {runs.map((r) => {
-                const mom = r.momentum_summary || [];
-                const okStrat = mom.filter((m) => m.status === 'ok').length;
-                const detail = [
-                  r.companies_total
-                    ? `${r.companies_processed}/${r.companies_total} companies · ${r.prices_refreshed}p / ${r.volumes_refreshed}v`
-                    : null,
-                  mom.length > 0 ? `${okStrat}/${mom.length} strategies ok` : null,
-                  r.error_summary,
-                ].filter(Boolean).join(' · ');
-                return (
-                  <div key={r.run_id} className="px-5 py-2 text-xs flex items-center gap-3 hover:bg-white/[0.02]">
-                    <span className={`inline-flex items-center text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border shrink-0 ${statusBadgeCls(r.status)}`}>
-                      {r.status}
-                    </span>
-                    <span className="text-gray-300 font-mono shrink-0">{fmtTimestamp(r.finished_at ?? r.started_at)}</span>
-                    <span className="text-gray-500 text-[10px] uppercase tracking-wider shrink-0">{r.triggered_by}</span>
-                    <span className="text-gray-400 truncate flex-1 min-w-0" title={detail}>{detail}</span>
+        <div className="border-t border-gray-800/30 divide-y divide-gray-800/30">
+          {/* ── Sub-section 1: Currently held companies ───────── */}
+          <div>
+            <div className="px-5 py-3 flex items-baseline justify-between gap-3">
+              <div>
+                <h4 className="text-xs font-medium text-gray-300 uppercase tracking-wider">
+                  Currently held companies
+                </h4>
+                <p className="text-[11px] text-gray-500 mt-0.5">
+                  Pooled across every enabled strategy&apos;s latest snapshot — these are the rows the next daily refresh will price.
+                </p>
+              </div>
+              {held && (
+                <div className="text-[11px] text-gray-500 shrink-0 font-mono">
+                  {held.total_companies} compan{held.total_companies === 1 ? 'y' : 'ies'} · {held.total_strategies} strateg{held.total_strategies === 1 ? 'y' : 'ies'}
+                </div>
+              )}
+            </div>
+            <HeldCompaniesTable
+              data={held}
+              loading={heldLoading}
+              error={heldError}
+              onRetry={() => void loadHeld()}
+            />
+          </div>
+
+          {/* ── Sub-section 2: Recent runs (click to expand) ──── */}
+          <div>
+            <div className="px-5 py-3">
+              <h4 className="text-xs font-medium text-gray-300 uppercase tracking-wider">
+                Recent runs
+              </h4>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                Click a row to see per-strategy outcome, error messages, and Python tracebacks.
+              </p>
+            </div>
+            {runs === null ? (
+              <div className="px-5 py-4 text-sm text-gray-500"><LoadingDots label="Loading" /></div>
+            ) : runs.length === 0 ? (
+              <div className="px-5 py-4 text-sm text-gray-500">No runs yet.</div>
+            ) : (
+              <div className="divide-y divide-gray-800/30">
+                {runs.map((r) => (
+                  <DailyRunRow
+                    key={r.run_id}
+                    run={r}
+                    expanded={expandedRunId === r.run_id}
+                    onToggle={() =>
+                      setExpandedRunId((cur) => (cur === r.run_id ? null : r.run_id))
+                    }
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Table of pooled held companies. Each row carries one or more
+ * strategy chips showing which scheduled strategies hold the company
+ * and as of which rebalance date. */
+function HeldCompaniesTable({
+  data,
+  loading,
+  error,
+  onRetry,
+}: {
+  data: HeldCompaniesResponse | null;
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
+}) {
+  if (error) {
+    return (
+      <div className="px-5 py-4 text-xs flex items-center justify-between bg-rose-500/5 border-t border-rose-500/20 text-rose-300">
+        <span>Couldn&apos;t load held companies: {error}</span>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="text-rose-200 hover:text-white"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+  if (loading && !data) {
+    return (
+      <div className="px-5 py-4 text-sm text-gray-500 inline-flex items-center gap-2">
+        <Spinner size={12} />
+        <span>Loading held companies…</span>
+      </div>
+    );
+  }
+  if (!data || data.companies.length === 0) {
+    return (
+      <div className="px-5 py-4 text-sm text-gray-500">
+        No companies held — either no enabled strategies, or none have produced a snapshot yet.
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-5 pb-4">
+      <div className="overflow-x-auto rounded-lg border border-gray-800/40">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-gray-800/40 text-gray-500 text-left">
+              <th className="px-3 py-2 font-medium">Company</th>
+              <th className="px-3 py-2 font-medium w-32">Sector</th>
+              <th className="px-3 py-2 font-medium">Held by</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.companies.map((c) => (
+              <tr key={c.company_id} className="border-b border-gray-800/20 last:border-0 hover:bg-white/[0.02]">
+                <td className="px-3 py-2 align-top">
+                  <div className="text-gray-200 font-medium truncate max-w-[20rem]" title={c.company_name ?? undefined}>
+                    {c.company_name ?? '—'}
                   </div>
-                );
-              })}
+                  <div className="text-[10px] text-gray-500 font-mono mt-0.5">
+                    {c.exchange ? `${c.exchange}:${c.ticker}` : c.ticker}
+                  </div>
+                </td>
+                <td className="px-3 py-2 align-top text-gray-400 text-[11px]">
+                  {c.sector ?? '—'}
+                </td>
+                <td className="px-3 py-2 align-top">
+                  <div className="flex flex-wrap gap-1">
+                    {c.held_by.map((hb) => (
+                      <HeldByChip key={`${c.company_id}-${hb.strategy_id}`} entry={hb} />
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/** One strategy chip with hover popover showing snapshot details. */
+function HeldByChip({ entry }: { entry: HeldByEntry }) {
+  const weightPct = (entry.target_weight * 100).toFixed(2);
+  const tooltipLines = [
+    `Opened: ${entry.as_of_date ?? '—'}`,
+    `Last priced: ${entry.latest_price_date ?? '—'}`,
+    `Weight: ${weightPct}%`,
+    entry.entry_price_local != null ? `Entry: ${entry.entry_price_local}` : null,
+    entry.score != null ? `Score: ${entry.score.toFixed(2)}` : null,
+    `Snapshot #${entry.snapshot_id} · ${entry.snapshot_kind}`,
+  ].filter(Boolean).join('\n');
+
+  return (
+    <span
+      title={tooltipLines}
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-indigo-500/10 border-indigo-500/25 text-indigo-200 text-[10px] font-medium cursor-help"
+    >
+      <span className="truncate max-w-[10rem]">{entry.strategy_name}</span>
+      <span className="text-indigo-400/70 font-mono">
+        {entry.as_of_date ? `· ${entry.as_of_date}` : ''}
+      </span>
+    </span>
+  );
+}
+
+/** One row in the daily-run history list. Collapsed shows the
+ * one-line summary; expanded shows per-strategy outcome blobs with
+ * collapsible error tracebacks. */
+function DailyRunRow({
+  run,
+  expanded,
+  onToggle,
+}: {
+  run: IngestRun;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const mom = run.momentum_summary || [];
+  const okStrat = mom.filter((m) => m.status === 'ok').length;
+  const detail = [
+    run.companies_total
+      ? `${run.companies_processed}/${run.companies_total} companies · ${run.prices_refreshed}p / ${run.volumes_refreshed}v`
+      : null,
+    mom.length > 0 ? `${okStrat}/${mom.length} strategies ok` : null,
+    run.error_summary,
+  ].filter(Boolean).join(' · ');
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full px-5 py-2 text-xs flex items-center gap-3 hover:bg-white/[0.02] text-left"
+      >
+        <span className="text-gray-500 font-mono text-[10px] w-3 shrink-0">{expanded ? '▾' : '▸'}</span>
+        <span className={`inline-flex items-center text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border shrink-0 ${statusBadgeCls(run.status)}`}>
+          {run.status}
+        </span>
+        <span className="text-gray-300 font-mono shrink-0">{fmtTimestamp(run.finished_at ?? run.started_at)}</span>
+        <span className="text-gray-500 text-[10px] uppercase tracking-wider shrink-0">{run.triggered_by}</span>
+        <span className="text-gray-400 truncate flex-1 min-w-0" title={detail}>{detail}</span>
+      </button>
+      {expanded && (
+        <div className="px-8 py-3 bg-[#0f1117]/40 space-y-3">
+          {/* Top-line counters */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[11px]">
+            <CounterCell label="Processed" value={`${run.companies_processed}${run.companies_total ? ` / ${run.companies_total}` : ''}`} />
+            <CounterCell label="Prices refreshed" value={String(run.prices_refreshed)} />
+            <CounterCell label="Volumes refreshed" value={String(run.volumes_refreshed)} />
+            <CounterCell label="Errors" value={String(run.error_count)} tone={run.error_count > 0 ? 'rose' : undefined} />
+          </div>
+
+          {/* Top-level error_summary (first ~5 errors, captured by the orchestrator) */}
+          {run.error_summary && (
+            <div className="bg-rose-500/5 border border-rose-500/20 rounded-lg p-3 text-[11px] text-rose-200">
+              <div className="text-rose-300 font-medium mb-1">Pipeline-level error summary</div>
+              <pre className="whitespace-pre-wrap font-mono text-rose-200/90">{run.error_summary}</pre>
+            </div>
+          )}
+
+          {/* Per-strategy results */}
+          {mom.length === 0 ? (
+            <div className="text-[11px] text-gray-500">No per-strategy results recorded — the prices phase may not have reached the momentum phase.</div>
+          ) : (
+            <div className="space-y-2">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500">Per-strategy outcomes ({mom.length})</div>
+              {mom.map((m, i) => (
+                <PerStrategyResult key={`${run.run_id}-${m.strategy_id ?? i}`} entry={m} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CounterCell({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: 'rose';
+}) {
+  return (
+    <div className="bg-[#151821] border border-gray-800/40 rounded-lg px-3 py-2">
+      <div className="text-[10px] uppercase tracking-wider text-gray-500">{label}</div>
+      <div className={`font-mono text-sm mt-0.5 ${tone === 'rose' ? 'text-rose-300' : 'text-gray-200'}`}>{value}</div>
+    </div>
+  );
+}
+
+/** One per-strategy row inside an expanded run. Shows status, holdings
+ * count, latest_price_date, and on failure a collapsible traceback. */
+function PerStrategyResult({
+  entry,
+}: {
+  entry: NonNullable<IngestRun['momentum_summary']>[number];
+}) {
+  const [showTraceback, setShowTraceback] = useState(false);
+  const isError = entry.status === 'error';
+  return (
+    <div className={`rounded-lg border px-3 py-2 ${isError ? 'bg-rose-500/5 border-rose-500/20' : 'bg-[#151821] border-gray-800/40'}`}>
+      <div className="flex items-center gap-3 text-[11px]">
+        <span className={`inline-flex items-center text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border shrink-0 ${
+          isError
+            ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+            : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+        }`}>
+          {entry.status}
+        </span>
+        <span className="text-gray-200 font-medium truncate flex-1 min-w-0">{entry.strategy_name}</span>
+        {entry.frequency && (
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-gray-500/10 text-gray-400 border-gray-500/30 shrink-0">
+            {entry.frequency}
+          </span>
+        )}
+        <span className="text-gray-500 text-[10px] uppercase tracking-wider shrink-0">{entry.kind ?? '—'}</span>
+      </div>
+      <div className="text-[11px] text-gray-400 mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+        <span>
+          <span className="text-gray-500">Holdings:</span>{' '}
+          <span className="font-mono text-gray-300">{entry.holdings_count}</span>
+        </span>
+        <span>
+          <span className="text-gray-500">Latest price:</span>{' '}
+          <span className="font-mono text-gray-300">{entry.latest_price_date ?? '—'}</span>
+        </span>
+        {entry.snapshot_id != null && (
+          <span>
+            <span className="text-gray-500">Snapshot:</span>{' '}
+            <span className="font-mono text-gray-300">#{entry.snapshot_id}</span>
+          </span>
+        )}
+      </div>
+      {entry.error_message && (
+        <div className="mt-2 text-[11px]">
+          <div className="text-rose-300 font-medium">Error</div>
+          <div className="text-rose-200 font-mono whitespace-pre-wrap break-words">{entry.error_message}</div>
+          {entry.error_traceback && (
+            <div className="mt-1">
+              <button
+                type="button"
+                onClick={() => setShowTraceback((v) => !v)}
+                className="text-[10px] uppercase tracking-wider text-rose-300 hover:text-rose-100"
+              >
+                {showTraceback ? '▾ hide' : '▸ show'} Python traceback
+              </button>
+              {showTraceback && (
+                <pre className="mt-1 text-[10px] font-mono text-rose-200/80 bg-[#0b0d13] border border-rose-500/20 rounded p-2 max-h-64 overflow-auto whitespace-pre">
+                  {entry.error_traceback}
+                </pre>
+              )}
             </div>
           )}
         </div>

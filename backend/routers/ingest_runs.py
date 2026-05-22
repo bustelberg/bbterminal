@@ -181,12 +181,36 @@ def _load_all_companies() -> list[dict]:
     # which we map to the empty string so they sort lexicographically
     # before any real date. Failure here just falls back to insertion
     # order — the phase still works, just without prioritization.
+    #
+    # Pagination: PostgREST caps responses at `db-max-rows` (1000 in the
+    # cloud project, 10000 in local Docker Supabase via config.toml). The
+    # RPC returns one row per company (~2800) so without paging in prod
+    # only the first 1000 would have stale-priority — see the 2G Energy
+    # incident on /companies that exposed the same trap on the
+    # company_universe_labels RPC.
     try:
-        latest_resp = supabase.rpc("company_latest_close_price_dates", {}).execute()
-        latest_by_cid: dict[int, str] = {
-            int(row["company_id"]): (row.get("latest_target_date") or "")
-            for row in (latest_resp.data or [])
-        }
+        latest_by_cid: dict[int, str] = {}
+        page = 1000
+        offset = 0
+        for _attempt in range(20):
+            latest_resp = (
+                supabase.rpc("company_latest_close_price_dates", {})
+                .range(offset, offset + page - 1)
+                .execute()
+            )
+            batch = latest_resp.data or []
+            if not batch:
+                break
+            added = 0
+            for row in batch:
+                cid = int(row["company_id"])
+                if cid in latest_by_cid:
+                    continue
+                latest_by_cid[cid] = row.get("latest_target_date") or ""
+                added += 1
+            if added == 0 or len(batch) < page:
+                break
+            offset += page
         out.sort(key=lambda c: latest_by_cid.get(c["cid"], ""))
     except Exception as e:
         logging.getLogger(__name__).warning(
