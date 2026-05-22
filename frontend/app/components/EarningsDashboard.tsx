@@ -31,7 +31,7 @@ import { expectedStaleSources } from './earnings/utils';
 // component itself easier to navigate.
 
 // ---------------------------------------------------------------------------
-// SSE log reader â€” thin hook over the module-scoped earningsRefreshStore so
+// SSE log reader — thin hook over the module-scoped earningsRefreshStore so
 // streams keep running while the user navigates away from this page.
 // ---------------------------------------------------------------------------
 
@@ -218,7 +218,7 @@ export default function EarningsDashboard() {
       {selected && (
         <>
           <div className="text-gray-400 text-sm">
-            {selected.company_name || selected.gurufocus_ticker} â€” {selected.gurufocus_ticker}.{selected.gurufocus_exchange}
+            {selected.company_name || selected.gurufocus_ticker} — {selected.gurufocus_ticker}.{selected.gurufocus_exchange}
           </div>
 
           <LogPanel logs={sse.logs} logEndRef={sse.logEndRef} running={sse.running} onClose={sse.clearLogs} />

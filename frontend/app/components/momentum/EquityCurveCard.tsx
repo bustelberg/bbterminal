@@ -33,7 +33,7 @@ type Props = {
   /** Active backtest result (the strategy being run). The card is only
    * meaningful when this is set; the parent guards on `result &&`. */
   result: BacktestResult;
-  /** Loaded saved run id, if the active strategy was loaded from disk â€”
+  /** Loaded saved run id, if the active strategy was loaded from disk —
    * used to label the active series and to disable that row in the
    * "add saved" dropdown. */
   loadedRunId: number | null;
@@ -45,9 +45,9 @@ type Props = {
    * `feeStats.ts`. Optional so the card stays usable when the parent
    * doesn't pipe it through (e.g. saved-bundle reload flows). */
   exchangeByCompany?: Map<number, string>;
-  /** Full label for the active strategy row â€” same format as a saved
-   * comparison's label (e.g. "ACWI-mei Â· Momentum Â· 2002-2026 Â· Every
-   * 12 months Â· Long-only"). Parent computes this from the actual
+  /** Full label for the active strategy row — same format as a saved
+   * comparison's label (e.g. "ACWI-mei · Momentum · 2002-2026 · Every
+   * 12 months · Long-only"). Parent computes this from the actual
    * strategy params + active variant key so the row reads like a saved
    * backtest rather than a generic "Strategy" placeholder. */
   activeStrategyLabel?: string;
@@ -56,16 +56,16 @@ type Props = {
 /** "Equity Curve" card cluster: comparison pill row, summary stats,
  * yearly breakdown + custom-range picker, and the chart itself. Owns its
  * own benchmark/saved comparison state and all the chart-derived memos
- * â€” the parent only feeds it the active strategy plus the saved-run
+ * — the parent only feeds it the active strategy plus the saved-run
  * list. */
 export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchangeByCompany, activeStrategyLabel }: Props) {
-  // Benchmark options for the "add series" dropdown â€” fetched via the
+  // Benchmark options for the "add series" dropdown — fetched via the
   // shared cached hook so a sibling component (e.g. MomentumBacktester's
   // sector-ETF lookup) reuses the same fetch instead of re-requesting.
   const { data: _benchmarks } = useBenchmarks();
   const benchmarkOptions = (_benchmarks ?? []) as BenchmarkOption[];
   const [comparisons, setComparisons] = useState<ComparisonItem[]>([]);
-  // Per-exchange fees (bps) for the (net) parenthetical â€” shared cached
+  // Per-exchange fees (bps) for the (net) parenthetical — shared cached
   // hook, returns null when no non-zero fees are configured so the
   // `parenPct(...)` calls below render as empty strings.
   const feesByExchange = useExchangeFeeMap();
@@ -74,14 +74,14 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
   const [logScale, setLogScale] = useState(false);
   const [hoveredDrawdown, setHoveredDrawdown] = useState<number | null>(null);
   const [customFromMonth, setCustomFromMonth] = useState('');
-  // Identifier of an "Add series" operation currently in flight â€” used to
+  // Identifier of an "Add series" operation currently in flight — used to
   // show a small spinner pill while we fetch the backend payload. Cleared
   // once the comparison item lands in `comparisons`.
   const [addingSeriesId, setAddingSeriesId] = useState<string | null>(null);
 
   // Net stats for the active strategy + every saved comparison. We
   // reuse the parent's `exchangeByCompany` as the lookup for all of
-  // them â€” its fallback fetch hits `/api/companies` which covers the
+  // them — its fallback fetch hits `/api/companies` which covers the
   // entire directory, so a saved run on a different universe still
   // resolves its holdings' exchanges. Benchmarks have no holdings to
   // trade so they always sit out (net == gross by definition).
@@ -116,7 +116,7 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
       const saved = data.result ?? data;
       // Variant bundles (Random multi-trial sweeps, frequency sweeps, etc.)
       // store records under each variant rather than at the top level. Pick
-      // the first variant â€” mirrors how loadBacktest chooses `firstKey`
+      // the first variant — mirrors how loadBacktest chooses `firstKey`
       // when rehydrating a sweep as the active strategy.
       const baseLabel = data.name ?? `Backtest ${runId}`;
       let monthly: PeriodRecord[] = [];
@@ -132,7 +132,7 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
         monthly = v?.monthly_records ?? [];
         daily = v?.daily_records;
         summary = v?.summary;
-        if (v?.label) label = `${baseLabel} Â· ${v.label}`;
+        if (v?.label) label = `${baseLabel} · ${v.label}`;
       } else {
         monthly = saved.monthly_records ?? [];
         daily = saved.daily_records;
@@ -199,13 +199,13 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
           monthly: v.monthly_records ?? [],
           daily: v.daily_records,
           summary: v.summary,
-          label: v.label ? `${base} Â· ${v.label}` : base,
+          label: v.label ? `${base} · ${v.label}` : base,
         };
       }),
     );
   };
 
-  // One global "variant picker open" per comparison id â€” keeps clicks
+  // One global "variant picker open" per comparison id — keeps clicks
   // outside the picker from leaving multiple pickers open.
   const [variantPickerOpen, setVariantPickerOpen] = useState<string | null>(null);
   const variantPickerRef = useRef<HTMLDivElement>(null);
@@ -213,7 +213,7 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
 
   // Resolve every series into a (date â†’ growth factor) map. Date keys are
   // normalized to YYYY-MM-DD so that string comparison correctly orders dates
-  // across mixed cadences â€” a saved variant with monthly_records ("2002-01")
+  // across mixed cadences — a saved variant with monthly_records ("2002-01")
   // sits at the *end of January* on the timeline, lining up with a daily
   // strategy's "2002-01-31" rather than colliding lexicographically.
   // Resolve every series (active + comparisons) into uniform shape.
@@ -227,12 +227,12 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
     return resolveSeries(result, comparisons, SERIES_COLORS, activeLabel);
   }, [result, comparisons, loadedRunId, savedRuns, activeStrategyLabel]);
 
-  // Alignment window + per-series rebased points + stats â€” moved to
+  // Alignment window + per-series rebased points + stats — moved to
   // `./equityCurve/seriesMath.ts:alignSeries`.
   const alignedSeries = useMemo(() => alignSeries(resolvedSeries), [resolvedSeries]);
 
   // The original ~125-line block below is dead code from the old inline
-  // implementation â€” kept temporarily for ref while extraction stabilizes.
+  // implementation — kept temporarily for ref while extraction stabilizes.
   // Will be deleted in the next cleanup pass.
 
   // Yearly performance breakdown — moved to seriesMath:computeYearlyBreakdown.
@@ -254,8 +254,8 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
     { key: 'months', header: 'Periods', accessor: (s) => s.stats.months },
   ], []);
 
-  // Export rows for the Yearly Performance table â€” one row per
-  // (year Ã— series). Long format > wide format for spreadsheets.
+  // Export rows for the Yearly Performance table — one row per
+  // (year × series). Long format > wide format for spreadsheets.
   type YearlyExportRow = { year: string; series: string; return_pct: number | null };
   const yearlyExportRows = useMemo<YearlyExportRow[]>(() => {
     const out: YearlyExportRow[] = [];
@@ -283,7 +283,7 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
     [alignedSeries, customFromMonth, activeNetStats, comparisons, comparisonNetStats],
   );
 
-  // Chart data â€” wide-format per month, one key per series id, plus a 0%
+  // Chart data — wide-format per month, one key per series id, plus a 0%
   // origin row so every line starts from the same reference point.
   // Wide-format chart data — moved to seriesMath:buildChartData.
   const chartData = useMemo(() => buildChartData(alignedSeries), [alignedSeries]);
@@ -302,7 +302,7 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
     });
   }, [chartData, logScale, alignedSeries]);
 
-  // Y-axis domain for chart â€” used by ReferenceArea to span full height
+  // Y-axis domain for chart — used by ReferenceArea to span full height
   // Y-axis domain for chart — moved to seriesMath:computeChartYDomain.
   const chartYDomain = useMemo<[number, number]>(
     () => computeChartYDomain(displayChartData, alignedSeries),
@@ -311,7 +311,7 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
 
   return (
     <>
-      {/* Comparison panel â€” active strategy + any added backtests/benchmarks */}
+      {/* Comparison panel — active strategy + any added backtests/benchmarks */}
       <div className="bg-[#151821] rounded-xl border border-gray-800/40 px-4 py-3">
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-gray-400 text-sm mr-1">Comparison</span>
@@ -394,7 +394,7 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
-                  Addingâ€¦
+                  Adding…
                 </>
               ) : (
                 <>+ Add series</>

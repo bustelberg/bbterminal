@@ -87,14 +87,24 @@ The frontend follows Next.js convention: `.env.local` overrides `.env`. Vercel u
 
 ## Backend (`backend/`)
 
-**Entry point**: `main.py` — single FastAPI app with all API endpoints.
+**Entry point**: `main.py` (~110 lines) — thin bootstrap. Constructs the `FastAPI()` app, attaches CORS + the admin-only-mutations middleware, mounts each domain router via `include_router(...)`, and registers the APScheduler. All endpoints live under `backend/routers/`.
 
 **Top-level modules**:
-- `portfolio.py` — Parses AIRS Excel exports, computes YTD returns in EUR and local currency per holding
-- `airs_scanner.py` — Playwright browser automation: logs in to AirSPMS, scrapes portfolio data
-- `fx_rates.py` — ECB/Yahoo FX rate fetchers + `fx_rate` table sync
-- `diagnose.py` — One-off diagnostic helpers
-- `playground/main.py` — **Ignore for now.** Standalone scratch file.
+- `deps.py` — Shared dependencies: Supabase client factory + env loading. Routers import from here, never from `main`.
+- `scheduler.py` — In-process APScheduler registration (weekly + monthly ingest ticks).
+- `portfolio.py` — Parses AIRS Excel exports, computes YTD returns in EUR and local currency per holding.
+- `airs_scanner.py` — Playwright browser automation: logs in to AirSPMS, scrapes portfolio data.
+- `fx_rates.py` — ECB/Yahoo FX rate fetchers + `fx_rate` table sync.
+- `diagnose.py` — One-off diagnostic helpers.
+- `playground/` — Scratch ACWI / S&P 500 spikes (`acwi_spike.py`, `acwi_history.py`, `sp500.py`, etc.). **Not imported by the app.** Candidates for cleanup — see Known issues.
+
+**`routers/` — All HTTP endpoints, one file per domain**:
+- Flat modules: `admin.py`, `airs.py`, `auth.py`, `benchmarks.py`, `companies.py`, `earnings.py`, `exchange_fees.py`, `fx.py`, `indicators.py`, `ingest_runs.py`, `leonteq.py`, `longequity.py`, `scheduled_strategies.py`, `system.py`, `universe_templates.py`.
+- Sub-packages where one domain warranted splitting:
+  - `momentum/` — `signals.py`, `backtest_crud.py`, `current_picks.py`, `backtest_stream/` (the SSE backtest stream lives here).
+  - `universe/` — `derive.py`, `derived_metrics.py`, `labels.py`, `screening.py`.
+  - `index_universe/` — `acwi.py`, `sp500.py`.
+- `_auth_middleware.py` — Admin-only-mutations gate. Read methods pass through; POST/PUT/PATCH/DELETE on non-exempt paths require an admin Bearer token.
 
 **`ingest/` — LongEquity + GuruFocus ingest pipeline**:
 - `acquire.py` — Downloads LongEquity report files from remote storage
@@ -126,7 +136,7 @@ The frontend follows Next.js convention: `.env.local` overrides `.env`. Vercel u
   - `run_multi_trial_backtest` — N independent random-selection runs with sequential seeds, aggregates mean ± std for headline stats
   - `run_current_portfolio` — "what would the strategy hold today" + per-trading-day daily picks for the current month. Each daily pick is a `MonthlyHolding`-shaped record with start-of-month → that-day MTD return, plus portfolio-level MTD return and turnover vs the previous day.
 
-**`tests/`** — Pytest unit tests for momentum signals + scoring (`uv run pytest tests/`).
+**`tests/`** — Pytest unit tests for the momentum engine: `test_signals.py`, `test_scoring.py`, and five `test_backtest_*.py` files (basic, long/short, rebalance, sharpe, universe). No coverage for the ingest pipeline, template refresh, prune, or any router. Run with `uv run pytest tests/`.
 
 **API endpoints** (selected — see `main.py` for the complete list):
 
@@ -468,3 +478,7 @@ Per-company outcomes aren't stored on `ingest_run` — only aggregates (`prices_
 ## Known issues
 
 - Universe for backtesting uses current company list retroactively (survivorship bias) when no `index_universe` (e.g. SP500, ACWI) is selected — LongEquity-derived snapshots only exist from Aug 2025 onward.
+- `frontend/app/components/MomentumBacktester.tsx` is ~1,900 lines and bundles config, signal/category sliders, equity chart, variants sweep, saved-backtests CRUD, and the daily-picks viewer in one file. Worth splitting before adding more to it.
+- Frontend has no test suite — the whole `frontend/app/` tree has zero `.test.tsx` / `.spec.ts` files. Every UI regression has to be caught manually.
+- Backend test coverage is momentum-only. Ingest pipeline, template refresh, prune, scheduled strategies, and the admin API have no tests.
+- `backend/playground/` is committed scratch code (ACWI / S&P 500 spikes) that's not imported by the app. Safe to delete once nothing in there is still useful for one-off investigations.

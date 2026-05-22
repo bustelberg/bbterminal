@@ -1193,7 +1193,7 @@
     "country": "France",
     "exchange": "XPAR",
     "alert": true,
-    "note": "EL is commonly US (EstÃ©e Lauder); verify France mapping"
+    "note": "EL is commonly US (Estée Lauder); verify France mapping"
   },
   {
     "ticker": "AI",
@@ -1826,7 +1826,7 @@
     "country": "Japan",
     "exchange": "TSE",
     "alert": true,
-    "note": "Numeric tickerâ€”verify company mapping",
+    "note": "Numeric ticker—verify company mapping",
     "gurufocus_exchange": "TSE",
     "gurufocus_ticker": "5344"
   },
@@ -1871,7 +1871,7 @@
     "country": "Netherlands",
     "exchange": "XAMS",
     "alert": true,
-    "note": "May be holding/vehicleâ€”verify listing"
+    "note": "May be holding/vehicle—verify listing"
   },
   {
     "ticker": "GIVN",
@@ -1977,7 +1977,7 @@
     "country": "South Korea",
     "exchange": "KRX",
     "alert": true,
-    "note": "Numeric tickerâ€”verify company mapping",
+    "note": "Numeric ticker—verify company mapping",
     "gurufocus_exchange": "XKRX",
     "gurufocus_ticker": "000660"
   },
@@ -1986,7 +1986,7 @@
     "country": "South Korea",
     "exchange": "KRX",
     "alert": true,
-    "note": "Numeric tickerâ€”verify company mapping",
+    "note": "Numeric ticker—verify company mapping",
     "gurufocus_exchange": "XKRX",
     "gurufocus_ticker": "005930"
   },
