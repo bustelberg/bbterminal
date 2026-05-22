@@ -26,3 +26,16 @@ supabase = create_client(
     os.environ["SUPABASE_URL"],
     os.environ["SUPABASE_SERVICE_KEY"],
 )
+
+# Default chunk size for `.in_()` queries.
+#
+# PostgREST encodes IN-clauses into the URL query string ("?col=in.(1,2,3,...)"),
+# so a long company-id list can blow past Cloudflare's URL/header limits and
+# return a 502 before the request ever reaches Supabase. Previous value was 50,
+# chosen as a known-safe lower bound. Bumped to 200 because (a) company_id is
+# at most ~5 digits + a comma = ~6 chars per entry, so 200 IDs is ~1.2 KB of
+# query string -- well under Cloudflare's 8 KB default and PostgREST's 4 KB
+# request-line limit, and (b) halving the number of round trips noticeably
+# speeds up the momentum backtest universe load. If 502s reappear, drop to 100
+# or revert to 50.
+IN_CHUNK_SIZE = 200

@@ -20,7 +20,7 @@ import time
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from deps import supabase
+from deps import supabase, IN_CHUNK_SIZE
 
 from ._helpers import (
     _applicable_metrics,
@@ -184,8 +184,8 @@ async def universe_derive_create(body: DeriveUniverseRequest):
                     f"Precomputing derived metrics for {len(cids)} companies...",
                 )
                 companies: list[dict] = []
-                for i in range(0, len(cids), 50):
-                    batch = cids[i:i + 50]
+                for i in range(0, len(cids), IN_CHUNK_SIZE):
+                    batch = cids[i:i + IN_CHUNK_SIZE]
                     r = supabase.table("company").select(
                         "company_id, gurufocus_ticker, company_name, "
                         "gurufocus_exchange:gurufocus_exchange(exchange_code)"

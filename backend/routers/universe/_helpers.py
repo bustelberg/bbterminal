@@ -11,7 +11,7 @@ import asyncio
 import queue as _queue
 from datetime import date
 
-from deps import supabase
+from deps import supabase, IN_CHUNK_SIZE
 
 
 def _cutoff_for_target_month(target_month: str) -> date:
@@ -29,10 +29,10 @@ def _load_derived_metrics(
     """Fetch derived metric rows for the given companies + codes.
 
     Returns {company_id -> [(fy_end_date, {code: value}), …]}, sorted by
-    date asc. Batched in chunks of 50 company_ids (Cloudflare 502 avoidance)."""
+    date asc. Batched in IN_CHUNK_SIZE chunks (Cloudflare 502 avoidance)."""
     out: dict[int, dict[str, dict[str, float]]] = {}  # cid -> {iso_date -> {code -> value}}
-    for i in range(0, len(company_ids), 50):
-        batch = company_ids[i:i + 50]
+    for i in range(0, len(company_ids), IN_CHUNK_SIZE):
+        batch = company_ids[i:i + IN_CHUNK_SIZE]
         resp = (
             supabase.table("metric_data")
             .select("company_id, metric_code, target_date, numeric_value")

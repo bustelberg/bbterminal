@@ -7,9 +7,92 @@ from playwright.sync_api import sync_playwright
 
 BASE_URL = "https://bustelberg.airspms.cloud"
 
+# Realistic desktop Chrome UA — Playwright's default UA contains
+# "HeadlessChrome" which trips simple bot-block rules at the WAF
+# layer. The `args` flag hides one of the most-checked automation
+# tells. Together these are enough to get past basic bot detection
+# (Cloudflare's "Just a moment" interstitial etc.) — if AirSPMS
+# detects via something deeper (TLS fingerprint, behavioural), we
+# need a stronger stealth approach.
+_CHROMIUM_LAUNCH_ARGS = ["--disable-blink-features=AutomationControlled"]
+_DESKTOP_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
+_DESKTOP_VIEWPORT = {"width": 1280, "height": 720}
+
+
+def _new_browser_page(pw):
+    """Launch headless Chromium with stealth-ish options and return
+    (browser, page). Single source of truth for browser config so the
+    scanner and the persistent session stay in lockstep."""
+    browser = pw.chromium.launch(headless=True, args=_CHROMIUM_LAUNCH_ARGS)
+    context = browser.new_context(
+        user_agent=_DESKTOP_UA,
+        viewport=_DESKTOP_VIEWPORT,
+        locale="en-US",
+    )
+    page = context.new_page()
+    return browser, page
+
+
+def _capture_login_diagnostics(page) -> str:
+    """Snapshot diagnostic signals when the login flow can't find
+    `#username`. Embedded in the raised exception so the SSE error
+    event lands them in the UI — useful when only prod fails and
+    we can't repro locally (e.g., AirSPMS bot-blocking Railway IPs).
+
+    Captures: current URL (in case of redirect), page title, count of
+    inputs / iframes (is the form in an iframe?), and known
+    bot-block phrases visible in the body."""
+    try:
+        url = page.url
+        try:
+            title = page.title()
+        except Exception:
+            title = "<title fetch failed>"
+        try:
+            html_head = (page.content() or "")[:600]
+        except Exception:
+            html_head = "<content fetch failed>"
+        try:
+            input_count = len(page.query_selector_all("input"))
+        except Exception:
+            input_count = -1
+        try:
+            iframe_count = len(page.query_selector_all("iframe"))
+        except Exception:
+            iframe_count = -1
+        try:
+            body_text = (
+                page.locator("body").inner_text()
+                if page.locator("body").count() else ""
+            )[:400]
+        except Exception:
+            body_text = ""
+        haystack = (body_text + " " + html_head).lower()
+        hints: list[str] = []
+        for needle in (
+            "cloudflare", "just a moment", "checking your browser",
+            "access denied", "forbidden", "attention required",
+            "captcha", "blocked", "rate limit", "challenge",
+        ):
+            if needle in haystack:
+                hints.append(needle)
+        return (
+            f"DIAG | url={url!r} title={title!r} "
+            f"inputs={input_count} iframes={iframe_count} "
+            f"bot_hints={hints} "
+            f"body_excerpt={body_text[:200]!r}"
+        )
+    except Exception as diag_err:
+        return f"(diagnostic capture failed: {diag_err})"
+
 
 def _login(page):
-    """Log in to AirSPMS. Raises on failure."""
+    """Log in to AirSPMS. Raises on failure with diagnostics attached
+    to the exception message — see `_capture_login_diagnostics`."""
     broker_username = os.environ.get("BROKER_USERNAME", "")
     broker_password = os.environ.get("BROKER_PASSWORD", "")
 
@@ -18,17 +101,24 @@ def _login(page):
 
     page.goto(f"{BASE_URL}/login.php")
     page.wait_for_load_state("domcontentloaded")
-    page.fill('#username', broker_username)
-    page.fill('#password', broker_password)
-    page.click('#btnFase1')
+    try:
+        page.fill("#username", broker_username, timeout=30000)
+    except Exception as e:
+        diag = _capture_login_diagnostics(page)
+        raise RuntimeError(
+            f"Could not find #username input on AirSPMS login page. "
+            f"Underlying error: {type(e).__name__}: {e}. {diag}"
+        ) from e
+    page.fill("#password", broker_password)
+    page.click("#btnFase1")
     page.wait_for_timeout(2000)
 
-    if page.locator('#smsValid').is_visible():
-        page.click('#btnFase3')
-    elif page.locator('#smsDialog').is_visible():
+    if page.locator("#smsValid").is_visible():
+        page.click("#btnFase3")
+    elif page.locator("#smsDialog").is_visible():
         raise RuntimeError("SMS code required — cannot automate SMS step")
-    elif page.locator('#smsOffline').is_visible():
-        page.click('#btnFase4')
+    elif page.locator("#smsOffline").is_visible():
+        page.click("#btnFase4")
 
     page.wait_for_load_state("networkidle")
 
@@ -54,8 +144,7 @@ class _AirsSession:
             if page is not None:
                 return
             pw = sync_playwright().start()
-            browser = pw.chromium.launch(headless=True)
-            page = browser.new_page()
+            browser, page = _new_browser_page(pw)
             _login(page)
 
         def close_session():
@@ -125,8 +214,7 @@ def download_portfolio_sync(portfolio_name: str, datum_van: str, datum_tot: str)
 def scan_portfolios_sync(send_event):
     """Run Playwright scan synchronously (call from a thread)."""
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        browser, page = _new_browser_page(p)
 
         try:
             send_event("progress", step="login", status="in_progress", message="Navigating to login page...")

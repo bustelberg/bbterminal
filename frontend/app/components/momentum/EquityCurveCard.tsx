@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import type {
   BacktestResult,
   DailyRecord,
@@ -25,7 +26,10 @@ import {
   computeYearlyBreakdown,
   resolveSeries,
 } from './equityCurve/seriesMath';
-import EquityChart from './equityCurve/EquityChart';
+// Recharts is ~100KB gzipped and only used by this chart. next/dynamic splits
+// it into a chunk that ships only when the user actually runs a backtest and
+// EquityChart mounts. ssr:false because Recharts uses browser-only ResizeObserver.
+const EquityChart = dynamic(() => import('./equityCurve/EquityChart'), { ssr: false });
 import YearlyBreakdown from './equityCurve/YearlyBreakdown';
 import SummaryStats from './equityCurve/SummaryStats';
 

@@ -28,8 +28,15 @@ from datetime import date
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from concurrent.futures import ThreadPoolExecutor
+
 from deps import supabase
 from index_universe.templates import all_templates, get_template
+from index_universe.templates._cache import (
+    list_summary_get,
+    list_summary_set,
+)
+from routers._cache_headers import CACHE_PIPELINE
 from routers.index_universe._helpers import drain_thread_queue
 
 router = APIRouter(tags=["universe-templates"])
@@ -71,21 +78,44 @@ def _summary(template) -> dict:
 
 
 @router.get("/api/universe-templates")
-async def list_universe_templates():
-    """Every registered template with its current state."""
+async def list_universe_templates(response: Response):
+    """Every registered template with its current state.
+
+    Three performance moves vs the naive `[_summary(t) for t in all_templates()]`:
+
+    1. Result is cached in-process for 5 min via `list_summary_get/set`. The
+       only thing that changes the payload is a template refresh, which
+       explicitly invalidates the cache via `invalidate_template`.
+    2. On a cache miss, the per-template summaries run in parallel through
+       a small thread pool. Each `_summary` is ~4 sequential Supabase round
+       trips and templates are independent, so parallelism turns N*latency
+       into ~1*latency. Matters most on the /backtest page where the dropdown
+       blocks on this endpoint.
+    3. Cache-Control on the response so the browser caches per-tab too;
+       repeat opens of the dropdown within 60s don't even round-trip.
+    """
+    response.headers["Cache-Control"] = CACHE_PIPELINE
     def _q():
-        return [_summary(t) for t in all_templates()]
+        cached = list_summary_get()
+        if cached is not None:
+            return cached
+        templates = list(all_templates())
+        with ThreadPoolExecutor(max_workers=max(1, len(templates))) as pool:
+            data = list(pool.map(_summary, templates))
+        list_summary_set(data)
+        return data
     return await asyncio.to_thread(_q)
 
 
 @router.get("/api/universe-templates/{template_key}")
-async def get_universe_template(template_key: str):
+async def get_universe_template(template_key: str, response: Response):
     """Single template summary + the full list of captured months. The
     list lets the UI build a date scrubber without a second round-trip."""
     try:
         t = get_template(template_key)
     except KeyError:
         raise HTTPException(404, f"Unknown template_key: {template_key}")
+    response.headers["Cache-Control"] = CACHE_PIPELINE
     def _q() -> dict:
         s = _summary(t)
         s["months"] = t.available_months(supabase)
@@ -94,13 +124,14 @@ async def get_universe_template(template_key: str):
 
 
 @router.get("/api/universe-templates/{template_key}/months")
-async def list_universe_template_months(template_key: str):
+async def list_universe_template_months(template_key: str, response: Response):
     """Just the captured-months list. Cheaper than the full summary
     when the UI is only re-fetching after a refresh."""
     try:
         t = get_template(template_key)
     except KeyError:
         raise HTTPException(404, f"Unknown template_key: {template_key}")
+    response.headers["Cache-Control"] = CACHE_PIPELINE
     months = await asyncio.to_thread(t.available_months, supabase)
     return {"template_key": template_key, "months": months}
 
@@ -137,7 +168,10 @@ async def get_universe_template_membership(
     etag = '"' + hashlib.sha256(etag_seed.encode()).hexdigest()[:16] + '"'
 
     if request.headers.get("if-none-match") == etag:
-        return Response(status_code=304, headers={"ETag": etag})
+        return Response(
+            status_code=304,
+            headers={"ETag": etag, "Cache-Control": CACHE_PIPELINE},
+        )
 
     return JSONResponse(
         content={
@@ -147,7 +181,7 @@ async def get_universe_template_membership(
             "membership": rows,
             "last_refreshed_at": last_refreshed,
         },
-        headers={"ETag": etag},
+        headers={"ETag": etag, "Cache-Control": CACHE_PIPELINE},
     )
 
 

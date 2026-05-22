@@ -12,10 +12,11 @@ from __future__ import annotations
 import asyncio
 import os
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
 from deps import supabase
 from ingest.api_usage import get_usage
+from routers._cache_headers import CACHE_PIPELINE
 
 router = APIRouter(tags=["system"])
 
@@ -64,11 +65,12 @@ async def api_usage():
 
 
 @router.get("/api/data/latest-price-date")
-async def latest_price_date():
+async def latest_price_date(response: Response):
     """Most recent close-price observation across all companies. The
     /backtest page uses this as the default end-date — "test up to
     however current our data is." Cheap: an index-backed
     `ORDER BY target_date DESC LIMIT 1` on `metric_data`."""
+    response.headers["Cache-Control"] = CACHE_PIPELINE
     def _q() -> dict:
         try:
             resp = (

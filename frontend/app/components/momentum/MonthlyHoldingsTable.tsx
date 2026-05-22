@@ -1,12 +1,16 @@
 'use client';
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import type { BacktestResult } from '../../../lib/stores/momentum';
 import type { Column } from '../../../lib/tableExport';
 import TableDownloadButton from '../TableDownloadButton';
 import CellInfoTip from './CellInfoTip';
 import CollapsibleCard from './CollapsibleCard';
-import TickerTimelineModal from './TickerTimelineModal';
+// Heavy modal: SSE wiring, breakdown-fetch handlers, ~900 lines. Only
+// mounts when a user clicks a row. next/dynamic puts it in a separate
+// chunk that ships only when the modal is actually opened.
+const TickerTimelineModal = dynamic(() => import('./TickerTimelineModal'), { ssr: false });
 import { computeNetStats, parenPct } from './feeStats';
 import { useClickOutside } from '../../../lib/hooks/useClickOutside';
 import { useExchangeFeeMap } from '../../../lib/hooks/apiData';
@@ -504,13 +508,15 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
         </table>
       </div>
     </CollapsibleCard>
-    <TickerTimelineModal
-      result={result}
-      companyId={timelineCompanyId}
-      exchangeByCompany={exchangeByCompany}
-      scoringConfig={scoringConfig}
-      onClose={() => setTimelineCompanyId(null)}
-    />
+    {timelineCompanyId !== null && (
+      <TickerTimelineModal
+        result={result}
+        companyId={timelineCompanyId}
+        exchangeByCompany={exchangeByCompany}
+        scoringConfig={scoringConfig}
+        onClose={() => setTimelineCompanyId(null)}
+      />
+    )}
     </>
   );
 }

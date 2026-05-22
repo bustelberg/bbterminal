@@ -18,6 +18,7 @@ from typing import Callable
 
 from supabase import Client
 
+from deps import IN_CHUNK_SIZE
 from ._cache import (
     invalidate_template as _invalidate_template_cache,
     membership_cache as _membership_cache,
@@ -341,12 +342,12 @@ class UniverseTemplate(ABC):
             if old[cid].get("universe_ticker") != new[cid].get("universe_ticker")
         )
 
-        # One batch fetch for names. Chunked at 50 to stay under
-        # PostgREST URL limits (same pattern used elsewhere).
+        # One batch fetch for names. Chunked at IN_CHUNK_SIZE to stay
+        # under PostgREST URL limits (same pattern used elsewhere).
         all_cids = list(set(added) | set(removed) | set(renamed))
         names: dict[int, str] = {}
-        for chunk_start in range(0, len(all_cids), 50):
-            chunk = all_cids[chunk_start : chunk_start + 50]
+        for chunk_start in range(0, len(all_cids), IN_CHUNK_SIZE):
+            chunk = all_cids[chunk_start : chunk_start + IN_CHUNK_SIZE]
             n_resp = (
                 supabase.table("company")
                 .select("company_id, company_name")

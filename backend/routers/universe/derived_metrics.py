@@ -18,7 +18,7 @@ import queue as _queue
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
-from deps import supabase
+from deps import supabase, IN_CHUNK_SIZE
 
 from ._helpers import drain_sse_queue
 from ._models import RecomputeRequest
@@ -114,8 +114,8 @@ async def universe_derived_recompute(body: RecomputeRequest = RecomputeRequest()
             return []
 
         companies: list[dict] = []
-        for i in range(0, len(ids), 50):
-            batch = ids[i:i + 50]
+        for i in range(0, len(ids), IN_CHUNK_SIZE):
+            batch = ids[i:i + IN_CHUNK_SIZE]
             r = supabase.table("company").select(
                 "company_id, gurufocus_ticker, company_name, "
                 "gurufocus_exchange:gurufocus_exchange(exchange_code)"

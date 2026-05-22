@@ -135,13 +135,17 @@ def _delete_universe_memberships(supabase: Client, universe_id: int) -> None:
     PostgREST per-request row cap so we never leave stragglers behind."""
     for _ in range(20):
         supabase.table('universe_membership').delete().eq('universe_id', universe_id).execute()
+        # Existence check, not count -- `SELECT 1 LIMIT 1` short-circuits as
+        # soon as one row is found, whereas `count="exact"` runs a full
+        # COUNT(*) over the matched set even with head=True.
         check = (
             supabase.table('universe_membership')
-            .select('company_id', count='exact', head=True)
+            .select('company_id')
             .eq('universe_id', universe_id)
+            .limit(1)
             .execute()
         )
-        if (check.count or 0) == 0:
+        if not check.data:
             return
 
 
