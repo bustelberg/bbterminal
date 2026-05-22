@@ -34,12 +34,25 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string]$MigrationFile,
-    [string]$ProdDbUrl = $env:PROD_DB_URL,
+    [string]$ProdDbUrl,
     [string]$Container = 'supabase_db_bbterminal',
     [switch]$LocalOnly
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Load scripts/.env.local (gitignored) — same precedence as copy-local-to-prod.ps1.
+$envFile = Join-Path $PSScriptRoot '.env.local'
+if (Test-Path $envFile) {
+    Get-Content $envFile | ForEach-Object {
+        if ($_ -match '^\s*#' -or $_ -match '^\s*$') { return }
+        if ($_ -match '^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.+?)\s*$') {
+            $k = $Matches[1]; $v = $Matches[2] -replace '^"(.*)"$','$1' -replace "^'(.*)'$",'$1'
+            if (-not (Test-Path "env:$k")) { Set-Item "env:$k" $v }
+        }
+    }
+}
+if (-not $ProdDbUrl) { $ProdDbUrl = $env:PROD_DB_URL }
 
 # Resolve + validate file
 $full = Resolve-Path $MigrationFile -ErrorAction SilentlyContinue
@@ -73,10 +86,13 @@ $containerPath = "/tmp/migration_$version.sql"
 docker cp "$full" "${Container}:$containerPath" | Out-Null
 
 function Apply-To {
-    param([string]$Label, [string]$ConnArg)
+    # ConnArgs is an array so multi-token specs like @('-U','postgres','-d','postgres')
+    # reach psql as separate argv entries. Passing a single space-separated string
+    # makes PowerShell quote the whole thing and psql treats it as one -U value.
+    param([string]$Label, [string[]]$ConnArgs)
 
     # Already recorded?
-    $check = docker exec $Container psql $ConnArg -tA -c "SELECT 1 FROM supabase_migrations.schema_migrations WHERE version = '$version';" 2>&1
+    $check = docker exec $Container psql @ConnArgs -tA -c "SELECT 1 FROM supabase_migrations.schema_migrations WHERE version = '$version';" 2>&1
     if ($check.Trim() -eq '1') {
         Write-Host "  [$Label] already recorded as applied (version=$version) — skipping" -ForegroundColor Yellow
         return
@@ -84,21 +100,21 @@ function Apply-To {
 
     # Apply SQL
     Write-Host "  [$Label] applying SQL..."
-    docker exec $Container psql $ConnArg -v ON_ERROR_STOP=1 -f $containerPath
+    docker exec $Container psql @ConnArgs -v ON_ERROR_STOP=1 -f $containerPath
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  [$Label] FAILED — see error above" -ForegroundColor Red
         throw "Apply failed on $Label"
     }
 
     # Record in schema_migrations
-    docker exec $Container psql $ConnArg -c "INSERT INTO supabase_migrations.schema_migrations (version, name, statements) VALUES ('$version', '$name', ARRAY['-- applied via apply-migration.ps1']);" | Out-Null
+    docker exec $Container psql @ConnArgs -c "INSERT INTO supabase_migrations.schema_migrations (version, name, statements) VALUES ('$version', '$name', ARRAY['-- applied via apply-migration.ps1']);" | Out-Null
     Write-Host "  [$Label] OK" -ForegroundColor Green
 }
 
 Write-Host "Applying $fname (version=$version):"
-Apply-To 'local' '-U postgres -d postgres'
+Apply-To 'local' @('-U','postgres','-d','postgres')
 if (-not $LocalOnly) {
-    Apply-To 'prod' $ProdDbUrl
+    Apply-To 'prod' @($ProdDbUrl)
 }
 
 # Cleanup
