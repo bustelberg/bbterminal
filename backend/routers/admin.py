@@ -152,7 +152,6 @@ async def get_egress_ip(authorization: str = Header(...)):
     so a single reflector outage doesn't blind us.
     """
     _require_admin(authorization)
-    import time as _time  # noqa: PLC0415
 
     reflectors = [
         "https://ifconfig.me/all.json",
@@ -180,7 +179,9 @@ async def get_egress_ip(authorization: str = Header(...)):
                         "observed_at": datetime.now(timezone.utc).isoformat(),
                         "raw": data,
                     }
-            except Exception as e:
+            except Exception:
+                # Per-reflector failure is non-fatal — the loop tries
+                # the next one. If every reflector fails we 502 below.
                 continue
         raise HTTPException(502, "all egress-ip reflectors failed")
 
