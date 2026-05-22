@@ -278,6 +278,11 @@ export type BacktestStartConfig = {
   min_price_score?: number | null;
   universe_label: string | null;
   index_universe: string | null;
+  /** How `top_n_sectors` buckets companies. 'sector' (default) works for
+   * every universe. 'industry' only works for Leonteq-derived universes
+   * (LEONTEQ, ACWI_LEONTEQ) because that's where the industry column is
+   * populated. The backend rejects 'industry' against any other universe. */
+  grouping?: 'sector' | 'industry';
   selection_mode: 'momentum' | 'random' | 'all' | 'sector_etf';
   random_seed: number | null;
   n_trials: number;

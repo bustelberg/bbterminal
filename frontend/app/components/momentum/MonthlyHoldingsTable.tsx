@@ -313,8 +313,11 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
                             <th className="text-left py-1 font-medium">
                               Sector<CellInfoTip>GICS sector. Selection picks top sectors then top stocks within each.</CellInfoTip>
                             </th>
-                            <th className="text-left py-1 font-medium whitespace-nowrap">
-                              Rank<CellInfoTip>Selection rank: <span className="font-mono">S·C</span> where <span className="font-mono">S</span> is this sector&apos;s position among the top sectors (1 = highest-scoring sector picked) and <span className="font-mono">C</span> is this company&apos;s rank within that sector (1 = top-scoring stock).</CellInfoTip>
+                            <th className="text-right py-1 font-medium whitespace-nowrap">
+                              Sector Rank<CellInfoTip>This sector&apos;s position among the top sectors picked this period (1 = highest-scoring sector by average company score). Range: 1..top_n_sectors.</CellInfoTip>
+                            </th>
+                            <th className="text-right py-1 font-medium whitespace-nowrap">
+                              Company Rank<CellInfoTip>This company&apos;s position within its sector (1 = top-scoring stock in the sector). Range: 1..top_n_per_sector.</CellInfoTip>
                             </th>
                             {categories.map((cat) => (
                               <th key={cat} className="text-right py-1 font-medium">
@@ -437,19 +440,16 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
                                     </a>
                                   </td>
                                   <td className="py-1.5 text-gray-500">{h.sector}</td>
-                                  <td className="py-1.5 whitespace-nowrap">
-                                    {h.sector_rank != null && h.company_rank != null ? (
-                                      <span
-                                        className="inline-flex items-center gap-1 font-mono text-[11px]"
-                                        title={`Sector rank ${h.sector_rank}, company rank ${h.company_rank} within sector`}
-                                      >
-                                        <span className="px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/25">
-                                          S{h.sector_rank}
-                                        </span>
-                                        <span className="px-1.5 py-0.5 rounded bg-gray-500/15 text-gray-300 border border-gray-500/25">
-                                          #{h.company_rank}
-                                        </span>
-                                      </span>
+                                  <td className="text-right py-1.5 font-mono">
+                                    {h.sector_rank != null ? (
+                                      <span className="text-indigo-300">{h.sector_rank}</span>
+                                    ) : (
+                                      <span className="text-gray-600 text-[10px]">—</span>
+                                    )}
+                                  </td>
+                                  <td className="text-right py-1.5 font-mono">
+                                    {h.company_rank != null ? (
+                                      <span className="text-gray-200">{h.company_rank}</span>
                                     ) : (
                                       <span className="text-gray-600 text-[10px]">—</span>
                                     )}

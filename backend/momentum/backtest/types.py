@@ -289,6 +289,8 @@ class CurrentPortfolio:
                     "exit_price_eur": h.exit_price_eur,
                     "entry_date": h.entry_date,
                     "exit_date": h.exit_date,
+                    "sector_rank": h.sector_rank,
+                    "company_rank": h.company_rank,
                 }
                 for h in self.holdings
             ],
@@ -316,6 +318,8 @@ class CurrentPortfolio:
                             "exit_price_eur": h.exit_price_eur,
                             "entry_date": h.entry_date,
                             "exit_date": h.exit_date,
+                            "sector_rank": h.sector_rank,
+                            "company_rank": h.company_rank,
                         }
                         for h in d.holdings
                     ],
@@ -362,6 +366,8 @@ class BacktestResult:
                             "entry_date": h.entry_date,
                             "exit_date": h.exit_date,
                             "side": h.side,
+                            "sector_rank": h.sector_rank,
+                            "company_rank": h.company_rank,
                         }
                         for h in r.holdings
                     ],

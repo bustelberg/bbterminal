@@ -69,6 +69,12 @@ export default function MomentumBacktester() {
   const [endDate, setEndDate] = useState(`${currentYear}-01`);
   const [topSectors, setTopSectors] = useState(4);
   const [topPerSector, setTopPerSector] = useState(6);
+  // 'sector' is universal; 'industry' is only meaningful for LEONTEQ /
+  // ACWI_LEONTEQ universes (where universe_membership.industry is
+  // populated). The UI guards on `groupingAllowed` below; if a user
+  // switches to a non-Leonteq universe while grouping='industry' we
+  // coerce back to 'sector' so the next run doesn't error out.
+  const [grouping, setGrouping] = useState<'sector' | 'industry'>('sector');
   const [noCache, setNoCache] = useState(false);
   const [maxCompanies, setMaxCompanies] = useState(0);
   // Optional price-score floor for long selection. Empty string = no
@@ -354,6 +360,17 @@ export default function MomentumBacktester() {
   // close-price date we have data for (independent of universe).
   // Both are stored as YYYY-MM-DD on the server; the `<input
   // type="month">` wants YYYY-MM, so slice.
+  // Industry grouping only makes sense for Leonteq-derived universes —
+  // those are the ones whose universe_membership rows carry an industry
+  // value. Any other universe must use sector grouping.
+  const groupingAllowed =
+    selectedIndexUniverse === 'LEONTEQ' || selectedIndexUniverse === 'ACWI_LEONTEQ';
+  useEffect(() => {
+    if (!groupingAllowed && grouping !== 'sector') {
+      setGrouping('sector');
+    }
+  }, [groupingAllowed, grouping]);
+
   const handleUniverseChange = (value: string) => {
     setSelectedIndexUniverse(value);
     if (value) {
@@ -425,6 +442,7 @@ export default function MomentumBacktester() {
         min_price_score: minPriceScore.trim() === '' ? null : Number(minPriceScore),
         universe_label: null,
         index_universe: selectedIndexUniverse || null,
+        grouping,
         selection_mode: selectionMode,
         random_seed: selectionMode === 'random' ? randomSeed : null,
         n_trials: selectionMode === 'random' ? Math.max(1, nTrials) : 1,
@@ -445,6 +463,7 @@ export default function MomentumBacktester() {
     max_companies: maxCompanies,
     universe_label: null,
     index_universe: selectedIndexUniverse || null,
+    grouping,
     selection_mode: 'momentum',
     random_seed: null,
     n_trials: 1,
@@ -525,6 +544,7 @@ export default function MomentumBacktester() {
             min_price_score: minPriceScore.trim() === '' ? null : Number(minPriceScore),
             universe_label: null,
             index_universe: selectedIndexUniverse || null,
+            grouping,
             // Persist the actual selection_mode used for this sweep —
             // "momentum" was hardcoded, which made All-universe and
             // Random saves report the wrong strategy on reload.
@@ -599,6 +619,11 @@ export default function MomentumBacktester() {
       if (cfg.category_weights) setCategoryWeights(cfg.category_weights);
       if (cfg.top_n_sectors) setTopSectors(cfg.top_n_sectors);
       if (cfg.top_n_per_sector) setTopPerSector(cfg.top_n_per_sector);
+      // Saved runs from before the grouping feature have no `grouping`
+      // field — default to 'sector' (the historic behavior). The auto-
+      // coerce effect kicks in if the loaded run had grouping='industry'
+      // but the universe doesn't carry industry data anymore.
+      setGrouping(cfg.grouping === 'industry' ? 'industry' : 'sector');
       // min_price_score may be null/undefined (no floor) or a number 0-100.
       // Convert to a string so the input's empty/zero distinction round-trips.
       setMinPriceScore(
@@ -1409,7 +1434,9 @@ export default function MomentumBacktester() {
             {selectionMode !== 'all' && (
               <div className="flex flex-wrap items-end gap-6 mb-5 pb-5 border-b border-gray-800/40">
                 <div>
-                  <label className="text-gray-500 text-xs block mb-1">Top Sectors</label>
+                  <label className="text-gray-500 text-xs block mb-1">
+                    Top {grouping === 'industry' ? 'Industries' : 'Sectors'}
+                  </label>
                   <input
                     type="number"
                     min={1}
@@ -1417,12 +1444,14 @@ export default function MomentumBacktester() {
                     value={topSectors}
                     onChange={(e) => setTopSectors(Number(e.target.value))}
                     className="w-16 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-                    title="How many sectors to pick per rebalance, ranked by aggregate score (or randomly in random mode)."
+                    title={`How many ${grouping === 'industry' ? 'industries' : 'sectors'} to pick per rebalance, ranked by aggregate score (or randomly in random mode).`}
                   />
                 </div>
                 {selectionMode !== 'sector_etf' && (
                   <div>
-                    <label className="text-gray-500 text-xs block mb-1">Per Sector</label>
+                    <label className="text-gray-500 text-xs block mb-1">
+                      Per {grouping === 'industry' ? 'Industry' : 'Sector'}
+                    </label>
                     <input
                       type="number"
                       min={1}
@@ -1430,10 +1459,47 @@ export default function MomentumBacktester() {
                       value={topPerSector}
                       onChange={(e) => setTopPerSector(Number(e.target.value))}
                       className="w-16 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-                      title="Per picked sector, how many top-ranked companies to hold (or random sample for random mode)."
+                      title={`Per picked ${grouping === 'industry' ? 'industry' : 'sector'}, how many top-ranked companies to hold (or random sample for random mode).`}
                     />
                   </div>
                 )}
+                {/* Group-by toggle: disabled when the selected universe
+                    doesn't carry industry data (only LEONTEQ + ACWI_LEONTEQ
+                    do). When disabled it visually pins to 'sector' and the
+                    tooltip explains why so the user knows it's not broken. */}
+                <div>
+                  <label className="text-gray-500 text-xs block mb-1">Group By</label>
+                  <div className="inline-flex bg-[#0f1117] border border-gray-700 rounded-lg overflow-hidden">
+                    {(['sector', 'industry'] as const).map((opt) => {
+                      const active = grouping === opt;
+                      const disabled = opt === 'industry' && !groupingAllowed;
+                      return (
+                        <button
+                          key={opt}
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => setGrouping(opt)}
+                          className={`px-3 py-2 text-xs font-medium transition-colors ${
+                            active
+                              ? 'bg-indigo-600 text-white'
+                              : disabled
+                                ? 'text-gray-600 cursor-not-allowed'
+                                : 'text-gray-300 hover:bg-white/5'
+                          }`}
+                          title={
+                            disabled
+                              ? 'Industry grouping is only available for Leonteq universes (LEONTEQ, ACWI_LEONTEQ)'
+                              : opt === 'industry'
+                                ? 'Bucket picks by Leonteq industry (finer than sector)'
+                                : 'Bucket picks by universe sector tag'
+                          }
+                        >
+                          {opt === 'industry' ? 'Industry' : 'Sector'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
                 {selectionMode === 'momentum' && (
                   <div>
                     <label className="text-gray-500 text-xs block mb-1">Min Price Score</label>

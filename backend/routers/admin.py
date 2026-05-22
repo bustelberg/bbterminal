@@ -137,6 +137,56 @@ def _build_portfolio_payload(snapshot_row: dict) -> dict:
     }
 
 
+@router.get("/api/admin/egress-ip")
+async def get_egress_ip(authorization: str = Header(...)):
+    """Return the IP this backend currently appears to egress from.
+
+    Why: AirSPMS allowlists by IP, Railway hobby/free egress IPs CAN
+    rotate across deploys/restarts. Hit this endpoint a few times over
+    a day to see whether the IP is stable enough to allowlist (or to
+    discover the value to plug into the allowlist + Railway's paid
+    static-egress add-on).
+
+    Returns: {ip, source, observed_at, headers_seen}. Uses ifconfig.me
+    as the reflector; falls back to a couple alternates if it 4xx/5xxs
+    so a single reflector outage doesn't blind us.
+    """
+    _require_admin(authorization)
+    import time as _time  # noqa: PLC0415
+
+    reflectors = [
+        "https://ifconfig.me/all.json",
+        "https://api.ipify.org?format=json",
+        "https://ifconfig.co/json",
+    ]
+
+    def _q() -> dict:
+        import requests as _req  # noqa: PLC0415
+        for url in reflectors:
+            try:
+                r = _req.get(url, timeout=10)
+                if not r.ok:
+                    continue
+                data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+                ip = (
+                    data.get("ip")
+                    or data.get("ip_addr")
+                    or (r.text.strip() if "ipify" in url else None)
+                )
+                if ip:
+                    return {
+                        "ip": ip,
+                        "source": url,
+                        "observed_at": datetime.now(timezone.utc).isoformat(),
+                        "raw": data,
+                    }
+            except Exception as e:
+                continue
+        raise HTTPException(502, "all egress-ip reflectors failed")
+
+    return await asyncio.to_thread(_q)
+
+
 @router.get("/api/admin/portfolio/latest")
 async def get_latest_portfolio(authorization: str = Header(...)):
     """Return the most recent current-picks snapshot in IBKR-friendly

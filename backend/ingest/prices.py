@@ -20,6 +20,7 @@ from supabase import Client
 from ingest._gurufocus_http import (
     cf_get,
     current_preferred_target,
+    explain_failure,
     is_available as _cf_is_available,
     ladder as _cf_ladder,
 )
@@ -264,24 +265,20 @@ def _fetch_indicator_from_api(ticker: str, exchange: str, indicator: str = "pric
             headers={"User-Agent": _USER_AGENT, "Accept": "application/json"},
             timeout=timeout,
         )
-        if resp.error is not None and resp.status_code is None:
-            return None, f"API error for {symbol}: {resp.error}", None
+        # Route every failure through `explain_failure` so the message
+        # tells the user the actual root cause (Cloudflare IP block,
+        # circuit breaker open, network error, real upstream 4xx, …)
+        # rather than dumping HTML / debug noise.
+        if resp.error is not None or (resp.status_code or 0) >= 400:
+            return None, explain_failure(resp, masked_url, subject=symbol), resp.status_code
         status = resp.status_code or 0
         body = resp.text or ""
-        if status >= 400 or resp.error is not None:
-            attempted = ",".join(resp.attempted) if resp.attempted else "n/a"
-            return (
-                None,
-                f"API HTTP {status} via curl_cffi/{resp.used_target} "
-                f"(tried={attempted}) for {symbol} body={body[:200]} ({masked_url})",
-                status,
-            )
         if not body:
-            return None, f"API returned empty response for {symbol} ({masked_url})", status
+            return None, f"GuruFocus returned empty body for {symbol} ({masked_url})", status
         try:
-            return json.loads(body), f"API OK for {symbol} ({masked_url})", status
+            return json.loads(body), f"OK for {symbol} ({masked_url})", status
         except json.JSONDecodeError as e:
-            return None, f"API returned invalid JSON for {symbol}: {e} ({masked_url})", None
+            return None, f"GuruFocus returned non-JSON content for {symbol}: {e} ({masked_url})", None
     else:
         req = Request(url, headers={"User-Agent": _USER_AGENT, "Accept": "application/json"})
         try:
