@@ -60,6 +60,10 @@ export type MomentumStrategyResult = {
   strategy_id: number | null;
   strategy_name: string;
   frequency: string | null;
+  /** Which kind of operation this run executed for the strategy:
+   * `rebalance` (fresh holdings) or `price_update` (last rebalance
+   * re-priced). Missing on older rows that pre-date the field. */
+  kind?: 'rebalance' | 'price_update' | string | null;
   /** Snapshot of the strategy's config at the time the pipeline ran it.
    * Shown in the run-detail view so the user can verify what was
    * actually computed — useful when the schedule entry has been edited
@@ -369,7 +373,21 @@ export default function Schedule() {
           </div>
         )}
 
-        <DailyMtdRefreshCard />
+        {/* Misc jobs — recurring side-tasks distinct from the
+            per-strategy momentum compute. Today this hosts the daily
+            held-companies price refresh; designed as a section so future
+            misc jobs slot in alongside without churning the layout. */}
+        <div className="space-y-3">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-sm uppercase tracking-wider text-gray-400 font-medium">
+              Misc jobs
+            </h2>
+            <p className="text-xs text-gray-600">
+              Recurring side-tasks (not per-strategy compute)
+            </p>
+          </div>
+          <DailyMtdRefreshCard />
+        </div>
 
         {/* Scheduled strategies */}
         <div className="bg-[#151821] rounded-xl border border-gray-800/40">
