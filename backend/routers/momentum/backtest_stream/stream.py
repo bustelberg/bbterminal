@@ -49,7 +49,7 @@ from .fetch_loop import run_fetch_loop
 from .models import BacktestRequest
 from .self_heal import compute_gap_cids, run_self_heal
 from .single_run import run_single
-from .universe_loader import load_monthly_eligible, load_monthly_eligible_for
+from .universe_loader import load_monthly_eligible_for
 from .variants import run_variants_sweep
 
 router = APIRouter(tags=["momentum"])

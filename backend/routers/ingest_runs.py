@@ -331,7 +331,6 @@ def _run_acquisition_phase(run_id: int) -> None:
     Leonteq: nothing to do — the template refresh in Phase 1 hits the
     Leonteq API directly.
     """
-    log = logging.getLogger(__name__)
     throttle = _Throttle()
     log_lines: list[str] = []
 

@@ -28,7 +28,6 @@ from ..scoring import (
     aggregate_to_sector,
     compute_category_scores,
     random_select,
-    score_and_select,
     score_universe,
     select_from_scored,
 )
