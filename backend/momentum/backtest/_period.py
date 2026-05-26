@@ -29,6 +29,8 @@ from ..scoring import (
     compute_category_scores,
     random_select,
     score_and_select,
+    score_universe,
+    select_from_scored,
 )
 from .indices import _date_on_or_after, _price_on_or_after, _price_on_or_before
 from .types import (
@@ -475,6 +477,14 @@ def compute_selection_period(
     local_price_index: dict[int, pd.Series] | None,
     company_currency: dict[int, str | None] | None,
     record_label: str,
+    # Pre-scored DataFrame from `score_universe` (computed once per
+    # period by the runner, possibly served from a cross-variant
+    # cache). When supplied, the long+short selections skip scoring
+    # and just call `select_from_scored` on the same frame. None →
+    # this branch computes its own scoring in-line (kept for callers
+    # that don't go through `run_backtest`, though there aren't any
+    # today — the runner is the sole caller).
+    scored_df: pd.DataFrame | None = None,
 ) -> _PeriodOutcome:
     """Regular stock-picking branch — momentum / random / all selection
     modes, with optional long-short. Builds the long bucket (always) and
@@ -502,22 +512,29 @@ def compute_selection_period(
         )
         selected_bottom = pd.DataFrame()
     else:
-        selected_top = score_and_select(
-            signals_df,
-            config.signal_weights,
+        # Defensive fallback: when the runner didn't pre-score (older
+        # callers, tests), do it here. Within a single
+        # compute_selection_period call long + short share the scored
+        # frame either way — the wasteful double-scoring of the pre-
+        # split code is gone.
+        if scored_df is None:
+            scored_df = score_universe(
+                signals_df,
+                config.signal_weights,
+                config.category_weights,
+            )
+        selected_top = select_from_scored(
+            scored_df,
             top_n_sectors=config.top_n_sectors,
             top_n_per_sector=config.top_n_per_sector,
-            category_weights=config.category_weights,
             direction="top",
             min_price_score=config.min_price_score,
         )
         if config.strategy_type == "long_short":
-            selected_bottom = score_and_select(
-                signals_df,
-                config.signal_weights,
+            selected_bottom = select_from_scored(
+                scored_df,
                 top_n_sectors=config.top_n_sectors,
                 top_n_per_sector=config.top_n_per_sector,
-                category_weights=config.category_weights,
                 direction="bottom",
             )
             # If a name lands in both books (small universe / overlapping

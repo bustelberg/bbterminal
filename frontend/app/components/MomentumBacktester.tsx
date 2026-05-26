@@ -361,12 +361,16 @@ export default function MomentumBacktester() {
     return () => clearInterval(id);
   }, [running]);
 
-  // Total elapsed for the panel header.
-  const totalElapsedMs = useMemo<number | null>(() => {
-    if (runStartedAt == null) return null;
-    const end = running ? Date.now() : (runEndedAt ?? Date.now());
-    return end - runStartedAt;
-  }, [running, runStartedAt, runEndedAt]);
+  // Total elapsed for the panel header. Intentionally NOT memoized —
+  // `setNowTick` re-renders us every second to keep this fresh, but a
+  // useMemo with [running, runStartedAt, runEndedAt] deps would cache
+  // the first-render value forever (none of those change on a tick),
+  // freezing the badge at the initial mount time. Inline math is
+  // cheap; recompute every render.
+  const totalElapsedMs: number | null =
+    runStartedAt == null
+      ? null
+      : (running ? Date.now() : (runEndedAt ?? Date.now())) - runStartedAt;
 
   // Per-entry log with relative timestamps so the timeline shows when each
   // step actually fired (and how big the gaps between steps are).
@@ -693,27 +697,74 @@ export default function MomentumBacktester() {
   // completed-ok payloads land in the bundle. Loading later rehydrates the
   // sweep state so the detail views switch between variants exactly like
   // they did during the live sweep.
-  /** Auto-save default: "{universe} · {strategy} · {startYear}-{endYear}".
-   * Includes the four parameters that fully describe the experiment so a
-   * user scanning the dropdown can tell what they're looking at without
-   * loading anything. Two sweeps with identical config still produce the
-   * same default name — the user can rename via the saved-runs dropdown
-   * if they want to keep both. */
+  /** Auto-save default: "{universes} · {strategy}[ · price≥X] · {range} ·
+   * {N} vars [ · ({axis×k, ...})]". Includes:
+   *   - universe(s): all selected sweep universes joined with `+`, or the
+   *     base universe when the sweep axis is empty.
+   *   - strategy label: includes `+L/S` when long_short is also swept.
+   *   - variant count: omitted for single-variant runs.
+   *   - swept-axes annotation: every axis with >1 value shows as
+   *     `axis×k` (e.g. `freq×4, top×2`). Lets the user tell a "frequency
+   *     sweep" apart from a "top-N sweep" of identical variant count.
+   *
+   * Two sweeps with byte-identical config still produce the same default
+   * name — the user can rename via the saved-runs dropdown if they want
+   * to keep both. */
   const defaultVariantsBundleName = (): string => {
-    const universe = (selectedIndexUniverse || '').trim() || 'All companies';
+    // Universe(s): when the picker has explicit universe selections, list
+    // them (they're what ran). When empty, the base universe applies to
+    // every variant.
+    const uniList = Array.from(selectedUniverses);
+    const universe = uniList.length > 1
+      ? uniList.join('+')
+      : uniList.length === 1
+        ? uniList[0]
+        : ((selectedIndexUniverse || '').trim() || 'All companies');
+
+    // Strategy label: when multiple strategies were swept, list them
+    // ("Long+L/S") so it's obvious from the name. For random / all /
+    // sector_etf the strategy axis is N/A — the selection mode label
+    // wins.
+    const stratList = Array.from(selectedStrategies);
     const strategyLabel = selectionMode === 'random'
       ? 'Random'
       : selectionMode === 'all'
         ? 'All-universe'
         : selectionMode === 'sector_etf'
           ? 'Sector ETF'
-          : 'Momentum';
+          : stratList.length > 1
+            ? stratList.map((s) => s === 'long_short' ? 'L/S' : 'Long').join('+')
+            : 'Momentum';
+
     const startYear = startDate.slice(0, 4);
     const endYear = endDate.slice(0, 4);
     const range = startYear === endYear ? startYear : `${startYear}-${endYear}`;
     const trimmedFloor = minPriceScore.trim();
     const floorPart = trimmedFloor === '' ? '' : ` · price≥${trimmedFloor}`;
-    return `${universe} · ${strategyLabel}${floorPart} · ${range}`;
+
+    const n = variantsToRun.length;
+    const nPart = n > 1 ? ` · ${n} vars` : '';
+
+    // Compact swept-axes annotation: every axis with >1 selected value
+    // gets an `axis×k` entry. Helps distinguish e.g. an 8-variant freq
+    // sweep from an 8-variant top-N sweep — without this they'd produce
+    // identical names.
+    const sweptAxes: string[] = [];
+    if (selectedFreqs.size > 1) sweptAxes.push(`freq×${selectedFreqs.size}`);
+    if (stratList.length > 1 && selectionMode !== 'random' && selectionMode !== 'all' && selectionMode !== 'sector_etf') {
+      sweptAxes.push(`strat×${stratList.length}`);
+    }
+    if (uniList.length > 1) sweptAxes.push(`uni×${uniList.length}`);
+    if (selectedGroupings.size > 1) sweptAxes.push(`grp×${selectedGroupings.size}`);
+    const topList = parseNumList(topSectorsSweep);
+    if (topList.length > 1) sweptAxes.push(`top×${topList.length}`);
+    const perList = parseNumList(perSectorSweep);
+    if (perList.length > 1) sweptAxes.push(`per×${perList.length}`);
+    const minList = parseMinScoreList(minScoreSweep);
+    if (minList.length > 1) sweptAxes.push(`min×${minList.length}`);
+    const sweepPart = sweptAxes.length > 0 ? ` (${sweptAxes.join(', ')})` : '';
+
+    return `${universe} · ${strategyLabel}${floorPart} · ${range}${nPart}${sweepPart}`;
   };
 
   const saveVariantsBundle = async (overrideName?: string) => {

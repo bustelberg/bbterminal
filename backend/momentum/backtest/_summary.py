@@ -48,6 +48,14 @@ class _PeriodAccumulators:
     # so the user can compare strategy vs. universe at a glance.
     universe_cumulative_factor: float = 1.0
     universe_period_returns: list[float] = None
+    # Daily universe baseline curve — same shape as the strategy's
+    # `daily_records`. The runner appends one entry per trading day
+    # inside each period using `_compute_universe_period_daily`,
+    # chain-linked via `universe_daily_factor`. Open periods feed the
+    # display tail but don't bump the cumulative factor (matching the
+    # per-period chain so headline universe stats stay closed-only).
+    universe_daily_records: list[tuple[str, float]] = None
+    universe_daily_factor: float = 1.0
 
     def __post_init__(self):
         if self.all_period_returns is None:
@@ -58,6 +66,8 @@ class _PeriodAccumulators:
             self.holdings_counts = []
         if self.universe_period_returns is None:
             self.universe_period_returns = []
+        if self.universe_daily_records is None:
+            self.universe_daily_records = []
 
 
 def build_backtest_result(
@@ -245,8 +255,30 @@ def build_backtest_result(
         universe_annualized_return_pct=universe_annualized,
     )
 
+    # Apples-to-apples date alignment for the universe baseline. The
+    # strategy's daily curve unions trading days across its handful of
+    # holdings; the universe's daily curve unions across every eligible
+    # cid in the panel, which spans more exchanges → more union dates.
+    # Without resampling, two side effects show up in the chart:
+    #   1. The "Periods" column on the universe row exceeds the
+    #      strategy's by 10-15% (more dates seen).
+    #   2. `periodsPerYear` in the frontend's points-derived stats
+    #      (`alignSeries`) scales up correspondingly, inflating the
+    #      universe's Sharpe by √(period_count_ratio).
+    # Filtering universe entries to the strategy's date set fixes both
+    # at once. Falls back to the native universe dates when the
+    # strategy has no curve (degenerate runs) so the user still sees a
+    # baseline line.
+    strategy_date_set = {d for d, _ in daily_curve}
+    universe_daily_aligned = (
+        [(d, v) for d, v in accumulators.universe_daily_records if d in strategy_date_set]
+        if strategy_date_set
+        else list(accumulators.universe_daily_records)
+    )
+
     return BacktestResult(
         monthly_records=period_records,
         summary=summary,
         daily_records=daily_curve,
+        universe_daily_records=universe_daily_aligned,
     )

@@ -29,6 +29,7 @@ from ._period import (
     compute_universe_period_return,
 )
 from ._summary import _PeriodAccumulators, build_backtest_result
+from .equity_curve import _compute_universe_period_daily
 from .preparation import _BacktestPrepared, _prepare_backtest
 from .types import (
     BacktestConfig,
@@ -36,6 +37,7 @@ from .types import (
     BacktestSummary,
     PeriodRecord,
 )
+from ..scoring import score_universe
 
 
 def run_backtest(
@@ -62,6 +64,36 @@ def run_backtest(
     # Shape matches the return of
     # `_period.compute_monthly_universe_baseline`.
     monthly_baseline_override: dict | None = None,
+    # Per-period universe baseline cache, precomputed by the variants
+    # sweep per (universe, frequency). Keyed by the period's date.
+    # When present, the period loop short-circuits the in-line
+    # `compute_universe_period_return` call for CLOSED periods. The
+    # open-period re-compute stays in-line (it uses a variant-
+    # specific `open_as_of` exit). None → compute in-line every
+    # period.
+    period_baseline_lookup: dict | None = None,
+    # Cross-variant score cache. Keyed by period_date; value is the
+    # per-period scored DataFrame produced by `score_universe`. The
+    # variants sweep allocates ONE dict per (universe combo) and
+    # passes it to every variant on that combo — the first variant
+    # to hit each period populates the cache, subsequent variants
+    # short-circuit the score pass entirely. Cache scope assumes
+    # `signal_weights` and `category_weights` are constant across all
+    # variants that share the dict (true today: variants vary only
+    # over top_n / frequency / strategy / universe / grouping). Pass
+    # None to disable caching (single-run path / tests / legacy
+    # callers). Mutated in place — pass a fresh dict per sweep.
+    score_cache: dict | None = None,
+    # Side-effect callback invoked once per period with the period
+    # date + the per-period eligibility-filtered signals_df, right
+    # after that frame is built. Used by single_run.py to populate the
+    # /signal-breakdown LRU so the user's first breakdown click after
+    # a backtest lands in <500ms instead of re-loading 500k+ price
+    # rows from Supabase. The callback receives the SAME shape (cids
+    # + sector + signal columns) that /signal-breakdown computes
+    # fresh, so caching it eliminates a redundant compute. None
+    # disables warming (tests / library callers).
+    panel_warm_callback: "Callable[[date, pd.DataFrame], None] | None" = None,
 ) -> BacktestResult:
     """Run a momentum backtest at the configured rebalance cadence.
 
@@ -214,6 +246,19 @@ def run_backtest(
         if not signals_df.empty and eligible_ids is not None:
             signals_df = signals_df[signals_df["company_id"].isin(eligible_ids)].copy()
             signals_df["sector"] = signals_df["company_id"].map(sector_map)
+        # Warm the /signal-breakdown LRU with this period's eligibility-
+        # filtered panel — same shape /signal-breakdown computes fresh.
+        # After the backtest, the user's first breakdown click for any
+        # stock at any covered cutoff hits the cache instead of paying
+        # the 10s universe-load + panel-compute cost.
+        if panel_warm_callback is not None and not signals_df.empty:
+            try:
+                panel_warm_callback(period_date, signals_df)
+            except Exception:
+                # Warming is best-effort — never break the backtest if
+                # the breakdown LRU misbehaves (full disk, lock contention,
+                # etc.). The user just pays the cost on first breakdown.
+                pass
         if signals_df.empty:
             reason = f"No companies had enough price data (need >= 20 data points before {_record_label(period_date)})"
             if send_event:
@@ -247,10 +292,46 @@ def run_backtest(
         # empty candidate set here.
         entry_ts = pd.Timestamp(period_date)
         closed_exit_ts = pd.Timestamp(next_period)
-        universe_ret_closed, universe_n_closed = compute_universe_period_return(
-            signals_df, price_index,
-            entry_ts=entry_ts, exit_ts=closed_exit_ts,
+        # Variant-sweep cache short-circuit: when the orchestrator
+        # precomputed per-period baselines for this (universe, freq),
+        # reuse the cached `(return_pct, n_constituents)` instead of
+        # recomputing here. Identical math; just avoids re-walking
+        # every eligible cid's prices N variants in a row. Falls back
+        # to in-line compute for periods not in the cache (open
+        # period's variant-specific exit) or when no cache was passed
+        # (single-run path / legacy callers).
+        if period_baseline_lookup is not None and period_date in period_baseline_lookup:
+            universe_ret_closed, universe_n_closed = period_baseline_lookup[period_date]
+        else:
+            universe_ret_closed, universe_n_closed = compute_universe_period_return(
+                signals_df, price_index,
+                entry_ts=entry_ts, exit_ts=closed_exit_ts,
+            )
+
+        # Score the eligible universe ONCE per period — both the long
+        # and short books (when long_short) and every variant sharing
+        # the score cache reuse the same scored frame. Skipped for
+        # selection modes that don't consult scores (random / all /
+        # sector_etf): scoring would be wasted work and would also
+        # require config.signal_weights to be valid, which "all" / etc.
+        # don't necessarily satisfy.
+        scored_df: pd.DataFrame | None = None
+        needs_score = (
+            config.selection_mode != "all"
+            and config.selection_mode != "sector_etf"
+            and rng is None
         )
+        if needs_score:
+            if score_cache is not None and period_date in score_cache:
+                scored_df = score_cache[period_date]
+            else:
+                scored_df = score_universe(
+                    signals_df,
+                    config.signal_weights,
+                    config.category_weights,
+                )
+                if score_cache is not None:
+                    score_cache[period_date] = scored_df
 
         # Dispatch to the right per-period branch.
         if config.selection_mode == "sector_etf":
@@ -272,6 +353,7 @@ def run_backtest(
                 local_price_index=local_price_index,
                 company_currency=company_currency,
                 record_label=_record_label(period_date),
+                scored_df=scored_df,
             )
 
         # Forward any warnings the branch raised. Done before the
@@ -307,6 +389,32 @@ def run_backtest(
             )
         else:
             universe_ret, universe_n = universe_ret_closed, universe_n_closed
+
+        # Daily universe equal-weight baseline curve for this period.
+        # Same entry/exit semantics as the per-period universe return
+        # above — closed periods exit at `next_period`, open periods at
+        # `open_as_of`. Each day's relative factor is chain-linked via
+        # the running `accum.universe_daily_factor` so the curve is
+        # continuous across rebalances. Closed periods advance the
+        # factor; open period feeds the display tail without bumping
+        # the factor (matches the per-period chain's closed-only
+        # accumulation, keeping headline universe stats unchanged).
+        universe_period_exit_ts = (
+            pd.Timestamp(open_as_of) if is_open_iter and open_as_of is not None
+            else closed_exit_ts
+        )
+        eligible_cids_set = set(signals_df["company_id"].astype(int))
+        per_period_universe_daily = _compute_universe_period_daily(
+            eligible_cids_set, price_index,
+            entry_ts=entry_ts, exit_ts=universe_period_exit_ts,
+        )
+        for day_ts, rel_factor in per_period_universe_daily:
+            cum_factor = accum.universe_daily_factor * rel_factor
+            accum.universe_daily_records.append(
+                (day_ts.date().isoformat(), round((cum_factor - 1) * 100, 4))
+            )
+        if per_period_universe_daily and not is_open_iter:
+            accum.universe_daily_factor *= per_period_universe_daily[-1][1]
 
         # Empty-holdings branch: forward the empty_reason as both a record
         # and a warning, then move on. The universe baseline is still
@@ -454,6 +562,11 @@ def run_multi_trial_backtest(
     # doesn't vary across random trials (deterministic per universe +
     # window), so trial 0 computes once and the rest reuse.
     monthly_baseline_override: dict | None = None,
+    # Same as in `run_backtest`. Period baselines are shared across
+    # trials within a multi-trial run too — the period dates +
+    # eligible cids are deterministic per (universe, frequency),
+    # which doesn't change between random trials.
+    period_baseline_lookup: dict | None = None,
 ) -> BacktestResult:
     """Run `n_trials` independent backtests with sequential seeds and return
     an aggregated BacktestResult.
@@ -537,6 +650,7 @@ def run_multi_trial_backtest(
             company_currency=company_currency,
             prepared=prepared,
             monthly_baseline_override=shared_monthly_baseline,
+            period_baseline_lookup=period_baseline_lookup,
         )
         trial_results.append(result)
         # Capture trial 0's baseline for trials 1..N-1. The summary
@@ -638,4 +752,10 @@ def run_multi_trial_backtest(
         monthly_records=aggregated_records,
         summary=summary,
         daily_records=daily_curve,
+        # Universe baseline is deterministic per (universe, window),
+        # not per trial — every trial produces the same daily curve.
+        # Reuse trial 0's so the aggregated result carries it.
+        universe_daily_records=(
+            trial_results[0].universe_daily_records if trial_results else []
+        ),
     )

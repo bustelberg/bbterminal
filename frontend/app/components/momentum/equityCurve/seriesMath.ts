@@ -98,14 +98,30 @@ export function seriesFromMonthly(
   return { map, months };
 }
 
-/** Build a {month -> factor} map from `monthly_records[i].universe_cumulative_return_pct`.
- * This is the "what if you held the entire eligible universe equal-weight"
- * baseline — the no-skill comparator the strategy is implicitly being
- * scored against. Returns an empty map when no period has a populated
- * universe figure (legacy saved runs predate this column). */
+/** Build a {date -> factor} map for the universe equal-weight baseline.
+ *
+ * Prefers `universe_daily_records` (one entry per trading day, same shape
+ * as the strategy's `daily_records`) when present so the gray baseline
+ * line matches the strategy's daily granularity in the chart, max DD
+ * detection, and Sharpe.
+ *
+ * Falls back to `monthly_records[i].universe_cumulative_return_pct` —
+ * one point per rebalance, anchored to end-of-month — for legacy saved
+ * runs predating the daily baseline. Returns an empty map when neither
+ * source carries data. */
 export function seriesFromUniverseBaseline(
   monthly: PeriodRecord[],
+  daily?: DailyRecord[] | null,
 ): { map: Map<string, number>; months: string[] } {
+  if (daily && daily.length > 0) {
+    const map = new Map<string, number>();
+    const dates: string[] = [];
+    for (const d of daily) {
+      map.set(d.date, 1 + d.cumulative_return_pct / 100);
+      dates.push(d.date);
+    }
+    return { map, months: dates };
+  }
   const map = new Map<string, number>();
   const months: string[] = [];
   for (const r of monthly) {
@@ -543,10 +559,14 @@ export function resolveSeries(
 
   // Universe (equal-weight) baseline — a non-removable gray line that
   // shows what a no-skill "hold the entire eligible universe equally"
-  // strategy would have returned over the same window. Skipped when
-  // monthly_records doesn't carry the universe figure (legacy saved
-  // runs predate it).
-  const universe = seriesFromUniverseBaseline(result.monthly_records);
+  // strategy would have returned over the same window. Prefers the
+  // daily curve when present (matches the strategy line's
+  // granularity); falls back to per-period monthly when not. Skipped
+  // when neither source carries data (very old saved runs).
+  const universe = seriesFromUniverseBaseline(
+    result.monthly_records,
+    result.universe_daily_records,
+  );
   if (universe.map.size > 0) {
     out.push({
       id: 'universe',

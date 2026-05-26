@@ -53,25 +53,19 @@ function derivedPct(steps: StepDef[], state: Record<string, StepState>): number 
   return Math.round((score / steps.length) * 100);
 }
 
-/** Human-readable elapsed-time label for the running/completed badge.
- * Shows only the relevant units — seconds-only when under a minute,
- * "M minutes S seconds" when under an hour, "H hours M minutes S seconds"
- * past an hour. Pluralizes correctly so "1 minute 1 second" reads right. */
-function formatElapsed(ms: number): string {
-  // Sub-second: round up so the badge never sticks at "0 seconds".
-  const totalSeconds = Math.max(1, Math.floor(ms / 1000));
+/** Compact `Xh Ym Zs` formatter for the elapsed / remaining / total
+ * chips in the header. Drops higher units when zero (e.g. "47s" not
+ * "0h 0m 47s"). Used three times per render so brevity matters more
+ * than the long-form "1 minute 23 seconds" the old verbose form used. */
+function formatCompact(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
-  const pluralize = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
   const parts: string[] = [];
-  if (hours > 0) parts.push(pluralize(hours, 'hour'));
-  if (minutes > 0) parts.push(pluralize(minutes, 'minute'));
-  // Show seconds when nothing else would, when the minute total is small
-  // enough that they're still meaningful, or when the seconds value
-  // itself is non-zero — drop them on a clean "2 hours 0 minutes 0
-  // seconds" so the chip doesn't read awkwardly.
-  if (seconds > 0 || parts.length === 0) parts.push(pluralize(seconds, 'second'));
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0 || hours > 0) parts.push(`${minutes}m`);
+  parts.push(`${seconds}s`);
   return parts.join(' ');
 }
 
@@ -114,14 +108,65 @@ export default function ProgressTimeline({
 
   const showProgressBar = steps.length > 0 || pct != null;
 
+  // Linear ETA from `pct`: total ≈ elapsed × (100/pct); remaining =
+  // total − elapsed. Only shown when running AND we have enough signal
+  // to extrapolate without flashing absurd numbers — the 5% floor + 2s
+  // floor together cover the early-noise window where extrapolation
+  // produces nonsense like "Total ~5h" because pct=1 after 0.5s of
+  // wall-clock. ETA is suppressed at 100% (run is done — show
+  // "Completed in X" instead). Caller-provided `pct` is the only source
+  // (derived pct from steps would skip per-message progress events).
+  const hasEta =
+    running &&
+    totalElapsedMs != null &&
+    totalElapsedMs >= 2000 &&
+    computedPct > 5 &&
+    computedPct < 100;
+  const remainingMs = hasEta
+    ? Math.max(0, Math.round((totalElapsedMs! / computedPct) * (100 - computedPct)))
+    : null;
+  const totalEstMs = remainingMs != null ? totalElapsedMs! + remainingMs : null;
+
   return (
     <div className={`bg-[#0f1117] border border-gray-800 rounded-lg p-3 space-y-2 ${className ?? ''}`}>
       {(title || onDismiss || totalElapsedMs != null) && (
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           {title && <div className="text-xs font-medium text-gray-300">{title}</div>}
           {totalElapsedMs != null && (
-            <div className="text-[11px] font-mono text-gray-500 ml-3">
-              {running ? `Running ${formatElapsed(totalElapsedMs)}` : `Completed in ${formatElapsed(totalElapsedMs)}`}
+            <div className={
+              running
+                ? 'flex items-center gap-2 px-3 py-1.5 rounded-md bg-indigo-500/10 border border-indigo-500/30 ml-auto'
+                : 'flex items-center gap-2 px-3 py-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 ml-auto'
+            }>
+              {running ? (
+                <>
+                  <span className="text-[11px] uppercase tracking-wide text-gray-400">Elapsed</span>
+                  <span className="text-[13px] font-mono font-semibold text-gray-100 tabular-nums">
+                    {formatCompact(totalElapsedMs)}
+                  </span>
+                  {remainingMs != null && totalEstMs != null && (
+                    <>
+                      <span className="text-gray-700">·</span>
+                      <span className="text-[11px] uppercase tracking-wide text-gray-400">Left</span>
+                      <span className="text-[13px] font-mono font-semibold text-indigo-300 tabular-nums">
+                        ~{formatCompact(remainingMs)}
+                      </span>
+                      <span className="text-gray-700">·</span>
+                      <span className="text-[11px] uppercase tracking-wide text-gray-400">Total</span>
+                      <span className="text-[13px] font-mono font-semibold text-gray-100 tabular-nums">
+                        ~{formatCompact(totalEstMs)}
+                      </span>
+                    </>
+                  )}
+                </>
+              ) : (
+                <>
+                  <span className="text-[11px] uppercase tracking-wide text-gray-400">Completed in</span>
+                  <span className="text-[13px] font-mono font-semibold text-gray-100 tabular-nums">
+                    {formatCompact(totalElapsedMs)}
+                  </span>
+                </>
+              )}
             </div>
           )}
           {onDismiss && (

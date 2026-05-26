@@ -365,12 +365,25 @@ class BacktestResult:
     # runs with no holdings; the frontend falls back to the period curve in
     # that case.
     daily_records: list[tuple[str, float]] = field(default_factory=list)
+    # Daily universe equal-weight baseline curve — same shape as
+    # `daily_records`, but computed over every eligible cid (the
+    # "no-skill" baseline) rather than the strategy's selections.
+    # The frontend prefers this over the per-period
+    # `universe_cumulative_return_pct` on monthly_records so the gray
+    # baseline line matches the strategy line's daily granularity.
+    # Empty on legacy/degenerate runs; frontend then falls back to the
+    # per-period chain.
+    universe_daily_records: list[tuple[str, float]] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
             "daily_records": [
                 {"date": d, "cumulative_return_pct": cum}
                 for d, cum in self.daily_records
+            ],
+            "universe_daily_records": [
+                {"date": d, "cumulative_return_pct": cum}
+                for d, cum in self.universe_daily_records
             ],
             "monthly_records": [
                 {

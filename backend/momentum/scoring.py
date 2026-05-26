@@ -121,39 +121,44 @@ def aggregate_to_sector(
     )
 
 
-def score_and_select(
+def score_universe(
     signals_df: pd.DataFrame,
     signal_weights: dict[str, float],
+    category_weights: dict[str, float] | None = None,
+) -> pd.DataFrame:
+    """The score-half of `score_and_select`: append per-category scores
+    + `momentum_score` to every row of `signals_df`. Pure function of
+    (signals_df, signal_weights, category_weights) — the result is
+    safe to cache across any variants that share those inputs (which,
+    in practice, is every variant in a sweep, since `signal_weights`
+    and `category_weights` come from the base request and don't vary
+    per variant).
+
+    For long-short strategies the same scored frame feeds both the
+    top and bottom selections — no need to rescore between them."""
+    if signals_df.empty:
+        return signals_df
+    return compute_category_scores(signals_df, signal_weights, category_weights)
+
+
+def select_from_scored(
+    scored: pd.DataFrame,
     *,
     top_n_sectors: int = 4,
     top_n_per_sector: int = 6,
-    category_weights: dict[str, float] | None = None,
     direction: SelectionDirection = "top",
     min_price_score: float | None = None,
 ) -> pd.DataFrame:
-    """Full pipeline: score companies → pick N sectors → pick M companies / sector.
+    """The select-half of `score_and_select`: applies `min_price_score`,
+    aggregates to sector, picks `top_n_sectors` × `top_n_per_sector`,
+    attaches `sector_rank` + `company_rank`. Takes the pre-scored
+    DataFrame produced by `score_universe` so callers can cache the
+    score pass and only pay this per-variant selection cost.
 
-    `direction="top"` (default) picks the highest-scoring sectors and the
-    highest-scoring companies within each — long-only momentum.
-
-    `direction="bottom"` picks the lowest-scoring sectors and the lowest-
-    scoring companies within each — used as the short bucket of a long-short
-    strategy.
-
-    `min_price_score` is an optional gate that drops any company whose
-    `score_price` is at or below the threshold BEFORE sector aggregation.
-    Only applied to the long bucket (`direction="top"`) — for a long-short
-    strategy the short side wants low-score names by design. Filter
-    happens pre-aggregation so a sector full of below-threshold names
-    doesn't get its average pulled up by the few survivors.
-
-    Returns a DataFrame of selected companies with their scores and sector.
-    """
-    if signals_df.empty:
+    Behavior is byte-identical to the equivalent path inside
+    `score_and_select` — that function now composes these two halves."""
+    if scored.empty:
         return pd.DataFrame()
-
-    # Score each company with per-category scores
-    scored = compute_category_scores(signals_df, signal_weights, category_weights)
 
     # Optional price-score floor — applied only to long selection (the
     # short bucket explicitly targets low scores, so a min there would
@@ -162,13 +167,9 @@ def score_and_select(
     # scores are dropped — a company that couldn't be scored on the
     # price category isn't a candidate for a price-floor strategy.
     if direction == "top" and min_price_score is not None and "score_price" in scored.columns:
-        before = len(scored)
         scored = scored[
             scored["score_price"].notna() & (scored["score_price"] > min_price_score)
         ].copy()
-        # No-op safety: if every company was excluded the rest of the
-        # function still produces an empty DataFrame cleanly.
-        _ = before  # kept for future logging / event emission
 
     # Aggregate to sector and pick from the right end of the ranking. The
     # aggregator returns sectors descending by mean score, so .head() →
@@ -214,6 +215,33 @@ def score_and_select(
         )
 
     return selected
+
+
+def score_and_select(
+    signals_df: pd.DataFrame,
+    signal_weights: dict[str, float],
+    *,
+    top_n_sectors: int = 4,
+    top_n_per_sector: int = 6,
+    category_weights: dict[str, float] | None = None,
+    direction: SelectionDirection = "top",
+    min_price_score: float | None = None,
+) -> pd.DataFrame:
+    """Convenience wrapper combining `score_universe` + `select_from_scored`
+    for callers that don't manage a score cache (single-run path, tests,
+    legacy callers). Behavior unchanged from the pre-split version.
+
+    Variant sweeps should use the split form directly so the score pass
+    is cached across variants — see `_period.compute_selection_period`
+    for the runner's cache-aware call site."""
+    scored = score_universe(signals_df, signal_weights, category_weights)
+    return select_from_scored(
+        scored,
+        top_n_sectors=top_n_sectors,
+        top_n_per_sector=top_n_per_sector,
+        direction=direction,
+        min_price_score=min_price_score,
+    )
 
 
 def random_select(

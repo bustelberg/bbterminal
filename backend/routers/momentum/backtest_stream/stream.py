@@ -487,6 +487,49 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         # variants paths.
         universe_snapshot = build_universe_snapshot(universe_df)
 
+        # Warm the persistent price/volume cache (Win #1). Build the
+        # per-cid indices ONCE here, share with every (combo) in this
+        # request, and make them available to /signal-breakdown for
+        # the LRU's TTL. Subsequent breakdown clicks at any cutoff
+        # within [price_start, price_end] for any cached universe skip
+        # the 10s Supabase load entirely (still pay ~2s panel compute,
+        # unless Win 5's panel cache also covers them — then <500ms).
+        try:
+            from momentum.backtest import _build_price_index, _build_volume_index  # noqa: PLC0415
+            from ..signals import warm_price_volume_cache  # noqa: PLC0415
+            _u_price_index = await asyncio.to_thread(_build_price_index, prices_df)
+            _u_volume_index = (
+                await asyncio.to_thread(_build_volume_index, volumes_df)
+                if volumes_df is not None and not volumes_df.empty else None
+            )
+            # Warm under EVERY combo's (universe_label, index_universe)
+            # so per-combo breakdown lookups all hit. The underlying
+            # dict references are shared across entries — no memory
+            # duplication beyond a few extra OrderedDict keys.
+            seen_warm_keys: set = set()
+            for combo in combos:
+                u_label, u_idx, _grp = combo
+                k = (u_label, u_idx)
+                if k in seen_warm_keys:
+                    continue
+                seen_warm_keys.add(k)
+                me_for_combo = monthly_eligible_by_combo.get(combo)
+                warm_price_volume_cache(
+                    u_label, u_idx,
+                    price_start, price_end,
+                    _u_price_index, _u_volume_index,
+                    universe_df=universe_df,
+                    monthly_eligible=me_for_combo,
+                )
+        except Exception as _warm_err:
+            # Warming is best-effort — never block a backtest if the
+            # LRU misbehaves. The user just pays the cost on first
+            # /signal-breakdown click.
+            import logging  # noqa: PLC0415
+            logging.getLogger(__name__).debug(
+                "[stream] price/volume cache warm failed: %s", _warm_err,
+            )
+
         # Dispatch to variants sweep or single-run path.
         if req.variants:
             async for evt in run_variants_sweep(

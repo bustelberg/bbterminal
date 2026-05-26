@@ -119,6 +119,14 @@ export type BacktestResult = {
   // this. Empty for degenerate runs / older saved results — the chart
   // falls back to monthly_records in that case.
   daily_records?: DailyRecord[];
+  // Daily universe equal-weight baseline curve. Same shape as
+  // `daily_records` but built from every eligible cid in each period
+  // (the no-skill baseline) rather than the strategy's picks. The chart
+  // prefers this over the per-period `universe_cumulative_return_pct`
+  // on monthly_records so the gray baseline line matches the strategy
+  // line's daily granularity. Absent on legacy saved runs predating
+  // this feature.
+  universe_daily_records?: DailyRecord[];
 };
 
 // Per-day pick holding has the same shape as a Holding for newer snapshots

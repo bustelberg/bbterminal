@@ -550,6 +550,36 @@ def _run_backfill(strategy_id: int) -> None:
                 "[backfill] strategy=%s target=%s insert failed: %s: %s",
                 strategy_id, rec_date, type(e).__name__, e,
             )
+    # After the rebalance rows are durable, refresh the OPEN period
+    # with each holding's actual-latest close. The engine's open-period
+    # `as_of_date` is the EARLIEST of per-holding latest-close dates
+    # (so every holding lines up on one shared date for the curve);
+    # that's the right call for the equity curve, but it means a
+    # single thinly-traded name with a stale close drags the whole
+    # period's MTD back days or weeks. `compute_and_save_price_update`
+    # fetches each cid's latest close independently and writes a
+    # `price_update` row whose `period_return_pct` overrides the open
+    # period in `_compute_period_returns`'s walker — so /schedule
+    # immediately reads the freshest per-holding prices instead of
+    # waiting for the next Tuesday 02:00 UTC tick to fire.
+    try:
+        pu_id = compute_and_save_price_update(
+            strategy_id, ingest_run_id=None, is_backfill=True,
+        )
+        if pu_id is not None:
+            _log.info(
+                "[backfill] strategy=%s post-backfill price_update=%s",
+                strategy_id, pu_id,
+            )
+    except Exception as e:
+        # Don't fail the whole backfill on a price_update hiccup —
+        # the rebalance rows are durable, the next pipeline tick
+        # will retry.
+        _log.warning(
+            "[backfill] strategy=%s post-backfill price_update failed: %s: %s",
+            strategy_id, type(e).__name__, e,
+        )
+
     progress.write(
         pct=100,
         message=f"Backfill complete: {persisted} of {len(engine_tail)} snapshots persisted",
