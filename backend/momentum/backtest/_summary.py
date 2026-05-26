@@ -124,18 +124,42 @@ def build_backtest_result(
     # closed-period daily returns only (open period's partial-window
     # samples would understate volatility).
     sharpe = None
+    sortino = None
     if len(closed_daily_returns) >= 21:
         arr = np.array(closed_daily_returns)
         d_mean = float(arr.mean())
         d_std = float(arr.std())
         if d_std > 0:
             sharpe = round((d_mean / d_std) * (252 ** 0.5), 2)
+        # Sortino — same period mean over downside-only std.
+        downside = arr[arr < 0]
+        if len(downside) > 1:
+            downside_std = float(downside.std())
+            if downside_std > 0:
+                sortino = round((d_mean / downside_std) * (252 ** 0.5), 2)
     elif len(accumulators.all_period_returns) >= int(_periods_per_year(rebalance_frequency)):
         arr = np.array(accumulators.all_period_returns)
         period_mean = float(arr.mean())
         period_std = float(arr.std())
         if period_std > 0:
             sharpe = round((period_mean / period_std) * (_periods_per_year(rebalance_frequency) ** 0.5), 2)
+        downside = arr[arr < 0]
+        if len(downside) > 1:
+            downside_std = float(downside.std())
+            if downside_std > 0:
+                sortino = round((period_mean / downside_std) * (_periods_per_year(rebalance_frequency) ** 0.5), 2)
+
+    # Win rate + median period return — uses closed period returns directly
+    # (not daily) so it lines up with the rebalance cadence.
+    win_rate_pct: float | None = None
+    median_period_return_pct: float | None = None
+    if accumulators.all_period_returns:
+        pr_arr = np.array(accumulators.all_period_returns)
+        wins = int((pr_arr > 0).sum())
+        total = int(pr_arr.size)
+        if total > 0:
+            win_rate_pct = round(100.0 * wins / total, 2)
+        median_period_return_pct = round(float(np.median(pr_arr)), 2)
 
     # Universe headline — same chain-link arithmetic as the strategy's
     # totals, computed over CLOSED periods only so the comparison is
@@ -157,6 +181,9 @@ def build_backtest_result(
         annualized_return_pct=annualized,
         max_drawdown_pct=round(max_dd, 2),
         sharpe_ratio=sharpe,
+        sortino_ratio=sortino,
+        win_rate_pct=win_rate_pct,
+        median_period_return_pct=median_period_return_pct,
         avg_monthly_turnover_pct=(
             round(float(np.mean(accumulators.turnover_values)), 2)
             if accumulators.turnover_values else 0

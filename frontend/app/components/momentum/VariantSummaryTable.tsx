@@ -53,6 +53,9 @@ export default function VariantSummaryTable({ exchangeByCompany }: Props) {
     end: string;
     annualized_pct: number | null;
     sharpe: number | null;
+    sortino: number | null;
+    win_rate_pct: number | null;
+    median_period_return_pct: number | null;
     total_return_pct: number | null;
     max_drawdown_pct: number | null;
   };
@@ -69,6 +72,9 @@ export default function VariantSummaryTable({ exchangeByCompany }: Props) {
         end: months[months.length - 1]?.date ?? '',
         annualized_pct: r.summary?.annualized_return_pct ?? null,
         sharpe: r.summary?.sharpe_ratio ?? null,
+        sortino: r.summary?.sortino_ratio ?? null,
+        win_rate_pct: r.summary?.win_rate_pct ?? null,
+        median_period_return_pct: r.summary?.median_period_return_pct ?? null,
         total_return_pct: r.summary?.total_return_pct ?? null,
         max_drawdown_pct: r.summary?.max_drawdown_pct ?? null,
       });
@@ -81,6 +87,9 @@ export default function VariantSummaryTable({ exchangeByCompany }: Props) {
     { key: 'end', header: 'End', accessor: (r) => r.end },
     { key: 'annualized_pct', header: 'Annualized return (%)', accessor: (r) => r.annualized_pct },
     { key: 'sharpe', header: 'Sharpe', accessor: (r) => r.sharpe },
+    { key: 'sortino', header: 'Sortino', accessor: (r) => r.sortino },
+    { key: 'win_rate_pct', header: 'Win rate (%)', accessor: (r) => r.win_rate_pct },
+    { key: 'median_period_return_pct', header: 'Median period return (%)', accessor: (r) => r.median_period_return_pct },
     { key: 'total_return_pct', header: 'Total return (%)', accessor: (r) => r.total_return_pct },
     { key: 'max_drawdown_pct', header: 'Max drawdown (%)', accessor: (r) => r.max_drawdown_pct },
   ], []);
@@ -110,7 +119,10 @@ export default function VariantSummaryTable({ exchangeByCompany }: Props) {
             <th className="text-right font-medium px-3 py-2">Start</th>
             <th className="text-right font-medium px-3 py-2">End</th>
             <th className="text-right font-medium px-3 py-2">Annualized return</th>
-            <th className="text-right font-medium px-3 py-2">Sharpe</th>
+            <th className="text-right font-medium px-3 py-2" title="Annualized risk-adjusted return: (mean daily return / std of all daily returns) × √252">Sharpe</th>
+            <th className="text-right font-medium px-3 py-2" title="Same as Sharpe but volatility only counts negative daily returns. Higher than Sharpe = upside vol dominates the variance.">Sortino</th>
+            <th className="text-right font-medium px-3 py-2" title="% of closed periods with strictly positive return">Win rate</th>
+            <th className="text-right font-medium px-3 py-2" title="Median of closed-period returns. Far below the mean → headline return is carried by a few outlier months.">Median period</th>
             <th className="text-right font-medium px-3 py-2">Total return</th>
             <th className="text-right font-medium px-3 py-2">Max drawdown</th>
           </tr>
@@ -245,9 +257,11 @@ function SummaryCells({
   }, [outcome, feesByExchange, exchangeByCompany]);
 
   if (outcome?.status !== 'ok') {
+    // 9 placeholders: Start, End, Annualized, Sharpe, Sortino, Win rate,
+    // Median, Total, Max DD. Keeps row width consistent across statuses.
     return (
       <>
-        {[0, 1, 2, 3, 4, 5].map((i) => (
+        {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
           <td key={i} className="px-3 py-2 text-right text-gray-700 font-mono">—</td>
         ))}
       </>
@@ -274,6 +288,15 @@ function SummaryCells({
       <td className="px-3 py-2 text-right font-mono text-gray-200">
         {s.sharpe_ratio != null ? s.sharpe_ratio.toFixed(2) : '—'}
         <span className="text-gray-500">{net?.sharpe_ratio != null ? ` (${net.sharpe_ratio.toFixed(2)})` : ''}</span>
+      </td>
+      <td className="px-3 py-2 text-right font-mono text-gray-200">
+        {s.sortino_ratio != null ? s.sortino_ratio.toFixed(2) : '—'}
+      </td>
+      <td className="px-3 py-2 text-right font-mono text-gray-300">
+        {s.win_rate_pct != null ? `${s.win_rate_pct.toFixed(0)}%` : '—'}
+      </td>
+      <td className={`px-3 py-2 text-right font-mono ${colorize(s.median_period_return_pct)}`}>
+        {s.median_period_return_pct != null ? fmtPct(s.median_period_return_pct) : '—'}
       </td>
       <td className={`px-3 py-2 text-right font-mono ${colorize(s.total_return_pct)}`}>
         {fmtPct(s.total_return_pct)}

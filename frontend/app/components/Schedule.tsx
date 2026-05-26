@@ -79,6 +79,24 @@ export type MomentumStrategyResult = {
   error_traceback: string | null;
 };
 
+/** One row from `GET /api/universe-templates`. Subset of the backend
+ * `_summary()` payload — only the fields the schedule section consumes.
+ * `last_refreshed_at === null` is the signal that a template was added
+ * but has never been refreshed in this env; the scheduler's bootstrap
+ * path is supposed to kick off the first refresh on app start but we
+ * still surface the state here so the user knows what's happening. */
+export type UniverseTemplateSummary = {
+  template_key: string;
+  label: string;
+  description: string;
+  earliest_date: string;
+  universe_id: number | null;
+  months_captured: number;
+  latest_captured_month: string | null;
+  latest_membership_count: number;
+  last_refreshed_at: string | null;
+};
+
 export type ScheduledStrategy = {
   id: number;
   name: string;
@@ -385,6 +403,14 @@ export default function Schedule() {
           </div>
         )}
 
+        {/* Template universes — visibility into the canonical universes
+            (ACWI, LEONTEQ, ACWI_LEONTEQ, ...) and whether any of them
+            need an initial refresh in this env. Placed above Misc jobs
+            because "is this environment fully set up" is the question a
+            user asks first when something looks wrong on /companies or
+            /backtest. */}
+        <TemplateUniversesCard />
+
         {/* Misc jobs — recurring side-tasks distinct from the
             per-strategy momentum compute. Today this hosts the daily
             held-companies price refresh; designed as a section so future
@@ -568,6 +594,168 @@ export default function Schedule() {
     </div>
   );
 }
+
+/** Template universes section on /schedule. Lists every registered
+ * `UniverseTemplate` with its current state and surfaces the
+ * `last_refreshed_at IS NULL` case so the dev→prod gap (new template
+ * deployed but pipeline hasn't run yet) is visible at a glance instead
+ * of silently producing empty membership chips on /companies.
+ *
+ * Pairs with `_maybe_bootstrap_templates` in `backend/scheduler.py` —
+ * the bootstrap should normally fix any never-refreshed templates
+ * within ~10 minutes of a fresh deploy, but if it gets short-circuited
+ * (another pipeline already running, etc.) the banner here gives the
+ * user a manual "Run pipeline now" button. */
+function TemplateUniversesCard() {
+  const [templates, setTemplates] = useState<UniverseTemplateSummary[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [triggering, setTriggering] = useState(false);
+  const [triggerError, setTriggerError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch(`${API_URL}/api/universe-templates`);
+      if (!r.ok) {
+        setLoadError(`${r.status} ${r.statusText}`);
+        return;
+      }
+      const data = (await r.json()) as UniverseTemplateSummary[];
+      setTemplates(Array.isArray(data) ? data : []);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const triggerPipeline = useCallback(async () => {
+    setTriggering(true);
+    setTriggerError(null);
+    try {
+      const r = await apiFetch(
+        `${API_URL}/api/ingest/scheduled-refresh/trigger?job_name=manual`,
+        { method: 'POST' },
+      );
+      if (!r.ok) {
+        const body = await r.text().catch(() => '');
+        setTriggerError(`${r.status} ${body.slice(0, 200)}`);
+        return;
+      }
+      // Refetch after a short delay so `last_refreshed_at` updates once
+      // the pipeline writes its first checkpoint. The user can also
+      // expand the run via the existing strategy-history view.
+      window.setTimeout(() => void load(), 5000);
+    } catch (e) {
+      setTriggerError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTriggering(false);
+    }
+  }, [load]);
+
+  const unrefreshed = templates?.filter((t) => t.last_refreshed_at == null) ?? [];
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-sm uppercase tracking-wider text-gray-400 font-medium">
+          Template universes
+        </h2>
+        <p className="text-xs text-gray-600">
+          Canonical universes refreshed by the pipeline
+        </p>
+      </div>
+
+      {unrefreshed.length > 0 && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg px-4 py-3 text-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-amber-300 font-medium mb-1">
+                {unrefreshed.length} template{unrefreshed.length === 1 ? '' : 's'} never refreshed in this environment
+              </div>
+              <div className="text-gray-300 text-xs leading-relaxed">
+                {unrefreshed.map((t) => t.template_key).join(', ')} —
+                the pipeline will populate {unrefreshed.length === 1 ? 'it' : 'them'} on
+                the next Tuesday 02:00 UTC tick, or click below to trigger now.
+                The in-process scheduler also auto-fires a bootstrap on app
+                start; if you just deployed, give it a minute.
+              </div>
+              {triggerError && (
+                <div className="text-rose-300 text-xs mt-2">Trigger failed: {triggerError}</div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => void triggerPipeline()}
+              disabled={triggering}
+              className="text-xs px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 border border-amber-500/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+            >
+              {triggering ? 'Triggering…' : 'Run pipeline now'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="bg-[#151821] rounded-xl border border-gray-800/40">
+        {loadError && (
+          <div className="px-5 py-3 text-xs text-rose-300">
+            Failed to load templates: {loadError}
+          </div>
+        )}
+        {!loadError && templates == null && (
+          <div className="px-5 py-3 text-sm text-gray-500">
+            <LoadingDots label="Loading" />
+          </div>
+        )}
+        {!loadError && templates?.length === 0 && (
+          <div className="px-5 py-4 text-sm text-gray-500">
+            No templates registered.
+          </div>
+        )}
+        {templates && templates.length > 0 && (
+          <div className="divide-y divide-gray-800/30">
+            {templates.map((t) => {
+              const neverRefreshed = t.last_refreshed_at == null;
+              return (
+                <div key={t.template_key} className="px-5 py-3 flex items-center gap-3 flex-wrap">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`text-sm font-medium ${neverRefreshed ? 'text-amber-200' : 'text-white'}`}>
+                        {t.label}
+                      </span>
+                      <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-gray-500/10 text-gray-400 border-gray-500/30 font-mono">
+                        {t.template_key}
+                      </span>
+                      {neverRefreshed && (
+                        <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-amber-500/15 text-amber-300 border-amber-500/40">
+                          never refreshed
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5 font-mono">
+                      {neverRefreshed ? (
+                        <span className="text-amber-300/80">no membership data yet</span>
+                      ) : (
+                        <>
+                          {t.latest_membership_count} member{t.latest_membership_count === 1 ? '' : 's'}
+                          {t.latest_captured_month && ` · latest month ${t.latest_captured_month}`}
+                          {' · last refresh '}
+                          {fmtTimestamp(t.last_refreshed_at)}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 
 /** Read-only breakdown of a backtest's config blob. Re-used by the add
  * picker and the per-strategy detail view. */

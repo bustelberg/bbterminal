@@ -237,9 +237,18 @@ class BacktestSummary:
     annualized_return_pct: float
     max_drawdown_pct: float
     sharpe_ratio: float | None
-    avg_monthly_turnover_pct: float
-    total_months: int
-    avg_holdings: float
+    # Sortino: same idea as Sharpe but only the negative-return tail
+    # contributes to the volatility denominator. None when too few
+    # closed periods to estimate downside std reliably.
+    sortino_ratio: float | None = None
+    # % of closed periods whose return was strictly > 0. Combined
+    # with median_period_return_pct it shows whether the strategy's
+    # headline mean is carried by many small wins or a few big ones.
+    win_rate_pct: float | None = None
+    median_period_return_pct: float | None = None
+    avg_monthly_turnover_pct: float = 0.0
+    total_months: int = 0
+    avg_holdings: float = 0.0
     top_drawdowns: list[DrawdownPeriod] = field(default_factory=list)
     # Universe (equal-weighted-everything) headline — the no-skill
     # baseline. Same chain-link math as `total_return_pct`, computed
@@ -405,6 +414,9 @@ class BacktestResult:
                 "annualized_return_pct": self.summary.annualized_return_pct,
                 "max_drawdown_pct": self.summary.max_drawdown_pct,
                 "sharpe_ratio": self.summary.sharpe_ratio,
+                "sortino_ratio": self.summary.sortino_ratio,
+                "win_rate_pct": self.summary.win_rate_pct,
+                "median_period_return_pct": self.summary.median_period_return_pct,
                 "avg_monthly_turnover_pct": self.summary.avg_monthly_turnover_pct,
                 "total_months": self.summary.total_months,
                 "avg_holdings": self.summary.avg_holdings,

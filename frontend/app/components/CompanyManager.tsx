@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import { dialog } from '../../lib/dialog';
 import { guruFocusUrl } from '../../lib/gurufocusUrl';
+import { useClickOutside, useEscapeKey } from '../../lib/hooks/useClickOutside';
 import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
 import { trackedFetch } from '../../lib/loading';
 import type { Column } from '../../lib/tableExport';
@@ -25,6 +26,13 @@ type Company = {
    * non-null value are excluded from the backtest gap warning and the
    * pipeline skips them entirely on subsequent runs. */
   delisted_at?: string | null;
+  /** ISO timestamp set when GuruFocus returns "Stock not found" on the
+   * primary exchange AND every fallback. Typically means the row's
+   * exchange is wrong (e.g. NYSE:ASND when it should be NASDAQ:ASND).
+   * UI renders a red "GF lookup" badge + a 'Find correct exchange'
+   * button that probes the GuruFocus diagnostic endpoint. Cleared
+   * automatically the next time a price fetch succeeds. */
+  gurufocus_lookup_failed_at?: string | null;
 };
 
 type SortField = 'company_name' | 'gurufocus_ticker' | 'gurufocus_exchange' | 'country';
@@ -50,6 +58,137 @@ function universeChipStyle(label: string): React.CSSProperties {
 
 const inputCls = 'w-full bg-[#0f1117] border border-gray-700 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-colors';
 const inputAddCls = 'w-full bg-[#0f1117] border border-emerald-800/50 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors';
+
+// ─── Multi-select checklist filter ───────────────────────────────────────────
+// Replaces the single-select dropdowns so the universe filter can pick out
+// e.g. ACWI ∩ LEONTEQ by checking both. `combineMode` is purely cosmetic —
+// it shows "(AND)" / "(OR)" in the panel header so the user knows whether
+// two checked entries narrow (AND) or widen (OR) the result. The actual
+// AND/OR application lives in the caller's filter useMemo.
+function MultiSelectFilter({
+  label,
+  options,
+  selected,
+  onChange,
+  combineMode,
+}: {
+  label: string;
+  options: string[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+  combineMode?: 'AND' | 'OR';
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+  useClickOutside(ref, () => setOpen(false), open);
+  useEscapeKey(() => setOpen(false), open);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? options.filter((o) => o.toLowerCase().includes(q)) : options;
+  }, [options, query]);
+
+  const buttonLabel =
+    selected.length === 0
+      ? `All ${label.toLowerCase()}`
+      : selected.length <= 2
+      ? selected.join(', ')
+      : `${selected.length} ${label.toLowerCase()}`;
+
+  const toggle = (opt: string) => {
+    onChange(
+      selected.includes(opt)
+        ? selected.filter((s) => s !== opt)
+        : [...selected, opt],
+    );
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`bg-[#151821] border rounded-lg px-3 py-2 text-sm text-white transition-colors inline-flex items-center gap-2 ${
+          selected.length > 0
+            ? 'border-indigo-500/60 text-indigo-200'
+            : 'border-gray-800/60 hover:border-gray-700'
+        }`}
+      >
+        <span className="truncate max-w-[180px]">{buttonLabel}</span>
+        <svg
+          className={`w-3.5 h-3.5 text-gray-500 transition-transform ${open ? 'rotate-180' : ''}`}
+          viewBox="0 0 20 20"
+          fill="currentColor"
+        >
+          <path
+            fillRule="evenodd"
+            d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z"
+            clipRule="evenodd"
+          />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute left-0 mt-1 w-64 bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-80 overflow-hidden flex flex-col">
+          <div className="px-3 py-2 border-b border-gray-800/60 flex items-center justify-between gap-2">
+            <span className="text-xs text-gray-400">
+              {label}
+              {combineMode && selected.length >= 2 && (
+                <span className="ml-1.5 text-[10px] uppercase tracking-wide text-gray-600">
+                  ({combineMode})
+                </span>
+              )}
+            </span>
+            {selected.length > 0 && (
+              <button
+                type="button"
+                onClick={() => onChange([])}
+                className="text-[11px] text-gray-500 hover:text-white"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          {options.length > 8 && (
+            <div className="px-2 pt-2">
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Filter…"
+                className="w-full bg-[#0f1117] border border-gray-700 rounded px-2 py-1 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+          )}
+          <div className="flex-1 overflow-auto p-1">
+            {filtered.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-gray-600">No matches</div>
+            ) : (
+              filtered.map((opt) => {
+                const checked = selected.includes(opt);
+                return (
+                  <label
+                    key={opt}
+                    className={`flex items-center gap-2 px-2 py-1.5 rounded hover:bg-white/[0.04] cursor-pointer text-sm ${
+                      checked ? 'text-white' : 'text-gray-300'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggle(opt)}
+                      className="accent-indigo-500 w-3.5 h-3.5"
+                    />
+                    <span className="truncate">{opt}</span>
+                  </label>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Inline edit row ──────────────────────────────────────────────────────────
 
@@ -258,9 +397,13 @@ export default function CompanyManager() {
   // company_id whose Delete request is currently in flight, or null.
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
-  const [filterExchange, setFilterExchange] = useState('');
-  const [filterCountry, setFilterCountry] = useState('');
-  const [filterUniverse, setFilterUniverse] = useState('');
+  // Multi-select filters. Exchange / Country combine as OR (a company has
+  // exactly one of each, so AND would always return empty as soon as 2+
+  // are checked). Universe combines as AND so the user can pick the
+  // intersection of multiple memberships (e.g. ACWI ∩ LEONTEQ).
+  const [filterExchange, setFilterExchange] = useState<string[]>([]);
+  const [filterCountry, setFilterCountry] = useState<string[]>([]);
+  const [filterUniverse, setFilterUniverse] = useState<string[]>([]);
   const [filterDupes, setFilterDupes] = useState(false);
   const [sortField, setSortField] = useState<SortField>('company_name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
@@ -350,9 +493,18 @@ export default function CompanyManager() {
           c.gurufocus_exchange.toLowerCase().includes(q),
       );
     }
-    if (filterExchange) list = list.filter((c) => c.gurufocus_exchange === filterExchange);
-    if (filterCountry) list = list.filter((c) => c.country === filterCountry);
-    if (filterUniverse) list = list.filter((c) => (c.universes ?? []).includes(filterUniverse));
+    if (filterExchange.length > 0) {
+      list = list.filter((c) => filterExchange.includes(c.gurufocus_exchange));
+    }
+    if (filterCountry.length > 0) {
+      list = list.filter((c) => c.country != null && filterCountry.includes(c.country));
+    }
+    if (filterUniverse.length > 0) {
+      list = list.filter((c) => {
+        const us = c.universes ?? [];
+        return filterUniverse.every((u) => us.includes(u));
+      });
+    }
     if (filterDupes) {
       const nameCounts = new Map<string, number>();
       for (const c of companies) {
@@ -469,6 +621,59 @@ export default function CompanyManager() {
     }
   }
 
+  /** Probe GuruFocus across a list of candidate exchanges to find which
+   * one actually resolves for this company's ticker. Surfaces the result
+   * via `dialog` so the user sees a clear "FOUND on NASDAQ" / "NOT FOUND"
+   * message + a one-click 'Update exchange to X' confirmation. The
+   * update writes through the same PUT /api/companies/{id} the inline
+   * edit uses, so the row refreshes naturally. */
+  async function findCorrectExchange(c: Company) {
+    try {
+      const res = await apiFetch(`${API_URL}/api/admin/gurufocus-exchange-search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tickers: [{ ticker: c.gurufocus_ticker, current_exchange: c.gurufocus_exchange }],
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        await dialog.alert(`Lookup failed: ${body.detail ?? `HTTP ${res.status}`}`);
+        return;
+      }
+      const data = (await res.json()) as Array<{
+        ticker: string;
+        current_exchange: string | null;
+        found_exchange: string | null;
+        status: 'found' | 'not_found';
+        candidates_tried: { exchange: string; status_code: number | null; ok: boolean }[];
+        error: string | null;
+      }>;
+      const r = data[0];
+      if (!r) {
+        await dialog.alert('Lookup returned no result.');
+        return;
+      }
+      const tried = r.candidates_tried.map((t) => `${t.exchange} ${t.ok ? 'OK' : `(${t.status_code ?? 'err'})`}`).join(', ');
+      if (r.status === 'found' && r.found_exchange && r.found_exchange !== c.gurufocus_exchange) {
+        const ok = await dialog.confirm(
+          `${r.ticker} resolved on ${r.found_exchange} (current: ${c.gurufocus_exchange}).\n\nUpdate the row's exchange to ${r.found_exchange}?\n\nTried: ${tried}`,
+          { confirmLabel: `Set to ${r.found_exchange}` },
+        );
+        if (!ok) return;
+        // Reuse the inline-edit save path so validation + reload behave
+        // identically. The handleSave signature takes a `Partial<Company>`.
+        await handleSave(c.company_id, { gurufocus_exchange: r.found_exchange });
+      } else if (r.status === 'found') {
+        await dialog.alert(`${r.ticker} resolved on ${r.found_exchange} — already the row's exchange. The lookup-failed flag should clear on the next ingest tick.`);
+      } else {
+        await dialog.alert(`Could not find ${r.ticker} on any candidate exchange.\n\nTried: ${tried}\n\nMight be a stale ticker symbol or genuinely not in GuruFocus.`);
+      }
+    } catch (e) {
+      await dialog.alert(`Lookup failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   async function handleDelete(id: number, name: string) {
     if (!(await dialog.confirm(`Delete "${name}"? This cannot be undone.`, { destructive: true, confirmLabel: 'Delete' }))) return;
     setError(null);
@@ -548,30 +753,27 @@ export default function CompanyManager() {
           placeholder="Search name, ticker, exchange..."
           className="bg-[#151821] border border-gray-800/60 rounded-lg px-3 py-2 text-sm text-white w-72 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 placeholder-gray-600 transition-colors"
         />
-        <select
-          value={filterExchange}
-          onChange={(e) => setFilterExchange(e.target.value)}
-          className="bg-[#151821] border border-gray-800/60 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
-        >
-          <option value="">All exchanges</option>
-          {exchangeOptions.map((e) => <option key={e} value={e}>{e}</option>)}
-        </select>
-        <select
-          value={filterCountry}
-          onChange={(e) => setFilterCountry(e.target.value)}
-          className="bg-[#151821] border border-gray-800/60 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
-        >
-          <option value="">All countries</option>
-          {countryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <select
-          value={filterUniverse}
-          onChange={(e) => setFilterUniverse(e.target.value)}
-          className="bg-[#151821] border border-gray-800/60 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
-        >
-          <option value="">All universes</option>
-          {universeOptions.map((u) => <option key={u} value={u}>{u}</option>)}
-        </select>
+        <MultiSelectFilter
+          label="Exchanges"
+          options={exchangeOptions}
+          selected={filterExchange}
+          onChange={setFilterExchange}
+          combineMode="OR"
+        />
+        <MultiSelectFilter
+          label="Countries"
+          options={countryOptions}
+          selected={filterCountry}
+          onChange={setFilterCountry}
+          combineMode="OR"
+        />
+        <MultiSelectFilter
+          label="Universes"
+          options={universeOptions}
+          selected={filterUniverse}
+          onChange={setFilterUniverse}
+          combineMode="AND"
+        />
         <button
           onClick={() => setFilterDupes(!filterDupes)}
           className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -582,9 +784,9 @@ export default function CompanyManager() {
         >
           Duplicates
         </button>
-        {(search || filterExchange || filterCountry || filterUniverse || filterDupes) && (
+        {(search || filterExchange.length > 0 || filterCountry.length > 0 || filterUniverse.length > 0 || filterDupes) && (
           <button
-            onClick={() => { setSearch(''); setFilterExchange(''); setFilterCountry(''); setFilterUniverse(''); setFilterDupes(false); }}
+            onClick={() => { setSearch(''); setFilterExchange([]); setFilterCountry([]); setFilterUniverse([]); setFilterDupes(false); }}
             className="text-sm text-gray-500 hover:text-white transition-colors"
           >
             Clear filters
@@ -676,6 +878,16 @@ export default function CompanyManager() {
                           DELISTED
                         </span>
                       )}
+                      {c.gurufocus_lookup_failed_at && !c.delisted_at && (
+                        <button
+                          type="button"
+                          onClick={() => void findCorrectExchange(c)}
+                          className="ml-2 px-1.5 py-0.5 text-[10px] font-medium bg-rose-500/15 text-rose-300 border border-rose-500/25 rounded hover:bg-rose-500/25 hover:text-rose-200 transition-colors cursor-pointer"
+                          title={`GuruFocus returned "Stock not found" on the primary exchange + every fallback as of ${new Date(c.gurufocus_lookup_failed_at).toLocaleString()}. Likely the exchange on this row is wrong. Click to probe GuruFocus for the correct exchange.`}
+                        >
+                          GF LOOKUP
+                        </button>
+                      )}
                       {c.company_name && duplicateNames.has(c.company_name.toLowerCase().trim()) && (
                         <span className="ml-2 px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/15 text-amber-400 border border-amber-500/25 rounded" title="Duplicate company name">
                           DUPE
@@ -706,7 +918,7 @@ export default function CompanyManager() {
                           {c.universes.map((u) => (
                             <button
                               key={u}
-                              onClick={() => setFilterUniverse((cur) => (cur === u ? '' : u))}
+                              onClick={() => setFilterUniverse((cur) => (cur.includes(u) ? cur.filter((x) => x !== u) : [...cur, u]))}
                               style={universeChipStyle(u)}
                               title={`Filter by ${u}`}
                               className="px-1.5 py-0.5 rounded text-[10px] font-medium border hover:brightness-125 transition"

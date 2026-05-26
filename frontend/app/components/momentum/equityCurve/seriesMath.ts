@@ -98,6 +98,27 @@ export function seriesFromMonthly(
   return { map, months };
 }
 
+/** Build a {month -> factor} map from `monthly_records[i].universe_cumulative_return_pct`.
+ * This is the "what if you held the entire eligible universe equal-weight"
+ * baseline — the no-skill comparator the strategy is implicitly being
+ * scored against. Returns an empty map when no period has a populated
+ * universe figure (legacy saved runs predate this column). */
+export function seriesFromUniverseBaseline(
+  monthly: PeriodRecord[],
+): { map: Map<string, number>; months: string[] } {
+  const map = new Map<string, number>();
+  const months: string[] = [];
+  for (const r of monthly) {
+    const v = r.universe_cumulative_return_pct;
+    if (v == null) continue;
+    const key = endOfMonth(r.date);
+    map.set(key, 1 + v / 100);
+    months.push(key);
+  }
+  months.sort();
+  return { map, months };
+}
+
 /** Prefer daily_records when present so the chart line, max DD, and
  * Sharpe all reflect intra-period moves. Falls back to monthly_records
  * for older saved runs that don't carry the daily curve. Dates are
@@ -519,6 +540,24 @@ export function resolveSeries(
     months,
     summary: result.summary,
   });
+
+  // Universe (equal-weight) baseline — a non-removable gray line that
+  // shows what a no-skill "hold the entire eligible universe equally"
+  // strategy would have returned over the same window. Skipped when
+  // monthly_records doesn't carry the universe figure (legacy saved
+  // runs predate it).
+  const universe = seriesFromUniverseBaseline(result.monthly_records);
+  if (universe.map.size > 0) {
+    out.push({
+      id: 'universe',
+      label: 'Universe (equal-weight)',
+      color: '#9ca3af', // gray-400
+      kind: 'benchmark',
+      removable: false,
+      factorByMonth: universe.map,
+      months: universe.months,
+    });
+  }
 
   for (const c of comparisons) {
     if (c.kind === 'saved') {

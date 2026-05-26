@@ -32,12 +32,14 @@ import {
   type BacktestStartConfig,
   type VariantKey,
   type VariantOutcome,
+  type VariantParams,
 } from '../../lib/stores/momentum';
 import CellInfoTip from './momentum/CellInfoTip';
 import CollapsibleCard from './momentum/CollapsibleCard';
 import DailyPicksHistory from './momentum/DailyPicksHistory';
 import EquityCurveCard from './momentum/EquityCurveCard';
 import MonthlyHoldingsTable from './momentum/MonthlyHoldingsTable';
+import SavedRunsDropdown from './momentum/SavedRunsDropdown';
 import SectorTimelineChart from './momentum/SectorTimelineChart';
 import TableDownloadButton from './TableDownloadButton';
 import VariantSummaryTable from './momentum/VariantSummaryTable';
@@ -231,8 +233,6 @@ export default function MomentumBacktester() {
   const [savedRuns, setSavedRuns] = useState<SavedRun[]>([]);
   const [saving, setSaving] = useState(false);
 
-  const [savedDropdownOpen, setSavedDropdownOpen] = useState(false);
-  const savedDropdownRef = useRef<HTMLDivElement>(null);
   const [picksDropdownOpen, setPicksDropdownOpen] = useState(false);
   const picksDropdownRef = useRef<HTMLDivElement>(null);
   // First-fetch loading state for the current-picks dropdown (the saved-
@@ -250,10 +250,9 @@ export default function MomentumBacktester() {
   const loadingSnapshotId = momentumStore.use((s) => s.loadingSnapshotId);
   const deletingSnapshotId = momentumStore.use((s) => s.deletingSnapshotId);
   const renamingSnapshotId = momentumStore.use((s) => s.renamingSnapshotId);
-  // Multi-select sets for bulk delete in each header dropdown. Cleared
-  // automatically when the dropdown closes — the selection isn't meant
-  // to persist across opens.
-  const [selectedRunIds, setSelectedRunIds] = useState<Set<number>>(new Set());
+  // Multi-select set for the current-picks dropdown's bulk delete. The
+  // saved-backtests dropdown owns its own selection internally now (the
+  // component was extracted into SavedRunsDropdown.tsx).
   const [selectedSnapshotIds, setSelectedSnapshotIds] = useState<Set<number>>(new Set());
   const [bulkDeletingRuns, setBulkDeletingRuns] = useState(false);
   const [bulkDeletingSnapshots, setBulkDeletingSnapshots] = useState(false);
@@ -386,16 +385,12 @@ export default function MomentumBacktester() {
 
   const universeDropdownValue = selectedIndexUniverse;
 
-  useClickOutside(savedDropdownRef, () => setSavedDropdownOpen(false), savedDropdownOpen);
   useClickOutside(picksDropdownRef, () => setPicksDropdownOpen(false), picksDropdownOpen);
   useClickOutside(variantsPickerRef, () => setVariantsPickerOpen(false), variantsPickerOpen);
 
-  // Reset multi-select when either dropdown closes — selection should
-  // not persist across opens, otherwise users land on a stale "5
-  // selected" state next time they peek.
-  useEffect(() => {
-    if (!savedDropdownOpen) setSelectedRunIds(new Set());
-  }, [savedDropdownOpen]);
+  // Reset current-picks multi-select when its dropdown closes — selection
+  // should not persist across opens. The saved-backtests dropdown manages
+  // its own selection internally.
   useEffect(() => {
     if (!picksDropdownOpen) setSelectedSnapshotIds(new Set());
   }, [picksDropdownOpen]);
@@ -421,14 +416,17 @@ export default function MomentumBacktester() {
   // re-runs are fast. When Random is the active strategy, long-short
   // variants are filtered out (the backend rejects that combination).
   const runVariantsBacktest = () => {
-    const eligibleKeys = VARIANT_DEFS
+    // 2-axis legacy sweep: turn each selected (frequency, strategy)
+    // VARIANT_DEFS entry into a VariantParams with no per-variant
+    // overrides — that's what `startVariantsBacktest` now expects.
+    // long-short needs a meaningful top vs. bottom split — neither
+    // random nor "all universe" provides one, so those combinations
+    // are dropped from the sweep.
+    const targets: VariantParams[] = VARIANT_DEFS
       .filter((v) => selectedVariantKeys.has(v.key))
-      // long-short needs a meaningful top vs. bottom split — neither
-      // random nor "all universe" provides one, so those combinations
-      // are dropped from the sweep.
       .filter((v) => (selectionMode !== 'random' && selectionMode !== 'all') || v.strategy !== 'long_short')
-      .map((v) => v.key);
-    if (eligibleKeys.length === 0) return;
+      .map((v) => ({ frequency: v.frequency, strategy: v.strategy }));
+    if (targets.length === 0) return;
     momentumStore.set({ result: null, loadedRunId: null });
     return startVariantsBacktest(
       {
@@ -449,7 +447,7 @@ export default function MomentumBacktester() {
         sector_etfs: selectionMode === 'sector_etf' ? sectorEtfs : undefined,
         force_recompute: noCache,
       },
-      eligibleKeys,
+      targets,
     );
   };
 
@@ -757,17 +755,19 @@ export default function MomentumBacktester() {
     }
   };
 
-  /** Bulk-delete handlers fire all DELETE requests in parallel. Confirm
-   * once up front; on completion clear the selection and close the
-   * dropdown so the post-delete state is visually obvious. */
-  const bulkDeleteRuns = async () => {
-    const ids = Array.from(selectedRunIds);
+  /** Bulk-delete handler fires all DELETE requests in parallel. The
+   * dropdown component owns selection state and passes the selected
+   * `ids` in; we confirm once up front, fire in parallel, then prune the
+   * list + clear `loadedRunId` if the active run was caught in the
+   * delete. */
+  const bulkDeleteRuns = async (ids: number[]) => {
     if (ids.length === 0) return;
     const ok = await dialog.confirm(
       `Delete ${ids.length} saved backtest${ids.length === 1 ? '' : 's'}?`,
       { destructive: true, confirmLabel: `Delete ${ids.length}` },
     );
     if (!ok) return;
+    const idSet = new Set(ids);
     setBulkDeletingRuns(true);
     try {
       await Promise.all(
@@ -775,11 +775,10 @@ export default function MomentumBacktester() {
           apiFetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' }).catch(() => {})
         ),
       );
-      setSavedRuns((prev) => prev.filter((r) => !selectedRunIds.has(r.run_id)));
-      if (loadedRunId != null && selectedRunIds.has(loadedRunId)) {
+      setSavedRuns((prev) => prev.filter((r) => !idSet.has(r.run_id)));
+      if (loadedRunId != null && idSet.has(loadedRunId)) {
         momentumStore.set({ loadedRunId: null });
       }
-      setSelectedRunIds(new Set());
     } finally {
       setBulkDeletingRuns(false);
     }
@@ -805,13 +804,6 @@ export default function MomentumBacktester() {
     }
   };
 
-  const toggleRunSelected = (runId: number) => {
-    setSelectedRunIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(runId)) next.delete(runId); else next.add(runId);
-      return next;
-    });
-  };
   const toggleSnapshotSelected = (snapshotId: number) => {
     setSelectedSnapshotIds((prev) => {
       const next = new Set(prev);
@@ -1028,130 +1020,19 @@ export default function MomentumBacktester() {
           </div>
           );
         })()}
-        {(() => {
-          const runsEmpty = !savedRunsLoading && savedRuns.length === 0;
-          const runsLabel = savedRunsLoading
-            ? <LoadingDots label="Loading saved backtests" />
-            : runsEmpty
-              ? 'No saved backtests yet'
-              : (loadedRunId
-                  ? savedRuns.find((r) => r.run_id === loadedRunId)?.name ?? 'Load saved backtest...'
-                  : 'Load saved backtest...');
-          return (
-          <div className="relative" ref={savedDropdownRef}>
-            <button
-              type="button"
-              onClick={() => { if (!savedRunsLoading && !runsEmpty) setSavedDropdownOpen((o) => !o); }}
-              disabled={savedRunsLoading || runsEmpty}
-              className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white flex items-center gap-2 hover:border-indigo-500 focus:outline-none focus:border-indigo-500 transition-colors min-w-[220px] disabled:opacity-70 disabled:cursor-default disabled:hover:border-gray-700"
-            >
-              {(savedRunsLoading || loadingRunId != null) && <Spinner />}
-              <span className="truncate">{runsLabel}</span>
-              <svg className={`w-3.5 h-3.5 text-gray-500 ml-auto transition-transform ${savedDropdownOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
-              </svg>
-            </button>
-            {savedDropdownOpen && (
-              <div className="absolute right-0 mt-1 w-max min-w-[280px] max-w-[90vw] bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-96 overflow-auto">
-                {selectedRunIds.size > 0 && (
-                  <div className="sticky top-0 z-10 bg-[#1a1d27] border-b border-gray-700 px-3 py-2 flex items-center justify-between gap-2">
-                    <span className="text-xs text-gray-300">
-                      {selectedRunIds.size} selected
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedRunIds(new Set())}
-                        className="text-[11px] text-gray-500 hover:text-gray-300 px-2 py-1 rounded transition-colors"
-                      >
-                        clear
-                      </button>
-                      <button
-                        type="button"
-                        onClick={bulkDeleteRuns}
-                        disabled={bulkDeletingRuns}
-                        className="text-[11px] font-medium px-2 py-1 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 hover:bg-rose-500/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
-                      >
-                        {bulkDeletingRuns && <Spinner size={12} />}
-                        Delete {selectedRunIds.size}
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {savedRuns.map((r) => {
-                  const isActive = r.run_id === loadedRunId;
-                  const isLoadingThis = loadingRunId === r.run_id;
-                  const isDeletingThis = deletingRunId === r.run_id;
-                  const isRenamingThis = renamingRunId === r.run_id;
-                  const isSelected = selectedRunIds.has(r.run_id);
-                  return (
-                    <div
-                      key={r.run_id}
-                      className={`group flex items-center gap-2 px-3 py-2 border-b border-gray-800/40 last:border-b-0 hover:bg-white/[0.03] transition-colors ${isActive ? 'bg-indigo-500/10' : ''} ${isSelected ? 'bg-rose-500/[0.06]' : ''}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={(e) => { e.stopPropagation(); toggleRunSelected(r.run_id); }}
-                        onClick={(e) => e.stopPropagation()}
-                        className="accent-indigo-500 w-3.5 h-3.5 shrink-0 cursor-pointer"
-                        title="Select for bulk delete"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => { loadBacktest(r.run_id); setSavedDropdownOpen(false); }}
-                        disabled={isLoadingThis || isDeletingThis}
-                        className="flex-1 text-left disabled:opacity-60"
-                      >
-                        <div className={`text-sm flex items-center gap-1.5 whitespace-nowrap ${isActive ? 'text-indigo-300' : 'text-gray-200'}`}>
-                          {isLoadingThis && <Spinner />}
-                          <span>{r.name}</span>
-                        </div>
-                        <div className="text-[10px] text-gray-500 font-mono">{new Date(r.created_at).toLocaleDateString()}</div>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); renameBacktest(r.run_id, r.name); }}
-                        disabled={isRenamingThis || isDeletingThis}
-                        className="p-1.5 rounded text-gray-500 hover:text-indigo-400 hover:bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-100 disabled:cursor-wait"
-                        title="Rename"
-                      >
-                        {isRenamingThis ? (
-                          <Spinner size={14} />
-                        ) : (
-                          <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                            <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-                          </svg>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          if (await dialog.confirm(`Delete "${r.name}"?`, { destructive: true, confirmLabel: 'Delete' })) {
-                            deleteBacktest(r.run_id);
-                          }
-                        }}
-                        disabled={isDeletingThis || isRenamingThis}
-                        className="p-1.5 rounded text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-100 disabled:cursor-wait"
-                        title="Delete"
-                      >
-                        {isDeletingThis ? (
-                          <Spinner size={14} />
-                        ) : (
-                          <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                          </svg>
-                        )}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-          );
-        })()}
+        <SavedRunsDropdown
+          savedRuns={savedRuns}
+          loading={savedRunsLoading}
+          loadedRunId={loadedRunId}
+          loadingRunId={loadingRunId}
+          deletingRunId={deletingRunId}
+          renamingRunId={renamingRunId}
+          bulkDeleting={bulkDeletingRuns}
+          onLoad={loadBacktest}
+          onDelete={deleteBacktest}
+          onRename={renameBacktest}
+          onBulkDelete={bulkDeleteRuns}
+        />
         </div>
       </div>
 

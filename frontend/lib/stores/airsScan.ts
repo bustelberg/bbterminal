@@ -24,11 +24,19 @@ export type Portfolio = {
   naam: string;
 };
 
+// Discriminator on structured scan errors so the UI can render targeted
+// guidance instead of a generic red banner. Today only `ip_forbidden`
+// (egress IP not on AirSPMS's allowlist) is classified; extend the union
+// when more failure modes get bespoke UX.
+export type AirsScanErrorKind = 'ip_forbidden';
+
 export type AirsScanState = {
   scanning: boolean;
   steps: ScanSteps | null;
   portfolios: Portfolio[] | null;
   error: string | null;
+  errorKind: AirsScanErrorKind | null;
+  errorDetail: string | null;
 };
 
 export const airsScanStore = createStore<AirsScanState>({
@@ -36,6 +44,8 @@ export const airsScanStore = createStore<AirsScanState>({
   steps: null,
   portfolios: null,
   error: null,
+  errorKind: null,
+  errorDetail: null,
 });
 
 let eventSource: EventSource | null = null;
@@ -49,6 +59,8 @@ export function startAirsScan(callbacks: {
     scanning: true,
     steps: { ...INITIAL_STEPS },
     error: null,
+    errorKind: null,
+    errorDetail: null,
   });
 
   const es = new EventSource(`${API_URL}/api/airs/scan`);
@@ -61,6 +73,8 @@ export function startAirsScan(callbacks: {
       status?: StepStatus;
       message?: string;
       data?: Portfolio[];
+      kind?: string;
+      detail?: string;
     };
     if (data.type === 'progress' && data.step && data.step in INITIAL_STEPS) {
       airsScanStore.set((s) => ({
@@ -76,14 +90,19 @@ export function startAirsScan(callbacks: {
       es.close();
       if (eventSource === es) eventSource = null;
     } else if (data.type === 'error') {
-      airsScanStore.set({ error: data.message ?? 'Unknown error', scanning: false });
+      airsScanStore.set({
+        error: data.message ?? 'Unknown error',
+        errorKind: data.kind === 'ip_forbidden' ? 'ip_forbidden' : null,
+        errorDetail: data.detail ?? null,
+        scanning: false,
+      });
       es.close();
       if (eventSource === es) eventSource = null;
     }
   };
 
   es.onerror = () => {
-    airsScanStore.set({ error: 'Connection lost', scanning: false });
+    airsScanStore.set({ error: 'Connection lost', errorKind: null, errorDetail: null, scanning: false });
     es.close();
     if (eventSource === es) eventSource = null;
   };

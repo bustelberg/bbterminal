@@ -49,7 +49,7 @@ from .fetch_loop import run_fetch_loop
 from .models import BacktestRequest
 from .self_heal import compute_gap_cids, run_self_heal
 from .single_run import run_single
-from .universe_loader import load_monthly_eligible
+from .universe_loader import load_monthly_eligible, load_monthly_eligible_for
 from .variants import run_variants_sweep
 
 router = APIRouter(tags=["momentum"])
@@ -247,32 +247,84 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                     ),
                 })
 
-        # Resolve monthly_eligible from universe_label / index_universe.
-        # The helper yields its own progress + error events; on error it
-        # yields an `error` event and returns the (None, True) sentinel,
-        # at which point we abort.
-        monthly_eligible = None
-        did_error = False
-        async for evt in load_monthly_eligible(req):
-            if isinstance(evt, tuple) and len(evt) >= 1 and evt[0] == "__result__":
-                _, monthly_eligible, did_error = evt
-                continue
-            yield evt
-        if did_error:
+        # Resolve monthly_eligible for the BASE (universe_label, index_universe,
+        # grouping) combo + every distinct combo any variant overrides into.
+        # The data pipeline below runs ONCE over the union of every combo's
+        # eligible companies, then each variant's compute pass picks its own
+        # `monthly_eligible_by_combo[(u_label, u_idx, grp)]` out of the cache.
+        base_grouping = getattr(req, "grouping", None) or "sector"
+        base_combo = (req.universe_label, req.index_universe, base_grouping)
+        combos: list[tuple] = [base_combo]
+        seen_combos = {base_combo}
+        for v in (req.variants or []):
+            combo = (
+                v.universe_label if v.universe_label is not None else req.universe_label,
+                v.index_universe if v.index_universe is not None else req.index_universe,
+                (v.grouping if v.grouping is not None else base_grouping),
+            )
+            if combo not in seen_combos:
+                combos.append(combo)
+                seen_combos.add(combo)
+
+        require_universe = (req.top_n_sectors or 0) > 0
+        monthly_eligible_by_combo: dict[tuple, dict] = {}
+        for combo in combos:
+            u_label, u_idx, grp = combo
+            me = None
+            did_error = False
+            async for evt in load_monthly_eligible_for(
+                u_label, u_idx, grp, require_universe=require_universe,
+            ):
+                if isinstance(evt, tuple) and len(evt) >= 1 and evt[0] == "__result__":
+                    _, me, did_error = evt
+                    continue
+                yield evt
+            if did_error:
+                return
+            if me is not None:
+                monthly_eligible_by_combo[combo] = me
+
+        monthly_eligible = monthly_eligible_by_combo.get(base_combo)
+
+        # Union over all combos — drives the shared price/volume fetch
+        # so each company is priced once even when variants sweep across
+        # multiple universes.
+        union_monthly_eligible: dict = {}
+        for me in monthly_eligible_by_combo.values():
+            for month, cmap in me.items():
+                tgt = union_monthly_eligible.setdefault(month, {})
+                for cid, v in cmap.items():
+                    if cid not in tgt:
+                        tgt[cid] = v
+
+        if not union_monthly_eligible and require_universe:
+            yield _emit({"type": "error", "message": "No universe selected. Sector-based selection requires a universe (or index universe) with stored sector data."})
             return
+
+        if combos[1:] and union_monthly_eligible:
+            n_uniq = len(monthly_eligible_by_combo)
+            cids: set[int] = set()
+            for me in monthly_eligible_by_combo.values():
+                for cmap in me.values():
+                    cids.update(cmap.keys())
+            yield _emit({
+                "type": "progress",
+                "pct": 7,
+                "message": f"Multi-universe sweep: {n_uniq} unique (universe, grouping) combos -> union of {len(cids):,} companies will be priced once and reused across variants.",
+            })
 
         data_cutoff = date.fromisoformat(req.end_date)
 
         excluded_ids: set[int] = set()
 
         # When a universe / index_universe is selected, drop every company
-        # that doesn't appear in any month of that universe. Otherwise
+        # that doesn't appear in any month of any combo's universe. Otherwise
         # price+volume gets fetched for unrelated companies that the
         # scoring pipeline would discard anyway, wasting GuruFocus API
         # calls and wall-time.
-        if monthly_eligible is not None:
+        if union_monthly_eligible:
             eligible_ids: set[int] = set()
-            for month_map in monthly_eligible.values():
+            for month_map in union_monthly_eligible.values():
                 eligible_ids.update(month_map.keys())
             before = len(universe_df)
             universe_df = universe_df[universe_df["company_id"].isin(eligible_ids)].reset_index(drop=True)
@@ -440,6 +492,8 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             async for evt in run_variants_sweep(
                 req, prices_df, prices_local_df, volumes_df,
                 universe_df, monthly_eligible, company_currency, universe_snapshot,
+                monthly_eligible_by_combo=monthly_eligible_by_combo,
+                union_monthly_eligible=union_monthly_eligible,
             ):
                 yield evt
             return

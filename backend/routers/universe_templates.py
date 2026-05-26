@@ -64,6 +64,10 @@ def _summary(template) -> dict:
             .execute()
         )
         latest_count = getattr(c_resp, "count", 0) or 0
+    # `last_refreshed_at` lets the /schedule UI flag templates that have
+    # never been refreshed in this env (typically a fresh prod deploy where
+    # the universe row exists from migrations but no pipeline has run yet).
+    last_refreshed_at = template.last_refreshed_at(supabase) if uid is not None else None
     return {
         "template_key": template.template_key,
         "label": template.label,
@@ -74,6 +78,7 @@ def _summary(template) -> dict:
         "earliest_captured_month": months[0] if months else None,
         "latest_captured_month": latest_month,
         "latest_membership_count": latest_count,
+        "last_refreshed_at": last_refreshed_at,
     }
 
 

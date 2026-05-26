@@ -55,6 +55,14 @@ async def run_variants_sweep(
     monthly_eligible: dict[str, dict[int, str | None]] | None,
     company_currency: dict[int, str | None],
     universe_snapshot: list[dict],
+    *,
+    # When the orchestrator pre-loaded multiple (universe, grouping)
+    # combos for a cross-product sweep, these carry the per-combo
+    # eligible dict and the union (used for the shared signal panel).
+    # Legacy callers omit them and the loop falls back to `monthly_eligible`
+    # for every variant — same behavior as before the cross-product feature.
+    monthly_eligible_by_combo: dict[tuple, dict] | None = None,
+    union_monthly_eligible: dict | None = None,
 ):
     """Async generator: drive the variants sweep loop, yielding SSE
     events. Returns nothing — the orchestrator only needs the streamed
@@ -91,13 +99,19 @@ async def run_variants_sweep(
                 "message": f"Precomputing signal panel over {len(_union_cutoffs)} union cutoffs (shared by all {len(req.variants)} variants)...",
             })
             yield _keepalive()
+            # The shared signal panel covers the UNION of every variant's
+            # eligible companies — same idea as the union the orchestrator
+            # used to filter `universe_df`. If no per-combo dict was passed
+            # in (legacy single-universe sweep), fall back to the request's
+            # `monthly_eligible`.
+            _shared_me = union_monthly_eligible if union_monthly_eligible else monthly_eligible
             shared_backtest = await asyncio.to_thread(
                 build_shared_backtest_inputs,
                 prices_df=prices_df,
                 universe_df=universe_df,
                 volumes_df=volumes_df,
                 prices_local_df=prices_local_df,
-                monthly_eligible=monthly_eligible,
+                monthly_eligible=_shared_me,
                 union_cutoffs=sorted(_union_cutoffs),
             )
 
@@ -110,8 +124,45 @@ async def run_variants_sweep(
             req.sector_etfs
         )
 
+    base_grouping = getattr(req, "grouping", "sector") or "sector"
+
     for v_idx, vspec in enumerate(req.variants):
-        variant_key = f"{vspec.frequency}__{vspec.strategy_type}"
+        # Effective per-variant dials. `None` on the spec means "inherit
+        # base", which keeps legacy 2-axis sweeps (frequency × strategy)
+        # behaving identically.
+        v_top_sectors = vspec.top_n_sectors if vspec.top_n_sectors is not None else req.top_n_sectors
+        v_top_per_sector = vspec.top_n_per_sector if vspec.top_n_per_sector is not None else req.top_n_per_sector
+        v_min_score = vspec.min_price_score if vspec.min_price_score is not None else req.min_price_score
+        v_universe_label = vspec.universe_label if vspec.universe_label is not None else req.universe_label
+        v_index_universe = vspec.index_universe if vspec.index_universe is not None else req.index_universe
+        v_grouping_field = vspec.grouping if vspec.grouping is not None else base_grouping
+
+        # Pick the per-combo monthly_eligible if available, else fall back
+        # to the shared one (legacy single-universe sweep).
+        v_monthly_eligible = monthly_eligible
+        if monthly_eligible_by_combo is not None:
+            v_combo = (v_universe_label, v_index_universe, v_grouping_field)
+            v_monthly_eligible = monthly_eligible_by_combo.get(v_combo, monthly_eligible)
+
+        # Variant key: legacy 2-segment form (`monthly__long_only`) when
+        # no axes were overridden, longer form otherwise. The frontend's
+        # `parseVariantKey` round-trips both shapes.
+        key_parts = [vspec.frequency, vspec.strategy_type]
+        if vspec.top_n_sectors is not None:
+            key_parts.append(f"s{vspec.top_n_sectors}")
+        if vspec.top_n_per_sector is not None:
+            key_parts.append(f"p{vspec.top_n_per_sector}")
+        if vspec.min_price_score is not None:
+            score_str = f"{vspec.min_price_score:g}" if isinstance(vspec.min_price_score, float) else str(vspec.min_price_score)
+            key_parts.append(f"m{score_str}")
+        if vspec.index_universe is not None:
+            key_parts.append(f"u{vspec.index_universe}")
+        elif vspec.universe_label is not None:
+            key_parts.append(f"u{vspec.universe_label}")
+        if vspec.grouping is not None:
+            key_parts.append(f"g{vspec.grouping}")
+        variant_key = "__".join(key_parts)
+
         yield _emit({"type": "variant_start", "variant_key": variant_key})
         yield _keepalive()
 
@@ -131,14 +182,14 @@ async def run_variants_sweep(
             "end_date": req.end_date,
             "signal_weights": req.signal_weights or {s["key"]: s["default_weight"] for s in PRICE_SIGNAL_DEFS},
             "category_weights": req.category_weights,
-            "top_n_sectors": req.top_n_sectors,
-            "top_n_per_sector": req.top_n_per_sector,
+            "top_n_sectors": v_top_sectors,
+            "top_n_per_sector": v_top_per_sector,
             "selection_mode": req.selection_mode,
             "random_seed": req.random_seed,
             "rebalance_frequency": vspec.frequency,
             "strategy_type": vspec.strategy_type,
             "sector_etfs": req.sector_etfs,
-            "min_price_score": req.min_price_score,
+            "min_price_score": v_min_score,
         })
 
         v_progress_queue: _queue.Queue = _queue.Queue()
@@ -173,19 +224,13 @@ async def run_variants_sweep(
                     variant_key, _prep_err,
                 )
 
-        def _v_run(cfg=v_config, prepared=v_prepared):
+        def _v_run(cfg=v_config, prepared=v_prepared, me=v_monthly_eligible):
             try:
                 if req.selection_mode == "random" and req.n_trials > 1:
-                    # Multi-trial random repeats `run_backtest` under the
-                    # hood; it builds its own prepared. The shared panel
-                    # still helps if/when we wire it through here, but for
-                    # now the per-trial path uses its own cache (which
-                    # already shares prepared across trials of the SAME
-                    # variant).
                     r = run_multi_trial_backtest(
                         cfg, prices_df, universe_df, req.n_trials, _v_send_event,
                         volumes_df=volumes_df,
-                        monthly_eligible=monthly_eligible,
+                        monthly_eligible=me,
                         prices_local_df=prices_local_df,
                         company_currency=company_currency,
                     )
@@ -193,7 +238,7 @@ async def run_variants_sweep(
                     r = run_backtest(
                         cfg, prices_df, universe_df, _v_send_event,
                         volumes_df=volumes_df,
-                        monthly_eligible=monthly_eligible,
+                        monthly_eligible=me,
                         prices_local_df=prices_local_df,
                         company_currency=company_currency,
                         prepared=prepared,

@@ -22,6 +22,16 @@ class VariantSpec(BaseModel):
         "every_10_months", "every_11_months", "every_12_months",
     ]
     strategy_type: Literal["long_only", "long_short"]
+    # Per-variant overrides for the cross-product sweep. None on any
+    # field means "inherit from the base BacktestRequest" so the legacy
+    # 2-axis sweep (just frequency × strategy) keeps its previous
+    # behavior — the new axes are purely additive.
+    top_n_sectors: int | None = None
+    top_n_per_sector: int | None = None
+    min_price_score: float | None = None
+    universe_label: str | None = None
+    index_universe: str | None = None
+    grouping: Literal["sector", "industry"] | None = None
 
 
 class BacktestRequest(BaseModel):

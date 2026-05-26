@@ -65,6 +65,14 @@ _VALID_JOB_NAMES = {
     # then recomputes + persists MTD on each strategy's latest snapshot so
     # the /schedule UI shows fresh "to-date" stats every trading day.
     "daily_holdings_refresh",
+    # One-shot bootstrap fired by `scheduler.py` at app start when one or
+    # more registered templates have never been refreshed in this env
+    # (typically the first request after a deploy that introduced a new
+    # template, or a fresh prod environment where migrations created the
+    # universe row but no pipeline has run yet). Same pipeline as the
+    # weekly/monthly ticks — distinguished by job_name so the run row's
+    # `triggered_by` history is clear.
+    "bootstrap_template_refresh",
 }
 # Concurrency cap — same as self_heal. GuruFocus is rate-limit-sensitive
 # and the ensure_* helpers short-circuit on fresh DB rows, so the bound

@@ -536,6 +536,9 @@ def run_multi_trial_backtest(
     ann_mean, ann_std = _mean_std("annualized_return_pct")
     dd_mean, dd_std = _mean_std("max_drawdown_pct")
     sharpe_mean, sharpe_std = _mean_std("sharpe_ratio")
+    sortino_mean, _sortino_std = _mean_std("sortino_ratio")
+    win_mean, _win_std = _mean_std("win_rate_pct")
+    median_mean, _median_std = _mean_std("median_period_return_pct")
     turn_mean, turn_std = _mean_std("avg_monthly_turnover_pct")
 
     # Use trial 0's drawdown periods + total_months + avg_holdings as
@@ -546,6 +549,9 @@ def run_multi_trial_backtest(
         annualized_return_pct=ann_mean if ann_mean is not None else 0.0,
         max_drawdown_pct=dd_mean if dd_mean is not None else 0.0,
         sharpe_ratio=sharpe_mean,
+        sortino_ratio=sortino_mean,
+        win_rate_pct=win_mean,
+        median_period_return_pct=median_mean,
         avg_monthly_turnover_pct=turn_mean if turn_mean is not None else 0.0,
         total_months=base_summary.total_months,
         avg_holdings=base_summary.avg_holdings,

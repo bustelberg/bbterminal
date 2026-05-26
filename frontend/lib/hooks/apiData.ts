@@ -40,6 +40,7 @@ export type CompanyRow = {
   gurufocus_exchange?: string | null;
   country?: string | null;
   delisted_at?: string | null;
+  gurufocus_lookup_failed_at?: string | null;
 };
 
 export type SignalDef = {

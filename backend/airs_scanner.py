@@ -37,6 +37,33 @@ def _new_browser_page(pw):
     return browser, page
 
 
+class AirsAccessForbiddenError(RuntimeError):
+    """AirSPMS returned a 403 Forbidden / bot-block page on the login URL.
+
+    Almost always means this server's egress IP is not on AirSPMS's
+    allowlist — the Apache/Cloudflare gateway blocks before the login
+    form is ever served. Distinct from a generic login failure so the
+    SSE error event can carry a `kind` discriminator and the frontend
+    can render IP-whitelist guidance instead of dumping the raw
+    Playwright trace at the user."""
+
+    def __init__(self, detail: str):
+        super().__init__("AirSPMS blocked the login request with 403 Forbidden")
+        self.detail = detail
+
+
+def _looks_forbidden(diag: str) -> bool:
+    """True when a `_capture_login_diagnostics` string indicates the page
+    we landed on was a 403 / forbidden / access-denied gateway response
+    rather than the real AirSPMS login form."""
+    lower = diag.lower()
+    return (
+        "403 forbidden" in lower
+        or "'forbidden'" in lower
+        or "'access denied'" in lower
+    )
+
+
 def _capture_login_diagnostics(page) -> str:
     """Snapshot diagnostic signals when the login flow can't find
     `#username`. Embedded in the raised exception so the SSE error
@@ -105,6 +132,8 @@ def _login(page):
         page.fill("#username", broker_username, timeout=30000)
     except Exception as e:
         diag = _capture_login_diagnostics(page)
+        if _looks_forbidden(diag):
+            raise AirsAccessForbiddenError(diag) from e
         raise RuntimeError(
             f"Could not find #username input on AirSPMS login page. "
             f"Underlying error: {type(e).__name__}: {e}. {diag}"
@@ -274,6 +303,19 @@ def scan_portfolios_sync(send_event):
             send_event("portfolios", data=portfolios)
             send_event("done", message=f"Scan complete. Found {len(portfolios)} portfolios.")
             return portfolios
+        except AirsAccessForbiddenError as e:
+            send_event(
+                "error",
+                kind="ip_forbidden",
+                message=(
+                    "AirSPMS responded with HTTP 403 Forbidden. This server's "
+                    "outbound IP address is likely not on the AirSPMS allowlist "
+                    "— ask your AirSPMS administrator to whitelist it, or wait "
+                    "and retry if the egress IP just rotated."
+                ),
+                detail=e.detail,
+            )
+            return []
         except Exception as e:
             send_event("error", message=f"{type(e).__name__}: {e}")
             return []
