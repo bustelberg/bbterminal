@@ -209,6 +209,17 @@ class PeriodRecord:
     # holding" return is when some names stopped reporting earlier than
     # others. Null on closed periods.
     as_of_date: str | None = None
+    # "What if you held the entire eligible universe equally weighted?"
+    # — the no-skill baseline this strategy compares itself against. Per-
+    # period return and the chain-linked cumulative; same denominator as
+    # the strategy (entry_ts → exit_ts) so apples-to-apples. Null when
+    # no eligible company had usable prices for the window.
+    universe_return_pct: float | None = None
+    universe_cumulative_return_pct: float | None = None
+    # Number of companies that actually contributed to universe_return_pct
+    # this period (eligibility minus missing-price drops). Useful diagnostic
+    # for "is the universe baseline meaningful here?".
+    universe_constituents: int | None = None
 
 
 @dataclass
@@ -226,10 +237,26 @@ class BacktestSummary:
     annualized_return_pct: float
     max_drawdown_pct: float
     sharpe_ratio: float | None
-    avg_monthly_turnover_pct: float
-    total_months: int
-    avg_holdings: float
+    # Sortino: same idea as Sharpe but only the negative-return tail
+    # contributes to the volatility denominator. None when too few
+    # closed periods to estimate downside std reliably.
+    sortino_ratio: float | None = None
+    # % of closed periods whose return was strictly > 0. Combined
+    # with median_period_return_pct it shows whether the strategy's
+    # headline mean is carried by many small wins or a few big ones.
+    win_rate_pct: float | None = None
+    median_period_return_pct: float | None = None
+    avg_monthly_turnover_pct: float = 0.0
+    total_months: int = 0
+    avg_holdings: float = 0.0
     top_drawdowns: list[DrawdownPeriod] = field(default_factory=list)
+    # Universe (equal-weighted-everything) headline — the no-skill
+    # baseline. Same chain-link math as `total_return_pct`, computed
+    # over the same closed periods. Alpha = total_return_pct minus
+    # this. Null on degenerate runs (no closed periods produced a
+    # universe return).
+    universe_total_return_pct: float | None = None
+    universe_annualized_return_pct: float | None = None
     # Populated only when the backtest aggregates across multiple trials
     # (random-baseline mode with n_trials > 1). All headline stats above
     # are means in that case; these fields hold the cross-trial std-dev.
@@ -338,12 +365,25 @@ class BacktestResult:
     # runs with no holdings; the frontend falls back to the period curve in
     # that case.
     daily_records: list[tuple[str, float]] = field(default_factory=list)
+    # Daily universe equal-weight baseline curve — same shape as
+    # `daily_records`, but computed over every eligible cid (the
+    # "no-skill" baseline) rather than the strategy's selections.
+    # The frontend prefers this over the per-period
+    # `universe_cumulative_return_pct` on monthly_records so the gray
+    # baseline line matches the strategy line's daily granularity.
+    # Empty on legacy/degenerate runs; frontend then falls back to the
+    # per-period chain.
+    universe_daily_records: list[tuple[str, float]] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
             "daily_records": [
                 {"date": d, "cumulative_return_pct": cum}
                 for d, cum in self.daily_records
+            ],
+            "universe_daily_records": [
+                {"date": d, "cumulative_return_pct": cum}
+                for d, cum in self.universe_daily_records
             ],
             "monthly_records": [
                 {
@@ -373,6 +413,9 @@ class BacktestResult:
                     ],
                     "portfolio_return_pct": r.portfolio_return_pct,
                     "cumulative_return_pct": r.cumulative_return_pct,
+                    "universe_return_pct": r.universe_return_pct,
+                    "universe_cumulative_return_pct": r.universe_cumulative_return_pct,
+                    "universe_constituents": r.universe_constituents,
                     **({"empty_reason": r.empty_reason} if r.empty_reason else {}),
                     **({"is_open": True} if r.is_open else {}),
                     **({"as_of_date": r.as_of_date} if r.as_of_date else {}),
@@ -384,9 +427,14 @@ class BacktestResult:
                 "annualized_return_pct": self.summary.annualized_return_pct,
                 "max_drawdown_pct": self.summary.max_drawdown_pct,
                 "sharpe_ratio": self.summary.sharpe_ratio,
+                "sortino_ratio": self.summary.sortino_ratio,
+                "win_rate_pct": self.summary.win_rate_pct,
+                "median_period_return_pct": self.summary.median_period_return_pct,
                 "avg_monthly_turnover_pct": self.summary.avg_monthly_turnover_pct,
                 "total_months": self.summary.total_months,
                 "avg_holdings": self.summary.avg_holdings,
+                "universe_total_return_pct": self.summary.universe_total_return_pct,
+                "universe_annualized_return_pct": self.summary.universe_annualized_return_pct,
                 "top_drawdowns": [
                     {
                         "drawdown_pct": dd.drawdown_pct,

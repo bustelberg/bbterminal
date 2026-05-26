@@ -19,11 +19,14 @@ from .holdings import _FILE, load_acwi_holdings
 from .exchange_map import (
     FEASIBLE_GF_EXCHANGES,
     _ISHARES_TO_GF,
+    CompanyOverrideResult,
+    apply_company_override,
     expected_db_exchange_codes,
     gurufocus_exchange,
     gurufocus_exchange_for_db,
     gurufocus_ticker_normalized,
     gurufocus_url,
+    unavailable_reason,
 )
 from .announcement_detail import (
     _load_detail_cache,
@@ -49,9 +52,11 @@ __all__ = [
     "load_acwi_holdings", "_FILE",
     # exchange map
     "FEASIBLE_GF_EXCHANGES", "_ISHARES_TO_GF",
+    "CompanyOverrideResult", "apply_company_override",
     "gurufocus_exchange", "gurufocus_exchange_for_db",
     "gurufocus_url", "gurufocus_ticker_normalized",
     "expected_db_exchange_codes",
+    "unavailable_reason",
     # announcement detail
     "fetch_announcement_detail", "fetch_announcement_detail_cached",
     "fetch_bulk_details",

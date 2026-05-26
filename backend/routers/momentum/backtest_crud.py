@@ -155,16 +155,18 @@ async def save_backtest(req: SaveBacktestRequest):
 
 @router.get("/api/momentum/backtests")
 async def list_backtests():
-    """List saved backtests — metadata only, no result blob.
+    """List saved backtests — metadata + config, no result blob.
 
-    The frontend dropdown only consumes (run_id, name, created_at). An
-    earlier version returned the result blob too, which ballooned the
-    response to ~50 MB for ~13 variant-bundle saves and made the dropdown
-    unusable. Per-run load is on demand below.
+    The frontend dropdown consumes (run_id, name, created_at, config).
+    `config` is included so the dropdown can render a one-line subtext
+    that disambiguates same-name runs by their parameters (top_n × per
+    sector, date range, selection mode, signal weights). It's small
+    (~1-3 KB per row) compared to the result blob which can be
+    multi-MB for variant bundles.
     """
     resp = await asyncio.to_thread(
         lambda: supabase.table("backtest_run")
-        .select("run_id, name, created_at")
+        .select("run_id, name, created_at, config")
         .order("created_at", desc=True)
         .execute()
     )

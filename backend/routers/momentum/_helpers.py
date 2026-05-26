@@ -133,7 +133,13 @@ def backtest_strategy_hash(req: "BacktestRequest") -> str:
 def find_cached_backtest(hash_: str) -> dict | None:
     """Today's cached backtest for this strategy, or None.
     Cache validity is scoped to the current UTC day — once `data_date`
-    rolls over (after the next daily price refresh) the next replay misses."""
+    rolls over (after the next daily price refresh) the next replay misses.
+
+    Also enforces a payload-shape contract: rows produced before fields
+    that are now required (e.g. `universe_daily_records`) are treated as
+    misses so the next compute writes the new shape. Once everyone has
+    re-run after a schema bump, the check is a no-op. Cheaper and less
+    invasive than a manual cache wipe."""
     today_iso = date.today().isoformat()
     resp = (
         supabase.table("backtest_cache")
@@ -145,7 +151,19 @@ def find_cached_backtest(hash_: str) -> dict | None:
         .execute()
     )
     rows = resp.data or []
-    return rows[0] if rows else None
+    if not rows:
+        return None
+    row = rows[0]
+    result = (row.get("payload") or {}).get("result") or {}
+    # Stale-shape gate: every shipped payload from this point forward
+    # carries `universe_daily_records` (added when the chart started
+    # rendering a daily-granularity universe baseline). A row that lacks
+    # the key is a pre-feature cache entry; bypass it so the next compute
+    # writes the new shape. Bump the required-field list when adding
+    # more fields downstream.
+    if "universe_daily_records" not in result:
+        return None
+    return row
 
 
 def save_backtest_cache(hash_: str, config: dict, payload: dict) -> None:

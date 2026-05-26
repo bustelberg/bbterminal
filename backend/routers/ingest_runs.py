@@ -65,6 +65,14 @@ _VALID_JOB_NAMES = {
     # then recomputes + persists MTD on each strategy's latest snapshot so
     # the /schedule UI shows fresh "to-date" stats every trading day.
     "daily_holdings_refresh",
+    # One-shot bootstrap fired by `scheduler.py` at app start when one or
+    # more registered templates have never been refreshed in this env
+    # (typically the first request after a deploy that introduced a new
+    # template, or a fresh prod environment where migrations created the
+    # universe row but no pipeline has run yet). Same pipeline as the
+    # weekly/monthly ticks — distinguished by job_name so the run row's
+    # `triggered_by` history is clear.
+    "bootstrap_template_refresh",
 }
 # Concurrency cap — same as self_heal. GuruFocus is rate-limit-sensitive
 # and the ensure_* helpers short-circuit on fresh DB rows, so the bound
@@ -152,10 +160,11 @@ def _load_all_companies() -> list[dict]:
         resp = (
             supabase.table("company")
             .select(
-                "company_id, gurufocus_ticker, delisted_at, "
+                "company_id, gurufocus_ticker, delisted_at, out_of_scope_at, "
                 "gurufocus_exchange:gurufocus_exchange(exchange_code)"
             )
             .is_("delisted_at", "null")
+            .is_("out_of_scope_at", "null")
             .range(offset, offset + page - 1)
             .execute()
         )
@@ -307,21 +316,21 @@ def _run_acquisition_phase(run_id: int) -> None:
     """Phase 0 — pull fresh source data from upstream before Phase 1
     rebuilds universes against it.
 
-    LongEquity: probe `check_latest_available_month` and run the sync
-    ingest only when a newer month is available than what's loaded.
-    Skipping when nothing new is the dominant happy-path on a weekly
-    tick. Result lands in `current_message` so /schedule shows whether
-    a new month was loaded or "nothing new".
+    Today this phase only carries the ACWI iShares XLS staleness
+    check: the file is committed manually (iShares blocks automated
+    downloads via region-cookie + JS challenge), and Phase 1's
+    template refresh reads from whatever's on disk. Surfacing the
+    file's age here lets /schedule recent-runs flag a stale XLS
+    before it silently affects months of reconstructed memberships.
 
-    ACWI: the iShares XLS gating prevents an automated download
-    (region-cookie + JS challenge). Stale-file warning lives at
-    /api/acwi/xls-age; this phase just records the age in the run
-    message so it surfaces in /schedule recent-runs.
+    LongEquity: moved into the templates phase as `LongEquityTemplate`
+    — `run_longequity_ingest_sync` runs there now (`templates/
+    longequity.py::refresh`). One source of truth per universe, no
+    duplicate-call problem.
 
     Leonteq: nothing to do — the template refresh in Phase 1 hits the
-    Leonteq API directly, no separate acquisition step needed.
+    Leonteq API directly.
     """
-    log = logging.getLogger(__name__)
     throttle = _Throttle()
     log_lines: list[str] = []
 
@@ -329,28 +338,6 @@ def _run_acquisition_phase(run_id: int) -> None:
         log_lines.append(msg)
         if msg and throttle.should_write():
             _update_run(run_id, current_message=f"[acquisition] {msg}")
-
-    # ── LongEquity ────────────────────────────────────────────
-    try:
-        from routers.longequity import run_longequity_ingest_sync  # noqa: PLC0415
-        emit("LongEquity: probing upstream…")
-        le_result = run_longequity_ingest_sync(supabase, on_progress=emit)
-        if le_result.get("status") == "no_new_data":
-            emit("LongEquity: nothing new upstream.")
-        elif le_result.get("status") == "ok":
-            months = le_result.get("months_loaded") or []
-            emit(
-                f"LongEquity: ingested {le_result.get('files_processed', 0)} month(s) — "
-                f"{', '.join(months) or 'none'} "
-                f"({le_result.get('companies_inserted', 0)} new companies, "
-                f"{le_result.get('metric_rows_inserted', 0)} metric rows)"
-            )
-        else:
-            emit(f"LongEquity: failed — {le_result.get('error')}")
-    except Exception as e:
-        msg = f"LongEquity acquisition crashed: {type(e).__name__}: {e}"
-        log.warning("[pipeline.acquisition] run_id=%s %s", run_id, msg)
-        emit(msg)
 
     # ── ACWI XLS age check ────────────────────────────────────
     try:

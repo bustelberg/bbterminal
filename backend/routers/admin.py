@@ -36,6 +36,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Header, HTTPException
 from postgrest.exceptions import APIError
+from pydantic import BaseModel
 
 from deps import supabase, IN_CHUNK_SIZE
 from routers.auth import _require_admin
@@ -135,6 +136,192 @@ def _build_portfolio_payload(snapshot_row: dict) -> dict:
         "holdings_count": len(holdings_out),
         "total_weight": round(total_weight, 6),
     }
+
+
+class _GuruFocusExchangeSearchRequest(BaseModel):
+    """One request entry for the bulk exchange-search diagnostic."""
+    ticker: str
+    current_exchange: str | None = None  # informational only -- gets echoed back
+
+
+class _GuruFocusExchangeSearchBody(BaseModel):
+    tickers: list[_GuruFocusExchangeSearchRequest]
+    # Candidate exchange codes to probe in order. Defaults to a list
+    # covering the markets GuruFocus's subscription includes (USA +
+    # Europe + Asia per FEASIBLE_GF_EXCHANGES). Caller can override to
+    # narrow the search or add a vendor-specific code we missed.
+    candidate_exchanges: list[str] | None = None
+
+
+@router.post("/api/admin/gurufocus-exchange-search")
+async def gurufocus_exchange_search(
+    body: _GuruFocusExchangeSearchBody,
+    authorization: str = Header(...),
+):
+    """Probe GuruFocus to find which exchange code ACTUALLY resolves for
+    each ticker. Use case: `company.gurufocus_lookup_failed_at` is set on
+    a row whose `exchange_id` is wrong (e.g. NYSE:ASND when the listing
+    is really NASDAQ:ASND). This endpoint tries each candidate exchange
+    in turn until one returns price data, then reports the match per
+    ticker.
+
+    Cost: O(tickers × candidates_per_ticker) GuruFocus API calls in the
+    worst case. The probe short-circuits to the first hit, so a ticker
+    that lives on its first-tried exchange is cheap (1 call). Bound
+    `candidate_exchanges` to a small list if you're searching across
+    many tickers.
+
+    Response: one entry per ticker with `{ticker, current_exchange,
+    found_exchange, status, candidates_tried, error}`. `found_exchange`
+    is non-null only when an exchange resolved to a 200 with parseable
+    data.
+    """
+    _require_admin(authorization)
+
+    DEFAULT_CANDIDATES = [
+        # Largest US exchanges first -- the most common wrong-NYSE/NASDAQ
+        # slip gets caught in the first 2 probes.
+        "NAS", "NYSE", "AMEX", "OTCBB",
+        # Major European exchanges (matches FEASIBLE_GF_EXCHANGES in acwi/exchange_map).
+        "XTER", "XPAR", "AMS", "OBOM", "MIL", "MAD", "WBO",
+        "STO", "OSL", "HEL", "CSE", "LSE", "SWX",
+        # Asia.
+        "TSE", "HKEX", "KSE", "BSE", "NSE", "SGX", "TPE",
+    ]
+    candidates = body.candidate_exchanges or DEFAULT_CANDIDATES
+
+    from ingest._gurufocus_http import cf_get  # noqa: PLC0415
+    import os as _os  # noqa: PLC0415
+
+    base_url = (_os.environ.get("GURUFOCUS_BASE_URL", "").strip().rstrip("/"))
+    if base_url.endswith("/data"):
+        base_url = base_url[: -len("/data")]
+    api_key = _os.environ.get("GURUFOCUS_API_KEY", "")
+    if not base_url or not api_key:
+        raise HTTPException(500, "GURUFOCUS_BASE_URL / GURUFOCUS_API_KEY not set")
+
+    def _build_symbol(ticker: str, exch: str) -> str:
+        # Mirror ingest.prices._build_symbol's US-vs-non-US convention.
+        us = {"NAS", "NASDAQ", "NYSE", "AMEX", "CBOE"}
+        return ticker if exch.upper() in us else f"{exch}:{ticker}"
+
+    def _probe_one(ticker: str, current: str | None) -> dict:
+        tried: list[dict] = []
+        # Try the company's CURRENT exchange first (free signal -- if it
+        # actually works the caller already would've gotten data). Then
+        # the candidates in order, skipping any equal to the current
+        # exchange.
+        order: list[str] = []
+        if current:
+            order.append(current)
+        for c in candidates:
+            if c.upper() != (current or "").upper():
+                order.append(c)
+        for exch in order:
+            symbol = _build_symbol(ticker, exch)
+            url = f"{base_url}/public/user/{api_key}/stock/{symbol}/price"
+            r = cf_get(url, headers={"Accept": "application/json"}, timeout=30)
+            short_body = (r.text or "")[:120].replace("\n", " ")
+            tried.append({
+                "exchange": exch,
+                "status_code": r.status_code,
+                "ok": r.ok,
+                "body_excerpt": short_body,
+            })
+            if r.ok:
+                # Sanity-check: GuruFocus sometimes returns 200 with an
+                # error string in the body. The price endpoint emits a
+                # JSON array on success; treat a leading `[` as the
+                # positive signal.
+                if r.text and r.text.lstrip().startswith("["):
+                    return {
+                        "ticker": ticker,
+                        "current_exchange": current,
+                        "found_exchange": exch,
+                        "status": "found",
+                        "candidates_tried": tried,
+                        "error": None,
+                    }
+        return {
+            "ticker": ticker,
+            "current_exchange": current,
+            "found_exchange": None,
+            "status": "not_found",
+            "candidates_tried": tried,
+            "error": f"No candidate exchange resolved {ticker}. Tried {len(tried)} exchanges.",
+        }
+
+    def _q() -> list[dict]:
+        return [_probe_one(t.ticker, t.current_exchange) for t in body.tickers]
+
+    return await asyncio.to_thread(_q)
+
+
+@router.get("/api/admin/gurufocus-probe")
+async def gurufocus_probe(
+    authorization: str = Header(...),
+    symbol: str = "AAPL",
+    endpoint: str = "price",
+):
+    """One-shot diagnostic: hit a single GuruFocus URL through the same
+    `cf_get` + impersonation ladder the ingest pipeline uses, and return
+    the FULL response (status, response headers, body excerpt, attempted
+    fingerprints) so we can confirm whether a failure is actually a
+    Cloudflare IP block or something else (revoked key, vendor 403,
+    nginx misconfig, etc.).
+
+    Query params:
+        symbol   GuruFocus symbol form, e.g. "AAPL" or "XAMS:ABN" (default AAPL)
+        endpoint One of "price", "financials", "analyst_estimate",
+                 "forward_pe_ratio" (default "price")
+
+    Look for these in `headers` to confirm Cloudflare:
+        cf-ray            present → Cloudflare touched the response
+        server=cloudflare same signal
+        cf-mitigated      explicit "challenge" / "block" verdict
+    If those are absent on a 403, it's NOT Cloudflare — investigate the
+    upstream (likely a GuruFocus auth/quota issue).
+    """
+    _require_admin(authorization)
+    import os as _os  # noqa: PLC0415
+
+    from ingest._gurufocus_http import cf_get, ladder, current_preferred_target  # noqa: PLC0415
+
+    base_url = (_os.environ.get("GURUFOCUS_BASE_URL", "").strip().rstrip("/"))
+    if base_url.endswith("/data"):
+        base_url = base_url[: -len("/data")]
+    api_key = _os.environ.get("GURUFOCUS_API_KEY", "")
+    if not base_url or not api_key:
+        raise HTTPException(500, "GURUFOCUS_BASE_URL / GURUFOCUS_API_KEY not set")
+
+    safe_endpoint = endpoint.strip().lstrip("/")
+    url = f"{base_url}/public/user/{api_key}/stock/{symbol}/{safe_endpoint}"
+    masked_url = url.replace(api_key, api_key[:4] + "***") if api_key else url
+
+    def _q() -> dict:
+        resp = cf_get(
+            url,
+            headers={"Accept": "application/json"},
+            timeout=30,
+        )
+        return {
+            "url": masked_url,
+            "status_code": resp.status_code,
+            "used_target": resp.used_target,
+            "attempted": resp.attempted,
+            "ladder": ladder(),
+            "current_preferred": current_preferred_target(),
+            "error": resp.error,
+            "is_cloudflare_block": resp.is_cloudflare_block,
+            "diagnostic_headers": resp.diagnostic_headers(),
+            "all_response_headers": resp.headers,
+            "body_excerpt": (resp.text or "")[:2000],
+            "body_length": len(resp.text or ""),
+            "proxy_set": bool(_os.environ.get("GURUFOCUS_PROXY") or _os.environ.get("HTTPS_PROXY")),
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    return await asyncio.to_thread(_q)
 
 
 @router.get("/api/admin/egress-ip")

@@ -176,9 +176,15 @@ export default function AirsPortfolioUpload() {
   const steps = airsScanStore.use((s) => s.steps);
   const portfoliosFromStore = airsScanStore.use((s) => s.portfolios);
   const error = airsScanStore.use((s) => s.error);
+  const errorKind = airsScanStore.use((s) => s.errorKind);
+  const errorDetail = airsScanStore.use((s) => s.errorDetail);
   const portfolios = portfoliosFromStore ?? [];
   const setPortfolios = (next: Portfolio[]) => airsScanStore.set({ portfolios: next });
-  const setError = (next: string | null) => airsScanStore.set({ error: next });
+  // Always reset kind + detail alongside the message so a manual setError
+  // call (e.g. an unrelated portfolio-fetch failure) doesn't inherit a
+  // stale ip_forbidden classification from a previous scan.
+  const setError = (next: string | null) =>
+    airsScanStore.set({ error: next, errorKind: null, errorDetail: null });
   const setSteps = (updater: (prev: ScanSteps | null) => ScanSteps | null) => {
     airsScanStore.set((s) => ({ steps: updater(s.steps) }));
   };
@@ -414,7 +420,37 @@ export default function AirsPortfolioUpload() {
         </button>
       </div>
 
-      {error && (
+      {error && errorKind === 'ip_forbidden' && (
+        <div className="mx-8 mt-4 px-4 py-3 text-sm bg-rose-500/10 border border-rose-500/20 rounded-lg">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-rose-300 font-medium mb-1">
+                AirSPMS access denied (403 Forbidden)
+              </div>
+              <div className="text-gray-300 text-xs leading-relaxed">
+                {error}
+              </div>
+              {errorDetail && (
+                <details className="mt-2">
+                  <summary className="text-gray-500 text-[11px] cursor-pointer hover:text-gray-300 select-none">
+                    Show technical details
+                  </summary>
+                  <pre className="mt-2 text-[10px] text-gray-500 font-mono whitespace-pre-wrap break-all bg-black/30 border border-gray-800 rounded p-2">
+                    {errorDetail}
+                  </pre>
+                </details>
+              )}
+            </div>
+            <button
+              onClick={() => setError(null)}
+              className="text-gray-500 hover:text-white text-xs shrink-0"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+      {error && errorKind !== 'ip_forbidden' && (
         <div className="mx-8 mt-4 px-4 py-3 text-sm text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-lg flex items-center justify-between">
           <span>{error}</span>
           <button onClick={() => setError(null)} className="text-gray-500 hover:text-white ml-3 text-xs">Dismiss</button>

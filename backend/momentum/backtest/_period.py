@@ -28,7 +28,8 @@ from ..scoring import (
     aggregate_to_sector,
     compute_category_scores,
     random_select,
-    score_and_select,
+    score_universe,
+    select_from_scored,
 )
 from .indices import _date_on_or_after, _price_on_or_after, _price_on_or_before
 from .types import (
@@ -38,6 +39,135 @@ from .types import (
     StrategyType,
     _norm_sector,
 )
+
+
+def compute_monthly_universe_baseline(
+    price_index: dict[int, pd.Series],
+    monthly_eligible: dict[str, dict[int, str | None]] | None,
+    *,
+    start_date: date,
+    end_date: date,
+) -> dict | None:
+    """Cadence-independent universe baseline. Walks calendar months
+    from `start_date` through `end_date`, equal-weighting every
+    eligible company at the start of each month and chaining the
+    1-month forward returns. The result depends ONLY on (universe,
+    window) — two strategies that share both get IDENTICAL baselines,
+    regardless of whether they rebalance daily, monthly, or yearly.
+
+    This is the number that surfaces as the headline "Universe
+    annualized" in /backtest's Variants table. The per-strategy-
+    cadence baseline (`compute_universe_period_return` below) still
+    drives the per-period `universe_return_pct` + the equity-curve
+    overlay, where matching the strategy's rebalance schedule is
+    actually what the user wants.
+
+    Returns `{annualized_pct, total_pct, n_months}` or None when no
+    universe was selected / no eligible months had usable prices.
+
+    Implementation notes: re-uses the same vectorized average-of-
+    per-name-returns model as `compute_universe_period_return`, just
+    called on every calendar-month pair instead of every strategy
+    rebalance. `_price_on_or_after` handles month-start dates that
+    fall on weekends/holidays."""
+    if not monthly_eligible:
+        return None
+
+    # Build the list of calendar-month start dates spanning the window.
+    cur = date(start_date.year, start_date.month, 1)
+    end_month_start = date(end_date.year, end_date.month, 1)
+    months: list[date] = []
+    while cur <= end_month_start:
+        months.append(cur)
+        cur = date(
+            cur.year + (1 if cur.month == 12 else 0),
+            1 if cur.month == 12 else cur.month + 1,
+            1,
+        )
+    if len(months) < 2:
+        return None
+
+    cumulative_factor = 1.0
+    valid_months = 0
+    for i in range(len(months) - 1):
+        m_start = months[i]
+        m_end = months[i + 1]
+        key = f"{m_start.year:04d}-{m_start.month:02d}"
+        eligible = monthly_eligible.get(key, {})
+        if not eligible:
+            continue
+        entry_ts = pd.Timestamp(m_start)
+        exit_ts = pd.Timestamp(m_end)
+        returns: list[float] = []
+        for cid in eligible.keys():
+            series = price_index.get(int(cid))
+            if series is None or len(series) == 0:
+                continue
+            entry = _price_on_or_after(series, entry_ts)
+            exit_p = _price_on_or_after(series, exit_ts)
+            if entry is None or exit_p is None or entry <= 0:
+                continue
+            returns.append((exit_p / entry - 1.0) * 100.0)
+        if not returns:
+            continue
+        period_return_frac = float(np.mean(returns)) / 100.0
+        cumulative_factor *= (1.0 + period_return_frac)
+        valid_months += 1
+
+    if valid_months == 0:
+        return None
+
+    total_pct = (cumulative_factor - 1.0) * 100.0
+    # Annualize over the actual window span (same day-count convention as
+    # the strategy's `annualized_return_pct`).
+    n_years = max(0.0, (end_date - start_date).days / 365.25)
+    annualized_pct: float | None = None
+    if n_years > 0:
+        annualized_pct = (cumulative_factor ** (1.0 / n_years) - 1.0) * 100.0
+    return {
+        "annualized_pct": (
+            round(float(annualized_pct), 2) if annualized_pct is not None else None
+        ),
+        "total_pct": round(float(total_pct), 2),
+        "n_months": valid_months,
+    }
+
+
+def compute_universe_period_return(
+    signals_df: pd.DataFrame,
+    price_index: dict[int, pd.Series],
+    *,
+    entry_ts: pd.Timestamp,
+    exit_ts: pd.Timestamp,
+) -> tuple[float | None, int]:
+    """Equal-weighted return across every eligible company in `signals_df`
+    over (`entry_ts`, `exit_ts`). The "what if you held the entire
+    universe?" baseline a backtest compares itself against.
+
+    Returns (return_pct, n_constituents). `return_pct` is None when no
+    company had usable entry+exit prices for the window. `n_constituents`
+    is the count of companies that DID contribute, useful for diagnostics.
+
+    Implementation: vectorized over the EUR price index. No FX (entry
+    and exit are both EUR already), no PeriodHolding construction, no
+    category-score recompute — this is a side computation that runs
+    every period, so it has to be cheap. A universe of ~2800 names
+    completes in single-digit milliseconds."""
+    if signals_df.empty or "company_id" not in signals_df.columns:
+        return None, 0
+    returns: list[float] = []
+    for cid in signals_df["company_id"].astype(int):
+        series = price_index.get(int(cid))
+        if series is None or len(series) == 0:
+            continue
+        entry = _price_on_or_after(series, entry_ts)
+        exit_p = _price_on_or_after(series, exit_ts)
+        if entry is None or exit_p is None or entry <= 0:
+            continue
+        returns.append((exit_p / entry - 1) * 100.0)
+    if not returns:
+        return None, 0
+    return round(float(np.mean(returns)), 4), len(returns)
 
 
 @dataclass
@@ -346,6 +476,14 @@ def compute_selection_period(
     local_price_index: dict[int, pd.Series] | None,
     company_currency: dict[int, str | None] | None,
     record_label: str,
+    # Pre-scored DataFrame from `score_universe` (computed once per
+    # period by the runner, possibly served from a cross-variant
+    # cache). When supplied, the long+short selections skip scoring
+    # and just call `select_from_scored` on the same frame. None →
+    # this branch computes its own scoring in-line (kept for callers
+    # that don't go through `run_backtest`, though there aren't any
+    # today — the runner is the sole caller).
+    scored_df: pd.DataFrame | None = None,
 ) -> _PeriodOutcome:
     """Regular stock-picking branch — momentum / random / all selection
     modes, with optional long-short. Builds the long bucket (always) and
@@ -373,22 +511,29 @@ def compute_selection_period(
         )
         selected_bottom = pd.DataFrame()
     else:
-        selected_top = score_and_select(
-            signals_df,
-            config.signal_weights,
+        # Defensive fallback: when the runner didn't pre-score (older
+        # callers, tests), do it here. Within a single
+        # compute_selection_period call long + short share the scored
+        # frame either way — the wasteful double-scoring of the pre-
+        # split code is gone.
+        if scored_df is None:
+            scored_df = score_universe(
+                signals_df,
+                config.signal_weights,
+                config.category_weights,
+            )
+        selected_top = select_from_scored(
+            scored_df,
             top_n_sectors=config.top_n_sectors,
             top_n_per_sector=config.top_n_per_sector,
-            category_weights=config.category_weights,
             direction="top",
             min_price_score=config.min_price_score,
         )
         if config.strategy_type == "long_short":
-            selected_bottom = score_and_select(
-                signals_df,
-                config.signal_weights,
+            selected_bottom = select_from_scored(
+                scored_df,
                 top_n_sectors=config.top_n_sectors,
                 top_n_per_sector=config.top_n_per_sector,
-                category_weights=config.category_weights,
                 direction="bottom",
             )
             # If a name lands in both books (small universe / overlapping

@@ -37,11 +37,15 @@ def _emit(data: dict) -> str:
 
 def _load_delisted_cids(candidate_cids: list[int]) -> set[int]:
     """Look up which of the given company_ids the pipeline has marked
-    `delisted_at` in `company`. Used to exclude them from the
-    "missing price data" warning — surfacing tickers we already know
-    are dead would be pure noise. Batched in 50-id chunks to stay
-    under Supabase's Cloudflare row-limit threshold. Returns an empty
-    set on any error so the audit still runs."""
+    `delisted_at` OR `out_of_scope_at` in `company`. Used to exclude
+    them from the "missing price data" warning — surfacing tickers we
+    already know are dead or deliberately uncovered would be pure
+    noise. Batched in 50-id chunks to stay under Supabase's Cloudflare
+    row-limit threshold. Returns an empty set on any error so the
+    audit still runs.
+
+    (Name retained for backwards-compat with callers; the set now also
+    includes out-of-scope rows.)"""
     if not candidate_cids:
         return set()
     from deps import supabase, IN_CHUNK_SIZE  # noqa: PLC0415
@@ -50,15 +54,19 @@ def _load_delisted_cids(candidate_cids: list[int]) -> set[int]:
     try:
         for start in range(0, len(candidate_cids), IN_CHUNK_SIZE):
             chunk = candidate_cids[start : start + IN_CHUNK_SIZE]
-            resp = (
-                supabase.table("company")
-                .select("company_id, delisted_at")
-                .in_("company_id", chunk)
-                .not_.is_("delisted_at", "null")
-                .execute()
-            )
-            for row in (resp.data or []):
-                out.add(int(row["company_id"]))
+            # Two filtered queries against the same chunk — PostgREST
+            # doesn't compose OR-on-different-cols cleanly through
+            # supabase-py without raw SQL. Both pages are tiny.
+            for column in ("delisted_at", "out_of_scope_at"):
+                resp = (
+                    supabase.table("company")
+                    .select(f"company_id, {column}")
+                    .in_("company_id", chunk)
+                    .not_.is_(column, "null")
+                    .execute()
+                )
+                for row in (resp.data or []):
+                    out.add(int(row["company_id"]))
     except Exception:
         # Audit is non-critical; swallow + return empty.
         return set()

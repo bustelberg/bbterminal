@@ -98,6 +98,43 @@ export function seriesFromMonthly(
   return { map, months };
 }
 
+/** Build a {date -> factor} map for the universe equal-weight baseline.
+ *
+ * Prefers `universe_daily_records` (one entry per trading day, same shape
+ * as the strategy's `daily_records`) when present so the gray baseline
+ * line matches the strategy's daily granularity in the chart, max DD
+ * detection, and Sharpe.
+ *
+ * Falls back to `monthly_records[i].universe_cumulative_return_pct` —
+ * one point per rebalance, anchored to end-of-month — for legacy saved
+ * runs predating the daily baseline. Returns an empty map when neither
+ * source carries data. */
+export function seriesFromUniverseBaseline(
+  monthly: PeriodRecord[],
+  daily?: DailyRecord[] | null,
+): { map: Map<string, number>; months: string[] } {
+  if (daily && daily.length > 0) {
+    const map = new Map<string, number>();
+    const dates: string[] = [];
+    for (const d of daily) {
+      map.set(d.date, 1 + d.cumulative_return_pct / 100);
+      dates.push(d.date);
+    }
+    return { map, months: dates };
+  }
+  const map = new Map<string, number>();
+  const months: string[] = [];
+  for (const r of monthly) {
+    const v = r.universe_cumulative_return_pct;
+    if (v == null) continue;
+    const key = endOfMonth(r.date);
+    map.set(key, 1 + v / 100);
+    months.push(key);
+  }
+  months.sort();
+  return { map, months };
+}
+
 /** Prefer daily_records when present so the chart line, max DD, and
  * Sharpe all reflect intra-period moves. Falls back to monthly_records
  * for older saved runs that don't carry the daily curve. Dates are
@@ -519,6 +556,28 @@ export function resolveSeries(
     months,
     summary: result.summary,
   });
+
+  // Universe (equal-weight) baseline — a non-removable gray line that
+  // shows what a no-skill "hold the entire eligible universe equally"
+  // strategy would have returned over the same window. Prefers the
+  // daily curve when present (matches the strategy line's
+  // granularity); falls back to per-period monthly when not. Skipped
+  // when neither source carries data (very old saved runs).
+  const universe = seriesFromUniverseBaseline(
+    result.monthly_records,
+    result.universe_daily_records,
+  );
+  if (universe.map.size > 0) {
+    out.push({
+      id: 'universe',
+      label: 'Universe (equal-weight)',
+      color: '#9ca3af', // gray-400
+      kind: 'benchmark',
+      removable: false,
+      factorByMonth: universe.map,
+      months: universe.months,
+    });
+  }
 
   for (const c of comparisons) {
     if (c.kind === 'saved') {

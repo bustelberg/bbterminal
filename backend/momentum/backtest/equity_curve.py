@@ -141,6 +141,61 @@ def _build_daily_equity_curve(
     return daily_records, daily_returns
 
 
+def _compute_universe_period_daily(
+    eligible_cids: set[int],
+    price_index: dict[int, pd.Series],
+    *,
+    entry_ts: pd.Timestamp,
+    exit_ts: pd.Timestamp,
+) -> list[tuple[pd.Timestamp, float]]:
+    """Per-trading-day relative factor for the universe equal-weight
+    baseline inside ONE period. The factor on day t is the mean of
+    `price[t] / entry_price` over every eligible cid that had a price
+    on (or just before) `entry_ts`. 1.0 ≈ "no change from entry".
+
+    Same staleness convention as `_build_daily_equity_curve`: a cid's
+    missing intra-period days carry its most recent observed price
+    forward (vectorized `ffill`, equivalent to per-day `Series.asof`
+    but ~50× faster on universe-sized inputs).
+
+    Caller chain-links across periods (multiplies prior period's final
+    factor into the next period's series) to produce a continuous daily
+    curve. Returns [] when no cid has both an entry price and at least
+    one observed price inside the window."""
+    if not eligible_cids or exit_ts <= entry_ts:
+        return []
+
+    # Per-cid entry-rebased price slices. `Series.asof(entry_ts)` picks
+    # the latest available close on or before the entry timestamp — same
+    # rule the per-period `compute_universe_period_return` uses, so the
+    # daily and per-period chains stay anchored to identical entry
+    # prices.
+    slices: dict[int, pd.Series] = {}
+    for cid in eligible_cids:
+        s = price_index.get(int(cid))
+        if s is None or s.empty:
+            continue
+        entry_px = s.asof(entry_ts)
+        if pd.isna(entry_px) or entry_px == 0:
+            continue
+        sub = s[(s.index >= entry_ts) & (s.index <= exit_ts)]
+        if sub.empty:
+            continue
+        slices[int(cid)] = sub / float(entry_px)
+
+    if not slices:
+        return []
+
+    # Combine into a wide DataFrame, ffill so each cid's missing days
+    # carry its most recent value. Per-day mean across columns skips
+    # leading NaN cells (cid hadn't started trading yet within the
+    # window), matching how the strategy's daily curve quietly drops
+    # holdings whose `asof` returns NaN.
+    df = pd.DataFrame(slices).sort_index().ffill()
+    daily_relative = df.mean(axis=1, skipna=True)
+    return [(ts, float(v)) for ts, v in daily_relative.items() if pd.notna(v)]
+
+
 def _find_drawdown_periods(values: list[tuple[str, float]]) -> list[DrawdownPeriod]:
     """Find all drawdown periods from a list of (date, portfolio_value) tuples.
 

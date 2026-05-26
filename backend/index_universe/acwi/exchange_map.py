@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 
 
 _US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX", "CBOE BZX"}
@@ -156,13 +157,106 @@ def _resolve_ticker_override(ticker: str, gf_prefix: str) -> tuple[str | None, s
       - a plain string (ticker rename, same exchange), or
       - a dict {"exchange": "FRA", "ticker": "6R9"} (cross-exchange remap),
         where missing fields fall back to the originals.
+      - a dict {"unavailable": true, "reason": "..."} (out-of-scope marker;
+        the company still lands in `company` under the iShares-derived
+        exchange + ticker so it shows up in /companies, but the ingest
+        downstream tags it `out_of_scope_at` and skips it from
+        universe_membership + the price phase). See `unavailable_reason`.
     """
     override = _load_gf_ticker_overrides().get(gf_prefix, {}).get(ticker)
     if isinstance(override, dict):
+        # Unavailable flag short-circuits the remap path. The company
+        # keeps its iShares-derived (gf_prefix, ticker) so the row in
+        # `company` is human-readable; out-of-scope status is queried
+        # separately via `unavailable_reason`.
+        if override.get("unavailable"):
+            return (None, ticker)
         return (override.get("exchange") or gf_prefix, override.get("ticker") or ticker)
     if isinstance(override, str):
         return (None, override)
     return (None, ticker)
+
+
+def unavailable_reason(ticker: str, ishares_exchange: str) -> str | None:
+    """Return the out-of-scope reason string for an iShares (ticker, exchange)
+    pair, or None if the override doesn't mark it as unavailable.
+
+    Used by the ACWI ingest path to stamp `company.out_of_scope_at` +
+    `company.out_of_scope_reason` instead of slotting the company into
+    `universe_membership`. The DB columns surface in /companies as an
+    amber OUT OF SCOPE badge."""
+    gf_prefix = _ISHARES_TO_GF.get(ishares_exchange)
+    if gf_prefix is None:
+        return None
+    override = _load_gf_ticker_overrides().get(gf_prefix, {}).get(ticker)
+    if isinstance(override, dict) and override.get("unavailable"):
+        return override.get("reason") or "(no reason given)"
+    return None
+
+
+# DB-side exchange codes that share the empty-string outer key in
+# `gf_ticker_overrides.json` (US exchanges have no prefix in
+# GuruFocus URLs and historically used "" as the iShares-mapped form).
+_US_DB_EXCHANGE_CODES = {"NYSE", "NASDAQ", "AMEX", "CBOE"}
+
+
+@dataclass(frozen=True)
+class CompanyOverrideResult:
+    """Outcome of applying `gf_ticker_overrides.json` to a (db_exchange,
+    ticker) pair already in DB form. Idempotent: when no override
+    matches, `target_exchange` and `target_ticker` equal the input and
+    `unavailable_reason` is None — callers can no-op on that case.
+
+    Used by both the in-flight ingest paths (ACWI, Leonteq auto-create)
+    and the one-shot retroactive sweep that fixes historical rows."""
+    target_exchange: str        # may equal input, or be remapped to a different exchange code
+    target_ticker: str          # may equal input, or be renamed via the override
+    unavailable_reason: str | None  # non-None = mark row out-of-scope (no remap applied in this case)
+
+
+def apply_company_override(exchange_code: str, ticker: str) -> CompanyOverrideResult:
+    """Resolve an override entry for a (db_exchange_code, ticker) pair
+    in the form they live in `company` table rows. The single entry
+    point any ingest path (ACWI / Leonteq / LongEquity / …) should
+    call before inserting a `company` row, AND the one the retroactive
+    sweep uses to fix historical bad rows.
+
+    Three possible outcomes:
+      1. No override → result equals input, unavailable_reason=None.
+      2. Remap → result carries the override's target exchange + ticker
+         (either field may equal the input when the override touches
+         only one of them).
+      3. Unavailable → result equals input + unavailable_reason set.
+         The caller should insert the company under the input
+         (exchange, ticker) and stamp `out_of_scope_at` +
+         `out_of_scope_reason` — DO NOT slot into universe_membership
+         + skip from the price phase.
+
+    Note on the US empty-string convention: the override JSON uses ""
+    as the outer key for US listings (matches the iShares-mapping
+    convention). DB rows use real exchange codes (NYSE/NASDAQ/AMEX/
+    CBOE), so we normalize before lookup."""
+    if not ticker:
+        return CompanyOverrideResult(exchange_code, ticker, None)
+    lookup_prefix = "" if exchange_code.upper() in _US_DB_EXCHANGE_CODES else exchange_code
+    entry = _load_gf_ticker_overrides().get(lookup_prefix, {}).get(ticker)
+    if entry is None:
+        return CompanyOverrideResult(exchange_code, ticker, None)
+    if isinstance(entry, dict):
+        if entry.get("unavailable"):
+            return CompanyOverrideResult(
+                exchange_code, ticker,
+                entry.get("reason") or "(no reason given)",
+            )
+        # `or` on the strings is intentional for ticker (an empty/missing
+        # string falls back to the input). For exchange we mirrored the
+        # NASDAQ:GLNG case — explicit "NASDAQ" wins over the input prefix.
+        new_exch = entry.get("exchange") if entry.get("exchange") else exchange_code
+        new_tick = entry.get("ticker") if entry.get("ticker") else ticker
+        return CompanyOverrideResult(new_exch, new_tick, None)
+    if isinstance(entry, str):
+        return CompanyOverrideResult(exchange_code, entry, None)
+    return CompanyOverrideResult(exchange_code, ticker, None)
 
 
 def _normalize_gf_ticker(ticker: str, gf_prefix: str) -> tuple[str, str]:

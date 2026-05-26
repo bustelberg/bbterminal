@@ -190,25 +190,26 @@ def _emit(data: dict) -> str:
 _LEONTEQ_GROUPED_UNIVERSES = ("LEONTEQ", "ACWI_LEONTEQ")
 
 
-async def load_monthly_eligible(req):
-    """Async generator: resolves `req.universe_label` / `req.index_universe`
-    into `monthly_eligible` and yields SSE progress / error events along
-    the way.
+async def load_monthly_eligible_for(
+    universe_label: str | None,
+    index_universe: str | None,
+    grouping_field: str,
+    *,
+    require_universe: bool = True,
+):
+    """Decoupled-arg variant of `load_monthly_eligible`: takes the inputs
+    directly instead of fishing them off a request. Used by the variants
+    sweep so each (universe, grouping) combo can be loaded independently.
 
-    Yields:
-        SSE event strings.
-    Final yield (always): a sentinel `("__result__", monthly_eligible_or_None, did_error)` tuple
-        so the orchestrator can pick up the loaded value without a second
-        async function.
-    """
+    Same yields contract: SSE event strings, then a final
+    `("__result__", monthly_eligible_or_None, did_error)` sentinel."""
+    if grouping_field not in ("sector", "industry"):
+        grouping_field = "sector"
+
     monthly_eligible: dict[str, dict[int, str | None]] | None = None
 
-    # `grouping_field` defaults to the regular sector column. Only LEONTEQ-
-    # backed universes carry an industry value -- enforce that here so the
-    # request fails fast rather than producing an all-None grouping silently.
-    grouping_field = getattr(req, "grouping", "sector") or "sector"
     if grouping_field == "industry":
-        chosen_universe = req.universe_label or req.index_universe
+        chosen_universe = universe_label or index_universe
         if chosen_universe not in _LEONTEQ_GROUPED_UNIVERSES:
             yield _emit({
                 "type": "error",
@@ -223,39 +224,36 @@ async def load_monthly_eligible(req):
 
     grouping_label = "industry" if grouping_field == "industry" else "sector"
 
-    if req.universe_label:
-        yield _emit({"type": "progress", "pct": 6, "message": f"Loading universe '{req.universe_label}'..."})
+    if universe_label:
+        yield _emit({"type": "progress", "pct": 6, "message": f"Loading universe '{universe_label}'..."})
         monthly_eligible = await asyncio.to_thread(
-            _load_universe_membership, req.universe_label, grouping_field,
+            _load_universe_membership, universe_label, grouping_field,
         )
         n_months = len(monthly_eligible)
         if n_months == 0:
-            yield _emit({"type": "error", "message": f"No universe data for label '{req.universe_label}'"})
+            yield _emit({"type": "error", "message": f"No universe data for label '{universe_label}'"})
             yield ("__result__", None, True)
             return
         avg_pass = sum(len(v) for v in monthly_eligible.values()) // n_months
         yield _emit({"type": "progress", "pct": 7, "message": f"Universe: {n_months} months, ~{avg_pass} companies/month"})
 
-        # Diagnose missing grouping data: if no membership row has a
-        # sector/industry value, selection will silently pick zero
-        # companies. Fail loudly.
         total_sec = sum(
             1 for month_map in monthly_eligible.values()
             for s in month_map.values() if s
         )
         if total_sec == 0:
-            yield _emit({"type": "error", "message": f"Universe '{req.universe_label}' has no {grouping_label} data in universe_membership — re-save this universe from its source page so {grouping_label}s are populated."})
+            yield _emit({"type": "error", "message": f"Universe '{universe_label}' has no {grouping_label} data in universe_membership — re-save this universe from its source page so {grouping_label}s are populated."})
             yield ("__result__", None, True)
             return
 
-    if req.index_universe and monthly_eligible is None:
-        yield _emit({"type": "progress", "pct": 6, "message": f"Loading index universe '{req.index_universe}'..."})
+    if index_universe and monthly_eligible is None:
+        yield _emit({"type": "progress", "pct": 6, "message": f"Loading index universe '{index_universe}'..."})
         monthly_eligible = await asyncio.to_thread(
-            _load_index_universe, req.index_universe, grouping_field,
+            _load_index_universe, index_universe, grouping_field,
         )
         n_months = len(monthly_eligible)
         if n_months == 0:
-            yield _emit({"type": "error", "message": f"No index universe data for '{req.index_universe}'"})
+            yield _emit({"type": "error", "message": f"No index universe data for '{index_universe}'"})
             yield ("__result__", None, True)
             return
         avg_co = sum(len(v) for v in monthly_eligible.values()) // n_months
@@ -266,16 +264,25 @@ async def load_monthly_eligible(req):
             for s in month_map.values() if s
         )
         if total_sec == 0:
-            yield _emit({"type": "error", "message": f"Index universe '{req.index_universe}' has no {grouping_label} data — re-save this universe from its source page so {grouping_label}s are populated."})
+            yield _emit({"type": "error", "message": f"Index universe '{index_universe}' has no {grouping_label} data — re-save this universe from its source page so {grouping_label}s are populated."})
             yield ("__result__", None, True)
             return
 
-    # Also fail cleanly when no universe was selected at all — the
-    # scoring pipeline requires per-company sectors, and `load_universe`
-    # leaves them all None in that fallback.
-    if monthly_eligible is None and (req.top_n_sectors or 0) > 0:
+    if monthly_eligible is None and require_universe:
         yield _emit({"type": "error", "message": "No universe selected. Sector-based selection requires a universe (or index universe) with stored sector data."})
         yield ("__result__", None, True)
         return
 
     yield ("__result__", monthly_eligible, False)
+
+
+async def load_monthly_eligible(req):
+    """Back-compat wrapper around `load_monthly_eligible_for` for the
+    single-run path that still reads everything off `req`."""
+    grouping_field = getattr(req, "grouping", "sector") or "sector"
+    require = (req.top_n_sectors or 0) > 0
+    async for evt in load_monthly_eligible_for(
+        req.universe_label, req.index_universe, grouping_field,
+        require_universe=require,
+    ):
+        yield evt

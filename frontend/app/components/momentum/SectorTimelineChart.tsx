@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { colorForSector } from '../../../lib/sectorColors';
 import type { BacktestResult, Holding, PeriodRecord } from '../../../lib/stores/momentum';
 import CollapsibleCard from './CollapsibleCard';
@@ -281,7 +281,7 @@ function buildTimelineData(
   return { sectors, runs, runByMonth, weightByMonth, months, cadenceDays: detectCadenceDays(months) };
 }
 
-export default function SectorTimelineChart({ result }: Props) {
+function SectorTimelineChartInner({ result }: Props) {
   // A long-short backtest has at least one holding with side === 'short'.
   // Long-only results omit `side` entirely (or always have 'long'), so the
   // single-panel branch covers the original behavior unchanged.
@@ -366,6 +366,12 @@ export default function SectorTimelineChart({ result }: Props) {
     </div>
   );
 }
+
+/** React.memo barrier — see MonthlyHoldingsTable / EquityCurveCard for
+ * rationale. Only `result` is a prop; default shallow compare on the
+ * object reference is exactly what we want. */
+const SectorTimelineChart = memo(SectorTimelineChartInner);
+export default SectorTimelineChart;
 
 function SliceControls({
   fromDate,

@@ -198,13 +198,21 @@ def run_acwi_save_universe(
     needed_eids = [exch_id_map[e] for e in needed_exchanges if e in exch_id_map]
     existing_by_key: dict[tuple[int, str], int] = {}
     existing_by_name: dict[tuple[int, str], list[int]] = {}
+    # `existing_by_scope_state` lets us avoid a write when the
+    # out_of_scope_at value is already correct (either both null, or
+    # both set with the same reason). Without this, every ACWI refresh
+    # would touch every out-of-scope row's updated_at.
+    existing_by_scope_state: dict[int, tuple[bool, str | None]] = {}
     if needed_eids:
         offset = 0
         page_size = 1000
         while True:
             c_resp = (
                 supabase.table("company")
-                .select("company_id, gurufocus_ticker, exchange_id, company_name")
+                .select(
+                    "company_id, gurufocus_ticker, exchange_id, company_name, "
+                    "out_of_scope_at, out_of_scope_reason"
+                )
                 .in_("exchange_id", needed_eids)
                 .range(offset, offset + page_size - 1)
                 .execute()
@@ -216,6 +224,12 @@ def run_acwi_save_universe(
                 name_norm = (c.get("company_name") or "").strip().upper()
                 if name_norm and c.get("exchange_id") is not None:
                     existing_by_name.setdefault((c["exchange_id"], name_norm), []).append(c["company_id"])
+                cid_int = c.get("company_id")
+                if cid_int is not None:
+                    existing_by_scope_state[int(cid_int)] = (
+                        c.get("out_of_scope_at") is not None,
+                        c.get("out_of_scope_reason"),
+                    )
             if len(batch) < page_size:
                 break
             offset += page_size
@@ -229,7 +243,49 @@ def run_acwi_save_universe(
     already = 0
     renamed = 0
     skipped = 0
+    out_of_scope_marked = 0
+    out_of_scope_cleared = 0
     unknown_exchanges: set[str] = set()
+
+    # ISO timestamp captured once at the top of the loop so every row
+    # marked in this run shares the same `out_of_scope_at` value (good
+    # for audit / "which run marked this batch").
+    import datetime as _dt  # noqa: PLC0415
+    _now_iso = _dt.datetime.now(_dt.timezone.utc).isoformat()
+
+    def _sync_scope_state(cid_local: int, fh_local: dict) -> None:
+        """Ensure (out_of_scope_at, out_of_scope_reason) matches the
+        override state for this company. Idempotent — no-op when the
+        DB row already reflects the desired state. Mutates the
+        in-memory `existing_by_scope_state` cache so subsequent iters
+        in the same run see the updated value."""
+        nonlocal out_of_scope_marked, out_of_scope_cleared
+        desired_reason = fh_local.get("unavailable_reason")
+        desired_marked = desired_reason is not None
+        current_marked, current_reason = existing_by_scope_state.get(cid_local, (False, None))
+        if desired_marked == current_marked and (not desired_marked or current_reason == desired_reason):
+            return
+        try:
+            if desired_marked:
+                supabase.table("company").update({
+                    "out_of_scope_at": _now_iso,
+                    "out_of_scope_reason": desired_reason,
+                }).eq("company_id", cid_local).execute()
+                out_of_scope_marked += 1
+            else:
+                supabase.table("company").update({
+                    "out_of_scope_at": None,
+                    "out_of_scope_reason": None,
+                }).eq("company_id", cid_local).execute()
+                out_of_scope_cleared += 1
+            existing_by_scope_state[cid_local] = (desired_marked, desired_reason)
+        except Exception as e:
+            emit(
+                f"  failed to sync out-of-scope state for cid={cid_local} "
+                f"({fh_local.get('symbol')}): {e}",
+                None,
+            )
+
     for idx, fh in enumerate(feasible):
         eid = exch_id_map.get(fh["db_exchange"])
         if eid is None:
@@ -237,9 +293,15 @@ def run_acwi_save_universe(
             unknown_exchanges.add(fh["db_exchange"])
             continue
         key = (eid, fh["gf_ticker"])
+        is_unavailable = fh.get("unavailable_reason") is not None
         cid = existing_by_key.get(key)
         if cid is not None:
-            company_lookup[fh["symbol"]] = cid
+            _sync_scope_state(cid, fh)
+            # Out-of-scope rows are deliberately excluded from
+            # universe_membership — leave them out of company_lookup so
+            # store_index_membership doesn't slot them into any month.
+            if not is_unavailable:
+                company_lookup[fh["symbol"]] = cid
             already += 1
             continue
 
@@ -257,7 +319,9 @@ def run_acwi_save_universe(
                     "company_name": fh["company_name"] or None,
                 }).eq("company_id", rename_target).execute()
                 existing_by_key[key] = rename_target
-                company_lookup[fh["symbol"]] = rename_target
+                _sync_scope_state(rename_target, fh)
+                if not is_unavailable:
+                    company_lookup[fh["symbol"]] = rename_target
                 renamed += 1
                 emit(
                     f"  renamed {fh['db_exchange']}:* → {fh['symbol']} "
@@ -270,15 +334,24 @@ def run_acwi_save_universe(
             continue
 
         try:
-            ins = supabase.table("company").insert({
+            insert_row = {
                 "gurufocus_ticker": fh["gf_ticker"],
                 "exchange_id": eid,
                 "company_name": fh["company_name"] or None,
-            }).execute()
+            }
+            if is_unavailable:
+                insert_row["out_of_scope_at"] = _now_iso
+                insert_row["out_of_scope_reason"] = fh.get("unavailable_reason")
+            ins = supabase.table("company").insert(insert_row).execute()
             if ins.data:
                 cid = ins.data[0]["company_id"]
                 existing_by_key[key] = cid
-                company_lookup[fh["symbol"]] = cid
+                if is_unavailable:
+                    existing_by_scope_state[int(cid)] = (True, fh.get("unavailable_reason"))
+                    out_of_scope_marked += 1
+                else:
+                    existing_by_scope_state[int(cid)] = (False, None)
+                    company_lookup[fh["symbol"]] = cid
                 created += 1
         except Exception as e:
             skipped += 1
@@ -298,7 +371,10 @@ def run_acwi_save_universe(
             pct = 10 + round((idx + 1) / len(feasible) * 30)
             emit(
                 f"Companies: {created} created, {renamed} renamed, "
-                f"{already} existing, {skipped} skipped ({idx + 1}/{len(feasible)})",
+                f"{already} existing, {skipped} skipped, "
+                f"{out_of_scope_marked} marked out-of-scope, "
+                f"{out_of_scope_cleared} cleared "
+                f"({idx + 1}/{len(feasible)})",
                 pct,
             )
 
@@ -306,7 +382,9 @@ def run_acwi_save_universe(
         emit(f"Unknown exchanges (missing from gurufocus_exchange): {sorted(unknown_exchanges)}", None)
     emit(
         f"Company sync done: {created} new, {renamed} renamed, "
-        f"{already} existing, {skipped} skipped",
+        f"{already} existing, {skipped} skipped, "
+        f"{out_of_scope_marked} marked out-of-scope, "
+        f"{out_of_scope_cleared} cleared",
         42,
     )
 
@@ -334,6 +412,8 @@ def run_acwi_save_universe(
         "companies_renamed": renamed,
         "companies_existing": already,
         "companies_skipped": skipped,
+        "companies_out_of_scope_marked": out_of_scope_marked,
+        "companies_out_of_scope_cleared": out_of_scope_cleared,
         "feasible_count": stats["feasible_count"],
         "grandfathered": stats["grandfathered"],
         "with_addition": stats["with_addition"],

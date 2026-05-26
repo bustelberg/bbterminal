@@ -187,8 +187,13 @@ def _is_cloudflare_block(status: int, body: str) -> bool:
 class CfResponse:
     """Lightweight response object returned by `cf_get`. The caller is
     responsible for URL masking and JSON parsing — we just hand back
-    what we got, plus context for diagnostics."""
-    __slots__ = ("status_code", "text", "used_target", "error", "attempted")
+    what we got, plus context for diagnostics.
+
+    `headers` is the final attempt's response headers (lower-cased keys).
+    Surfacing `cf-ray`, `server`, `cf-mitigated`, `x-cache` etc. lets the
+    caller (and the diagnostic probe) confirm Cloudflare vs some other
+    intermediary without having to re-run the request."""
+    __slots__ = ("status_code", "text", "used_target", "error", "attempted", "headers")
 
     def __init__(
         self,
@@ -197,12 +202,14 @@ class CfResponse:
         used_target: str,
         error: str | None,
         attempted: list[str],
+        headers: dict[str, str] | None = None,
     ):
         self.status_code = status_code
         self.text = text
         self.used_target = used_target
         self.error = error
         self.attempted = attempted
+        self.headers = headers or {}
 
     @property
     def ok(self) -> bool:
@@ -211,6 +218,21 @@ class CfResponse:
     @property
     def is_cloudflare_block(self) -> bool:
         return _is_cloudflare_block(self.status_code or 0, self.text or "")
+
+    def diagnostic_headers(self) -> dict[str, str]:
+        """Subset of response headers that pin down which CDN / intermediary
+        served the response. Used in error messages so we don't carry every
+        cookie / cache header around."""
+        keys = (
+            "cf-ray", "cf-cache-status", "cf-mitigated", "cf-chl-bypass",
+            "server", "x-cache", "x-served-by", "x-amz-cf-id",
+            "via", "x-content-type-options",
+        )
+        return {
+            k: self.headers[k]
+            for k in keys
+            if k in self.headers and self.headers[k]
+        }
 
 
 def _note_block_and_check_circuit() -> bool:
@@ -346,6 +368,14 @@ def cf_get(
                 proxies=proxies,
             )
             body = resp.text or ""
+            # Lower-case header keys so callers / diagnostics can index
+            # consistently regardless of the upstream casing. curl_cffi's
+            # response.headers is typically a CaseInsensitiveDict, but
+            # downstream consumers shouldn't have to assume that.
+            resp_headers = {
+                str(k).lower(): str(v)
+                for k, v in (resp.headers or {}).items()
+            }
             if _is_cloudflare_block(resp.status_code, body):
                 saw_cf_block_this_call = True
                 last = CfResponse(
@@ -354,6 +384,7 @@ def cf_get(
                     used_target=target,
                     error=f"Cloudflare blocked impersonation target {target}",
                     attempted=attempted,
+                    headers=resp_headers,
                 )
                 log.warning(
                     "gurufocus http: target=%s blocked by Cloudflare "
@@ -379,6 +410,7 @@ def cf_get(
                 used_target=target,
                 error=None,
                 attempted=attempted,
+                headers=resp_headers,
             )
         except Exception as e:
             last = CfResponse(
@@ -461,11 +493,22 @@ def explain_failure(
     # whenever the FINAL response we kept was a CF-style HTML 403/503.
     if resp.is_cloudflare_block:
         n = len(resp.attempted) or len(_TARGETS)
+        # Surface the CDN-identifying headers + a longer body slice so we
+        # can tell a real Cloudflare block from any other HTML 403 (nginx,
+        # AWS WAF, vendor's own gateway). Without this the message says
+        # "Cloudflare" even when the upstream might be something else.
+        diag = resp.diagnostic_headers()
+        diag_str = ", ".join(f"{k}={v}" for k, v in diag.items()) if diag else "(no diagnostic headers)"
+        body_excerpt = (resp.text or "")[:400].replace("\n", " ").strip()
         return (
-            f"Cloudflare blocked GuruFocus{for_clause} on all {n} TLS "
-            f"fingerprints. This host's egress IP is graylisted. Set "
-            f"{_PROXY_ENV_VAR}=<proxy URL> to route through a "
-            f"residential IP. ({masked_url})"
+            f"Cloudflare-style HTML {resp.status_code or '?'} blocked GuruFocus"
+            f"{for_clause} on all {n} TLS fingerprints. "
+            f"If `cf-ray` / `server=cloudflare` are below, this host's egress IP "
+            f"is graylisted -- set {_PROXY_ENV_VAR}=<proxy URL>. If those headers "
+            f"are absent, the 403 came from somewhere else and we should "
+            f"investigate before blaming Cloudflare. "
+            f"headers=[{diag_str}] "
+            f"body={body_excerpt!r} ({masked_url})"
         )
 
     # Pre-response failure (network error / library exception / no

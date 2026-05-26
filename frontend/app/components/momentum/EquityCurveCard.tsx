@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import type {
   BacktestResult,
@@ -62,7 +62,7 @@ type Props = {
  * own benchmark/saved comparison state and all the chart-derived memos
  * — the parent only feeds it the active strategy plus the saved-run
  * list. */
-export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchangeByCompany, activeStrategyLabel }: Props) {
+function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompany, activeStrategyLabel }: Props) {
   // Benchmark options for the "add series" dropdown — fetched via the
   // shared cached hook so a sibling component (e.g. MomentumBacktester's
   // sector-ETF lookup) reuses the same fetch instead of re-requesting.
@@ -497,3 +497,14 @@ export default function EquityCurveCard({ result, loadedRunId, savedRuns, exchan
     </>
   );
 }
+
+/** React.memo barrier — the chart card is one of the more expensive
+ * renders on /backtest (Recharts SVG + Summary table + Yearly
+ * breakdown). Default shallow-compare matches our use site: the
+ * caller passes a memoized `exchangeByCompany`, the result object
+ * is stable per backtest, and `activeStrategyLabel` is a string
+ * (value-equal). Skipping renders when parent state changes for
+ * unrelated reasons (slider drags, axis toggles, run-time ticker)
+ * keeps scrolling smooth even with many variants loaded. */
+const EquityCurveCard = memo(EquityCurveCardInner);
+export default EquityCurveCard;

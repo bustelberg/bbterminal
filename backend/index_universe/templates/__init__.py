@@ -24,12 +24,19 @@ from .base import (
     UniverseTemplate,
 )
 from .leonteq import LeonteqTemplate
+from .longequity import LongEquityTemplate
 
-# Order matters: ACWI_LEONTEQ is a derived template that reads from
-# the ACWI and LEONTEQ universe_membership rows. Register it AFTER its
-# two parents so the pipeline's templates phase refreshes the parents
-# first; otherwise the intersection lags by one tick.
+# Order matters two ways:
+#   1. LongEquity is listed first because its refresh() probes upstream
+#      for newer data; running it before the other templates means the
+#      pipeline's effective data freshness for LongEquity tracks the
+#      tick time, not "tick minus N minutes spent on other templates".
+#   2. ACWI_LEONTEQ is a derived template that reads from the ACWI and
+#      LEONTEQ universe_membership rows. Register it AFTER its two
+#      parents so the pipeline's templates phase refreshes the parents
+#      first; otherwise the intersection lags by one tick.
 TEMPLATES: dict[str, type[UniverseTemplate]] = {
+    LongEquityTemplate.template_key: LongEquityTemplate,
     ACWITemplate.template_key: ACWITemplate,
     LeonteqTemplate.template_key: LeonteqTemplate,
     ACWILeonteqTemplate.template_key: ACWILeonteqTemplate,
@@ -56,6 +63,7 @@ __all__ = [
     "ACWITemplate",
     "ACWILeonteqTemplate",
     "LeonteqTemplate",
+    "LongEquityTemplate",
     "ProgressCallback",
     "RefreshResult",
     "TEMPLATES",

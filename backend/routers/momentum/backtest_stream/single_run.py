@@ -30,6 +30,7 @@ from .._helpers import (
     save_current_picks_snapshot as _save_current_picks_snapshot,
     strategy_hash as _strategy_hash,
 )
+from ..signals import warm_breakdown_panel_cache
 from .benchmarks import fetch_benchmark_price_index
 
 
@@ -84,6 +85,18 @@ async def run_single(
     def send_event(event_type: str, **kwargs):
         progress_queue.put({"type": event_type, **kwargs})
 
+    # Post-backtest cache warming hook: the runner calls this once per
+    # period with that period's eligibility-filtered signals_df. Pipes
+    # straight into the /signal-breakdown LRU so the user's first
+    # breakdown click after the backtest hits the cache instead of
+    # paying the 10s universe-load. Only fired by the regular backtest
+    # path — current_portfolio + multi-trial random don't traverse the
+    # cutoffs in the shape needed for cache priming.
+    def _warm_panel(cutoff, panel):
+        warm_breakdown_panel_cache(
+            req.universe_label, req.index_universe, cutoff, panel,
+        )
+
     def _run_backtest():
         try:
             if req.mode == "current_portfolio":
@@ -110,6 +123,7 @@ async def run_single(
                     company_currency=company_currency,
                     benchmark_price_index=benchmark_price_index,
                     benchmark_meta=benchmark_meta,
+                    panel_warm_callback=_warm_panel,
                 )
             backtest_result_holder.append(r)
         except Exception as e:

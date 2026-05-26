@@ -62,6 +62,12 @@ class PruneResult:
     longequity_kept: int = 0
     acwi_kept: int = 0
     leonteq_kept: int = 0
+    # Companies kept by virtue of an out-of-scope marker (override-set
+    # via gf_ticker_overrides.json `{"unavailable": true, ...}`). These
+    # rows have no universe_membership but should stay visible in
+    # /companies as an explicit "we know this exists, deliberately not
+    # covered" record.
+    out_of_scope_kept: int = 0
 
 
 def _chunked(items: list[int], size: int = _IN_CHUNK) -> list[list[int]]:
@@ -134,6 +140,35 @@ def _load_membership_company_ids(supabase: Client, universe_id: int) -> set[int]
             supabase.table("universe_membership")
             .select("company_id")
             .eq("universe_id", universe_id)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        batch = resp.data or []
+        if not batch:
+            break
+        for r in batch:
+            cid = r.get("company_id")
+            if cid is not None:
+                out.add(int(cid))
+        if len(batch) < page_size:
+            break
+        offset += page_size
+    return out
+
+
+def _load_out_of_scope_company_ids(supabase: Client) -> set[int]:
+    """Companies the override file marked out-of-scope. Kept even though
+    they have no universe_membership — that's the whole point of the
+    out-of-scope flag (preserve a row in `company` for visibility).
+    Paginates because PostgREST caps at 1000 per request."""
+    out: set[int] = set()
+    offset = 0
+    page_size = 1000
+    while True:
+        resp = (
+            supabase.table("company")
+            .select("company_id")
+            .not_.is_("out_of_scope_at", "null")
             .range(offset, offset + page_size - 1)
             .execute()
         )
@@ -227,7 +262,9 @@ def compute_orphans(supabase: Client) -> PruneResult:
     if "LEONTEQ" in universe_ids:
         leonteq_kept = _load_membership_company_ids(supabase, universe_ids["LEONTEQ"])
 
-    kept = longequity_kept | acwi_kept | leonteq_kept
+    out_of_scope_kept = _load_out_of_scope_company_ids(supabase)
+
+    kept = longequity_kept | acwi_kept | leonteq_kept | out_of_scope_kept
     orphans = sorted(all_ids - kept)
 
     result = PruneResult(
@@ -237,6 +274,7 @@ def compute_orphans(supabase: Client) -> PruneResult:
         longequity_kept=len(longequity_kept),
         acwi_kept=len(acwi_kept),
         leonteq_kept=len(leonteq_kept),
+        out_of_scope_kept=len(out_of_scope_kept),
         orphan_sample=_load_orphan_sample(supabase, orphans, n=20),
     )
     return result
@@ -297,7 +335,9 @@ def prune_orphan_companies(
 
 
 def _kept_union(supabase: Client) -> set[int]:
-    """Union of company_ids that belong to any source universe."""
+    """Union of company_ids that belong to any source universe OR are
+    explicitly tagged out-of-scope (deliberate out-of-coverage record,
+    kept for /companies visibility — see `out_of_scope_at`)."""
     universe_ids = _load_universe_ids(supabase)
     kept: set[int] = set()
     if "LongEquity" in universe_ids:
@@ -307,6 +347,7 @@ def _kept_union(supabase: Client) -> set[int]:
         kept |= _load_membership_company_ids(supabase, universe_ids["ACWI"])
     if "LEONTEQ" in universe_ids:
         kept |= _load_membership_company_ids(supabase, universe_ids["LEONTEQ"])
+    kept |= _load_out_of_scope_company_ids(supabase)
     return kept
 
 
@@ -315,9 +356,10 @@ def format_audit(result: PruneResult) -> str:
     lines = [
         f"Company table: {result.company_count_before} rows",
         f"  Kept: {result.kept_count}",
-        f"    LongEquity: {result.longequity_kept}",
-        f"    ACWI:       {result.acwi_kept}",
-        f"    Leonteq:    {result.leonteq_kept}",
+        f"    LongEquity:   {result.longequity_kept}",
+        f"    ACWI:         {result.acwi_kept}",
+        f"    Leonteq:      {result.leonteq_kept}",
+        f"    Out-of-scope: {result.out_of_scope_kept}",
         f"  Orphans: {result.orphan_count}",
     ]
     if result.orphan_sample:

@@ -688,6 +688,21 @@ def ensure_prices_for_company(
     # exchange. The caller is expected to retry via `FALLBACK_EXCHANGES`
     # before declaring the listing dead. See `_try_with_fallbacks` below.
 
+    # Stamp lookup-failed when every fallback exhausted with "Stock not
+    # found". Surfaced in the /companies UI so the user can spot rows
+    # whose exchange is wrong before the next backtest complains.
+    if data is None and api_log and "stock not found" in api_log.lower():
+        try:
+            import datetime as _dt  # noqa: PLC0415
+            supabase.table("company").update(
+                {"gurufocus_lookup_failed_at": _dt.datetime.now(_dt.timezone.utc).isoformat()}
+            ).eq("company_id", company_id).execute()
+        except Exception as e:
+            logging.getLogger(__name__).warning(
+                "[ensure_prices] failed to stamp lookup_failed cid=%s: %s: %s",
+                company_id, type(e).__name__, e,
+            )
+
     if data is None:
         # Fall back to stale cache
         cached = _fetch_from_storage(supabase, path)
@@ -724,5 +739,17 @@ def ensure_prices_for_company(
     result.total_prices = len(parsed)
     result.rows_loaded = load_prices_into_db(supabase, company_id, parsed)
     _log(f"loaded {result.rows_loaded} rows into DB (>= {_PRICE_CUTOFF})")
+
+    # Clear lookup-failed stamp once a fetch succeeds (only if it was set,
+    # to avoid the write entirely for the >99% of healthy rows).
+    try:
+        supabase.table("company").update(
+            {"gurufocus_lookup_failed_at": None}
+        ).eq("company_id", company_id).not_.is_("gurufocus_lookup_failed_at", "null").execute()
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            "[ensure_prices] failed to clear lookup_failed cid=%s: %s: %s",
+            company_id, type(e).__name__, e,
+        )
 
     return result

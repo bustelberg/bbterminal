@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, memo, useMemo, useState } from 'react';
 import type { CurrentPortfolio, DailyPick } from '../../../lib/stores/momentum';
 import type { Column } from '../../../lib/tableExport';
 import TableDownloadButton from '../TableDownloadButton';
@@ -18,7 +18,7 @@ type Props = {
  * to full per-holding detail. Past months are read-only — only days
  * already saved are shown. The card returns null when there's nothing to
  * show, so callers can render it unconditionally. */
-export default function DailyPicksHistory({ currentPortfolio, categories, exchangeByCompany }: Props) {
+function DailyPicksHistoryInner({ currentPortfolio, categories, exchangeByCompany }: Props) {
   const [expandedHistoryMonth, setExpandedHistoryMonth] = useState<string | null>(null);
   const [expandedDailyDate, setExpandedDailyDate] = useState<string | null>(null);
 
@@ -389,3 +389,11 @@ export default function DailyPicksHistory({ currentPortfolio, categories, exchan
     </div>
   );
 }
+
+/** React.memo barrier — see MonthlyHoldingsTable for the rationale.
+ * Renders a per-month → per-day → per-holding tree that can blow up
+ * to thousands of rows when fully expanded; not re-rendering it on
+ * every parent state change is a noticeable scroll-perf win on
+ * /backtest. */
+const DailyPicksHistory = memo(DailyPicksHistoryInner);
+export default DailyPicksHistory;

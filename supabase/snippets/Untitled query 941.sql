@@ -1,10 +1,6 @@
-SELECT
-  schemaname,
-  tablename,
-  pg_size_pretty(pg_total_relation_size(schemaname || '.' || tablename)) AS total_size,
-  pg_size_pretty(pg_relation_size(schemaname || '.' || tablename)) AS table_size,
-  pg_size_pretty(pg_total_relation_size(schemaname || '.' || tablename) - pg_relation_size(schemaname || '.' || tablename)) AS index_size,
-  pg_total_relation_size(schemaname || '.' || tablename) AS total_bytes
-FROM pg_tables
-WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
-ORDER BY pg_total_relation_size(schemaname || '.' || tablename) DESC;
+UPDATE ingest_run
+  SET status = 'error',
+      current_phase = 'done',
+      finished_at = NOW(),
+      error_summary = 'Orphaned by backend restart (manually marked, was stuck for 5d 18h)'
+  WHERE run_id = 6;

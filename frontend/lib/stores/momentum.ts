@@ -51,6 +51,17 @@ export type PeriodRecord = {
   // to the "open" badge so users see how stale the displayed return is
   // when some names stopped reporting earlier than others.
   as_of_date?: string;
+  // "What if you held the entire eligible universe equal-weighted?" —
+  // the no-skill baseline this strategy compares itself against. Per-
+  // period return + chain-linked cumulative, computed over the SAME
+  // entry→exit window the strategy used. Null when no eligible company
+  // had usable prices for the window OR on legacy results predating
+  // this column.
+  universe_return_pct?: number | null;
+  universe_cumulative_return_pct?: number | null;
+  // Number of companies that actually contributed to universe_return_pct
+  // this period (signals minus missing-price drops). Diagnostic only.
+  universe_constituents?: number | null;
 };
 
 export type DrawdownPeriod = {
@@ -65,10 +76,26 @@ export type Summary = {
   annualized_return_pct: number;
   max_drawdown_pct: number;
   sharpe_ratio: number | null;
+  /** Sortino: like Sharpe but only penalizes downside vol (std of
+   * negative daily returns × √252). Higher than Sharpe = upside vol
+   * dominates the variance. Null on degenerate runs / pre-feature
+   * saved results. */
+  sortino_ratio?: number | null;
+  /** % of closed periods with strictly positive return. Combined with
+   * median_period_return_pct, distinguishes "many small wins" from
+   * "a few outlier months" strategies. */
+  win_rate_pct?: number | null;
+  median_period_return_pct?: number | null;
   avg_monthly_turnover_pct: number;
   total_months: number;
   avg_holdings: number;
   top_drawdowns?: DrawdownPeriod[];
+  // Universe (equal-weighted-everything) baseline. The "did we
+  // outperform?" reference. Chain-linked over closed periods using
+  // the same entry/exit windows as the strategy. Null on degenerate
+  // runs and on saved results from before this feature.
+  universe_total_return_pct?: number | null;
+  universe_annualized_return_pct?: number | null;
   // Populated only for multi-trial random backtests; headline stats above
   // are then means and these are the cross-trial std-devs.
   n_trials?: number | null;
@@ -92,6 +119,14 @@ export type BacktestResult = {
   // this. Empty for degenerate runs / older saved results — the chart
   // falls back to monthly_records in that case.
   daily_records?: DailyRecord[];
+  // Daily universe equal-weight baseline curve. Same shape as
+  // `daily_records` but built from every eligible cid in each period
+  // (the no-skill baseline) rather than the strategy's picks. The chart
+  // prefers this over the per-period `universe_cumulative_return_pct`
+  // on monthly_records so the gray baseline line matches the strategy
+  // line's daily granularity. Absent on legacy saved runs predating
+  // this feature.
+  universe_daily_records?: DailyRecord[];
 };
 
 // Per-day pick holding has the same shape as a Holding for newer snapshots
@@ -168,13 +203,94 @@ export type RebalanceFrequency =
   | 'every_6_months' | 'every_7_months' | 'every_8_months' | 'every_9_months'
   | 'every_10_months' | 'every_11_months' | 'every_12_months';
 export type StrategyType = 'long_only' | 'long_short';
-export type VariantKey = `${RebalanceFrequency}__${StrategyType}`;
+// Loose enough to accept both legacy 2-segment keys
+// (`monthly__long_only`) and the cross-product sweep's extended form
+// (`monthly__long_only__s4__p6__m30__uACWI__gsector`). The parser /
+// builder below are the canonical encoders.
+export type VariantKey = string;
 export type VariantDef = {
   key: VariantKey;
   frequency: RebalanceFrequency;
   strategy: StrategyType;
   label: string;          // human-readable, e.g. "Monthly · Long-only"
 };
+
+/** All possible per-variant axes — five total: frequency, strategy,
+ *  top_n_sectors, top_n_per_sector, min_price_score, universe, grouping.
+ *  Any field left `undefined` means "inherit from the base request"
+ *  (matches the backend `VariantSpec` field defaults). `min_price_score`
+ *  uses `null` for "explicitly off" so the user can disable the filter
+ *  for specific variants while leaving it on for the base. */
+export type VariantParams = {
+  frequency: RebalanceFrequency;
+  strategy: StrategyType;
+  top_n_sectors?: number;
+  top_n_per_sector?: number;
+  min_price_score?: number | null;
+  universe?: string;
+  grouping?: 'sector' | 'industry';
+};
+
+/** Encode a VariantParams into the canonical sweep key. The backend
+ * mirrors this exact ordering in `variants.py`. Legacy 2-axis variants
+ * still produce `${frequency}__${strategy}` so saved bundles keep their
+ * keys. */
+export function makeVariantKey(p: VariantParams): VariantKey {
+  const parts: string[] = [p.frequency, p.strategy];
+  if (p.top_n_sectors != null) parts.push(`s${p.top_n_sectors}`);
+  if (p.top_n_per_sector != null) parts.push(`p${p.top_n_per_sector}`);
+  if (p.min_price_score != null) parts.push(`m${p.min_price_score}`);
+  if (p.universe != null) parts.push(`u${p.universe}`);
+  if (p.grouping != null) parts.push(`g${p.grouping}`);
+  return parts.join('__');
+}
+
+/** Round-trip inverse of `makeVariantKey`. Returns null for malformed
+ * input. The first two segments are frequency / strategy; subsequent
+ * segments are tag-prefixed (s/p/m/u/g). Unknown tags pass through
+ * silently — the table just won't display them. */
+export function parseVariantKey(key: VariantKey): VariantParams | null {
+  const parts = key.split('__');
+  if (parts.length < 2) return null;
+  const out: VariantParams = {
+    frequency: parts[0] as RebalanceFrequency,
+    strategy: parts[1] as StrategyType,
+  };
+  for (let i = 2; i < parts.length; i++) {
+    const seg = parts[i];
+    const tag = seg[0];
+    const rest = seg.slice(1);
+    if (tag === 's') { const n = Number(rest); if (Number.isFinite(n)) out.top_n_sectors = n; }
+    else if (tag === 'p') { const n = Number(rest); if (Number.isFinite(n)) out.top_n_per_sector = n; }
+    else if (tag === 'm') { const n = Number(rest); if (Number.isFinite(n)) out.min_price_score = n; }
+    else if (tag === 'u') { out.universe = rest; }
+    else if (tag === 'g') { if (rest === 'sector' || rest === 'industry') out.grouping = rest; }
+  }
+  return out;
+}
+
+/** Human-readable label for a sweep variant. Used in the permutations
+ * preview, variant tabs, and the variants table. Mirrors the legacy
+ * VARIANT_DEFS labels for the 2-axis case so saved bundles still
+ * render identically. */
+export function variantLabel(p: VariantParams): string {
+  const freqLabel = (
+    p.frequency === 'daily' ? 'Daily' :
+    p.frequency === 'weekly' ? 'Weekly' :
+    p.frequency === 'monthly' ? 'Monthly' :
+    p.frequency.replace(/^every_(\d+)_months$/, 'Every $1 months')
+  );
+  const stratLabel = p.strategy === 'long_only' ? 'Long-only' : 'Long-short';
+  const parts: string[] = [freqLabel, stratLabel];
+  if (p.universe != null) parts.push(p.universe);
+  if (p.grouping != null) parts.push(p.grouping === 'industry' ? 'by industry' : 'by sector');
+  const bucketSingular = p.grouping === 'industry' ? 'industry' : 'sector';
+  const bucketPlural = p.grouping === 'industry' ? 'industries' : 'sectors';
+  if (p.top_n_sectors != null) parts.push(`top ${p.top_n_sectors} ${p.top_n_sectors === 1 ? bucketSingular : bucketPlural}`);
+  if (p.top_n_per_sector != null) parts.push(`${p.top_n_per_sector} per ${bucketSingular}`);
+  if (p.min_price_score != null) parts.push(`min ${p.min_price_score}`);
+  return parts.join(' · ');
+}
 
 // Insertion order = display order in tables and tabs. Long-only group comes
 // first (largest period → smallest), then the long-short group in the same
@@ -303,9 +419,19 @@ export type BacktestStartConfig = {
   strategy_type?: StrategyType;
   // When set, the request becomes a sweep: backend loads data once and
   // runs the backtest computation per variant, streaming a separate
-  // `variant_result` event per (frequency × strategy_type). Replaces
-  // the per-variant POST loop the frontend used to do.
-  variants?: { frequency: RebalanceFrequency; strategy_type: StrategyType }[];
+  // `variant_result` event per (frequency × strategy_type × overrides).
+  // Optional override fields are the cross-product axes — see
+  // `VariantParams`. Backend `VariantSpec` defaults None on each field.
+  variants?: {
+    frequency: RebalanceFrequency;
+    strategy_type: StrategyType;
+    top_n_sectors?: number;
+    top_n_per_sector?: number;
+    min_price_score?: number | null;
+    universe_label?: string;
+    index_universe?: string;
+    grouping?: 'sector' | 'industry';
+  }[];
 };
 
 export const momentumStore = createStore<MomentumState>({
@@ -465,23 +591,20 @@ let variantsAbortController: AbortController | null = null;
  * sweep is in flight. */
 export async function startVariantsBacktest(
   base: Omit<BacktestStartConfig, 'rebalance_frequency' | 'strategy_type' | 'mode' | 'variants'>,
-  keys?: readonly VariantKey[],
+  variants: VariantParams[],
 ): Promise<void> {
   variantsAbortController?.abort();
   const controller = new AbortController();
   variantsAbortController = controller;
 
-  // Resolve which variants to run, preserving VARIANT_DEFS display order so
-  // the summary table reads consistently.
-  const selectedSet = new Set<VariantKey>(keys ?? VARIANT_DEFS.map((v) => v.key));
-  const targets = VARIANT_DEFS.filter((v) => selectedSet.has(v.key));
+  const targets = variants;
   if (targets.length === 0) return;
 
   // Reset sweep state. Only pre-seed variants we plan to run — un-selected
   // keys stay absent from `variants` so the summary table doesn't render
   // ghost rows for them.
   const initial: Partial<Record<VariantKey, VariantOutcome>> = {};
-  for (const v of targets) initial[v.key] = { status: 'pending' };
+  for (const v of targets) initial[makeVariantKey(v)] = { status: 'pending' };
   const startedAt = Date.now();
   momentumStore.set({
     variants: initial,
@@ -504,7 +627,15 @@ export async function startVariantsBacktest(
 
   const cfg: BacktestStartConfig = {
     ...base,
-    variants: targets.map((v) => ({ frequency: v.frequency, strategy_type: v.strategy })),
+    variants: targets.map((v) => ({
+      frequency: v.frequency,
+      strategy_type: v.strategy,
+      ...(v.top_n_sectors != null ? { top_n_sectors: v.top_n_sectors } : {}),
+      ...(v.top_n_per_sector != null ? { top_n_per_sector: v.top_n_per_sector } : {}),
+      ...(v.min_price_score != null ? { min_price_score: v.min_price_score } : {}),
+      ...(v.universe != null ? { index_universe: v.universe } : {}),
+      ...(v.grouping != null ? { grouping: v.grouping } : {}),
+    })),
   };
 
   let aborted = false;
@@ -605,9 +736,10 @@ export async function startVariantsBacktest(
     momentumStore.set((s) => {
       const next = { ...s.variants };
       for (const v of targets) {
-        const cur = next[v.key];
+        const k = makeVariantKey(v);
+        const cur = next[k];
         if (cur?.status === 'running' || cur?.status === 'pending') {
-          next[v.key] = { status: 'error', message: topLevelError! };
+          next[k] = { status: 'error', message: topLevelError! };
         }
       }
       return { variants: next, error: topLevelError };
@@ -618,9 +750,10 @@ export async function startVariantsBacktest(
     momentumStore.set((s) => {
       const next = { ...s.variants };
       for (const v of targets) {
-        const cur = next[v.key];
+        const k = makeVariantKey(v);
+        const cur = next[k];
         if (cur?.status === 'running' || cur?.status === 'pending') {
-          next[v.key] = { status: 'cancelled' };
+          next[k] = { status: 'cancelled' };
         }
       }
       return { variants: next };

@@ -59,6 +59,17 @@ const ENDPOINTS: Endpoint[] = [
     path: '/api/admin/egress-ip',
     desc: 'The public IP this backend currently appears to egress from (queried via ifconfig.me with fallbacks). Hit it a few times across deploys/restarts to see if Railway is giving you a stable IP — if yes, paste it into the AirSPMS allowlist. If it rotates, you either need Railway\'s Static Outbound IP add-on or a small static-IP proxy in front.',
   },
+  {
+    id: 'admin-gurufocus-probe',
+    group: 'Admin · health',
+    method: 'GET',
+    path: '/api/admin/gurufocus-probe',
+    desc: 'One-shot diagnostic: hits a single GuruFocus URL through the same impersonation ladder the ingest pipeline uses, and returns the FULL response (status, all headers, body excerpt, attempted profiles). Use to confirm whether a 403 is actually Cloudflare (look for cf-ray / server=cloudflare in the response headers) vs some other 403 (revoked key, vendor 403, etc.). Compare local vs prod to confirm IP-block hypothesis.',
+    queryParams: [
+      { name: 'symbol', type: 'string', default: 'AAPL', hint: 'GuruFocus symbol, e.g. "AAPL" or "XAMS:ABN"' },
+      { name: 'endpoint', type: 'string', default: 'price', hint: 'GuruFocus endpoint: price | financials | analyst_estimate | forward_pe_ratio' },
+    ],
+  },
 
   // ─── Admin: portfolio ────────────────────────────────────────────
   {

@@ -26,8 +26,10 @@ from ._period import (
     adjust_open_period_holdings,
     compute_selection_period,
     compute_sector_etf_period,
+    compute_universe_period_return,
 )
 from ._summary import _PeriodAccumulators, build_backtest_result
+from .equity_curve import _compute_universe_period_daily
 from .preparation import _BacktestPrepared, _prepare_backtest
 from .types import (
     BacktestConfig,
@@ -35,6 +37,7 @@ from .types import (
     BacktestSummary,
     PeriodRecord,
 )
+from ..scoring import score_universe
 
 
 def run_backtest(
@@ -55,6 +58,42 @@ def run_backtest(
     benchmark_price_index: dict[int, pd.Series] | None = None,
     # {benchmark_id: (ticker, name)} for display in the holdings table.
     benchmark_meta: dict[int, tuple[str, str]] | None = None,
+    # Cadence-independent universe baseline result, precomputed and
+    # passed in by the variants sweep so the same (universe, window)
+    # isn't re-computed for every variant. None → compute in-line.
+    # Shape matches the return of
+    # `_period.compute_monthly_universe_baseline`.
+    monthly_baseline_override: dict | None = None,
+    # Per-period universe baseline cache, precomputed by the variants
+    # sweep per (universe, frequency). Keyed by the period's date.
+    # When present, the period loop short-circuits the in-line
+    # `compute_universe_period_return` call for CLOSED periods. The
+    # open-period re-compute stays in-line (it uses a variant-
+    # specific `open_as_of` exit). None → compute in-line every
+    # period.
+    period_baseline_lookup: dict | None = None,
+    # Cross-variant score cache. Keyed by period_date; value is the
+    # per-period scored DataFrame produced by `score_universe`. The
+    # variants sweep allocates ONE dict per (universe combo) and
+    # passes it to every variant on that combo — the first variant
+    # to hit each period populates the cache, subsequent variants
+    # short-circuit the score pass entirely. Cache scope assumes
+    # `signal_weights` and `category_weights` are constant across all
+    # variants that share the dict (true today: variants vary only
+    # over top_n / frequency / strategy / universe / grouping). Pass
+    # None to disable caching (single-run path / tests / legacy
+    # callers). Mutated in place — pass a fresh dict per sweep.
+    score_cache: dict | None = None,
+    # Side-effect callback invoked once per period with the period
+    # date + the per-period eligibility-filtered signals_df, right
+    # after that frame is built. Used by single_run.py to populate the
+    # /signal-breakdown LRU so the user's first breakdown click after
+    # a backtest lands in <500ms instead of re-loading 500k+ price
+    # rows from Supabase. The callback receives the SAME shape (cids
+    # + sector + signal columns) that /signal-breakdown computes
+    # fresh, so caching it eliminates a redundant compute. None
+    # disables warming (tests / library callers).
+    panel_warm_callback: "Callable[[date, pd.DataFrame], None] | None" = None,
 ) -> BacktestResult:
     """Run a momentum backtest at the configured rebalance cadence.
 
@@ -207,6 +246,19 @@ def run_backtest(
         if not signals_df.empty and eligible_ids is not None:
             signals_df = signals_df[signals_df["company_id"].isin(eligible_ids)].copy()
             signals_df["sector"] = signals_df["company_id"].map(sector_map)
+        # Warm the /signal-breakdown LRU with this period's eligibility-
+        # filtered panel — same shape /signal-breakdown computes fresh.
+        # After the backtest, the user's first breakdown click for any
+        # stock at any covered cutoff hits the cache instead of paying
+        # the 10s universe-load + panel-compute cost.
+        if panel_warm_callback is not None and not signals_df.empty:
+            try:
+                panel_warm_callback(period_date, signals_df)
+            except Exception:
+                # Warming is best-effort — never break the backtest if
+                # the breakdown LRU misbehaves (full disk, lock contention,
+                # etc.). The user just pays the cost on first breakdown.
+                pass
         if signals_df.empty:
             reason = f"No companies had enough price data (need >= 20 data points before {_record_label(period_date)})"
             if send_event:
@@ -231,6 +283,56 @@ def run_backtest(
             ))
             continue
 
+        # Compute the universe-equal-weight baseline ONCE per period
+        # from the same `signals_df` the strategy will operate on. For
+        # closed periods the exit is `next_period`; for open periods we
+        # re-compute below after `adjust_open_period_holdings` resolves
+        # the effective `open_as_of`. Branches 1 and 2 above already
+        # `continue`d on empty `signals_df`, so we always have a non-
+        # empty candidate set here.
+        entry_ts = pd.Timestamp(period_date)
+        closed_exit_ts = pd.Timestamp(next_period)
+        # Variant-sweep cache short-circuit: when the orchestrator
+        # precomputed per-period baselines for this (universe, freq),
+        # reuse the cached `(return_pct, n_constituents)` instead of
+        # recomputing here. Identical math; just avoids re-walking
+        # every eligible cid's prices N variants in a row. Falls back
+        # to in-line compute for periods not in the cache (open
+        # period's variant-specific exit) or when no cache was passed
+        # (single-run path / legacy callers).
+        if period_baseline_lookup is not None and period_date in period_baseline_lookup:
+            universe_ret_closed, universe_n_closed = period_baseline_lookup[period_date]
+        else:
+            universe_ret_closed, universe_n_closed = compute_universe_period_return(
+                signals_df, price_index,
+                entry_ts=entry_ts, exit_ts=closed_exit_ts,
+            )
+
+        # Score the eligible universe ONCE per period — both the long
+        # and short books (when long_short) and every variant sharing
+        # the score cache reuse the same scored frame. Skipped for
+        # selection modes that don't consult scores (random / all /
+        # sector_etf): scoring would be wasted work and would also
+        # require config.signal_weights to be valid, which "all" / etc.
+        # don't necessarily satisfy.
+        scored_df: pd.DataFrame | None = None
+        needs_score = (
+            config.selection_mode != "all"
+            and config.selection_mode != "sector_etf"
+            and rng is None
+        )
+        if needs_score:
+            if score_cache is not None and period_date in score_cache:
+                scored_df = score_cache[period_date]
+            else:
+                scored_df = score_universe(
+                    signals_df,
+                    config.signal_weights,
+                    config.category_weights,
+                )
+                if score_cache is not None:
+                    score_cache[period_date] = scored_df
+
         # Dispatch to the right per-period branch.
         if config.selection_mode == "sector_etf":
             outcome = compute_sector_etf_period(
@@ -251,6 +353,7 @@ def run_backtest(
                 local_price_index=local_price_index,
                 company_currency=company_currency,
                 record_label=_record_label(period_date),
+                scored_df=scored_df,
             )
 
         # Forward any warnings the branch raised. Done before the
@@ -274,14 +377,65 @@ def run_backtest(
                 strategy_type=config.strategy_type,
             )
 
+        # For the open period, redo the universe baseline using the
+        # SAME `open_as_of` exit the strategy used. Without this the
+        # baseline reads its exit as `next_period` (in the future) and
+        # silently returns None for every name, leaving the comparison
+        # blank exactly when the user most wants it.
+        if is_open_iter and open_as_of is not None:
+            universe_ret, universe_n = compute_universe_period_return(
+                signals_df, price_index,
+                entry_ts=entry_ts, exit_ts=pd.Timestamp(open_as_of),
+            )
+        else:
+            universe_ret, universe_n = universe_ret_closed, universe_n_closed
+
+        # Daily universe equal-weight baseline curve for this period.
+        # Same entry/exit semantics as the per-period universe return
+        # above — closed periods exit at `next_period`, open periods at
+        # `open_as_of`. Each day's relative factor is chain-linked via
+        # the running `accum.universe_daily_factor` so the curve is
+        # continuous across rebalances. Closed periods advance the
+        # factor; open period feeds the display tail without bumping
+        # the factor (matches the per-period chain's closed-only
+        # accumulation, keeping headline universe stats unchanged).
+        universe_period_exit_ts = (
+            pd.Timestamp(open_as_of) if is_open_iter and open_as_of is not None
+            else closed_exit_ts
+        )
+        eligible_cids_set = set(signals_df["company_id"].astype(int))
+        per_period_universe_daily = _compute_universe_period_daily(
+            eligible_cids_set, price_index,
+            entry_ts=entry_ts, exit_ts=universe_period_exit_ts,
+        )
+        for day_ts, rel_factor in per_period_universe_daily:
+            cum_factor = accum.universe_daily_factor * rel_factor
+            accum.universe_daily_records.append(
+                (day_ts.date().isoformat(), round((cum_factor - 1) * 100, 4))
+            )
+        if per_period_universe_daily and not is_open_iter:
+            accum.universe_daily_factor *= per_period_universe_daily[-1][1]
+
         # Empty-holdings branch: forward the empty_reason as both a record
-        # and a warning, then move on.
+        # and a warning, then move on. The universe baseline is still
+        # meaningful here (signals_df was non-empty; the strategy just
+        # couldn't pick anything) so we record + chain-link it.
         if outcome.empty_reason is not None:
             if send_event:
                 send_event(
                     "warning", scope="backtest",
                     message=f"{_record_label(period_date)}: {outcome.empty_reason}",
                 )
+            universe_cum_record = None
+            if universe_ret is not None:
+                if is_open_iter:
+                    universe_cum_record = (
+                        accum.universe_cumulative_factor * (1 + universe_ret / 100) - 1
+                    ) * 100
+                else:
+                    accum.universe_cumulative_factor *= (1 + universe_ret / 100)
+                    accum.universe_period_returns.append(universe_ret)
+                    universe_cum_record = (accum.universe_cumulative_factor - 1) * 100
             period_records.append(PeriodRecord(
                 date=_record_date(period_date),
                 holdings=[],
@@ -289,6 +443,11 @@ def run_backtest(
                 cumulative_return_pct=round(accum.cumulative, 2),
                 empty_reason=outcome.empty_reason,
                 is_open=is_open_iter,
+                universe_return_pct=universe_ret,
+                universe_cumulative_return_pct=(
+                    round(universe_cum_record, 2) if universe_cum_record is not None else None
+                ),
+                universe_constituents=universe_n if universe_ret is not None else None,
             ))
             continue
 
@@ -321,6 +480,21 @@ def run_backtest(
         if not is_open_iter:
             prev_holdings_set = current_set
 
+        # Chain-link the universe baseline using the same closed-vs-open
+        # split the strategy uses above: open period updates the
+        # display cumulative but does NOT bump the accumulator (so the
+        # summary headline stays apples-to-apples with closed periods).
+        universe_cum_record_v = None
+        if universe_ret is not None:
+            if is_open_iter:
+                universe_cum_record_v = (
+                    accum.universe_cumulative_factor * (1 + universe_ret / 100) - 1
+                ) * 100
+            else:
+                accum.universe_cumulative_factor *= (1 + universe_ret / 100)
+                accum.universe_period_returns.append(universe_ret)
+                universe_cum_record_v = (accum.universe_cumulative_factor - 1) * 100
+
         period_records.append(PeriodRecord(
             date=_record_date(period_date),
             holdings=outcome.holdings,
@@ -328,10 +502,39 @@ def run_backtest(
             cumulative_return_pct=round(record_cum, 2),
             is_open=is_open_iter,
             as_of_date=open_as_of.isoformat() if open_as_of else None,
+            universe_return_pct=universe_ret,
+            universe_cumulative_return_pct=(
+                round(universe_cum_record_v, 2) if universe_cum_record_v is not None else None
+            ),
+            universe_constituents=universe_n if universe_ret is not None else None,
         ))
 
     if send_event:
         send_event("progress", month="done", pct=100, message="Backtest complete")
+
+    # Cadence-independent universe baseline. Walks calendar months
+    # over the same window and chains equal-weighted 1-month returns,
+    # so two variants on the same universe + window get IDENTICAL
+    # headline universe annualized numbers (no rebalancing-drag
+    # variation from the strategy's cadence). Overrides the per-period
+    # cumulative-factor-derived value in `build_backtest_result`. None
+    # when no universe was selected — the strategy-cadence value is
+    # used as fallback.
+    #
+    # When `monthly_baseline_override` is supplied (variant sweeps
+    # precompute one per universe-combo upfront, then pass the same
+    # result to every variant on that combo), skip the in-line compute
+    # — it's pure per (universe, window) so re-running it per variant
+    # is wasted work.
+    if monthly_baseline_override is not None:
+        monthly_baseline = monthly_baseline_override
+    else:
+        from ._period import compute_monthly_universe_baseline  # noqa: PLC0415
+        monthly_baseline = compute_monthly_universe_baseline(
+            price_index, monthly_eligible,
+            start_date=config.start_date,
+            end_date=config.end_date,
+        )
 
     return build_backtest_result(
         period_records, accum,
@@ -339,6 +542,7 @@ def run_backtest(
         strategy_type=config.strategy_type,
         benchmark_price_index=benchmark_price_index,
         rebalance_frequency=prepared.frequency,
+        monthly_baseline=monthly_baseline,
     )
 
 
@@ -353,6 +557,16 @@ def run_multi_trial_backtest(
     monthly_eligible: dict[str, dict[int, str | None]] | None = None,
     prices_local_df: pd.DataFrame | None = None,
     company_currency: dict[int, str | None] | None = None,
+    # Same as in `run_backtest` — variant sweeps precompute once per
+    # (universe, window) and pass to every trial. Universe baseline
+    # doesn't vary across random trials (deterministic per universe +
+    # window), so trial 0 computes once and the rest reuse.
+    monthly_baseline_override: dict | None = None,
+    # Same as in `run_backtest`. Period baselines are shared across
+    # trials within a multi-trial run too — the period dates +
+    # eligible cids are deterministic per (universe, frequency),
+    # which doesn't change between random trials.
+    period_baseline_lookup: dict | None = None,
 ) -> BacktestResult:
     """Run `n_trials` independent backtests with sequential seeds and return
     an aggregated BacktestResult.
@@ -395,6 +609,11 @@ def run_multi_trial_backtest(
     )
 
     trial_results: list[BacktestResult] = []
+    # Reusable monthly baseline across trials. Pre-seeded with the
+    # caller's override when supplied (variant sweep case); otherwise
+    # populated from trial 0's summary on first iteration so trials
+    # 1..N-1 don't re-walk the calendar.
+    shared_monthly_baseline: dict | None = monthly_baseline_override
     for i in range(n_trials):
         if send_event:
             pct = round((i / n_trials) * 100)
@@ -417,6 +636,9 @@ def run_multi_trial_backtest(
             strategy_type=config.strategy_type,
         )
         # No per-month progress for individual trials — too noisy.
+        # Universe baseline is identical across trials (deterministic
+        # per universe + window). Trial 0 computes it in-line;
+        # subsequent trials reuse via the cached override.
         result = run_backtest(
             trial_config,
             prices_df,
@@ -427,8 +649,21 @@ def run_multi_trial_backtest(
             prices_local_df=prices_local_df,
             company_currency=company_currency,
             prepared=prepared,
+            monthly_baseline_override=shared_monthly_baseline,
+            period_baseline_lookup=period_baseline_lookup,
         )
         trial_results.append(result)
+        # Capture trial 0's baseline for trials 1..N-1. The summary
+        # carries it as `universe_*_return_pct`; we can reconstruct
+        # the dict shape `run_backtest` expects from those fields.
+        if shared_monthly_baseline is None:
+            s = result.summary
+            if s.universe_annualized_return_pct is not None or s.universe_total_return_pct is not None:
+                shared_monthly_baseline = {
+                    "annualized_pct": s.universe_annualized_return_pct,
+                    "total_pct": s.universe_total_return_pct,
+                    "n_months": 0,  # not surfaced on Summary; reused dict only uses the two pct fields
+                }
 
     # Aggregate: per-month mean cumulative return across trials. All trials
     # iterate the same month grid so records align by index.
@@ -471,20 +706,31 @@ def run_multi_trial_backtest(
     ann_mean, ann_std = _mean_std("annualized_return_pct")
     dd_mean, dd_std = _mean_std("max_drawdown_pct")
     sharpe_mean, sharpe_std = _mean_std("sharpe_ratio")
+    sortino_mean, _sortino_std = _mean_std("sortino_ratio")
+    win_mean, _win_std = _mean_std("win_rate_pct")
+    median_mean, _median_std = _mean_std("median_period_return_pct")
     turn_mean, turn_std = _mean_std("avg_monthly_turnover_pct")
 
     # Use trial 0's drawdown periods + total_months + avg_holdings as
     # representative; per-trial std for drawdown periods isn't meaningful.
+    # Universe baseline is deterministic per (universe, window) — doesn't
+    # vary across random trials — so trial 0's values carry through
+    # unchanged for every trial.
     base_summary = trial_results[0].summary
     summary = BacktestSummary(
         total_return_pct=tr_mean if tr_mean is not None else 0.0,
         annualized_return_pct=ann_mean if ann_mean is not None else 0.0,
         max_drawdown_pct=dd_mean if dd_mean is not None else 0.0,
         sharpe_ratio=sharpe_mean,
+        sortino_ratio=sortino_mean,
+        win_rate_pct=win_mean,
+        median_period_return_pct=median_mean,
         avg_monthly_turnover_pct=turn_mean if turn_mean is not None else 0.0,
         total_months=base_summary.total_months,
         avg_holdings=base_summary.avg_holdings,
         top_drawdowns=base_summary.top_drawdowns,
+        universe_total_return_pct=base_summary.universe_total_return_pct,
+        universe_annualized_return_pct=base_summary.universe_annualized_return_pct,
         n_trials=n_trials,
         total_return_pct_std=tr_std,
         annualized_return_pct_std=ann_std,
@@ -506,4 +752,10 @@ def run_multi_trial_backtest(
         monthly_records=aggregated_records,
         summary=summary,
         daily_records=daily_curve,
+        # Universe baseline is deterministic per (universe, window),
+        # not per trial — every trial produces the same daily curve.
+        # Reuse trial 0's so the aggregated result carries it.
+        universe_daily_records=(
+            trial_results[0].universe_daily_records if trial_results else []
+        ),
     )

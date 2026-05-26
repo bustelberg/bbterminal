@@ -17,8 +17,10 @@ loop calls `prepare_variant_from_shared` to slice it per variant."""
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import logging
+import os
 import queue as _queue
 import time
 from datetime import date
@@ -35,6 +37,7 @@ from momentum.backtest import (
 )
 from momentum.signals import PRICE_SIGNAL_DEFS
 
+from ..signals import warm_breakdown_panel_cache
 from .benchmarks import fetch_benchmark_price_index
 
 
@@ -55,6 +58,14 @@ async def run_variants_sweep(
     monthly_eligible: dict[str, dict[int, str | None]] | None,
     company_currency: dict[int, str | None],
     universe_snapshot: list[dict],
+    *,
+    # When the orchestrator pre-loaded multiple (universe, grouping)
+    # combos for a cross-product sweep, these carry the per-combo
+    # eligible dict and the union (used for the shared signal panel).
+    # Legacy callers omit them and the loop falls back to `monthly_eligible`
+    # for every variant — same behavior as before the cross-product feature.
+    monthly_eligible_by_combo: dict[tuple, dict] | None = None,
+    union_monthly_eligible: dict | None = None,
 ):
     """Async generator: drive the variants sweep loop, yielding SSE
     events. Returns nothing — the orchestrator only needs the streamed
@@ -91,13 +102,19 @@ async def run_variants_sweep(
                 "message": f"Precomputing signal panel over {len(_union_cutoffs)} union cutoffs (shared by all {len(req.variants)} variants)...",
             })
             yield _keepalive()
+            # The shared signal panel covers the UNION of every variant's
+            # eligible companies — same idea as the union the orchestrator
+            # used to filter `universe_df`. If no per-combo dict was passed
+            # in (legacy single-universe sweep), fall back to the request's
+            # `monthly_eligible`.
+            _shared_me = union_monthly_eligible if union_monthly_eligible else monthly_eligible
             shared_backtest = await asyncio.to_thread(
                 build_shared_backtest_inputs,
                 prices_df=prices_df,
                 universe_df=universe_df,
                 volumes_df=volumes_df,
                 prices_local_df=prices_local_df,
-                monthly_eligible=monthly_eligible,
+                monthly_eligible=_shared_me,
                 union_cutoffs=sorted(_union_cutoffs),
             )
 
@@ -110,169 +127,425 @@ async def run_variants_sweep(
             req.sector_etfs
         )
 
-    for v_idx, vspec in enumerate(req.variants):
-        variant_key = f"{vspec.frequency}__{vspec.strategy_type}"
-        yield _emit({"type": "variant_start", "variant_key": variant_key})
-        yield _keepalive()
+    base_grouping = getattr(req, "grouping", "sector") or "sector"
 
-        # Per-variant config: same base, overridden frequency + strategy.
-        # Reject long_short + random/all at the variant level — the same
-        # combination check the single-run path applies, but per-row.
-        if vspec.strategy_type == "long_short" and req.selection_mode in ("random", "all"):
+    # Cadence-independent universe baseline cache. Pure function of
+    # (universe combo, window) — the same value for every variant
+    # that runs on that combo. Without this cache each variant re-
+    # walks the calendar months and re-equal-weights every eligible
+    # company; for a 32-variant sweep on 2 universes that's 30
+    # redundant computes. Precomputing once per distinct combo here
+    # then passing through `run_backtest`'s `monthly_baseline_override`
+    # collapses that to 2 computes. The cache key uses the same combo
+    # tuple shape as `monthly_eligible_by_combo`.
+    monthly_baseline_cache: dict[tuple, dict | None] = {}
+    if shared_backtest is not None and monthly_eligible_by_combo:
+        from momentum.backtest._period import compute_monthly_universe_baseline  # noqa: PLC0415
+        start_d = date.fromisoformat(req.start_date)
+        end_d = date.fromisoformat(req.end_date)
+        for combo, me in monthly_eligible_by_combo.items():
+            try:
+                monthly_baseline_cache[combo] = await asyncio.to_thread(
+                    compute_monthly_universe_baseline,
+                    shared_backtest.price_index, me,
+                    start_date=start_d,
+                    end_date=end_d,
+                )
+            except Exception as _bl_err:
+                logging.getLogger(__name__).warning(
+                    "[variants] monthly-baseline precompute failed for combo=%s: %s",
+                    combo, _bl_err,
+                )
+                monthly_baseline_cache[combo] = None
+        n_combos = len([v for v in monthly_baseline_cache.values() if v is not None])
+        if n_combos > 1:
             yield _emit({
+                "type": "progress",
+                "pct": 69,
+                "message": f"Precomputed universe baseline for {n_combos} (universe, grouping) combos -> reused across {len(req.variants)} variants.",
+            })
+
+    # Per-period universe baseline cache (Win 2). The runner's period
+    # loop calls `compute_universe_period_return(signals_df, ...)` once
+    # per CLOSED rebalance period — pure function of (eligible cids at
+    # that month, prices, entry_ts, exit_ts). Two variants with the
+    # same (combo, frequency) have identical rebalance dates AND
+    # identical eligible sets per date → identical per-period
+    # baselines. Without caching, a 32-variant sweep over 4 distinct
+    # (combo, freq) tuples × ~200 periods recomputes the same 800
+    # values 8 times each (5600+ wasted calls). Precomputing once per
+    # (combo, freq) and passing through `run_backtest`'s
+    # `period_baseline_lookup` kwarg eliminates that.
+    #
+    # The OPEN period stays in-line — its exit (`open_as_of`) depends
+    # on the variant's actual holdings (most recent date common to
+    # every held company), which isn't knowable until selection has
+    # run. One in-line call per variant is cheap and unavoidable.
+    period_baseline_cache: dict[tuple, dict[date, tuple[float | None, int]]] = {}
+    if shared_backtest is not None and monthly_eligible_by_combo:
+        from momentum.backtest._period import compute_universe_period_return  # noqa: PLC0415
+        seen_combo_freq: set[tuple] = set()
+        for _v in req.variants:
+            _v_universe_label = _v.universe_label if _v.universe_label is not None else req.universe_label
+            _v_index_universe = _v.index_universe if _v.index_universe is not None else req.index_universe
+            _v_grouping = _v.grouping if _v.grouping is not None else base_grouping
+            _v_combo = (_v_universe_label, _v_index_universe, _v_grouping)
+            cf_key = (_v_combo, _v.frequency)
+            if cf_key in seen_combo_freq:
+                continue
+            seen_combo_freq.add(cf_key)
+            me = monthly_eligible_by_combo.get(_v_combo)
+            if me is None:
+                continue
+            try:
+                periods = _generate_rebalance_dates(
+                    date.fromisoformat(req.start_date),
+                    date.fromisoformat(req.end_date),
+                    _v.frequency,
+                    prices_df,
+                )
+            except Exception as _gen_err:
+                logging.getLogger(__name__).warning(
+                    "[variants] period-baseline date generation failed for %s: %s",
+                    cf_key, _gen_err,
+                )
+                continue
+            if len(periods) < 2:
+                continue
+            per_period: dict[date, tuple[float | None, int]] = {}
+            for i in range(len(periods) - 1):
+                period_date = periods[i]
+                next_period = periods[i + 1]
+                # Get the signal panel for this period from the
+                # SHARED panel (built over the union of every
+                # variant's cutoffs, so it's guaranteed to contain
+                # this date).
+                panel_df = shared_backtest.union_panel.get(period_date)
+                if panel_df is None or panel_df.empty:
+                    per_period[period_date] = (None, 0)
+                    continue
+                eligible_ids = set((me.get(period_date.isoformat()[:7]) or {}).keys())
+                if not eligible_ids:
+                    per_period[period_date] = (None, 0)
+                    continue
+                signals_filtered = panel_df[panel_df["company_id"].isin(eligible_ids)]
+                ret, n = compute_universe_period_return(
+                    signals_filtered, shared_backtest.price_index,
+                    entry_ts=pd.Timestamp(period_date),
+                    exit_ts=pd.Timestamp(next_period),
+                )
+                per_period[period_date] = (ret, n)
+            period_baseline_cache[cf_key] = per_period
+        n_cf = len(period_baseline_cache)
+        if n_cf > 1:
+            yield _emit({
+                "type": "progress",
+                "pct": 69,
+                "message": f"Precomputed per-period universe returns for {n_cf} (universe, freq) combos -> reused across {len(req.variants)} variants.",
+            })
+
+    # Cross-variant score cache (Win 3). One empty dict per universe
+    # combo, lazily populated by the variant loop — the first variant
+    # to score a given (combo, period_date) stores the scored frame,
+    # subsequent variants on the same combo short-circuit the score
+    # pass via `run_backtest`'s `score_cache` kwarg. Cache scope
+    # assumes signal_weights + category_weights are constant across
+    # all variants in the sweep (true today — the variant spec varies
+    # frequency / strategy / universe / grouping / top_n / min_score,
+    # not signal weights). Per-combo keying is required because each
+    # combo's eligible cid set differs, producing different
+    # signals_df at every period_date. Skipped for random / all
+    # selection modes (the runner never calls into scoring) and when
+    # there's no per-combo split (single-combo sweeps share their
+    # `prepared` panel but each variant has unique selection params,
+    # so caching still pays — fall back to a single shared dict).
+    score_cache_by_combo: dict[tuple, dict] = {}
+    score_cache_single: dict = {}  # fallback for non-cross-product sweeps
+    if req.selection_mode not in ("random", "all"):
+        if monthly_eligible_by_combo is not None:
+            for combo in monthly_eligible_by_combo:
+                score_cache_by_combo[combo] = {}
+
+    # ===== Win 4: parallel variant execution =====
+    # Worker threads run independently; each pushes its lifecycle events
+    # (variant_start, optional warnings, terminal variant_result OR
+    # variant_error) to a single shared queue. The async generator drains
+    # the queue and forwards events to SSE, counting terminals to know
+    # when the sweep is done. Workers never emit per-variant `progress`
+    # events — with N variants running concurrently those would be noise.
+    # Instead the drain loop emits one completion-based progress event
+    # after each terminal so the user sees N/total advancing in real time.
+    #
+    # Pandas releases the GIL during heavy numeric ops, so multiple
+    # variant threads make real progress in parallel even in CPython.
+    # On a 4-vCPU box a 32-variant sweep typically lands ~3x faster.
+    #
+    # Cache safety: the read-only caches (`monthly_baseline_cache`,
+    # `period_baseline_cache`) were fully populated before this point.
+    # `score_cache_by_combo[combo]` is shared-mutable across siblings
+    # on the same combo — but CPython dict item assignment is atomic
+    # per-key, and the worst case is "two threads compute the same
+    # (combo, period_date) score before either stores it; the second
+    # overwrites the first with byte-identical data." Harmless duplicate
+    # compute, not a correctness bug. Skipping a lock keeps the hot path
+    # lock-free.
+    #
+    # Concurrency cap defaults to 4 (env-tunable). 1 → fully sequential
+    # if needed for debugging. Capped at len(variants) so we don't spin
+    # up idle workers.
+    n_variants = len(req.variants)
+    try:
+        _env_workers = int(os.getenv("VARIANT_MAX_WORKERS", "4"))
+    except ValueError:
+        _env_workers = 4
+    max_workers = max(1, min(n_variants, _env_workers)) if n_variants > 0 else 1
+
+    sweep_queue: _queue.Queue = _queue.Queue()
+
+    def _run_one_variant(vspec_inner, v_idx_inner):
+        """Thread worker: computes one variant end-to-end and pushes
+        every lifecycle event for it to `sweep_queue`. Always emits
+        exactly one terminal (`variant_result` or `variant_error`)
+        even on unexpected exceptions, so the drain loop's terminal-
+        counter is reliable."""
+        variant_key = "?"  # set below before any early-exit branch
+        try:
+            # Effective per-variant dials. `None` on the spec means
+            # "inherit base", preserving legacy 2-axis sweep behavior.
+            v_top_sectors = vspec_inner.top_n_sectors if vspec_inner.top_n_sectors is not None else req.top_n_sectors
+            v_top_per_sector = vspec_inner.top_n_per_sector if vspec_inner.top_n_per_sector is not None else req.top_n_per_sector
+            v_min_score = vspec_inner.min_price_score if vspec_inner.min_price_score is not None else req.min_price_score
+            v_universe_label = vspec_inner.universe_label if vspec_inner.universe_label is not None else req.universe_label
+            v_index_universe = vspec_inner.index_universe if vspec_inner.index_universe is not None else req.index_universe
+            v_grouping_field = vspec_inner.grouping if vspec_inner.grouping is not None else base_grouping
+
+            # Per-combo cache lookups (Wins 1-3).
+            v_monthly_eligible = monthly_eligible
+            v_monthly_baseline: dict | None = None
+            v_period_baselines: dict[date, tuple[float | None, int]] | None = None
+            v_score_cache: dict | None = None
+            if monthly_eligible_by_combo is not None:
+                v_combo = (v_universe_label, v_index_universe, v_grouping_field)
+                v_monthly_eligible = monthly_eligible_by_combo.get(v_combo, monthly_eligible)
+                v_monthly_baseline = monthly_baseline_cache.get(v_combo)
+                v_period_baselines = period_baseline_cache.get((v_combo, vspec_inner.frequency))
+                v_score_cache = score_cache_by_combo.get(v_combo)
+            elif req.selection_mode not in ("random", "all"):
+                v_score_cache = score_cache_single
+
+            # Variant key.
+            key_parts = [vspec_inner.frequency, vspec_inner.strategy_type]
+            if vspec_inner.top_n_sectors is not None:
+                key_parts.append(f"s{vspec_inner.top_n_sectors}")
+            if vspec_inner.top_n_per_sector is not None:
+                key_parts.append(f"p{vspec_inner.top_n_per_sector}")
+            if vspec_inner.min_price_score is not None:
+                score_str = f"{vspec_inner.min_price_score:g}" if isinstance(vspec_inner.min_price_score, float) else str(vspec_inner.min_price_score)
+                key_parts.append(f"m{score_str}")
+            if vspec_inner.index_universe is not None:
+                key_parts.append(f"u{vspec_inner.index_universe}")
+            elif vspec_inner.universe_label is not None:
+                key_parts.append(f"u{vspec_inner.universe_label}")
+            if vspec_inner.grouping is not None:
+                key_parts.append(f"g{vspec_inner.grouping}")
+            variant_key = "__".join(key_parts)
+
+            sweep_queue.put({"type": "variant_start", "variant_key": variant_key})
+
+            # Same long_short + random/all rejection the sequential path
+            # applied — now lives in the worker so it produces a
+            # variant_error terminal (instead of `continue`).
+            if vspec_inner.strategy_type == "long_short" and req.selection_mode in ("random", "all"):
+                sweep_queue.put({
+                    "type": "variant_error",
+                    "variant_key": variant_key,
+                    "message": f"long_short is not supported with selection_mode='{req.selection_mode}'",
+                })
+                return
+
+            v_config = BacktestConfig.from_dict({
+                "start_date": req.start_date,
+                "end_date": req.end_date,
+                "signal_weights": req.signal_weights or {s["key"]: s["default_weight"] for s in PRICE_SIGNAL_DEFS},
+                "category_weights": req.category_weights,
+                "top_n_sectors": v_top_sectors,
+                "top_n_per_sector": v_top_per_sector,
+                "selection_mode": req.selection_mode,
+                "random_seed": req.random_seed,
+                "rebalance_frequency": vspec_inner.frequency,
+                "strategy_type": vspec_inner.strategy_type,
+                "sector_etfs": req.sector_etfs,
+                "min_price_score": v_min_score,
+            })
+
+            # Per-variant prepared (slices the shared signal panel for
+            # this frequency).
+            v_prepared = None
+            if shared_backtest is not None:
+                try:
+                    v_prepared = prepare_variant_from_shared(
+                        shared=shared_backtest,
+                        start_date=date.fromisoformat(req.start_date),
+                        end_date=date.fromisoformat(req.end_date),
+                        frequency=vspec_inner.frequency,
+                        prices_df=prices_df,
+                    )
+                except Exception as _prep_err:
+                    v_prepared = None
+                    logging.getLogger(__name__).debug(
+                        "[variants] prepare_variant_from_shared failed for %s: %s",
+                        variant_key, _prep_err,
+                    )
+
+            # Forward warnings (with variant_key prefix); ignore the
+            # runner's per-period progress events (too noisy to interleave
+            # across N concurrent variants).
+            def _worker_send_event(event_type: str, **kwargs):
+                if event_type == "warning":
+                    sweep_queue.put({
+                        "type": "warning",
+                        "scope": kwargs.get("scope", "backtest"),
+                        "message": f"[{variant_key}] {kwargs.get('message', '')}",
+                        "variant_key": variant_key,
+                    })
+
+            if req.selection_mode == "random" and req.n_trials > 1:
+                r = run_multi_trial_backtest(
+                    v_config, prices_df, universe_df, req.n_trials, _worker_send_event,
+                    volumes_df=volumes_df,
+                    monthly_eligible=v_monthly_eligible,
+                    prices_local_df=prices_local_df,
+                    company_currency=company_currency,
+                    monthly_baseline_override=v_monthly_baseline,
+                    period_baseline_lookup=v_period_baselines,
+                )
+            else:
+                r = run_backtest(
+                    v_config, prices_df, universe_df, _worker_send_event,
+                    volumes_df=volumes_df,
+                    monthly_eligible=v_monthly_eligible,
+                    prices_local_df=prices_local_df,
+                    company_currency=company_currency,
+                    prepared=v_prepared,
+                    benchmark_price_index=variant_benchmark_price_index,
+                    benchmark_meta=variant_benchmark_meta,
+                    monthly_baseline_override=v_monthly_baseline,
+                    period_baseline_lookup=v_period_baselines,
+                    score_cache=v_score_cache,
+                )
+
+            sweep_queue.put({
+                "type": "variant_result",
+                "variant_key": variant_key,
+                "data": r.to_dict(),
+                "universe": universe_snapshot,
+            })
+        except Exception as e:
+            # Catch-all so the drain loop's terminal counter still
+            # advances if the worker fails ANYWHERE — including before
+            # variant_start fired (in which case the UI will see a
+            # variant_error for a variant it never saw start, which is
+            # fine; the variant_key is still meaningful when key
+            # construction succeeded, and a "?" placeholder otherwise).
+            #
+            # Logged at DEBUG (with traceback) rather than ERROR/EXCEPTION
+            # because most failures here are foreseeable user-input issues
+            # — e.g. "Need at least 2 rebalance periods" when the date
+            # window is too short for the cadence, "no eligible
+            # companies" when a universe-month combination is empty —
+            # and the variant_error event already carries the user-facing
+            # message to the UI's variants table. Devs debugging an
+            # unexpected crash can enable DEBUG to see the full trace.
+            logging.getLogger(__name__).debug(
+                "[variants] worker for variant_key=%s failed",
+                variant_key, exc_info=True,
+            )
+            sweep_queue.put({
                 "type": "variant_error",
                 "variant_key": variant_key,
-                "message": f"long_short is not supported with selection_mode='{req.selection_mode}'",
+                "message": f"{type(e).__name__}: {e}",
             })
-            continue
 
-        v_config = BacktestConfig.from_dict({
-            "start_date": req.start_date,
-            "end_date": req.end_date,
-            "signal_weights": req.signal_weights or {s["key"]: s["default_weight"] for s in PRICE_SIGNAL_DEFS},
-            "category_weights": req.category_weights,
-            "top_n_sectors": req.top_n_sectors,
-            "top_n_per_sector": req.top_n_per_sector,
-            "selection_mode": req.selection_mode,
-            "random_seed": req.random_seed,
-            "rebalance_frequency": vspec.frequency,
-            "strategy_type": vspec.strategy_type,
-            "sector_etfs": req.sector_etfs,
-            "min_price_score": req.min_price_score,
-        })
+    yield _emit({
+        "type": "progress",
+        "pct": 70,
+        "message": f"Running {n_variants} variants ({max_workers} in parallel)...",
+    })
+    yield _keepalive()
 
-        v_progress_queue: _queue.Queue = _queue.Queue()
-        v_result_holder: list = []
-        v_error_holder: list = []
+    n_completed = 0
+    last_yield = time.monotonic()
+    # `with` block waits for every submitted future on exit. Since the
+    # drain loop only finishes once we've seen N terminals, all workers
+    # have ALREADY completed by then — the wait is a no-op safety net.
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=max_workers,
+        thread_name_prefix="variant-worker",
+    ) as executor:
+        for v_idx, vspec in enumerate(req.variants):
+            executor.submit(_run_one_variant, vspec, v_idx)
 
-        def _v_send_event(event_type: str, **kwargs):
-            v_progress_queue.put({"type": event_type, **kwargs})
-
-        # Per-variant `_BacktestPrepared` built from the sweep-shared
-        # signal panel + indices. `prepared` already carries the variant's
-        # frequency, periods, and the filtered panel; `run_backtest`
-        # short-circuits its own `_prepare_backtest` call when `prepared`
-        # is supplied.
-        v_prepared = None
-        if shared_backtest is not None:
+        while n_completed < n_variants:
             try:
-                v_prepared = prepare_variant_from_shared(
-                    shared=shared_backtest,
-                    start_date=date.fromisoformat(req.start_date),
-                    end_date=date.fromisoformat(req.end_date),
-                    frequency=vspec.frequency,
-                    prices_df=prices_df,
-                )
-            except Exception as _prep_err:
-                # Fall through to the regular path which will raise the
-                # same error inside the variant thread so it surfaces
-                # as a per-variant error event.
-                v_prepared = None
-                logging.getLogger(__name__).debug(
-                    "[variants] prepare_variant_from_shared failed for %s: %s",
-                    variant_key, _prep_err,
-                )
-
-        def _v_run(cfg=v_config, prepared=v_prepared):
-            try:
-                if req.selection_mode == "random" and req.n_trials > 1:
-                    # Multi-trial random repeats `run_backtest` under the
-                    # hood; it builds its own prepared. The shared panel
-                    # still helps if/when we wire it through here, but for
-                    # now the per-trial path uses its own cache (which
-                    # already shares prepared across trials of the SAME
-                    # variant).
-                    r = run_multi_trial_backtest(
-                        cfg, prices_df, universe_df, req.n_trials, _v_send_event,
-                        volumes_df=volumes_df,
-                        monthly_eligible=monthly_eligible,
-                        prices_local_df=prices_local_df,
-                        company_currency=company_currency,
-                    )
-                else:
-                    r = run_backtest(
-                        cfg, prices_df, universe_df, _v_send_event,
-                        volumes_df=volumes_df,
-                        monthly_eligible=monthly_eligible,
-                        prices_local_df=prices_local_df,
-                        company_currency=company_currency,
-                        prepared=prepared,
-                        benchmark_price_index=variant_benchmark_price_index,
-                        benchmark_meta=variant_benchmark_meta,
-                    )
-                v_result_holder.append(r)
-            except Exception as e:
-                v_error_holder.append(e)
-            finally:
-                v_progress_queue.put(None)
-
-        yield _emit({
-            "type": "progress",
-            "pct": 68 + round((v_idx / max(1, len(req.variants))) * 32),
-            "message": f"[{variant_key}] running backtest computation ({v_idx + 1}/{len(req.variants)})...",
-        })
-        yield _keepalive()
-
-        loop = asyncio.get_event_loop()
-        loop.run_in_executor(None, _v_run)
-
-        # Same keepalive-15s pattern as the single-run path so the proxy
-        # doesn't kill the connection during long signal computation
-        # phases.
-        v_last_yield = time.monotonic()
-        while True:
-            try:
-                evt = await asyncio.to_thread(v_progress_queue.get, timeout=0.2)
+                evt = await asyncio.to_thread(sweep_queue.get, timeout=0.2)
             except Exception:
-                if time.monotonic() - v_last_yield >= 15.0:
+                if time.monotonic() - last_yield >= 15.0:
                     yield _keepalive()
-                    v_last_yield = time.monotonic()
+                    last_yield = time.monotonic()
                 continue
-            if evt is None:
-                break
-            if evt["type"] == "progress":
-                # Scale this variant's internal pct (0-100) into the
-                # overall sweep progress: each variant owns a 32/N slice
-                # of the [68, 100] band, and within the slice we advance
-                # proportionally to the variant's own progress event.
-                # Without this the bar was locked at the variant's start
-                # pct throughout its run, then frozen at
-                # `68 + ((N-1)/N)*32` after the last variant finished —
-                # e.g. 84% for N=8.
-                local_pct = float(evt.get("pct") or 0)
-                sweep_fraction = (v_idx + max(0.0, min(100.0, local_pct)) / 100.0) / max(1, len(req.variants))
+            yield _emit(evt)
+            last_yield = time.monotonic()
+            if evt["type"] in ("variant_result", "variant_error"):
+                n_completed += 1
                 yield _emit({
                     "type": "progress",
-                    "pct": 68 + round(sweep_fraction * 32),
-                    "message": f"[{variant_key}] {evt.get('message', '')}",
+                    "pct": 70 + round((n_completed / max(1, n_variants)) * 30),
+                    "message": f"{n_completed}/{n_variants} variants complete",
                 })
-            elif evt["type"] == "warning":
-                yield _emit({
-                    "type": "warning",
-                    "scope": evt.get("scope", "backtest"),
-                    "message": f"[{variant_key}] {evt.get('message', '')}",
-                })
-            v_last_yield = time.monotonic()
 
-        if v_error_holder:
-            yield _emit({
-                "type": "variant_error",
-                "variant_key": variant_key,
-                "message": f"{type(v_error_holder[0]).__name__}: {v_error_holder[0]}",
-            })
-            continue
-
-        v_result_dict = v_result_holder[0].to_dict()
-        yield _emit({
-            "type": "variant_result",
-            "variant_key": variant_key,
-            "data": v_result_dict,
-            "universe": universe_snapshot,
-        })
+    # Post-sweep cache warming for /signal-breakdown. The runner's
+    # `panel_warm_callback` hook (used by single_run.py) covers the
+    # single-backtest path; for sweeps we batch the work here so we
+    # warm ONCE per (combo, cutoff) instead of N times across N
+    # variants on the same combo. After this, the user's first
+    # breakdown click on any stock in any covered (universe, cutoff)
+    # hits the LRU in <500ms instead of paying the 10s universe-load.
+    if shared_backtest is not None and shared_backtest.union_panel:
+        if monthly_eligible_by_combo:
+            # Cross-product sweep: each combo's monthly_eligible defines
+            # the per-cutoff cid filter that /signal-breakdown would
+            # apply fresh. Slice the union panel accordingly so the
+            # cached frames match what the breakdown endpoint computes.
+            for combo, me in monthly_eligible_by_combo.items():
+                v_universe_label, v_index_universe, _v_grouping = combo
+                for cutoff, panel in shared_backtest.union_panel.items():
+                    if panel is None or panel.empty:
+                        continue
+                    month_key = cutoff.isoformat()[:7]
+                    sector_map = me.get(month_key) or {}
+                    eligible_cids = set(sector_map.keys())
+                    if not eligible_cids:
+                        continue
+                    filtered = panel[panel["company_id"].isin(eligible_cids)].copy()
+                    if filtered.empty:
+                        continue
+                    filtered["sector"] = filtered["company_id"].map(sector_map)
+                    warm_breakdown_panel_cache(
+                        v_universe_label, v_index_universe, cutoff, filtered,
+                    )
+        else:
+            # Single-combo sweep without cross-product per-month
+            # eligibility: warm with the union panel as-is. Matches the
+            # non-snapshot universe path the runner takes.
+            for cutoff, panel in shared_backtest.union_panel.items():
+                if panel is None or panel.empty:
+                    continue
+                warm_breakdown_panel_cache(
+                    req.universe_label, req.index_universe, cutoff, panel,
+                )
 
     # Belt-and-suspenders 100% emit: even if the final variant didn't
-    # deliver a closing progress event (e.g. it errored, or was skipped
-    # because long_short+random is forbidden), the user-facing progress
-    # bar lands at 100 before `done`.
+    # deliver a closing progress event, the user-facing progress bar
+    # lands at 100 before `done`.
     yield _emit({"type": "progress", "pct": 100, "message": f"Variants sweep complete ({len(req.variants)})"})
     yield _emit({"type": "done", "message": f"Variants sweep complete ({len(req.variants)})"})

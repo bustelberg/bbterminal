@@ -29,16 +29,24 @@ import {
   deleteCurrentPicksSnapshot,
   renameCurrentPicksSnapshot,
   VARIANT_DEFS,
+  makeVariantKey,
+  parseVariantKey,
+  variantLabel,
   type BacktestStartConfig,
+  type RebalanceFrequency,
+  type StrategyType,
   type VariantKey,
   type VariantOutcome,
+  type VariantParams,
 } from '../../lib/stores/momentum';
 import CellInfoTip from './momentum/CellInfoTip';
 import CollapsibleCard from './momentum/CollapsibleCard';
 import DailyPicksHistory from './momentum/DailyPicksHistory';
 import EquityCurveCard from './momentum/EquityCurveCard';
 import MonthlyHoldingsTable from './momentum/MonthlyHoldingsTable';
+import SavedRunsDropdown from './momentum/SavedRunsDropdown';
 import SectorTimelineChart from './momentum/SectorTimelineChart';
+import VariantAttribution from './momentum/VariantAttribution';
 import TableDownloadButton from './TableDownloadButton';
 import VariantSummaryTable from './momentum/VariantSummaryTable';
 import {
@@ -51,6 +59,62 @@ import type {
   SavedRun,
   SignalDef,
 } from './momentum/types';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** A single column of the Variants picker — header with All/None links,
+ * then a bordered scrollable list of items rendered via the caller's
+ * `renderItem` callback. Generic over the option type so the same shell
+ * carries frequencies (strings), strategies (StrategyType), universes
+ * (strings), and groupings ('sector' | 'industry'). */
+function AxisColumn<T>({
+  label,
+  options,
+  selected,
+  onAll,
+  onNone,
+  renderItem,
+  maxHClass,
+}: {
+  label: string;
+  options: readonly T[];
+  selected: ReadonlySet<T>;
+  onAll: () => void;
+  onNone: () => void;
+  renderItem: (option: T) => React.ReactNode;
+  maxHClass: string;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-gray-500 text-xs">
+          {label}{' '}
+          <span className="text-gray-600 text-[10px]">
+            ({selected.size}/{options.length})
+          </span>
+        </span>
+        <div className="flex items-center gap-2 text-[11px]">
+          <button type="button" onClick={onAll} className="text-indigo-400 hover:text-indigo-300">
+            All
+          </button>
+          <span className="text-gray-700">·</span>
+          <button type="button" onClick={onNone} className="text-gray-400 hover:text-gray-200">
+            None
+          </button>
+        </div>
+      </div>
+      <ul className={`border border-gray-800/60 rounded-lg p-1 overflow-auto ${maxHClass}`}>
+        {options.length === 0 ? (
+          <li className="px-3 py-2 text-xs text-gray-600">No options</li>
+        ) : (
+          options.map((opt) => <li key={String(opt)}>{renderItem(opt)}</li>)
+        )}
+      </ul>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -114,24 +178,146 @@ export default function MomentumBacktester() {
     setSectorEtfs(map);
   }, [_bmRows, _bmLoading, _bmError, selectionMode]);
 
-  // Variant sweep selection — which (frequency × strategy) combos to run.
-  // Default to all selected so the "Run variants" button matches its
-  // pre-selection behavior. Controls live in a popover next to the button.
-  const [selectedVariantKeys, setSelectedVariantKeys] = useState<Set<VariantKey>>(
-    () => new Set(VARIANT_DEFS.map((v) => v.key)),
+  // Variant sweep selection — the 5-axis cross-product picker. Each
+  // permutation in the cartesian product becomes one VariantParams sent
+  // to the backend. The four Set-backed axes (frequency, strategy,
+  // universe, grouping) drive multi-select chips; the three text inputs
+  // are comma-separated numeric overrides ("4,6" → two values; empty
+  // means "inherit base, don't sweep"). `disabledPerms` lets the user
+  // carve specific permutations out of the cross-product preview.
+  const ALL_FREQS = useMemo(
+    () => Array.from(new Set(VARIANT_DEFS.map((v) => v.frequency))),
+    [],
   );
-  const [variantsPickerOpen, setVariantsPickerOpen] = useState(false);
-  const variantsPickerRef = useRef<HTMLDivElement>(null);
-  const toggleVariantKey = (key: VariantKey) => {
-    setSelectedVariantKeys((prev) => {
+  const ALL_STRATEGIES = useMemo(
+    () => Array.from(new Set(VARIANT_DEFS.map((v) => v.strategy))),
+    [],
+  );
+  const [selectedFreqs, setSelectedFreqs] = useState<Set<RebalanceFrequency>>(
+    () => new Set<RebalanceFrequency>(['monthly', 'every_3_months']),
+  );
+  const [selectedStrategies, setSelectedStrategies] = useState<Set<StrategyType>>(
+    () => new Set<StrategyType>(['long_only']),
+  );
+  const [selectedUniverses, setSelectedUniverses] = useState<Set<string>>(
+    () => new Set<string>(['ACWI_LEONTEQ']),
+  );
+  const [selectedGroupings, setSelectedGroupings] = useState<Set<'sector' | 'industry'>>(
+    () => new Set<'sector' | 'industry'>(['sector']),
+  );
+  const [topSectorsSweep, setTopSectorsSweep] = useState<string>('');
+  const [perSectorSweep, setPerSectorSweep] = useState<string>('');
+  const [minScoreSweep, setMinScoreSweep] = useState<string>('');
+  const [disabledPerms, setDisabledPerms] = useState<Set<VariantKey>>(() => new Set());
+
+  // Generic immutable Set toggle for the four checkbox-list axes.
+  const toggleInSet = <T,>(
+    setter: React.Dispatch<React.SetStateAction<Set<T>>>,
+    value: T,
+  ) => {
+    setter((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) next.delete(value); else next.add(value);
+      return next;
+    });
+  };
+  // Toggle one permutation in/out of the run. Used by the row-level
+  // checkbox in the permutations preview.
+  const togglePermDisabled = (key: VariantKey) => {
+    setDisabledPerms((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key); else next.add(key);
       return next;
     });
   };
+  // Comma-separated number list parser: "4, 6,8" → [4, 6, 8]. Filters
+  // non-finite and dedups. Empty / whitespace-only input → empty array.
+  const parseNumList = (s: string): number[] => {
+    const out: number[] = [];
+    const seen = new Set<number>();
+    for (const tok of s.split(',')) {
+      const t = tok.trim();
+      if (!t) continue;
+      const n = Number(t);
+      if (!Number.isFinite(n)) continue;
+      if (seen.has(n)) continue;
+      seen.add(n);
+      out.push(n);
+    }
+    return out;
+  };
+  // Same as parseNumList but recognizes the literal `none` / `off`
+  // tokens as `null` ("filter disabled for this variant"). Null is
+  // distinct from any numeric value so dedup keeps it.
+  const parseMinScoreList = (s: string): (number | null)[] => {
+    const out: (number | null)[] = [];
+    let sawNull = false;
+    const seen = new Set<number>();
+    for (const tok of s.split(',')) {
+      const t = tok.trim();
+      if (!t) continue;
+      const lower = t.toLowerCase();
+      if (lower === 'none' || lower === 'off') {
+        if (!sawNull) { out.push(null); sawNull = true; }
+        continue;
+      }
+      const n = Number(t);
+      if (!Number.isFinite(n)) continue;
+      if (seen.has(n)) continue;
+      seen.add(n);
+      out.push(n);
+    }
+    return out;
+  };
   // Backend rejects `long_short` + `random` (long-short without a
   // signal-driven score is meaningless), so when Random is selected we
   // hide the long-short rows from the picker and only run long-only.
+  // `LARGE_VARIANTS_THRESHOLD` is just a UI warning — runs above this
+  // count get an amber chip in the permutations preview to flag the
+  // wall-time cost. Backend has no hard cap.
+  const LARGE_VARIANTS_THRESHOLD = 30;
+
+  // Cross-product of the five axes: for each (frequency × strategy) pair
+  // selected, fan out across whichever numeric/categorical axes have at
+  // least one value. An "empty" axis is treated as a single `undefined`
+  // marker — that maps to "inherit base, don't sweep this dimension" on
+  // the backend `VariantSpec`.
+  const allPermutations = useMemo<VariantParams[]>(() => {
+    const topList = parseNumList(topSectorsSweep);
+    const perList = parseNumList(perSectorSweep);
+    const minList = parseMinScoreList(minScoreSweep);
+    const uniList = Array.from(selectedUniverses);
+    const grpList = Array.from(selectedGroupings);
+    const topAxis: (number | undefined)[] = topList.length === 0 ? [undefined] : topList;
+    const perAxis: (number | undefined)[] = perList.length === 0 ? [undefined] : perList;
+    const minAxis: (number | null | undefined)[] = minList.length === 0 ? [undefined] : minList;
+    const uniAxis: (string | undefined)[] = uniList.length === 0 ? [undefined] : uniList;
+    const grpAxis: ('sector' | 'industry' | undefined)[] =
+      grpList.length === 0 ? [undefined] : grpList;
+    const out: VariantParams[] = [];
+    for (const v of VARIANT_DEFS) {
+      if (!selectedFreqs.has(v.frequency)) continue;
+      if (!selectedStrategies.has(v.strategy)) continue;
+      for (const t of topAxis) for (const p of perAxis) for (const m of minAxis)
+      for (const u of uniAxis) for (const g of grpAxis) {
+        out.push({
+          frequency: v.frequency,
+          strategy: v.strategy,
+          ...(t !== undefined ? { top_n_sectors: t } : {}),
+          ...(p !== undefined ? { top_n_per_sector: p } : {}),
+          ...(m !== undefined ? { min_price_score: m } : {}),
+          ...(u !== undefined ? { universe: u } : {}),
+          ...(g !== undefined ? { grouping: g } : {}),
+        });
+      }
+    }
+    return out;
+  }, [selectedFreqs, selectedStrategies, selectedUniverses, selectedGroupings, topSectorsSweep, perSectorSweep, minScoreSweep]);
+
+  const variantsToRun = useMemo(
+    () => allPermutations.filter((p) => !disabledPerms.has(makeVariantKey(p))),
+    [allPermutations, disabledPerms],
+  );
 
   // Backtest run state lives in a module-scoped store so the SSE stream
   // keeps running when the user navigates away from /momentum.
@@ -175,12 +361,16 @@ export default function MomentumBacktester() {
     return () => clearInterval(id);
   }, [running]);
 
-  // Total elapsed for the panel header.
-  const totalElapsedMs = useMemo<number | null>(() => {
-    if (runStartedAt == null) return null;
-    const end = running ? Date.now() : (runEndedAt ?? Date.now());
-    return end - runStartedAt;
-  }, [running, runStartedAt, runEndedAt]);
+  // Total elapsed for the panel header. Intentionally NOT memoized —
+  // `setNowTick` re-renders us every second to keep this fresh, but a
+  // useMemo with [running, runStartedAt, runEndedAt] deps would cache
+  // the first-render value forever (none of those change on a tick),
+  // freezing the badge at the initial mount time. Inline math is
+  // cheap; recompute every render.
+  const totalElapsedMs: number | null =
+    runStartedAt == null
+      ? null
+      : (running ? Date.now() : (runEndedAt ?? Date.now())) - runStartedAt;
 
   // Per-entry log with relative timestamps so the timeline shows when each
   // step actually fired (and how big the gaps between steps are).
@@ -231,8 +421,6 @@ export default function MomentumBacktester() {
   const [savedRuns, setSavedRuns] = useState<SavedRun[]>([]);
   const [saving, setSaving] = useState(false);
 
-  const [savedDropdownOpen, setSavedDropdownOpen] = useState(false);
-  const savedDropdownRef = useRef<HTMLDivElement>(null);
   const [picksDropdownOpen, setPicksDropdownOpen] = useState(false);
   const picksDropdownRef = useRef<HTMLDivElement>(null);
   // First-fetch loading state for the current-picks dropdown (the saved-
@@ -250,10 +438,9 @@ export default function MomentumBacktester() {
   const loadingSnapshotId = momentumStore.use((s) => s.loadingSnapshotId);
   const deletingSnapshotId = momentumStore.use((s) => s.deletingSnapshotId);
   const renamingSnapshotId = momentumStore.use((s) => s.renamingSnapshotId);
-  // Multi-select sets for bulk delete in each header dropdown. Cleared
-  // automatically when the dropdown closes — the selection isn't meant
-  // to persist across opens.
-  const [selectedRunIds, setSelectedRunIds] = useState<Set<number>>(new Set());
+  // Multi-select set for the current-picks dropdown's bulk delete. The
+  // saved-backtests dropdown owns its own selection internally now (the
+  // component was extracted into SavedRunsDropdown.tsx).
   const [selectedSnapshotIds, setSelectedSnapshotIds] = useState<Set<number>>(new Set());
   const [bulkDeletingRuns, setBulkDeletingRuns] = useState(false);
   const [bulkDeletingSnapshots, setBulkDeletingSnapshots] = useState(false);
@@ -284,13 +471,27 @@ export default function MomentumBacktester() {
     total_unique_tickers: number;
   }[]>([]);
   const [selectedIndexUniverse, setSelectedIndexUniverse] = useState<string>('');
-  const [universesLoading, setUniversesLoading] = useState(true);
-  const [universesError, setUniversesError] = useState<string | null>(null);
-  const [universesElapsed, setUniversesElapsed] = useState(0);
+  // The Universe `<select>` used to show "loading X (Ns)" + an error
+  // label — those signals lived in the now-removed dropdown. State is
+  // removed; the AxisColumn for universes below reads the loaded list
+  // straight from `indexUniverses` and just renders nothing while it's
+  // empty.
   // Latest available close-price date, fed by GET /api/data/latest-price-date.
   // Cached for the lifetime of the page mount — the data refresh runs
   // weekly, so revalidating per-render is wasteful.
   const [latestPriceDate, setLatestPriceDate] = useState<string | null>(null);
+
+  // Memoized so `MonthlyHoldingsTable`'s React.memo barrier holds —
+  // an inline `{...}` literal would create a fresh object reference
+  // every parent re-render, busting shallow-equality on the props
+  // and forcing the (heavy) table to re-render even when nothing it
+  // actually consumes has changed.
+  const scoringConfig = useMemo(() => ({
+    universe_label: null as string | null,
+    index_universe: selectedIndexUniverse || null,
+    signal_weights: weights,
+    category_weights: categoryWeights,
+  }), [selectedIndexUniverse, weights, categoryWeights]);
 
   // Signal definitions — shared cached hook.
   const { data: _signalsData } = useMomentumSignals();
@@ -308,16 +509,10 @@ export default function MomentumBacktester() {
     setCategoryWeights(cw);
   }, [_signalsData]);
 
-  // Universe templates — shared cached hook. The dropdown wants a
-  // slightly different shape, so map locally.
-  const {
-    data: _utRaw,
-    loading: _utLoading,
-    error: _utError,
-  } = useUniverseTemplates();
+  // Universe templates — shared cached hook. The Variants AxisColumn
+  // wants the locally-shaped `IndexUniverseEntry` so we map after load.
+  const { data: _utRaw } = useUniverseTemplates();
   useEffect(() => {
-    setUniversesLoading(_utLoading);
-    setUniversesError(_utError);
     if (!_utRaw) return;
     setIndexUniverses(
       _utRaw.map((t) => ({
@@ -333,25 +528,20 @@ export default function MomentumBacktester() {
         total_unique_tickers: t.latest_membership_count,
       })),
     );
-  }, [_utRaw, _utLoading, _utError]);
+  }, [_utRaw]);
 
   // One-time bookkeeping at mount: saved runs, current-picks snapshots,
-  // the universe-load elapsed-seconds ticker, and the latest-price-date
-  // fetch. The endpoint hooks above own all the recurring fetches.
+  // and the latest-price-date fetch. The endpoint hooks above own all
+  // the recurring fetches.
   useEffect(() => {
     loadSavedRuns();
     setPicksListLoading(true);
     loadCurrentPicksSnapshots().finally(() => setPicksListLoading(false));
-    const universesStart = Date.now();
-    const tick = setInterval(
-      () => setUniversesElapsed(Math.round((Date.now() - universesStart) / 1000)),
-      500,
-    );
     fetch(`${API_URL}/api/data/latest-price-date`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${r.status}`))))
       .then((d: { date: string | null }) => setLatestPriceDate(d.date))
       .catch(() => { /* silent — the user can still pick a date manually */ });
-    return () => clearInterval(tick);
+    return () => undefined;
   }, []);
 
   // When universe selection changes, auto-set start/end dates per the
@@ -360,42 +550,31 @@ export default function MomentumBacktester() {
   // close-price date we have data for (independent of universe).
   // Both are stored as YYYY-MM-DD on the server; the `<input
   // type="month">` wants YYYY-MM, so slice.
-  // Industry grouping only makes sense for Leonteq-derived universes —
-  // those are the ones whose universe_membership rows carry an industry
-  // value. Any other universe must use sector grouping.
-  const groupingAllowed =
-    selectedIndexUniverse === 'LEONTEQ' || selectedIndexUniverse === 'ACWI_LEONTEQ';
+  // When the user picks exactly one universe in the Variants panel
+  // below, adopt its hard-backstop as the default start date so the
+  // backtest doesn't try to look further back than the universe was
+  // first captured. End date follows the latest available price.
+  // Triggered by changes to `selectedUniverses` rather than the
+  // (now-removed) top-row Universe `<select>`. We only auto-adjust on
+  // single-selection so a multi-universe sweep doesn't yank the dates
+  // around each toggle.
   useEffect(() => {
-    if (!groupingAllowed && grouping !== 'sector') {
-      setGrouping('sector');
-    }
-  }, [groupingAllowed, grouping]);
+    if (selectedUniverses.size !== 1) return;
+    const only = Array.from(selectedUniverses)[0];
+    const entry = indexUniverses.find((i) => i.index_name === only);
+    if (!entry) return;
+    setStartDate(entry.hard_backstop.slice(0, 7));
+    setEndDate((latestPriceDate ?? entry.end_month).slice(0, 7));
+    // setStartDate / setEndDate are stable React setters — omitting
+    // them keeps the effect re-runs scoped to actual universe / data
+    // changes.
+  }, [selectedUniverses, indexUniverses, latestPriceDate]);
 
-  const handleUniverseChange = (value: string) => {
-    setSelectedIndexUniverse(value);
-    if (value) {
-      const entry = indexUniverses.find(i => i.index_name === value);
-      if (entry) {
-        setStartDate(entry.hard_backstop.slice(0, 7));
-        // Fall back to the universe's latest captured month if the
-        // global price-date probe hasn't resolved yet.
-        setEndDate((latestPriceDate ?? entry.end_month).slice(0, 7));
-      }
-    }
-  };
-
-  const universeDropdownValue = selectedIndexUniverse;
-
-  useClickOutside(savedDropdownRef, () => setSavedDropdownOpen(false), savedDropdownOpen);
   useClickOutside(picksDropdownRef, () => setPicksDropdownOpen(false), picksDropdownOpen);
-  useClickOutside(variantsPickerRef, () => setVariantsPickerOpen(false), variantsPickerOpen);
 
-  // Reset multi-select when either dropdown closes — selection should
-  // not persist across opens, otherwise users land on a stale "5
-  // selected" state next time they peek.
-  useEffect(() => {
-    if (!savedDropdownOpen) setSelectedRunIds(new Set());
-  }, [savedDropdownOpen]);
+  // Reset current-picks multi-select when its dropdown closes — selection
+  // should not persist across opens. The saved-backtests dropdown manages
+  // its own selection internally.
   useEffect(() => {
     if (!picksDropdownOpen) setSelectedSnapshotIds(new Set());
   }, [picksDropdownOpen]);
@@ -416,19 +595,41 @@ export default function MomentumBacktester() {
   };
 
 
-  // Variant sweep — fans the current config out across the selected
-  // (frequency × strategy) combos. Backend cache keys on both axes so
-  // re-runs are fast. When Random is the active strategy, long-short
-  // variants are filtered out (the backend rejects that combination).
+  // Long-short variants are filtered out when the selection mode
+  // doesn't produce a meaningful top vs bottom split (random / all-
+  // universe / sector_etf all share the same constraint — backend
+  // rejects long-short under those modes). Computed here so the
+  // permutations preview can disable + grey those rows, AND so
+  // `runVariantsBacktest` only ships the eligible ones.
+  const longShortBlocked =
+    selectionMode === 'random' || selectionMode === 'all' || selectionMode === 'sector_etf';
+  const eligibleVariants = useMemo(
+    () => variantsToRun.filter((v) => !longShortBlocked || v.strategy !== 'long_short'),
+    [variantsToRun, longShortBlocked],
+  );
+  const eligibleCount = eligibleVariants.length;
+  const totalPerms = allPermutations.length;
+  // Pre-flight check the Run button's tooltip / Banner surface to the
+  // user. Today's only fail-fast is "no universe selected" — without
+  // that there's nothing for the per-combo loader to fetch.
+  const variantsBlockReason: string | null =
+    selectedUniverses.size === 0 ? 'Pick at least one universe.' : null;
+
+  // Variant sweep — fans the current config out across the cross-product
+  // permutations selected in the inline picker. The picker derives the
+  // base config's `index_universe` + `grouping` from the first selected
+  // variant, since the legacy top-row inputs for those are gone.
   const runVariantsBacktest = () => {
-    const eligibleKeys = VARIANT_DEFS
-      .filter((v) => selectedVariantKeys.has(v.key))
-      // long-short needs a meaningful top vs. bottom split — neither
-      // random nor "all universe" provides one, so those combinations
-      // are dropped from the sweep.
-      .filter((v) => (selectionMode !== 'random' && selectionMode !== 'all') || v.strategy !== 'long_short')
-      .map((v) => v.key);
-    if (eligibleKeys.length === 0) return;
+    const targets = eligibleVariants;
+    if (targets.length === 0) return;
+    // Base config carries everything the per-variant overrides DON'T
+    // touch (signals, category weights, date range, max companies,
+    // selection mode, trials/seed, sector ETFs). `index_universe` +
+    // `grouping` are derived from the first variant when one was picked;
+    // that mirrors what the picker's universe / grouping columns set
+    // per variant when only one universe is selected.
+    const universeFromVariants = targets[0]?.universe ?? null;
+    const groupingFromVariants = targets[0]?.grouping ?? 'sector';
     momentumStore.set({ result: null, loadedRunId: null });
     return startVariantsBacktest(
       {
@@ -441,15 +642,15 @@ export default function MomentumBacktester() {
         max_companies: maxCompanies,
         min_price_score: minPriceScore.trim() === '' ? null : Number(minPriceScore),
         universe_label: null,
-        index_universe: selectedIndexUniverse || null,
-        grouping,
+        index_universe: universeFromVariants,
+        grouping: groupingFromVariants,
         selection_mode: selectionMode,
         random_seed: selectionMode === 'random' ? randomSeed : null,
         n_trials: selectionMode === 'random' ? Math.max(1, nTrials) : 1,
         sector_etfs: selectionMode === 'sector_etf' ? sectorEtfs : undefined,
         force_recompute: noCache,
       },
-      eligibleKeys,
+      targets,
     );
   };
 
@@ -496,35 +697,88 @@ export default function MomentumBacktester() {
   // completed-ok payloads land in the bundle. Loading later rehydrates the
   // sweep state so the detail views switch between variants exactly like
   // they did during the live sweep.
-  /** Auto-save default: "{universe} · {strategy} · {startYear}-{endYear}".
-   * Includes the four parameters that fully describe the experiment so a
-   * user scanning the dropdown can tell what they're looking at without
-   * loading anything. Two sweeps with identical config still produce the
-   * same default name — the user can rename via the saved-runs dropdown
-   * if they want to keep both. */
+  /** Auto-save default: "{universes} · {strategy}[ · price≥X] · {range} ·
+   * {N} vars [ · ({axis×k, ...})]". Includes:
+   *   - universe(s): all selected sweep universes joined with `+`, or the
+   *     base universe when the sweep axis is empty.
+   *   - strategy label: includes `+L/S` when long_short is also swept.
+   *   - variant count: omitted for single-variant runs.
+   *   - swept-axes annotation: every axis with >1 value shows as
+   *     `axis×k` (e.g. `freq×4, top×2`). Lets the user tell a "frequency
+   *     sweep" apart from a "top-N sweep" of identical variant count.
+   *
+   * Two sweeps with byte-identical config still produce the same default
+   * name — the user can rename via the saved-runs dropdown if they want
+   * to keep both. */
   const defaultVariantsBundleName = (): string => {
-    const universe = (selectedIndexUniverse || '').trim() || 'All companies';
+    // Universe(s): when the picker has explicit universe selections, list
+    // them (they're what ran). When empty, the base universe applies to
+    // every variant.
+    const uniList = Array.from(selectedUniverses);
+    const universe = uniList.length > 1
+      ? uniList.join('+')
+      : uniList.length === 1
+        ? uniList[0]
+        : ((selectedIndexUniverse || '').trim() || 'All companies');
+
+    // Strategy label: when multiple strategies were swept, list them
+    // ("Long+L/S") so it's obvious from the name. For random / all /
+    // sector_etf the strategy axis is N/A — the selection mode label
+    // wins.
+    const stratList = Array.from(selectedStrategies);
     const strategyLabel = selectionMode === 'random'
       ? 'Random'
       : selectionMode === 'all'
         ? 'All-universe'
         : selectionMode === 'sector_etf'
           ? 'Sector ETF'
-          : 'Momentum';
+          : stratList.length > 1
+            ? stratList.map((s) => s === 'long_short' ? 'L/S' : 'Long').join('+')
+            : 'Momentum';
+
     const startYear = startDate.slice(0, 4);
     const endYear = endDate.slice(0, 4);
     const range = startYear === endYear ? startYear : `${startYear}-${endYear}`;
     const trimmedFloor = minPriceScore.trim();
     const floorPart = trimmedFloor === '' ? '' : ` · price≥${trimmedFloor}`;
-    return `${universe} · ${strategyLabel}${floorPart} · ${range}`;
+
+    const n = variantsToRun.length;
+    const nPart = n > 1 ? ` · ${n} vars` : '';
+
+    // Compact swept-axes annotation: every axis with >1 selected value
+    // gets an `axis×k` entry. Helps distinguish e.g. an 8-variant freq
+    // sweep from an 8-variant top-N sweep — without this they'd produce
+    // identical names.
+    const sweptAxes: string[] = [];
+    if (selectedFreqs.size > 1) sweptAxes.push(`freq×${selectedFreqs.size}`);
+    if (stratList.length > 1 && selectionMode !== 'random' && selectionMode !== 'all' && selectionMode !== 'sector_etf') {
+      sweptAxes.push(`strat×${stratList.length}`);
+    }
+    if (uniList.length > 1) sweptAxes.push(`uni×${uniList.length}`);
+    if (selectedGroupings.size > 1) sweptAxes.push(`grp×${selectedGroupings.size}`);
+    const topList = parseNumList(topSectorsSweep);
+    if (topList.length > 1) sweptAxes.push(`top×${topList.length}`);
+    const perList = parseNumList(perSectorSweep);
+    if (perList.length > 1) sweptAxes.push(`per×${perList.length}`);
+    const minList = parseMinScoreList(minScoreSweep);
+    if (minList.length > 1) sweptAxes.push(`min×${minList.length}`);
+    const sweepPart = sweptAxes.length > 0 ? ` (${sweptAxes.join(', ')})` : '';
+
+    return `${universe} · ${strategyLabel}${floorPart} · ${range}${nPart}${sweepPart}`;
   };
 
   const saveVariantsBundle = async (overrideName?: string) => {
     const name = (overrideName ?? defaultVariantsBundleName()).trim();
     if (!name) return;
-    const okEntries = VARIANT_DEFS.flatMap((v) => {
-      const o = variants[v.key];
-      return o?.status === 'ok' ? [{ def: v, result: o.result }] : [];
+    // Iterate the live `variants` map rather than VARIANT_DEFS so
+    // cross-product keys (e.g. `monthly__long_only__s4__p6`) survive.
+    // The parsed `params` powers the per-entry `label` so the saved
+    // bundle reads naturally on reload no matter which axes overrode.
+    const okEntries = Object.entries(variants).flatMap(([key, o]) => {
+      if (o?.status !== 'ok') return [];
+      const params = parseVariantKey(key as VariantKey);
+      if (!params) return [];
+      return [{ key: key as VariantKey, params, result: o.result }];
     });
     if (okEntries.length === 0) return;
     setSaving(true);
@@ -553,22 +807,22 @@ export default function MomentumBacktester() {
             n_trials: selectionMode === 'random' ? Math.max(1, nTrials) : 1,
             sector_etfs: selectionMode === 'sector_etf' ? sectorEtfs : null,
           },
-          variants: okEntries.map(({ def, result: r }) => ({
-            key: def.key,
-            label: def.label,
-            frequency: def.frequency,
-            strategy: def.strategy,
+          variants: okEntries.map(({ key, params, result: r }) => ({
+            key,
+            label: variantLabel(params),
+            frequency: params.frequency,
+            strategy: params.strategy,
+            top_n_sectors: params.top_n_sectors,
+            top_n_per_sector: params.top_n_per_sector,
+            min_price_score: params.min_price_score,
             summary: r.summary,
-            // For All-universe runs, each PeriodRecord ships every name in
-            // the universe (~2900 holdings) — over 14 variants × 288
-            // periods this grows into a multi-GB JSONB and the insert
-            // trips Supabase's statement_timeout. Strip the holdings;
-            // dates + portfolio_return_pct + cumulative_return_pct still
-            // power the equity curve and summary table on reload, and
-            // "what was held" is "the whole universe" by definition.
-            monthly_records: selectionMode === 'all'
-              ? r.monthly_records.map((rec) => ({ ...rec, holdings: [] }))
-              : r.monthly_records,
+            // Strip per-period `holdings` for EVERY cross-product bundle
+            // (not just selection_mode='all'). A 5-axis sweep can easily
+            // produce 50+ variants × 288 periods; even at 30 holdings
+            // per period that's 432k holding rows per bundle and trips
+            // Supabase's statement_timeout on save. The user can drill
+            // into any single variant by re-running it standalone.
+            monthly_records: r.monthly_records.map((rec) => ({ ...rec, holdings: [] })),
             // Keep the daily equity curve so the chart line, intra-period
             // max-DD overlays, and the √252 Sharpe recompute survive reload.
             // The backend compacts these into a `{dates, returns}`
@@ -656,6 +910,8 @@ export default function MomentumBacktester() {
       if (saved.kind === 'variants' && Array.isArray(saved.variants)) {
         const next: Partial<Record<VariantKey, VariantOutcome>> = {};
         let firstKey: VariantKey | null = null;
+        const savedKeys = new Set<VariantKey>();
+        const paramsList: VariantParams[] = [];
         for (const v of saved.variants) {
           const key = v?.key as VariantKey | undefined;
           if (!key) continue;
@@ -668,7 +924,118 @@ export default function MomentumBacktester() {
             },
           };
           if (firstKey == null) firstKey = key;
+          savedKeys.add(key);
+          const p = parseVariantKey(key);
+          if (p) paramsList.push(p);
         }
+
+        // ── Restore the picker state so a re-run produces the same
+        //    set of variants. Without this, the user loads a saved
+        //    bundle of 32 variants but the picker still points at
+        //    whatever axes were selected before — hitting "Run
+        //    variants" then yields a completely different sweep.
+        //
+        //    Logic per axis:
+        //      - frequency / strategy: every variant carries these,
+        //        collect the distinct values into the multi-select.
+        //      - universe / grouping: collect distinct values when
+        //        any variant overrode the axis; otherwise leave the
+        //        current selection alone (legacy 2-segment bundles
+        //        inherit from the base config which we already set
+        //        above).
+        //      - top_n_sectors / top_n_per_sector / min_price_score:
+        //        collect distinct override values across variants
+        //        and write them as a comma-joined string into the
+        //        sweep text input. Variants that inherited (no
+        //        override) contribute nothing to the text input —
+        //        the result is an exact axis representation when all
+        //        variants either all-overrode or all-inherited that
+        //        axis, and a lossy "use the override values, ignore
+        //        the inheritors" when mixed (rare).
+        //      - disabledPerms: when the picker's cross-product
+        //        would produce permutations the saved bundle DOESN'T
+        //        include (e.g. the user originally disabled some
+        //        rows in the permutations preview), reconstruct
+        //        those marks so a re-run produces exactly the saved
+        //        set, not a superset.
+        if (paramsList.length > 0) {
+          const freqs = new Set<RebalanceFrequency>(paramsList.map((p) => p.frequency));
+          const strats = new Set<StrategyType>(paramsList.map((p) => p.strategy));
+          const universes = new Set<string>(
+            paramsList.map((p) => p.universe).filter((u): u is string => u != null),
+          );
+          const groupings = new Set<'sector' | 'industry'>(
+            paramsList.map((p) => p.grouping).filter((g): g is 'sector' | 'industry' => g != null),
+          );
+
+          const distinctNums = (k: 'top_n_sectors' | 'top_n_per_sector'): number[] => {
+            const out = new Set<number>();
+            for (const p of paramsList) {
+              const v = p[k];
+              if (v != null) out.add(v);
+            }
+            return Array.from(out).sort((a, b) => a - b);
+          };
+          const distinctMins = (): (number | null)[] => {
+            const seen = new Set<string>();
+            const out: (number | null)[] = [];
+            for (const p of paramsList) {
+              const v = p.min_price_score;
+              if (v === undefined) continue;
+              const tok = v === null ? 'off' : String(v);
+              if (!seen.has(tok)) {
+                seen.add(tok);
+                out.push(v);
+              }
+            }
+            return out;
+          };
+
+          const topList = distinctNums('top_n_sectors');
+          const perList = distinctNums('top_n_per_sector');
+          const minList = distinctMins();
+
+          setSelectedFreqs(freqs);
+          setSelectedStrategies(strats);
+          if (universes.size > 0) setSelectedUniverses(universes);
+          if (groupings.size > 0) setSelectedGroupings(groupings);
+          setTopSectorsSweep(topList.join(','));
+          setPerSectorSweep(perList.join(','));
+          setMinScoreSweep(minList.map((v) => (v === null ? 'off' : String(v))).join(','));
+
+          // Reconstruct the cross-product the picker WOULD generate
+          // from those axes, then mark every permutation that isn't
+          // in the saved set as user-disabled. Mirrors the same
+          // algorithm as the `allPermutations` memo so a round-trip
+          // produces the same cross-product.
+          const topAxis: (number | undefined)[] = topList.length === 0 ? [undefined] : topList;
+          const perAxis: (number | undefined)[] = perList.length === 0 ? [undefined] : perList;
+          const minAxis: (number | null | undefined)[] = minList.length === 0 ? [undefined] : minList;
+          const uniAxis: (string | undefined)[] = universes.size === 0 ? [undefined] : Array.from(universes);
+          const grpAxis: ('sector' | 'industry' | undefined)[] =
+            groupings.size === 0 ? [undefined] : Array.from(groupings);
+          const disabled = new Set<VariantKey>();
+          for (const def of VARIANT_DEFS) {
+            if (!freqs.has(def.frequency)) continue;
+            if (!strats.has(def.strategy)) continue;
+            for (const t of topAxis) for (const p of perAxis) for (const m of minAxis)
+            for (const u of uniAxis) for (const g of grpAxis) {
+              const candidate: VariantParams = {
+                frequency: def.frequency,
+                strategy: def.strategy,
+                ...(t !== undefined ? { top_n_sectors: t } : {}),
+                ...(p !== undefined ? { top_n_per_sector: p } : {}),
+                ...(m !== undefined ? { min_price_score: m } : {}),
+                ...(u !== undefined ? { universe: u } : {}),
+                ...(g !== undefined ? { grouping: g } : {}),
+              };
+              const k = makeVariantKey(candidate);
+              if (!savedKeys.has(k)) disabled.add(k);
+            }
+          }
+          setDisabledPerms(disabled);
+        }
+
         momentumStore.set({
           result: null,
           variants: next,
@@ -757,17 +1124,19 @@ export default function MomentumBacktester() {
     }
   };
 
-  /** Bulk-delete handlers fire all DELETE requests in parallel. Confirm
-   * once up front; on completion clear the selection and close the
-   * dropdown so the post-delete state is visually obvious. */
-  const bulkDeleteRuns = async () => {
-    const ids = Array.from(selectedRunIds);
+  /** Bulk-delete handler fires all DELETE requests in parallel. The
+   * dropdown component owns selection state and passes the selected
+   * `ids` in; we confirm once up front, fire in parallel, then prune the
+   * list + clear `loadedRunId` if the active run was caught in the
+   * delete. */
+  const bulkDeleteRuns = async (ids: number[]) => {
     if (ids.length === 0) return;
     const ok = await dialog.confirm(
       `Delete ${ids.length} saved backtest${ids.length === 1 ? '' : 's'}?`,
       { destructive: true, confirmLabel: `Delete ${ids.length}` },
     );
     if (!ok) return;
+    const idSet = new Set(ids);
     setBulkDeletingRuns(true);
     try {
       await Promise.all(
@@ -775,11 +1144,10 @@ export default function MomentumBacktester() {
           apiFetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' }).catch(() => {})
         ),
       );
-      setSavedRuns((prev) => prev.filter((r) => !selectedRunIds.has(r.run_id)));
-      if (loadedRunId != null && selectedRunIds.has(loadedRunId)) {
+      setSavedRuns((prev) => prev.filter((r) => !idSet.has(r.run_id)));
+      if (loadedRunId != null && idSet.has(loadedRunId)) {
         momentumStore.set({ loadedRunId: null });
       }
-      setSelectedRunIds(new Set());
     } finally {
       setBulkDeletingRuns(false);
     }
@@ -805,13 +1173,6 @@ export default function MomentumBacktester() {
     }
   };
 
-  const toggleRunSelected = (runId: number) => {
-    setSelectedRunIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(runId)) next.delete(runId); else next.add(runId);
-      return next;
-    });
-  };
   const toggleSnapshotSelected = (snapshotId: number) => {
     setSelectedSnapshotIds((prev) => {
       const next = new Set(prev);
@@ -843,14 +1204,22 @@ export default function MomentumBacktester() {
       return;
     }
     if (saving) return;
-    const okEntries = VARIANT_DEFS.filter((v) => variants[v.key]?.status === 'ok');
-    const errEntries = VARIANT_DEFS.filter((v) => variants[v.key]?.status === 'error');
-    if (okEntries.length === 0) {
+    // Iterate `variants` directly so cross-product keys (e.g.
+    // `monthly__long_only__s4__p6`) are counted alongside legacy
+    // 2-segment ones. Splitting okKeys/errKeys lets the warn log spell
+    // out which variants the auto-save bailed on.
+    const okKeys: string[] = [];
+    const errKeys: string[] = [];
+    for (const [k, o] of Object.entries(variants)) {
+      if (o?.status === 'ok') okKeys.push(k);
+      else if (o?.status === 'error') errKeys.push(k);
+    }
+    if (okKeys.length === 0) {
       console.warn('[momentum] auto-save skipped: 0 successful variants', {
         attempted: Object.keys(variants).length,
         ok: 0,
-        errored: errEntries.length,
-        errors: errEntries.map((v) => ({ key: v.key, msg: (variants[v.key] as { message?: string })?.message })),
+        errored: errKeys.length,
+        errors: errKeys.map((k) => ({ key: k, msg: (variants[k as VariantKey] as { message?: string })?.message })),
       });
       lastAutoSavedRunStartedAtRef.current = runStartedAt;
       return;
@@ -1028,130 +1397,19 @@ export default function MomentumBacktester() {
           </div>
           );
         })()}
-        {(() => {
-          const runsEmpty = !savedRunsLoading && savedRuns.length === 0;
-          const runsLabel = savedRunsLoading
-            ? <LoadingDots label="Loading saved backtests" />
-            : runsEmpty
-              ? 'No saved backtests yet'
-              : (loadedRunId
-                  ? savedRuns.find((r) => r.run_id === loadedRunId)?.name ?? 'Load saved backtest...'
-                  : 'Load saved backtest...');
-          return (
-          <div className="relative" ref={savedDropdownRef}>
-            <button
-              type="button"
-              onClick={() => { if (!savedRunsLoading && !runsEmpty) setSavedDropdownOpen((o) => !o); }}
-              disabled={savedRunsLoading || runsEmpty}
-              className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white flex items-center gap-2 hover:border-indigo-500 focus:outline-none focus:border-indigo-500 transition-colors min-w-[220px] disabled:opacity-70 disabled:cursor-default disabled:hover:border-gray-700"
-            >
-              {(savedRunsLoading || loadingRunId != null) && <Spinner />}
-              <span className="truncate">{runsLabel}</span>
-              <svg className={`w-3.5 h-3.5 text-gray-500 ml-auto transition-transform ${savedDropdownOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
-              </svg>
-            </button>
-            {savedDropdownOpen && (
-              <div className="absolute right-0 mt-1 w-max min-w-[280px] max-w-[90vw] bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-96 overflow-auto">
-                {selectedRunIds.size > 0 && (
-                  <div className="sticky top-0 z-10 bg-[#1a1d27] border-b border-gray-700 px-3 py-2 flex items-center justify-between gap-2">
-                    <span className="text-xs text-gray-300">
-                      {selectedRunIds.size} selected
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedRunIds(new Set())}
-                        className="text-[11px] text-gray-500 hover:text-gray-300 px-2 py-1 rounded transition-colors"
-                      >
-                        clear
-                      </button>
-                      <button
-                        type="button"
-                        onClick={bulkDeleteRuns}
-                        disabled={bulkDeletingRuns}
-                        className="text-[11px] font-medium px-2 py-1 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 hover:bg-rose-500/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
-                      >
-                        {bulkDeletingRuns && <Spinner size={12} />}
-                        Delete {selectedRunIds.size}
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {savedRuns.map((r) => {
-                  const isActive = r.run_id === loadedRunId;
-                  const isLoadingThis = loadingRunId === r.run_id;
-                  const isDeletingThis = deletingRunId === r.run_id;
-                  const isRenamingThis = renamingRunId === r.run_id;
-                  const isSelected = selectedRunIds.has(r.run_id);
-                  return (
-                    <div
-                      key={r.run_id}
-                      className={`group flex items-center gap-2 px-3 py-2 border-b border-gray-800/40 last:border-b-0 hover:bg-white/[0.03] transition-colors ${isActive ? 'bg-indigo-500/10' : ''} ${isSelected ? 'bg-rose-500/[0.06]' : ''}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={(e) => { e.stopPropagation(); toggleRunSelected(r.run_id); }}
-                        onClick={(e) => e.stopPropagation()}
-                        className="accent-indigo-500 w-3.5 h-3.5 shrink-0 cursor-pointer"
-                        title="Select for bulk delete"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => { loadBacktest(r.run_id); setSavedDropdownOpen(false); }}
-                        disabled={isLoadingThis || isDeletingThis}
-                        className="flex-1 text-left disabled:opacity-60"
-                      >
-                        <div className={`text-sm flex items-center gap-1.5 whitespace-nowrap ${isActive ? 'text-indigo-300' : 'text-gray-200'}`}>
-                          {isLoadingThis && <Spinner />}
-                          <span>{r.name}</span>
-                        </div>
-                        <div className="text-[10px] text-gray-500 font-mono">{new Date(r.created_at).toLocaleDateString()}</div>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); renameBacktest(r.run_id, r.name); }}
-                        disabled={isRenamingThis || isDeletingThis}
-                        className="p-1.5 rounded text-gray-500 hover:text-indigo-400 hover:bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-100 disabled:cursor-wait"
-                        title="Rename"
-                      >
-                        {isRenamingThis ? (
-                          <Spinner size={14} />
-                        ) : (
-                          <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                            <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-                          </svg>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          if (await dialog.confirm(`Delete "${r.name}"?`, { destructive: true, confirmLabel: 'Delete' })) {
-                            deleteBacktest(r.run_id);
-                          }
-                        }}
-                        disabled={isDeletingThis || isRenamingThis}
-                        className="p-1.5 rounded text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-100 disabled:cursor-wait"
-                        title="Delete"
-                      >
-                        {isDeletingThis ? (
-                          <Spinner size={14} />
-                        ) : (
-                          <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                          </svg>
-                        )}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-          );
-        })()}
+        <SavedRunsDropdown
+          savedRuns={savedRuns}
+          loading={savedRunsLoading}
+          loadedRunId={loadedRunId}
+          loadingRunId={loadingRunId}
+          deletingRunId={deletingRunId}
+          renamingRunId={renamingRunId}
+          bulkDeleting={bulkDeletingRuns}
+          onLoad={loadBacktest}
+          onDelete={deleteBacktest}
+          onRename={renameBacktest}
+          onBulkDelete={bulkDeleteRuns}
+        />
         </div>
       </div>
 
@@ -1159,50 +1417,25 @@ export default function MomentumBacktester() {
         {/* Config Panel */}
         <div className="bg-[#151821] rounded-xl border border-gray-800/40 p-5">
           <div className="flex flex-wrap items-end gap-5 mb-5">
-            {/* Universe Label */}
-            <div>
-              <label className="text-gray-500 text-xs mb-1 flex items-center gap-2">
-                <span>Universe</span>
-                {universesLoading && (
-                  <span className="flex items-center gap-1.5 text-indigo-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-                    <span className="text-[10px]">loading stats from DB… {universesElapsed}s</span>
-                  </span>
-                )}
-                {!universesLoading && !universesError && indexUniverses.length > 0 && (
-                  <span className="text-[10px] text-gray-600">{indexUniverses.length} loaded</span>
-                )}
-                {universesError && (
-                  <span className="text-[10px] text-rose-400">failed: {universesError}</span>
-                )}
-              </label>
-              <select
-                value={universeDropdownValue}
-                onChange={(e) => handleUniverseChange(e.target.value)}
-                disabled={universesLoading}
-                className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none disabled:opacity-60 disabled:cursor-wait"
-              >
-                {universesLoading ? (
-                  <option value="">Loading universes… ({universesElapsed}s)</option>
-                ) : (
-                  <>
-                    <option value="">All companies</option>
-                    {indexUniverses.map(i => (
-                      <option key={i.index_name} value={i.index_name}>
-                        {i.display_label}{i.start_month && i.end_month ? ` (${i.start_month.slice(0, 7)} – ${i.end_month.slice(0, 7)}, ${i.total_unique_tickers} tickers)` : ' (not yet populated)'}
-                      </option>
-                    ))}
-                  </>
-                )}
-              </select>
-            </div>
-            {/* Date Range */}
+            {/* Universe is now picked per-variant in the Variants panel
+                below — no top-level dropdown. The first selected variant
+                drives the base config's `index_universe` for cache
+                identity (see runVariantsBacktest). */}
+            {/* Date Range — min/max bound the typeable year to 4 digits.
+                Browsers accept "202604" or "999999" in a <input
+                type="month"> without these constraints, which then
+                breaks the backend's YYYY-MM-01 parse. 1998 matches the
+                price-data cutoff in backend/ingest/prices.py
+                (_PRICE_CUTOFF); upper bound is one year past today so
+                the picker still allows scheduling forward. */}
             <div>
               <label className="text-gray-500 text-xs block mb-1">Start</label>
               <input
                 type="month"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
+                min="1998-01"
+                max={`${currentYear + 1}-12`}
                 className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
               />
             </div>
@@ -1212,6 +1445,8 @@ export default function MomentumBacktester() {
                 type="month"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
+                min="1998-01"
+                max={`${currentYear + 1}-12`}
                 className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
               />
             </div>
@@ -1270,94 +1505,24 @@ export default function MomentumBacktester() {
                 "Strategy parameters" section below — same place as the
                 momentum signal/category weights — so the inline config
                 row only has to carry universe-level inputs. */}
-            {(() => {
-              const longShortBlocked = selectionMode === 'random' || selectionMode === 'all' || selectionMode === 'sector_etf';
-              const eligibleCount = VARIANT_DEFS
-                .filter((v) => selectedVariantKeys.has(v.key))
-                .filter((v) => !longShortBlocked || v.strategy !== 'long_short')
-                .length;
-              return (
-                <div className="relative inline-flex" ref={variantsPickerRef}>
-                  <button
-                    onClick={runVariantsBacktest}
-                    disabled={running || variantsRunning || eligibleCount === 0}
-                    className="px-5 py-2 rounded-l-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    title={
-                      eligibleCount === 0
-                        ? longShortBlocked
-                          ? `${selectionMode === 'all' ? 'All-universe' : 'Random'} mode supports long-only variants only — pick at least one`
-                          : 'Select at least one variant to run'
-                        : `Run ${eligibleCount} selected variant${eligibleCount === 1 ? '' : 's'} and compare them in one table`
-                    }
-                  >
-                    {variantsRunning
-                      ? `Running variants ${variantsRun?.completed ?? 0}/${variantsRun?.total ?? 0}…`
-                      : `Run variants (${eligibleCount})`}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setVariantsPickerOpen((o) => !o)}
-                    disabled={running || variantsRunning}
-                    className="px-2 py-2 rounded-r-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Choose which variants to include in the sweep"
-                    aria-label="Choose variants"
-                  >
-                    <svg className={`w-3.5 h-3.5 transition-transform ${variantsPickerOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
-                    </svg>
-                  </button>
-                  {variantsPickerOpen && (
-                    <div className="absolute top-full left-0 mt-1 w-72 bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-medium text-gray-300">Variants to run</span>
-                        <div className="flex items-center gap-2 text-[11px]">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedVariantKeys(new Set(VARIANT_DEFS.map((v) => v.key)))}
-                            className="text-indigo-400 hover:text-indigo-300"
-                          >
-                            All
-                          </button>
-                          <span className="text-gray-700">·</span>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedVariantKeys(new Set())}
-                            className="text-gray-400 hover:text-gray-200"
-                          >
-                            None
-                          </button>
-                        </div>
-                      </div>
-                      {(selectionMode === 'random' || selectionMode === 'all' || selectionMode === 'sector_etf') && (
-                        <div className="mb-2 px-2 py-1.5 text-[10px] text-amber-300/80 bg-amber-500/5 border border-amber-500/20 rounded">
-                          Long-short is disabled in {selectionMode === 'all' ? 'all-universe' : 'random'} mode (no top/bottom split to short on).
-                        </div>
-                      )}
-                      <ul className="space-y-1 max-h-72 overflow-auto">
-                        {VARIANT_DEFS.map((v) => {
-                          const checked = selectedVariantKeys.has(v.key);
-                          const disabled = (selectionMode === 'random' || selectionMode === 'all' || selectionMode === 'sector_etf') && v.strategy === 'long_short';
-                          return (
-                            <li key={v.key}>
-                              <label className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs ${disabled ? 'text-gray-600 cursor-not-allowed' : 'text-gray-300 hover:bg-white/5 cursor-pointer'}`}>
-                                <input
-                                  type="checkbox"
-                                  checked={checked && !disabled}
-                                  disabled={disabled}
-                                  onChange={() => toggleVariantKey(v.key)}
-                                  className="accent-indigo-500 w-3.5 h-3.5 cursor-pointer disabled:cursor-not-allowed"
-                                />
-                                <span>{v.label}</span>
-                              </label>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
+            <button
+              onClick={runVariantsBacktest}
+              disabled={running || variantsRunning || eligibleCount === 0 || variantsBlockReason != null}
+              className="px-5 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title={
+                variantsBlockReason
+                  ? variantsBlockReason
+                  : eligibleCount === 0
+                    ? longShortBlocked
+                      ? `${selectionMode === 'all' ? 'All-universe' : selectionMode === 'sector_etf' ? 'Sector-ETF' : 'Random'} mode supports long-only variants only — adjust the Strategy axis below`
+                      : 'Pick at least one permutation in the Variants panel below'
+                    : `Run ${eligibleCount} permutation${eligibleCount === 1 ? '' : 's'} and compare them in one table`
+              }
+            >
+              {variantsRunning
+                ? `Running variants ${variantsRun?.completed ?? 0}/${variantsRun?.total ?? 0}…`
+                : `Run variants (${eligibleCount})`}
+            </button>
             <button
               onClick={showCurrentPicks}
               disabled={running || selectionMode === 'random'}
@@ -1402,6 +1567,269 @@ export default function MomentumBacktester() {
             )}
           </div>
 
+          {/* ─── Variants (cross-product sweep) ─────────────────────
+              The Run-variants button above fans the base config out
+              across every permutation enabled here. Each axis is a
+              dimension of the cross-product:
+                Frequency        — rebalance cadence per variant
+                Strategy         — long-only / long-short per variant
+                Universe         — which universe each variant runs in
+                Grouping         — bucket by sector or industry per variant
+                Top sectors      — comma list ("3,4,5") or blank
+                Per sector       — comma list or blank
+                Min price score  — comma list, or "none"/"off" tokens
+              Empty numeric axes inherit the (now-hidden) base values
+              for topSectors/topPerSector/min_price_score — same legacy
+              defaults that single-permutation sweeps used to use. */}
+          <div className="border-t border-gray-800/60 pt-4 mb-4">
+            <div className="flex items-baseline gap-3 mb-3">
+              <h2 className="text-gray-300 text-xs font-semibold uppercase tracking-wider">
+                Variants
+              </h2>
+              <span className="text-[10px] text-gray-500">
+                Cross-product of the axes below — each permutation runs once and shows up in the variants table
+              </span>
+            </div>
+
+            {variantsBlockReason && (
+              <div className="mb-3 px-3 py-2 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg">
+                {variantsBlockReason}
+              </div>
+            )}
+
+            {/* Sweep-axes row: three comma-separated text inputs. Empty
+                means "inherit base, don't sweep". For min_price_score
+                the literal `none` / `off` becomes a null token. */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+              <div>
+                <label className="text-gray-500 text-xs block mb-1">
+                  Top {Array.from(selectedGroupings)[0] === 'industry' ? 'industries' : 'sectors'}{' '}
+                  <span className="text-gray-600 text-[10px]">(comma list, blank = inherit)</span>
+                </label>
+                <input
+                  type="text"
+                  value={topSectorsSweep}
+                  onChange={(e) => setTopSectorsSweep(e.target.value)}
+                  placeholder={`e.g. 3,4,5  (blank = ${topSectors})`}
+                  className="w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-gray-500 text-xs block mb-1">
+                  Per {Array.from(selectedGroupings)[0] === 'industry' ? 'industry' : 'sector'}{' '}
+                  <span className="text-gray-600 text-[10px]">(comma list, blank = inherit)</span>
+                </label>
+                <input
+                  type="text"
+                  value={perSectorSweep}
+                  onChange={(e) => setPerSectorSweep(e.target.value)}
+                  placeholder={`e.g. 4,6,8  (blank = ${topPerSector})`}
+                  className="w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-gray-500 text-xs block mb-1">
+                  Min price score{' '}
+                  <span className="text-gray-600 text-[10px]">(comma list; &quot;none&quot;/&quot;off&quot; = disabled)</span>
+                </label>
+                <input
+                  type="text"
+                  value={minScoreSweep}
+                  onChange={(e) => setMinScoreSweep(e.target.value)}
+                  placeholder={`e.g. 20,30,off  (blank = ${minPriceScore.trim() || 'off'})`}
+                  className="w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                />
+              </div>
+            </div>
+
+            {longShortBlocked && (
+              <div className="mb-3 px-3 py-2 text-[11px] text-amber-300/80 bg-amber-500/5 border border-amber-500/20 rounded-lg">
+                Long-short is disabled in {selectionMode === 'all' ? 'all-universe' : selectionMode === 'sector_etf' ? 'sector-ETF' : 'random'} mode (no top/bottom split to short on). Long-short rows below are greyed out.
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+              <AxisColumn
+                label="Frequency"
+                options={ALL_FREQS}
+                selected={selectedFreqs}
+                onAll={() => setSelectedFreqs(new Set(ALL_FREQS))}
+                onNone={() => setSelectedFreqs(new Set())}
+                renderItem={(freq) => {
+                  const checked = selectedFreqs.has(freq);
+                  return (
+                    <label key={freq} className="flex items-center gap-2 px-2 py-1 rounded text-xs text-gray-300 hover:bg-white/5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleInSet(setSelectedFreqs, freq)}
+                        className="accent-indigo-500 w-3.5 h-3.5 cursor-pointer"
+                      />
+                      <span>{freq}</span>
+                    </label>
+                  );
+                }}
+                maxHClass="max-h-56"
+              />
+              <AxisColumn
+                label="Strategy"
+                options={ALL_STRATEGIES}
+                selected={selectedStrategies}
+                onAll={() => setSelectedStrategies(new Set(ALL_STRATEGIES))}
+                onNone={() => setSelectedStrategies(new Set())}
+                renderItem={(strat) => {
+                  const checked = selectedStrategies.has(strat);
+                  const blocked = strat === 'long_short' && longShortBlocked;
+                  return (
+                    <label
+                      key={strat}
+                      className={`flex items-center gap-2 px-2 py-1 rounded text-xs ${
+                        blocked ? 'text-gray-600 cursor-not-allowed' : 'text-gray-300 hover:bg-white/5 cursor-pointer'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked && !blocked}
+                        disabled={blocked}
+                        onChange={() => toggleInSet(setSelectedStrategies, strat)}
+                        className="accent-indigo-500 w-3.5 h-3.5 cursor-pointer disabled:cursor-not-allowed"
+                      />
+                      <span>{strat}</span>
+                    </label>
+                  );
+                }}
+                maxHClass="max-h-32"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+              <AxisColumn
+                label="Universe"
+                options={indexUniverses.map((i) => i.index_name)}
+                selected={selectedUniverses}
+                onAll={() => setSelectedUniverses(new Set(indexUniverses.map((i) => i.index_name)))}
+                onNone={() => setSelectedUniverses(new Set())}
+                renderItem={(uni) => {
+                  const checked = selectedUniverses.has(uni);
+                  const entry = indexUniverses.find((i) => i.index_name === uni);
+                  return (
+                    <label key={uni} className="flex items-center gap-2 px-2 py-1 rounded text-xs text-gray-300 hover:bg-white/5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleInSet(setSelectedUniverses, uni)}
+                        className="accent-indigo-500 w-3.5 h-3.5 cursor-pointer"
+                      />
+                      <span className="truncate">
+                        {entry?.display_label ?? uni}
+                        {entry?.total_unique_tickers != null && (
+                          <span className="text-gray-600 ml-1">({entry.total_unique_tickers})</span>
+                        )}
+                      </span>
+                    </label>
+                  );
+                }}
+                maxHClass="max-h-56"
+              />
+              <AxisColumn
+                label="Grouping"
+                options={['sector', 'industry'] as const}
+                selected={selectedGroupings}
+                onAll={() => setSelectedGroupings(new Set<'sector' | 'industry'>(['sector', 'industry']))}
+                onNone={() => setSelectedGroupings(new Set<'sector' | 'industry'>())}
+                renderItem={(grp) => {
+                  const checked = selectedGroupings.has(grp);
+                  // Industry only has data on LEONTEQ / ACWI_LEONTEQ — let
+                  // the user pick it anyway, but warn so they don't get
+                  // a silently empty result when paired with another
+                  // universe.
+                  const hint = grp === 'industry'
+                    ? 'Only LEONTEQ / ACWI_LEONTEQ carry industry data — pairing with another universe will produce a backend error.'
+                    : 'Group picks by universe sector tag (every universe has this).';
+                  return (
+                    <label key={grp} className="flex items-center gap-2 px-2 py-1 rounded text-xs text-gray-300 hover:bg-white/5 cursor-pointer" title={hint}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleInSet(setSelectedGroupings, grp)}
+                        className="accent-indigo-500 w-3.5 h-3.5 cursor-pointer"
+                      />
+                      <span>{grp}</span>
+                    </label>
+                  );
+                }}
+                maxHClass="max-h-32"
+              />
+            </div>
+
+            {/* Permutations preview — every cross-product permutation
+                with a per-row enable checkbox. The count chip turns
+                amber once `eligibleCount` crosses LARGE_VARIANTS_THRESHOLD
+                so wall-time costs are visible before the user hits run. */}
+            <div className="border border-gray-800/60 rounded-lg overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-2 bg-[#0f1117] border-b border-gray-800/40">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-400">Permutations</span>
+                  <span
+                    className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                      eligibleCount > LARGE_VARIANTS_THRESHOLD
+                        ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                        : 'bg-gray-700/40 text-gray-300 border border-gray-700/40'
+                    }`}
+                    title={
+                      eligibleCount > LARGE_VARIANTS_THRESHOLD
+                        ? `${eligibleCount} permutations will run sequentially — this may take a while`
+                        : ''
+                    }
+                  >
+                    {eligibleCount} eligible / {totalPerms} total
+                  </span>
+                </div>
+                {totalPerms > eligibleCount && (
+                  <button
+                    type="button"
+                    onClick={() => setDisabledPerms(new Set())}
+                    className="text-[11px] text-indigo-400 hover:text-indigo-300"
+                  >
+                    Enable all
+                  </button>
+                )}
+              </div>
+              <ul className="max-h-72 overflow-auto p-1">
+                {allPermutations.length === 0 ? (
+                  <li className="px-3 py-2 text-xs text-gray-600">
+                    Pick at least one frequency, strategy, universe, and grouping above to generate permutations.
+                  </li>
+                ) : (
+                  allPermutations.map((p) => {
+                    const key = makeVariantKey(p);
+                    const userDisabled = disabledPerms.has(key);
+                    const modeDisabled = longShortBlocked && p.strategy === 'long_short';
+                    const enabled = !userDisabled && !modeDisabled;
+                    return (
+                      <li key={key}>
+                        <label
+                          className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs ${
+                            modeDisabled ? 'text-gray-600 cursor-not-allowed' : 'text-gray-300 hover:bg-white/5 cursor-pointer'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={enabled}
+                            disabled={modeDisabled}
+                            onChange={() => togglePermDisabled(key)}
+                            className="accent-indigo-500 w-3.5 h-3.5 cursor-pointer disabled:cursor-not-allowed"
+                          />
+                          <span className="truncate">{variantLabel(p)}</span>
+                        </label>
+                      </li>
+                    );
+                  })
+                )}
+              </ul>
+            </div>
+          </div>
+
           {/* Strategy parameters — content swaps based on the selected
               strategy. Momentum shows the price/volume signal weights
               and category weights; Random shows only the Trials and
@@ -1425,100 +1853,12 @@ export default function MomentumBacktester() {
               </span>
             </div>
 
-            {/* Selection-size + filter inputs. Conditionally rendered
-                per strategy: top-N sectors applies to momentum / random
-                / sector_etf; per-sector pick count applies to momentum
-                + random only; min price score is momentum-specific.
-                "All universe" hides this whole row (it holds every
-                eligible name regardless). */}
-            {selectionMode !== 'all' && (
-              <div className="flex flex-wrap items-end gap-6 mb-5 pb-5 border-b border-gray-800/40">
-                <div>
-                  <label className="text-gray-500 text-xs block mb-1">
-                    Top {grouping === 'industry' ? 'Industries' : 'Sectors'}
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={topSectors}
-                    onChange={(e) => setTopSectors(Number(e.target.value))}
-                    className="w-16 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-                    title={`How many ${grouping === 'industry' ? 'industries' : 'sectors'} to pick per rebalance, ranked by aggregate score (or randomly in random mode).`}
-                  />
-                </div>
-                {selectionMode !== 'sector_etf' && (
-                  <div>
-                    <label className="text-gray-500 text-xs block mb-1">
-                      Per {grouping === 'industry' ? 'Industry' : 'Sector'}
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={20}
-                      value={topPerSector}
-                      onChange={(e) => setTopPerSector(Number(e.target.value))}
-                      className="w-16 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-                      title={`Per picked ${grouping === 'industry' ? 'industry' : 'sector'}, how many top-ranked companies to hold (or random sample for random mode).`}
-                    />
-                  </div>
-                )}
-                {/* Group-by toggle: disabled when the selected universe
-                    doesn't carry industry data (only LEONTEQ + ACWI_LEONTEQ
-                    do). When disabled it visually pins to 'sector' and the
-                    tooltip explains why so the user knows it's not broken. */}
-                <div>
-                  <label className="text-gray-500 text-xs block mb-1">Group By</label>
-                  <div className="inline-flex bg-[#0f1117] border border-gray-700 rounded-lg overflow-hidden">
-                    {(['sector', 'industry'] as const).map((opt) => {
-                      const active = grouping === opt;
-                      const disabled = opt === 'industry' && !groupingAllowed;
-                      return (
-                        <button
-                          key={opt}
-                          type="button"
-                          disabled={disabled}
-                          onClick={() => setGrouping(opt)}
-                          className={`px-3 py-2 text-xs font-medium transition-colors ${
-                            active
-                              ? 'bg-indigo-600 text-white'
-                              : disabled
-                                ? 'text-gray-600 cursor-not-allowed'
-                                : 'text-gray-300 hover:bg-white/5'
-                          }`}
-                          title={
-                            disabled
-                              ? 'Industry grouping is only available for Leonteq universes (LEONTEQ, ACWI_LEONTEQ)'
-                              : opt === 'industry'
-                                ? 'Bucket picks by Leonteq industry (finer than sector)'
-                                : 'Bucket picks by universe sector tag'
-                          }
-                        >
-                          {opt === 'industry' ? 'Industry' : 'Sector'}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                {selectionMode === 'momentum' && (
-                  <div>
-                    <label className="text-gray-500 text-xs block mb-1">Min Price Score</label>
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      step={1}
-                      placeholder="off"
-                      value={minPriceScore}
-                      onChange={(e) => setMinPriceScore(e.target.value)}
-                      className="w-20 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-                      title="Optional 0-100 floor on each candidate's price-category score. Only companies whose score_price strictly exceeds this value are eligible for the long bucket. Empty = no filter. Common default: 30."
-                    />
-                    <span className="text-gray-600 text-xs ml-1">{minPriceScore.trim() === '' ? 'off' : '>'}</span>
-                  </div>
-                )}
-              </div>
-            )}
+            {/* Top Sectors / Per Sector / Group By / Min Price Score
+                are now per-variant axes in the Variants panel below.
+                Leave the dials empty there to inherit the base values
+                (topSectors=4, topPerSector=6, grouping='sector',
+                min_price_score=off) — comma-separate two or more values
+                to sweep across them. */}
 
             {selectionMode === 'momentum' && (
               <div className="space-y-4">
@@ -1929,6 +2269,13 @@ export default function MomentumBacktester() {
             views below. Hidden entirely when no sweep has run. */}
         {hasVariants && <VariantSummaryTable exchangeByCompany={exchangeByCompany} />}
 
+        {/* Variant attribution — per-axis marginal averages so the user
+            can see at a glance which axis values consistently produce
+            better metrics. Self-hides when fewer than 2 successful
+            variants are available (or when no axis has 2+ distinct
+            values, i.e. nothing to compare). */}
+        {hasVariants && <VariantAttribution />}
+
         {/* Results — either the single-run `result` or, when a variant is
             active, that variant's BacktestResult. The detail components
             don't care which path the data came from. */}
@@ -1945,11 +2292,18 @@ export default function MomentumBacktester() {
             ? savedRuns.find((r) => r.run_id === loadedRunId)?.name
             : undefined;
           const labelBase = baseName ?? defaultVariantsBundleName();
-          const variantLabel = activeVariantKey
-            ? VARIANT_DEFS.find((v) => v.key === activeVariantKey)?.label
+          // Renamed from `variantLabel` to avoid shadowing the imported
+          // helper function (`variantLabel(params)`). Falls back through
+          // VARIANT_DEFS for legacy 2-segment keys, then the helper for
+          // extended cross-product keys (e.g. `monthly__long_only__s4__p6`).
+          const activeVariantSuffix = activeVariantKey
+            ? (VARIANT_DEFS.find((v) => v.key === activeVariantKey)?.label
+                ?? (parseVariantKey(activeVariantKey)
+                  ? variantLabel(parseVariantKey(activeVariantKey)!)
+                  : undefined))
             : undefined;
-          const activeStrategyLabel = variantLabel
-            ? `${labelBase} · ${variantLabel}`
+          const activeStrategyLabel = activeVariantSuffix
+            ? `${labelBase} · ${activeVariantSuffix}`
             : labelBase;
           return (
           <>
@@ -1967,12 +2321,7 @@ export default function MomentumBacktester() {
               result={displayResult}
               categories={categories}
               exchangeByCompany={exchangeByCompany}
-              scoringConfig={{
-                universe_label: null,
-                index_universe: selectedIndexUniverse || null,
-                signal_weights: weights,
-                category_weights: categoryWeights,
-              }}
+              scoringConfig={scoringConfig}
             />
 
             {/* Auto-save status. Variant sweeps + single-strategy runs are

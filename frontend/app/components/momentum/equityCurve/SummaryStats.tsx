@@ -86,12 +86,55 @@ export default function SummaryStats({
           })}
         </tbody>
       </table>
-      {/* Active strategy — raw (non-aligned) metrics, including turnover + holdings */}
+      {/* Active strategy — raw (non-aligned) metrics. The Sortino / win
+          rate / median row complements the table by showing risk-adjusted
+          stats the aligned per-series table doesn't carry (those are
+          active-strategy-only — benchmarks have no per-period returns
+          we can win-rate against). */}
       <div className="px-4 py-3 border-t border-gray-800/40 text-xs text-gray-500 flex flex-wrap gap-x-6 gap-y-1">
         <span>Strategy (full range): <span className="font-mono text-gray-300">Turnover {fmtPct(result.summary.avg_monthly_turnover_pct)}</span></span>
         <span><span className="font-mono text-gray-300">Avg Holdings {result.summary.avg_holdings.toFixed(1)}</span></span>
         <span><span className="font-mono text-gray-300">Months {result.summary.total_months}</span></span>
+        {result.summary.sortino_ratio != null && (
+          <span title="Sortino: like Sharpe but only penalizes downside vol (std of negative daily returns × √252). Higher than Sharpe → upside vol dominates.">
+            <span className="font-mono text-gray-300">Sortino {result.summary.sortino_ratio.toFixed(2)}</span>
+          </span>
+        )}
+        {result.summary.win_rate_pct != null && (
+          <span title="% of calendar months with strictly positive return — computed from the daily equity curve resampled to month-end, regardless of rebalance cadence.">
+            <span className="font-mono text-gray-300">Win rate {result.summary.win_rate_pct.toFixed(0)}%</span>
+          </span>
+        )}
+        {result.summary.median_period_return_pct != null && (
+          <span title="Median calendar-month return — computed from the daily equity curve resampled to month-end, regardless of rebalance cadence. Far below the headline mean → the strategy's return is carried by a few outlier months rather than steady ones.">
+            <span className={`font-mono ${result.summary.median_period_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>Median month {fmtPct(result.summary.median_period_return_pct)}</span>
+          </span>
+        )}
       </div>
+      {/* Universe baseline ("hold the entire eligible universe equal-
+          weight"). Same period-chain over closed periods as the
+          strategy, so alpha = strategy total − universe total. The
+          row is hidden when the engine produced no universe baseline
+          (degenerate run / legacy result without the field). */}
+      {result.summary.universe_total_return_pct != null && (
+        <div className="px-4 py-3 border-t border-gray-800/40 text-xs text-gray-500 flex flex-wrap gap-x-6 gap-y-1">
+          <span>Universe baseline: <span className={`font-mono ${result.summary.universe_total_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(result.summary.universe_total_return_pct)}</span><span className="text-gray-600"> total</span></span>
+          {result.summary.universe_annualized_return_pct != null && (
+            <span><span className={`font-mono ${result.summary.universe_annualized_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(result.summary.universe_annualized_return_pct)}</span><span className="text-gray-600"> annualized</span></span>
+          )}
+          {(() => {
+            const alpha = result.summary.total_return_pct - result.summary.universe_total_return_pct;
+            return (
+              <span title="Strategy total return minus universe total return — positive means the picks added value on top of just being in the market.">
+                <span className="text-gray-600">Alpha vs. universe: </span>
+                <span className={`font-mono font-medium ${alpha >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {alpha >= 0 ? '+' : ''}{alpha.toFixed(2)}%
+                </span>
+              </span>
+            );
+          })()}
+        </div>
+      )}
       {/* Multi-trial cross-trial statistics — backend means ± std. These
           are the numbers to compare a momentum run against, NOT the
           per-series stats above (which derive from the mean equity curve
