@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import type { BacktestResult } from '../../../lib/stores/momentum';
 import type { Column } from '../../../lib/tableExport';
@@ -43,7 +43,7 @@ type Props = {
  * that changes — new run, loaded saved run, etc. — the table resets its
  * expansion automatically.
  */
-export default function MonthlyHoldingsTable({ result, categories, exchangeByCompany, scoringConfig }: Props) {
+function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scoringConfig }: Props) {
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
   // company_id whose timeline modal is open, or null for closed.
   const [timelineCompanyId, setTimelineCompanyId] = useState<number | null>(null);
@@ -609,6 +609,18 @@ export default function MonthlyHoldingsTable({ result, categories, exchangeByCom
     </>
   );
 }
+
+/** React.memo barrier — `MomentumBacktester` re-renders the whole tree
+ * on lots of unrelated state changes (axis chip toggles, sweep
+ * inputs, run-time timer). This table renders ~200 monthly rows and
+ * its expanded per-month holdings detail, so re-rendering it for an
+ * unrelated parent state change is the most expensive needless work
+ * on the /backtest page. Default shallow-compare is sufficient
+ * because the caller already useMemo()s `scoringConfig` and the
+ * `result` / `categories` / `exchangeByCompany` references only
+ * change when their underlying data actually changes. */
+const MonthlyHoldingsTable = memo(MonthlyHoldingsTableInner);
+export default MonthlyHoldingsTable;
 
 /** Search box in the Portfolios card header. Filters the set of companies
  * ever held during this backtest by ticker prefix / name substring and lets

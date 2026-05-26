@@ -56,6 +56,12 @@ def run_backtest(
     benchmark_price_index: dict[int, pd.Series] | None = None,
     # {benchmark_id: (ticker, name)} for display in the holdings table.
     benchmark_meta: dict[int, tuple[str, str]] | None = None,
+    # Cadence-independent universe baseline result, precomputed and
+    # passed in by the variants sweep so the same (universe, window)
+    # isn't re-computed for every variant. None → compute in-line.
+    # Shape matches the return of
+    # `_period.compute_monthly_universe_baseline`.
+    monthly_baseline_override: dict | None = None,
 ) -> BacktestResult:
     """Run a momentum backtest at the configured rebalance cadence.
 
@@ -398,12 +404,37 @@ def run_backtest(
     if send_event:
         send_event("progress", month="done", pct=100, message="Backtest complete")
 
+    # Cadence-independent universe baseline. Walks calendar months
+    # over the same window and chains equal-weighted 1-month returns,
+    # so two variants on the same universe + window get IDENTICAL
+    # headline universe annualized numbers (no rebalancing-drag
+    # variation from the strategy's cadence). Overrides the per-period
+    # cumulative-factor-derived value in `build_backtest_result`. None
+    # when no universe was selected — the strategy-cadence value is
+    # used as fallback.
+    #
+    # When `monthly_baseline_override` is supplied (variant sweeps
+    # precompute one per universe-combo upfront, then pass the same
+    # result to every variant on that combo), skip the in-line compute
+    # — it's pure per (universe, window) so re-running it per variant
+    # is wasted work.
+    if monthly_baseline_override is not None:
+        monthly_baseline = monthly_baseline_override
+    else:
+        from ._period import compute_monthly_universe_baseline  # noqa: PLC0415
+        monthly_baseline = compute_monthly_universe_baseline(
+            price_index, monthly_eligible,
+            start_date=config.start_date,
+            end_date=config.end_date,
+        )
+
     return build_backtest_result(
         period_records, accum,
         price_index=price_index,
         strategy_type=config.strategy_type,
         benchmark_price_index=benchmark_price_index,
         rebalance_frequency=prepared.frequency,
+        monthly_baseline=monthly_baseline,
     )
 
 
@@ -418,6 +449,11 @@ def run_multi_trial_backtest(
     monthly_eligible: dict[str, dict[int, str | None]] | None = None,
     prices_local_df: pd.DataFrame | None = None,
     company_currency: dict[int, str | None] | None = None,
+    # Same as in `run_backtest` — variant sweeps precompute once per
+    # (universe, window) and pass to every trial. Universe baseline
+    # doesn't vary across random trials (deterministic per universe +
+    # window), so trial 0 computes once and the rest reuse.
+    monthly_baseline_override: dict | None = None,
 ) -> BacktestResult:
     """Run `n_trials` independent backtests with sequential seeds and return
     an aggregated BacktestResult.
@@ -460,6 +496,11 @@ def run_multi_trial_backtest(
     )
 
     trial_results: list[BacktestResult] = []
+    # Reusable monthly baseline across trials. Pre-seeded with the
+    # caller's override when supplied (variant sweep case); otherwise
+    # populated from trial 0's summary on first iteration so trials
+    # 1..N-1 don't re-walk the calendar.
+    shared_monthly_baseline: dict | None = monthly_baseline_override
     for i in range(n_trials):
         if send_event:
             pct = round((i / n_trials) * 100)
@@ -482,6 +523,9 @@ def run_multi_trial_backtest(
             strategy_type=config.strategy_type,
         )
         # No per-month progress for individual trials — too noisy.
+        # Universe baseline is identical across trials (deterministic
+        # per universe + window). Trial 0 computes it in-line;
+        # subsequent trials reuse via the cached override.
         result = run_backtest(
             trial_config,
             prices_df,
@@ -492,8 +536,20 @@ def run_multi_trial_backtest(
             prices_local_df=prices_local_df,
             company_currency=company_currency,
             prepared=prepared,
+            monthly_baseline_override=shared_monthly_baseline,
         )
         trial_results.append(result)
+        # Capture trial 0's baseline for trials 1..N-1. The summary
+        # carries it as `universe_*_return_pct`; we can reconstruct
+        # the dict shape `run_backtest` expects from those fields.
+        if shared_monthly_baseline is None:
+            s = result.summary
+            if s.universe_annualized_return_pct is not None or s.universe_total_return_pct is not None:
+                shared_monthly_baseline = {
+                    "annualized_pct": s.universe_annualized_return_pct,
+                    "total_pct": s.universe_total_return_pct,
+                    "n_months": 0,  # not surfaced on Summary; reused dict only uses the two pct fields
+                }
 
     # Aggregate: per-month mean cumulative return across trials. All trials
     # iterate the same month grid so records align by index.
@@ -543,6 +599,9 @@ def run_multi_trial_backtest(
 
     # Use trial 0's drawdown periods + total_months + avg_holdings as
     # representative; per-trial std for drawdown periods isn't meaningful.
+    # Universe baseline is deterministic per (universe, window) — doesn't
+    # vary across random trials — so trial 0's values carry through
+    # unchanged for every trial.
     base_summary = trial_results[0].summary
     summary = BacktestSummary(
         total_return_pct=tr_mean if tr_mean is not None else 0.0,
@@ -556,6 +615,8 @@ def run_multi_trial_backtest(
         total_months=base_summary.total_months,
         avg_holdings=base_summary.avg_holdings,
         top_drawdowns=base_summary.top_drawdowns,
+        universe_total_return_pct=base_summary.universe_total_return_pct,
+        universe_annualized_return_pct=base_summary.universe_annualized_return_pct,
         n_trials=n_trials,
         total_return_pct_std=tr_std,
         annualized_return_pct_std=ann_std,

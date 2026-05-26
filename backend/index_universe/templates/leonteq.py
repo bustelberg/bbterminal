@@ -232,6 +232,11 @@ class LeonteqTemplate(UniverseTemplate):
             cid = r.get("company_id")
             if cid is None:
                 continue
+            # Skip rows the new auto-create marked override-unavailable.
+            # Their `company` row exists (so /companies shows the badge),
+            # but they don't belong in Leonteq's universe_membership.
+            if r.get("_out_of_scope"):
+                continue
             cid_int = int(cid)
             if cid_int in seen_company_ids:
                 continue
@@ -242,6 +247,42 @@ class LeonteqTemplate(UniverseTemplate):
                 "sector": r.get("sector"),
                 "industry": r.get("industry"),
             })
+
+        # Defensive filter: if `_match_company` (the ticker-based
+        # match) linked a scraped row to an existing company that
+        # already carries `out_of_scope_at` (e.g. flagged by an
+        # earlier retroactive sweep or by a previous Leonteq refresh
+        # that ran with overrides), drop it here too. Without this,
+        # a stamped row would still slip into Leonteq membership and
+        # backtests would fail to find prices for it.
+        if seen_company_ids:
+            try:
+                cid_list = list(seen_company_ids)
+                # Chunk to stay under Cloudflare URL limits.
+                oos_set: set[int] = set()
+                for i in range(0, len(cid_list), 50):
+                    chunk = cid_list[i:i + 50]
+                    oos_resp = (
+                        supabase.table("company")
+                        .select("company_id")
+                        .in_("company_id", chunk)
+                        .not_.is_("out_of_scope_at", "null")
+                        .execute()
+                    )
+                    for row in (oos_resp.data or []):
+                        oos_set.add(int(row["company_id"]))
+                if oos_set:
+                    per_company = [c for c in per_company if c["company_id"] not in oos_set]
+                    log.info(
+                        "[leonteq] excluded %s out-of-scope companies from membership",
+                        len(oos_set),
+                    )
+            except Exception as e:
+                log.warning(
+                    "[leonteq] out-of-scope membership filter failed (%s: %s) — "
+                    "membership may include stamped rows.",
+                    type(e).__name__, e,
+                )
 
         # Replicate per-company entries across every month.
         membership_rows: list[dict] = []
@@ -477,10 +518,28 @@ class LeonteqTemplate(UniverseTemplate):
         isin_to_country = {r["isin"]: r.get("country") for r in unresolved if r.get("isin")}
         isin_to_lq_ticker = {r["isin"]: r.get("ticker") for r in unresolved if r.get("isin")}
 
+        # Lazy import to avoid an import-order foot-gun (this module
+        # is loaded during template registry build; the acwi package
+        # has heavier deps).
+        from index_universe.acwi.exchange_map import apply_company_override  # noqa: PLC0415
+
+        import datetime as _dt  # noqa: PLC0415
+        _now_iso = _dt.datetime.now(_dt.timezone.utc).isoformat()
+
         new_rows: list[dict] = []
+        # For each ISIN, remember the OPENFIGI-RESOLVED tuple so the
+        # downstream link pass below can hit the override-corrected
+        # cid by looking up `(target_exch, target_tick)` rather than
+        # the OpenFIGI-raw `(exch_code, ticker)`.
         isin_to_resolution: dict[str, dict] = {}
         unmapped_exchange_counts: dict[str, int] = {}
         unmapped_examples: dict[str, list[str]] = {}
+        # Track ISINs whose override said "unavailable" so the link
+        # pass can recognize them and (a) link to the inserted row
+        # (so /companies shows the OUT OF SCOPE badge), but (b) skip
+        # them when building per-Leonteq universe_membership — those
+        # tickers don't belong in any membership.
+        unavailable_isins: set[str] = set()
         for res in resolutions:
             exch_code = res["gurufocus_exchange"]
             exch_id = exchange_id_map.get(exch_code)
@@ -503,17 +562,36 @@ class LeonteqTemplate(UniverseTemplate):
                     )
                 continue
             from ingest.dedupe import canonical_ticker  # noqa: PLC0415
-            isin_to_resolution[res["isin"]] = res
-            new_rows.append({
-                # Canonical form (HKSE zero-padded, Nordic share-class
-                # punctuation normalized) so two iShares/Leonteq sources
-                # for the same security can't drift into separate rows.
-                "gurufocus_ticker": canonical_ticker(
-                    res["gurufocus_ticker"], exch_code,
-                ),
+            canonical_tick = canonical_ticker(res["gurufocus_ticker"], exch_code)
+            # Apply `gf_ticker_overrides.json` to the OpenFIGI-resolved
+            # (exchange, ticker) BEFORE insert. Three outcomes (see
+            # apply_company_override docstring):
+            #   - no override: insert with OpenFIGI's values.
+            #   - remap: insert with the override's target values.
+            #   - unavailable: insert with OpenFIGI's values + stamp
+            #     out_of_scope_at, then exclude from membership.
+            override = apply_company_override(exch_code, canonical_tick)
+            final_exch_code = override.target_exchange
+            final_tick = override.target_ticker
+            final_exch_id = exchange_id_map.get(final_exch_code, exch_id)
+            row = {
+                "gurufocus_ticker": final_tick,
                 "company_name": isin_to_name.get(res["isin"]),
-                "exchange_id": exch_id,
-            })
+                "exchange_id": final_exch_id,
+            }
+            if override.unavailable_reason is not None:
+                row["out_of_scope_at"] = _now_iso
+                row["out_of_scope_reason"] = override.unavailable_reason
+                if res.get("isin"):
+                    unavailable_isins.add(res["isin"])
+            # Stash the FINAL resolved (exch_code, ticker) on the
+            # resolution dict so the link pass can find the row we
+            # actually inserted, not the OpenFIGI-raw key.
+            res = dict(res)
+            res["final_gurufocus_exchange"] = final_exch_code
+            res["final_gurufocus_ticker"] = final_tick
+            isin_to_resolution[res["isin"]] = res
+            new_rows.append(row)
 
         if unmapped_exchange_counts:
             summary = ", ".join(
@@ -579,11 +657,23 @@ class LeonteqTemplate(UniverseTemplate):
             res = isin_to_resolution.get(isin)
             if res is None:
                 continue
-            match = by_ticker.get(res["gurufocus_ticker"].strip().upper())
+            # Look up by the FINAL (override-applied) ticker, not the
+            # OpenFIGI-raw one. Falls back to the raw value for
+            # resolutions that pre-date this code path (e.g. older
+            # legacy mappings whose `isin_to_resolution` entries don't
+            # carry `final_gurufocus_ticker`).
+            lookup_tick = (res.get("final_gurufocus_ticker") or res["gurufocus_ticker"]).strip().upper()
+            match = by_ticker.get(lookup_tick)
             if match is None:
                 continue
             cid = int(match["company_id"])
             row["company_id"] = cid
+            # Mark the scraped row when its company is override-
+            # unavailable so the membership-build step downstream can
+            # skip it. (The cid is still set so the equity is
+            # discoverable in /companies with the OUT OF SCOPE badge.)
+            if isin in unavailable_isins:
+                row["_out_of_scope"] = True
             # Tag with company_source for auditability ("which template
             # created this company row") — best-effort, never fatal.
             try:

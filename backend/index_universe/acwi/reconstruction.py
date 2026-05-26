@@ -32,8 +32,14 @@ def _parse_effective_date(s: str):
 def feasible_holdings_for_db() -> list[dict]:
     """Return feasible ACWI holdings with DB-facing fields.
 
-    Each dict: {db_exchange, gf_ticker, company_name, sector, symbol, ishares_ticker, ishares_exchange}.
+    Each dict: {db_exchange, gf_ticker, company_name, sector, symbol,
+    ishares_ticker, ishares_exchange, unavailable_reason}.
     symbol is "EXCH:TICK" used as the universe_ticker and lookup key.
+    `unavailable_reason` is non-None only when the override marks the
+    listing out-of-scope (e.g. Varta on Hamburg) — the company still
+    lands in `company` for visibility, but the caller MUST skip
+    universe_membership insertion for these rows and stamp
+    `out_of_scope_at` + `out_of_scope_reason` on the company row.
     """
     holdings, _ = load_acwi_holdings()
     result: list[dict] = []
@@ -46,6 +52,9 @@ def feasible_holdings_for_db() -> list[dict]:
             continue
         db_exch, gf_tick = norm
         sector = (h.get("Sector") or "").strip() or None
+        # Lazy import keeps this module's import graph free of
+        # exchange_map's helper surface area.
+        from .exchange_map import unavailable_reason as _unavailable_reason  # noqa: PLC0415
         result.append({
             "db_exchange": db_exch,
             "gf_ticker": gf_tick,
@@ -54,6 +63,7 @@ def feasible_holdings_for_db() -> list[dict]:
             "symbol": f"{db_exch}:{gf_tick}",
             "ishares_ticker": h["Ticker"],
             "ishares_exchange": h["Exchange"],
+            "unavailable_reason": _unavailable_reason(h["Ticker"], h["Exchange"]),
         })
     return result
 
@@ -83,6 +93,10 @@ def reconstruct_monthly_holdings(start_date: str, end_date: str) -> tuple[dict[s
     # month of membership. There are ~38 such ticker collisions in the
     # current iShares ACWI file, accounting for the visible gap between
     # 2005 feasible holdings and ~1967 membership rows per month.
+    # Lazy import — keeps the top-of-file import set focused on the
+    # core reconstruction surface.
+    from .exchange_map import unavailable_reason as _unavailable_reason  # noqa: PLC0415
+
     feasible_holdings: list[tuple[str, str]] = []
     for h in holdings:
         gf = _ISHARES_TO_GF.get(h["Exchange"])
@@ -90,6 +104,13 @@ def reconstruct_monthly_holdings(start_date: str, end_date: str) -> tuple[dict[s
             continue
         norm = gurufocus_ticker_normalized(h["Ticker"], h["Exchange"])
         if norm is None:
+            continue
+        # Out-of-scope listings: the company lands in `company` for
+        # /companies visibility but must NOT appear in any monthly
+        # membership — backtests would otherwise include a ticker the
+        # price phase deliberately skipped, producing missing-data
+        # warnings every run.
+        if _unavailable_reason(h["Ticker"], h["Exchange"]) is not None:
             continue
         db_exch, gf_tick = norm
         symbol = f"{db_exch}:{gf_tick}"

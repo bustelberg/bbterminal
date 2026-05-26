@@ -90,6 +90,7 @@ async def list_companies():
                 .select(
                     "company_id,company_name,gurufocus_ticker,exchange_id,"
                     "delisted_at,gurufocus_lookup_failed_at,"
+                    "out_of_scope_at,out_of_scope_reason,"
                     "gurufocus_exchange:gurufocus_exchange("
                     "exchange_code,country:country(country_name))"
                 )

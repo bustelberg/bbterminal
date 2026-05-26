@@ -126,6 +126,42 @@ async def run_variants_sweep(
 
     base_grouping = getattr(req, "grouping", "sector") or "sector"
 
+    # Cadence-independent universe baseline cache. Pure function of
+    # (universe combo, window) — the same value for every variant
+    # that runs on that combo. Without this cache each variant re-
+    # walks the calendar months and re-equal-weights every eligible
+    # company; for a 32-variant sweep on 2 universes that's 30
+    # redundant computes. Precomputing once per distinct combo here
+    # then passing through `run_backtest`'s `monthly_baseline_override`
+    # collapses that to 2 computes. The cache key uses the same combo
+    # tuple shape as `monthly_eligible_by_combo`.
+    monthly_baseline_cache: dict[tuple, dict | None] = {}
+    if shared_backtest is not None and monthly_eligible_by_combo:
+        from momentum.backtest._period import compute_monthly_universe_baseline  # noqa: PLC0415
+        start_d = date.fromisoformat(req.start_date)
+        end_d = date.fromisoformat(req.end_date)
+        for combo, me in monthly_eligible_by_combo.items():
+            try:
+                monthly_baseline_cache[combo] = await asyncio.to_thread(
+                    compute_monthly_universe_baseline,
+                    shared_backtest.price_index, me,
+                    start_date=start_d,
+                    end_date=end_d,
+                )
+            except Exception as _bl_err:
+                logging.getLogger(__name__).warning(
+                    "[variants] monthly-baseline precompute failed for combo=%s: %s",
+                    combo, _bl_err,
+                )
+                monthly_baseline_cache[combo] = None
+        n_combos = len([v for v in monthly_baseline_cache.values() if v is not None])
+        if n_combos > 1:
+            yield _emit({
+                "type": "progress",
+                "pct": 69,
+                "message": f"Precomputed universe baseline for {n_combos} (universe, grouping) combos -> reused across {len(req.variants)} variants.",
+            })
+
     for v_idx, vspec in enumerate(req.variants):
         # Effective per-variant dials. `None` on the spec means "inherit
         # base", which keeps legacy 2-axis sweeps (frequency × strategy)
@@ -140,9 +176,14 @@ async def run_variants_sweep(
         # Pick the per-combo monthly_eligible if available, else fall back
         # to the shared one (legacy single-universe sweep).
         v_monthly_eligible = monthly_eligible
+        v_monthly_baseline: dict | None = None
         if monthly_eligible_by_combo is not None:
             v_combo = (v_universe_label, v_index_universe, v_grouping_field)
             v_monthly_eligible = monthly_eligible_by_combo.get(v_combo, monthly_eligible)
+            # Look up the precomputed universe baseline for this
+            # combo — `run_backtest` skips its in-line compute when
+            # this is non-None.
+            v_monthly_baseline = monthly_baseline_cache.get(v_combo)
 
         # Variant key: legacy 2-segment form (`monthly__long_only`) when
         # no axes were overridden, longer form otherwise. The frontend's
@@ -224,7 +265,7 @@ async def run_variants_sweep(
                     variant_key, _prep_err,
                 )
 
-        def _v_run(cfg=v_config, prepared=v_prepared, me=v_monthly_eligible):
+        def _v_run(cfg=v_config, prepared=v_prepared, me=v_monthly_eligible, mb=v_monthly_baseline):
             try:
                 if req.selection_mode == "random" and req.n_trials > 1:
                     r = run_multi_trial_backtest(
@@ -233,6 +274,7 @@ async def run_variants_sweep(
                         monthly_eligible=me,
                         prices_local_df=prices_local_df,
                         company_currency=company_currency,
+                        monthly_baseline_override=mb,
                     )
                 else:
                     r = run_backtest(
@@ -244,6 +286,7 @@ async def run_variants_sweep(
                         prepared=prepared,
                         benchmark_price_index=variant_benchmark_price_index,
                         benchmark_meta=variant_benchmark_meta,
+                        monthly_baseline_override=mb,
                     )
                 v_result_holder.append(r)
             except Exception as e:

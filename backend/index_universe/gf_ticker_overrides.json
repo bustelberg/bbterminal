@@ -2,20 +2,39 @@
   "": {
     "BRKB": "BRK.B",
     "HEIA": "HEI.A",
-    "PSTG": "P"
+    "PSTG": "P",
+    "BIDUN": { "exchange": "HKSE", "ticker": "09888" },
+    "ACGL": { "exchange": "NASDAQ", "ticker": "ACGL" },
+    "CBRS": { "exchange": "NASDAQ", "ticker": "CBRS" }
   },
   "SGX": {
     "CICT": "C38U",
     "CLAR": "A17U"
   },
   "XPRA": {
-    "BAAKOMB": "KOMB"
+    "BAAKOMB": "KOMB",
+    "EBS": { "exchange": "WBO", "ticker": "EBS" },
+    "VAR1": { "unavailable": true, "reason": "Listing is on Hamburg (XHAM) — out of scope for the GuruFocus subscription." },
+    "ANDR": { "exchange": "WBO", "ticker": "ANDR" }
   },
   "OSTO": {
-    "VSURE": { "exchange": "FRA", "ticker": "6R9" }
+    "VSURE": { "exchange": "FRA", "ticker": "6R9" },
+    "SSABA": "SSAB A"
   },
   "WAR": {
     "SPL": "EBP"
+  },
+  "OHEL": {
+    "NDA": "NDA FI"
+  },
+  "TSE": {
+    "2330": { "exchange": "TPE", "ticker": "2330" }
+  },
+  "XTER": {
+    "CI4A": { "exchange": "HKSE", "ticker": "00354" },
+    "KAB0": { "exchange": "XSWX", "ticker": "DOKA" },
+    "G2O": { "exchange": "NASDAQ", "ticker": "GLNG" },
+    "NMR": { "exchange": "NASDAQ", "ticker": "NVMI" }
   },
   "XKLS": {
     "MAYBANK": "1155",

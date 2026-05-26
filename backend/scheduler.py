@@ -57,8 +57,91 @@ _scheduler: BackgroundScheduler | None = None
 _BOOTSTRAP_DELAY_SECONDS = 30
 # An `ingest_run` row in `running` state newer than this counts as a
 # pipeline currently in flight — guards against a bootstrap firing while
-# a manual run started moments earlier is still going.
+# a manual run started moments earlier is still going. Doubles as the
+# "consider this row orphaned" cutoff for `_reap_orphan_runs` below.
 _PIPELINE_STALE_AFTER_SECONDS = 3600
+
+
+def _reap_orphan_runs() -> None:
+    """Mark any `ingest_run` row stuck in `status='running'` for longer
+    than `_PIPELINE_STALE_AFTER_SECONDS` as errored. Runs once on
+    startup so a backend restart that killed mid-run daemon threads
+    doesn't leave the /schedule UI showing a perpetually-running job.
+
+    The pipeline workers run as `daemon=True` threads
+    (`_spawn_ingest` in `routers/ingest_runs.py`), which means a
+    process restart — common during dev with uvicorn --reload, but
+    also possible in prod on a Railway deploy that lands while a job
+    is in flight — kills them mid-execution. The `ingest_run` row
+    keeps the last checkpoint state forever unless something cleans
+    it up. The hour-old cutoff is conservative: even the full weekly
+    pipeline (acquisition + templates + prune + prices + momentum)
+    completes inside an hour, so anything older that's still
+    `running` is provably orphaned.
+
+    Best-effort: failures are logged + swallowed so a Supabase blip
+    on boot never blocks scheduler startup."""
+    from deps import supabase  # noqa: PLC0415
+
+    cutoff_iso = (
+        datetime.now(timezone.utc) - timedelta(seconds=_PIPELINE_STALE_AFTER_SECONDS)
+    ).isoformat()
+    try:
+        # 1. Find them so we can log the IDs explicitly. Useful when
+        #    triaging a recurring-restart situation — without the log
+        #    line you'd never know which run(s) got reaped.
+        resp = (
+            supabase.table("ingest_run")
+            .select("run_id, job_name, started_at, current_phase, current_message")
+            .eq("status", "running")
+            .lt("started_at", cutoff_iso)
+            .order("started_at", desc=False)
+            .execute()
+        )
+        orphans = resp.data or []
+        if not orphans:
+            return
+        _log.warning(
+            "[scheduler] reaping %s orphan ingest_run row(s) "
+            "(status=running, older than %ss): %s",
+            len(orphans), _PIPELINE_STALE_AFTER_SECONDS,
+            [
+                {
+                    "run_id": o["run_id"],
+                    "job_name": o.get("job_name"),
+                    "current_phase": o.get("current_phase"),
+                    "started_at": o.get("started_at"),
+                }
+                for o in orphans
+            ],
+        )
+        # 2. Mark each as errored. One row at a time so a partial
+        #    failure stops on the offending row rather than wiping
+        #    all of them with a confusing PostgREST error.
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for o in orphans:
+            try:
+                supabase.table("ingest_run").update({
+                    "status": "error",
+                    "current_phase": "done",
+                    "finished_at": now_iso,
+                    "error_summary": (
+                        f"Orphaned (backend restart while running) — auto-reaped "
+                        f"on next startup. Was stuck in phase "
+                        f"{o.get('current_phase') or '?'} with message: "
+                        f"{(o.get('current_message') or '')[:200]}"
+                    ),
+                }).eq("run_id", o["run_id"]).execute()
+            except Exception as e:
+                _log.warning(
+                    "[scheduler] failed to reap run_id=%s: %s: %s",
+                    o["run_id"], type(e).__name__, e,
+                )
+    except Exception as e:
+        _log.warning(
+            "[scheduler] orphan-run probe failed: %s: %s — skipping reap",
+            type(e).__name__, e,
+        )
 
 
 def _unrefreshed_templates() -> list[str]:
@@ -211,6 +294,18 @@ def register_scheduler(app) -> None:
         )
         sched.start()
         _scheduler = sched
+        # Reap any orphan `ingest_run` rows left in `status='running'`
+        # from a previous process that died mid-job (uvicorn --reload,
+        # Railway redeploy, OOM kill, …). Runs BEFORE the bootstrap
+        # probe so a stale orphan doesn't fool `_pipeline_already_running`
+        # into skipping a bootstrap that should fire.
+        try:
+            _reap_orphan_runs()
+        except Exception as e:
+            _log.warning(
+                "[scheduler] reap-orphan-runs wrapper failed: %s: %s",
+                type(e).__name__, e,
+            )
         # Probe for templates that have never been refreshed in this env
         # and schedule a one-shot full pipeline if so. Wrapped so a probe
         # failure can never take down the scheduler startup.

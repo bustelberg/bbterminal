@@ -41,6 +41,14 @@ export type CompanyRow = {
   country?: string | null;
   delisted_at?: string | null;
   gurufocus_lookup_failed_at?: string | null;
+  /** ISO timestamp set when an entry in
+   * `backend/index_universe/gf_ticker_overrides.json` flags the
+   * (ticker, exchange) pair as `{"unavailable": true, ...}` — meaning
+   * we know the listing exists on a real exchange we deliberately
+   * don't cover (e.g. Varta on Hamburg). UI renders an amber
+   * OUT OF SCOPE badge with `out_of_scope_reason` in the tooltip. */
+  out_of_scope_at?: string | null;
+  out_of_scope_reason?: string | null;
 };
 
 export type SignalDef = {

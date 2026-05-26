@@ -101,13 +101,13 @@ export default function SummaryStats({
           </span>
         )}
         {result.summary.win_rate_pct != null && (
-          <span title="% of closed periods with strictly positive return.">
+          <span title="% of calendar months with strictly positive return — computed from the daily equity curve resampled to month-end, regardless of rebalance cadence.">
             <span className="font-mono text-gray-300">Win rate {result.summary.win_rate_pct.toFixed(0)}%</span>
           </span>
         )}
         {result.summary.median_period_return_pct != null && (
-          <span title="Median of closed-period returns. Far below the headline mean → return is carried by a few outlier months.">
-            <span className={`font-mono ${result.summary.median_period_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>Median period {fmtPct(result.summary.median_period_return_pct)}</span>
+          <span title="Median calendar-month return — computed from the daily equity curve resampled to month-end, regardless of rebalance cadence. Far below the headline mean → the strategy's return is carried by a few outlier months rather than steady ones.">
+            <span className={`font-mono ${result.summary.median_period_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>Median month {fmtPct(result.summary.median_period_return_pct)}</span>
           </span>
         )}
       </div>

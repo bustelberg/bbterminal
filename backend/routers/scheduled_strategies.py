@@ -621,15 +621,27 @@ def _extract_sectors(holdings: list[dict] | None) -> list[dict]:
 def _compute_period_returns(snapshots: list[dict], today: date) -> dict:
     """MTD + YTD returns for a strategy.
 
-    Walks the strategy's full snapshot history chronologically to build a
-    relative equity curve, then reads off the ratio between current equity
-    and equity at the start of the current month / year.
+    Walks the strategy's full snapshot history chronologically to build
+    a relative equity curve, then reads off the ratio between current
+    equity and equity at the start of the current month / year.
 
-    Convention: each rebalance closes the prior period at the latest known
-    `period_return_pct` (from the most recent price_update in that
-    period; 0 if none observed yet) and opens a new one at the same
-    equity. Each price_update updates the open period's running return,
-    so the equity at that snapshot reflects the unrealized gain.
+    Snapshot convention: `period_return_pct` on each row is the running
+    return for THAT row's open period as of the row's `latest_price_date`.
+    For a BACKFILL rebalance this is the full closed-period return (the
+    backfill knew the whole period at compute time). For a LIVE rebalance
+    inserted by the pipeline tick it's 0% at creation, then refreshed by
+    the daily MTD price_update flow.
+
+    Walker rules:
+      - On rebalance: close prior period at its running return, then
+        open a new one whose initial running return = THIS row's stored
+        `period_return_pct` (full-period value for backfill, 0 for
+        live).
+      - On price_update: refresh the open period's running return with
+        this row's `period_return_pct`.
+
+    This treats backfill + live snapshots uniformly — both have the
+    same "running return on this row" semantic.
 
     Returns {mtd_return_pct, ytd_return_pct, as_of_date} all None-able.
     `as_of_date` is the latest_price_date of the newest snapshot, surfaced
@@ -638,14 +650,14 @@ def _compute_period_returns(snapshots: list[dict], today: date) -> dict:
     if not snapshots:
         return {"mtd_return_pct": None, "ytd_return_pct": None, "as_of_date": None}
 
-    # Iterate in chronological order, snapshots are passed already sorted
+    # Iterate in chronological order; snapshots are passed already sorted
     # by (latest_price_date asc, created_at asc).
-    equity = 1.0
     open_period_return_pct = 0.0
     open_period_start_equity = 1.0
+    last_rebalance_eff_date: str | None = None
     # Equity curve points keyed by effective date; multiple snapshots on
     # the same date overwrite each other (last wins), which is what we
-    # want -- a price_update later in the day reflects more-current data.
+    # want — a price_update later in the day reflects more-current data.
     curve: list[tuple[str, float]] = []
 
     for s in snapshots:
@@ -656,20 +668,22 @@ def _compute_period_returns(snapshots: list[dict], today: date) -> dict:
         kind = s.get("kind") or "rebalance"
         pct = s.get("period_return_pct")
         if kind == "rebalance":
-            # Close prior period at its last-known return, then open a
-            # fresh one at the resulting equity. The very first
-            # rebalance in history closes a zero-return baseline period
-            # so equity stays at 1.0.
-            equity = open_period_start_equity * (1.0 + (open_period_return_pct or 0.0) / 100.0)
-            open_period_return_pct = 0.0
-            open_period_start_equity = equity
+            # Close prior period at its last-known running return.
+            equity_after_close = open_period_start_equity * (1.0 + open_period_return_pct / 100.0)
+            # Open new period. The new period's initial running return =
+            # whatever this rebalance row stored — for a backfill row
+            # that's the full closed-period return; for a live-pipeline
+            # rebalance row that's 0 (no observed return yet).
+            open_period_start_equity = equity_after_close
+            open_period_return_pct = float(pct) if pct is not None else 0.0
+            last_rebalance_eff_date = eff_date
         else:
-            # price_update (or anything else): treat as a refresh of the
-            # open period's running return.
+            # price_update: refresh the open period's running return.
             if pct is not None:
                 open_period_return_pct = float(pct)
-            equity = open_period_start_equity * (1.0 + (open_period_return_pct or 0.0) / 100.0)
-        curve.append((eff_date, equity))
+        # Snapshot the current equity (open period running return applied).
+        equity_now = open_period_start_equity * (1.0 + open_period_return_pct / 100.0)
+        curve.append((eff_date, equity_now))
 
     if not curve:
         return {"mtd_return_pct": None, "ytd_return_pct": None, "as_of_date": None}
@@ -678,16 +692,28 @@ def _compute_period_returns(snapshots: list[dict], today: date) -> dict:
     month_start = today.replace(day=1).isoformat()
     year_start = today.replace(month=1, day=1).isoformat()
 
-    # Anchor = the LAST equity value strictly before the cutoff. If no
-    # snapshot predates the cutoff (strategy started inside the window),
-    # anchor at 1.0 -- i.e. measure relative to inception.
-    mtd_anchor = 1.0
+    # YTD anchor: last equity point strictly before year start, else 1.0
+    # (strategy started inside the year — measure from inception).
     ytd_anchor = 1.0
+    for d, e in curve:
+        if d < year_start:
+            ytd_anchor = e
+
+    # MTD anchor:
+    #   Default — last equity point strictly before month_start.
+    #   Override — when the latest rebalance fired IN this month, anchor
+    #     at the open-period start equity (post-close of the prior period
+    #     by THIS rebalance). That way MTD reads as "return since the
+    #     latest rebalance" for cadences where the rebalance landed in
+    #     this month (monthly / weekly / daily), rather than including a
+    #     chunk of the prior month's open period that we can't cleanly
+    #     attribute to either calendar month.
+    mtd_anchor = 1.0
     for d, e in curve:
         if d < month_start:
             mtd_anchor = e
-        if d < year_start:
-            ytd_anchor = e
+    if last_rebalance_eff_date and last_rebalance_eff_date >= month_start:
+        mtd_anchor = open_period_start_equity
 
     def _pct(end: float, start: float) -> float | None:
         if start <= 0:
@@ -1195,6 +1221,27 @@ async def list_strategy_runs(strategy_id: int, limit: int = 50):
             .execute()
         )
         snapshots = snap_resp.data or []
+
+        # Suppress backfill rebalance rows whose `as_of_date` is also
+        # covered by a NEWER non-backfill snapshot (a daily-refresh
+        # price_update or a live pipeline rebalance). The backfill
+        # row's data is point-in-time stale at that point — the user
+        # already has the latest data via the newer snapshot, and
+        # showing both creates a confusing "2026-05-04 backfill
+        # +0.45% (data through 05-06)" alongside "2026-05-04 price
+        # update +2.07% (data through 05-25)" pair for the same
+        # open period. `_compute_period_returns` keeps the full
+        # history above — this filter is purely cosmetic.
+        non_backfill_asofs = {
+            s["as_of_date"] for s in snapshots
+            if not (s.get("kind") == "rebalance" and s.get("is_backfill"))
+            and s.get("as_of_date")
+        }
+        snapshots = [
+            s for s in snapshots
+            if not (s.get("kind") == "rebalance" and s.get("is_backfill"))
+            or s.get("as_of_date") not in non_backfill_asofs
+        ]
 
         run_ids = list({s["ingest_run_id"] for s in snapshots if s.get("ingest_run_id")})
         runs_by_id: dict[int, dict] = {}

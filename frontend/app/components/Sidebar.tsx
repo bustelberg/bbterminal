@@ -23,7 +23,7 @@ const navItems: NavItem[] = [
   { href: '/acwi', label: 'ACWI Universe' },
   { href: '/leonteq', label: 'Leonteq Universe' },
   { href: '/fx-rates', label: 'FX Rates' },
-  { href: '/airs-portfolio', label: 'AIRS Portfolio' },
+  { href: '/airs-portfolio', label: 'AIRS Portfolio', userVisible: true },
   { href: '/request_gurufocus', label: 'Request GuruFocus' },
   { href: '/benchmarks', label: 'Benchmarks' },
   { href: '/companies', label: 'Companies', userVisible: true },

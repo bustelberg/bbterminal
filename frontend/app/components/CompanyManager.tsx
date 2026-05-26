@@ -33,6 +33,14 @@ type Company = {
    * button that probes the GuruFocus diagnostic endpoint. Cleared
    * automatically the next time a price fetch succeeds. */
   gurufocus_lookup_failed_at?: string | null;
+  /** ISO timestamp set when an override in `gf_ticker_overrides.json`
+   * flagged this (ticker, exchange) as `{"unavailable": true, ...}` —
+   * the listing is on a real exchange we deliberately don't cover.
+   * The reason string is shown in the OUT OF SCOPE badge's tooltip
+   * so a user wondering "why isn't this in my backtest" sees an
+   * explicit answer instead of a missing row. */
+  out_of_scope_at?: string | null;
+  out_of_scope_reason?: string | null;
 };
 
 type SortField = 'company_name' | 'gurufocus_ticker' | 'gurufocus_exchange' | 'country';
@@ -878,7 +886,15 @@ export default function CompanyManager() {
                           DELISTED
                         </span>
                       )}
-                      {c.gurufocus_lookup_failed_at && !c.delisted_at && (
+                      {c.out_of_scope_at && !c.delisted_at && (
+                        <span
+                          className="ml-2 px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/15 text-amber-300 border border-amber-500/30 rounded"
+                          title={`Out of scope: ${c.out_of_scope_reason ?? '(no reason given)'}. Marked ${new Date(c.out_of_scope_at).toLocaleString()}. Excluded from universe membership and skipped by the price phase — see backend/index_universe/gf_ticker_overrides.json.`}
+                        >
+                          OUT OF SCOPE
+                        </span>
+                      )}
+                      {c.gurufocus_lookup_failed_at && !c.delisted_at && !c.out_of_scope_at && (
                         <button
                           type="button"
                           onClick={() => void findCorrectExchange(c)}
