@@ -714,6 +714,10 @@ export default function MomentumBacktester() {
   // hover button on each OK row in the variants summary table.
   const handleAddVariantToSchedule = async (variantKey: VariantKey, variantLabel: string) => {
     const v = parseVariantKey(variantKey);
+    if (!v) {
+      await dialog.alert(`Couldn't parse variant key "${variantKey}".`, { title: 'Schedule add failed' });
+      return;
+    }
     // Map the variant's `rebalance_frequency` to a schedule cadence.
     // Off-cadence months (4/5/7/8/10/11) round to quarterly — those
     // variants are rare and the cadence pinning isn't strict (the

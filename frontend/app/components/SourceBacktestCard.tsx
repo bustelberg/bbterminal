@@ -89,6 +89,12 @@ export default function SourceBacktestCard({
 
   useEffect(() => {
     let cancelled = false;
+    // Reset state on every runId change so the loading panel reappears
+    // and stale data clears before the next fetch resolves. React 19's
+    // "no setState in effect" rule fires on the setLoading line but
+    // the alternatives (useReducer dispatch, key-based remount) add
+    // more noise than they save for a fire-once fetch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     setError(null);
     setData(null);
@@ -111,7 +117,13 @@ export default function SourceBacktestCard({
     return () => { cancelled = true; };
   }, [runId]);
 
-  const monthly: PeriodRecord[] = data?.result?.monthly_records ?? [];
+  // Memoize the `?? []` fallback so the useMemo blocks below see a
+  // stable reference when `data` is null (instead of a fresh `[]` on
+  // every render, which trips react-hooks/exhaustive-deps).
+  const monthly = useMemo<PeriodRecord[]>(
+    () => data?.result?.monthly_records ?? [],
+    [data],
+  );
   const summary: Summary = data?.result?.summary ?? {};
 
   // The vertical line lands on the calendar day this strategy was
@@ -264,10 +276,13 @@ export default function SourceBacktestCard({
                   fontSize: 12,
                 }}
                 labelStyle={{ color: '#9ca3af' }}
-                formatter={(v: number, name: string) => [
-                  fmtPct(v),
-                  name === 'cum_backtest' ? 'Backtest' : 'Live',
-                ]}
+                formatter={(value, name) => {
+                  const v = typeof value === 'number' ? value : null;
+                  return [
+                    fmtPct(v),
+                    name === 'cum_backtest' ? 'Backtest' : 'Live',
+                  ];
+                }}
               />
               <ReferenceLine
                 x={scheduledAtDay}

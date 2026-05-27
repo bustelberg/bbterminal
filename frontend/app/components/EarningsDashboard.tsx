@@ -168,7 +168,6 @@ export default function EarningsDashboard() {
   // `refresh-all` (force=false) when today's date implies any source is
   // due for new data — old values stay on screen until the SSE round-trip
   // replaces them.
-  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
   useEffect(() => {
     sse.clearLogs();
     setRefreshingSources(new Set());
@@ -182,6 +181,10 @@ export default function EarningsDashboard() {
         refresh('all', false, true, stale);
       }
     });
+    // Intentionally depends on `loadMetrics` only — `refresh`, `selected`,
+    // `sse` are read once on mount; adding them re-fires the effect on
+    // every keystroke that touches their identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadMetrics]);
 
   return (

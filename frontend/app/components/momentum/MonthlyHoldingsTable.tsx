@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, memo, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import type { BacktestResult } from '../../../lib/stores/momentum';
 import type { Column } from '../../../lib/tableExport';
@@ -15,7 +15,6 @@ import { computeNetStats, parenPct } from './feeStats';
 import { useClickOutside } from '../../../lib/hooks/useClickOutside';
 import { useExchangeFeeMap } from '../../../lib/hooks/apiData';
 import { EXCHANGE_NAMES, displayExchange, fmtPct, fmtPrice, guruFocusUrl } from './utils';
-import { API_URL } from '../../../lib/apiUrl';
 
 type HeldCompany = { company_id: number; ticker: string; company_name: string };
 

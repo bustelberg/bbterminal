@@ -23,6 +23,17 @@ const eslintConfig = defineConfig([
       "react-hooks/set-state-in-effect": "warn",
       "react-hooks/purity": "warn",
       "@typescript-eslint/no-explicit-any": "warn",
+      // Honor the underscore-prefix convention for intentionally-unused
+      // bindings — `_idx`, `_unused`, etc. stop tripping the rule. The
+      // rest of the rule (genuine accidental-unused) still reports.
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+        },
+      ],
     },
   },
 ]);

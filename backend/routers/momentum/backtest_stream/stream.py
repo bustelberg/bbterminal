@@ -30,8 +30,6 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from deps import supabase
-
-_log = logging.getLogger(__name__)
 from momentum.data import load_universe
 
 from .._helpers import (
@@ -55,6 +53,8 @@ from .self_heal import compute_gap_cids, run_self_heal
 from .single_run import run_single
 from .universe_loader import load_monthly_eligible_for
 from .variants import run_variants_sweep
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["momentum"])
 

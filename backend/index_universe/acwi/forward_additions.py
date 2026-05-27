@@ -25,7 +25,6 @@ import logging
 import os
 import re
 import time
-from datetime import date
 from urllib.parse import quote
 
 import requests

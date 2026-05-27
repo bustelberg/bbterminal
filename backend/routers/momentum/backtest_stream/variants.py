@@ -17,7 +17,6 @@ loop calls `prepare_variant_from_shared` to slice it per variant."""
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import json
 import logging
 import os
@@ -242,15 +241,18 @@ async def run_variants_sweep(
             if len(periods) < 2:
                 continue
 
-            # Build the per-period tasks (pre-fetched eligibility +
-            # panel slice so worker threads don't repeat the dict
-            # lookups under the GIL).
             # Serial execution (parallel pool removed — see variant loop
             # comment below for the rationale). Period count is small
             # (~300) and each call is mostly numpy under the hood, so
             # serial finishes in a few seconds without thread overhead.
+            # Yield throttled progress so the user sees which (universe,
+            # freq, year-month) is being computed live, instead of
+            # waiting silently for the summary at the end.
+            _combo_label = f"{_v_universe_label or _v_index_universe or '?'} · {_v.frequency} · {_v_grouping}"
             per_period: dict[date, tuple[float | None, int]] = {}
-            for i in range(len(periods) - 1):
+            _last_emit_ts = time.monotonic()
+            total_periods = len(periods) - 1
+            for i in range(total_periods):
                 period_date = periods[i]
                 next_period = periods[i + 1]
                 panel_df = shared_backtest.union_panel.get(period_date)
@@ -261,6 +263,17 @@ async def run_variants_sweep(
                     period_date, next_period, panel_df, eligible_ids,
                 )
                 per_period[pd_date] = val
+                now = time.monotonic()
+                if now - _last_emit_ts >= 0.4 or i == total_periods - 1:
+                    yield _emit({
+                        "type": "progress",
+                        "pct": 69,
+                        "message": (
+                            f"Universe baseline · {_combo_label} · "
+                            f"{period_date.isoformat()[:7]} ({i + 1}/{total_periods})"
+                        ),
+                    })
+                    _last_emit_ts = now
             period_baseline_cache[cf_key] = per_period
         n_cf = len(period_baseline_cache)
         if n_cf > 1:
@@ -369,10 +382,28 @@ async def run_variants_sweep(
             # Serial. Each call is pandas+numpy on a ~1500-row frame;
             # the GIL contention pattern from the previous parallel
             # version cost more in synchronization than it saved.
-            for t in score_tasks:
+            # Yield throttled per-period progress so the user can see
+            # the year-month being scored live — instead of one summary
+            # at the end of a multi-second loop.
+            _last_emit_ts = time.monotonic()
+            total_tasks = len(score_tasks)
+            for i, t in enumerate(score_tasks):
                 combo_done, period_done, scored_df = _score_one(*t)
                 if scored_df is not None and combo_done in score_cache_by_combo:
                     score_cache_by_combo[combo_done][period_done] = scored_df
+                now = time.monotonic()
+                if now - _last_emit_ts >= 0.4 or i == total_tasks - 1:
+                    _u_label, _ix_label, _g_label = combo_done
+                    _combo_short = f"{_u_label or _ix_label or '?'} · {_g_label}"
+                    yield _emit({
+                        "type": "progress",
+                        "pct": 70,
+                        "message": (
+                            f"Scoring · {_combo_short} · "
+                            f"{period_done.isoformat()[:7]} ({i + 1}/{total_tasks})"
+                        ),
+                    })
+                    _last_emit_ts = now
             warmed = sum(len(d) for d in score_cache_by_combo.values())
             yield _emit({
                 "type": "progress",
@@ -422,7 +453,6 @@ async def run_variants_sweep(
     # if needed for debugging. Capped at len(variants) so we don't spin
     # up idle workers.
     n_variants = len(req.variants)
-    max_workers = max(1, min(n_variants, _env_workers)) if n_variants > 0 else 1
 
     sweep_queue: _queue.Queue = _queue.Queue()
 
