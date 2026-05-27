@@ -8,7 +8,7 @@ A financial data terminal for wealth management. Analyses stocks using data from
 - **Backend**: FastAPI (Python, `uv`) deployed on Railway — `backend/`
 - **Database**: Supabase (Postgres) — schema in `supabase/migrations/`
 - **Auth**: Supabase Auth (email/password)
-- **Two Supabase projects**: dev and prod. Dev has all data; prod needs migrations + data sync.
+- **Supabase**: one hosted prod project + a local Supabase for dev (run via `npx supabase start`). Local is the working dataset; the old hosted dev project no longer exists.
 
 ## Running locally
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useState, useEffect, useMemo, useRef } from 'react';
+import { Fragment, useCallback, useState, useEffect, useMemo, useRef } from 'react';
 
 import ApiUsageBadge from './ApiUsageBadge';
 import LoadingDots from './LoadingDots';
@@ -185,16 +185,28 @@ export default function MomentumBacktester() {
   // are comma-separated numeric overrides ("4,6" → two values; empty
   // means "inherit base, don't sweep"). `disabledPerms` lets the user
   // carve specific permutations out of the cross-product preview.
-  const ALL_FREQS = useMemo(
-    () => Array.from(new Set(VARIANT_DEFS.map((v) => v.frequency))),
+  // Off-cadence months (4, 5, 7, 8, 10, 11) are valid rebalance schedules
+  // backend-side but rarely interesting in a sweep — hide them from the
+  // selector without removing them from VARIANT_DEFS so any saved backtest
+  // / scheduled strategy that pinned one keeps working.
+  const HIDDEN_FREQS = useMemo(
+    () => new Set<RebalanceFrequency>([
+      'every_4_months', 'every_5_months', 'every_7_months',
+      'every_8_months', 'every_10_months', 'every_11_months',
+    ]),
     [],
+  );
+  const ALL_FREQS = useMemo(
+    () => Array.from(new Set(VARIANT_DEFS.map((v) => v.frequency)))
+      .filter((f) => !HIDDEN_FREQS.has(f)),
+    [HIDDEN_FREQS],
   );
   const ALL_STRATEGIES = useMemo(
     () => Array.from(new Set(VARIANT_DEFS.map((v) => v.strategy))),
     [],
   );
   const [selectedFreqs, setSelectedFreqs] = useState<Set<RebalanceFrequency>>(
-    () => new Set<RebalanceFrequency>(['monthly', 'every_3_months']),
+    () => new Set<RebalanceFrequency>(['monthly', 'every_2_months', 'every_3_months']),
   );
   const [selectedStrategies, setSelectedStrategies] = useState<Set<StrategyType>>(
     () => new Set<StrategyType>(['long_only']),
@@ -208,6 +220,18 @@ export default function MomentumBacktester() {
   const [topSectorsSweep, setTopSectorsSweep] = useState<string>('');
   const [perSectorSweep, setPerSectorSweep] = useState<string>('');
   const [minScoreSweep, setMinScoreSweep] = useState<string>('');
+  // Auto-skip variants whose effective portfolio size (top × per) falls
+  // outside [min, max]. The raw inputs are strings — blank inherits the
+  // sensible default (12 / 50) so the filter is on by default; explicit
+  // 0 disables that side; any positive integer overrides.
+  const [minPortfolioSizeRaw, setMinPortfolioSizeRaw] = useState<string>('');
+  const [maxPortfolioSizeRaw, setMaxPortfolioSizeRaw] = useState<string>('');
+  const minPortfolioSize = minPortfolioSizeRaw === ''
+    ? 12
+    : Math.max(0, parseInt(minPortfolioSizeRaw, 10) || 0);
+  const maxPortfolioSize = maxPortfolioSizeRaw === ''
+    ? 50
+    : Math.max(0, parseInt(maxPortfolioSizeRaw, 10) || 0);
   const [disabledPerms, setDisabledPerms] = useState<Set<VariantKey>>(() => new Set());
 
   // Generic immutable Set toggle for the four checkbox-list axes.
@@ -314,9 +338,38 @@ export default function MomentumBacktester() {
     return out;
   }, [selectedFreqs, selectedStrategies, selectedUniverses, selectedGroupings, topSectorsSweep, perSectorSweep, minScoreSweep]);
 
+  // Effective portfolio size per variant. Variants leave `top_n_sectors`
+  // and `top_n_per_sector` `undefined` to inherit the base config values
+  // (`topSectors` / `topPerSector`) — substitute those so the floor check
+  // reflects what'll actually run.
+  const variantSize = useCallback(
+    (p: VariantParams) =>
+      (p.top_n_sectors ?? topSectors) * (p.top_n_per_sector ?? topPerSector),
+    [topSectors, topPerSector],
+  );
+  const belowMinSize = useMemo<Set<VariantKey>>(() => {
+    if (minPortfolioSize <= 0) return new Set();
+    return new Set(
+      allPermutations
+        .filter((p) => variantSize(p) < minPortfolioSize)
+        .map(makeVariantKey),
+    );
+  }, [allPermutations, minPortfolioSize, variantSize]);
+  const aboveMaxSize = useMemo<Set<VariantKey>>(() => {
+    if (maxPortfolioSize <= 0) return new Set();
+    return new Set(
+      allPermutations
+        .filter((p) => variantSize(p) > maxPortfolioSize)
+        .map(makeVariantKey),
+    );
+  }, [allPermutations, maxPortfolioSize, variantSize]);
+
   const variantsToRun = useMemo(
-    () => allPermutations.filter((p) => !disabledPerms.has(makeVariantKey(p))),
-    [allPermutations, disabledPerms],
+    () => allPermutations.filter((p) => {
+      const k = makeVariantKey(p);
+      return !disabledPerms.has(k) && !belowMinSize.has(k) && !aboveMaxSize.has(k);
+    }),
+    [allPermutations, disabledPerms, belowMinSize, aboveMaxSize],
   );
 
   // Backtest run state lives in a module-scoped store so the SSE stream
@@ -652,6 +705,138 @@ export default function MomentumBacktester() {
       },
       targets,
     );
+  };
+
+  // Pin a single variant from a completed sweep to /schedule. The
+  // pipeline will then keep its current-picks snapshot up to date on
+  // every tick, AND surface its full backtest stats on /schedule's
+  // per-strategy run history. The user reaches this via the "+ Schedule"
+  // hover button on each OK row in the variants summary table.
+  const handleAddVariantToSchedule = async (variantKey: VariantKey, variantLabel: string) => {
+    const v = parseVariantKey(variantKey);
+    // Map the variant's `rebalance_frequency` to a schedule cadence.
+    // Off-cadence months (4/5/7/8/10/11) round to quarterly — those
+    // variants are rare and the cadence pinning isn't strict (the
+    // strategy still rebalances on its own internal cadence; this
+    // controls how often the pipeline refreshes the snapshot).
+    const FREQ_MAP: Record<string, string> = {
+      daily: 'daily', weekly: 'weekly', monthly: 'monthly',
+      every_2_months: 'bimonthly',
+      every_3_months: 'quarterly', every_4_months: 'quarterly',
+      every_5_months: 'quarterly', every_6_months: 'quarterly',
+      every_7_months: 'quarterly', every_8_months: 'quarterly',
+      every_9_months: 'quarterly', every_10_months: 'quarterly',
+      every_11_months: 'quarterly', every_12_months: 'quarterly',
+    };
+    const scheduleFreq = FREQ_MAP[v.frequency] ?? 'monthly';
+
+    const defaultName = `${variantLabel} · ${v.universe ?? selectedIndexUniverse ?? 'ACWI_LEONTEQ'}`;
+    const enteredName = await dialog.prompt(
+      `Save this variant to /schedule. Pipeline cadence: ${scheduleFreq} (mapped from "${v.frequency}").`,
+      { title: 'Add variant to schedule', defaultValue: defaultName, placeholder: 'Strategy name' },
+    );
+    if (!enteredName || !enteredName.trim()) return;
+
+    // Build the full config. Merge order: base from this component's
+    // state, then variant overrides (frequency, strategy_type, and any
+    // per-axis dials that differ from base).
+    const config: Record<string, unknown> = {
+      selection_mode: selectionMode,
+      index_universe: v.universe ?? selectedIndexUniverse ?? null,
+      universe_label: null,
+      max_companies: maxCompanies,
+      strategy_type: v.strategy,
+      rebalance_frequency: v.frequency,
+      top_n_sectors: v.top_n_sectors ?? topSectors,
+      top_n_per_sector: v.top_n_per_sector ?? topPerSector,
+      grouping: v.grouping ?? grouping,
+      start_date: `${startDate}-01`,
+      end_date: `${endDate}-01`,
+    };
+    if (selectionMode === 'momentum') {
+      const baseMs = minPriceScore.trim() === '' ? null : Number(minPriceScore);
+      // Variant `min_price_score === null` means "explicit OFF" (sweep
+      // axis entered "none"/"off"); undefined means "inherit base".
+      config.min_price_score =
+        v.min_price_score === undefined ? baseMs : v.min_price_score;
+      config.signal_weights = weights;
+      config.category_weights = categoryWeights;
+    }
+    if (selectionMode === 'random') {
+      config.random_seed = randomSeed;
+      config.n_trials = Math.max(1, nTrials);
+    }
+    if (selectionMode === 'sector_etf') {
+      config.sector_etfs = sectorEtfs;
+    }
+
+    // Grab the variant's actual BacktestResult so we can persist it as
+    // a saved backtest_run. The scheduled_strategy then links to that
+    // run via `backtest_run_id` — /schedule renders the full equity
+    // curve + monthly history from this on expansion, no recompute
+    // needed. The pipeline still produces live snapshots on every
+    // tick; those get appended past the "scheduled at" date with
+    // visually-distinct styling so the cutover is clear.
+    const variantOutcome = momentumStore.get().variants[variantKey];
+    if (!variantOutcome || variantOutcome.status !== 'ok') {
+      await dialog.alert('Variant has no completed backtest result to save.', { title: 'Schedule add failed' });
+      return;
+    }
+    const result = variantOutcome.result;
+    try {
+      // 1. Persist the variant's BacktestResult as a backtest_run row.
+      const saveResp = await apiFetch(`${API_URL}/api/momentum/backtests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: enteredName.trim(),
+          config,
+          summary: result.summary,
+          monthly_records: result.monthly_records,
+          daily_records: result.daily_records,
+          universe: momentumStore.get().universe,
+        }),
+      });
+      if (!saveResp.ok) {
+        const body = await saveResp.text().catch(() => '');
+        await dialog.alert(
+          `Could not save backtest before scheduling: ${saveResp.status} ${body.slice(0, 240)}`,
+          { title: 'Schedule add failed' },
+        );
+        return;
+      }
+      const saved = await saveResp.json() as { run_id?: number };
+      const backtest_run_id = saved.run_id ?? null;
+
+      // 2. Create the scheduled_strategy linked to the saved backtest.
+      const r = await apiFetch(`${API_URL}/api/scheduled-strategies`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: enteredName.trim(),
+          frequency: scheduleFreq,
+          config,
+          backtest_run_id,
+        }),
+      });
+      if (!r.ok) {
+        const body = await r.text().catch(() => '');
+        await dialog.alert(
+          `Failed to schedule "${enteredName}": ${r.status} ${body.slice(0, 240)}`,
+          { title: 'Schedule add failed' },
+        );
+        return;
+      }
+      await dialog.alert(
+        `"${enteredName}" added to /schedule. The full backtest history is preserved; the next pipeline tick will start appending live snapshots.`,
+        { title: 'Variant scheduled' },
+      );
+    } catch (e) {
+      await dialog.alert(
+        `Failed to schedule "${enteredName}": ${e instanceof Error ? e.message : String(e)}`,
+        { title: 'Schedule add failed' },
+      );
+    }
   };
 
   const _currentPortfolioConfig = (opts: { force: boolean; dbOnly: boolean }): BacktestStartConfig => ({
@@ -1642,6 +1827,47 @@ export default function MomentumBacktester() {
               </div>
             </div>
 
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+              <div>
+                <label className="text-gray-500 text-xs block mb-1">
+                  Skip variants smaller than{' '}
+                  <span className="text-gray-600 text-[10px]">(blank = 12, 0 disables)</span>
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={minPortfolioSizeRaw}
+                  onChange={(e) => setMinPortfolioSizeRaw(e.target.value)}
+                  placeholder="blank = 12"
+                  className="w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                />
+                {minPortfolioSize > 0 && belowMinSize.size > 0 && (
+                  <p className="text-[10px] text-amber-400/70 mt-1.5">
+                    Skipping {belowMinSize.size} of {allPermutations.length} (portfolio &lt; {minPortfolioSize}).
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="text-gray-500 text-xs block mb-1">
+                  Skip variants larger than{' '}
+                  <span className="text-gray-600 text-[10px]">(blank = 50, 0 disables)</span>
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={maxPortfolioSizeRaw}
+                  onChange={(e) => setMaxPortfolioSizeRaw(e.target.value)}
+                  placeholder="blank = 50"
+                  className="w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                />
+                {maxPortfolioSize > 0 && aboveMaxSize.size > 0 && (
+                  <p className="text-[10px] text-amber-400/70 mt-1.5">
+                    Skipping {aboveMaxSize.size} of {allPermutations.length} (portfolio &gt; {maxPortfolioSize}).
+                  </p>
+                )}
+              </div>
+            </div>
+
             {longShortBlocked && (
               <div className="mb-3 px-3 py-2 text-[11px] text-amber-300/80 bg-amber-500/5 border border-amber-500/20 rounded-lg">
                 Long-short is disabled in {selectionMode === 'all' ? 'all-universe' : selectionMode === 'sector_etf' ? 'sector-ETF' : 'random'} mode (no top/bottom split to short on). Long-short rows below are greyed out.
@@ -1805,22 +2031,37 @@ export default function MomentumBacktester() {
                     const key = makeVariantKey(p);
                     const userDisabled = disabledPerms.has(key);
                     const modeDisabled = longShortBlocked && p.strategy === 'long_short';
-                    const enabled = !userDisabled && !modeDisabled;
+                    const sizeBelowMin = belowMinSize.has(key);
+                    const sizeAboveMax = aboveMaxSize.has(key);
+                    const enabled = !userDisabled && !modeDisabled && !sizeBelowMin && !sizeAboveMax;
+                    const autoDisabled = modeDisabled || sizeBelowMin || sizeAboveMax;
                     return (
                       <li key={key}>
                         <label
                           className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs ${
-                            modeDisabled ? 'text-gray-600 cursor-not-allowed' : 'text-gray-300 hover:bg-white/5 cursor-pointer'
+                            autoDisabled ? 'text-gray-600 cursor-not-allowed' : 'text-gray-300 hover:bg-white/5 cursor-pointer'
                           }`}
                         >
                           <input
                             type="checkbox"
                             checked={enabled}
-                            disabled={modeDisabled}
+                            disabled={autoDisabled}
                             onChange={() => togglePermDisabled(key)}
                             className="accent-indigo-500 w-3.5 h-3.5 cursor-pointer disabled:cursor-not-allowed"
                           />
-                          <span className="truncate">{variantLabel(p)}</span>
+                          <span className="truncate">
+                            {variantLabel(p)}
+                            {sizeBelowMin && (
+                              <span className="ml-1.5 text-[9px] uppercase tracking-wider text-amber-400/70">
+                                skipped · {variantSize(p)} &lt; {minPortfolioSize}
+                              </span>
+                            )}
+                            {sizeAboveMax && (
+                              <span className="ml-1.5 text-[9px] uppercase tracking-wider text-amber-400/70">
+                                skipped · {variantSize(p)} &gt; {maxPortfolioSize}
+                              </span>
+                            )}
+                          </span>
                         </label>
                       </li>
                     );
@@ -2267,7 +2508,12 @@ export default function MomentumBacktester() {
         {/* Variant sweep summary — appears as soon as one variant outcome
             lands and stays visible alongside the active variant's detail
             views below. Hidden entirely when no sweep has run. */}
-        {hasVariants && <VariantSummaryTable exchangeByCompany={exchangeByCompany} />}
+        {hasVariants && (
+          <VariantSummaryTable
+            exchangeByCompany={exchangeByCompany}
+            onAddToSchedule={handleAddVariantToSchedule}
+          />
+        )}
 
         {/* Variant attribution — per-axis marginal averages so the user
             can see at a glance which axis values consistently produce

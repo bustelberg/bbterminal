@@ -69,7 +69,7 @@ class ACWITemplate(UniverseTemplate):
         )
 
         today = date.today()
-        run_acwi_save_universe(
+        run_result = run_acwi_save_universe(
             self.label,
             self.earliest_date.isoformat(),
             today.isoformat(),
@@ -88,6 +88,12 @@ class ACWITemplate(UniverseTemplate):
             universe_id=universe_id,
             prev_month=prev_month,
             this_month=this_month,
+        )
+        # Forward-additions that resolved cleanly are already part of
+        # the membership rows; only the unresolved ones need to surface
+        # to /schedule for manual review.
+        diff.unresolved_additions = (run_result or {}).get(
+            "unresolved_forward_additions", []
         )
 
         months = self.available_months(supabase)

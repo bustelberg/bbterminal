@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import queue as _queue
+import threading
 
 import pandas as pd
 
@@ -80,6 +81,8 @@ async def run_self_heal(
     fx_rates: dict[str, pd.Series],
     price_start,
     price_end,
+    *,
+    cancel_event: threading.Event | None = None,
 ):
     """Yield SSE progress events while running the self-heal task and
     merging the recovered frames. Finally yields
@@ -99,17 +102,69 @@ async def run_self_heal(
 
     heal_progress_q: _queue.Queue = _queue.Queue()
 
-    def _on_heal_progress(cid, status, msg):
-        heal_progress_q.put({"cid": cid, "status": status, "msg": msg})
+    def _on_heal_progress(cid, status, msg, *, prices_loaded=0, volumes_loaded=0):
+        heal_progress_q.put({
+            "cid": cid,
+            "status": status,
+            "msg": msg,
+            "prices_loaded": prices_loaded,
+            "volumes_loaded": volumes_loaded,
+        })
 
     heal_task = asyncio.create_task(asyncio.to_thread(
         self_heal_missing_data,
         supabase, gap_cids, ticker_lookup, exchange_lookup,
         on_progress=_on_heal_progress,
+        cancel_event=cancel_event,
     ))
+
+    # Track which originally-flagged cids have actually been recovered.
+    # The audit's gap sets are the ground-truth denominator for the live
+    # warning-update counters — we don't trust the per-cid stream alone
+    # because forbidden/skipped cids never produce prices_loaded > 0 but
+    # also shouldn't be counted as "still missing in self-heal".
+    price_gap_set = {int(c) for c in (audit.no_price_gap_cids or [])}
+    vol_gap_set = {int(c) for c in (audit.no_vol_gap_cids or [])}
+    recovered_price: set[int] = set()
+    recovered_vol: set[int] = set()
+    processed_cids: set[int] = set()
+    status_icons = {"ok": "✓", "noop": "—", "skipped": "—", "forbidden": "✗", "error": "✗"}
+
+    def _live_warning(scope_label: str, gap_set: set[int], recovered_set: set[int]) -> str:
+        still_missing = len(gap_set) - len(recovered_set)
+        if still_missing == 0:
+            # All recovered — dismiss the standing warning entirely.
+            return _emit({
+                "type": "warning",
+                "id": f"{scope_label}-gap",
+                "scope": scope_label,
+                "dismiss": True,
+                "message": "",
+            })
+        return _emit({
+            "type": "warning",
+            "id": f"{scope_label}-gap",
+            "scope": scope_label,
+            "message": (
+                f"{still_missing} of {len(gap_set)} companies still missing "
+                f"{scope_label} ({len(recovered_set)} recovered so far, self-heal in progress…)"
+            ),
+        })
 
     done_count = 0
     while not heal_task.done():
+        if cancel_event is not None and cancel_event.is_set():
+            # Stop yielding new progress events — the worker's seeing the
+            # same flag and is bailing out fast. Returning here lets the
+            # async generator unwind so the client-disconnect cancellation
+            # actually halts the stream instead of waiting for the worker
+            # to drain its full queue.
+            yield _emit({
+                "type": "info",
+                "scope": "self-heal",
+                "message": f"Self-heal cancelled at {done_count}/{len(gap_cids)}.",
+            })
+            return
         drained = []
         while True:
             try:
@@ -118,8 +173,44 @@ async def run_self_heal(
                 break
         if drained:
             done_count += len(drained)
-            yield _emit({"type": "progress", "pct": 67, "message": f"  Self-heal: {done_count}/{len(gap_cids)} companies processed..."})
-        await asyncio.sleep(0.2)
+            # Update recovery tallies from every drained item.
+            for item in drained:
+                cid = int(item["cid"])
+                processed_cids.add(cid)
+                if item.get("prices_loaded", 0) > 0 and cid in price_gap_set:
+                    recovered_price.add(cid)
+                if item.get("volumes_loaded", 0) > 0 and cid in vol_gap_set:
+                    recovered_vol.add(cid)
+            # Per-iteration progress with the latest cid's outcome.
+            latest = drained[-1]
+            latest_cid = int(latest["cid"])
+            icon = status_icons.get(latest["status"], "·")
+            label = audit.label_for_cid.get(latest_cid, str(latest_cid))
+            yield _emit({
+                "type": "progress",
+                "pct": 67,
+                "message": (
+                    f"  Self-heal: {done_count}/{len(gap_cids)} processed — "
+                    f"last: {icon} {label} ({latest['msg']})"
+                ),
+            })
+            # Live warning updates (deduped on the frontend by `id`).
+            if price_gap_set:
+                yield _live_warning("prices", price_gap_set, recovered_price)
+            if vol_gap_set:
+                yield _live_warning("volumes", vol_gap_set, recovered_vol)
+        try:
+            await asyncio.sleep(0.2)
+        except asyncio.CancelledError:
+            # Cancellation arrived mid-loop. Set the worker-visible flag
+            # so the next per-company call short-circuits, then re-raise
+            # so the async generator unwinds cleanly. Without setting
+            # the flag here, workers wouldn't notice until the outer
+            # stream's except handler set it — a few-hundred-ms gap that
+            # would otherwise start one more GF fetch per worker thread.
+            if cancel_event is not None:
+                cancel_event.set()
+            raise
 
     heal_result = await heal_task
     healed_cids = heal_result["healed_company_ids"]

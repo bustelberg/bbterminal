@@ -1,31 +1,23 @@
 """Scheduled refresh pipeline.
 
-Backs the /schedule page. Each run executes four phases in order:
+Backs the /schedule page. Each run executes these phases in order:
 
+  0. Source acquisition — probe upstream and pull anything newer than
+     what's loaded (currently only an XLS staleness check for ACWI; the
+     LongEquity ingest lives in its template now).
   1. Template-managed universe refresh — iterates every registered
-     `UniverseTemplate` (currently just ACWI; SP500 will plug in once
-     migrated). For each: calls `template.refresh()`, which reconstructs
-     monthly memberships in the canonical universe row and produces a
-     diff (additions/removals/renames) vs the previous month. Each
-     template's diff lands as one entry in `ingest_run.templates_summary`
-     (a JSONB array, one entry per template).
+     `UniverseTemplate`. Each diff lands as one entry in
+     `ingest_run.templates_summary`.
   2. Orphan prune — delete any `company` row that's no longer a member
-     of one of the three source universes (LongEquity / ACWI / Leonteq).
-     The invariant: every row in `company` must come from one of these
-     three sources. Runs AFTER the template refresh so the kept-set
-     reflects the latest universe state, and BEFORE the price phase so
-     we don't waste GuruFocus API calls on rows we're about to delete.
-  3. Price + volume refresh — walks every company in `company` through
-     `ensure_prices_for_company` + `ensure_volume_for_company`,
-     tallying forbidden / delisted / errors silently. This is the
-     phase that used to be the whole job pre-pipeline.
-  4. Momentum compute — loops over every enabled row in
-     `scheduled_strategy`. For each, drains `_momentum_backtest_stream`
-     with `mode=current_portfolio` and that strategy's backtest config,
-     persisting one `current_picks_snapshot` per strategy. The inverse
-     FK `current_picks_snapshot.ingest_run_id` ties snapshots back to
-     this run; `ingest_run.momentum_summary` JSONB holds an array of
-     per-strategy result entries (status, holdings_count, etc.).
+     of one of the source universes (LongEquity / ACWI / Leonteq).
+  2.5. Duplicate merge — collapse cross-source duplicates (`Bank of New
+     York Mellon` from ACWI + Leonteq landing as two rows) before the
+     prices phase wastes GuruFocus calls on the losers. Calls
+     `ingest.dedupe.merge_existing_duplicates`.
+  3. Price + volume refresh — walks every surviving company through
+     `ensure_prices_for_company` + `ensure_volume_for_company`.
+  4. Momentum compute — one current-picks snapshot per enabled
+     `scheduled_strategy`.
 
 Phases run independently — a failure in one is captured in
 `error_summary` (first ~5 errors across all phases) but the next phase
@@ -65,6 +57,13 @@ _VALID_JOB_NAMES = {
     # then recomputes + persists MTD on each strategy's latest snapshot so
     # the /schedule UI shows fresh "to-date" stats every trading day.
     "daily_holdings_refresh",
+    # Daily template refresh: fires Mon, Wed-Sun 02:30 UTC (skipping Tue
+    # which the weekly full pipeline covers). Lightweight — runs only
+    # acquisition + templates + prune + dedupe, no prices/momentum.
+    # Picks up MSCI announcement changes for ACWI and Leonteq eligibility
+    # list updates on a daily cadence so /schedule's per-template
+    # additions/removals view stays current.
+    "daily_template_refresh",
     # One-shot bootstrap fired by `scheduler.py` at app start when one or
     # more registered templates have never been refreshed in this env
     # (typically the first request after a deploy that introduced a new
@@ -281,6 +280,18 @@ def _run_pipeline_sync(run_id: int) -> None:
         log.warning("[pipeline] run_id=%s %s", run_id, msg)
         accumulated_errors.append(msg)
 
+    # ── Phase 2.5: duplicate merge ─────────────────────────────
+    # Collapse cross-source dupes (same issuer ingested as separate
+    # rows by ACWI + Leonteq + LongEquity) so the prices phase doesn't
+    # spend API calls on losers we're about to delete.
+    _update_run(run_id, current_phase="dedupe", current_message="Merging duplicate companies…")
+    try:
+        _run_dedupe_phase(run_id)
+    except Exception as e:
+        msg = f"Dedupe phase failed: {type(e).__name__}: {e}"
+        log.warning("[pipeline] run_id=%s %s", run_id, msg)
+        accumulated_errors.append(msg)
+
     # ── Phase 3: price + volume refresh ────────────────────────
     _update_run(run_id, current_phase="prices", current_message="Loading company list…")
     try:
@@ -455,6 +466,40 @@ def _run_prune_phase(run_id: int) -> None:
     )
     _update_run(run_id, current_message=msg)
     log.info("[pipeline.prune] run_id=%s %s", run_id, msg)
+
+
+def _run_dedupe_phase(run_id: int) -> None:
+    """Phase 2.5 — collapse duplicate `company` rows that ended up in
+    the table because three different sources (LongEquity / ACWI /
+    Leonteq) all ingested the same issuer. Calls
+    `ingest.dedupe.merge_existing_duplicates` which groups by
+    canonical_name, picks a winner per `EXCHANGE_PRIORITY`, and rewires
+    every FK (metric_data, universe_membership, portfolio_weight,
+    company_source, leonteq_equity, current_picks_snapshot) before
+    deleting the loser rows.
+
+    Runs AFTER prune (so we don't merge into a row that's about to be
+    deleted) and BEFORE prices (so we don't spend GuruFocus calls on
+    losers)."""
+    from ingest.dedupe import (  # noqa: PLC0415
+        merge_existing_duplicates,
+    )
+
+    log = logging.getLogger(__name__)
+    _update_run(run_id, current_message="Scanning for duplicate companies…")
+    report = merge_existing_duplicates(supabase, dry_run=False)
+
+    msg = (
+        f"Dedupe done: merged {report.groups_merged} dupe groups, "
+        f"deleted {report.rows_deleted} loser rows "
+        f"(HKSE pad: {report.hkse_tickers_normalized}, "
+        f"metric_data: {report.metric_data_reassigned} moved / "
+        f"{report.metric_data_dropped} dropped, "
+        f"membership: {report.universe_membership_reassigned}, "
+        f"weights: {report.portfolio_weight_reassigned})."
+    )
+    _update_run(run_id, current_message=msg)
+    log.info("[pipeline.dedupe] run_id=%s %s", run_id, msg)
 
 
 def _run_prices_phase(
@@ -1257,15 +1302,74 @@ def _run_daily_mtd_pipeline_sync(run_id: int) -> None:
     log.info("[daily_mtd] run_id=%s finished status=%s", run_id, final_status)
 
 
+def _run_daily_template_refresh_pipeline_sync(run_id: int) -> None:
+    """Lightweight daily template-refresh pipeline. Runs Phases 0-2.5
+    only — acquisition → templates → prune → dedupe — and skips the
+    heavy prices + momentum phases entirely. Fires daily so
+    /schedule's per-template additions/removals view picks up MSCI
+    announcement changes and Leonteq eligibility list updates within
+    24h instead of waiting for the weekly full pipeline."""
+    log = logging.getLogger(__name__)
+    accumulated_errors: list[str] = []
+
+    _update_run(run_id, current_phase="acquisition", current_message="Probing upstream sources…")
+    try:
+        _run_acquisition_phase(run_id)
+    except Exception as e:
+        msg = f"Acquisition phase failed: {type(e).__name__}: {e}"
+        log.warning("[daily_templates] run_id=%s %s", run_id, msg)
+        accumulated_errors.append(msg)
+
+    _update_run(run_id, current_phase="templates", current_message="Starting template refresh…")
+    try:
+        _run_templates_phase(run_id)
+    except Exception as e:
+        msg = f"Templates phase failed: {type(e).__name__}: {e}"
+        log.warning("[daily_templates] run_id=%s %s", run_id, msg)
+        accumulated_errors.append(msg)
+
+    _update_run(run_id, current_phase="prune", current_message="Pruning orphan companies…")
+    try:
+        _run_prune_phase(run_id)
+    except Exception as e:
+        msg = f"Prune phase failed: {type(e).__name__}: {e}"
+        log.warning("[daily_templates] run_id=%s %s", run_id, msg)
+        accumulated_errors.append(msg)
+
+    _update_run(run_id, current_phase="dedupe", current_message="Merging duplicate companies…")
+    try:
+        _run_dedupe_phase(run_id)
+    except Exception as e:
+        msg = f"Dedupe phase failed: {type(e).__name__}: {e}"
+        log.warning("[daily_templates] run_id=%s %s", run_id, msg)
+        accumulated_errors.append(msg)
+
+    final_status = "error" if accumulated_errors else "ok"
+    summary = (
+        ("First errors:\n" + "\n".join(accumulated_errors[:5]))[:1000]
+        if accumulated_errors else None
+    )
+    _update_run(
+        run_id,
+        current_phase="done",
+        status=final_status,
+        error_summary=summary,
+        finished_at=_now_utc_iso(),
+    )
+    log.info("[daily_templates] run_id=%s finished status=%s", run_id, final_status)
+
+
 def _spawn_ingest(run_id: int, job_name: str) -> None:
     """Dispatch by `job_name`. The full pipeline (acquisition → … →
-    momentum) runs for the weekly/monthly/manual jobs; the lightweight
-    daily orchestrator runs for `daily_holdings_refresh`."""
-    target = (
-        _run_daily_mtd_pipeline_sync
-        if job_name == "daily_holdings_refresh"
-        else _run_pipeline_sync
-    )
+    momentum) runs for the weekly/manual/bootstrap jobs; the lightweight
+    daily orchestrators run for `daily_holdings_refresh` (prices+MTD)
+    and `daily_template_refresh` (templates+prune+dedupe)."""
+    if job_name == "daily_holdings_refresh":
+        target = _run_daily_mtd_pipeline_sync
+    elif job_name == "daily_template_refresh":
+        target = _run_daily_template_refresh_pipeline_sync
+    else:
+        target = _run_pipeline_sync
     threading.Thread(
         target=target,
         args=(run_id,),

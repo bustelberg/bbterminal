@@ -84,10 +84,16 @@ class ScheduledStrategyCreate(BaseModel):
     """Body for POST. `config` is the full BacktestRequest payload (we
     don't re-validate it here; the pipeline drives it through
     `BacktestRequest(**config)` and surfaces any failure as a per-
-    strategy error in the run's templates_summary)."""
+    strategy error in the run's templates_summary).
+
+    `backtest_run_id` is REQUIRED. Every scheduled strategy must
+    originate from a backtested variant — that gives /schedule a
+    persistent equity-curve / monthly-history record to anchor the
+    live snapshots against. The manual-add flow has been retired."""
     name: str
     frequency: str
     config: dict
+    backtest_run_id: int
 
 
 class ScheduledStrategyPatch(BaseModel):
@@ -447,6 +453,12 @@ def _run_backfill(strategy_id: int) -> None:
         "every_3_months": 900,  # 15mo + 12mo
     }.get(bt_freq, 550)
     today = date.today()
+    # Pop any variant-add transport fields that don't belong in
+    # BacktestRequest (backfill_start_date / _end_date were a prior
+    # experiment; the variant-add flow now skips backfill entirely and
+    # uses backtest_run_id instead).
+    config.pop("backfill_start_date", None)
+    config.pop("backfill_end_date", None)
     start = today - timedelta(days=lookback_days)
     config["mode"] = "backtest"
     config["start_date"] = start.isoformat()
@@ -512,6 +524,12 @@ def _run_backfill(strategy_id: int) -> None:
         _log.info("[backfill] strategy=%s no monthly records produced", strategy_id)
         return
     # Newest 5 records, ordered newest-first for tidier insert logs.
+    # Variant-add flow (the "+ Schedule" button on /backtest) skips
+    # this whole `_run_backfill` codepath entirely — it preserves the
+    # full BacktestResult via `scheduled_strategy.backtest_run_id`
+    # instead. Manual /schedule adds without a saved backtest still
+    # get a 5-period preview so the run history isn't empty until
+    # the first live pipeline tick.
     engine_tail = list(reversed(monthly[-5:]))
 
     progress.write(pct=95, message=f"Persisting {len(engine_tail)} backfill snapshots…")
@@ -1131,16 +1149,18 @@ async def add_scheduled_strategy(body: ScheduledStrategyCreate):
 
     def _insert() -> dict:
         next_due = _initial_next_due_at().isoformat()
+        insert_row: dict = {
+            "name": body.name.strip(),
+            "frequency": body.frequency,
+            "config": body.config,
+            "enabled": True,
+            "next_due_at": next_due,
+            "backtest_run_id": body.backtest_run_id,
+        }
         try:
             resp = (
                 supabase.table("scheduled_strategy")
-                .insert({
-                    "name": body.name.strip(),
-                    "frequency": body.frequency,
-                    "config": body.config,
-                    "enabled": True,
-                    "next_due_at": next_due,
-                })
+                .insert(insert_row)
                 .execute()
             )
         except Exception as e:
@@ -1148,11 +1168,9 @@ async def add_scheduled_strategy(body: ScheduledStrategyCreate):
         if not resp.data:
             raise HTTPException(500, "Insert returned no row")
         new_row = resp.data[0]
-        # Kick off the backfill in a daemon thread so the POST
-        # returns immediately. The backfill snapshots appear in the
-        # strategy's run history as they're persisted; the UI polls
-        # the runs endpoint to pick them up.
-        _spawn_backfill(int(new_row["id"]))
+        # No backfill — the saved backtest_run IS the pre-schedule
+        # history. Live snapshots accumulate from the next pipeline
+        # tick onwards.
         return _hydrate([new_row])[0]
     return await asyncio.to_thread(_insert)
 
@@ -1321,6 +1339,11 @@ async def list_strategy_runs(strategy_id: int, limit: int = 50):
             "created_at": sched.get("created_at"),
             "last_run_at": sched.get("last_run_at"),
             "next_due_at": sched.get("next_due_at"),
+            # Variant-add flow stores the source backtest here. Frontend
+            # fetches /api/momentum/backtests/{run_id} on expansion to
+            # render the full equity curve + monthly history with a
+            # "scheduled at" demarcation line at `created_at`.
+            "backtest_run_id": sched.get("backtest_run_id"),
             "backfill": {
                 "status": sched.get("backfill_status"),
                 "progress_pct": sched.get("backfill_progress_pct"),

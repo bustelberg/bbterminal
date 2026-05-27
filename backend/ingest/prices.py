@@ -44,7 +44,7 @@ else:
 _BUCKET = "gurufocus-raw"
 _PRICE_CUTOFF = date(1998, 1, 1)
 
-US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX", "CBOE"}
+from .gurufocus_url import US_EXCHANGE_CODES as US_EXCHANGES  # single source of truth
 
 # When GuruFocus returns 404 "Stock not found" for a (ticker, exchange)
 # pair, try these alternative exchanges before giving up. iShares ACWI

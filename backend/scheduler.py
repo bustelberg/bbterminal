@@ -292,6 +292,26 @@ def register_scheduler(app) -> None:
             coalesce=True,
             misfire_grace_time=600,
         )
+        # Daily template refresh: Mon, Wed-Sun 02:30 UTC. Lightweight
+        # (acquisition → templates → prune → dedupe, no prices/momentum).
+        # Picks up MSCI announcement changes for ACWI + Leonteq
+        # eligibility list updates within 24h so /schedule's per-
+        # template additions/removals view stays current daily.
+        # Skips Tue (weekly full pipeline already does it). Offset 30
+        # min from the MTD tick so the two daily jobs don't pile on
+        # GuruFocus simultaneously when both happen to fire same day.
+        sched.add_job(
+            _fire_job,
+            CronTrigger(
+                day_of_week="mon,wed,thu,fri,sat,sun",
+                hour=2, minute=30, timezone="UTC",
+            ),
+            args=["daily_template_refresh"],
+            id="daily_template_refresh",
+            replace_existing=True,
+            coalesce=True,
+            misfire_grace_time=600,
+        )
         sched.start()
         _scheduler = sched
         # Reap any orphan `ingest_run` rows left in `status='running'`

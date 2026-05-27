@@ -84,6 +84,18 @@ def run_backtest(
     # None to disable caching (single-run path / tests / legacy
     # callers). Mutated in place — pass a fresh dict per sweep.
     score_cache: dict | None = None,
+    # Win #3: per-sweep cache for the per-cid price math in
+    # `make_period_holding`. Same lifecycle as `score_cache` — variants
+    # sweep allocates one dict and passes it to every variant; siblings
+    # on the same (cid, entry_ts, exit_ts) triple hit the cache. Pass
+    # None to disable. Mutated in place.
+    price_cache: dict | None = None,
+    # Win #5: per-sweep cache for `select_from_scored`. Same lifecycle
+    # as `score_cache`. Caches the pandas filter/groupby/nlargest by
+    # `(period_date, top_n_sectors, top_n_per_sector, min_price_score,
+    # direction)` so variants sharing those params on the same combo
+    # skip the selection compute entirely.
+    selection_cache: dict | None = None,
     # Side-effect callback invoked once per period with the period
     # date + the per-period eligibility-filtered signals_df, right
     # after that frame is built. Used by single_run.py to populate the
@@ -179,6 +191,10 @@ def run_backtest(
         return d.isoformat() if sub_monthly else d.strftime("%b %Y")
 
     period_records: list[PeriodRecord] = []
+    # Roll up empty-selection events into a single warning emitted at
+    # the end. Each entry is (period_date, empty_reason); we emit a
+    # one-liner per run summarizing N empty periods + a sample of dates.
+    _empty_reasons: list[tuple] = []
     accum = _PeriodAccumulators()
     prev_holdings_set: set[int] = set()
 
@@ -354,6 +370,8 @@ def run_backtest(
                 company_currency=company_currency,
                 record_label=_record_label(period_date),
                 scored_df=scored_df,
+                price_cache=price_cache,
+                selection_cache=selection_cache,
             )
 
         # Forward any warnings the branch raised. Done before the
@@ -416,16 +434,14 @@ def run_backtest(
         if per_period_universe_daily and not is_open_iter:
             accum.universe_daily_factor *= per_period_universe_daily[-1][1]
 
-        # Empty-holdings branch: forward the empty_reason as both a record
-        # and a warning, then move on. The universe baseline is still
-        # meaningful here (signals_df was non-empty; the strategy just
-        # couldn't pick anything) so we record + chain-link it.
+        # Empty-holdings branch: record the empty reason on the
+        # PeriodRecord below for UI surfacing, AND accumulate it into
+        # a per-run summary that fires ONCE at the end of the run.
+        # Per-period warnings (the previous behavior) drowned out
+        # other warnings in a sweep — a single variant with an
+        # aggressive min_price_score could emit 30-80 of these.
         if outcome.empty_reason is not None:
-            if send_event:
-                send_event(
-                    "warning", scope="backtest",
-                    message=f"{_record_label(period_date)}: {outcome.empty_reason}",
-                )
+            _empty_reasons.append((period_date, outcome.empty_reason))
             universe_cum_record = None
             if universe_ret is not None:
                 if is_open_iter:
@@ -508,6 +524,29 @@ def run_backtest(
             ),
             universe_constituents=universe_n if universe_ret is not None else None,
         ))
+
+    # Per-run summary of empty-selection events. Replaces the per-period
+    # warning storm — one variant with min_price_score=80 and a sparse
+    # universe used to emit ~30-80 individual warnings; now it's a
+    # single line per variant.
+    if send_event and _empty_reasons:
+        n_empty = len(_empty_reasons)
+        first_dates = ", ".join(
+            _record_label(d) for d, _ in _empty_reasons[:5]
+        )
+        more = f" (+{n_empty - 5} more)" if n_empty > 5 else ""
+        # Pick the most common reason — typically every empty period
+        # shares the same template ("X companies but none passed
+        # selection (top_n=…, per=…)"), so any sample tells the story.
+        sample_reason = _empty_reasons[0][1]
+        send_event(
+            "warning", scope="backtest",
+            message=(
+                f"{n_empty} period(s) produced no holdings (likely "
+                f"min_price_score too restrictive). First: {first_dates}{more}. "
+                f"Reason: {sample_reason}"
+            ),
+        )
 
     if send_event:
         send_event("progress", month="done", pct=100, message="Backtest complete")

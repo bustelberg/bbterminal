@@ -128,6 +128,65 @@ async def get_universe_template(template_key: str, response: Response):
     return await asyncio.to_thread(_q)
 
 
+@router.get("/api/universe-templates/{template_key}/recent-changes")
+async def get_universe_template_recent_changes(
+    template_key: str, limit: int = 5,
+):
+    """Latest N additions/removals/renames for a template, sourced from
+    `ingest_run.templates_summary` array entries on the most recent
+    successful runs. The /schedule per-template expand uses this to
+    show "last week's diff" without re-loading the full membership
+    table."""
+    try:
+        get_template(template_key)  # validate key
+    except KeyError:
+        raise HTTPException(404, f"Unknown template_key: {template_key}")
+    limit = max(1, min(20, limit))
+
+    def _q() -> list[dict]:
+        # Pull recent ingest_runs and pluck out THIS template's diff
+        # entry. We over-fetch (limit * 4) on the runs query because
+        # not every run includes every template (e.g., a daily
+        # template-refresh might fail mid-phase and leave gaps).
+        resp = (
+            supabase.table("ingest_run")
+            .select("run_id, started_at, finished_at, status, templates_summary")
+            .order("started_at", desc=True)
+            .limit(limit * 4)
+            .execute()
+        )
+        rows = resp.data or []
+        out: list[dict] = []
+        for r in rows:
+            summary = r.get("templates_summary") or []
+            for entry in summary:
+                if entry.get("template_key") != template_key:
+                    continue
+                # Skip entries that errored — those carry no diff.
+                if entry.get("error"):
+                    continue
+                out.append({
+                    "run_id": r["run_id"],
+                    "started_at": r["started_at"],
+                    "finished_at": r.get("finished_at"),
+                    "status": r["status"],
+                    "this_month": entry.get("this_month"),
+                    "prev_month": entry.get("prev_month"),
+                    "additions_count": entry.get("additions_count", 0),
+                    "removals_count": entry.get("removals_count", 0),
+                    "renames_count": entry.get("renames_count", 0),
+                    "additions": entry.get("additions") or [],
+                    "removals": entry.get("removals") or [],
+                    "renames": entry.get("renames") or [],
+                })
+                if len(out) >= limit:
+                    return out
+                break  # one entry per run for this template
+        return out
+
+    return await asyncio.to_thread(_q)
+
+
 @router.get("/api/universe-templates/{template_key}/months")
 async def list_universe_template_months(template_key: str, response: Response):
     """Just the captured-months list. Cheaper than the full summary

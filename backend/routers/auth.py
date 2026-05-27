@@ -16,6 +16,7 @@ PATCH /api/auth/users/{id}/role.
 
 from __future__ import annotations
 
+import hashlib
 import os
 
 from fastapi import APIRouter, HTTPException, Header
@@ -26,10 +27,26 @@ from deps import supabase
 
 router = APIRouter(tags=["auth"])
 
+# SHA-256(lower(email)) hex of hardcoded admin emails. Mirrors the
+# trigger in 20260527010000_admin_email_hash.sql — change both together.
+_ADMIN_EMAIL_HASHES: frozenset[str] = frozenset({
+    "9fe083c7c1b2b6273a30b369870280d9cdfd3a89e165e6c2d68035cf1f7f144f",
+    "5db5e75947119ef23451bc46919479a90b6bd51cd2e81815f2c7083e20fde36f",
+})
+
+
+def _is_hardcoded_admin_email(email: str | None) -> bool:
+    if not email:
+        return False
+    h = hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()
+    return h in _ADMIN_EMAIL_HASHES
+
 
 def _require_admin(authorization: str) -> dict:
     """Verify the Bearer token and return {id, email, role}. Raises 403
-    unless the user has app_metadata.role == 'admin'."""
+    unless the user has app_metadata.role == 'admin' OR their email
+    hashes to a hardcoded admin (fallback for accounts that predate the
+    signup trigger or whose role was wiped)."""
     token = (authorization or "").replace("Bearer ", "")
     if not token:
         raise HTTPException(401, "Missing Authorization header")
@@ -41,9 +58,10 @@ def _require_admin(authorization: str) -> dict:
     if not user:
         raise HTTPException(401, "Invalid token — no user found")
     role = (getattr(user, "app_metadata", None) or {}).get("role")
-    if role != "admin":
+    email = getattr(user, "email", None)
+    if role != "admin" and not _is_hardcoded_admin_email(email):
         raise HTTPException(403, "Admin role required")
-    return {"id": user.id, "email": user.email, "role": role}
+    return {"id": user.id, "email": email, "role": "admin"}
 
 
 @router.delete("/api/auth/delete-account")
