@@ -51,9 +51,9 @@ describe('seriesFromMonthly', () => {
 describe('seriesFromPrices', () => {
   it('rebases to 1.0 on the first day and tracks proportional growth', () => {
     const prices = [
-      { target_date: '2024-01-02', price: 100, currency: 'USD' },
-      { target_date: '2024-01-03', price: 110, currency: 'USD' },
-      { target_date: '2024-01-04', price: 90, currency: 'USD' },
+      { target_date: '2024-01-02', price: 100 },
+      { target_date: '2024-01-03', price: 110 },
+      { target_date: '2024-01-04', price: 90 },
     ];
     const { map } = seriesFromPrices(prices);
     expect(map.get('2024-01-02')).toBeCloseTo(1.0);
@@ -63,8 +63,8 @@ describe('seriesFromPrices', () => {
 
   it('returns empty maps when the first price is non-positive', () => {
     const { map, months } = seriesFromPrices([
-      { target_date: '2024-01-01', price: 0, currency: 'USD' },
-      { target_date: '2024-01-02', price: 10, currency: 'USD' },
+      { target_date: '2024-01-01', price: 0 },
+      { target_date: '2024-01-02', price: 10 },
     ]);
     expect(map.size).toBe(0);
     expect(months).toEqual([]);

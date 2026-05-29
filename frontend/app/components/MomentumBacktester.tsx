@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useState, useEffect, useMemo, useRef } from 'react';
+import { Fragment, useState, useEffect, useMemo, useRef } from 'react';
 
 import ApiUsageBadge from './ApiUsageBadge';
 import LoadingDots from './LoadingDots';
@@ -12,7 +12,6 @@ import ProgressTimeline from './ProgressTimeline';
 import NotificationsPanel from './momentum/NotificationsPanel';
 import { useClickOutside } from '../../lib/hooks/useClickOutside';
 import {
-  useBenchmarks,
   useCompanyExchangeMap,
   useMomentumSignals,
   useUniverseTemplates,
@@ -39,6 +38,7 @@ import {
   type VariantOutcome,
   type VariantParams,
 } from '../../lib/stores/momentum';
+import AxisColumn from './momentum/AxisColumn';
 import CellInfoTip from './momentum/CellInfoTip';
 import CollapsibleCard from './momentum/CollapsibleCard';
 import DailyPicksHistory from './momentum/DailyPicksHistory';
@@ -49,6 +49,9 @@ import SectorTimelineChart from './momentum/SectorTimelineChart';
 import VariantAttribution from './momentum/VariantAttribution';
 import TableDownloadButton from './TableDownloadButton';
 import VariantSummaryTable from './momentum/VariantSummaryTable';
+import { parseMinScoreList, parseNumList, toggleInSet } from './momentum/variantHelpers';
+import { useSectorEtfs } from './momentum/useSectorEtfs';
+import { useVariantSelection } from './momentum/useVariantSelection';
 import {
   EXCHANGE_NAMES,
   fmtPct,
@@ -69,53 +72,6 @@ import type {
  * `renderItem` callback. Generic over the option type so the same shell
  * carries frequencies (strings), strategies (StrategyType), universes
  * (strings), and groupings ('sector' | 'industry'). */
-function AxisColumn<T>({
-  label,
-  options,
-  selected,
-  onAll,
-  onNone,
-  renderItem,
-  maxHClass,
-}: {
-  label: string;
-  options: readonly T[];
-  selected: ReadonlySet<T>;
-  onAll: () => void;
-  onNone: () => void;
-  renderItem: (option: T) => React.ReactNode;
-  maxHClass: string;
-}) {
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-1.5">
-        <span className="text-gray-500 text-xs">
-          {label}{' '}
-          <span className="text-gray-600 text-[10px]">
-            ({selected.size}/{options.length})
-          </span>
-        </span>
-        <div className="flex items-center gap-2 text-[11px]">
-          <button type="button" onClick={onAll} className="text-indigo-400 hover:text-indigo-300">
-            All
-          </button>
-          <span className="text-gray-700">·</span>
-          <button type="button" onClick={onNone} className="text-gray-400 hover:text-gray-200">
-            None
-          </button>
-        </div>
-      </div>
-      <ul className={`border border-gray-800/60 rounded-lg p-1 overflow-auto ${maxHClass}`}>
-        {options.length === 0 ? (
-          <li className="px-3 py-2 text-xs text-gray-600">No options</li>
-        ) : (
-          options.map((opt) => <li key={String(opt)}>{renderItem(opt)}</li>)
-        )}
-      </ul>
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -149,150 +105,41 @@ export default function MomentumBacktester() {
   const [randomSeed, setRandomSeed] = useState<number>(42);
   const [nTrials, setNTrials] = useState<number>(1);
 
-  // Sector → benchmark_id mapping for selection_mode='sector_etf'. Loaded
-  // lazily from /api/benchmarks when the user picks Sector ETF mode (and
-  // refreshed whenever they pop back to that mode in case they've edited
-  // mappings on /benchmarks in another tab).
-  const [sectorEtfs, setSectorEtfs] = useState<Record<string, number>>({});
-  const [sectorEtfsLoading, setSectorEtfsLoading] = useState(false);
-  const [sectorEtfsError, setSectorEtfsError] = useState<string | null>(null);
-  // Sector-ETF map (sector name → benchmark_id) derived from the shared
-  // benchmarks fetch. Only fires the network call when sector_etf mode
-  // is active; otherwise the hook idles.
+  // Sector → benchmark_id mapping for selection_mode='sector_etf'.
+  // Encapsulated in `useSectorEtfs`: lazy-loads from /api/benchmarks
+  // only when sector_etf mode is active and refreshes whenever the user
+  // pops back to that mode. `setSectorEtfs` is exposed so the saved-
+  // config loader downstream can overwrite the map directly.
   const {
-    data: _bmRows,
-    loading: _bmLoading,
-    error: _bmError,
-  } = useBenchmarks({ enabled: selectionMode === 'sector_etf' });
-  useEffect(() => {
-    setSectorEtfsLoading(_bmLoading);
-    setSectorEtfsError(_bmError);
-    if (!_bmRows) {
-      if (selectionMode !== 'sector_etf') setSectorEtfs({});
-      return;
-    }
-    const map: Record<string, number> = {};
-    for (const r of _bmRows) {
-      if (r.sector) map[r.sector] = r.benchmark_id;
-    }
-    setSectorEtfs(map);
-  }, [_bmRows, _bmLoading, _bmError, selectionMode]);
+    sectorEtfs,
+    setSectorEtfs,
+    sectorEtfsLoading,
+    sectorEtfsError,
+  } = useSectorEtfs({ active: selectionMode === 'sector_etf' });
 
   // Variant sweep selection — the 5-axis cross-product picker. Each
   // permutation in the cartesian product becomes one VariantParams sent
-  // to the backend. The four Set-backed axes (frequency, strategy,
-  // universe, grouping) drive multi-select chips; the three text inputs
-  // are comma-separated numeric overrides ("4,6" → two values; empty
-  // means "inherit base, don't sweep"). `disabledPerms` lets the user
-  // carve specific permutations out of the cross-product preview.
-  // Off-cadence months (4, 5, 7, 8, 10, 11) are valid rebalance schedules
-  // backend-side but rarely interesting in a sweep — hide them from the
-  // selector without removing them from VARIANT_DEFS so any saved backtest
-  // / scheduled strategy that pinned one keeps working.
-  const HIDDEN_FREQS = useMemo(
-    () => new Set<RebalanceFrequency>([
-      'every_4_months', 'every_5_months', 'every_7_months',
-      'every_8_months', 'every_10_months', 'every_11_months',
-    ]),
-    [],
-  );
-  const ALL_FREQS = useMemo(
-    () => Array.from(new Set(VARIANT_DEFS.map((v) => v.frequency)))
-      .filter((f) => !HIDDEN_FREQS.has(f)),
-    [HIDDEN_FREQS],
-  );
-  const ALL_STRATEGIES = useMemo(
-    () => Array.from(new Set(VARIANT_DEFS.map((v) => v.strategy))),
-    [],
-  );
-  const [selectedFreqs, setSelectedFreqs] = useState<Set<RebalanceFrequency>>(
-    () => new Set<RebalanceFrequency>(['monthly', 'every_2_months', 'every_3_months']),
-  );
-  const [selectedStrategies, setSelectedStrategies] = useState<Set<StrategyType>>(
-    () => new Set<StrategyType>(['long_only']),
-  );
-  const [selectedUniverses, setSelectedUniverses] = useState<Set<string>>(
-    () => new Set<string>(['ACWI_LEONTEQ']),
-  );
-  const [selectedGroupings, setSelectedGroupings] = useState<Set<'sector' | 'industry'>>(
-    () => new Set<'sector' | 'industry'>(['sector']),
-  );
-  const [topSectorsSweep, setTopSectorsSweep] = useState<string>('');
-  const [perSectorSweep, setPerSectorSweep] = useState<string>('');
-  const [minScoreSweep, setMinScoreSweep] = useState<string>('');
-  // Auto-skip variants whose effective portfolio size (top × per) falls
-  // outside [min, max]. The raw inputs are strings — blank inherits the
-  // sensible default (12 / 50) so the filter is on by default; explicit
-  // 0 disables that side; any positive integer overrides.
-  const [minPortfolioSizeRaw, setMinPortfolioSizeRaw] = useState<string>('');
-  const [maxPortfolioSizeRaw, setMaxPortfolioSizeRaw] = useState<string>('');
-  const minPortfolioSize = minPortfolioSizeRaw === ''
-    ? 12
-    : Math.max(0, parseInt(minPortfolioSizeRaw, 10) || 0);
-  const maxPortfolioSize = maxPortfolioSizeRaw === ''
-    ? 50
-    : Math.max(0, parseInt(maxPortfolioSizeRaw, 10) || 0);
-  const [disabledPerms, setDisabledPerms] = useState<Set<VariantKey>>(() => new Set());
-
-  // Generic immutable Set toggle for the four checkbox-list axes.
-  const toggleInSet = <T,>(
-    setter: React.Dispatch<React.SetStateAction<Set<T>>>,
-    value: T,
-  ) => {
-    setter((prev) => {
-      const next = new Set(prev);
-      if (next.has(value)) next.delete(value); else next.add(value);
-      return next;
-    });
-  };
-  // Toggle one permutation in/out of the run. Used by the row-level
-  // checkbox in the permutations preview.
-  const togglePermDisabled = (key: VariantKey) => {
-    setDisabledPerms((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
-  };
-  // Comma-separated number list parser: "4, 6,8" → [4, 6, 8]. Filters
-  // non-finite and dedups. Empty / whitespace-only input → empty array.
-  const parseNumList = (s: string): number[] => {
-    const out: number[] = [];
-    const seen = new Set<number>();
-    for (const tok of s.split(',')) {
-      const t = tok.trim();
-      if (!t) continue;
-      const n = Number(t);
-      if (!Number.isFinite(n)) continue;
-      if (seen.has(n)) continue;
-      seen.add(n);
-      out.push(n);
-    }
-    return out;
-  };
-  // Same as parseNumList but recognizes the literal `none` / `off`
-  // tokens as `null` ("filter disabled for this variant"). Null is
-  // distinct from any numeric value so dedup keeps it.
-  const parseMinScoreList = (s: string): (number | null)[] => {
-    const out: (number | null)[] = [];
-    let sawNull = false;
-    const seen = new Set<number>();
-    for (const tok of s.split(',')) {
-      const t = tok.trim();
-      if (!t) continue;
-      const lower = t.toLowerCase();
-      if (lower === 'none' || lower === 'off') {
-        if (!sawNull) { out.push(null); sawNull = true; }
-        continue;
-      }
-      const n = Number(t);
-      if (!Number.isFinite(n)) continue;
-      if (seen.has(n)) continue;
-      seen.add(n);
-      out.push(n);
-    }
-    return out;
-  };
+  // to the backend. All state + derived cross-product math lives in
+  // `useVariantSelection` so it's testable in isolation. The base
+  // config's top_n / per_sector flow in so `variantSize` can fall back
+  // to them when a variant leaves the axis undefined.
+  const variantSel = useVariantSelection({ topSectors, topPerSector });
+  const {
+    selectedFreqs, setSelectedFreqs,
+    selectedStrategies, setSelectedStrategies,
+    selectedUniverses, setSelectedUniverses,
+    selectedGroupings, setSelectedGroupings,
+    topSectorsSweep, setTopSectorsSweep,
+    perSectorSweep, setPerSectorSweep,
+    minScoreSweep, setMinScoreSweep,
+    minPortfolioSizeRaw, setMinPortfolioSizeRaw,
+    maxPortfolioSizeRaw, setMaxPortfolioSizeRaw,
+    disabledPerms, setDisabledPerms,
+    ALL_FREQS, ALL_STRATEGIES,
+    minPortfolioSize, maxPortfolioSize,
+    allPermutations, variantSize, belowMinSize, aboveMaxSize, variantsToRun,
+    togglePermDisabled,
+  } = variantSel;
   // Backend rejects `long_short` + `random` (long-short without a
   // signal-driven score is meaningless), so when Random is selected we
   // hide the long-short rows from the picker and only run long-only.
@@ -300,77 +147,6 @@ export default function MomentumBacktester() {
   // count get an amber chip in the permutations preview to flag the
   // wall-time cost. Backend has no hard cap.
   const LARGE_VARIANTS_THRESHOLD = 30;
-
-  // Cross-product of the five axes: for each (frequency × strategy) pair
-  // selected, fan out across whichever numeric/categorical axes have at
-  // least one value. An "empty" axis is treated as a single `undefined`
-  // marker — that maps to "inherit base, don't sweep this dimension" on
-  // the backend `VariantSpec`.
-  const allPermutations = useMemo<VariantParams[]>(() => {
-    const topList = parseNumList(topSectorsSweep);
-    const perList = parseNumList(perSectorSweep);
-    const minList = parseMinScoreList(minScoreSweep);
-    const uniList = Array.from(selectedUniverses);
-    const grpList = Array.from(selectedGroupings);
-    const topAxis: (number | undefined)[] = topList.length === 0 ? [undefined] : topList;
-    const perAxis: (number | undefined)[] = perList.length === 0 ? [undefined] : perList;
-    const minAxis: (number | null | undefined)[] = minList.length === 0 ? [undefined] : minList;
-    const uniAxis: (string | undefined)[] = uniList.length === 0 ? [undefined] : uniList;
-    const grpAxis: ('sector' | 'industry' | undefined)[] =
-      grpList.length === 0 ? [undefined] : grpList;
-    const out: VariantParams[] = [];
-    for (const v of VARIANT_DEFS) {
-      if (!selectedFreqs.has(v.frequency)) continue;
-      if (!selectedStrategies.has(v.strategy)) continue;
-      for (const t of topAxis) for (const p of perAxis) for (const m of minAxis)
-      for (const u of uniAxis) for (const g of grpAxis) {
-        out.push({
-          frequency: v.frequency,
-          strategy: v.strategy,
-          ...(t !== undefined ? { top_n_sectors: t } : {}),
-          ...(p !== undefined ? { top_n_per_sector: p } : {}),
-          ...(m !== undefined ? { min_price_score: m } : {}),
-          ...(u !== undefined ? { universe: u } : {}),
-          ...(g !== undefined ? { grouping: g } : {}),
-        });
-      }
-    }
-    return out;
-  }, [selectedFreqs, selectedStrategies, selectedUniverses, selectedGroupings, topSectorsSweep, perSectorSweep, minScoreSweep]);
-
-  // Effective portfolio size per variant. Variants leave `top_n_sectors`
-  // and `top_n_per_sector` `undefined` to inherit the base config values
-  // (`topSectors` / `topPerSector`) — substitute those so the floor check
-  // reflects what'll actually run.
-  const variantSize = useCallback(
-    (p: VariantParams) =>
-      (p.top_n_sectors ?? topSectors) * (p.top_n_per_sector ?? topPerSector),
-    [topSectors, topPerSector],
-  );
-  const belowMinSize = useMemo<Set<VariantKey>>(() => {
-    if (minPortfolioSize <= 0) return new Set();
-    return new Set(
-      allPermutations
-        .filter((p) => variantSize(p) < minPortfolioSize)
-        .map(makeVariantKey),
-    );
-  }, [allPermutations, minPortfolioSize, variantSize]);
-  const aboveMaxSize = useMemo<Set<VariantKey>>(() => {
-    if (maxPortfolioSize <= 0) return new Set();
-    return new Set(
-      allPermutations
-        .filter((p) => variantSize(p) > maxPortfolioSize)
-        .map(makeVariantKey),
-    );
-  }, [allPermutations, maxPortfolioSize, variantSize]);
-
-  const variantsToRun = useMemo(
-    () => allPermutations.filter((p) => {
-      const k = makeVariantKey(p);
-      return !disabledPerms.has(k) && !belowMinSize.has(k) && !aboveMaxSize.has(k);
-    }),
-    [allPermutations, disabledPerms, belowMinSize, aboveMaxSize],
-  );
 
   // Backtest run state lives in a module-scoped store so the SSE stream
   // keeps running when the user navigates away from /momentum.

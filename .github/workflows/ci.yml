@@ -1,23 +1,62 @@
-# Runs on every push and pull request. Two parallel jobs — backend
-# (pytest + ruff) and frontend (tsc + eslint). Keep this fast and
+# Runs on PRs and direct pushes to main/dev. Three parallel jobs —
+# backend (pytest + ruff), frontend (tsc + eslint + vitest), and a
+# Postgres+PostgREST stack smoke. Each job is path-gated so unrelated
+# changes don't burn minutes on the other area. Keep this fast and
 # deterministic; integration tests can be added as separate workflows.
 name: CI
 
+# `push:` is filtered to long-lived branches so a PR's `push` event
+# doesn't double-fire alongside its `pull_request` event. Feature
+# branches still get CI — via the PR event. Direct pushes to main/dev
+# get CI via the push event.
 on:
   push:
+    branches: [main, dev]
   pull_request:
 
-# Cancel an in-progress run when a newer commit lands on the same branch /
-# PR. Saves CI minutes on rapid push sequences without losing the latest
-# result.
+# Cancel an in-progress run when a newer commit lands on the same
+# branch / PR. Saves CI minutes on rapid push sequences without losing
+# the latest result. `pull_request.number || ref` keeps push-on-main
+# and PR-on-feature in distinct groups but still dedupes within each.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Single setup job — emits per-area flags so the heavy jobs only fire
+  # when their files actually changed. Workflow-file changes flip every
+  # flag so CI edits get full coverage.
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      smoke: ${{ steps.filter.outputs.smoke }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - '.github/workflows/ci.yml'
+            frontend:
+              - 'frontend/**'
+              - '.github/workflows/ci.yml'
+            smoke:
+              - 'backend/**'
+              - 'supabase/migrations/**'
+              - '.github/workflows/ci.yml'
+
   backend:
     name: Backend (pytest + ruff)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: backend
@@ -34,13 +73,15 @@ jobs:
         uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
-          cache-dependency-glob: "backend/pyproject.toml"
+          cache-dependency-glob: "backend/uv.lock"
 
-      # No uv.lock in the repo yet — `uv sync` resolves fresh each run. If
-      # version drift becomes a problem, commit a lockfile and switch to
-      # `uv sync --frozen`. The `dev` group (pytest) is included by default.
+      # `--frozen` uses the committed uv.lock verbatim — no resolution,
+      # no network call to the resolver. Materially faster than `uv sync`
+      # and removes the "passes locally / breaks in CI" risk from
+      # silent version drift. If pyproject.toml diverges from the lock,
+      # this step fails — run `uv lock` locally and commit.
       - name: Sync dependencies
-        run: uv sync
+        run: uv sync --frozen
 
       # Lint via uvx — runs the latest ruff without committing it as a
       # backend dep.
@@ -52,7 +93,10 @@ jobs:
 
   frontend:
     name: Frontend (typecheck + lint)
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: frontend
@@ -113,8 +157,14 @@ jobs:
   # Skip the job by pushing with `[skip stack-smoke]` in the commit subject.
   backend-stack-smoke:
     name: Backend stack smoke (Postgres + PostgREST + uvicorn)
+    needs: changes
     runs-on: ubuntu-latest
-    if: "!contains(github.event.head_commit.message, '[skip stack-smoke]')"
+    # Skip when nothing backend-shaped changed (paths gate) OR when the
+    # commit message asks for it. Both halves are honored on push and
+    # pull_request events.
+    if: |
+      needs.changes.outputs.smoke == 'true'
+      && !contains(github.event.head_commit.message, '[skip stack-smoke]')
     timeout-minutes: 8
 
     services:
@@ -261,11 +311,11 @@ jobs:
         uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
-          cache-dependency-glob: "backend/pyproject.toml"
+          cache-dependency-glob: "backend/uv.lock"
 
       - name: Sync backend deps
         working-directory: backend
-        run: uv sync
+        run: uv sync --frozen
 
       # Boot uvicorn in the background. SUPABASE_URL points at the
       # PostgREST service-container port. DISABLE_SCHEDULER=1 stops the
@@ -299,57 +349,67 @@ jobs:
       #   * admin-gated endpoints (require an admin JWT — not in scope here)
       #   * AIRS Playwright endpoints (need broker creds)
       #   * Leonteq endpoints (external API, flaky for CI)
-      # Add new endpoints here when adding routers. Any non-2xx fails CI.
+      #   * gurufocus/* (need API key)
+      #   * longequity/latest-available (probes external host)
+      #   * fx/latest (falls back to live ECB call on empty DB)
+      # Path-param endpoints are skipped automatically (anything with
+      # `{` in the URL). To add a new endpoint to the smoke, just add
+      # `@router.get("/api/...")` on the backend — it'll appear in the
+      # OpenAPI spec and be picked up here.
       - name: Probe safe read endpoints
         run: |
           set -u
           BACKEND=http://127.0.0.1:8000
-          ENDPOINTS=(
-            /api/health
-            /api/hello
-            /api/items
-            /api/usage
-            /api/data/latest-price-date
-            /api/companies
-            /api/companies/field-options
-            /api/companies/memberships
-            /api/companies/check-duplicates
-            /api/longequity/snapshots
-            # /api/longequity/latest-available — needs LONGEQUITY_BASE_URL
-            # to probe the upstream LongEquity host. CI doesn't have it.
-            /api/momentum/signals
-            /api/momentum/backtests
-            /api/momentum/current-picks
-            /api/universe-templates
-            /api/universe/labels
-            /api/universe/months
-            /api/universe/criteria
-            /api/universe/derived-metrics/criteria
-            /api/universe/derived-metrics/status
-            /api/index-universe/indexes
-            /api/index-universe/months
-            /api/index-universe/cumulative
-            /api/index-universe/changes
-            /api/benchmarks
-            /api/fx/coverage
-            # /api/fx/latest — when fx_rate table is empty (CI default),
-            # the endpoint falls back to a live ECB call which can fail
-            # or be slow. Not a useful smoke signal.
-            /api/exchange-fees
-            /api/scheduled-strategies
-            /api/scheduled-strategies/held-companies
-            /api/ingest/runs
-            # /api/gurufocus/exchanges + /api/gurufocus/exchange-currencies
-            # — need GURUFOCUS_BASE_URL + GURUFOCUS_API_KEY to call the
-            # upstream API. CI is meant to stay offline.
-            /api/acwi/xls-age
-            /api/acwi/holdings
-            /api/acwi/announcements
-            /api/acwi/net-additions
+
+          # Endpoints that need external state CI doesn't have. The
+          # bash array is bash-3.2-safe: `${EXCLUDE[*]}` joined with `|`
+          # makes a regex `/api/longequity/latest-available|/api/fx/latest|...`.
+          EXCLUDE=(
+            /api/longequity/latest-available
+            /api/fx/latest
+            /api/gurufocus/exchanges
+            /api/gurufocus/exchange-currencies
+            /api/airs/scan
+          )
+          # Tags whose endpoints we never smoke. admin + auth need a
+          # real JWT (they 401/403 unauthenticated). airs needs broker
+          # creds. leonteq makes external API calls. FastAPI tags come
+          # from `APIRouter(tags=[...])` declarations.
+          EXCLUDE_TAGS=(admin auth airs leonteq)
+
+          # Pull every GET path with no `{placeholders}` from the
+          # backend's OpenAPI spec, drop tag-excluded entries, sort.
+          # jq's --argjson takes a JSON array; we build one with `printf`
+          # so the bash arrays above stay the single source of truth.
+          EXCL_PATHS_JSON=$(printf '%s\n' "${EXCLUDE[@]}" | jq -R . | jq -s .)
+          EXCL_TAGS_JSON=$(printf '%s\n' "${EXCLUDE_TAGS[@]}" | jq -R . | jq -s .)
+          ENDPOINTS=$(
+            curl -fsS -m 30 "$BACKEND/openapi.json" \
+              | jq -r \
+                  --argjson excl_paths "$EXCL_PATHS_JSON" \
+                  --argjson excl_tags "$EXCL_TAGS_JSON" '
+                .paths
+                | to_entries[]
+                | select(.key | contains("{") | not)
+                | select(.key as $p | $excl_paths | index($p) | not)
+                | select(.value.get != null)
+                | select((.value.get.tags // []) as $t | $excl_tags | map(. as $x | $t | index($x)) | any | not)
+                | .key
+                ' | sort -u
           )
 
+          if [[ -z "$ENDPOINTS" ]]; then
+            echo "::error::No endpoints discovered from /openapi.json. Smoke aborted."
+            exit 1
+          fi
+
+          count=$(printf "%s\n" "$ENDPOINTS" | wc -l)
+          echo "Discovered $count GET endpoints. Probing each…"
+          echo ""
+
           fail=0
-          for path in "${ENDPOINTS[@]}"; do
+          while IFS= read -r path; do
+            [[ -z "$path" ]] && continue
             status=$(curl -sS -o /tmp/body -w "%{http_code}" -m 60 \
               "$BACKEND$path" || echo "000")
             if [[ "$status" =~ ^2[0-9][0-9]$ ]]; then
@@ -361,7 +421,7 @@ jobs:
               echo
               fail=1
             fi
-          done
+          done <<< "$ENDPOINTS"
 
           if [[ $fail -ne 0 ]]; then
             echo "::error::One or more endpoints returned non-2xx. See lines above."

@@ -5,10 +5,12 @@ import { createClient } from '../../lib/supabase/client';
 
 import { API_URL } from '../../lib/apiUrl';
 
-/** Catalog entry for one endpoint. Each entry produces a card on the
- * page; the user fills in path/query params, hits Try, and sees the
- * response inline. New endpoints land in one place — no per-endpoint
- * component sprawl. */
+/** Catalog entry for one endpoint card. New endpoints land in one
+ * place — auto-discovered from FastAPI's `/openapi.json` on mount, so
+ * adding a new `@router.get(...)` on the backend is enough. The
+ * MANUAL_OVERRIDES map below lets us enrich descriptions / set
+ * defaults / hide endpoints when the auto-derived metadata isn't
+ * quite right. */
 type Param = {
   name: string;
   type: 'integer' | 'string';
@@ -29,144 +31,129 @@ type Endpoint = {
   bodyExample?: object; // when set, body editor renders preseeded with this JSON
 };
 
-const ENDPOINTS: Endpoint[] = [
-  // ─── Admin: health + monitoring ──────────────────────────────────
-  {
-    id: 'admin-health',
-    group: 'Admin · health',
-    method: 'GET',
-    path: '/api/admin/health',
-    desc: 'Composite system health. Returns is_healthy + is_healthy_strict booleans, the list of underlying checks, and any problems found. Use the strict flag as a pre-trade gate.',
-  },
-  {
-    id: 'admin-data-freshness',
-    group: 'Admin · health',
-    method: 'GET',
-    path: '/api/admin/data-freshness',
-    desc: 'Per-source freshness: close_price + volume max target_date (with trading-day-age), the latest current-picks snapshot, the most recent pipeline run.',
-  },
-  {
-    id: 'admin-sanity-check',
-    group: 'Admin · health',
-    method: 'GET',
-    path: '/api/admin/sanity-check',
-    desc: 'Coarse table counts (company / ingest_run / current_picks_snapshot / …) + recent-run status distribution + latest snapshot summary. For eyeball "is everything basically wired up?" checks.',
-  },
-  {
-    id: 'admin-egress-ip',
-    group: 'Admin · health',
-    method: 'GET',
-    path: '/api/admin/egress-ip',
-    desc: 'The public IP this backend currently appears to egress from (queried via ifconfig.me with fallbacks). Hit it a few times across deploys/restarts to see if Railway is giving you a stable IP — if yes, paste it into the AirSPMS allowlist. If it rotates, you either need Railway\'s Static Outbound IP add-on or a small static-IP proxy in front.',
-  },
-  {
-    id: 'admin-gurufocus-probe',
-    group: 'Admin · health',
-    method: 'GET',
-    path: '/api/admin/gurufocus-probe',
-    desc: 'One-shot diagnostic: hits a single GuruFocus URL through the same impersonation ladder the ingest pipeline uses, and returns the FULL response (status, all headers, body excerpt, attempted profiles). Use to confirm whether a 403 is actually Cloudflare (look for cf-ray / server=cloudflare in the response headers) vs some other 403 (revoked key, vendor 403, etc.). Compare local vs prod to confirm IP-block hypothesis.',
+// ─── OpenAPI → Endpoint transform ──────────────────────────────────
+
+type OpenApiParam = {
+  name: string;
+  in: 'path' | 'query' | 'header';
+  required?: boolean;
+  description?: string;
+  schema?: { type?: string; default?: unknown };
+};
+
+type OpenApiOperation = {
+  tags?: string[];
+  summary?: string;
+  description?: string;
+  operationId?: string;
+  parameters?: OpenApiParam[];
+  requestBody?: unknown;
+};
+
+type OpenApiSpec = {
+  paths: Record<string, Partial<Record<'get' | 'post' | 'put' | 'delete' | 'patch', OpenApiOperation>>>;
+};
+
+/** Per-endpoint enrichment merged onto the auto-derived card. Keys are
+ * `METHOD path`. Use this for: tighter descriptions when the docstring
+ * is too long or too short; default values for params that don't have
+ * one in the schema; sample request bodies for POST endpoints; hide
+ * endpoints we never want to show in the UI. */
+const MANUAL_OVERRIDES: Record<string, Partial<Endpoint> & { hide?: boolean }> = {
+  'GET /api/admin/gurufocus-probe': {
     queryParams: [
       { name: 'symbol', type: 'string', default: 'AAPL', hint: 'GuruFocus symbol, e.g. "AAPL" or "XAMS:ABN"' },
-      { name: 'endpoint', type: 'string', default: 'price', hint: 'GuruFocus endpoint: price | financials | analyst_estimate | forward_pe_ratio' },
+      { name: 'endpoint', type: 'string', default: 'price', hint: 'price | financials | analyst_estimate | forward_pe_ratio' },
     ],
   },
+  // X-Cron-Secret protected — not callable from the UI.
+  'POST /api/ingest/scheduled-refresh/cron': { hide: true },
+  'POST /api/momentum/current-picks/cron': { hide: true },
+};
 
-  // ─── Admin: portfolio ────────────────────────────────────────────
-  {
-    id: 'admin-portfolio-latest',
-    group: 'Admin · portfolio',
-    method: 'GET',
-    path: '/api/admin/portfolio/latest',
-    desc: 'Latest scheduled-strategy snapshot, IBKR-ready. Returns target weights, exchange codes, currencies, sides, prices, and strategy metadata.',
-  },
-  {
-    id: 'admin-portfolio-by-id',
-    group: 'Admin · portfolio',
-    method: 'GET',
-    path: '/api/admin/portfolio/{snapshot_id}',
-    desc: 'Specific snapshot by id, same shape as /latest.',
-    pathParams: [
-      { name: 'snapshot_id', type: 'integer', required: true, hint: 'snapshot_id from /portfolio/latest or /runs/latest' },
-    ],
-  },
+/** Title-case a tag for the group header (e.g. "admin" → "Admin",
+ * "index-universe" → "Index Universe"). Falls back to the raw tag. */
+function _formatGroup(tag: string): string {
+  return tag
+    .split(/[-_ ]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ') || tag;
+}
 
-  // ─── Admin: schedules ───────────────────────────────────────────
-  {
-    id: 'admin-schedules-list',
-    group: 'Admin · schedules',
-    method: 'GET',
-    path: '/api/admin/schedules',
-    desc: 'Every scheduled strategy + its full latest portfolio. The intended one-shot for an external buyer: list of strategies, next rebalancing date (next_due_at), and full IBKR-ready holdings (ticker / exchange / currency / target_weight / entry_price_local).',
-    queryParams: [
-      { name: 'enabled_only', type: 'string', default: 'true', hint: '"true" hides paused strategies; "false" returns everything' },
-    ],
-  },
-  {
-    id: 'admin-schedule-by-id',
-    group: 'Admin · schedules',
-    method: 'GET',
-    path: '/api/admin/schedules/{strategy_id}',
-    desc: 'One scheduled strategy with its latest portfolio + next_due_at. Same shape as one entry from the list endpoint.',
-    pathParams: [
-      { name: 'strategy_id', type: 'integer', required: true, hint: 'id from the list endpoint' },
-    ],
-  },
+function _mapOpenApiParam(p: OpenApiParam): Param {
+  const t = p.schema?.type;
+  return {
+    name: p.name,
+    type: t === 'integer' || t === 'number' ? 'integer' : 'string',
+    default: p.schema?.default as string | number | undefined,
+    required: p.required,
+    hint: p.description,
+  };
+}
 
-  // ─── Admin: pipeline runs ────────────────────────────────────────
-  {
-    id: 'admin-runs-latest',
-    group: 'Admin · pipeline',
-    method: 'GET',
-    path: '/api/admin/runs/latest',
-    desc: 'Most recent pipeline run (any status) + most recent SUCCESSFUL run. The latter is useful when the latest run errored — you can still see when things last worked.',
-  },
-  {
-    id: 'admin-pipeline-runs',
-    group: 'Admin · pipeline',
-    method: 'GET',
-    path: '/api/admin/pipeline-runs',
-    desc: 'Recent pipeline runs (newest first), compact per-row summary.',
-    queryParams: [
-      { name: 'limit', type: 'integer', default: 20, hint: '1–100' },
-    ],
-  },
-  {
-    id: 'admin-companies-flagged',
-    group: 'Admin · companies',
-    method: 'GET',
-    path: '/api/admin/companies/flagged',
-    desc: (
-      'Two ad-hoc audit heuristics for manual review of the universe: ' +
-      '(1) companies with "ADR" in their name (often surfaces wrong-variant mappings — ' +
-      'a depositary listing got linked instead of the primary local security); ' +
-      '(2) companies whose latest N close-price observations are all the same value ' +
-      '(stale or dead listings, or wrong mappings whose ticker ships a stub). ' +
-      'Already-delisted companies are excluded from the flat-price list. ' +
-      'Returns `{adr_in_name: {count, companies}, flat_prices: {count, companies}}`.'
-    ),
-    queryParams: [
-      { name: 'window_days', type: 'integer', default: 10, hint: 'Number of trailing close_price points required to be identical (default 10).' },
-    ],
-  },
+function _endpointFromOperation(
+  path: string,
+  method: string,
+  op: OpenApiOperation,
+): Endpoint {
+  const tag = (op.tags && op.tags[0]) || 'other';
+  const group = _formatGroup(tag);
+  const id = op.operationId || `${method.toLowerCase()}-${path.replace(/[^\w]+/g, '-')}`;
+  const pathParams: Param[] = [];
+  const queryParams: Param[] = [];
+  for (const p of op.parameters ?? []) {
+    // The auth middleware injects `authorization: Header(...)` into
+    // every protected route — that's not a user-facing param, skip.
+    if (p.name === 'authorization' && p.in === 'header') continue;
+    const mapped = _mapOpenApiParam(p);
+    if (p.in === 'path') pathParams.push(mapped);
+    else if (p.in === 'query') queryParams.push(mapped);
+  }
+  return {
+    id,
+    group,
+    method: method.toUpperCase() as Endpoint['method'],
+    path,
+    desc: op.description?.trim() || op.summary?.trim() || '',
+    pathParams: pathParams.length > 0 ? pathParams : undefined,
+    queryParams: queryParams.length > 0 ? queryParams : undefined,
+  };
+}
 
-  // ─── Auth ────────────────────────────────────────────────────────
-  {
-    id: 'auth-me',
-    group: 'Auth',
-    method: 'GET',
-    path: '/api/auth/me',
-    desc: "Caller's user info + role. Hit this first to confirm the Bearer token works.",
-  },
+/** Walk an OpenAPI spec → Endpoint[], applying MANUAL_OVERRIDES and
+ * filtering out hidden endpoints. Path order within a group is
+ * alphabetical; group order matches the GROUP_ORDER constant below
+ * (Admin first, System last). */
+function endpointsFromOpenApi(spec: OpenApiSpec): Endpoint[] {
+  const out: Endpoint[] = [];
+  for (const [path, ops] of Object.entries(spec.paths)) {
+    for (const [method, op] of Object.entries(ops)) {
+      if (!op) continue;
+      const ep = _endpointFromOperation(path, method, op);
+      const overrideKey = `${ep.method} ${ep.path}`;
+      const override = MANUAL_OVERRIDES[overrideKey];
+      if (override?.hide) continue;
+      out.push({ ...ep, ...override });
+    }
+  }
+  return out;
+}
 
-  // ─── Health (no auth required) ───────────────────────────────────
-  {
-    id: 'system-health',
-    group: 'System',
-    method: 'GET',
-    path: '/api/health',
-    desc: 'Backend liveness probe. Returns quickly with no auth required.',
-  },
+/** Pinned group order so the dashboard reads top-down by use-case
+ * (admin first because that's the dominant audience for this page). */
+const GROUP_ORDER = [
+  'Admin', 'Auth', 'Companies', 'Earnings', 'Momentum',
+  'Universe', 'Index Universe', 'Universe Templates',
+  'Schedule', 'Ingest', 'Fx', 'Fees', 'Benchmarks',
+  'Indicators', 'Longequity', 'Leonteq', 'Airs', 'System', 'Other',
 ];
+
+function _groupRank(g: string): number {
+  const i = GROUP_ORDER.indexOf(g);
+  return i < 0 ? GROUP_ORDER.length : i;
+}
+
 
 type CallResult =
   | { status: 'idle' }
@@ -449,6 +436,8 @@ export default function ApiExplorer() {
   const [token, setToken] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
+  const [endpoints, setEndpoints] = useState<Endpoint[] | null>(null);
+  const [specError, setSpecError] = useState<string | null>(null);
 
   useEffect(() => {
     const supabase = createClient();
@@ -471,15 +460,40 @@ export default function ApiExplorer() {
     return () => { cancelled = true; subscription.unsubscribe(); };
   }, []);
 
+  // Fetch the FastAPI OpenAPI spec on mount → transform → display.
+  // Auto-discovery means new `@router.get(...)` definitions on the
+  // backend show up as cards here without any per-endpoint UI work.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await fetch(`${API_URL}/openapi.json`);
+        if (!resp.ok) throw new Error(`/openapi.json returned ${resp.status}`);
+        const spec = (await resp.json()) as OpenApiSpec;
+        if (cancelled) return;
+        setEndpoints(endpointsFromOpenApi(spec));
+      } catch (e) {
+        if (!cancelled) setSpecError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const grouped = useMemo(() => {
+    if (!endpoints) return [];
     const out = new Map<string, Endpoint[]>();
-    for (const ep of ENDPOINTS) {
+    for (const ep of endpoints) {
       const arr = out.get(ep.group) ?? [];
       arr.push(ep);
       out.set(ep.group, arr);
     }
-    return Array.from(out.entries());
-  }, []);
+    // Sort endpoints inside each group by path for predictable order.
+    for (const arr of out.values()) {
+      arr.sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method));
+    }
+    // Sort groups by GROUP_ORDER ranking.
+    return Array.from(out.entries()).sort((a, b) => _groupRank(a[0]) - _groupRank(b[0]));
+  }, [endpoints]);
 
   return (
     <div className="min-h-screen bg-[#0f1117] text-gray-200">
@@ -508,9 +522,25 @@ export default function ApiExplorer() {
           )}
         </div>
 
+        {/* Loading / error state for the openapi.json fetch. The cards
+            stream in once the spec lands. */}
+        {endpoints === null && !specError && (
+          <div className="bg-[#151821] border border-gray-800/40 rounded-xl px-5 py-4 text-sm text-gray-500">
+            Loading endpoint catalog from <span className="font-mono text-gray-400">{API_URL}/openapi.json</span>…
+          </div>
+        )}
+        {specError && (
+          <div className="bg-rose-500/10 border border-rose-500/20 rounded-xl px-5 py-4 text-sm text-rose-300">
+            Couldn&apos;t load the endpoint catalog: <span className="font-mono">{specError}</span>. The backend may be down or unreachable.
+          </div>
+        )}
+
         {grouped.map(([group, eps]) => (
           <section key={group} className="space-y-3">
-            <h2 className="text-xs uppercase tracking-wider text-gray-500 px-1">{group}</h2>
+            <h2 className="text-xs uppercase tracking-wider text-gray-500 px-1 flex items-baseline gap-2">
+              <span>{group}</span>
+              <span className="text-[10px] text-gray-600 font-mono normal-case">{eps.length} endpoint{eps.length === 1 ? '' : 's'}</span>
+            </h2>
             <div className="space-y-3">
               {eps.map((ep) => (
                 <EndpointCard key={ep.id} ep={ep} token={token} />
