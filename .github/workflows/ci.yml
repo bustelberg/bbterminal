@@ -83,3 +83,173 @@ jobs:
       # surface in the lint output as a triage backlog without blocking CI.
       - name: Lint (eslint)
         run: npm run lint
+
+  # Stack-up smoke. Spins local Supabase (Docker), applies every
+  # migration, boots uvicorn against it, and hits every safe read
+  # endpoint. Catches the "backend code expects schema/data prod doesn't
+  # have" class of bug BEFORE merge — i.e. what shipped on 2026-05-29
+  # when the new `gurufocus_lookup_failed_at` / `out_of_scope_*` columns
+  # in companies.py's SELECT 500'd in prod for hours.
+  #
+  # ~3-4 min on cold cache (Supabase Docker image pulls dominate). Skip
+  # this job by pushing with `[skip stack-smoke]` in the commit subject —
+  # check `if:` below.
+  backend-stack-smoke:
+    name: Backend stack smoke (Supabase + uvicorn)
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip stack-smoke]')"
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+
+      # Supabase CLI needs Node. v22 matches the rest of the workflow.
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      # Install via npm rather than the official action — npm i -g is
+      # simpler and the action's value (caching) is small when the
+      # bottleneck is the Postgres / Studio / Storage container pulls.
+      - name: Install Supabase CLI
+        run: npm install -g supabase
+
+      # `supabase start` boots Postgres + PostgREST + GoTrue + Storage +
+      # Studio in Docker, then auto-applies every migration in
+      # supabase/migrations/. Empty DB — that's fine; the smoke list
+      # only includes endpoints that tolerate an empty universe.
+      - name: Start Supabase (applies migrations)
+        run: supabase start
+
+      # Export the local URL + service key so the backend can talk to
+      # the same instance.
+      - name: Capture Supabase env
+        id: sb
+        run: |
+          eval "$(supabase status -o env)"
+          echo "url=$API_URL" >> $GITHUB_OUTPUT
+          echo "::add-mask::$SERVICE_ROLE_KEY"
+          echo "key=$SERVICE_ROLE_KEY" >> $GITHUB_OUTPUT
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "backend/pyproject.toml"
+
+      - name: Sync backend deps
+        working-directory: backend
+        run: uv sync
+
+      # Boot uvicorn in the background. DISABLE_SCHEDULER=1 stops the
+      # APScheduler from firing weekly/monthly jobs inside CI (the
+      # backend handles this env var in scheduler.py:258).
+      - name: Start backend
+        working-directory: backend
+        env:
+          SUPABASE_URL: ${{ steps.sb.outputs.url }}
+          SUPABASE_SERVICE_KEY: ${{ steps.sb.outputs.key }}
+          DISABLE_SCHEDULER: "1"
+        run: |
+          nohup uv run uvicorn main:app --host 127.0.0.1 --port 8000 \
+            > backend.log 2>&1 &
+          echo $! > backend.pid
+
+      - name: Wait for /api/health (max 60s)
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sS -m 5 http://127.0.0.1:8000/api/health >/dev/null 2>&1; then
+              echo "Backend ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Backend never became healthy. Logs:"
+          tail -200 backend/backend.log || true
+          exit 1
+
+      # Probe every safe GET endpoint. The list deliberately excludes:
+      #   * path-param endpoints needing fixture data (e.g. /companies/{id}, /earnings/{cid}/...)
+      #   * admin-gated endpoints (require an admin JWT — not in scope here)
+      #   * AIRS Playwright endpoints (need broker creds)
+      #   * Leonteq endpoints (external API, flaky for CI)
+      # Add new endpoints here when adding routers. Any non-2xx fails CI.
+      - name: Probe safe read endpoints
+        run: |
+          set -u
+          BACKEND=http://127.0.0.1:8000
+          ENDPOINTS=(
+            /api/health
+            /api/hello
+            /api/items
+            /api/usage
+            /api/data/latest-price-date
+            /api/companies
+            /api/companies/field-options
+            /api/companies/memberships
+            /api/companies/check-duplicates
+            /api/longequity/snapshots
+            /api/longequity/latest-available
+            /api/momentum/signals
+            /api/momentum/backtests
+            /api/momentum/current-picks
+            /api/universe-templates
+            /api/universe/labels
+            /api/universe/months
+            /api/universe/criteria
+            /api/universe/derived-metrics/criteria
+            /api/universe/derived-metrics/status
+            /api/index-universe/indexes
+            /api/index-universe/months
+            /api/index-universe/cumulative
+            /api/index-universe/changes
+            /api/benchmarks
+            /api/fx/coverage
+            /api/fx/latest
+            /api/exchange-fees
+            /api/scheduled-strategies
+            /api/scheduled-strategies/held-companies
+            /api/ingest/runs
+            /api/gurufocus/exchanges
+            /api/gurufocus/exchange-currencies
+            /api/acwi/xls-age
+            /api/acwi/holdings
+            /api/acwi/announcements
+            /api/acwi/net-additions
+          )
+
+          fail=0
+          for path in "${ENDPOINTS[@]}"; do
+            status=$(curl -sS -o /tmp/body -w "%{http_code}" -m 60 \
+              "$BACKEND$path" || echo "000")
+            if [[ "$status" =~ ^2[0-9][0-9]$ ]]; then
+              printf "OK   %s  %s\n" "$status" "$path"
+            else
+              printf "FAIL %s  %s\n" "$status" "$path"
+              echo "  body (first 500 bytes):"
+              head -c 500 /tmp/body | sed 's/^/    /'
+              echo
+              fail=1
+            fi
+          done
+
+          if [[ $fail -ne 0 ]]; then
+            echo "::error::One or more endpoints returned non-2xx. See lines above."
+            exit 1
+          fi
+
+      - name: Backend logs (on failure)
+        if: failure()
+        run: tail -300 backend/backend.log || true
+
+      # Always tear down so the runner doesn't leak containers if the
+      # job is re-run on the same hosted runner (unlikely on
+      # ubuntu-latest but cheap insurance).
+      - name: Stop backend
+        if: always()
+        run: |
+          [[ -f backend/backend.pid ]] && kill "$(cat backend/backend.pid)" 2>/dev/null || true
+
+      - name: Stop Supabase
+        if: always()
+        run: supabase stop || true

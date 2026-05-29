@@ -1,0 +1,93 @@
+# Production smoke test. Hits a handful of canonical read endpoints and
+# fails if any return non-2xx. Catches the "code expects schema/data that
+# prod doesn't have" class of regression — e.g. the 2026-05-29
+# /api/companies CORS-error-but-actually-500 caused by unpushed
+# migrations.
+#
+# Triggers:
+#   * push to main      — runs after the merge that Railway/Vercel auto-deploy.
+#                         Waits 120s for Railway to finish before hitting endpoints.
+#   * schedule (6h)     — catches drift unrelated to a deploy (manual prod edits,
+#                         expired secrets, upstream Supabase issues).
+#   * workflow_dispatch — manual trigger from the Actions tab.
+name: Prod smoke
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: prod-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Hit canonical read endpoints
+    runs-on: ubuntu-latest
+    env:
+      BACKEND: https://bbterminal-production.up.railway.app
+    steps:
+      # Give Railway time to roll the new build. Skipped on schedule/manual
+      # runs so we don't waste 2min when there's no deploy in flight.
+      - name: Wait for Railway deploy
+        if: github.event_name == 'push'
+        run: sleep 120
+
+      - name: Probe endpoints
+        run: |
+          set -u
+          ENDPOINTS=(
+            "/api/health"
+            "/api/companies"
+            "/api/companies/field-options"
+            "/api/companies/memberships"
+            "/api/longequity/snapshots"
+            "/api/momentum/signals"
+            "/api/universe-templates"
+            "/api/fx/coverage"
+          )
+
+          fail=0
+          for path in "${ENDPOINTS[@]}"; do
+            url="${BACKEND}${path}"
+            # -m 60: each endpoint has 60s to respond (covers cold-start +
+            # a heavy aggregate like /memberships). -o /dev/null discards
+            # body; -w pulls the status code out.
+            status=$(curl -sS -o /dev/null -w "%{http_code}" -m 60 \
+              -H "Origin: https://bbterminal.vercel.app" \
+              "$url" || echo "000")
+            if [[ "$status" =~ ^2[0-9][0-9]$ ]]; then
+              echo "OK   $status  $path"
+            else
+              echo "FAIL $status  $path"
+              fail=1
+            fi
+          done
+
+          if [[ $fail -ne 0 ]]; then
+            echo ""
+            echo "::error::One or more prod endpoints returned non-2xx. See log above."
+            exit 1
+          fi
+
+      - name: Confirm CORS header on a sample endpoint
+        # Today's incident wasn't just a 500 — it was a 500 with no CORS
+        # header, which is what the browser actually surfaced. The
+        # status-code loop above catches the 500; this step catches the
+        # narrower regression where a response comes back 2xx but the
+        # CORS middleware silently stopped attaching headers (e.g. config
+        # drift on the allowed-origins list).
+        run: |
+          set -u
+          headers=$(curl -sS -D - -o /dev/null -m 30 \
+            -H "Origin: https://bbterminal.vercel.app" \
+            "${BACKEND}/api/health")
+          if ! grep -qi "^access-control-allow-origin:.*bbterminal.vercel.app" <<<"$headers"; then
+            echo "::error::Missing or wrong Access-Control-Allow-Origin on /api/health"
+            echo "$headers"
+            exit 1
+          fi
+          echo "CORS header present."
