@@ -83,6 +83,14 @@ jobs:
       - name: Lint (eslint)
         run: npm run lint
 
+      # Vitest covers the pure-function math + matcher helpers
+      # (earnings/utils.ts, equityCurve/seriesMath.ts). happy-dom env,
+      # ~2s total. Catches the regressions we've burned hours on this
+      # session (leap-year trailing-window, semi-annual cadence,
+      # CAGR sign guards).
+      - name: Unit tests (vitest)
+        run: npm test
+
   # Stack-up smoke. Spins minimal Postgres + PostgREST as GitHub Actions
   # service containers, applies every migration via psql, boots uvicorn
   # against PostgREST, and hits every safe read endpoint. Catches the
@@ -222,19 +230,31 @@ jobs:
           # migration didn't NOTIFY itself.
           psql -h localhost -p 54322 -U postgres -c "NOTIFY pgrst, 'reload schema'"
 
-      - name: Wait for PostgREST to reload schema
+      - name: Wait for PostgREST to expose public tables
+        env:
+          PGPASSWORD: postgres
         run: |
-          # Probe the OpenAPI doc — succeeds only after PostgREST has
-          # picked up the migrated schema. The post-NOTIFY reload is
-          # async; usually <1s but give it a few seconds of headroom.
-          for i in $(seq 1 15); do
-            if curl -sS -m 3 -o /dev/null -w "%{http_code}" http://localhost:54321/ | grep -q "^200$"; then
-              echo "PostgREST ready (${i}s)"
+          # PostgREST and the postgres container boot in parallel, so
+          # PostgREST may have cached the empty `public` schema BEFORE
+          # the bootstrap + migrations ran. The migration apply step
+          # ends with `NOTIFY pgrst, 'reload schema'`, but that single
+          # signal can be missed if PostgREST's LISTEN connection isn't
+          # active yet. So we re-fire NOTIFY each iteration and probe
+          # a sentinel table (`company`) until it returns 200 — which
+          # confirms PostgREST has the migrated schema cached.
+          for i in $(seq 1 60); do
+            code=$(curl -sS -m 3 -o /dev/null -w "%{http_code}" \
+              "http://localhost:54321/company?limit=1" || echo 000)
+            if [[ "$code" == "200" ]]; then
+              echo "PostgREST schema cache includes 'company' (${i}s)"
               exit 0
             fi
+            psql -h localhost -p 54322 -U postgres \
+              -c "NOTIFY pgrst, 'reload schema'" >/dev/null 2>&1 || true
             sleep 1
           done
-          echo "::error::PostgREST never reported ready"
+          echo "::error::PostgREST never picked up the migrated schema. Tables on disk:"
+          psql -h localhost -p 54322 -U postgres -c "\dt public.*" || true
           exit 1
 
       - name: Install uv
@@ -295,7 +315,8 @@ jobs:
             /api/companies/memberships
             /api/companies/check-duplicates
             /api/longequity/snapshots
-            /api/longequity/latest-available
+            # /api/longequity/latest-available — needs LONGEQUITY_BASE_URL
+            # to probe the upstream LongEquity host. CI doesn't have it.
             /api/momentum/signals
             /api/momentum/backtests
             /api/momentum/current-picks
@@ -311,13 +332,16 @@ jobs:
             /api/index-universe/changes
             /api/benchmarks
             /api/fx/coverage
-            /api/fx/latest
+            # /api/fx/latest — when fx_rate table is empty (CI default),
+            # the endpoint falls back to a live ECB call which can fail
+            # or be slow. Not a useful smoke signal.
             /api/exchange-fees
             /api/scheduled-strategies
             /api/scheduled-strategies/held-companies
             /api/ingest/runs
-            /api/gurufocus/exchanges
-            /api/gurufocus/exchange-currencies
+            # /api/gurufocus/exchanges + /api/gurufocus/exchange-currencies
+            # — need GURUFOCUS_BASE_URL + GURUFOCUS_API_KEY to call the
+            # upstream API. CI is meant to stay offline.
             /api/acwi/xls-age
             /api/acwi/holdings
             /api/acwi/announcements
