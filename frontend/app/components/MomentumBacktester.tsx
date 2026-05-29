@@ -1276,9 +1276,13 @@ export default function MomentumBacktester() {
   const deleteBacktest = async (runId: number) => {
     setDeletingRunId(runId);
     if (loadedRunId === runId) momentumStore.set({ loadedRunId: null });
+    // Optimistic remove — the prod round-trip is ~500ms and the user
+    // shouldn't watch the row sit there waiting. Refetch on failure so
+    // a row only stays gone when the server actually deleted it.
+    setSavedRuns(prev => prev.filter(r => r.run_id !== runId));
     try {
-      await apiFetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' });
-      setSavedRuns(prev => prev.filter(r => r.run_id !== runId));
+      const resp = await apiFetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' });
+      if (!resp.ok) loadSavedRuns();
     } catch {
       loadSavedRuns();
     } finally {
@@ -1327,16 +1331,21 @@ export default function MomentumBacktester() {
     if (!ok) return;
     const idSet = new Set(ids);
     setBulkDeletingRuns(true);
+    // Optimistic remove — same reasoning as deleteBacktest above. If
+    // anything failed server-side, the refetch below restores those rows.
+    setSavedRuns((prev) => prev.filter((r) => !idSet.has(r.run_id)));
+    if (loadedRunId != null && idSet.has(loadedRunId)) {
+      momentumStore.set({ loadedRunId: null });
+    }
     try {
-      await Promise.all(
+      const results = await Promise.all(
         ids.map((runId) =>
-          apiFetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' }).catch(() => {})
+          apiFetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' })
+            .then((r) => r.ok)
+            .catch(() => false)
         ),
       );
-      setSavedRuns((prev) => prev.filter((r) => !idSet.has(r.run_id)));
-      if (loadedRunId != null && idSet.has(loadedRunId)) {
-        momentumStore.set({ loadedRunId: null });
-      }
+      if (results.some((ok) => !ok)) loadSavedRuns();
     } finally {
       setBulkDeletingRuns(false);
     }

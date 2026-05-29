@@ -417,6 +417,87 @@ export function computeYearlyBreakdown(
   return { years, bySeries, netYearlyBySeries };
 }
 
+// ─── Per-year subplots (cumulative + alpha vs universe) ────────────
+
+export type YearSubplotPoint = {
+  date: string;                  // YYYY-MM-DD (or YYYY-MM if monthly)
+  strategyCum: number | null;    // rebased so year-start = 0%
+  universeCum: number | null;    // rebased so year-start = 0%
+  alpha: number | null;          // strategyCum − universeCum, percentage points
+};
+
+export type YearSubplot = {
+  year: string;
+  points: YearSubplotPoint[];
+};
+
+/** Per-calendar-year sub-charts: strategy and universe cumulative
+ * returns rebased so each year starts at 0%, plus a derived alpha
+ * (arithmetic excess return in percentage points).
+ *
+ * The baseline used to rebase year Y is the previous year's last
+ * non-null cumReturnPct (or 0% when there is no prior year). This
+ * matches `computeYearlyBreakdown`'s semantics so totals at year-end
+ * agree with the Yearly Performance table.
+ *
+ * Returns `[]` when the universe baseline isn't available (very old
+ * saved runs predating `universe_daily_records` /
+ * `universe_cumulative_return_pct`). The grid component checks this
+ * and hides itself in that case.
+ */
+export function computeYearlySubplots(aligned: AlignedResult): YearSubplot[] {
+  const active = aligned.series.find((s) => s.kind === 'active');
+  const universe = aligned.series.find((s) => s.id === 'universe');
+  if (!active || !universe) return [];
+
+  // Build year → prior-year-end baseline for each series so the
+  // first day of each year sits at 0% and the curve through the year
+  // is a true within-year cumulative.
+  const yearBaseline = (
+    points: SeriesPoint[],
+  ): Map<string, number> => {
+    const lastByYear = new Map<string, number>();
+    for (const p of points) {
+      if (p.cumReturnPct == null) continue;
+      lastByYear.set(p.date.slice(0, 4), p.cumReturnPct);
+    }
+    const years = Array.from(lastByYear.keys()).sort();
+    const out = new Map<string, number>();
+    for (let i = 0; i < years.length; i++) {
+      out.set(years[i], i > 0 ? lastByYear.get(years[i - 1])! : 0);
+    }
+    return out;
+  };
+  const stratBase = yearBaseline(active.points);
+  const uniBase = yearBaseline(universe.points);
+
+  // Universe points by date for O(1) lookup while iterating the
+  // strategy's points (which drives the per-year x-axis).
+  const uniByDate = new Map<string, number | null>();
+  for (const p of universe.points) uniByDate.set(p.date, p.cumReturnPct);
+
+  const byYear = new Map<string, YearSubplotPoint[]>();
+  for (const p of active.points) {
+    const y = p.date.slice(0, 4);
+    const sb = stratBase.get(y) ?? 0;
+    const ub = uniBase.get(y) ?? 0;
+    const sCum = p.cumReturnPct;
+    const uCum = uniByDate.get(p.date) ?? null;
+    const sR = sCum == null ? null : ((1 + sCum / 100) / (1 + sb / 100) - 1) * 100;
+    const uR = uCum == null ? null : ((1 + uCum / 100) / (1 + ub / 100) - 1) * 100;
+    const alpha = sR != null && uR != null ? sR - uR : null;
+    const bucket = byYear.get(y) ?? [];
+    bucket.push({ date: p.date, strategyCum: sR, universeCum: uR, alpha });
+    byYear.set(y, bucket);
+  }
+
+  return Array.from(byYear.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([year, points]) => ({ year, points }))
+    // Drop empty years (no overlap with active series within window).
+    .filter((s) => s.points.some((p) => p.strategyCum != null || p.universeCum != null));
+}
+
 // ─── Custom range ──────────────────────────────────────────────────
 
 export type CustomRangeReturn = {

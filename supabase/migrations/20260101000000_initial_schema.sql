@@ -2,7 +2,6 @@
 -- PostgreSQL database dump
 --
 
-\restrict vBWoYetLtmz7G0FkRKI5scVlttFceLoxFdnGjXzhr1M5us8hxrXYGj3J99qblUP
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 17.6
@@ -1589,13 +1588,11 @@ ALTER TABLE public.universe_membership ENABLE ROW LEVEL SECURITY;
 -- PostgreSQL database dump complete
 --
 
-\unrestrict vBWoYetLtmz7G0FkRKI5scVlttFceLoxFdnGjXzhr1M5us8hxrXYGj3J99qblUP
 
 --
 -- PostgreSQL database dump
 --
 
-\restrict jsfP29PeA5hTrBjVj3pWaN4hzdOF3iLwIBrYHPmFJQ1qTxrTo06xFVN7z8Vho7F
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 17.6
@@ -1848,5 +1845,4 @@ XSGO	10.0000	2026-05-15 11:32:39.101822+00	t
 -- PostgreSQL database dump complete
 --
 
-\unrestrict jsfP29PeA5hTrBjVj3pWaN4hzdOF3iLwIBrYHPmFJQ1qTxrTo06xFVN7z8Vho7F
 

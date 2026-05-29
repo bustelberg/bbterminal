@@ -3,17 +3,21 @@
 import type { RefObject } from 'react';
 
 /** Live event log shown while a refresh is in flight + a "done" summary
- * line afterwards. Renders nothing when there are no events. */
+ * line afterwards. Renders nothing when there are no events. An optional
+ * `label` (e.g. ticker) lets the caller disambiguate stacked panels
+ * during a comparison-mode dual refresh. */
 export default function LogPanel({
   logs,
   logEndRef,
   running,
   onClose,
+  label,
 }: {
   logs: { type: string; message: string }[];
   logEndRef: RefObject<HTMLDivElement | null>;
   running: boolean;
   onClose?: () => void;
+  label?: string;
 }) {
   if (logs.length === 0) return null;
   const isDone = !running;
@@ -23,7 +27,10 @@ export default function LogPanel({
         {isDone
           ? <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
           : <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />}
-        <span className="text-gray-500 text-xs font-medium">{isDone ? 'Refresh Complete' : 'Refresh Progress'}</span>
+        <span className="text-gray-500 text-xs font-medium">
+          {label && <span className="text-gray-400 mr-1.5 font-mono">{label}</span>}
+          {isDone ? 'Refresh Complete' : 'Refresh Progress'}
+        </span>
         <button onClick={onClose} className="ml-auto text-gray-500 hover:text-gray-300 transition-colors" aria-label="Close">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
             <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
