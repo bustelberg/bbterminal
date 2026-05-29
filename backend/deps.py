@@ -13,19 +13,60 @@ this module thin; if a helper has a clear home in one of the
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING, Any
 
 from dotenv import load_dotenv
 from supabase import create_client
+
+if TYPE_CHECKING:
+    from supabase import Client
 
 # .env first (prod defaults), .env.local overrides (local dev only — file
 # doesn't exist on Railway/Vercel so this is a no-op there).
 load_dotenv()
 load_dotenv(".env.local", override=True)
 
-supabase = create_client(
-    os.environ["SUPABASE_URL"],
-    os.environ["SUPABASE_SERVICE_KEY"],
-)
+
+class _LazySupabase:
+    """Proxy that defers `create_client(...)` until the first method call.
+
+    `from deps import supabase` resolves to this instance at import
+    time — no env vars touched. The real client is built on the first
+    attribute access (e.g. `supabase.table('foo')`) and cached. Lets
+    `pytest`, `scripts/dump_openapi.py`, and any future tool import
+    router modules without SUPABASE_URL / SUPABASE_SERVICE_KEY set.
+
+    Functionally a drop-in for `Client` — all method/attribute access
+    falls through `__getattr__` after the first call materializes it.
+    Code that hits the DB still needs the env vars; code that doesn't
+    no longer does.
+    """
+
+    __slots__ = ("_real",)
+
+    def __init__(self) -> None:
+        # Use `object.__setattr__` so initialization doesn't recurse
+        # through `_LazySupabase.__setattr__`.
+        object.__setattr__(self, "_real", None)
+
+    def _build(self) -> "Client":
+        real = object.__getattribute__(self, "_real")
+        if real is None:
+            real = create_client(
+                os.environ["SUPABASE_URL"],
+                os.environ["SUPABASE_SERVICE_KEY"],
+            )
+            object.__setattr__(self, "_real", real)
+        return real
+
+    def __getattr__(self, name: str) -> Any:
+        # Only invoked when normal lookup fails — i.e. `name` isn't on
+        # the proxy itself. Forward to the real client.
+        return getattr(self._build(), name)
+
+
+supabase = _LazySupabase()
+
 
 # Default chunk size for `.in_()` queries.
 #

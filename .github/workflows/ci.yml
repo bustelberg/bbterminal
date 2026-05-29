@@ -5,21 +5,23 @@
 # deterministic; integration tests can be added as separate workflows.
 name: CI
 
-# `push:` is filtered to long-lived branches so a PR's `push` event
-# doesn't double-fire alongside its `pull_request` event. Feature
-# branches still get CI — via the PR event. Direct pushes to main/dev
-# get CI via the push event.
+# `push:` only — no `pull_request:`. When dev has an open PR, a push to
+# dev would otherwise fire BOTH the push event AND the pull_request
+# event, producing duplicate runs (the concurrency group can't dedupe
+# across them because `github.ref` differs: `refs/heads/dev` vs
+# `refs/pull/N/merge`). The push event still shows up as a commit
+# check on the PR page, so PR review surfaces it without needing the
+# pull_request trigger. Tradeoff: PRs from forks wouldn't trigger CI
+# (fork pushes don't fire the upstream push event) — fine for solo dev.
 on:
   push:
     branches: [main, dev]
-  pull_request:
 
 # Cancel an in-progress run when a newer commit lands on the same
-# branch / PR. Saves CI minutes on rapid push sequences without losing
-# the latest result. `pull_request.number || ref` keeps push-on-main
-# and PR-on-feature in distinct groups but still dedupes within each.
+# branch. Saves CI minutes on rapid push sequences without losing the
+# latest result.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
