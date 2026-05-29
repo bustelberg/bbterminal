@@ -45,6 +45,10 @@ jobs:
               - '.github/workflows/ci.yml'
             frontend:
               - 'frontend/**'
+              # `backend/openapi.json` is the source for the generated
+              # `frontend/lib/api-types.ts` — any contract change must
+              # re-run the frontend's drift check too.
+              - 'backend/openapi.json'
               - '.github/workflows/ci.yml'
             smoke:
               - 'backend/**'
@@ -91,6 +95,24 @@ jobs:
       - name: Run tests
         run: uv run pytest tests/ -v
 
+      # Regenerate the canonical OpenAPI spec and fail if it doesn't
+      # match the committed copy. Catches "added a Pydantic field but
+      # forgot to refresh the contract" — which downstream desyncs the
+      # frontend's generated types. To fix locally:
+      #   cd backend && uv run python scripts/dump_openapi.py
+      # then commit the updated `backend/openapi.json` and run
+      # `npm run gen:types` in frontend to refresh `lib/api-types.ts`.
+      - name: Verify openapi.json is up to date
+        run: |
+          uv run python scripts/dump_openapi.py
+          if ! git diff --quiet openapi.json; then
+            echo "::error::backend/openapi.json is stale. Run 'uv run python scripts/dump_openapi.py' and commit the result."
+            git --no-pager diff --stat openapi.json
+            git --no-pager diff openapi.json | head -200
+            exit 1
+          fi
+          echo "openapi.json matches the regenerated spec."
+
   frontend:
     name: Frontend (typecheck + lint)
     needs: changes
@@ -115,6 +137,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Regenerate the API types from the committed openapi.json and
+      # fail if `lib/api-types.ts` is stale. This is the frontend half
+      # of the contract-drift check — the backend job verifies the
+      # openapi.json itself is fresh. To fix locally: `npm run gen:types`
+      # then commit `lib/api-types.ts`.
+      - name: Verify api-types.ts is up to date
+        run: |
+          npm run gen:types
+          if ! git diff --quiet lib/api-types.ts; then
+            echo "::error::frontend/lib/api-types.ts is stale. Run 'npm run gen:types' and commit the result."
+            git --no-pager diff --stat lib/api-types.ts
+            git --no-pager diff lib/api-types.ts | head -200
+            exit 1
+          fi
+          echo "lib/api-types.ts matches the regenerated types."
+
       # No build step here — Vercel does that on deploy, and a build would
       # fail on missing NEXT_PUBLIC_* env vars CI doesn't have. tsc --noEmit
       # catches type regressions without that requirement.
@@ -134,6 +172,67 @@ jobs:
       # CAGR sign guards).
       - name: Unit tests (vitest)
         run: npm test
+
+  # Playwright UI regression suite. Spins Next.js's production build on
+  # port 3100 (no real backend, no real Supabase — `E2E_BYPASS_AUTH=1`
+  # short-circuits the auth middleware and tests stub /api/* responses
+  # via page.route()). Same path gate as the frontend job; skipped on
+  # backend-only commits.
+  e2e:
+    name: Frontend e2e (Playwright)
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Cache the ~150MB Chromium binary across runs — keyed on
+      # @playwright/test version so a Playwright bump invalidates the
+      # cache and pulls a matching browser.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright system deps (cache hit branch)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Run Playwright tests
+        run: npm run e2e
+
+      # Surface the HTML report + traces when a test fails so the
+      # author can download + inspect locally instead of squinting at
+      # log output.
+      - name: Upload Playwright report (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7
 
   # Stack-up smoke. Spins minimal Postgres + PostgREST as GitHub Actions
   # service containers, applies every migration via psql, boots uvicorn
