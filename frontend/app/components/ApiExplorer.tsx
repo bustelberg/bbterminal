@@ -130,6 +130,24 @@ const ENDPOINTS: Endpoint[] = [
       { name: 'limit', type: 'integer', default: 20, hint: '1–100' },
     ],
   },
+  {
+    id: 'admin-companies-flagged',
+    group: 'Admin · companies',
+    method: 'GET',
+    path: '/api/admin/companies/flagged',
+    desc: (
+      'Two ad-hoc audit heuristics for manual review of the universe: ' +
+      '(1) companies with "ADR" in their name (often surfaces wrong-variant mappings — ' +
+      'a depositary listing got linked instead of the primary local security); ' +
+      '(2) companies whose latest N close-price observations are all the same value ' +
+      '(stale or dead listings, or wrong mappings whose ticker ships a stub). ' +
+      'Already-delisted companies are excluded from the flat-price list. ' +
+      'Returns `{adr_in_name: {count, companies}, flat_prices: {count, companies}}`.'
+    ),
+    queryParams: [
+      { name: 'window_days', type: 'integer', default: 10, hint: 'Number of trailing close_price points required to be identical (default 10).' },
+    ],
+  },
 
   // ─── Auth ────────────────────────────────────────────────────────
   {
