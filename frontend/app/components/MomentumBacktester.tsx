@@ -12,7 +12,6 @@ import ProgressTimeline from './ProgressTimeline';
 import NotificationsPanel from './momentum/NotificationsPanel';
 import { useClickOutside } from '../../lib/hooks/useClickOutside';
 import {
-  useBenchmarks,
   useCompanyExchangeMap,
   useMomentumSignals,
   useUniverseTemplates,
@@ -39,6 +38,7 @@ import {
   type VariantOutcome,
   type VariantParams,
 } from '../../lib/stores/momentum';
+import AxisColumn from './momentum/AxisColumn';
 import CellInfoTip from './momentum/CellInfoTip';
 import CollapsibleCard from './momentum/CollapsibleCard';
 import DailyPicksHistory from './momentum/DailyPicksHistory';
@@ -49,6 +49,9 @@ import SectorTimelineChart from './momentum/SectorTimelineChart';
 import VariantAttribution from './momentum/VariantAttribution';
 import TableDownloadButton from './TableDownloadButton';
 import VariantSummaryTable from './momentum/VariantSummaryTable';
+import { parseMinScoreList, parseNumList, toggleInSet } from './momentum/variantHelpers';
+import { useSectorEtfs } from './momentum/useSectorEtfs';
+import { useVariantSelection } from './momentum/useVariantSelection';
 import {
   EXCHANGE_NAMES,
   fmtPct,
@@ -69,53 +72,6 @@ import type {
  * `renderItem` callback. Generic over the option type so the same shell
  * carries frequencies (strings), strategies (StrategyType), universes
  * (strings), and groupings ('sector' | 'industry'). */
-function AxisColumn<T>({
-  label,
-  options,
-  selected,
-  onAll,
-  onNone,
-  renderItem,
-  maxHClass,
-}: {
-  label: string;
-  options: readonly T[];
-  selected: ReadonlySet<T>;
-  onAll: () => void;
-  onNone: () => void;
-  renderItem: (option: T) => React.ReactNode;
-  maxHClass: string;
-}) {
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-1.5">
-        <span className="text-gray-500 text-xs">
-          {label}{' '}
-          <span className="text-gray-600 text-[10px]">
-            ({selected.size}/{options.length})
-          </span>
-        </span>
-        <div className="flex items-center gap-2 text-[11px]">
-          <button type="button" onClick={onAll} className="text-indigo-400 hover:text-indigo-300">
-            All
-          </button>
-          <span className="text-gray-700">·</span>
-          <button type="button" onClick={onNone} className="text-gray-400 hover:text-gray-200">
-            None
-          </button>
-        </div>
-      </div>
-      <ul className={`border border-gray-800/60 rounded-lg p-1 overflow-auto ${maxHClass}`}>
-        {options.length === 0 ? (
-          <li className="px-3 py-2 text-xs text-gray-600">No options</li>
-        ) : (
-          options.map((opt) => <li key={String(opt)}>{renderItem(opt)}</li>)
-        )}
-      </ul>
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -149,126 +105,41 @@ export default function MomentumBacktester() {
   const [randomSeed, setRandomSeed] = useState<number>(42);
   const [nTrials, setNTrials] = useState<number>(1);
 
-  // Sector → benchmark_id mapping for selection_mode='sector_etf'. Loaded
-  // lazily from /api/benchmarks when the user picks Sector ETF mode (and
-  // refreshed whenever they pop back to that mode in case they've edited
-  // mappings on /benchmarks in another tab).
-  const [sectorEtfs, setSectorEtfs] = useState<Record<string, number>>({});
-  const [sectorEtfsLoading, setSectorEtfsLoading] = useState(false);
-  const [sectorEtfsError, setSectorEtfsError] = useState<string | null>(null);
-  // Sector-ETF map (sector name → benchmark_id) derived from the shared
-  // benchmarks fetch. Only fires the network call when sector_etf mode
-  // is active; otherwise the hook idles.
+  // Sector → benchmark_id mapping for selection_mode='sector_etf'.
+  // Encapsulated in `useSectorEtfs`: lazy-loads from /api/benchmarks
+  // only when sector_etf mode is active and refreshes whenever the user
+  // pops back to that mode. `setSectorEtfs` is exposed so the saved-
+  // config loader downstream can overwrite the map directly.
   const {
-    data: _bmRows,
-    loading: _bmLoading,
-    error: _bmError,
-  } = useBenchmarks({ enabled: selectionMode === 'sector_etf' });
-  useEffect(() => {
-    setSectorEtfsLoading(_bmLoading);
-    setSectorEtfsError(_bmError);
-    if (!_bmRows) {
-      if (selectionMode !== 'sector_etf') setSectorEtfs({});
-      return;
-    }
-    const map: Record<string, number> = {};
-    for (const r of _bmRows) {
-      if (r.sector) map[r.sector] = r.benchmark_id;
-    }
-    setSectorEtfs(map);
-  }, [_bmRows, _bmLoading, _bmError, selectionMode]);
+    sectorEtfs,
+    setSectorEtfs,
+    sectorEtfsLoading,
+    sectorEtfsError,
+  } = useSectorEtfs({ active: selectionMode === 'sector_etf' });
 
   // Variant sweep selection — the 5-axis cross-product picker. Each
   // permutation in the cartesian product becomes one VariantParams sent
-  // to the backend. The four Set-backed axes (frequency, strategy,
-  // universe, grouping) drive multi-select chips; the three text inputs
-  // are comma-separated numeric overrides ("4,6" → two values; empty
-  // means "inherit base, don't sweep"). `disabledPerms` lets the user
-  // carve specific permutations out of the cross-product preview.
-  const ALL_FREQS = useMemo(
-    () => Array.from(new Set(VARIANT_DEFS.map((v) => v.frequency))),
-    [],
-  );
-  const ALL_STRATEGIES = useMemo(
-    () => Array.from(new Set(VARIANT_DEFS.map((v) => v.strategy))),
-    [],
-  );
-  const [selectedFreqs, setSelectedFreqs] = useState<Set<RebalanceFrequency>>(
-    () => new Set<RebalanceFrequency>(['monthly', 'every_3_months']),
-  );
-  const [selectedStrategies, setSelectedStrategies] = useState<Set<StrategyType>>(
-    () => new Set<StrategyType>(['long_only']),
-  );
-  const [selectedUniverses, setSelectedUniverses] = useState<Set<string>>(
-    () => new Set<string>(['ACWI_LEONTEQ']),
-  );
-  const [selectedGroupings, setSelectedGroupings] = useState<Set<'sector' | 'industry'>>(
-    () => new Set<'sector' | 'industry'>(['sector']),
-  );
-  const [topSectorsSweep, setTopSectorsSweep] = useState<string>('');
-  const [perSectorSweep, setPerSectorSweep] = useState<string>('');
-  const [minScoreSweep, setMinScoreSweep] = useState<string>('');
-  const [disabledPerms, setDisabledPerms] = useState<Set<VariantKey>>(() => new Set());
-
-  // Generic immutable Set toggle for the four checkbox-list axes.
-  const toggleInSet = <T,>(
-    setter: React.Dispatch<React.SetStateAction<Set<T>>>,
-    value: T,
-  ) => {
-    setter((prev) => {
-      const next = new Set(prev);
-      if (next.has(value)) next.delete(value); else next.add(value);
-      return next;
-    });
-  };
-  // Toggle one permutation in/out of the run. Used by the row-level
-  // checkbox in the permutations preview.
-  const togglePermDisabled = (key: VariantKey) => {
-    setDisabledPerms((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
-  };
-  // Comma-separated number list parser: "4, 6,8" → [4, 6, 8]. Filters
-  // non-finite and dedups. Empty / whitespace-only input → empty array.
-  const parseNumList = (s: string): number[] => {
-    const out: number[] = [];
-    const seen = new Set<number>();
-    for (const tok of s.split(',')) {
-      const t = tok.trim();
-      if (!t) continue;
-      const n = Number(t);
-      if (!Number.isFinite(n)) continue;
-      if (seen.has(n)) continue;
-      seen.add(n);
-      out.push(n);
-    }
-    return out;
-  };
-  // Same as parseNumList but recognizes the literal `none` / `off`
-  // tokens as `null` ("filter disabled for this variant"). Null is
-  // distinct from any numeric value so dedup keeps it.
-  const parseMinScoreList = (s: string): (number | null)[] => {
-    const out: (number | null)[] = [];
-    let sawNull = false;
-    const seen = new Set<number>();
-    for (const tok of s.split(',')) {
-      const t = tok.trim();
-      if (!t) continue;
-      const lower = t.toLowerCase();
-      if (lower === 'none' || lower === 'off') {
-        if (!sawNull) { out.push(null); sawNull = true; }
-        continue;
-      }
-      const n = Number(t);
-      if (!Number.isFinite(n)) continue;
-      if (seen.has(n)) continue;
-      seen.add(n);
-      out.push(n);
-    }
-    return out;
-  };
+  // to the backend. All state + derived cross-product math lives in
+  // `useVariantSelection` so it's testable in isolation. The base
+  // config's top_n / per_sector flow in so `variantSize` can fall back
+  // to them when a variant leaves the axis undefined.
+  const variantSel = useVariantSelection({ topSectors, topPerSector });
+  const {
+    selectedFreqs, setSelectedFreqs,
+    selectedStrategies, setSelectedStrategies,
+    selectedUniverses, setSelectedUniverses,
+    selectedGroupings, setSelectedGroupings,
+    topSectorsSweep, setTopSectorsSweep,
+    perSectorSweep, setPerSectorSweep,
+    minScoreSweep, setMinScoreSweep,
+    minPortfolioSizeRaw, setMinPortfolioSizeRaw,
+    maxPortfolioSizeRaw, setMaxPortfolioSizeRaw,
+    disabledPerms, setDisabledPerms,
+    ALL_FREQS, ALL_STRATEGIES,
+    minPortfolioSize, maxPortfolioSize,
+    allPermutations, variantSize, belowMinSize, aboveMaxSize, variantsToRun,
+    togglePermDisabled,
+  } = variantSel;
   // Backend rejects `long_short` + `random` (long-short without a
   // signal-driven score is meaningless), so when Random is selected we
   // hide the long-short rows from the picker and only run long-only.
@@ -276,48 +147,6 @@ export default function MomentumBacktester() {
   // count get an amber chip in the permutations preview to flag the
   // wall-time cost. Backend has no hard cap.
   const LARGE_VARIANTS_THRESHOLD = 30;
-
-  // Cross-product of the five axes: for each (frequency × strategy) pair
-  // selected, fan out across whichever numeric/categorical axes have at
-  // least one value. An "empty" axis is treated as a single `undefined`
-  // marker — that maps to "inherit base, don't sweep this dimension" on
-  // the backend `VariantSpec`.
-  const allPermutations = useMemo<VariantParams[]>(() => {
-    const topList = parseNumList(topSectorsSweep);
-    const perList = parseNumList(perSectorSweep);
-    const minList = parseMinScoreList(minScoreSweep);
-    const uniList = Array.from(selectedUniverses);
-    const grpList = Array.from(selectedGroupings);
-    const topAxis: (number | undefined)[] = topList.length === 0 ? [undefined] : topList;
-    const perAxis: (number | undefined)[] = perList.length === 0 ? [undefined] : perList;
-    const minAxis: (number | null | undefined)[] = minList.length === 0 ? [undefined] : minList;
-    const uniAxis: (string | undefined)[] = uniList.length === 0 ? [undefined] : uniList;
-    const grpAxis: ('sector' | 'industry' | undefined)[] =
-      grpList.length === 0 ? [undefined] : grpList;
-    const out: VariantParams[] = [];
-    for (const v of VARIANT_DEFS) {
-      if (!selectedFreqs.has(v.frequency)) continue;
-      if (!selectedStrategies.has(v.strategy)) continue;
-      for (const t of topAxis) for (const p of perAxis) for (const m of minAxis)
-      for (const u of uniAxis) for (const g of grpAxis) {
-        out.push({
-          frequency: v.frequency,
-          strategy: v.strategy,
-          ...(t !== undefined ? { top_n_sectors: t } : {}),
-          ...(p !== undefined ? { top_n_per_sector: p } : {}),
-          ...(m !== undefined ? { min_price_score: m } : {}),
-          ...(u !== undefined ? { universe: u } : {}),
-          ...(g !== undefined ? { grouping: g } : {}),
-        });
-      }
-    }
-    return out;
-  }, [selectedFreqs, selectedStrategies, selectedUniverses, selectedGroupings, topSectorsSweep, perSectorSweep, minScoreSweep]);
-
-  const variantsToRun = useMemo(
-    () => allPermutations.filter((p) => !disabledPerms.has(makeVariantKey(p))),
-    [allPermutations, disabledPerms],
-  );
 
   // Backtest run state lives in a module-scoped store so the SSE stream
   // keeps running when the user navigates away from /momentum.
@@ -652,6 +481,142 @@ export default function MomentumBacktester() {
       },
       targets,
     );
+  };
+
+  // Pin a single variant from a completed sweep to /schedule. The
+  // pipeline will then keep its current-picks snapshot up to date on
+  // every tick, AND surface its full backtest stats on /schedule's
+  // per-strategy run history. The user reaches this via the "+ Schedule"
+  // hover button on each OK row in the variants summary table.
+  const handleAddVariantToSchedule = async (variantKey: VariantKey, variantLabel: string) => {
+    const v = parseVariantKey(variantKey);
+    if (!v) {
+      await dialog.alert(`Couldn't parse variant key "${variantKey}".`, { title: 'Schedule add failed' });
+      return;
+    }
+    // Map the variant's `rebalance_frequency` to a schedule cadence.
+    // Off-cadence months (4/5/7/8/10/11) round to quarterly — those
+    // variants are rare and the cadence pinning isn't strict (the
+    // strategy still rebalances on its own internal cadence; this
+    // controls how often the pipeline refreshes the snapshot).
+    const FREQ_MAP: Record<string, string> = {
+      daily: 'daily', weekly: 'weekly', monthly: 'monthly',
+      every_2_months: 'bimonthly',
+      every_3_months: 'quarterly', every_4_months: 'quarterly',
+      every_5_months: 'quarterly', every_6_months: 'quarterly',
+      every_7_months: 'quarterly', every_8_months: 'quarterly',
+      every_9_months: 'quarterly', every_10_months: 'quarterly',
+      every_11_months: 'quarterly', every_12_months: 'quarterly',
+    };
+    const scheduleFreq = FREQ_MAP[v.frequency] ?? 'monthly';
+
+    const defaultName = `${variantLabel} · ${v.universe ?? selectedIndexUniverse ?? 'ACWI_LEONTEQ'}`;
+    const enteredName = await dialog.prompt(
+      `Save this variant to /schedule. Pipeline cadence: ${scheduleFreq} (mapped from "${v.frequency}").`,
+      { title: 'Add variant to schedule', defaultValue: defaultName, placeholder: 'Strategy name' },
+    );
+    if (!enteredName || !enteredName.trim()) return;
+
+    // Build the full config. Merge order: base from this component's
+    // state, then variant overrides (frequency, strategy_type, and any
+    // per-axis dials that differ from base).
+    const config: Record<string, unknown> = {
+      selection_mode: selectionMode,
+      index_universe: v.universe ?? selectedIndexUniverse ?? null,
+      universe_label: null,
+      max_companies: maxCompanies,
+      strategy_type: v.strategy,
+      rebalance_frequency: v.frequency,
+      top_n_sectors: v.top_n_sectors ?? topSectors,
+      top_n_per_sector: v.top_n_per_sector ?? topPerSector,
+      grouping: v.grouping ?? grouping,
+      start_date: `${startDate}-01`,
+      end_date: `${endDate}-01`,
+    };
+    if (selectionMode === 'momentum') {
+      const baseMs = minPriceScore.trim() === '' ? null : Number(minPriceScore);
+      // Variant `min_price_score === null` means "explicit OFF" (sweep
+      // axis entered "none"/"off"); undefined means "inherit base".
+      config.min_price_score =
+        v.min_price_score === undefined ? baseMs : v.min_price_score;
+      config.signal_weights = weights;
+      config.category_weights = categoryWeights;
+    }
+    if (selectionMode === 'random') {
+      config.random_seed = randomSeed;
+      config.n_trials = Math.max(1, nTrials);
+    }
+    if (selectionMode === 'sector_etf') {
+      config.sector_etfs = sectorEtfs;
+    }
+
+    // Grab the variant's actual BacktestResult so we can persist it as
+    // a saved backtest_run. The scheduled_strategy then links to that
+    // run via `backtest_run_id` — /schedule renders the full equity
+    // curve + monthly history from this on expansion, no recompute
+    // needed. The pipeline still produces live snapshots on every
+    // tick; those get appended past the "scheduled at" date with
+    // visually-distinct styling so the cutover is clear.
+    const variantOutcome = momentumStore.get().variants[variantKey];
+    if (!variantOutcome || variantOutcome.status !== 'ok') {
+      await dialog.alert('Variant has no completed backtest result to save.', { title: 'Schedule add failed' });
+      return;
+    }
+    const result = variantOutcome.result;
+    try {
+      // 1. Persist the variant's BacktestResult as a backtest_run row.
+      const saveResp = await apiFetch(`${API_URL}/api/momentum/backtests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: enteredName.trim(),
+          config,
+          summary: result.summary,
+          monthly_records: result.monthly_records,
+          daily_records: result.daily_records,
+          universe: momentumStore.get().universe,
+        }),
+      });
+      if (!saveResp.ok) {
+        const body = await saveResp.text().catch(() => '');
+        await dialog.alert(
+          `Could not save backtest before scheduling: ${saveResp.status} ${body.slice(0, 240)}`,
+          { title: 'Schedule add failed' },
+        );
+        return;
+      }
+      const saved = await saveResp.json() as { run_id?: number };
+      const backtest_run_id = saved.run_id ?? null;
+
+      // 2. Create the scheduled_strategy linked to the saved backtest.
+      const r = await apiFetch(`${API_URL}/api/scheduled-strategies`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: enteredName.trim(),
+          frequency: scheduleFreq,
+          config,
+          backtest_run_id,
+        }),
+      });
+      if (!r.ok) {
+        const body = await r.text().catch(() => '');
+        await dialog.alert(
+          `Failed to schedule "${enteredName}": ${r.status} ${body.slice(0, 240)}`,
+          { title: 'Schedule add failed' },
+        );
+        return;
+      }
+      await dialog.alert(
+        `"${enteredName}" added to /schedule. The full backtest history is preserved; the next pipeline tick will start appending live snapshots.`,
+        { title: 'Variant scheduled' },
+      );
+    } catch (e) {
+      await dialog.alert(
+        `Failed to schedule "${enteredName}": ${e instanceof Error ? e.message : String(e)}`,
+        { title: 'Schedule add failed' },
+      );
+    }
   };
 
   const _currentPortfolioConfig = (opts: { force: boolean; dbOnly: boolean }): BacktestStartConfig => ({
@@ -1087,9 +1052,13 @@ export default function MomentumBacktester() {
   const deleteBacktest = async (runId: number) => {
     setDeletingRunId(runId);
     if (loadedRunId === runId) momentumStore.set({ loadedRunId: null });
+    // Optimistic remove — the prod round-trip is ~500ms and the user
+    // shouldn't watch the row sit there waiting. Refetch on failure so
+    // a row only stays gone when the server actually deleted it.
+    setSavedRuns(prev => prev.filter(r => r.run_id !== runId));
     try {
-      await apiFetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' });
-      setSavedRuns(prev => prev.filter(r => r.run_id !== runId));
+      const resp = await apiFetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' });
+      if (!resp.ok) loadSavedRuns();
     } catch {
       loadSavedRuns();
     } finally {
@@ -1138,16 +1107,21 @@ export default function MomentumBacktester() {
     if (!ok) return;
     const idSet = new Set(ids);
     setBulkDeletingRuns(true);
+    // Optimistic remove — same reasoning as deleteBacktest above. If
+    // anything failed server-side, the refetch below restores those rows.
+    setSavedRuns((prev) => prev.filter((r) => !idSet.has(r.run_id)));
+    if (loadedRunId != null && idSet.has(loadedRunId)) {
+      momentumStore.set({ loadedRunId: null });
+    }
     try {
-      await Promise.all(
+      const results = await Promise.all(
         ids.map((runId) =>
-          apiFetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' }).catch(() => {})
+          apiFetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' })
+            .then((r) => r.ok)
+            .catch(() => false)
         ),
       );
-      setSavedRuns((prev) => prev.filter((r) => !idSet.has(r.run_id)));
-      if (loadedRunId != null && idSet.has(loadedRunId)) {
-        momentumStore.set({ loadedRunId: null });
-      }
+      if (results.some((ok) => !ok)) loadSavedRuns();
     } finally {
       setBulkDeletingRuns(false);
     }
@@ -1642,6 +1616,47 @@ export default function MomentumBacktester() {
               </div>
             </div>
 
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+              <div>
+                <label className="text-gray-500 text-xs block mb-1">
+                  Skip variants smaller than{' '}
+                  <span className="text-gray-600 text-[10px]">(blank = 12, 0 disables)</span>
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={minPortfolioSizeRaw}
+                  onChange={(e) => setMinPortfolioSizeRaw(e.target.value)}
+                  placeholder="blank = 12"
+                  className="w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                />
+                {minPortfolioSize > 0 && belowMinSize.size > 0 && (
+                  <p className="text-[10px] text-amber-400/70 mt-1.5">
+                    Skipping {belowMinSize.size} of {allPermutations.length} (portfolio &lt; {minPortfolioSize}).
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="text-gray-500 text-xs block mb-1">
+                  Skip variants larger than{' '}
+                  <span className="text-gray-600 text-[10px]">(blank = 50, 0 disables)</span>
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={maxPortfolioSizeRaw}
+                  onChange={(e) => setMaxPortfolioSizeRaw(e.target.value)}
+                  placeholder="blank = 50"
+                  className="w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                />
+                {maxPortfolioSize > 0 && aboveMaxSize.size > 0 && (
+                  <p className="text-[10px] text-amber-400/70 mt-1.5">
+                    Skipping {aboveMaxSize.size} of {allPermutations.length} (portfolio &gt; {maxPortfolioSize}).
+                  </p>
+                )}
+              </div>
+            </div>
+
             {longShortBlocked && (
               <div className="mb-3 px-3 py-2 text-[11px] text-amber-300/80 bg-amber-500/5 border border-amber-500/20 rounded-lg">
                 Long-short is disabled in {selectionMode === 'all' ? 'all-universe' : selectionMode === 'sector_etf' ? 'sector-ETF' : 'random'} mode (no top/bottom split to short on). Long-short rows below are greyed out.
@@ -1805,22 +1820,37 @@ export default function MomentumBacktester() {
                     const key = makeVariantKey(p);
                     const userDisabled = disabledPerms.has(key);
                     const modeDisabled = longShortBlocked && p.strategy === 'long_short';
-                    const enabled = !userDisabled && !modeDisabled;
+                    const sizeBelowMin = belowMinSize.has(key);
+                    const sizeAboveMax = aboveMaxSize.has(key);
+                    const enabled = !userDisabled && !modeDisabled && !sizeBelowMin && !sizeAboveMax;
+                    const autoDisabled = modeDisabled || sizeBelowMin || sizeAboveMax;
                     return (
                       <li key={key}>
                         <label
                           className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs ${
-                            modeDisabled ? 'text-gray-600 cursor-not-allowed' : 'text-gray-300 hover:bg-white/5 cursor-pointer'
+                            autoDisabled ? 'text-gray-600 cursor-not-allowed' : 'text-gray-300 hover:bg-white/5 cursor-pointer'
                           }`}
                         >
                           <input
                             type="checkbox"
                             checked={enabled}
-                            disabled={modeDisabled}
+                            disabled={autoDisabled}
                             onChange={() => togglePermDisabled(key)}
                             className="accent-indigo-500 w-3.5 h-3.5 cursor-pointer disabled:cursor-not-allowed"
                           />
-                          <span className="truncate">{variantLabel(p)}</span>
+                          <span className="truncate">
+                            {variantLabel(p)}
+                            {sizeBelowMin && (
+                              <span className="ml-1.5 text-[9px] uppercase tracking-wider text-amber-400/70">
+                                skipped · {variantSize(p)} &lt; {minPortfolioSize}
+                              </span>
+                            )}
+                            {sizeAboveMax && (
+                              <span className="ml-1.5 text-[9px] uppercase tracking-wider text-amber-400/70">
+                                skipped · {variantSize(p)} &gt; {maxPortfolioSize}
+                              </span>
+                            )}
+                          </span>
                         </label>
                       </li>
                     );
@@ -2267,7 +2297,12 @@ export default function MomentumBacktester() {
         {/* Variant sweep summary — appears as soon as one variant outcome
             lands and stays visible alongside the active variant's detail
             views below. Hidden entirely when no sweep has run. */}
-        {hasVariants && <VariantSummaryTable exchangeByCompany={exchangeByCompany} />}
+        {hasVariants && (
+          <VariantSummaryTable
+            exchangeByCompany={exchangeByCompany}
+            onAddToSchedule={handleAddVariantToSchedule}
+          />
+        )}
 
         {/* Variant attribution — per-axis marginal averages so the user
             can see at a glance which axis values consistently produce

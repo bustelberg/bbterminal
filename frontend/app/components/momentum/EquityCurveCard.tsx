@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import type {
   BacktestResult,
@@ -9,12 +9,9 @@ import type {
   Summary,
 } from '../../../lib/stores/momentum';
 import type { Column } from '../../../lib/tableExport';
-import TableDownloadButton from '../TableDownloadButton';
-import CellInfoTip from './CellInfoTip';
-import CollapsibleCard from './CollapsibleCard';
-import { SERIES_COLORS, fmtPct, tooltipStyle } from './utils';
+import { SERIES_COLORS } from './utils';
 import type { BenchmarkOption, BenchmarkPrice, ComparisonItem, SavedRun, SavedVariant } from './types';
-import { computeNetStats, parenPct, type NetStats } from './feeStats';
+import { computeNetStats, type NetStats } from './feeStats';
 import { useClickOutside } from '../../../lib/hooks/useClickOutside';
 import { useBenchmarks, useExchangeFeeMap } from '../../../lib/hooks/apiData';
 import { API_URL } from '../../../lib/apiUrl';
@@ -24,6 +21,7 @@ import {
   computeChartYDomain,
   computeCustomRangeReturn,
   computeYearlyBreakdown,
+  computeYearlySubplots,
   resolveSeries,
 } from './equityCurve/seriesMath';
 // Recharts is ~100KB gzipped and only used by this chart. next/dynamic splits
@@ -32,6 +30,11 @@ import {
 const EquityChart = dynamic(() => import('./equityCurve/EquityChart'), { ssr: false });
 import YearlyBreakdown from './equityCurve/YearlyBreakdown';
 import SummaryStats from './equityCurve/SummaryStats';
+// Recharts is split off into the EquityChart chunk above; the yearly
+// subplots grid uses the same library, so dynamic-loading it keeps the
+// initial /backtest bundle untouched even though the grid renders
+// inline below the main chart.
+const YearlySubplotsGrid = dynamic(() => import('./equityCurve/YearlySubplotsGrid'), { ssr: false });
 
 type Props = {
   /** Active backtest result (the strategy being run). The card is only
@@ -313,6 +316,13 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
     [displayChartData, alignedSeries],
   );
 
+  // Per-calendar-year mini-charts (strategy vs universe + alpha). Built
+  // off the same aligned series the main chart uses so years agree with
+  // the Yearly Performance table. Empty when no universe baseline is
+  // available — the grid component then renders nothing.
+  const yearlySubplots = useMemo(() => computeYearlySubplots(alignedSeries), [alignedSeries]);
+  const strategyColor = alignedSeries.series[0]?.color;
+
   return (
     <>
       {/* Comparison panel — active strategy + any added backtests/benchmarks */}
@@ -494,6 +504,13 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
         hoveredDrawdown={hoveredDrawdown}
         setHoveredDrawdown={setHoveredDrawdown}
       />
+
+      {/* Per-year small multiples — cumulative + alpha. Both reuse the
+          same `computeYearlySubplots` result; the grid component branches
+          on `mode`. Renders nothing on saved runs without a universe
+          baseline. */}
+      <YearlySubplotsGrid subplots={yearlySubplots} mode="cumulative" strategyColor={strategyColor} />
+      <YearlySubplotsGrid subplots={yearlySubplots} mode="alpha" strategyColor={strategyColor} />
     </>
   );
 }

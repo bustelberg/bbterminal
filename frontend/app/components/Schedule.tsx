@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import AddScheduledStrategyForm from './AddScheduledStrategyForm';
 import DailyMtdRefreshCard from './DailyMtdRefreshCard';
 import ScheduledStrategyDetail, { type StrategyRunHistory } from './ScheduledStrategyDetail';
 import LoadingDots from './LoadingDots';
@@ -18,7 +17,7 @@ export type IngestRun = {
   started_at: string;
   finished_at: string | null;
   status: 'running' | 'ok' | 'error';
-  current_phase: 'acquisition' | 'templates' | 'prune' | 'prices' | 'momentum' | 'done' | null;
+  current_phase: 'acquisition' | 'templates' | 'prune' | 'dedupe' | 'prices' | 'momentum' | 'done' | null;
   // Array — one entry per template-managed universe the pipeline
   // refreshed in phase 1. Each entry carries that template's per-run
   // diff (additions/removals/renames). Empty when no templates are
@@ -52,6 +51,19 @@ export type TemplateDiff = {
   additions: Array<{ company_id: number; ticker: string; name: string | null; sector: string | null }>;
   removals: Array<{ company_id: number; ticker: string; name: string | null; sector: string | null }>;
   renames: Array<{ company_id: number; old_ticker: string; new_ticker: string; name: string | null }>;
+  /** Post-XLS MSCI additions the pipeline couldn't verify on GuruFocus.
+   * Each needs a manual override before the security can land in the
+   * universe. Only populated for the ACWI template today. */
+  unresolved_additions?: Array<{
+    name: string;
+    country: string;
+    eff_date: string | null;
+    reason: string;
+    gf_url: string | null;
+    openfigi_candidate?: { exch_code?: string; ticker?: string; name?: string } | null;
+    msci_href?: string;
+    detail?: string;
+  }>;
   error?: string | null;
 };
 
@@ -150,6 +162,7 @@ export const PIPELINE_STEPS: StepDef[] = [
   { key: 'acquisition', label: 'Source acquisition' },
   { key: 'templates', label: 'Template universe refresh' },
   { key: 'prune', label: 'Orphan company prune' },
+  { key: 'dedupe', label: 'Duplicate company merge' },
   { key: 'prices', label: 'Price + volume refresh' },
   { key: 'momentum', label: 'Momentum compute' },
 ];
@@ -168,6 +181,7 @@ export function runToTimelineProps(run: IngestRun): {
     acquisition: { status: 'pending' },
     templates: { status: 'pending' },
     prune: { status: 'pending' },
+    dedupe: { status: 'pending' },
     prices: { status: 'pending' },
     momentum: { status: 'pending' },
   };
@@ -177,7 +191,7 @@ export function runToTimelineProps(run: IngestRun): {
   // Phase 0 — Acquisition. There's no per-run summary column on
   // `ingest_run` for acquisition results — current_message carries the
   // status line. Once we move past this phase we mark it done.
-  if (phase === 'templates' || phase === 'prune' || phase === 'prices' || phase === 'momentum' || phase === 'done' || finished) {
+  if (phase === 'templates' || phase === 'prune' || phase === 'dedupe' || phase === 'prices' || phase === 'momentum' || phase === 'done' || finished) {
     state.acquisition = { status: 'done', message: 'sources acquired' };
   } else if (phase === 'acquisition') {
     state.acquisition = { status: 'in_progress', message: liveMessage ?? 'probing upstream sources…' };
@@ -187,7 +201,7 @@ export function runToTimelineProps(run: IngestRun): {
   const templates = run.templates_summary ?? [];
   const tplErr = templates.filter((t) => t.error).length;
   const tplOk = templates.length - tplErr;
-  if (templates.length > 0 && (phase === 'prune' || phase === 'prices' || phase === 'momentum' || phase === 'done' || finished)) {
+  if (templates.length > 0 && (phase === 'prune' || phase === 'dedupe' || phase === 'prices' || phase === 'momentum' || phase === 'done' || finished)) {
     // Aggregate diff across templates for the inline message.
     const totAdd = templates.reduce((a, t) => a + (t.additions_count || 0), 0);
     const totRem = templates.reduce((a, t) => a + (t.removals_count || 0), 0);
@@ -205,10 +219,18 @@ export function runToTimelineProps(run: IngestRun): {
   // Phase 2 — Prune (no per-run summary column; current_message
   // carries the count line. Once we move past prune the step is done
   // unless the phase errored, which would land in error_summary).
-  if (phase === 'prices' || phase === 'momentum' || phase === 'done' || finished) {
+  if (phase === 'dedupe' || phase === 'prices' || phase === 'momentum' || phase === 'done' || finished) {
     state.prune = { status: 'done', message: 'orphan companies pruned' };
   } else if (phase === 'prune') {
     state.prune = { status: 'in_progress', message: liveMessage ?? 'pruning orphan companies…' };
+  }
+
+  // Phase 2.5 — Dedupe (no per-run summary column; current_message
+  // carries the merge counts).
+  if (phase === 'prices' || phase === 'momentum' || phase === 'done' || finished) {
+    state.dedupe = { status: 'done', message: 'duplicates merged' };
+  } else if (phase === 'dedupe') {
+    state.dedupe = { status: 'in_progress', message: liveMessage ?? 'merging duplicate companies…' };
   }
 
   // Phase 3 — Prices
@@ -296,7 +318,6 @@ export default function Schedule() {
   const [strategiesLoading, setStrategiesLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedStrategyId, setExpandedStrategyId] = useState<number | null>(null);
-  const [addingPickerOpen, setAddingPickerOpen] = useState(false);
   // Per-strategy run-history cache. Survives collapse/re-expand so the
   // detail view renders instantly on a second click; the detail still
   // fires a silent revalidate fetch on every mount to pick up updates.
@@ -447,31 +468,21 @@ export default function Schedule() {
                   Remove all
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => setAddingPickerOpen((v) => !v)}
+              <a
+                href="/backtest"
                 className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+                title="Strategies can only be scheduled from a backtested variant — run a sweep on /backtest, then use the '+ Schedule' button on any OK variant row."
               >
-                {addingPickerOpen ? 'Cancel' : '+ Add strategy'}
-              </button>
+                Add via /backtest →
+              </a>
             </div>
           </div>
-
-          {addingPickerOpen && (
-            <AddScheduledStrategyForm
-              onAdded={async () => {
-                setAddingPickerOpen(false);
-                await loadStrategies();
-              }}
-              onCancel={() => setAddingPickerOpen(false)}
-            />
-          )}
 
           {strategiesLoading ? (
             <div className="px-5 py-5 text-sm text-gray-500"><LoadingDots label="Loading" /></div>
           ) : strategies.length === 0 ? (
             <div className="px-5 py-6 text-sm text-gray-500">
-              No strategies scheduled yet. Click <span className="text-gray-300">+ Add strategy</span> to add one inline.
+              No strategies scheduled yet. Strategies must originate from a backtested variant: run a sweep on <a href="/backtest" className="text-indigo-300 hover:text-indigo-200 underline">/backtest</a>, then click <span className="text-gray-300">+ Schedule</span> on any OK variant row in the Variants table.
             </div>
           ) : (
             <div className="divide-y divide-gray-800/30">
@@ -715,40 +726,9 @@ function TemplateUniversesCard() {
         )}
         {templates && templates.length > 0 && (
           <div className="divide-y divide-gray-800/30">
-            {templates.map((t) => {
-              const neverRefreshed = t.last_refreshed_at == null;
-              return (
-                <div key={t.template_key} className="px-5 py-3 flex items-center gap-3 flex-wrap">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`text-sm font-medium ${neverRefreshed ? 'text-amber-200' : 'text-white'}`}>
-                        {t.label}
-                      </span>
-                      <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-gray-500/10 text-gray-400 border-gray-500/30 font-mono">
-                        {t.template_key}
-                      </span>
-                      {neverRefreshed && (
-                        <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-amber-500/15 text-amber-300 border-amber-500/40">
-                          never refreshed
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-0.5 font-mono">
-                      {neverRefreshed ? (
-                        <span className="text-amber-300/80">no membership data yet</span>
-                      ) : (
-                        <>
-                          {t.latest_membership_count} member{t.latest_membership_count === 1 ? '' : 's'}
-                          {t.latest_captured_month && ` · latest month ${t.latest_captured_month}`}
-                          {' · last refresh '}
-                          {fmtTimestamp(t.last_refreshed_at)}
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+            {templates.map((t) => (
+              <TemplateRow key={t.template_key} t={t} />
+            ))}
           </div>
         )}
       </div>
@@ -756,6 +736,204 @@ function TemplateUniversesCard() {
   );
 }
 
+
+/** Per-template row in the templates section. Collapsible — click to
+ * expand into the recent additions/removals diff. Shows last refresh +
+ * next-refresh ETA so the user can tell at a glance when the data
+ * was last updated and when it'll auto-refresh next. */
+function TemplateRow({ t }: { t: UniverseTemplateSummary }) {
+  const [expanded, setExpanded] = useState(false);
+  const neverRefreshed = t.last_refreshed_at == null;
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full px-5 py-3 flex items-center gap-3 flex-wrap hover:bg-white/[0.02] transition-colors text-left"
+      >
+        <span className="text-gray-500 text-xs font-mono w-3 inline-block">
+          {expanded ? '▾' : '▸'}
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`text-sm font-medium ${neverRefreshed ? 'text-amber-200' : 'text-white'}`}>
+              {t.label}
+            </span>
+            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-gray-500/10 text-gray-400 border-gray-500/30 font-mono">
+              {t.template_key}
+            </span>
+            {neverRefreshed && (
+              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-amber-500/15 text-amber-300 border-amber-500/40">
+                never refreshed
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-gray-500 mt-0.5 font-mono">
+            {neverRefreshed ? (
+              <span className="text-amber-300/80">no membership data yet</span>
+            ) : (
+              <>
+                {t.latest_membership_count} member{t.latest_membership_count === 1 ? '' : 's'}
+                {t.latest_captured_month && ` · latest month ${t.latest_captured_month}`}
+                {' · last refresh '}
+                {fmtTimestamp(t.last_refreshed_at)}
+                {' · next refresh '}
+                <span className="text-gray-400">{fmtTimestamp(nextDailyTemplateRefresh())}</span>
+              </>
+            )}
+          </div>
+        </div>
+      </button>
+      {expanded && <TemplateRecentChanges templateKey={t.template_key} />}
+    </div>
+  );
+}
+
+/** Compute the next 02:30 UTC after `now` that ISN'T a Tuesday (the
+ * weekly full pipeline covers Tue, so the daily template-refresh job
+ * skips it — see scheduler.py). Returns an ISO timestamp string. */
+function nextDailyTemplateRefresh(): string {
+  const now = new Date();
+  const target = new Date(now);
+  target.setUTCHours(2, 30, 0, 0);
+  // If today's 02:30 UTC is already past, jump to tomorrow.
+  if (target.getTime() <= now.getTime()) {
+    target.setUTCDate(target.getUTCDate() + 1);
+  }
+  // Skip Tuesdays (UTC day = 2).
+  while (target.getUTCDay() === 2) {
+    target.setUTCDate(target.getUTCDate() + 1);
+  }
+  return target.toISOString();
+}
+
+/** Recent additions/removals for one template. Fetched lazily on
+ * expand from `GET /api/universe-templates/{key}/recent-changes`. */
+function TemplateRecentChanges({ templateKey }: { templateKey: string }) {
+  type ChangeEntry = {
+    run_id: number;
+    started_at: string;
+    status: string;
+    this_month: string | null;
+    prev_month: string | null;
+    additions_count: number;
+    removals_count: number;
+    renames_count: number;
+    additions: Array<{ company_id: number; ticker?: string; name?: string | null; sector?: string | null }>;
+    removals: Array<{ company_id: number; ticker?: string; name?: string | null; sector?: string | null }>;
+    renames: Array<{ company_id: number; old_ticker?: string; new_ticker?: string; name?: string | null }>;
+  };
+  const [data, setData] = useState<ChangeEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_URL}/api/universe-templates/${encodeURIComponent(templateKey)}/recent-changes?limit=5`)
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((rows: ChangeEntry[]) => { if (!cancelled) setData(rows); })
+      .catch((e: unknown) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); });
+    return () => { cancelled = true; };
+  }, [templateKey]);
+
+  if (error) {
+    return (
+      <div className="px-12 pb-3 text-xs text-rose-300">Failed to load recent changes: {error}</div>
+    );
+  }
+  if (data == null) {
+    return (
+      <div className="px-12 pb-3 text-xs text-gray-500"><LoadingDots label="Loading recent changes" /></div>
+    );
+  }
+  if (data.length === 0) {
+    return (
+      <div className="px-12 pb-3 text-xs text-gray-500">No pipeline runs have refreshed this template yet — recent additions/removals will appear here after the next tick.</div>
+    );
+  }
+  return (
+    <div className="px-12 pb-4 space-y-3">
+      {data.map((entry) => {
+        const noChanges = entry.additions_count === 0 && entry.removals_count === 0 && entry.renames_count === 0;
+        return (
+          <div key={`${entry.run_id}-${entry.this_month}`} className="bg-[#0f1117] border border-gray-800/40 rounded-lg overflow-hidden">
+            <div className="px-3 py-2 border-b border-gray-800/40 flex items-baseline gap-3 flex-wrap text-xs">
+              <span className="text-gray-300 font-mono">{fmtTimestamp(entry.started_at)}</span>
+              <span className="text-gray-500 font-mono">
+                {entry.this_month ?? '—'}
+                {entry.prev_month && <span className="text-gray-600"> vs {entry.prev_month}</span>}
+              </span>
+              <span className="text-[10px] text-gray-500 font-mono ml-auto">run #{entry.run_id}</span>
+              <span className="text-xs text-gray-400 font-mono">
+                +{entry.additions_count} / −{entry.removals_count}
+                {entry.renames_count > 0 && <span> / r{entry.renames_count}</span>}
+              </span>
+            </div>
+            {noChanges ? (
+              <div className="px-3 py-2 text-[11px] text-gray-500 italic">No constituent changes vs the prior month.</div>
+            ) : (
+              <div className="grid gap-2 md:grid-cols-3 p-3">
+                {entry.additions_count > 0 && (
+                  <DiffPanel
+                    color="emerald" label="Additions" count={entry.additions_count}
+                    items={entry.additions.map((a) => ({ key: a.company_id, primary: a.ticker ?? '?', secondary: a.name ?? null }))}
+                  />
+                )}
+                {entry.removals_count > 0 && (
+                  <DiffPanel
+                    color="rose" label="Removals" count={entry.removals_count}
+                    items={entry.removals.map((a) => ({ key: a.company_id, primary: a.ticker ?? '?', secondary: a.name ?? null }))}
+                  />
+                )}
+                {entry.renames_count > 0 && (
+                  <DiffPanel
+                    color="amber" label="Renames" count={entry.renames_count}
+                    items={entry.renames.map((r) => ({ key: r.company_id, primary: `${r.old_ticker} → ${r.new_ticker}`, secondary: r.name ?? null }))}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DiffPanel({
+  color, label, count, items,
+}: {
+  color: 'emerald' | 'rose' | 'amber';
+  label: string;
+  count: number;
+  items: Array<{ key: number; primary: string; secondary: string | null }>;
+}) {
+  const colorCls = color === 'emerald'
+    ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30'
+    : color === 'rose'
+      ? 'text-rose-300 bg-rose-500/10 border-rose-500/30'
+      : 'text-amber-300 bg-amber-500/10 border-amber-500/30';
+  return (
+    <div className="bg-[#151821] rounded border border-gray-800/40">
+      <div className="px-2.5 py-1 flex items-center gap-2 border-b border-gray-800/40">
+        <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${colorCls}`}>{label}</span>
+        <span className="text-xs text-gray-300 font-mono">{count}</span>
+      </div>
+      <div className="max-h-48 overflow-auto divide-y divide-gray-800/30">
+        {items.slice(0, 50).map((it) => (
+          <div key={it.key} className="px-2.5 py-1">
+            <div className="text-xs font-mono text-gray-200">{it.primary}</div>
+            {it.secondary && <div className="text-[10px] text-gray-500 truncate">{it.secondary}</div>}
+          </div>
+        ))}
+        {items.length > 50 && (
+          <div className="px-2.5 py-1 text-[10px] text-gray-600 italic">+ {items.length - 50} more (open the run on /schedule for the full list)</div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 /** Read-only breakdown of a backtest's config blob. Re-used by the add
  * picker and the per-strategy detail view. */

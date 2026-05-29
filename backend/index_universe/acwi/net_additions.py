@@ -106,11 +106,16 @@ def _extract_first_company(title: str) -> str:
     return m.group(1).strip() if m else re.sub(r"^[A-Z]{2}: ", "", title)
 
 
-def compute_net_additions() -> list[dict]:
-    """Compute net additions (added & not deleted) matched against current holdings.
+def compute_constituent_changes() -> list[dict]:
+    """Compute the latest constituent-change event per announcement title.
 
-    Returns list of dicts with: title, country, date, effective_date, href,
-    matched (bool), matched_ticker, matched_name, match_method.
+    Like `compute_net_additions` but keeps DELETED entries too — the
+    reconstruction pipeline uses both to walk forward of the XLS date
+    (drop holdings whose latest action is DELETED with effective_date
+    after the XLS snapshot).
+
+    Each entry adds an `action` field ("ADDED" or "DELETED") on top of
+    the `compute_net_additions` shape.
     """
     from collections import defaultdict
     from datetime import datetime
@@ -119,12 +124,10 @@ def compute_net_additions() -> list[dict]:
     cache = _load_detail_cache()
     holdings, _ = load_acwi_holdings()
 
-    # Load manual overrides: maps announcement company name → holding name
     overrides = _load_name_overrides()
 
-    # Build holdings lookup structures
     h_clean_map: dict[str, dict] = {}
-    h_name_map: dict[str, dict] = {}  # exact Name → holding for override lookups
+    h_name_map: dict[str, dict] = {}
     h_token_list: list[tuple[set[str], dict]] = []
     for h in holdings:
         c = _clean_name(h["Name"])
@@ -133,7 +136,6 @@ def compute_net_additions() -> list[dict]:
         h_token_list.append((_tokenize_significant(h["Name"]), h))
 
     def _match(ann_name: str) -> tuple[dict | None, str]:
-        # Manual override (highest priority)
         override_target = overrides.get(ann_name.upper())
         if override_target:
             h = h_name_map.get(override_target.upper())
@@ -141,15 +143,11 @@ def compute_net_additions() -> list[dict]:
                 return h, "override"
 
         c = _clean_name(ann_name)
-        # Exact cleaned match
         if c in h_clean_map:
             return h_clean_map[c], "exact"
-        # Prefix match (either direction)
         for hc, h in h_clean_map.items():
             if len(c) >= 3 and len(hc) >= 3 and (hc.startswith(c) or c.startswith(hc)):
                 return h, "prefix"
-        # Token overlap — require at least 2 overlapping significant tokens and 60% score
-        # Also counts fuzzy matches: one token is a prefix of or contained in another (min 4 chars)
         ann_tokens = _tokenize_significant(ann_name)
         if len(ann_tokens) < 2:
             return None, ""
@@ -177,7 +175,6 @@ def compute_net_additions() -> list[dict]:
             return best, f"token({best_score:.0%})"
         return None, ""
 
-    # Build history per announcement title
     constituent = [a for a in anns if a.get("is_constituent_change") and a.get("href")]
     history: dict[str, list[tuple[datetime, str, dict]]] = defaultdict(list)
     for a in constituent:
@@ -197,8 +194,6 @@ def compute_net_additions() -> list[dict]:
     for title, events in history.items():
         events.sort(key=lambda x: x[0], reverse=True)
         ts, action, a = events[0]
-        if action != "ADDED":
-            continue
 
         country_m = re.match(r"^([A-Z]{2}): ", title)
         country = country_m.group(1) if country_m else ""
@@ -212,14 +207,13 @@ def compute_net_additions() -> list[dict]:
             "date": a["date"],
             "effective_date": (a.get("detail") or {}).get("effective_date"),
             "href": a["href"],
+            "action": action,
             "matched": h is not None,
             "matched_ticker": h["Ticker"] if h else None,
             "matched_name": h["Name"] if h else None,
             "match_method": method,
         })
 
-    results.sort(key=lambda x: x["date"], reverse=False)
-    # Sort by parsed date descending
     def _parse_dt(s: str):
         try:
             return datetime.strptime(s, "%d %b %Y")
@@ -228,3 +222,16 @@ def compute_net_additions() -> list[dict]:
     results.sort(key=lambda x: _parse_dt(x["date"]), reverse=True)
 
     return results
+
+
+def compute_net_additions() -> list[dict]:
+    """Net additions (latest action per title is ADDED), matched against
+    current holdings. Backward-compatible wrapper over
+    `compute_constituent_changes` — strips the `action` field so the
+    `/api/acwi/net-additions` endpoint output stays unchanged.
+    """
+    return [
+        {k: v for k, v in c.items() if k != "action"}
+        for c in compute_constituent_changes()
+        if c.get("action") == "ADDED"
+    ]

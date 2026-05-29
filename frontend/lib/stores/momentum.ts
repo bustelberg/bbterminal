@@ -190,7 +190,7 @@ export type UniverseEntry = {
 };
 
 export type ProgressEntry = { pct: number; message: string; t: number };
-export type WarningEntry = { scope: string; message: string };
+export type WarningEntry = { scope: string; message: string; id?: string };
 export type InfoEntry = { scope: string; message: string };
 
 // Phase 3 — variants. The "Run variants" button fans out to a fixed
@@ -504,9 +504,33 @@ export async function startBacktest(cfg: BacktestStartConfig): Promise<void> {
             progress: [...s.progress, { pct: data.pct ?? 0, message: data.message ?? '', t: Date.now() }],
           }));
         } else if (data.type === 'warning') {
-          momentumStore.set((s) => ({
-            warnings: [...s.warnings, { scope: data.scope ?? 'backtest', message: data.message ?? '' }],
-          }));
+          const id = (data as { id?: string }).id;
+          const dismiss = (data as { dismiss?: boolean }).dismiss === true;
+          momentumStore.set((s) => {
+            // Dismiss request: drop any warning with this id (live self-heal
+            // updates fire dismiss=true when everything's recovered).
+            if (id && dismiss) {
+              return { warnings: s.warnings.filter((w) => w.id !== id) };
+            }
+            // Last-write-wins on `id`: replace existing same-id warning so
+            // live updates (e.g. self-heal "X of Y still missing…")
+            // visually supersede the original audit warning instead of
+            // stacking under it.
+            const entry: WarningEntry = {
+              scope: data.scope ?? 'backtest',
+              message: data.message ?? '',
+              ...(id ? { id } : {}),
+            };
+            if (id) {
+              const idx = s.warnings.findIndex((w) => w.id === id);
+              if (idx >= 0) {
+                const next = [...s.warnings];
+                next[idx] = entry;
+                return { warnings: next };
+              }
+            }
+            return { warnings: [...s.warnings, entry] };
+          });
         } else if (data.type === 'info') {
           momentumStore.set((s) => ({
             infos: [...s.infos, { scope: data.scope ?? 'backtest', message: data.message ?? '' }],

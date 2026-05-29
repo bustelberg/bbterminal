@@ -463,63 +463,66 @@ def compute_signals_panel(
         return {}
 
     cutoff_ts = [pd.Timestamp(c) for c in cutoffs]
+    cutoff_ts_index = pd.DatetimeIndex(cutoff_ts)
     max_staleness_days = 30
 
-    # Per-cutoff lists of row dicts (one row per eligible company).
-    per_cutoff_rows: dict[pd.Timestamp, list[dict]] = {c: [] for c in cutoff_ts}
+    cids = list(universe_df["company_id"].unique())
 
-    for cid in universe_df["company_id"].unique():
-        series = price_index.get(int(cid))
+    def _per_cid(cid_: int) -> dict[pd.Timestamp, dict]:
+        """Per-cid worker — independent of every other cid, so a thread
+        pool gives near-linear speedup on this loop. Returns the
+        per-cutoff row dict; the main thread aggregates."""
+        local: dict[pd.Timestamp, dict] = {}
+        series = price_index.get(int(cid_))
         if series is None or len(series) < 20:
-            continue
+            return local
 
         price_panel = _build_price_signal_panel(series)
         if price_panel.empty:
-            continue
+            return local
 
-        vol_series = volume_index.get(int(cid)) if volume_index is not None else None
+        vol_series = volume_index.get(int(cid_)) if volume_index is not None else None
         vol_panel = (
             _build_volume_signal_panel(vol_series)
             if vol_series is not None and len(vol_series) > 0
             else None
         )
 
-        # Resolve "last bar strictly before cutoff" for every cutoff at once
-        # via searchsorted.
         price_idx = series.index
-        positions = price_idx.searchsorted(pd.DatetimeIndex(cutoff_ts), side="left") - 1
+        positions = price_idx.searchsorted(cutoff_ts_index, side="left") - 1
 
         for c, c_ts, pos in zip(cutoffs, cutoff_ts, positions):
             if pos < 0:
                 continue
             anchor = price_idx[pos]
-            # Need >=20 bars strictly before cutoff, matching compute_price_signals
-            # which checks `len(trimmed) < 20` after the strict-< trim.
             if pos + 1 < 20:
                 continue
             if (c_ts - anchor).days > max_staleness_days:
                 continue
 
-            row = {"company_id": int(cid)}
+            row = {"company_id": int(cid_)}
             row.update(price_panel.iloc[pos].to_dict())
 
             if vol_panel is not None:
-                # Volume signals are anchored at the same date as price; if
-                # the volume index doesn't reach that anchor (or has < 20
-                # bars), the row's volume columns are absent — matches the
-                # per-cutoff path which does `signals.update(vol_signals)`
-                # only when `_compute_volume_signals` returned a dict.
                 vol_pos = vol_panel.index.searchsorted(anchor, side="right") - 1
                 if vol_pos >= 0 and vol_pos + 1 >= 20:
                     vol_row = vol_panel.iloc[vol_pos]
-                    # Only include keys where rolling produced a value (the
-                    # per-cutoff helper omits the keys when `len < 20` or
-                    # `len < long_window`).
                     for k in _VOLUME_SIGNAL_COLUMNS:
                         v = vol_row.get(k)
                         if pd.notna(v):
                             row[k] = float(v) if k == "vol_20d_vs_60d" else float(v)
 
+            local[c_ts] = row
+        return local
+
+    # Serial loop across cids. The previous parallel version (Win #7)
+    # gave modest wins on synthetic data and was contention-bound on
+    # real sweeps — see variants.py for the rationale. pandas
+    # operations under the hood are numpy, which is fast serially.
+    per_cutoff_rows: dict[pd.Timestamp, list[dict]] = {c: [] for c in cutoff_ts}
+    for cid in cids:
+        local_rows = _per_cid(cid)
+        for c_ts, row in local_rows.items():
             per_cutoff_rows[c_ts].append(row)
 
     # Assemble per-cutoff DataFrames with the same shape compute_price_signals

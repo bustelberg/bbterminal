@@ -1,23 +1,68 @@
-# Runs on every push and pull request. Two parallel jobs — backend
-# (pytest + ruff) and frontend (tsc + eslint). Keep this fast and
+# Runs on PRs and direct pushes to main/dev. Three parallel jobs —
+# backend (pytest + ruff), frontend (tsc + eslint + vitest), and a
+# Postgres+PostgREST stack smoke. Each job is path-gated so unrelated
+# changes don't burn minutes on the other area. Keep this fast and
 # deterministic; integration tests can be added as separate workflows.
 name: CI
 
+# `push:` only — no `pull_request:`. When dev has an open PR, a push to
+# dev would otherwise fire BOTH the push event AND the pull_request
+# event, producing duplicate runs (the concurrency group can't dedupe
+# across them because `github.ref` differs: `refs/heads/dev` vs
+# `refs/pull/N/merge`). The push event still shows up as a commit
+# check on the PR page, so PR review surfaces it without needing the
+# pull_request trigger. Tradeoff: PRs from forks wouldn't trigger CI
+# (fork pushes don't fire the upstream push event) — fine for solo dev.
 on:
   push:
-  pull_request:
+    branches: [main, dev]
 
-# Cancel an in-progress run when a newer commit lands on the same branch /
-# PR. Saves CI minutes on rapid push sequences without losing the latest
-# result.
+# Cancel an in-progress run when a newer commit lands on the same
+# branch. Saves CI minutes on rapid push sequences without losing the
+# latest result.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Single setup job — emits per-area flags so the heavy jobs only fire
+  # when their files actually changed. Workflow-file changes flip every
+  # flag so CI edits get full coverage.
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      smoke: ${{ steps.filter.outputs.smoke }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - '.github/workflows/ci.yml'
+            frontend:
+              - 'frontend/**'
+              # `backend/openapi.json` is the source for the generated
+              # `frontend/lib/api-types.ts` — any contract change must
+              # re-run the frontend's drift check too.
+              - 'backend/openapi.json'
+              - '.github/workflows/ci.yml'
+            smoke:
+              - 'backend/**'
+              - 'supabase/migrations/**'
+              - '.github/workflows/ci.yml'
+
   backend:
     name: Backend (pytest + ruff)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: backend
@@ -34,26 +79,48 @@ jobs:
         uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
-          cache-dependency-glob: "backend/pyproject.toml"
+          cache-dependency-glob: "backend/uv.lock"
 
-      # No uv.lock in the repo yet — `uv sync` resolves fresh each run. If
-      # version drift becomes a problem, commit a lockfile and switch to
-      # `uv sync --frozen`. The `dev` group (pytest) is included by default.
+      # `--frozen` uses the committed uv.lock verbatim — no resolution,
+      # no network call to the resolver. Materially faster than `uv sync`
+      # and removes the "passes locally / breaks in CI" risk from
+      # silent version drift. If pyproject.toml diverges from the lock,
+      # this step fails — run `uv lock` locally and commit.
       - name: Sync dependencies
-        run: uv sync
+        run: uv sync --frozen
 
       # Lint via uvx — runs the latest ruff without committing it as a
-      # backend dep. `diagnose.py` and `playground/` are excluded via
-      # pyproject.toml [tool.ruff] config.
+      # backend dep.
       - name: Lint (ruff)
         run: uvx ruff check .
 
       - name: Run tests
         run: uv run pytest tests/ -v
 
+      # Regenerate the canonical OpenAPI spec and fail if it doesn't
+      # match the committed copy. Catches "added a Pydantic field but
+      # forgot to refresh the contract" — which downstream desyncs the
+      # frontend's generated types. To fix locally:
+      #   cd backend && uv run python scripts/dump_openapi.py
+      # then commit the updated `backend/openapi.json` and run
+      # `npm run gen:types` in frontend to refresh `lib/api-types.ts`.
+      - name: Verify openapi.json is up to date
+        run: |
+          uv run python scripts/dump_openapi.py
+          if ! git diff --quiet openapi.json; then
+            echo "::error::backend/openapi.json is stale. Run 'uv run python scripts/dump_openapi.py' and commit the result."
+            git --no-pager diff --stat openapi.json
+            git --no-pager diff openapi.json | head -200
+            exit 1
+          fi
+          echo "openapi.json matches the regenerated spec."
+
   frontend:
     name: Frontend (typecheck + lint)
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: frontend
@@ -72,6 +139,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Regenerate the API types from the committed openapi.json and
+      # fail if `lib/api-types.ts` is stale. This is the frontend half
+      # of the contract-drift check — the backend job verifies the
+      # openapi.json itself is fresh. To fix locally: `npm run gen:types`
+      # then commit `lib/api-types.ts`.
+      - name: Verify api-types.ts is up to date
+        run: |
+          npm run gen:types
+          if ! git diff --quiet lib/api-types.ts; then
+            echo "::error::frontend/lib/api-types.ts is stale. Run 'npm run gen:types' and commit the result."
+            git --no-pager diff --stat lib/api-types.ts
+            git --no-pager diff lib/api-types.ts | head -200
+            exit 1
+          fi
+          echo "lib/api-types.ts matches the regenerated types."
+
       # No build step here — Vercel does that on deploy, and a build would
       # fail on missing NEXT_PUBLIC_* env vars CI doesn't have. tsc --noEmit
       # catches type regressions without that requirement.
@@ -83,3 +166,378 @@ jobs:
       # surface in the lint output as a triage backlog without blocking CI.
       - name: Lint (eslint)
         run: npm run lint
+
+      # Vitest covers the pure-function math + matcher helpers
+      # (earnings/utils.ts, equityCurve/seriesMath.ts). happy-dom env,
+      # ~2s total. Catches the regressions we've burned hours on this
+      # session (leap-year trailing-window, semi-annual cadence,
+      # CAGR sign guards).
+      - name: Unit tests (vitest)
+        run: npm test
+
+  # Playwright UI regression suite. Spins Next.js's production build on
+  # port 3100 (no real backend, no real Supabase — `E2E_BYPASS_AUTH=1`
+  # short-circuits the auth middleware and tests stub /api/* responses
+  # via page.route()). Same path gate as the frontend job; skipped on
+  # backend-only commits.
+  e2e:
+    name: Frontend e2e (Playwright)
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Cache the ~150MB Chromium binary across runs — keyed on
+      # @playwright/test version so a Playwright bump invalidates the
+      # cache and pulls a matching browser.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright system deps (cache hit branch)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Run Playwright tests
+        run: npm run e2e
+
+      # Surface the HTML report + traces when a test fails so the
+      # author can download + inspect locally instead of squinting at
+      # log output.
+      - name: Upload Playwright report (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7
+
+  # Stack-up smoke. Spins minimal Postgres + PostgREST as GitHub Actions
+  # service containers, applies every migration via psql, boots uvicorn
+  # against PostgREST, and hits every safe read endpoint. Catches the
+  # "backend code expects schema/data prod doesn't have" class of bug
+  # BEFORE merge — i.e. what shipped on 2026-05-29 when the new
+  # `gurufocus_lookup_failed_at` / `out_of_scope_*` columns in
+  # companies.py's SELECT 500'd in prod for hours.
+  #
+  # Why services and not `supabase start`: the full Supabase CLI brings
+  # up ~10 containers (postgres, postgrest, gotrue, realtime, storage,
+  # imgproxy, edge-runtime, studio, inbucket, vector, pooler). The
+  # backend's smoke endpoints only need postgres + postgrest, so we skip
+  # the rest. Cold-cache runtime drops from ~3-4 min to ~60-90s.
+  #
+  # Auth shim: a few migrations reference `auth.users` and
+  # `extensions.digest` (a Supabase convention — pgcrypto lives in the
+  # `extensions` schema). The bootstrap step creates both before
+  # migrations apply, so the migrations are byte-identical to prod's.
+  #
+  # Skip the job by pushing with `[skip stack-smoke]` in the commit subject.
+  backend-stack-smoke:
+    name: Backend stack smoke (Postgres + PostgREST + uvicorn)
+    needs: changes
+    runs-on: ubuntu-latest
+    # Skip when nothing backend-shaped changed (paths gate) OR when the
+    # commit message asks for it. Both halves are honored on push and
+    # pull_request events.
+    if: |
+      needs.changes.outputs.smoke == 'true'
+      && !contains(github.event.head_commit.message, '[skip stack-smoke]')
+    timeout-minutes: 8
+
+    services:
+      # postgres:17-alpine matches Supabase's pinned major version
+      # (supabase/config.toml: major_version = 17). Alpine variant is
+      # ~85MB vs ~150MB for postgres:17.
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 54322:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+      # PostgREST translates the REST calls the backend's Supabase
+      # client makes into SQL. JWT secret matches Supabase's default
+      # demo secret so the well-known service_role JWT (used below)
+      # validates here.
+      postgrest:
+        image: postgrest/postgrest:v12.2.0
+        env:
+          PGRST_DB_URI: postgres://postgres:postgres@postgres:5432/postgres
+          PGRST_DB_ANON_ROLE: anon
+          PGRST_DB_SCHEMAS: public
+          PGRST_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+          PGRST_DB_USE_LEGACY_GUCS: "false"
+        ports:
+          - 54321:3000
+
+    env:
+      # Well-known Supabase demo service_role JWT — signed with the secret
+      # above, role=service_role, no expiry concern (exp far in the
+      # future). Same key `supabase status -o env` prints locally. Public
+      # because the JWT secret is also public; only meaningful inside this
+      # CI's isolated network.
+      SUPABASE_DEMO_SERVICE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install postgres-client (psql)
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      # Bootstrap the bits a Supabase-flavored DB has by default but a
+      # bare postgres image does not: the three Supabase roles, the
+      # `extensions` schema with pgcrypto (so `extensions.digest(...)`
+      # resolves), and a minimal `auth.users` shim so the
+      # admin_email_hash migration's UPDATE statement runs against an
+      # empty table instead of erroring out.
+      - name: Bootstrap Supabase-shaped DB
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -p 54322 -U postgres -v ON_ERROR_STOP=1 <<'SQL'
+          -- Roles referenced by every Supabase migration (GRANTs etc).
+          -- service_role needs BYPASSRLS so the deny-all RLS policies in
+          -- 20260522030000 don't lock us out via PostgREST.
+          DO $$ BEGIN
+            CREATE ROLE anon NOLOGIN;
+          EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+          DO $$ BEGIN
+            CREATE ROLE authenticated NOLOGIN;
+          EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+          DO $$ BEGIN
+            CREATE ROLE service_role NOLOGIN BYPASSRLS;
+          EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+          -- pgcrypto in the `extensions` schema — Supabase convention,
+          -- referenced by the admin-email trigger as `extensions.digest(...)`.
+          CREATE SCHEMA IF NOT EXISTS extensions;
+          CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA extensions;
+
+          -- Minimal auth.users — three columns the
+          -- admin_email_hash migration's UPDATE touches. Empty in CI,
+          -- so the UPDATE no-ops.
+          CREATE SCHEMA IF NOT EXISTS auth;
+          CREATE TABLE IF NOT EXISTS auth.users (
+            id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            email text,
+            raw_app_meta_data jsonb DEFAULT '{}'::jsonb
+          );
+
+          -- Minimal storage.buckets — the bucket-create rows in the
+          -- backtest_results_storage migration target the real
+          -- Supabase storage table (which lives in prod + supabase
+          -- start). In CI the storage service container isn't running,
+          -- so the schema doesn't exist; this 3-column shim lets the
+          -- INSERT … ON CONFLICT statements no-op against an empty
+          -- table instead of erroring on a missing relation.
+          CREATE SCHEMA IF NOT EXISTS storage;
+          CREATE TABLE IF NOT EXISTS storage.buckets (
+            id text PRIMARY KEY,
+            name text NOT NULL,
+            public boolean DEFAULT false
+          );
+          SQL
+
+      - name: Apply migrations
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -e
+          for f in supabase/migrations/*.sql; do
+            echo "Applying $(basename "$f")"
+            psql -h localhost -p 54322 -U postgres -v ON_ERROR_STOP=1 -f "$f"
+          done
+          # Make sure PostgREST picks up the new schema even if a
+          # migration didn't NOTIFY itself.
+          psql -h localhost -p 54322 -U postgres -c "NOTIFY pgrst, 'reload schema'"
+
+      - name: Wait for PostgREST to expose public tables
+        env:
+          PGPASSWORD: postgres
+        run: |
+          # PostgREST and the postgres container boot in parallel, so
+          # PostgREST may have cached the empty `public` schema BEFORE
+          # the bootstrap + migrations ran. The migration apply step
+          # ends with `NOTIFY pgrst, 'reload schema'`, but that single
+          # signal can be missed if PostgREST's LISTEN connection isn't
+          # active yet. So we re-fire NOTIFY each iteration and probe
+          # a sentinel table (`company`) until it returns 200 — which
+          # confirms PostgREST has the migrated schema cached.
+          for i in $(seq 1 60); do
+            code=$(curl -sS -m 3 -o /dev/null -w "%{http_code}" \
+              "http://localhost:54321/company?limit=1" || echo 000)
+            if [[ "$code" == "200" ]]; then
+              echo "PostgREST schema cache includes 'company' (${i}s)"
+              exit 0
+            fi
+            psql -h localhost -p 54322 -U postgres \
+              -c "NOTIFY pgrst, 'reload schema'" >/dev/null 2>&1 || true
+            sleep 1
+          done
+          echo "::error::PostgREST never picked up the migrated schema. Tables on disk:"
+          psql -h localhost -p 54322 -U postgres -c "\dt public.*" || true
+          exit 1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "backend/uv.lock"
+
+      - name: Sync backend deps
+        working-directory: backend
+        run: uv sync --frozen
+
+      # Boot uvicorn in the background. SUPABASE_URL points at the
+      # PostgREST service-container port. DISABLE_SCHEDULER=1 stops the
+      # APScheduler from firing weekly/monthly jobs inside CI.
+      - name: Start backend
+        working-directory: backend
+        env:
+          SUPABASE_URL: http://localhost:54321
+          SUPABASE_SERVICE_KEY: ${{ env.SUPABASE_DEMO_SERVICE_KEY }}
+          DISABLE_SCHEDULER: "1"
+        run: |
+          nohup uv run uvicorn main:app --host 127.0.0.1 --port 8000 \
+            > backend.log 2>&1 &
+          echo $! > backend.pid
+
+      - name: Wait for /api/health (max 60s)
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sS -m 5 http://127.0.0.1:8000/api/health >/dev/null 2>&1; then
+              echo "Backend ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Backend never became healthy. Logs:"
+          tail -200 backend/backend.log || true
+          exit 1
+
+      # Probe every safe GET endpoint. The list deliberately excludes:
+      #   * path-param endpoints needing fixture data (e.g. /companies/{id}, /earnings/{cid}/...)
+      #   * admin-gated endpoints (require an admin JWT — not in scope here)
+      #   * AIRS Playwright endpoints (need broker creds)
+      #   * Leonteq endpoints (external API, flaky for CI)
+      #   * gurufocus/* (need API key)
+      #   * longequity/latest-available (probes external host)
+      #   * fx/latest (falls back to live ECB call on empty DB)
+      # Path-param endpoints are skipped automatically (anything with
+      # `{` in the URL). To add a new endpoint to the smoke, just add
+      # `@router.get("/api/...")` on the backend — it'll appear in the
+      # OpenAPI spec and be picked up here.
+      - name: Probe safe read endpoints
+        run: |
+          set -u
+          BACKEND=http://127.0.0.1:8000
+
+          # Endpoints that need external state CI doesn't have. The
+          # bash array is bash-3.2-safe: `${EXCLUDE[*]}` joined with `|`
+          # makes a regex `/api/longequity/latest-available|/api/fx/latest|...`.
+          EXCLUDE=(
+            /api/longequity/latest-available
+            /api/fx/latest
+            /api/gurufocus/exchanges
+            /api/gurufocus/exchange-currencies
+            /api/airs/scan
+          )
+          # Tags whose endpoints we never smoke. admin + auth need a
+          # real JWT (they 401/403 unauthenticated). airs needs broker
+          # creds. leonteq makes external API calls. FastAPI tags come
+          # from `APIRouter(tags=[...])` declarations.
+          EXCLUDE_TAGS=(admin auth airs leonteq)
+
+          # Pull every GET path with no `{placeholders}` from the
+          # backend's OpenAPI spec, drop tag-excluded entries, sort.
+          # jq's --argjson takes a JSON array; we build one with `printf`
+          # so the bash arrays above stay the single source of truth.
+          EXCL_PATHS_JSON=$(printf '%s\n' "${EXCLUDE[@]}" | jq -R . | jq -s .)
+          EXCL_TAGS_JSON=$(printf '%s\n' "${EXCLUDE_TAGS[@]}" | jq -R . | jq -s .)
+          ENDPOINTS=$(
+            curl -fsS -m 30 "$BACKEND/openapi.json" \
+              | jq -r \
+                  --argjson excl_paths "$EXCL_PATHS_JSON" \
+                  --argjson excl_tags "$EXCL_TAGS_JSON" '
+                .paths
+                | to_entries[]
+                | select(.key | contains("{") | not)
+                | select(.key as $p | $excl_paths | index($p) | not)
+                | select(.value.get != null)
+                | select((.value.get.tags // []) as $t | $excl_tags | map(. as $x | $t | index($x)) | any | not)
+                | .key
+                ' | sort -u
+          )
+
+          if [[ -z "$ENDPOINTS" ]]; then
+            echo "::error::No endpoints discovered from /openapi.json. Smoke aborted."
+            exit 1
+          fi
+
+          count=$(printf "%s\n" "$ENDPOINTS" | wc -l)
+          echo "Discovered $count GET endpoints. Probing each…"
+          echo ""
+
+          fail=0
+          while IFS= read -r path; do
+            [[ -z "$path" ]] && continue
+            status=$(curl -sS -o /tmp/body -w "%{http_code}" -m 60 \
+              "$BACKEND$path" || echo "000")
+            if [[ "$status" =~ ^2[0-9][0-9]$ ]]; then
+              printf "OK   %s  %s\n" "$status" "$path"
+            else
+              printf "FAIL %s  %s\n" "$status" "$path"
+              echo "  body (first 500 bytes):"
+              head -c 500 /tmp/body | sed 's/^/    /'
+              echo
+              fail=1
+            fi
+          done <<< "$ENDPOINTS"
+
+          if [[ $fail -ne 0 ]]; then
+            echo "::error::One or more endpoints returned non-2xx. See lines above."
+            exit 1
+          fi
+
+      - name: Backend logs (on failure)
+        if: failure()
+        run: tail -300 backend/backend.log || true
+
+      # Service containers are torn down automatically when the job
+      # ends; the backend process dies with the runner. The kill step
+      # below is cheap insurance for `if: always()` log inspection
+      # paths that might fire before the runner shuts down.
+      - name: Stop backend
+        if: always()
+        run: |
+          [[ -f backend/backend.pid ]] && kill "$(cat backend/backend.pid)" 2>/dev/null || true

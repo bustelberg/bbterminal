@@ -30,6 +30,10 @@
   "TSE": {
     "2330": { "exchange": "TPE", "ticker": "2330" }
   },
+  "XSWX": {
+    "1CG": { "exchange": "NASDAQ", "ticker": "CRSP" },
+    "49G": { "exchange": "NYSE", "ticker": "ONON" }
+  },
   "XTER": {
     "CI4A": { "exchange": "HKSE", "ticker": "00354" },
     "KAB0": { "exchange": "XSWX", "ticker": "DOKA" },

@@ -20,6 +20,7 @@ def self_heal_missing_data(
     exchange_lookup: dict[int, str],
     *,
     on_progress=None,
+    cancel_event: "threading.Event | None" = None,
 ) -> dict:
     """For each company in `company_ids`, ensure both close_price and volume
     are present in `metric_data` by re-running the ingest pipeline (Storage
@@ -65,6 +66,15 @@ def self_heal_missing_data(
     lock = threading.Lock()
 
     def _heal_one(cid: int) -> None:
+        # Honor client-disconnect cancellation. Checked at the start of
+        # every per-company call so already-queued workers exit promptly
+        # — Python threads can't be interrupted mid-API-call, but the
+        # 4 in-flight workers finish in seconds while the long tail
+        # (hundreds of queued companies) gets skipped immediately.
+        if cancel_event is not None and cancel_event.is_set():
+            if on_progress:
+                on_progress(cid, "skipped", "cancelled")
+            return
         ticker = ticker_lookup.get(cid)
         exch = exchange_lookup.get(cid)
         if not ticker or not exch:
@@ -107,6 +117,8 @@ def self_heal_missing_data(
                 cid,
                 "ok" if any_loaded else "noop",
                 f"prices={r_p.source}({r_p.rows_loaded}) volumes={r_v.source}({r_v.rows_loaded})",
+                prices_loaded=r_p.rows_loaded,
+                volumes_loaded=r_v.rows_loaded,
             )
 
     # Use fewer workers than the bulk load: each call hits the GF API,

@@ -26,6 +26,15 @@ function isPublicPath(pathname: string): boolean {
 }
 
 export async function proxy(request: NextRequest) {
+  // Playwright e2e short-circuit. Only fires when the server was started
+  // with `E2E_BYPASS_AUTH=1` (set by `playwright.config.ts` for tests
+  // and never present in dev / Vercel). Skips the Supabase server-side
+  // session call so tests can hit any route without a real login; the
+  // tests themselves mock /api/* responses via `page.route()`.
+  if (process.env.E2E_BYPASS_AUTH === '1') {
+    return NextResponse.next({ request })
+  }
+
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(

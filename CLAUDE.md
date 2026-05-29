@@ -8,7 +8,7 @@ A financial data terminal for wealth management. Analyses stocks using data from
 - **Backend**: FastAPI (Python, `uv`) deployed on Railway — `backend/`
 - **Database**: Supabase (Postgres) — schema in `supabase/migrations/`
 - **Auth**: Supabase Auth (email/password)
-- **Two Supabase projects**: dev and prod. Dev has all data; prod needs migrations + data sync.
+- **Supabase**: one hosted prod project + a local Supabase for dev (run via `npx supabase start`). Local is the working dataset; the old hosted dev project no longer exists.
 
 ## Running locally
 
@@ -95,8 +95,6 @@ The frontend follows Next.js convention: `.env.local` overrides `.env`. Vercel u
 - `portfolio.py` — Parses AIRS Excel exports, computes YTD returns in EUR and local currency per holding.
 - `airs_scanner.py` — Playwright browser automation: logs in to AirSPMS, scrapes portfolio data.
 - `fx_rates.py` — ECB/Yahoo FX rate fetchers + `fx_rate` table sync.
-- `diagnose.py` — One-off diagnostic helpers.
-- `playground/` — Scratch ACWI / S&P 500 spikes (`acwi_spike.py`, `acwi_history.py`, `sp500.py`, etc.). **Not imported by the app.** Candidates for cleanup — see Known issues.
 
 **`routers/` — All HTTP endpoints, one file per domain**:
 - Flat modules: `admin.py`, `airs.py`, `auth.py`, `benchmarks.py`, `companies.py`, `earnings.py`, `exchange_fees.py`, `fx.py`, `indicators.py`, `ingest_runs.py`, `leonteq.py`, `longequity.py`, `scheduled_strategies.py`, `system.py`, `universe_templates.py`.
@@ -331,6 +329,8 @@ Modern fintech dark theme. Key principles:
 - **Momentum tests live in `backend/tests/`** — run with `uv run pytest tests/` from the backend dir.
 - Transient Supabase Storage / `metric_data.upsert` errors retry up to 3× with backoff via `_retry_transient` in `ingest/prices.py`.
 - **Current Picks caching**: a request's strategy identity is `_strategy_hash(req)` in `backend/main.py` — a 16-char SHA-256 of `signal_weights + category_weights + top_n_sectors + top_n_per_sector + max_companies + universe_label + index_universe + selection_mode`. Date range is intentionally excluded so the sliding "this month" view caches across runs that differ only in dates. Past months are read-only — `current_picks_day` only ever gains rows for the current month at compute time; it never backfills closed months.
+- **API contract pipeline**: `backend/openapi.json` is the source of truth for the frontend's generated types at `frontend/lib/api-types.ts`. After changing any route or Pydantic model, regenerate both — `cd backend && uv run python scripts/dump_openapi.py` then `cd frontend && npm run gen:types` — and commit both files. CI's backend job fails if `openapi.json` is stale; the frontend job fails if `api-types.ts` is stale. Import types from `lib/api-types.ts` for new code instead of hand-mirroring shapes from the backend.
+- **Playwright e2e** live in `frontend/e2e/`. Run with `npm run e2e` (headless), `npm run e2e:headed` (visible browser), or `npm run e2e:ui` (interactive picker). The webServer config does a production build → `next start --port 3100` per run (~30s first boot, ~10s subsequent with `.next` cache). `E2E_BYPASS_AUTH=1` short-circuits `proxy.ts`'s Supabase session check so tests don't need a live Supabase; tests stub `/api/*` responses via `page.route()` (see `e2e/_mocks/*.ts`). Currently covered: /login (public), /companies (auth + read-side mocks), /backtest (smoke). Patterns for adding /universe, /schedule, and deeper /backtest flows: copy a mock module + spec from existing ones; for SSE streaming endpoints (`POST /api/momentum/backtest`), mock with `page.route()` returning `text/event-stream` chunks via a streaming Response. CI's `e2e` job runs on every frontend-flagged commit; failure uploads the trace + HTML report as artifacts.
 
 ---
 
@@ -481,4 +481,3 @@ Per-company outcomes aren't stored on `ingest_run` — only aggregates (`prices_
 - `frontend/app/components/MomentumBacktester.tsx` is ~1,900 lines and bundles config, signal/category sliders, equity chart, variants sweep, saved-backtests CRUD, and the daily-picks viewer in one file. Worth splitting before adding more to it.
 - Frontend has no test suite — the whole `frontend/app/` tree has zero `.test.tsx` / `.spec.ts` files. Every UI regression has to be caught manually.
 - Backend test coverage is momentum-only. Ingest pipeline, template refresh, prune, scheduled strategies, and the admin API have no tests.
-- `backend/playground/` is committed scratch code (ACWI / S&P 500 spikes) that's not imported by the app. Safe to delete once nothing in there is still useful for one-off investigations.

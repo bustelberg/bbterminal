@@ -1,0 +1,6037 @@
+{
+  "components": {
+    "schemas": {
+      "BacktestRequest": {
+        "properties": {
+          "category_weights": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Weights"
+          },
+          "db_only": {
+            "default": true,
+            "title": "Db Only",
+            "type": "boolean"
+          },
+          "end_date": {
+            "default": "2026-01-01",
+            "title": "End Date",
+            "type": "string"
+          },
+          "force_recompute": {
+            "default": false,
+            "title": "Force Recompute",
+            "type": "boolean"
+          },
+          "grouping": {
+            "default": "sector",
+            "enum": [
+              "sector",
+              "industry"
+            ],
+            "title": "Grouping",
+            "type": "string"
+          },
+          "index_universe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index Universe"
+          },
+          "max_companies": {
+            "default": 0,
+            "title": "Max Companies",
+            "type": "integer"
+          },
+          "min_price_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Price Score"
+          },
+          "mode": {
+            "default": "backtest",
+            "enum": [
+              "backtest",
+              "current_portfolio"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "n_trials": {
+            "default": 1,
+            "title": "N Trials",
+            "type": "integer"
+          },
+          "random_seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Random Seed"
+          },
+          "rebalance_frequency": {
+            "default": "monthly",
+            "enum": [
+              "daily",
+              "weekly",
+              "monthly",
+              "every_2_months",
+              "every_3_months",
+              "every_4_months",
+              "every_5_months",
+              "every_6_months",
+              "every_7_months",
+              "every_8_months",
+              "every_9_months",
+              "every_10_months",
+              "every_11_months",
+              "every_12_months"
+            ],
+            "title": "Rebalance Frequency",
+            "type": "string"
+          },
+          "sector_etfs": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector Etfs"
+          },
+          "selection_mode": {
+            "default": "momentum",
+            "enum": [
+              "momentum",
+              "random",
+              "all",
+              "sector_etf"
+            ],
+            "title": "Selection Mode",
+            "type": "string"
+          },
+          "signal_weights": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal Weights"
+          },
+          "start_date": {
+            "default": "2017-01-01",
+            "title": "Start Date",
+            "type": "string"
+          },
+          "strategy_type": {
+            "default": "long_only",
+            "enum": [
+              "long_only",
+              "long_short"
+            ],
+            "title": "Strategy Type",
+            "type": "string"
+          },
+          "top_n_per_sector": {
+            "default": 6,
+            "title": "Top N Per Sector",
+            "type": "integer"
+          },
+          "top_n_sectors": {
+            "default": 4,
+            "title": "Top N Sectors",
+            "type": "integer"
+          },
+          "universe_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Universe Label"
+          },
+          "variants": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/VariantSpec"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variants"
+          }
+        },
+        "title": "BacktestRequest",
+        "type": "object"
+      },
+      "Body_parse_portfolio_api_portfolios_parse_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_parse_portfolio_api_portfolios_parse_post",
+        "type": "object"
+      },
+      "BuildUniverseRequest": {
+        "properties": {
+          "end_month": {
+            "title": "End Month",
+            "type": "string"
+          },
+          "label": {
+            "default": "default",
+            "title": "Label",
+            "type": "string"
+          },
+          "max_companies": {
+            "default": 5,
+            "title": "Max Companies",
+            "type": "integer"
+          },
+          "start_month": {
+            "title": "Start Month",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start_month",
+          "end_month"
+        ],
+        "title": "BuildUniverseRequest",
+        "type": "object"
+      },
+      "CreateBenchmarkRequest": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker",
+          "name"
+        ],
+        "title": "CreateBenchmarkRequest",
+        "type": "object"
+      },
+      "CreateCompanyRequest": {
+        "properties": {
+          "company_name": {
+            "title": "Company Name",
+            "type": "string"
+          },
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
+          },
+          "gurufocus_exchange": {
+            "title": "Gurufocus Exchange",
+            "type": "string"
+          },
+          "gurufocus_ticker": {
+            "title": "Gurufocus Ticker",
+            "type": "string"
+          }
+        },
+        "required": [
+          "company_name",
+          "gurufocus_ticker",
+          "gurufocus_exchange"
+        ],
+        "title": "CreateCompanyRequest",
+        "type": "object"
+      },
+      "CreateUserRequest": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "title": "Password",
+            "type": "string"
+          },
+          "role": {
+            "default": "user",
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "CreateUserRequest",
+        "type": "object"
+      },
+      "DeriveUniverseRequest": {
+        "properties": {
+          "base_universe_id": {
+            "title": "Base Universe Id",
+            "type": "integer"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "filter_config": {
+            "additionalProperties": true,
+            "title": "Filter Config",
+            "type": "object"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "required": [
+          "base_universe_id",
+          "filter_config"
+        ],
+        "title": "DeriveUniverseRequest",
+        "type": "object"
+      },
+      "ExchangeFeeIn": {
+        "properties": {
+          "fee_bps": {
+            "maximum": 10000.0,
+            "minimum": 0.0,
+            "title": "Fee Bps",
+            "type": "number"
+          },
+          "is_broker_supported": {
+            "default": true,
+            "title": "Is Broker Supported",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "fee_bps"
+        ],
+        "title": "ExchangeFeeIn",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ImpersonateRequest": {
+        "properties": {
+          "target_user_id": {
+            "title": "Target User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_user_id"
+        ],
+        "title": "ImpersonateRequest",
+        "type": "object"
+      },
+      "IndicatorRequest": {
+        "properties": {
+          "exchange": {
+            "title": "Exchange",
+            "type": "string"
+          },
+          "force_refresh": {
+            "default": false,
+            "title": "Force Refresh",
+            "type": "boolean"
+          },
+          "from_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Date"
+          },
+          "indicator": {
+            "default": "price",
+            "title": "Indicator",
+            "type": "string"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          },
+          "to_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Date"
+          }
+        },
+        "required": [
+          "exchange",
+          "ticker"
+        ],
+        "title": "IndicatorRequest",
+        "type": "object"
+      },
+      "LongEquitySaveUniverseRequest": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Date"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Date"
+          }
+        },
+        "title": "LongEquitySaveUniverseRequest",
+        "type": "object"
+      },
+      "RecomputeRequest": {
+        "properties": {
+          "universe_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Universe Ids"
+          }
+        },
+        "title": "RecomputeRequest",
+        "type": "object"
+      },
+      "RenameBacktestRequest": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "RenameBacktestRequest",
+        "type": "object"
+      },
+      "RenameCurrentPicksRequest": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "RenameCurrentPicksRequest",
+        "type": "object"
+      },
+      "SaveBacktestRequest": {
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          },
+          "monthly_records": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Records"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "universe": {
+            "items": {},
+            "title": "Universe",
+            "type": "array"
+          },
+          "variants": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variants"
+          }
+        },
+        "required": [
+          "name",
+          "config",
+          "universe"
+        ],
+        "title": "SaveBacktestRequest",
+        "type": "object"
+      },
+      "ScheduledStrategyCreate": {
+        "description": "Body for POST. `config` is the full BacktestRequest payload (we\ndon't re-validate it here; the pipeline drives it through\n`BacktestRequest(**config)` and surfaces any failure as a per-\nstrategy error in the run's templates_summary).\n\n`backtest_run_id` is REQUIRED. Every scheduled strategy must\noriginate from a backtested variant \u2014 that gives /schedule a\npersistent equity-curve / monthly-history record to anchor the\nlive snapshots against. The manual-add flow has been retired.",
+        "properties": {
+          "backtest_run_id": {
+            "title": "Backtest Run Id",
+            "type": "integer"
+          },
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          },
+          "frequency": {
+            "title": "Frequency",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "frequency",
+          "config",
+          "backtest_run_id"
+        ],
+        "title": "ScheduledStrategyCreate",
+        "type": "object"
+      },
+      "ScheduledStrategyPatch": {
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          }
+        },
+        "title": "ScheduledStrategyPatch",
+        "type": "object"
+      },
+      "ScreenRequest": {
+        "properties": {
+          "as_of_year": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of Year"
+          },
+          "force_refresh": {
+            "default": false,
+            "title": "Force Refresh",
+            "type": "boolean"
+          }
+        },
+        "title": "ScreenRequest",
+        "type": "object"
+      },
+      "SetRoleRequest": {
+        "properties": {
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "SetRoleRequest",
+        "type": "object"
+      },
+      "SignalBreakdownRequest": {
+        "properties": {
+          "as_of_date": {
+            "title": "As Of Date",
+            "type": "string"
+          },
+          "category_weights": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Weights"
+          },
+          "company_id": {
+            "title": "Company Id",
+            "type": "integer"
+          },
+          "index_universe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index Universe"
+          },
+          "signal_weights": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal Weights"
+          },
+          "universe_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Universe Label"
+          }
+        },
+        "required": [
+          "company_id",
+          "as_of_date"
+        ],
+        "title": "SignalBreakdownRequest",
+        "type": "object"
+      },
+      "UniverseRenameRequest": {
+        "properties": {
+          "new_label": {
+            "title": "New Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "new_label"
+        ],
+        "title": "UniverseRenameRequest",
+        "type": "object"
+      },
+      "UpdateBenchmarkSectorRequest": {
+        "properties": {
+          "sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector"
+          }
+        },
+        "required": [
+          "sector"
+        ],
+        "title": "UpdateBenchmarkSectorRequest",
+        "type": "object"
+      },
+      "UpdateCompanyRequest": {
+        "properties": {
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "gurufocus_exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gurufocus Exchange"
+          },
+          "gurufocus_ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gurufocus Ticker"
+          }
+        },
+        "title": "UpdateCompanyRequest",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "VariantSpec": {
+        "properties": {
+          "frequency": {
+            "enum": [
+              "daily",
+              "weekly",
+              "monthly",
+              "every_2_months",
+              "every_3_months",
+              "every_4_months",
+              "every_5_months",
+              "every_6_months",
+              "every_7_months",
+              "every_8_months",
+              "every_9_months",
+              "every_10_months",
+              "every_11_months",
+              "every_12_months"
+            ],
+            "title": "Frequency",
+            "type": "string"
+          },
+          "grouping": {
+            "anyOf": [
+              {
+                "enum": [
+                  "sector",
+                  "industry"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grouping"
+          },
+          "index_universe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index Universe"
+          },
+          "min_price_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Price Score"
+          },
+          "strategy_type": {
+            "enum": [
+              "long_only",
+              "long_short"
+            ],
+            "title": "Strategy Type",
+            "type": "string"
+          },
+          "top_n_per_sector": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top N Per Sector"
+          },
+          "top_n_sectors": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top N Sectors"
+          },
+          "universe_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Universe Label"
+          }
+        },
+        "required": [
+          "frequency",
+          "strategy_type"
+        ],
+        "title": "VariantSpec",
+        "type": "object"
+      },
+      "_GuruFocusExchangeSearchBody": {
+        "properties": {
+          "candidate_exchanges": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Exchanges"
+          },
+          "tickers": {
+            "items": {
+              "$ref": "#/components/schemas/_GuruFocusExchangeSearchRequest"
+            },
+            "title": "Tickers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tickers"
+        ],
+        "title": "_GuruFocusExchangeSearchBody",
+        "type": "object"
+      },
+      "_GuruFocusExchangeSearchRequest": {
+        "description": "One request entry for the bulk exchange-search diagnostic.",
+        "properties": {
+          "current_exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Exchange"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker"
+        ],
+        "title": "_GuruFocusExchangeSearchRequest",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "FastAPI",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/acwi/announcement-detail": {
+      "get": {
+        "description": "STANDARD action + EFFECTIVE DATE from one MSCI announcement page.",
+        "operationId": "acwi_announcement_detail_api_acwi_announcement_detail_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "url",
+            "required": true,
+            "schema": {
+              "title": "Url",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Acwi Announcement Detail",
+        "tags": [
+          "index-universe"
+        ]
+      }
+    },
+    "/api/acwi/announcement-details-bulk": {
+      "post": {
+        "description": "Batch detail fetch. Body: {urls: [...]}",
+        "operationId": "acwi_announcement_details_bulk_api_acwi_announcement_details_bulk_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Acwi Announcement Details Bulk",
+        "tags": [
+          "index-universe"
+        ]
+      }
+    },
+    "/api/acwi/announcements": {
+      "get": {
+        "description": "MSCI index announcements (cached locally, 24h TTL).",
+        "operationId": "acwi_announcements_api_acwi_announcements_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Acwi Announcements",
+        "tags": [
+          "index-universe"
+        ]
+      }
+    },
+    "/api/acwi/fetch-all-details": {
+      "get": {
+        "description": "Backfill the announcement-detail cache. SSE.",
+        "operationId": "acwi_fetch_all_details_api_acwi_fetch_all_details_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Acwi Fetch All Details",
+        "tags": [
+          "index-universe"
+        ]
+      }
+    },
+    "/api/acwi/holdings": {
+      "get": {
+        "description": "Current iShares ACWI ETF holdings parsed from the bundled XLS.",
+        "operationId": "acwi_holdings_api_acwi_holdings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Acwi Holdings",
+        "tags": [
+          "index-universe"
+        ]
+      }
+    },
+    "/api/acwi/net-additions": {
+      "get": {
+        "description": "Net additions (companies in current holdings whose last action is ADD).",
+        "operationId": "acwi_net_additions_api_acwi_net_additions_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Acwi Net Additions",
+        "tags": [
+          "index-universe"
+        ]
+      }
+    },
+    "/api/acwi/xls-age": {
+      "get": {
+        "description": "Age of the bundled `iShares-MSCI-ACWI-ETF_fund.xls` file.\n\niShares blocks automated downloads (region-cookie + JS challenge),\nso the XLS file lives in the repo and updates only when someone\ncommits a fresh one. This endpoint surfaces the file's mtime so\nthe UI can warn when it gets too old. Threshold lives client-side;\nthe backend just reports the raw age.",
+        "operationId": "acwi_xls_age_api_acwi_xls_age_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Acwi Xls Age",
+        "tags": [
+          "index-universe"
+        ]
+      }
+    },
+    "/api/admin/companies/flagged": {
+      "get": {
+        "description": "Ad-hoc audit for manual review: companies that look suspicious\nbased on two heuristics. Pure triage \u2014 nothing is auto-modified.\n\n  * `adr_in_name`: company_name contains 'ADR' (case-insensitive).\n    Often surfaces wrong-variant mappings \u2014 an ADR depositary\n    listing got linked instead of the primary local security,\n    which then poisons everything downstream (sector, returns).\n  * `flat_prices`: latest `window_days` close_price observations\n    are all the exact same value. Strong signal for a stale /\n    dead listing OR a wrong (primary\u2192ADR or similar) mapping\n    whose ticker continues to ship a stub. Companies already\n    stamped `delisted_at` are excluded \u2014 flat prices on those\n    are expected.\n\nBacked by the `company_flat_price_run` RPC (single SQL query,\nway faster than paginating metric_data from Python) plus a\ndirect `ILIKE` on company.company_name for the ADR check.",
+        "operationId": "list_flagged_companies_api_admin_companies_flagged_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "window_days",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "title": "Window Days",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Flagged Companies",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/companies/missing-exchange": {
+      "get": {
+        "description": "Companies whose `exchange_id` is NULL \u2014 they show up with an empty\nexchange column in /backtest + /schedule + /companies, and the\nfrontend's GuruFocus link falls back to a bare-ticker URL that\nsilently lands on the wrong security (or 404s) for non-US names.\nReturns `{count, companies: [{company_id, name, ticker, country}]}`.\nThe country comes from any universe-membership rows on the row;\nuseful as a hint for the bulk-resolve endpoint's OpenFIGI call.",
+        "operationId": "list_companies_missing_exchange_api_admin_companies_missing_exchange_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Companies Missing Exchange",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/companies/resolve-missing-exchanges": {
+      "post": {
+        "description": "For every `company.exchange_id IS NULL` row, run an OpenFIGI\nlookup by `gurufocus_ticker` and update `exchange_id` to the\nresolved exchange's id. Returns a per-company outcome so the\ncaller can audit:\n\n  `{count_total, count_resolved, count_unresolved, count_unmapped,\n    resolved: [...], unresolved: [...], unmapped: [...]}`\n\n- `resolved`: OpenFIGI returned an exchange + we found it in\n  `gurufocus_exchange`. With `dry_run=true` (default), the row is\n  NOT updated \u2014 the response just shows what WOULD change. Pass\n  `dry_run=false` to commit.\n- `unresolved`: OpenFIGI returned no match for the ticker (silent\n  skip; the row stays NULL and the user has to fix manually via\n  /companies).\n- `unmapped`: OpenFIGI returned a match, but the exchange code\n  isn't in our `gurufocus_exchange` table \u2014 add the row first,\n  then re-run.\n\nAmbiguous tickers (e.g. one ticker listed on multiple exchanges)\nuse OpenFIGI's first match. Cross-check `resolved[].openfigi_exchange`\nagainst your expectation before committing.",
+        "operationId": "resolve_missing_exchanges_api_admin_companies_resolve_missing_exchanges_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Dry Run",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Missing Exchanges",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/data-freshness": {
+      "get": {
+        "description": "How current each data source is. The IBKR script can use the\n`close_price_age_trading_days` field as a gate: bail out before\nplacing orders if it's > some threshold.",
+        "operationId": "get_data_freshness_api_admin_data_freshness_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Data Freshness",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/egress-ip": {
+      "get": {
+        "description": "Return the IP this backend currently appears to egress from.\n\nWhy: AirSPMS allowlists by IP, Railway hobby/free egress IPs CAN\nrotate across deploys/restarts. Hit this endpoint a few times over\na day to see whether the IP is stable enough to allowlist (or to\ndiscover the value to plug into the allowlist + Railway's paid\nstatic-egress add-on).\n\nReturns: {ip, source, observed_at, headers_seen}. Uses ifconfig.me\nas the reflector; falls back to a couple alternates if it 4xx/5xxs\nso a single reflector outage doesn't blind us.",
+        "operationId": "get_egress_ip_api_admin_egress_ip_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Egress Ip",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/gurufocus-exchange-search": {
+      "post": {
+        "description": "Probe GuruFocus to find which exchange code ACTUALLY resolves for\neach ticker. Use case: `company.gurufocus_lookup_failed_at` is set on\na row whose `exchange_id` is wrong (e.g. NYSE:ASND when the listing\nis really NASDAQ:ASND). This endpoint tries each candidate exchange\nin turn until one returns price data, then reports the match per\nticker.\n\nCost: O(tickers \u00d7 candidates_per_ticker) GuruFocus API calls in the\nworst case. The probe short-circuits to the first hit, so a ticker\nthat lives on its first-tried exchange is cheap (1 call). Bound\n`candidate_exchanges` to a small list if you're searching across\nmany tickers.\n\nResponse: one entry per ticker with `{ticker, current_exchange,\nfound_exchange, status, candidates_tried, error}`. `found_exchange`\nis non-null only when an exchange resolved to a 200 with parseable\ndata.",
+        "operationId": "gurufocus_exchange_search_api_admin_gurufocus_exchange_search_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/_GuruFocusExchangeSearchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Gurufocus Exchange Search",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/gurufocus-probe": {
+      "get": {
+        "description": "One-shot diagnostic: hit a single GuruFocus URL through the same\n`cf_get` + impersonation ladder the ingest pipeline uses, and return\nthe FULL response (status, response headers, body excerpt, attempted\nfingerprints) so we can confirm whether a failure is actually a\nCloudflare IP block or something else (revoked key, vendor 403,\nnginx misconfig, etc.).\n\nQuery params:\n    symbol   GuruFocus symbol form, e.g. \"AAPL\" or \"XAMS:ABN\" (default AAPL)\n    endpoint One of \"price\", \"financials\", \"analyst_estimate\",\n             \"forward_pe_ratio\" (default \"price\")\n\nLook for these in `headers` to confirm Cloudflare:\n    cf-ray            present \u2192 Cloudflare touched the response\n    server=cloudflare same signal\n    cf-mitigated      explicit \"challenge\" / \"block\" verdict\nIf those are absent on a 403, it's NOT Cloudflare \u2014 investigate the\nupstream (likely a GuruFocus auth/quota issue).",
+        "operationId": "gurufocus_probe_api_admin_gurufocus_probe_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "symbol",
+            "required": false,
+            "schema": {
+              "default": "AAPL",
+              "title": "Symbol",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "endpoint",
+            "required": false,
+            "schema": {
+              "default": "price",
+              "title": "Endpoint",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Gurufocus Probe",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/health": {
+      "get": {
+        "description": "Composite go/no-go. Returns a single boolean `is_healthy` plus\nthe list of checks that failed. Threshold defaults are\nintentionally permissive \u2014 we're guarding against \"something is\nobviously broken\" cases, not micro-staleness.\n\nChecks:\n  - DB reachable\n  - close_price max date is within the last 6 trading days\n  - most recent ingest_run is within the last 8 days\n  - that run isn't 'running' for more than 2 hours (a stuck job)\n  - that run's status is 'ok' (allows a single transient failure\n    downstream \u2014 see `is_healthy_strict` for the stricter variant)",
+        "operationId": "get_health_api_admin_health_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Health",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/pipeline-runs": {
+      "get": {
+        "description": "Recent pipeline runs (newest first), compact summary per row.\nCaps `limit` at 100.",
+        "operationId": "list_pipeline_runs_api_admin_pipeline_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Pipeline Runs",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/portfolio/latest": {
+      "get": {
+        "description": "Return the most recent current-picks snapshot in IBKR-friendly\nshape. 404 when no snapshot has been produced yet.",
+        "operationId": "get_latest_portfolio_api_admin_portfolio_latest_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Latest Portfolio",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/portfolio/{snapshot_id}": {
+      "get": {
+        "description": "Return a specific snapshot by id, same shape as /latest.",
+        "operationId": "get_portfolio_by_id_api_admin_portfolio__snapshot_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "title": "Snapshot Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Portfolio By Id",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/runs/latest": {
+      "get": {
+        "description": "Return a compact summary of the most recent pipeline run plus\nthe most recent SUCCESSFUL run (when different). Use this as the\none-line \"is anything working?\" probe \u2014 if `latest.status` is `ok`\nand `latest.finished_at` is within the last week, the system is\nhealthy.",
+        "operationId": "get_latest_run_api_admin_runs_latest_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Latest Run",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/sanity-check": {
+      "get": {
+        "description": "Sanity diagnostics for verifying everything still hangs together.\nIndependent from `health` \u2014 these are coarse counts and shapes the\nuser (or a CI smoke test) can eyeball to confirm the system isn't\nquietly broken.",
+        "operationId": "sanity_check_api_admin_sanity_check_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sanity Check",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/schedules": {
+      "get": {
+        "description": "Every scheduled strategy on the system with its latest portfolio\nattached. Returns a list (newest-created last) so an external buyer\nscript can iterate strategies, see when each is due to rebalance\n(`next_due_at`), and pull the holdings they should currently be\nholding (`latest_portfolio.holdings`).\n\nQuery: `enabled_only=true` (default) hides paused strategies; pass\n`false` to see everything.",
+        "operationId": "list_schedules_api_admin_schedules_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "enabled_only",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Enabled Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Schedules",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/schedules/{strategy_id}": {
+      "get": {
+        "description": "One scheduled strategy + its full latest portfolio. Same shape as\none entry of `/api/admin/schedules`. 404 when the strategy doesn't\nexist.",
+        "operationId": "get_schedule_api_admin_schedules__strategy_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Schedule",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/airs/portfolio/{portfolio_name}": {
+      "get": {
+        "description": "Return performance data. Serves from DB cache unless refresh=true or no cache.",
+        "operationId": "airs_portfolio_download_api_airs_portfolio__portfolio_name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_name",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "datum_van",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Datum Van"
+            }
+          },
+          {
+            "in": "query",
+            "name": "datum_tot",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Datum Tot"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Portfolio Download",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/portfolios": {
+      "get": {
+        "description": "Portfolios we already have performance data for, with latest YTD.",
+        "operationId": "airs_portfolios_from_db_api_airs_portfolios_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Airs Portfolios From Db",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/scan": {
+      "get": {
+        "operationId": "airs_scan_api_airs_scan_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Airs Scan",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/auth/delete-account": {
+      "delete": {
+        "description": "Delete the authenticated user's own account.",
+        "operationId": "delete_account_api_auth_delete_account_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Account",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/impersonate": {
+      "post": {
+        "description": "Mint a real session for another user (admin only).\n\nTwo-step server-side dance:\n  1. `admin.generate_link({type: \"magiclink\", email})` produces a\n     hashed_token normally embedded in an email.\n  2. `auth.verify_otp({token_hash, type: \"magiclink\"})` consumes the\n     hashed_token and returns a fresh `{access_token, refresh_token}`\n     for the target user.\n\nThe frontend then calls `supabase.auth.setSession(...)` with those\ntokens to swap the active session. No URL fragment, no magic-link\nredirect, no race with cookie writes.",
+        "operationId": "impersonate_user_api_auth_impersonate_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImpersonateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Impersonate User",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "description": "Return the caller's user info + role. The frontend uses this to\ndecide what to show; the source of truth for access is still the\nmiddleware / per-endpoint admin check, not this endpoint.",
+        "operationId": "auth_me_api_auth_me_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Me",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/users": {
+      "get": {
+        "description": "List all users (admin only). Returns id, email, role, created_at.",
+        "operationId": "list_users_api_auth_users_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Users",
+        "tags": [
+          "auth"
+        ]
+      },
+      "post": {
+        "description": "Create a new user with an initial password (admin only).",
+        "operationId": "create_user_api_auth_users_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create User",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/users/{user_id}": {
+      "delete": {
+        "description": "Delete a user (admin only).",
+        "operationId": "delete_user_api_auth_users__user_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete User",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/users/{user_id}/role": {
+      "patch": {
+        "description": "Promote/demote a user (admin only).",
+        "operationId": "set_user_role_api_auth_users__user_id__role_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetRoleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set User Role",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/benchmarks": {
+      "get": {
+        "description": "List all benchmarks with price date range and sector tag.",
+        "operationId": "list_benchmarks_api_benchmarks_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Benchmarks",
+        "tags": [
+          "benchmarks"
+        ]
+      },
+      "post": {
+        "description": "Create a benchmark and fetch its prices from GuruFocus.",
+        "operationId": "create_benchmark_api_benchmarks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBenchmarkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Benchmark",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/benchmarks/{benchmark_id}": {
+      "delete": {
+        "description": "Delete a benchmark and its prices (cascade).",
+        "operationId": "delete_benchmark_api_benchmarks__benchmark_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "benchmark_id",
+            "required": true,
+            "schema": {
+              "title": "Benchmark Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Benchmark",
+        "tags": [
+          "benchmarks"
+        ]
+      },
+      "patch": {
+        "description": "Set or clear the GICS sector tag on a benchmark. The DB has a\npartial unique index on sector so only one benchmark can carry each\nsector at a time.",
+        "operationId": "update_benchmark_sector_api_benchmarks__benchmark_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "benchmark_id",
+            "required": true,
+            "schema": {
+              "title": "Benchmark Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBenchmarkSectorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Benchmark Sector",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/benchmarks/{benchmark_id}/prices": {
+      "get": {
+        "description": "Get prices for a benchmark, optionally filtered by date range.\nPaginated to defeat Supabase's silent 1000-row limit \u2014 a typical ETF\nsince 1998 has ~6,886 daily bars.",
+        "operationId": "get_benchmark_prices_api_benchmarks__benchmark_id__prices_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "benchmark_id",
+            "required": true,
+            "schema": {
+              "title": "Benchmark Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Start Date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_date",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "End Date",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Benchmark Prices",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/benchmarks/{benchmark_id}/refresh": {
+      "post": {
+        "description": "Re-fetch prices for an existing benchmark.",
+        "operationId": "refresh_benchmark_api_benchmarks__benchmark_id__refresh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "benchmark_id",
+            "required": true,
+            "schema": {
+              "title": "Benchmark Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Benchmark",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/companies": {
+      "get": {
+        "description": "Company list. Memberships are fetched separately via\n/api/companies/memberships so a slow aggregate can't block the table render.\n\nPagination: PostgREST `db-max-rows` caps the cloud project at 1000 by\ndefault \u2014 `.limit(10000)` alone won't lift the cap. We page via\n`.range()` so the company list comes through whole even when the\nproject setting hasn't been bumped to match local (10000 in\n`supabase/config.toml`). See `project_postgrest_max_rows_trap`.",
+        "operationId": "list_companies_api_companies_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Companies",
+        "tags": [
+          "companies"
+        ]
+      },
+      "post": {
+        "operationId": "create_company_api_companies_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCompanyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Company",
+        "tags": [
+          "companies"
+        ]
+      }
+    },
+    "/api/companies/check-duplicates": {
+      "get": {
+        "description": "Pre-add dupe probe. Returns any existing rows that would\ncanonically match the proposed `(name, ticker, exchange)` triple \u2014\nHKSE zero-pad collapsed, name case-insensitive, also catches the\ncross-exchange H-share/A-share/GDR collisions.\n\nThe frontend calls this on input change (debounced) to surface\nwarnings inline before the user clicks Add.",
+        "operationId": "check_duplicates_api_companies_check_duplicates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ticker",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Ticker",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exchange",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Exchange",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Duplicates",
+        "tags": [
+          "companies"
+        ]
+      }
+    },
+    "/api/companies/field-options": {
+      "get": {
+        "description": "Dropdown options for the companies page \u2014 exchanges, countries, sectors.",
+        "operationId": "get_company_field_options_api_companies_field_options_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Company Field Options",
+        "tags": [
+          "companies"
+        ]
+      }
+    },
+    "/api/companies/memberships": {
+      "get": {
+        "description": "Distinct universe labels per company. Computed server-side via the\n`company_universe_labels` RPC; backed by an index on\nuniverse_membership(company_id) so the aggregate is fast even when the\ntable holds millions of per-month rows. Returns\n`{memberships: {company_id: [labels]}}`.\n\nPagination: the cloud Supabase project caps PostgREST responses at\n`db-max-rows=1000` per request (local Docker Supabase is bumped to\n10000 in `supabase/config.toml`, which hides the cap during dev). The\nRPC returns ~2800 rows in prod, so without paging we'd silently miss\nthe membership chips for every company past offset 1000 \u2014 see the\n2G Energy AG / cid=4875 incident on 2026-05-22. The loop here pages\nvia `.range()` until a partial page comes back.",
+        "operationId": "list_company_memberships_api_companies_memberships_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Company Memberships",
+        "tags": [
+          "companies"
+        ]
+      }
+    },
+    "/api/companies/{company_id}": {
+      "delete": {
+        "description": "Manual cascade because the FKs predate ON DELETE CASCADE in places.",
+        "operationId": "delete_company_api_companies__company_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Company",
+        "tags": [
+          "companies"
+        ]
+      },
+      "put": {
+        "operationId": "update_company_api_companies__company_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCompanyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Company",
+        "tags": [
+          "companies"
+        ]
+      }
+    },
+    "/api/data/latest-price-date": {
+      "get": {
+        "description": "Most recent close-price observation across all companies. The\n/backtest page uses this as the default end-date \u2014 \"test up to\nhowever current our data is.\" Cheap: an index-backed\n`ORDER BY target_date DESC LIMIT 1` on `metric_data`.",
+        "operationId": "latest_price_date_api_data_latest_price_date_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Latest Price Date",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/earnings/{company_id}/metric-codes": {
+      "get": {
+        "description": "Debug: distinct metric codes stored for a company.",
+        "operationId": "get_earnings_metric_codes_api_earnings__company_id__metric_codes_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Earnings Metric Codes",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/{company_id}/metrics": {
+      "get": {
+        "description": "Dashboard metrics for a company (source=gurufocus, dates >= 1998).\n\nPostgREST caps a single response at ~1000 rows regardless of `.limit(N)`,\nand our `.order(\"target_date\")` is ascending \u2014 so a flat `.limit(5000)`\nsilently returns the OLDEST 1000 rows and hides everything recent.\nEvery multi-row read here paginates instead.",
+        "operationId": "get_earnings_metrics_api_earnings__company_id__metrics_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Earnings Metrics",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/{company_id}/refresh-all": {
+      "post": {
+        "description": "Refresh all earnings data sources. SSE stream.",
+        "operationId": "refresh_earnings_all_api_earnings__company_id__refresh_all_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "title": "Company Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Earnings All",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/{company_id}/refresh/{source}": {
+      "post": {
+        "description": "Refresh a single earnings data source. SSE stream.",
+        "operationId": "refresh_earnings_source_api_earnings__company_id__refresh__source__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "title": "Company Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "title": "Source",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Earnings Source",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/exchange-fees": {
+      "get": {
+        "description": "Every exchange with its currently-configured fee. Exchanges with no\n`exchange_fee` row return `fee_bps=0` so the UI shows them as\nnot-yet-set rather than missing. Sorted by exchange_code for stable\ndisplay order.",
+        "operationId": "list_exchange_fees_api_exchange_fees_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Exchange Fees",
+        "tags": [
+          "fees"
+        ]
+      }
+    },
+    "/api/exchange-fees/{exchange_code}": {
+      "delete": {
+        "description": "Reset an exchange to \"no fee\" by dropping the row. Equivalent to\nPUT with fee_bps=0 in terms of what the frontend reads, just keeps the\ntable smaller.",
+        "operationId": "delete_exchange_fee_api_exchange_fees__exchange_code__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "exchange_code",
+            "required": true,
+            "schema": {
+              "title": "Exchange Code",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Exchange Fee",
+        "tags": [
+          "fees"
+        ]
+      },
+      "put": {
+        "description": "Set or update the fee for one exchange. Upsert keyed on\n`exchange_code` so PUT is idempotent.",
+        "operationId": "upsert_exchange_fee_api_exchange_fees__exchange_code__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "exchange_code",
+            "required": true,
+            "schema": {
+              "title": "Exchange Code",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExchangeFeeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upsert Exchange Fee",
+        "tags": [
+          "fees"
+        ]
+      }
+    },
+    "/api/fx/coverage": {
+      "get": {
+        "description": "Compare ACWI currencies against ECB FX rate availability.",
+        "operationId": "fx_coverage_api_fx_coverage_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Fx Coverage",
+        "tags": [
+          "fx"
+        ]
+      }
+    },
+    "/api/fx/history/{currency}": {
+      "get": {
+        "description": "Daily historical FX rates for one currency from the local cache.\n\nReturns DB-only so the chart can render instantly. The frontend fires\nPOST /refresh in the background when `max_date < today` to fill the\ngap; this endpoint never hits ECB itself.",
+        "operationId": "fx_history_api_fx_history__currency__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "currency",
+            "required": true,
+            "schema": {
+              "title": "Currency",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fx History",
+        "tags": [
+          "fx"
+        ]
+      }
+    },
+    "/api/fx/history/{currency}/refresh": {
+      "post": {
+        "description": "Stale-while-revalidate refresh for one currency.\n\nFetches the gap from `fx_rate.max(rate_date) + 1 day` to today, upserts\nnew rows, and returns the full history so the UI can swap the chart\nonce new data rolls in. The frontend calls this in the background after\nthe GET so the user never waits on ECB.",
+        "operationId": "fx_history_refresh_api_fx_history__currency__refresh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "currency",
+            "required": true,
+            "schema": {
+              "title": "Currency",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fx History Refresh",
+        "tags": [
+          "fx"
+        ]
+      }
+    },
+    "/api/fx/latest": {
+      "get": {
+        "description": "Latest daily rates per currency.\n\nReads from `fx_rate` (fast); falls back to live ECB when the table is\nempty so the page renders on a fresh install \u2014 user can then click\n\"Sync from ECB\" to populate the table and get the fast path next time.",
+        "operationId": "fx_latest_api_fx_latest_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Fx Latest",
+        "tags": [
+          "fx"
+        ]
+      }
+    },
+    "/api/fx/sync": {
+      "post": {
+        "description": "Sync ECB + pegged + TWD rates into the local fx_rate table.\n\nBacks the FX page's manual Sync button. Idempotent \u2014 each currency\nonly fetches the gap between its latest stored date and today, so\nrepeated calls are cheap.",
+        "operationId": "fx_sync_api_fx_sync_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fx Sync",
+        "tags": [
+          "fx"
+        ]
+      }
+    },
+    "/api/gurufocus/exchange-currencies": {
+      "get": {
+        "description": "Build exchange_code \u2192 currency map by joining exchange_list with\ncountry_currency from GuruFocus. Raw responses cached in Storage.",
+        "operationId": "gurufocus_exchange_currencies_api_gurufocus_exchange_currencies_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "force_refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Gurufocus Exchange Currencies",
+        "tags": [
+          "indicators"
+        ]
+      }
+    },
+    "/api/gurufocus/exchanges": {
+      "get": {
+        "description": "Supported GuruFocus exchanges. Raw response cached in Supabase Storage.",
+        "operationId": "gurufocus_exchanges_api_gurufocus_exchanges_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "force_refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Gurufocus Exchanges",
+        "tags": [
+          "indicators"
+        ]
+      }
+    },
+    "/api/health": {
+      "get": {
+        "description": "Probe Supabase connectivity. Returns {status: ok | error, ...}.",
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/hello": {
+      "get": {
+        "operationId": "hello_api_hello_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Hello",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/index-universe/changes": {
+      "get": {
+        "description": "Historical add/remove changelog for an index.",
+        "operationId": "index_universe_changes_api_index_universe_changes_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "index",
+            "required": false,
+            "schema": {
+              "default": "SP500",
+              "title": "Index",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Index Universe Changes",
+        "tags": [
+          "index-universe"
+        ]
+      }
+    },
+    "/api/index-universe/check-gurufocus": {
+      "post": {
+        "description": "Check GuruFocus cache coverage for all tickers in an index. SSE.",
+        "operationId": "index_universe_check_gf_api_index_universe_check_gurufocus_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "index",
+            "required": false,
+            "schema": {
+              "default": "SP500",
+              "title": "Index",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Index Universe Check Gf",
+        "tags": [
+          "index-universe"
+        ]
+      }
+    },
+    "/api/index-universe/cumulative": {
+      "get": {
+        "description": "Union of all unique tickers across all months for an index.",
+        "operationId": "index_universe_cumulative_api_index_universe_cumulative_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "index",
+            "required": false,
+            "schema": {
+              "default": "SP500",
+              "title": "Index",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Index Universe Cumulative",
+        "tags": [
+          "index-universe"
+        ]
+      }
+    },
+    "/api/index-universe/import-sp500": {
+      "post": {
+        "description": "Scrape S&P 500 from Wikipedia, reconstruct monthly holdings, store. SSE.",
+        "operationId": "index_universe_import_sp500_api_index_universe_import_sp500_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Index Universe Import Sp500",
+        "tags": [
+          "index-universe"
+        ]
+      }
+    },
+    "/api/index-universe/indexes": {
+      "get": {
+        "description": "List stored index universes with month range and unique ticker counts.\n\nAggregates come from the universe_stats view \u2014 querying membership rows\ndirectly + counting in Python ran ~70s for SP500 + ACWI. Cached 5min;\nfalls back to a stale cache entry on timeout, then to a degraded\nuniverse-table-only read so the UI still loads.",
+        "operationId": "index_universe_list_api_index_universe_indexes_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Index Universe List",
+        "tags": [
+          "index-universe"
+        ]
+      }
+    },
+    "/api/index-universe/indexes/{index_name}": {
+      "delete": {
+        "description": "Delete an index (cascades memberships).",
+        "operationId": "index_universe_delete_api_index_universe_indexes__index_name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "index_name",
+            "required": true,
+            "schema": {
+              "title": "Index Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Index Universe Delete",
+        "tags": [
+          "index-universe"
+        ]
+      }
+    },
+    "/api/index-universe/months": {
+      "get": {
+        "description": "Months for a given index with ticker counts per month.",
+        "operationId": "index_universe_months_api_index_universe_months_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "index",
+            "required": false,
+            "schema": {
+              "default": "SP500",
+              "title": "Index",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Index Universe Months",
+        "tags": [
+          "index-universe"
+        ]
+      }
+    },
+    "/api/index-universe/tickers": {
+      "get": {
+        "description": "Tickers for a specific (index, month).",
+        "operationId": "index_universe_tickers_api_index_universe_tickers_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "index",
+            "required": false,
+            "schema": {
+              "default": "SP500",
+              "title": "Index",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "month",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Month",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Index Universe Tickers",
+        "tags": [
+          "index-universe"
+        ]
+      }
+    },
+    "/api/indicators/fetch": {
+      "post": {
+        "description": "Fetch an indicator from GuruFocus, cache the raw response in Storage,\nupsert parsed time-series into metric_data. Resolves (creates if\nneeded) the company row first.",
+        "operationId": "indicators_fetch_api_indicators_fetch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IndicatorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Indicators Fetch",
+        "tags": [
+          "indicators"
+        ]
+      }
+    },
+    "/api/ingest/long-equity": {
+      "post": {
+        "description": "SSE: kick off the full ingest pipeline.",
+        "operationId": "ingest_long_equity_api_ingest_long_equity_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ingest Long Equity",
+        "tags": [
+          "longequity"
+        ]
+      }
+    },
+    "/api/ingest/runs": {
+      "get": {
+        "description": "Recent ingest runs (newest first). Caps `limit` to 200. Pass\n`job_name=...` to filter to a single job type \u2014 the /schedule\ndaily-MTD card uses this to fetch only its own runs.",
+        "operationId": "list_ingest_runs_api_ingest_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "job_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Ingest Runs",
+        "tags": [
+          "ingest"
+        ]
+      }
+    },
+    "/api/ingest/runs/{run_id}": {
+      "get": {
+        "description": "Single ingest_run row by id.",
+        "operationId": "get_ingest_run_api_ingest_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Ingest Run",
+        "tags": [
+          "ingest"
+        ]
+      }
+    },
+    "/api/ingest/runs/{run_id}/templates/{template_key}/membership": {
+      "get": {
+        "description": "Universe membership captured by this run's templates phase, for\nthe given `template_key`. Reads `universe_id` + `this_month` from\nthe run's `templates_summary` array entry (set by the templates\nphase as each template's refresh completes). Returns 404 when the\nrun didn't include the requested template, or when its diff entry\nfailed (no `this_month`).",
+        "operationId": "get_template_membership_for_run_api_ingest_runs__run_id__templates__template_key__membership_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "template_key",
+            "required": true,
+            "schema": {
+              "title": "Template Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Template Membership For Run",
+        "tags": [
+          "ingest"
+        ]
+      }
+    },
+    "/api/ingest/scheduled-refresh/cron": {
+      "post": {
+        "description": "Cron entry point. Verifies `X-Cron-Secret`, inserts an `ingest_run`\nrow tagged `triggered_by='auto'`, spawns the work in a daemon thread,\nand returns the run_id immediately so the cron's curl exits fast.\nThe Railway cron just needs the 200 \u2014 it doesn't wait for completion.",
+        "operationId": "cron_scheduled_refresh_api_ingest_scheduled_refresh_cron_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "job_name",
+            "required": false,
+            "schema": {
+              "default": "weekly_price_volume",
+              "title": "Job Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-cron-secret",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Cron-Secret",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cron Scheduled Refresh",
+        "tags": [
+          "ingest"
+        ]
+      }
+    },
+    "/api/ingest/scheduled-refresh/trigger": {
+      "post": {
+        "description": "Manual trigger from the /schedule UI's Run-now button. Same work\nas the cron path, just `triggered_by='manual'`. No cron-secret \u2014\nauth is enforced by the frontend proxy middleware in `frontend/proxy.ts`.",
+        "operationId": "trigger_scheduled_refresh_api_ingest_scheduled_refresh_trigger_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "job_name",
+            "required": false,
+            "schema": {
+              "default": "manual",
+              "title": "Job Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trigger Scheduled Refresh",
+        "tags": [
+          "ingest"
+        ]
+      }
+    },
+    "/api/items": {
+      "get": {
+        "operationId": "get_items_api_items_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Items",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/leonteq/equities": {
+      "get": {
+        "description": "Every equity in the latest Leonteq scrape. Newest scrape only \u2014\nthe table is replace-all on every refresh.",
+        "operationId": "list_equities_api_leonteq_equities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Equities",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
+    "/api/leonteq/overview": {
+      "get": {
+        "description": "Sector \u2192 industries \u2192 companies tree, plus header counters.\n\nResponse shape:\n  {\n    \"total_equities\": int,\n    \"unique_sectors\": int,\n    \"unique_industries\": int,\n    \"scraped_at\": str | null,\n    \"sectors\": [\n      {\n        \"name\": str,\n        \"company_count\": int,\n        \"industries\": [\n          {\n            \"name\": str,\n            \"company_count\": int,\n            \"companies\": [\n              { \"name\", \"ticker\", \"isin\", \"gurufocus_url\", \"company_id\" }\n            ]\n          }\n        ]\n      }\n    ]\n  }\n\nIndustries are guaranteed to map to ONE sector each by construction\n(an industry that appears under multiple sectors in the scrape gets\nbucketed by majority-sector \u2014 this should never happen with a clean\nGICS-style source but we defend against it).",
+        "operationId": "overview_api_leonteq_overview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Overview",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
+    "/api/longequity/companies": {
+      "get": {
+        "description": "Companies present in the LongEquity snapshot for `target_date`, plus\nadd/remove diff vs the previous snapshot.",
+        "operationId": "get_longequity_companies_api_longequity_companies_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "target_date",
+            "required": true,
+            "schema": {
+              "title": "Target Date",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Longequity Companies",
+        "tags": [
+          "longequity"
+        ]
+      }
+    },
+    "/api/longequity/latest-available": {
+      "get": {
+        "description": "Probe remote storage for the newest report; reports whether a month\nnewer than what's loaded is available.",
+        "operationId": "get_latest_available_api_longequity_latest_available_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Latest Available",
+        "tags": [
+          "longequity"
+        ]
+      }
+    },
+    "/api/longequity/save-universe": {
+      "post": {
+        "description": "SSE: rebuild the cumulative `longequity` universe.\n\nReplaced the old \"save a custom universe\" flow \u2014 the cumulative\nrebuild now runs automatically at the end of each LongEquity\ningest, and the universe is always one canonical row labeled\n`longequity`. This endpoint stays as a manual trigger for cases\nwhere the user wants to force a rebuild without re-ingesting\n(e.g. after a manual metric_data fix).",
+        "operationId": "longequity_save_universe_api_longequity_save_universe_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LongEquitySaveUniverseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Longequity Save Universe",
+        "tags": [
+          "longequity"
+        ]
+      }
+    },
+    "/api/longequity/snapshots": {
+      "get": {
+        "description": "Distinct target_dates with LongEquity data in metric_data.",
+        "operationId": "get_longequity_snapshots_api_longequity_snapshots_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Longequity Snapshots",
+        "tags": [
+          "longequity"
+        ]
+      }
+    },
+    "/api/momentum/backtest": {
+      "post": {
+        "operationId": "momentum_backtest_api_momentum_backtest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Momentum Backtest",
+        "tags": [
+          "momentum"
+        ]
+      }
+    },
+    "/api/momentum/backtests": {
+      "get": {
+        "description": "List saved backtests \u2014 metadata + config, no result blob.\n\nThe frontend dropdown consumes (run_id, name, created_at, config).\n`config` is included so the dropdown can render a one-line subtext\nthat disambiguates same-name runs by their parameters (top_n \u00d7 per\nsector, date range, selection mode, signal weights). It's small\n(~1-3 KB per row) compared to the result blob which can be\nmulti-MB for variant bundles.",
+        "operationId": "list_backtests_api_momentum_backtests_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Backtests",
+        "tags": [
+          "momentum"
+        ]
+      },
+      "post": {
+        "description": "Save a backtest run. Accepts single-run or variant-bundle shape.\n\nThe result blob is compacted (daily-curve parallel-array encoding),\ngzipped, and uploaded to the `backtest-results` Storage bucket. The\nDB row stores only the bucket path in `result_path` \u2014 the in-row\n`result` JSONB column is left NULL on new saves. This lifts the\nstatement_timeout ceiling that previously bit multi-decade\n\u00d7 N-variant bundles even after compaction (postgrest 57014).",
+        "operationId": "save_backtest_api_momentum_backtests_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveBacktestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Backtest",
+        "tags": [
+          "momentum"
+        ]
+      }
+    },
+    "/api/momentum/backtests/{run_id}": {
+      "delete": {
+        "description": "Delete a saved backtest run + its Storage object (if any). Storage\ncleanup is best-effort \u2014 an orphaned file is acceptable and visible\nin the bucket; an orphaned DB row is not (the user would still see\nthe row in the dropdown). So the DB delete always runs; the storage\ndelete failures are logged but don't fail the request.",
+        "operationId": "delete_backtest_api_momentum_backtests__run_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Backtest",
+        "tags": [
+          "momentum"
+        ]
+      },
+      "get": {
+        "description": "Full backtest payload for one run. Two source paths, transparent to\nthe caller:\n\n  * `result_path` populated \u2192 download the gzipped JSON from the\n    `backtest-results` Storage bucket and decode.\n  * `result_path` null \u2192 use the in-row `result` JSONB (legacy rows\n    written before the storage move).\n\nCompacted daily-curve fields are re-expanded back to the verbose\n`[{date, cumulative_return_pct}, ...]` shape so the frontend can\nkeep treating saved runs identically to in-memory ones.",
+        "operationId": "load_backtest_api_momentum_backtests__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Load Backtest",
+        "tags": [
+          "momentum"
+        ]
+      },
+      "patch": {
+        "description": "Rename a saved backtest run.",
+        "operationId": "rename_backtest_api_momentum_backtests__run_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameBacktestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rename Backtest",
+        "tags": [
+          "momentum"
+        ]
+      }
+    },
+    "/api/momentum/current-picks": {
+      "get": {
+        "description": "List snapshots, most recent first. Excludes the heavy holdings JSONB.\nDrops the `name` column from the SELECT when the migration hasn't been\napplied yet \u2014 the frontend already treats `name` as optional and falls\nback to the auto-generated date/trigger label.",
+        "operationId": "list_current_picks_api_momentum_current_picks_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Current Picks",
+        "tags": [
+          "momentum"
+        ]
+      }
+    },
+    "/api/momentum/current-picks/cron": {
+      "post": {
+        "description": "Cron entry point \u2014 forces mode=current_portfolio, runs the full\ncompute, and persists with triggered_by='auto'.\n\nAuth: X-Cron-Secret header must match the CRON_SECRET env var.",
+        "operationId": "cron_current_picks_api_momentum_current_picks_cron_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-cron-secret",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Cron-Secret",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cron Current Picks",
+        "tags": [
+          "momentum"
+        ]
+      }
+    },
+    "/api/momentum/current-picks/{snapshot_id}": {
+      "delete": {
+        "description": "Delete a current-picks snapshot.",
+        "operationId": "delete_current_picks_api_momentum_current_picks__snapshot_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "title": "Snapshot Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Current Picks",
+        "tags": [
+          "momentum"
+        ]
+      },
+      "get": {
+        "description": "Full snapshot for one id, including holdings.",
+        "operationId": "get_current_picks_api_momentum_current_picks__snapshot_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "title": "Snapshot Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Current Picks",
+        "tags": [
+          "momentum"
+        ]
+      },
+      "patch": {
+        "description": "Set or clear a custom name on a snapshot.",
+        "operationId": "rename_current_picks_api_momentum_current_picks__snapshot_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "title": "Snapshot Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameCurrentPicksRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rename Current Picks",
+        "tags": [
+          "momentum"
+        ]
+      }
+    },
+    "/api/momentum/current-picks/{snapshot_id}/refresh-mtd": {
+      "post": {
+        "description": "Recompute MTD on a STORED snapshot using the latest available prices.\nDoes NOT mutate the stored snapshot \u2014 this is a read-side recompute.",
+        "operationId": "refresh_current_picks_mtd_api_momentum_current_picks__snapshot_id__refresh_mtd_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "title": "Snapshot Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Current Picks Mtd",
+        "tags": [
+          "momentum"
+        ]
+      }
+    },
+    "/api/momentum/signal-breakdown": {
+      "post": {
+        "description": "SSE stream of step-by-step signal-breakdown computation. Emits\n`progress` events with pct + message during the heavy universe load,\nthen a final `result` event with the full breakdown payload (or an\n`error` event on failure). On cache hit the slow steps are skipped.",
+        "operationId": "signal_breakdown_api_momentum_signal_breakdown_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignalBreakdownRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Signal Breakdown",
+        "tags": [
+          "momentum"
+        ]
+      }
+    },
+    "/api/momentum/signals": {
+      "get": {
+        "description": "Available signal definitions + the category buckets used by scoring.",
+        "operationId": "get_momentum_signals_api_momentum_signals_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Momentum Signals",
+        "tags": [
+          "momentum"
+        ]
+      }
+    },
+    "/api/portfolios/parse": {
+      "post": {
+        "operationId": "parse_portfolio_api_portfolios_parse_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_parse_portfolio_api_portfolios_parse_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Parse Portfolio",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/scheduled-strategies": {
+      "delete": {
+        "description": "Wipe every scheduled strategy. Snapshots stay (their\n`scheduled_strategy_id` FK is set to NULL via cascade) so the\nhistorical run-history view remains inspectable. Mostly used to\nreset the /schedule page after experimenting with multiple\npermutations.",
+        "operationId": "delete_all_scheduled_strategies_api_scheduled_strategies_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Delete All Scheduled Strategies",
+        "tags": [
+          "schedule"
+        ]
+      },
+      "get": {
+        "description": "Every scheduled strategy, newest first by created_at desc, with\nits last snapshot summary attached.",
+        "operationId": "list_scheduled_strategies_api_scheduled_strategies_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Scheduled Strategies",
+        "tags": [
+          "schedule"
+        ]
+      },
+      "post": {
+        "description": "Create a new scheduled strategy. Sets `next_due_at` to the next\nupcoming Tuesday 02:00 UTC pipeline tick so the entry runs on the\nnext eligible tick regardless of frequency.",
+        "operationId": "add_scheduled_strategy_api_scheduled_strategies_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduledStrategyCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Scheduled Strategy",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
+    "/api/scheduled-strategies/held-companies": {
+      "get": {
+        "description": "Pooled set of companies currently held across every enabled\nscheduled strategy. Drives the /schedule \"Misc jobs \u2192 Currently held\ncompanies\" panel \u2014 gives the user full transparency over which\ncompany is in which strategy's portfolio, when each position was\nopened, and where the next daily price refresh will be writing data.\n\nAggregation: for each enabled strategy, take the most-recent\n`current_picks_snapshot` (any kind \u2014 rebalance or price_update;\nthey share the same holdings shape). Pool the holdings, dedup by\n`company_id`, and attach one `held_by` entry per strategy that holds\nthat company. Companies with no snapshot yet are skipped silently.\n\nReturns:\n    {\n      \"total_companies\": int,           # distinct companies pooled\n      \"total_strategies\": int,          # strategies contributing\n      \"freshness_summary\": {            # what date prices we actually have\n        \"latest_close_date\": str|None,  # max(target_date) across held companies\n        \"fresh_count\": int,             # companies at the latest_close_date\n        \"stale_count\": int,             # companies with an older latest target_date\n        \"missing_count\": int,           # companies with NO close_price data at all\n      },\n      \"companies\": [{\n        \"company_id\", \"ticker\", \"exchange\",\n        \"company_name\", \"sector\",\n        \"latest_close_price_date\": str|None,  # max(target_date) in metric_data for this company\n        \"held_by\": [{\n          \"strategy_id\", \"strategy_name\",\n          \"snapshot_id\", \"snapshot_kind\",  # \"rebalance\"|\"price_update\"\n          \"as_of_date\",                    # when this position was opened\n          \"latest_price_date\",             # most recent close seen for it\n          \"target_weight\",                 # fractional, 0..1\n          \"score\", \"entry_price_local\", \"entry_date\",\n        }]\n      }]\n    }",
+        "operationId": "list_held_companies_api_scheduled_strategies_held_companies_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Held Companies",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
+    "/api/scheduled-strategies/{strategy_id}": {
+      "delete": {
+        "description": "Remove from the schedule. Past snapshots are preserved (the\nsnapshot's `scheduled_strategy_id` FK is set to NULL via the\nforeign-key cascade, so they're orphaned but visible for historical\ninspection).",
+        "operationId": "delete_scheduled_strategy_api_scheduled_strategies__strategy_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Scheduled Strategy",
+        "tags": [
+          "schedule"
+        ]
+      },
+      "patch": {
+        "description": "Toggle `enabled`. Re-pointing at a different config isn't\nallowed in place \u2014 delete + re-add to keep per-snapshot\nattribution unambiguous.",
+        "operationId": "patch_scheduled_strategy_api_scheduled_strategies__strategy_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduledStrategyPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Scheduled Strategy",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
+    "/api/scheduled-strategies/{strategy_id}/runs": {
+      "get": {
+        "description": "Run history for one scheduled strategy. Joins via the new\n`current_picks_snapshot.scheduled_strategy_id` FK so it stays clean\neven after schema-evolution churn on adjacent tables.",
+        "operationId": "list_strategy_runs_api_scheduled_strategies__strategy_id__runs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Strategy Runs",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
+    "/api/universe-templates": {
+      "get": {
+        "description": "Every registered template with its current state.\n\nThree performance moves vs the naive `[_summary(t) for t in all_templates()]`:\n\n1. Result is cached in-process for 5 min via `list_summary_get/set`. The\n   only thing that changes the payload is a template refresh, which\n   explicitly invalidates the cache via `invalidate_template`.\n2. On a cache miss, the per-template summaries run in parallel through\n   a small thread pool. Each `_summary` is ~4 sequential Supabase round\n   trips and templates are independent, so parallelism turns N*latency\n   into ~1*latency. Matters most on the /backtest page where the dropdown\n   blocks on this endpoint.\n3. Cache-Control on the response so the browser caches per-tab too;\n   repeat opens of the dropdown within 60s don't even round-trip.",
+        "operationId": "list_universe_templates_api_universe_templates_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Universe Templates",
+        "tags": [
+          "universe-templates"
+        ]
+      }
+    },
+    "/api/universe-templates/{template_key}": {
+      "get": {
+        "description": "Single template summary + the full list of captured months. The\nlist lets the UI build a date scrubber without a second round-trip.",
+        "operationId": "get_universe_template_api_universe_templates__template_key__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_key",
+            "required": true,
+            "schema": {
+              "title": "Template Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Universe Template",
+        "tags": [
+          "universe-templates"
+        ]
+      }
+    },
+    "/api/universe-templates/{template_key}/all-companies.csv": {
+      "get": {
+        "description": "CSV of every company that has ever appeared in this template's\nuniverse. One row per unique company. Aggregated server-side via\nthe `universe_all_companies_ever` SQL function (single round-trip).\n\nColumns: exchange_code, gurufocus_ticker, company_name,\nexchange_name, sector, gurufocus_url.",
+        "operationId": "export_all_companies_csv_api_universe_templates__template_key__all_companies_csv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_key",
+            "required": true,
+            "schema": {
+              "title": "Template Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export All Companies Csv",
+        "tags": [
+          "universe-templates"
+        ]
+      }
+    },
+    "/api/universe-templates/{template_key}/membership": {
+      "get": {
+        "description": "Holdings active in the given month (`date` = 'YYYY-MM' or\n'YYYY-MM-DD'; we use only the year-month portion to look up\n`universe_membership.target_month`).\n\nResponds with an `ETag` derived from `(template_key, target_month,\nlast_refreshed_at)`. Browsers that resend with `If-None-Match` get a\n304 with no body \u2014 repeat scrubs through the same months cost zero\nbandwidth + a sub-millisecond server check.",
+        "operationId": "get_universe_template_membership_api_universe_templates__template_key__membership_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_key",
+            "required": true,
+            "schema": {
+              "title": "Template Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date",
+            "required": true,
+            "schema": {
+              "title": "Date",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Universe Template Membership",
+        "tags": [
+          "universe-templates"
+        ]
+      }
+    },
+    "/api/universe-templates/{template_key}/months": {
+      "get": {
+        "description": "Just the captured-months list. Cheaper than the full summary\nwhen the UI is only re-fetching after a refresh.",
+        "operationId": "list_universe_template_months_api_universe_templates__template_key__months_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_key",
+            "required": true,
+            "schema": {
+              "title": "Template Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Universe Template Months",
+        "tags": [
+          "universe-templates"
+        ]
+      }
+    },
+    "/api/universe-templates/{template_key}/recent-changes": {
+      "get": {
+        "description": "Latest N additions/removals/renames for a template, sourced from\n`ingest_run.templates_summary` array entries on the most recent\nsuccessful runs. The /schedule per-template expand uses this to\nshow \"last week's diff\" without re-loading the full membership\ntable.",
+        "operationId": "get_universe_template_recent_changes_api_universe_templates__template_key__recent_changes_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_key",
+            "required": true,
+            "schema": {
+              "title": "Template Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Universe Template Recent Changes",
+        "tags": [
+          "universe-templates"
+        ]
+      }
+    },
+    "/api/universe-templates/{template_key}/refresh": {
+      "post": {
+        "description": "Trigger a refresh: SSE stream of progress events from the\ntemplate's reconstruction pipeline. Same event shape the old\n`/api/acwi/save-universe` produced (`progress`, `done`, `error`)\nso the /acwi frontend's progress timeline keeps working.",
+        "operationId": "refresh_universe_template_api_universe_templates__template_key__refresh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_key",
+            "required": true,
+            "schema": {
+              "title": "Template Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Universe Template",
+        "tags": [
+          "universe-templates"
+        ]
+      }
+    },
+    "/api/universe/build": {
+      "post": {
+        "description": "Build monthly universes for a date range and persist them. SSE stream.",
+        "operationId": "universe_build_api_universe_build_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildUniverseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Universe Build",
+        "tags": [
+          "universe"
+        ]
+      }
+    },
+    "/api/universe/criteria": {
+      "get": {
+        "description": "LongEquity quality criteria list with descriptions + min_years.",
+        "operationId": "universe_criteria_api_universe_criteria_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Universe Criteria",
+        "tags": [
+          "universe"
+        ]
+      }
+    },
+    "/api/universe/derive": {
+      "post": {
+        "description": "Create a derived (tightened) universe. SSE: precompute \u2192 filter \u2192 insert.",
+        "operationId": "universe_derive_create_api_universe_derive_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeriveUniverseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Universe Derive Create",
+        "tags": [
+          "universe"
+        ]
+      }
+    },
+    "/api/universe/derive/preview": {
+      "post": {
+        "description": "Count how many companies per month would survive the filter. No writes.",
+        "operationId": "universe_derive_preview_api_universe_derive_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeriveUniverseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Universe Derive Preview",
+        "tags": [
+          "universe"
+        ]
+      }
+    },
+    "/api/universe/derived-metrics/criteria": {
+      "get": {
+        "description": "Criterion specs + default filter_config for the /universe UI.",
+        "operationId": "universe_derived_criteria_api_universe_derived_metrics_criteria_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Universe Derived Criteria",
+        "tags": [
+          "universe"
+        ]
+      }
+    },
+    "/api/universe/derived-metrics/recompute": {
+      "post": {
+        "description": "Recompute derived metric values from cached GuruFocus annuals. SSE.",
+        "operationId": "universe_derived_recompute_api_universe_derived_metrics_recompute_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecomputeRequest",
+                "default": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Universe Derived Recompute",
+        "tags": [
+          "universe"
+        ]
+      }
+    },
+    "/api/universe/derived-metrics/status": {
+      "get": {
+        "description": "How many companies have at least one derived metric row stored.",
+        "operationId": "universe_derived_status_api_universe_derived_metrics_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Universe Derived Status",
+        "tags": [
+          "universe"
+        ]
+      }
+    },
+    "/api/universe/labels": {
+      "delete": {
+        "description": "Delete EVERY universe + memberships (cascade).",
+        "operationId": "universe_delete_all_api_universe_labels_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Universe Delete All",
+        "tags": [
+          "universe"
+        ]
+      },
+      "get": {
+        "description": "List all universes with stats. Aggregation runs in Postgres via the\n`universe_full_stats` RPC so this is two round trips regardless of\nuniverse size.",
+        "operationId": "universe_labels_api_universe_labels_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Universe Labels",
+        "tags": [
+          "universe"
+        ]
+      }
+    },
+    "/api/universe/labels/{label}": {
+      "delete": {
+        "description": "Delete a universe and its memberships.\n\nIf the target is a base universe, its derived children (tight variants)\nare deleted first \u2014 the `parent_universe_id` FK is ON DELETE SET NULL,\nnot CASCADE, so callers would otherwise leave orphans.",
+        "operationId": "universe_delete_label_api_universe_labels__label__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "label",
+            "required": true,
+            "schema": {
+              "title": "Label",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Universe Delete Label",
+        "tags": [
+          "universe"
+        ]
+      },
+      "put": {
+        "description": "Rename a universe label.",
+        "operationId": "universe_rename_label_api_universe_labels__label__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "label",
+            "required": true,
+            "schema": {
+              "title": "Label",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UniverseRenameRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Universe Rename Label",
+        "tags": [
+          "universe"
+        ]
+      }
+    },
+    "/api/universe/months": {
+      "get": {
+        "description": "Distinct months + per-month row counts for one universe label.",
+        "operationId": "universe_months_api_universe_months_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "label",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "title": "Label",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Universe Months",
+        "tags": [
+          "universe"
+        ]
+      }
+    },
+    "/api/universe/months/{month}": {
+      "delete": {
+        "description": "Delete one month's memberships from a universe.",
+        "operationId": "universe_delete_month_api_universe_months__month__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "month",
+            "required": true,
+            "schema": {
+              "title": "Month",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "label",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "title": "Label",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Universe Delete Month",
+        "tags": [
+          "universe"
+        ]
+      },
+      "get": {
+        "description": "All companies for a specific (label, month) pair.",
+        "operationId": "universe_month_detail_api_universe_months__month__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "month",
+            "required": true,
+            "schema": {
+              "title": "Month",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "label",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "title": "Label",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Universe Month Detail",
+        "tags": [
+          "universe"
+        ]
+      }
+    },
+    "/api/universe/screen": {
+      "post": {
+        "description": "Screen all companies against LongEquity criteria. SSE stream.",
+        "operationId": "universe_screen_api_universe_screen_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScreenRequest",
+                "default": {
+                  "force_refresh": false
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Universe Screen",
+        "tags": [
+          "universe"
+        ]
+      }
+    },
+    "/api/universe/validate": {
+      "get": {
+        "description": "Compare current screening results against LongEquity snapshots.",
+        "operationId": "universe_validate_api_universe_validate_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Universe Validate",
+        "tags": [
+          "universe"
+        ]
+      }
+    },
+    "/api/usage": {
+      "get": {
+        "description": "GuruFocus API usage counter for the current month.",
+        "operationId": "api_usage_api_usage_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Usage",
+        "tags": [
+          "system"
+        ]
+      }
+    }
+  }
+}

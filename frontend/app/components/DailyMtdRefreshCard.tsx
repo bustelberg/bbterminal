@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import type { IngestRun } from './Schedule';
 import LoadingDots from './LoadingDots';
@@ -637,10 +637,24 @@ function LiveProgressPanel({ run }: { run: IngestRun }) {
 
   // Elapsed seconds since the run started — gives an "is this stuck?"
   // signal even when current_message hasn't changed in a while.
-  const elapsedSec = (() => {
-    try { return Math.max(0, Math.round((Date.now() - Date.parse(run.started_at)) / 1000)); }
-    catch { return null; }
-  })();
+  // `now` is tracked in state and updated every second by an effect, so
+  // the elapsed counter stays current between parent polls without
+  // breaking React 19's render-purity rule (calling Date.now() at
+  // render time does — same pattern SweepStatus uses).
+  const startedAt = useMemo(() => {
+    try { return Date.parse(run.started_at); } catch { return null; }
+  }, [run.started_at]);
+  const [now, setNow] = useState<number>(() => startedAt ?? 0);
+  useEffect(() => {
+    if (startedAt == null) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [startedAt]);
+  const elapsedSec = startedAt != null
+    ? Math.max(0, Math.round((now - startedAt) / 1000))
+    : null;
 
   return (
     <div className="px-5 py-3 bg-amber-500/5">

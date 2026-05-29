@@ -9,6 +9,10 @@ const nextConfig: NextConfig = {
   // once https://github.com/facebook/react/issues for this pattern is fixed,
   // or add 'use no memo' directives to the affected files.
   reactCompiler: false,
+  // Off so dev mounts effects once (matching prod). With Strict Mode on,
+  // every fetch in a mount-effect fires twice in dev — wasted GuruFocus
+  // quota and noisy in-flight-request panel.
+  reactStrictMode: false,
   devIndicators: false,
   allowedDevOrigins: ['127.0.0.1'],
   turbopack: {

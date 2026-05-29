@@ -1,5 +1,6 @@
 'use client';
 
+import { Fragment, useMemo, useState } from 'react';
 import type { Column } from '../../../../lib/tableExport';
 import CellInfoTip from '../CellInfoTip';
 import CollapsibleCard from '../CollapsibleCard';
@@ -9,6 +10,62 @@ import { parenPct } from '../feeStats';
 import type { AlignedResult, CustomRangeReturn, YearlyBreakdown as YB } from './seriesMath';
 
 type YearlyExportRow = { year: string; series: string; return_pct: number | null };
+
+const MONTH_NAMES = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+/** Per-month chained return for every series within a single calendar
+ * year. Baseline for each month is the previous month's end-cum
+ * (or end-of-previous-year for January, or 0 if neither exists — same
+ * rebase semantics as `computeYearlyBreakdown`).
+ *
+ * Returns:
+ *   months: ['YYYY-MM', ...] sorted, union across series
+ *   bySeries: series_id → month → return_pct (null when undefined)
+ */
+function monthlyReturnsForYear(
+  aligned: AlignedResult,
+  year: string,
+): { months: string[]; bySeries: Record<string, Record<string, number | null>> } {
+  const monthsSet = new Set<string>();
+  const bySeries: Record<string, Record<string, number | null>> = {};
+
+  for (const s of aligned.series) {
+    let prevYearEndCum: number | null = null;
+    const byMonth = new Map<string, number>();
+    for (const p of s.points) {
+      if (p.cumReturnPct == null) continue;
+      const py = p.date.slice(0, 4);
+      if (py < year) {
+        prevYearEndCum = p.cumReturnPct;
+      } else if (py === year) {
+        byMonth.set(p.date.slice(0, 7), p.cumReturnPct);
+      } else {
+        break;
+      }
+    }
+
+    const months = Array.from(byMonth.keys()).sort();
+    const rowMap: Record<string, number | null> = {};
+    let prevCum: number | null = prevYearEndCum;
+    for (const m of months) {
+      const lastCum = byMonth.get(m)!;
+      const baseline = prevCum ?? 0;
+      rowMap[m] = ((1 + lastCum / 100) / (1 + baseline / 100) - 1) * 100;
+      prevCum = lastCum;
+      monthsSet.add(m);
+    }
+    bySeries[s.id] = rowMap;
+  }
+
+  const months = Array.from(monthsSet).sort();
+  for (const s of aligned.series) {
+    for (const m of months) if (!(m in bySeries[s.id])) bySeries[s.id][m] = null;
+  }
+  return { months, bySeries };
+}
 
 /** Yearly performance grid + custom-range cumulative return widget.
  * One row per calendar year, one column per aligned series. Each cell
@@ -31,6 +88,12 @@ export default function YearlyBreakdown({
   yearlyExportRows: YearlyExportRow[];
   yearlyExportColumns: Column<YearlyExportRow>[];
 }) {
+  const [expandedYear, setExpandedYear] = useState<string | null>(null);
+  const monthlyForExpanded = useMemo(
+    () => (expandedYear ? monthlyReturnsForYear(alignedSeries, expandedYear) : null),
+    [expandedYear, alignedSeries],
+  );
+
   if (yearlyBreakdown.years.length === 0) return null;
 
   return (
@@ -64,33 +127,64 @@ export default function YearlyBreakdown({
             </tr>
           </thead>
           <tbody>
-            {yearlyBreakdown.years.map((y) => (
-              <tr key={y} className="border-b border-gray-800/20 hover:bg-white/[0.02]">
-                <td className="px-5 py-2 text-gray-200 font-mono">{y}</td>
-                {alignedSeries.series.map((s) => {
-                  const v = yearlyBreakdown.bySeries[s.id]?.[y];
-                  // Active strategy + saved comparisons both get the
-                  // (net) parenthetical when fees are configured; benchmarks
-                  // stay gross-only. Uses `netYearlyBySeries` (gross × per-year
-                  // fee-factor drag) rather than NetStats.yearly so the
-                  // parenthetical can never exceed displayed gross — the
-                  // period-start-bucketed `yearly` could drift above gross for
-                  // rebalances that don't align to Jan 1.
-                  const netY = s.kind !== 'benchmark'
-                    ? yearlyBreakdown.netYearlyBySeries?.[s.id]?.[y]
-                    : undefined;
-                  return (
-                    <td
-                      key={s.id}
-                      className={`px-3 py-2 text-right font-mono ${v != null ? (v >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}
-                    >
-                      {v != null ? fmtPct(v) : '—'}
-                      {netY != null && <span className="text-gray-500">{parenPct(netY)}</span>}
+            {yearlyBreakdown.years.map((y) => {
+              const isExpanded = expandedYear === y;
+              return (
+                <Fragment key={y}>
+                  <tr
+                    className="border-b border-gray-800/20 hover:bg-white/[0.02] cursor-pointer"
+                    onClick={() => setExpandedYear(isExpanded ? null : y)}
+                  >
+                    <td className="px-5 py-2 text-gray-200 font-mono">
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="text-gray-500 w-3 text-xs">{isExpanded ? '▾' : '▸'}</span>
+                        {y}
+                      </span>
                     </td>
-                  );
-                })}
-              </tr>
-            ))}
+                    {alignedSeries.series.map((s) => {
+                      const v = yearlyBreakdown.bySeries[s.id]?.[y];
+                      // Active strategy + saved comparisons both get the
+                      // (net) parenthetical when fees are configured; benchmarks
+                      // stay gross-only. Uses `netYearlyBySeries` (gross × per-year
+                      // fee-factor drag) rather than NetStats.yearly so the
+                      // parenthetical can never exceed displayed gross — the
+                      // period-start-bucketed `yearly` could drift above gross for
+                      // rebalances that don't align to Jan 1.
+                      const netY = s.kind !== 'benchmark'
+                        ? yearlyBreakdown.netYearlyBySeries?.[s.id]?.[y]
+                        : undefined;
+                      return (
+                        <td
+                          key={s.id}
+                          className={`px-3 py-2 text-right font-mono ${v != null ? (v >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}
+                        >
+                          {v != null ? fmtPct(v) : '—'}
+                          {netY != null && <span className="text-gray-500">{parenPct(netY)}</span>}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                  {isExpanded && monthlyForExpanded?.months.map((m) => (
+                    <tr key={`${y}-${m}`} className="border-b border-gray-800/10 bg-white/[0.015]">
+                      <td className="pl-12 pr-5 py-1.5 text-gray-500 font-mono text-xs">
+                        {MONTH_NAMES[parseInt(m.slice(5), 10) - 1]}
+                      </td>
+                      {alignedSeries.series.map((s) => {
+                        const v = monthlyForExpanded.bySeries[s.id]?.[m];
+                        return (
+                          <td
+                            key={s.id}
+                            className={`px-3 py-1.5 text-right font-mono text-xs ${v != null ? (v >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}
+                          >
+                            {v != null ? fmtPct(v) : '—'}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>

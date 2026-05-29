@@ -114,6 +114,20 @@ def audit_price_coverage(
 
     _no_price = [cid for cid in company_ids if price_counts.get(int(cid), 0) == 0]
     _sparse_price = [cid for cid in company_ids if 0 < price_counts.get(int(cid), 0) < 20]
+    _with_price = [cid for cid in company_ids if price_counts.get(int(cid), 0) > 0]
+
+    # Positive count: how many companies in this universe actually have
+    # usable price data. Pairs with the negative "X have NO price data"
+    # warning further down so the user can read both as a fraction.
+    res.events.append(_emit({
+        "type": "info",
+        "scope": "prices",
+        "message": (
+            f"Price coverage: {len(_with_price)} of {len(company_ids)} "
+            f"companies have price data "
+            f"({len(_with_price) / max(1, len(company_ids)) * 100:.0f}%)."
+        ),
+    }))
 
     # Group no-price companies by exchange. An exchange where every
     # universe company has zero price rows is almost certainly
@@ -177,7 +191,7 @@ def audit_price_coverage(
     if res.no_price_gap_cids:
         sample = ", ".join(_label(int(c)) for c in res.no_price_gap_cids[:10])
         more = f" (+{len(res.no_price_gap_cids) - 10} more)" if len(res.no_price_gap_cids) > 10 else ""
-        res.events.append(_emit({"type": "warning", "scope": "prices", "message": f"{len(res.no_price_gap_cids)} companies on subscribed exchanges have NO price data: {sample}{more}"}))
+        res.events.append(_emit({"type": "warning", "id": "prices-gap", "scope": "prices", "message": f"{len(res.no_price_gap_cids)} companies on subscribed exchanges have NO price data: {sample}{more}"}))
     if _sparse_price:
         sample = ", ".join(
             f"{_label(int(c))}[{price_counts.get(int(c), 0)} rows]" for c in _sparse_price[:10]
@@ -202,6 +216,18 @@ def audit_volume_coverage(
     vol_counts = volumes_df.groupby("company_id").size().to_dict() if not volumes_df.empty else {}
     _no_vol_all = [cid for cid in company_ids if vol_counts.get(int(cid), 0) == 0]
     _sparse_vol = [cid for cid in company_ids if 0 < vol_counts.get(int(cid), 0) < 20]
+    _with_vol = [cid for cid in company_ids if vol_counts.get(int(cid), 0) > 0]
+
+    # Positive count for volumes — same shape as the price coverage info.
+    audit.events.append(_emit({
+        "type": "info",
+        "scope": "volumes",
+        "message": (
+            f"Volume coverage: {len(_with_vol)} of {len(company_ids)} "
+            f"companies have volume data "
+            f"({len(_with_vol) / max(1, len(company_ids)) * 100:.0f}%)."
+        ),
+    }))
     audit.no_vol_gap_cids = [
         cid for cid in _no_vol_all
         if audit.exchange_for_cid.get(int(cid), "UNKNOWN") not in audit.unsubscribed_exchanges
@@ -209,7 +235,7 @@ def audit_volume_coverage(
     if audit.no_vol_gap_cids:
         sample = ", ".join(audit.label_for_cid.get(int(c), str(c)) for c in audit.no_vol_gap_cids[:10])
         more = f" (+{len(audit.no_vol_gap_cids) - 10} more)" if len(audit.no_vol_gap_cids) > 10 else ""
-        audit.events.append(_emit({"type": "warning", "scope": "volumes", "message": f"{len(audit.no_vol_gap_cids)} companies on subscribed exchanges have NO volume data — volume signals will be skipped for them: {sample}{more}"}))
+        audit.events.append(_emit({"type": "warning", "id": "volumes-gap", "scope": "volumes", "message": f"{len(audit.no_vol_gap_cids)} companies on subscribed exchanges have NO volume data — volume signals will be skipped for them: {sample}{more}"}))
     if _sparse_vol:
         sample = ", ".join(
             f"{audit.label_for_cid.get(int(c), str(c))}[{vol_counts.get(int(c), 0)} rows]" for c in _sparse_vol[:10]

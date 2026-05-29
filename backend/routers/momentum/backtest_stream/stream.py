@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import threading
 from datetime import date, timedelta
 
 from fastapi import APIRouter
@@ -51,6 +53,8 @@ from .self_heal import compute_gap_cids, run_self_heal
 from .single_run import run_single
 from .universe_loader import load_monthly_eligible_for
 from .variants import run_variants_sweep
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["momentum"])
 
@@ -162,6 +166,13 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                 return
         except Exception as e:
             yield _emit({"type": "warning", "scope": "cache", "message": f"Backtest cache lookup failed: {type(e).__name__}: {e}"})
+
+    # Shared cancel flag. The `except asyncio.CancelledError` block at
+    # the bottom of this try sets it when the client disconnects, and
+    # worker threads in the long phases (currently self-heal) check it
+    # at their natural checkpoints so the work actually halts instead
+    # of running to completion in the background after Cancel.
+    cancel_event = threading.Event()
 
     try:
         yield _emit({"type": "progress", "pct": 0, "message": "Loading universe..."})
@@ -404,16 +415,19 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         currencies_needed = sorted({c for c in company_currency.values() if c})
         yield _emit({"type": "progress", "pct": 65, "message": f"Found {len(currencies_needed)} distinct currencies: {', '.join(currencies_needed)}"})
 
-        # Sync fx_rate table from ECB for every currency in range. This
-        # is idempotent and cheap — only fetches what's missing past the
-        # highest existing rate_date per currency. Skipped under db_only.
-        if req.db_only:
-            yield _emit({"type": "progress", "pct": 65, "message": "DB-only mode: skipping ECB FX sync, using cached FX rates"})
-        else:
-            async for evt in sync_fx_streamed(currencies_needed, price_start, price_end):
-                if isinstance(evt, tuple) and evt[0] == "__result__":
-                    continue  # the sync result dict isn't needed downstream
-                yield evt
+        # Sync fx_rate table from ECB for every currency in range. ALWAYS
+        # runs (ignores db_only) — sync is idempotent and cheap, only
+        # fetching what's missing past the highest existing rate_date per
+        # currency. Gating this behind db_only used to silently drop every
+        # company on a currency whose first-ever appearance in any backtest
+        # happened to land here (e.g., adding HKD-listed names to an
+        # existing universe). FX is a per-currency lookup, not per-company —
+        # the speed/predictability arguments for db_only on prices+volumes
+        # don't apply.
+        async for evt in sync_fx_streamed(currencies_needed, price_start, price_end):
+            if isinstance(evt, tuple) and evt[0] == "__result__":
+                continue  # the sync result dict isn't needed downstream
+            yield evt
 
         # Load FX rates + convert prices to EUR.
         prices_eur_df = None
@@ -477,10 +491,72 @@ async def _momentum_backtest_stream(req: BacktestRequest):
                 prices_df, prices_local_df, volumes_df,
                 company_currency, fx_rates,
                 price_start, price_end,
+                cancel_event=cancel_event,
             ):
                 if isinstance(evt, tuple) and evt[0] == "__result__":
                     prices_df, prices_local_df, volumes_df = evt[1]
                     continue
+                yield evt
+
+            # Post-heal final state: re-emit the standing warning with its
+            # original `id` so the frontend's last-write-wins dedup
+            # replaces the live "in progress…" message. Either the
+            # warning is dismissed (everything recovered) or it carries
+            # the post-heal count with sample tickers.
+            def _post_heal_final(scope_label: str, df, original_gap_cids):
+                if not original_gap_cids:
+                    return []
+                counts = (
+                    df.groupby("company_id").size().to_dict()
+                    if df is not None and not df.empty else {}
+                )
+                original = {int(c) for c in original_gap_cids}
+                still_missing = sorted(
+                    c for c in original if counts.get(int(c), 0) == 0
+                )
+                recovered = len(original) - len(still_missing)
+                events: list[str] = []
+                if recovered > 0:
+                    events.append(_emit({
+                        "type": "info",
+                        "scope": "self-heal",
+                        "message": (
+                            f"Self-heal recovered {scope_label} for {recovered} "
+                            f"of {len(original)} previously-missing companies."
+                        ),
+                    }))
+                if not still_missing:
+                    events.append(_emit({
+                        "type": "warning",
+                        "id": f"{scope_label}-gap",
+                        "scope": scope_label,
+                        "dismiss": True,
+                        "message": "",
+                    }))
+                else:
+                    sample = ", ".join(
+                        audit.label_for_cid.get(int(c), str(c))
+                        for c in still_missing[:10]
+                    )
+                    more = (
+                        f" (+{len(still_missing) - 10} more)"
+                        if len(still_missing) > 10 else ""
+                    )
+                    events.append(_emit({
+                        "type": "warning",
+                        "id": f"{scope_label}-gap",
+                        "scope": scope_label,
+                        "message": (
+                            f"After self-heal: {len(still_missing)} of "
+                            f"{len(original)} companies still have NO "
+                            f"{scope_label} data: {sample}{more}"
+                        ),
+                    }))
+                return events
+
+            for evt in _post_heal_final("prices", prices_df, audit.no_price_gap_cids):
+                yield evt
+            for evt in _post_heal_final("volumes", volumes_df, audit.no_vol_gap_cids):
                 yield evt
 
         # Build universe snapshot once — used by both single-run and
@@ -547,6 +623,17 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         ):
             yield evt
 
+    except asyncio.CancelledError:
+        # Client disconnected (user hit Cancel). Signal worker threads
+        # to bail out at their next checkpoint, then re-raise so
+        # FastAPI's StreamingResponse cleanly tears down. Without this,
+        # the SSE generator simply unwinds but the parallel-4 self-heal
+        # workers (and any other thread-based phase) keep running to
+        # completion in the background, burning GuruFocus quota for a
+        # backtest nobody's listening to.
+        cancel_event.set()
+        _log.info("[backtest_stream] client cancelled; signalling workers to stop")
+        raise
     except Exception as e:
         yield _emit({"type": "error", "message": str(e)})
 

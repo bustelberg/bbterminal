@@ -38,6 +38,10 @@ type Props = {
    * for each variant's stats. Optional — when omitted the table just shows
    * gross figures. */
   exchangeByCompany?: Map<number, string>;
+  /** Called when the user clicks the "+ Schedule" button on an OK-status
+   * row. Parent has the base BacktestRequest state and builds the schedule
+   * `config` by merging base + variant overrides. */
+  onAddToSchedule?: (variantKey: VariantKey, variantLabel: string) => void;
 };
 
 // All sortable columns in display order. `variant` is text; everything
@@ -108,7 +112,7 @@ function rankBorderClass(rank: number | undefined): string {
   return '';
 }
 
-function VariantSummaryTableInner({ exchangeByCompany }: Props) {
+function VariantSummaryTableInner({ exchangeByCompany, onAddToSchedule }: Props) {
   const variants = momentumStore.use((s) => s.variants);
   const active = momentumStore.use((s) => s.activeVariantKey);
   const run = momentumStore.use((s) => s.variantsRun);
@@ -330,6 +334,7 @@ function VariantSummaryTableInner({ exchangeByCompany }: Props) {
               feesByExchange={feesByExchange}
               exchangeByCompany={exchangeByCompany}
               ranksByColumn={ranksByColumn}
+              onAddToSchedule={onAddToSchedule}
             />
           ))}
         </tbody>
@@ -430,6 +435,7 @@ function VariantRow({
   feesByExchange,
   exchangeByCompany,
   ranksByColumn,
+  onAddToSchedule,
 }: {
   variantKey: VariantKey;
   label: string;
@@ -438,6 +444,7 @@ function VariantRow({
   feesByExchange: Map<string, number> | null;
   exchangeByCompany: Map<number, string> | undefined;
   ranksByColumn: Map<ColumnKey, Map<number, number>>;
+  onAddToSchedule?: (variantKey: VariantKey, label: string) => void;
 }) {
   const status = outcome?.status ?? 'pending';
   const clickable = status === 'ok';
@@ -454,7 +461,7 @@ function VariantRow({
     : '';
 
   return (
-    <tr className={`border-b border-gray-800/20 ${rowClass}`} onClick={handleClick}>
+    <tr className={`border-b border-gray-800/20 group ${rowClass}`} onClick={handleClick}>
       <td className="px-3 py-2 text-gray-200">
         <div className="flex items-center gap-2">
           <span className={`inline-block w-3 text-indigo-400 ${isActive ? '' : 'opacity-0'}`}>
@@ -464,6 +471,19 @@ function VariantRow({
           <span className={isActive ? 'text-white font-medium' : ''}>{label}</span>
           {status === 'cancelled' && (
             <span className="text-[10px] text-gray-500 italic">cancelled</span>
+          )}
+          {clickable && onAddToSchedule && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();  // don't trigger setActiveVariant
+                onAddToSchedule(variantKey, label);
+              }}
+              title="Save this variant as a scheduled strategy. The pipeline will keep its current-picks snapshot up to date on every tick."
+              className="ml-2 text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded border border-indigo-500/30 text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 opacity-0 group-hover:opacity-100 transition-opacity"
+            >
+              + Schedule
+            </button>
           )}
         </div>
         {status === 'error' && outcome?.status === 'error' && (
