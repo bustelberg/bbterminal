@@ -193,6 +193,20 @@ jobs:
             email text,
             raw_app_meta_data jsonb DEFAULT '{}'::jsonb
           );
+
+          -- Minimal storage.buckets — the bucket-create rows in the
+          -- backtest_results_storage migration target the real
+          -- Supabase storage table (which lives in prod + supabase
+          -- start). In CI the storage service container isn't running,
+          -- so the schema doesn't exist; this 3-column shim lets the
+          -- INSERT … ON CONFLICT statements no-op against an empty
+          -- table instead of erroring on a missing relation.
+          CREATE SCHEMA IF NOT EXISTS storage;
+          CREATE TABLE IF NOT EXISTS storage.buckets (
+            id text PRIMARY KEY,
+            name text NOT NULL,
+            public boolean DEFAULT false
+          );
           SQL
 
       - name: Apply migrations
