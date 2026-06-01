@@ -381,6 +381,17 @@ jobs:
           # migration didn't NOTIFY itself.
           psql -h localhost -p 54322 -U postgres -c "NOTIFY pgrst, 'reload schema'"
 
+      # Seed a tiny, self-consistent fixture (companies + prices/volume +
+      # longequity snapshots + a universe) so the probe below can assert
+      # real behaviour, not just 2xx on empty tables. CI-only — not loaded
+      # by `supabase db reset` (config.toml seeds ./seed.sql only).
+      - name: Seed fixture data
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -p 54322 -U postgres -v ON_ERROR_STOP=1 -f supabase/ci_seed.sql
+          echo "seeded: $(psql -h localhost -p 54322 -U postgres -tAc 'SELECT count(*) FROM company') companies"
+
       - name: Wait for PostgREST to expose public tables
         env:
           PGPASSWORD: postgres
@@ -569,6 +580,31 @@ jobs:
             echo "::error::One or more endpoints returned non-2xx. See lines above."
             exit 1
           fi
+
+      # Correctness gate. The probe above only proves endpoints don't 500;
+      # these assert the seeded fixture actually surfaces through the whole
+      # stack (DB → supabase-py → RPCs → FastAPI) — the thing the /rest/v1
+      # proxy fix unblocked. Shapes: /api/companies → array; snapshots →
+      # [{target_date}]; latest-price-date → {date}.
+      - name: Assert seeded data surfaces
+        run: |
+          set -u
+          BACKEND=http://127.0.0.1:8000
+
+          companies=$(curl -fsS -m 30 "$BACKEND/api/companies" | jq 'length')
+          echo "/api/companies count = $companies"
+          [[ "$companies" -ge 3 ]] || { echo "::error::expected >=3 seeded companies, got $companies"; exit 1; }
+
+          snaps=$(curl -fsS -m 30 "$BACKEND/api/longequity/snapshots" | jq -r '.[].target_date' | sort -u)
+          echo "longequity snapshots:"; echo "$snaps" | sed 's/^/  /'
+          grep -q '2026-04-01' <<<"$snaps" || { echo "::error::seeded snapshot 2026-04-01 missing"; exit 1; }
+          grep -q '2026-05-01' <<<"$snaps" || { echo "::error::seeded snapshot 2026-05-01 missing"; exit 1; }
+
+          lpd=$(curl -fsS -m 30 "$BACKEND/api/data/latest-price-date" | jq -r '.date // empty')
+          echo "latest-price-date = $lpd"
+          [[ "$lpd" == "2026-05-01" ]] || { echo "::error::latest-price-date expected 2026-05-01, got '$lpd'"; exit 1; }
+
+          echo "✓ seeded data surfaces correctly through the backend"
 
       - name: Backend logs (on failure)
         if: failure()
