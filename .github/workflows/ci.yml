@@ -453,6 +453,11 @@ jobs:
       #   * gurufocus/* (need API key)
       #   * longequity/latest-available (probes external host)
       #   * fx/latest (falls back to live ECB call on empty DB)
+      #   * required-query-param endpoints (4xx without fixture-specific
+      #     params the empty CI DB can't provide — see EXCLUDE below)
+      #   * heavy/diagnostic + external-fan-out endpoints (validate
+      #     re-screens the whole universe; acwi/fetch-all-details streams
+      #     ~2k GuruFocus lookups) — they hang or need an API key
       # Path-param endpoints are skipped automatically (anything with
       # `{` in the URL). To add a new endpoint to the smoke, just add
       # `@router.get("/api/...")` on the backend — it'll appear in the
@@ -471,6 +476,17 @@ jobs:
             /api/gurufocus/exchanges
             /api/gurufocus/exchange-currencies
             /api/airs/scan
+            # Require a query param the empty CI DB has no valid value for
+            # (the probe sends none → deterministic 4xx).
+            /api/acwi/announcement-detail      # needs ?url=
+            /api/index-universe/tickers        # needs ?month=
+            /api/longequity/companies          # needs ?target_date=
+            # Heavy diagnostic — re-runs the full universe screen; hangs on
+            # an empty DB. Not a "safe read".
+            /api/universe/validate
+            # SSE that fans out ~2k detail lookups to GuruFocus (needs an
+            # API key; times out without one).
+            /api/acwi/fetch-all-details
           )
           # Tags whose endpoints we never smoke. admin + auth need a
           # real JWT (they 401/403 unauthenticated). airs needs broker
