@@ -1,0 +1,54 @@
+# Some Git GUI clients on Windows (GitHub Desktop, Sourcetree) invoke
+# hooks with a minimal PATH that doesn't include Node.js. Inject the
+# default install location if it's not already there — terminal
+# commits already have Node on PATH and this just no-ops the second
+# prepend. Custom installs (nvm-windows, Volta) should add their path
+# to `~/.config/husky/init.sh`.
+case ":$PATH:" in
+  *":/c/Program Files/nodejs:"*) ;;
+  *) [ -x "/c/Program Files/nodejs/node.exe" ] && export PATH="/c/Program Files/nodejs:$PATH" ;;
+esac
+
+# Windows GUI clients (GitHub Desktop, Sourcetree, …) can run hooks with
+# a PATH where bare `bash`/`sh` resolves to the WSL `bash.exe` shim in
+# System32 instead of a real shell. With no WSL distro installed that
+# dies mid-hook with "execvpe(/bin/bash) failed: no such file or
+# directory". Put a genuine Git-for-Windows usr/bin (real bash + the
+# coreutils these hooks lean on) ahead of it. No-ops on macOS/Linux
+# (none of these paths exist).
+#
+# Primary candidate is derived from the git actually running this hook
+# (covers GitHub Desktop's bundled git regardless of $HOME). git
+# --exec-path emits drive-letter form (C:/…); convert it to /c/… so PATH
+# parsing — which splits on ':' — doesn't choke on the drive colon.
+_gx=$(git --exec-path 2>/dev/null)
+case "$_gx" in
+  */libexec/git-core) _gx="${_gx%/*/libexec/git-core}/usr/bin" ;;
+  *) _gx="" ;;
+esac
+case "$_gx" in
+  [A-Za-z]:/*)
+    _drv=${_gx%%:*}; _rest=${_gx#*:}
+    case "$_drv" in
+      [Cc]) _gx="/c$_rest" ;; [Dd]) _gx="/d$_rest" ;; [Ee]) _gx="/e$_rest" ;; *) _gx="" ;;
+    esac ;;
+esac
+for _gitusr in \
+  "$_gx" \
+  "$HOME/AppData/Local/Programs/Git/usr/bin" \
+  "/c/Program Files/Git/usr/bin" \
+  "/c/Program Files (x86)/Git/usr/bin"; do
+  [ -n "$_gitusr" ] || continue
+  if [ -x "$_gitusr/bash.exe" ]; then
+    case ":$PATH:" in
+      *":$_gitusr:"*) ;;
+      *) export PATH="$_gitusr:$PATH" ;;
+    esac
+    break
+  fi
+done
+
+# Fast feedback only — eslint for staged frontend files, ruff for
+# staged backend files. Both auto-fix and re-stage. Anything slower
+# (typecheck, contract drift) runs on pre-push so commits stay snappy.
+npx lint-staged

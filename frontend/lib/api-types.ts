@@ -2706,30 +2706,30 @@ export interface components {
              * Db Only
              * @default true
              */
-            db_only: boolean;
+            db_only?: boolean;
             /**
              * End Date
              * @default 2026-01-01
              */
-            end_date: string;
+            end_date?: string;
             /**
              * Force Recompute
              * @default false
              */
-            force_recompute: boolean;
+            force_recompute?: boolean;
             /**
              * Grouping
              * @default sector
              * @enum {string}
              */
-            grouping: "sector" | "industry";
+            grouping?: "sector" | "industry";
             /** Index Universe */
             index_universe?: string | null;
             /**
              * Max Companies
              * @default 0
              */
-            max_companies: number;
+            max_companies?: number;
             /** Min Price Score */
             min_price_score?: number | null;
             /**
@@ -2737,12 +2737,12 @@ export interface components {
              * @default backtest
              * @enum {string}
              */
-            mode: "backtest" | "current_portfolio";
+            mode?: "backtest" | "current_portfolio";
             /**
              * N Trials
              * @default 1
              */
-            n_trials: number;
+            n_trials?: number;
             /** Random Seed */
             random_seed?: number | null;
             /**
@@ -2750,7 +2750,7 @@ export interface components {
              * @default monthly
              * @enum {string}
              */
-            rebalance_frequency: "daily" | "weekly" | "monthly" | "every_2_months" | "every_3_months" | "every_4_months" | "every_5_months" | "every_6_months" | "every_7_months" | "every_8_months" | "every_9_months" | "every_10_months" | "every_11_months" | "every_12_months";
+            rebalance_frequency?: "daily" | "weekly" | "monthly" | "every_2_months" | "every_3_months" | "every_4_months" | "every_5_months" | "every_6_months" | "every_7_months" | "every_8_months" | "every_9_months" | "every_10_months" | "every_11_months" | "every_12_months";
             /** Sector Etfs */
             sector_etfs?: {
                 [key: string]: number;
@@ -2760,7 +2760,7 @@ export interface components {
              * @default momentum
              * @enum {string}
              */
-            selection_mode: "momentum" | "random" | "all" | "sector_etf";
+            selection_mode?: "momentum" | "random" | "all" | "sector_etf";
             /** Signal Weights */
             signal_weights?: {
                 [key: string]: number;
@@ -2769,23 +2769,23 @@ export interface components {
              * Start Date
              * @default 2017-01-01
              */
-            start_date: string;
+            start_date?: string;
             /**
              * Strategy Type
              * @default long_only
              * @enum {string}
              */
-            strategy_type: "long_only" | "long_short";
+            strategy_type?: "long_only" | "long_short";
             /**
              * Top N Per Sector
              * @default 6
              */
-            top_n_per_sector: number;
+            top_n_per_sector?: number;
             /**
              * Top N Sectors
              * @default 4
              */
-            top_n_sectors: number;
+            top_n_sectors?: number;
             /** Universe Label */
             universe_label?: string | null;
             /** Variants */
@@ -2804,12 +2804,12 @@ export interface components {
              * Label
              * @default default
              */
-            label: string;
+            label?: string;
             /**
              * Max Companies
              * @default 5
              */
-            max_companies: number;
+            max_companies?: number;
             /** Start Month */
             start_month: string;
         };
@@ -2830,7 +2830,7 @@ export interface components {
              * Force
              * @default false
              */
-            force: boolean;
+            force?: boolean;
             /** Gurufocus Exchange */
             gurufocus_exchange: string;
             /** Gurufocus Ticker */
@@ -2846,7 +2846,7 @@ export interface components {
              * Role
              * @default user
              */
-            role: string;
+            role?: string;
         };
         /** DeriveUniverseRequest */
         DeriveUniverseRequest: {
@@ -2869,7 +2869,7 @@ export interface components {
              * Is Broker Supported
              * @default true
              */
-            is_broker_supported: boolean;
+            is_broker_supported?: boolean;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -2889,14 +2889,14 @@ export interface components {
              * Force Refresh
              * @default false
              */
-            force_refresh: boolean;
+            force_refresh?: boolean;
             /** From Date */
             from_date?: string | null;
             /**
              * Indicator
              * @default price
              */
-            indicator: string;
+            indicator?: string;
             /** Ticker */
             ticker: string;
             /** To Date */
@@ -2984,7 +2984,7 @@ export interface components {
              * Force Refresh
              * @default false
              */
-            force_refresh: boolean;
+            force_refresh?: boolean;
         };
         /** SetRoleRequest */
         SetRoleRequest: {
