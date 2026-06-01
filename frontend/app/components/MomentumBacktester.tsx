@@ -38,11 +38,15 @@ import AxisColumn from './momentum/AxisColumn';
 import CellInfoTip from './momentum/CellInfoTip';
 import CollapsibleCard from './momentum/CollapsibleCard';
 import DailyPicksHistory from './momentum/DailyPicksHistory';
+import DateRangeRow from './momentum/DateRangeRow';
 import EquityCurveCard from './momentum/EquityCurveCard';
 import MonthlyHoldingsTable from './momentum/MonthlyHoldingsTable';
+import RandomParamsInputs from './momentum/RandomParamsInputs';
+import RunControls from './momentum/RunControls';
 import SavedRunsDropdown from './momentum/SavedRunsDropdown';
 import SectorTimelineChart from './momentum/SectorTimelineChart';
 import SignalWeightSliders from './momentum/SignalWeightSliders';
+import StrategyModeSelect from './momentum/StrategyModeSelect';
 import VariantAttribution from './momentum/VariantAttribution';
 import TableDownloadButton from './TableDownloadButton';
 import VariantSummaryTable from './momentum/VariantSummaryTable';
@@ -99,8 +103,6 @@ export default function MomentumBacktester() {
     randomSeed, setRandomSeed,
     nTrials, setNTrials,
   } = config;
-  // Still used by the date `<input type="month">` max attributes below.
-  const currentYear = new Date().getFullYear();
 
   // Sector → benchmark_id mapping for selection_mode='sector_etf'.
   // Encapsulated in `useSectorEtfs`: lazy-loads from /api/benchmarks
@@ -1307,122 +1309,43 @@ export default function MomentumBacktester() {
                 below — no top-level dropdown. The first selected variant
                 drives the base config's `index_universe` for cache
                 identity (see runVariantsBacktest). */}
-            {/* Date Range — min/max bound the typeable year to 4 digits.
-                Browsers accept "202604" or "999999" in a <input
-                type="month"> without these constraints, which then
-                breaks the backend's YYYY-MM-01 parse. 1998 matches the
-                price-data cutoff in backend/ingest/prices.py
-                (_PRICE_CUTOFF); upper bound is one year past today so
-                the picker still allows scheduling forward. */}
-            <div>
-              <label className="text-gray-500 text-xs block mb-1">Start</label>
-              <input
-                type="month"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                min="1998-01"
-                max={`${currentYear + 1}-12`}
-                className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-gray-500 text-xs block mb-1">End</label>
-              <input
-                type="month"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                min="1998-01"
-                max={`${currentYear + 1}-12`}
-                className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-gray-500 text-xs block mb-1">Max Companies</label>
-              <input
-                type="number"
-                min={0}
-                max={500}
-                value={maxCompanies}
-                onChange={(e) => setMaxCompanies(Number(e.target.value))}
-                className="w-20 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-                title="0 = all companies, otherwise limit alphabetically"
-              />
-              <span className="text-gray-600 text-xs ml-1">0 = all</span>
-            </div>
+            <DateRangeRow
+              startDate={startDate}
+              setStartDate={setStartDate}
+              endDate={endDate}
+              setEndDate={setEndDate}
+              maxCompanies={maxCompanies}
+              setMaxCompanies={setMaxCompanies}
+            />
             {/* Top Sectors / Per Sector / Min Price Score moved to the
                 Strategy parameters section below — they only apply to
                 certain strategies (e.g. min_price_score is momentum-
                 only; top-N pair is meaningless for "all universe").
                 Keeping them out of the universe/date row leaves only
                 strategy-agnostic inputs at the top level. */}
-            <div>
-              <label className="text-gray-500 text-xs block mb-1">Strategy</label>
-              <select
-                value={selectionMode}
-                onChange={(e) => setSelectionMode(e.target.value as 'momentum' | 'random' | 'all' | 'sector_etf')}
-                className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-                title="Momentum ranks the universe by signal score. Random picks sectors/stocks at random (noise-floor baseline). All holds every eligible name in the universe equal-weighted (index-proxy benchmark). Sector ETF ranks sectors via stock-aggregate momentum then holds the mapped sector ETF for each picked sector — set the mapping on /benchmarks."
-              >
-                <option value="momentum">Momentum</option>
-                <option value="random">Random (baseline)</option>
-                <option value="all">All universe (index proxy)</option>
-                <option value="sector_etf">Sector ETF (per-sector benchmark)</option>
-              </select>
-              {selectionMode === 'sector_etf' && (
-                <div className="text-[10px] mt-1 max-w-xs">
-                  {sectorEtfsLoading ? (
-                    <span className="text-gray-500">loading sector mapping…</span>
-                  ) : sectorEtfsError ? (
-                    <span className="text-rose-400">{sectorEtfsError}</span>
-                  ) : Object.keys(sectorEtfs).length === 0 ? (
-                    <span className="text-amber-400">
-                      No sector→ETF mappings yet. Open <a href="/benchmarks" className="underline">/benchmarks</a> and tag at least one benchmark with a sector.
-                    </span>
-                  ) : (
-                    <span className="text-gray-500">
-                      {Object.keys(sectorEtfs).length} sector{Object.keys(sectorEtfs).length === 1 ? '' : 's'} mapped:{' '}
-                      <span className="text-gray-400">{Object.keys(sectorEtfs).sort().join(', ')}</span>
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
+            <StrategyModeSelect
+              selectionMode={selectionMode}
+              setSelectionMode={setSelectionMode}
+              sectorEtfs={sectorEtfs}
+              sectorEtfsLoading={sectorEtfsLoading}
+              sectorEtfsError={sectorEtfsError}
+            />
             {/* Random-mode params (Trials, Seed) live in the
                 "Strategy parameters" section below — same place as the
                 momentum signal/category weights — so the inline config
                 row only has to carry universe-level inputs. */}
-            <button
-              onClick={runVariantsBacktest}
-              disabled={running || variantsRunning || eligibleCount === 0 || variantsBlockReason != null}
-              className="px-5 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title={
-                variantsBlockReason
-                  ? variantsBlockReason
-                  : eligibleCount === 0
-                    ? longShortBlocked
-                      ? `${selectionMode === 'all' ? 'All-universe' : selectionMode === 'sector_etf' ? 'Sector-ETF' : 'Random'} mode supports long-only variants only — adjust the Strategy axis below`
-                      : 'Pick at least one permutation in the Variants panel below'
-                    : `Run ${eligibleCount} permutation${eligibleCount === 1 ? '' : 's'} and compare them in one table`
-              }
-            >
-              {variantsRunning
-                ? `Running variants ${variantsRun?.completed ?? 0}/${variantsRun?.total ?? 0}…`
-                : `Run variants (${eligibleCount})`}
-            </button>
-            <button
-              onClick={showCurrentPicks}
-              disabled={running || selectionMode === 'random'}
-              className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-700 text-gray-300 hover:bg-white/5 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title={
-                selectionMode === 'random'
-                  ? 'Current Picks is unavailable for random selection mode'
-                  : currentPicksSnapshots.length > 0
-                    ? `Load most recent snapshot (${currentPicksSnapshots[0].as_of_date}, ${currentPicksSnapshots[0].triggered_by})`
-                    : 'No saved snapshot yet — first click will run a full compute and save it'
-              }
-            >
-              Current Picks
-            </button>
+            <RunControls
+              runVariantsBacktest={runVariantsBacktest}
+              showCurrentPicks={showCurrentPicks}
+              running={running}
+              variantsRunning={variantsRunning}
+              eligibleCount={eligibleCount}
+              variantsBlockReason={variantsBlockReason}
+              longShortBlocked={longShortBlocked}
+              selectionMode={selectionMode}
+              variantsRun={variantsRun}
+              currentPicksSnapshots={currentPicksSnapshots}
+            />
             <label
               className="flex items-center gap-2 cursor-pointer select-none self-center pt-4"
               title="Bypass the replay cache and recompute the backtest from scratch."
@@ -1814,36 +1737,12 @@ export default function MomentumBacktester() {
             )}
 
             {selectionMode === 'random' && (
-              <div className="flex flex-wrap items-end gap-6">
-                <div>
-                  <label className="text-gray-500 text-xs block mb-1">Trials (parallel seeds)</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={100}
-                    value={nTrials}
-                    onChange={(e) => setNTrials(Number(e.target.value))}
-                    className="w-24 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-                    title="Independent random-selection runs. Summary headline becomes mean ± std across trials."
-                  />
-                  <div className="text-[10px] text-gray-600 mt-1 max-w-[260px]">
-                    More trials → tighter confidence on the noise-floor return. 5–25 is a sensible range.
-                  </div>
-                </div>
-                <div>
-                  <label className="text-gray-500 text-xs block mb-1">Base seed</label>
-                  <input
-                    type="number"
-                    value={randomSeed}
-                    onChange={(e) => setRandomSeed(Number(e.target.value))}
-                    className="w-24 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-                    title="Same base seed reproduces the same set of random picks. Trials use seed, seed+1, ..., seed+N-1."
-                  />
-                  <div className="text-[10px] text-gray-600 mt-1 max-w-[260px]">
-                    Reproducibility anchor; trials use seed, seed+1, …, seed+N−1.
-                  </div>
-                </div>
-              </div>
+              <RandomParamsInputs
+                nTrials={nTrials}
+                setNTrials={setNTrials}
+                randomSeed={randomSeed}
+                setRandomSeed={setRandomSeed}
+              />
             )}
 
             {selectionMode === 'all' && (
