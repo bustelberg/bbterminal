@@ -1,0 +1,11 @@
+# Normalize line endings across all platforms.
+#
+# `text=auto`  — git decides per file whether it's text (binaries are
+#                auto-detected and left untouched).
+# `eol=lf`     — text files are stored AND checked out as LF, on every OS.
+#                This overrides each machine's core.autocrlf, so Windows
+#                working copies stop drifting to CRLF (which is what caused
+#                the LF→CRLF diff churn) and shell scripts like .husky/*
+#                stay LF-safe. The app deploys to Linux, so LF is the
+#                correct canonical form.
+* text=auto eol=lf
