@@ -54,8 +54,11 @@ type HeldCompaniesResponse = {
   companies: HeldCompany[];
 };
 
-// Daily job fires Wed-Sat 02:00 UTC. UTC weekday: 0=Sun, 1=Mon, ... 6=Sat.
-const DAILY_TICK_DAYS = new Set([3, 4, 5, 6]);
+// Daily job fires every day EXCEPT Tuesday (the weekly full pipeline
+// covers Tue), at 02:00 UTC. UTC weekday: 0=Sun, 1=Mon, … 6=Sat — so the
+// tick days are everything but 2 (Tue). Plus a startup catch-up fires it
+// immediately whenever held snapshots are stale.
+const DAILY_TICK_DAYS = new Set([0, 1, 3, 4, 5, 6]);
 
 function computeNextDailyTickUtc(now: Date): Date {
   const next = new Date(Date.UTC(
@@ -198,7 +201,7 @@ export default function DailyMtdRefreshCard() {
   const nextTick = !isRunning ? computeNextDailyTickUtc(new Date()) : null;
 
   const summaryLine = (() => {
-    if (!last) return 'No runs yet — fires next Wed-Sat 02:00 UTC or click Run now';
+    if (!last) return 'No runs yet — fires daily (except Tue) at 02:00 UTC, catches up automatically on startup when stale, or click Run now';
     if (last.status === 'running') return last.current_message || 'running…';
     if (last.status === 'error') return last.error_summary || 'failed';
     const mom = last.momentum_summary || [];
@@ -220,7 +223,7 @@ export default function DailyMtdRefreshCard() {
           <div className="flex-1 min-w-0">
             <h3 className="text-sm font-medium text-white">Daily MTD refresh</h3>
             <p className="text-xs text-gray-500 mt-0.5">
-              Wed-Sat 02:00 UTC · pools held companies across all enabled strategies, refreshes prices, then persists MTD onto each strategy&apos;s latest snapshot
+              Daily (except Tue) 02:00 UTC + an automatic catch-up on startup when snapshots are stale · pools held companies across all enabled strategies, refreshes prices, then persists MTD onto each strategy&apos;s latest snapshot
             </p>
           </div>
         </button>

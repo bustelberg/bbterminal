@@ -62,13 +62,13 @@ export function useVariantSelection({
 
   // ── Axis selection state ─────────────────────────────────────────
   const [selectedFreqs, setSelectedFreqs] = useState<Set<RebalanceFrequency>>(
-    () => new Set<RebalanceFrequency>(['monthly', 'every_2_months', 'every_3_months']),
+    () => new Set<RebalanceFrequency>(['monthly']),
   );
   const [selectedStrategies, setSelectedStrategies] = useState<Set<StrategyType>>(
     () => new Set<StrategyType>(['long_only']),
   );
   const [selectedUniverses, setSelectedUniverses] = useState<Set<string>>(
-    () => new Set<string>(['ACWI_LEONTEQ']),
+    () => new Set<string>(['LEONTEQ']),
   );
   const [selectedGroupings, setSelectedGroupings] = useState<Set<'sector' | 'industry'>>(
     () => new Set<'sector' | 'industry'>(['sector']),

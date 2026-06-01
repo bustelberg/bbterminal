@@ -71,7 +71,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 
 # backend — create backend/.env
 SUPABASE_URL=...
-SUPABASE_SERVICE_ROLE_KEY=...
+SUPABASE_SERVICE_KEY=...
 ```
 
 ---
@@ -79,8 +79,14 @@ SUPABASE_SERVICE_ROLE_KEY=...
 ## Useful commands
 
 ```bash
-# Run frontend linter
+# Frontend: lint / typecheck / unit tests / e2e
 cd frontend && npm run lint
+cd frontend && npx tsc --noEmit
+cd frontend && npm test          # vitest
+cd frontend && npm run e2e        # Playwright (runs a production build)
+
+# Backend: unit tests (momentum engine)
+cd backend && uv run pytest tests/
 
 # Build frontend for production (local check)
 cd frontend && npm run build

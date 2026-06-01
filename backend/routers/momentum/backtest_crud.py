@@ -164,9 +164,14 @@ def _expand_in_place(blob: dict) -> None:
 class SaveBacktestRequest(BaseModel):
     name: str
     config: dict
-    # Single-run shape: provide summary + monthly_records.
+    # Single-run shape: provide summary + monthly_records. The two daily
+    # curves are optional but strongly recommended — without them a loaded
+    # single run falls back to month-end points and the equity / vs-universe
+    # / alpha charts render monthly instead of daily.
     summary: dict | None = None
     monthly_records: list | None = None
+    daily_records: list | None = None
+    universe_daily_records: list | None = None
     # Variant-bundle shape: provide a list of variants, each
     # {key, label, summary, monthly_records}. When present, `summary` /
     # `monthly_records` are ignored and the row is stored as
@@ -206,6 +211,14 @@ async def save_backtest(req: SaveBacktestRequest):
             "monthly_records": req.monthly_records,
             "universe": req.universe,
         }
+        # Persist the daily curves when the caller supplied them so a
+        # loaded single run keeps daily granularity. Only set the keys when
+        # present — _compact_in_place / _expand_in_place key off `f in blob`,
+        # and legacy rows that never had them must stay absent (not []).
+        if req.daily_records is not None:
+            result_blob["daily_records"] = req.daily_records
+        if req.universe_daily_records is not None:
+            result_blob["universe_daily_records"] = req.universe_daily_records
     _compact_in_place(result_blob)
 
     # Serialize + gzip. JSON is canonical (sorted=False; preserve insert

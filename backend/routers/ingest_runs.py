@@ -384,6 +384,7 @@ def _run_templates_phase(run_id: int) -> None:
     diff entries; `current_picks_snapshot.backtest_run_id` ties momentum
     output back to its source strategy."""
     from index_universe.templates import all_templates  # noqa: PLC0415
+    from index_universe.templates import _refresh_status  # noqa: PLC0415
 
     templates = all_templates()
     if not templates:
@@ -403,7 +404,12 @@ def _run_templates_phase(run_id: int) -> None:
                 _update_run(run_id, current_message=f"{_prefix} {message}")
 
         try:
-            result = t.refresh(supabase, on_progress=on_progress)
+            # tracked_refresh mirrors live progress into the in-process
+            # status registry so the /schedule template rows show a busy
+            # spinner + progress bar for scheduled (not just manual) runs.
+            result = _refresh_status.tracked_refresh(
+                t, supabase, extra_on_progress=on_progress,
+            )
             summaries.append(result.diff.to_summary_entry())
         except Exception as e:
             msg = f"{type(e).__name__}: {e}"

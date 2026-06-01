@@ -22,6 +22,9 @@ const SECTOR_LABEL_GAP = 12; // matches `pr-3` on the label div
 
 type Props = {
   result: BacktestResult;
+  /** Optional "go-live" date (YYYY-MM-DD). Drawn as a red dashed vertical
+   * line at the month cell containing it, matching the other charts. */
+  markerDate?: string;
 };
 
 // Sector color palette lives in `lib/sectorColors.ts` so /schedule's
@@ -281,7 +284,7 @@ function buildTimelineData(
   return { sectors, runs, runByMonth, weightByMonth, months, cadenceDays: detectCadenceDays(months) };
 }
 
-function SectorTimelineChartInner({ result }: Props) {
+function SectorTimelineChartInner({ result, markerDate }: Props) {
   // A long-short backtest has at least one holding with side === 'short'.
   // Long-only results omit `side` entirely (or always have 'long'), so the
   // single-panel branch covers the original behavior unchanged.
@@ -345,6 +348,7 @@ function SectorTimelineChartInner({ result }: Props) {
           title="Sector Timeline"
           data={longData}
           defaultCollapsed={false}
+          markerDate={markerDate}
         />
       </div>
     );
@@ -357,11 +361,13 @@ function SectorTimelineChartInner({ result }: Props) {
         title="Sector Timeline · Long"
         data={longData}
         defaultCollapsed={false}
+        markerDate={markerDate}
       />
       <TimelinePanel
         title="Sector Timeline · Short"
         data={shortData!}
         defaultCollapsed={false}
+        markerDate={markerDate}
       />
     </div>
   );
@@ -438,10 +444,12 @@ function TimelinePanel({
   title,
   data,
   defaultCollapsed,
+  markerDate,
 }: {
   title: string;
   data: TimelineData;
   defaultCollapsed: boolean;
+  markerDate?: string;
 }) {
   const { sectors, runs, runByMonth, weightByMonth, months, cadenceDays } = data;
   const [hoveredRun, setHoveredRun] = useState<{ sector: string; runIdx: number } | null>(null);
@@ -487,6 +495,26 @@ function TimelinePanel({
   // scrollLeft = scrollWidth pins us to the right (most recent periods).
   const innerWidth = cellsTotalWidth;
   const hasOverflow = cellsTotalWidth > cellAreaWidth + 0.5;
+
+  // Go-live marker: px offset from the left of the cell strip, placed
+  // proportionally (by calendar day) within the month cell that contains
+  // the date. Null when there's no marker or it falls before the visible
+  // range. Cheap plain const — recomputes each render with cellWidth.
+  let markerLeft: number | null = null;
+  if (markerDate && cellWidth > 0 && months.length > 0) {
+    const norm = (s: string) => (s.length === 7 ? `${s}-01` : s.slice(0, 10));
+    let mi = -1;
+    for (let i = 0; i < months.length; i++) {
+      if (norm(months[i]) <= markerDate) mi = i;
+      else break;
+    }
+    if (mi >= 0) {
+      const cellStart = new Date(norm(months[mi])).getTime();
+      const go = new Date(markerDate).getTime();
+      const frac = Math.max(0, Math.min(1, (go - cellStart) / (cadenceDays * 86400000)));
+      markerLeft = (mi + frac) * cellWidth;
+    }
+  }
 
   // On mount + when content/cell-width changes, jump to the right edge so
   // the most recent ~5 years are visible. The user pans backward in time
@@ -730,6 +758,17 @@ function TimelinePanel({
                   </div>
                 );
               })}
+
+              {/* Go-live marker — a red dashed vertical line spanning the
+                  cell rows at the month containing the date. pointer-events
+                  off so it never blocks a cell hover. */}
+              {markerLeft != null && (
+                <div
+                  className="absolute top-0 bottom-0 pointer-events-none"
+                  style={{ left: markerLeft, borderLeft: '1.5px dashed #ef4444', zIndex: 6 }}
+                  title={`Go-live ${markerDate}`}
+                />
+              )}
             </div>
           </div>
         </div>

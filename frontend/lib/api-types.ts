@@ -2019,6 +2019,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/momentum/prices-at": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Prices At
+         * @description Close price (local + EUR) for each company at the nearest trading day
+         *     on/before `as_of`. Read-only DB lookup — the Portfolio table uses it to
+         *     re-price holdings at a go-live split boundary so each sub-period shows
+         *     the entry/exit prices for its own dates. `company_ids` is comma-separated.
+         */
+        get: operations["prices_at_api_momentum_prices_at_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/momentum/signal-breakdown": {
         parameters: {
             query?: never;
@@ -2191,9 +2214,10 @@ export interface paths {
         head?: never;
         /**
          * Patch Scheduled Strategy
-         * @description Toggle `enabled`. Re-pointing at a different config isn't
-         *     allowed in place — delete + re-add to keep per-snapshot
-         *     attribution unambiguous.
+         * @description Toggle `enabled` and/or set the configurable `start_date` (the
+         *     go-live marker + live cutoff). Re-pointing at a different config isn't
+         *     allowed in place — delete + re-add to keep per-snapshot attribution
+         *     unambiguous.
          */
         patch: operations["patch_scheduled_strategy_api_scheduled_strategies__strategy_id__patch"];
         trace?: never;
@@ -2245,6 +2269,34 @@ export interface paths {
          *        repeat opens of the dropdown within 60s don't even round-trip.
          */
         get: operations["list_universe_templates_api_universe_templates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/universe-templates/refresh-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Universe Template Refresh Status
+         * @description Live per-template refresh status from the in-process registry.
+         *
+         *     Cheap (no DB) so the frontend can poll it every couple seconds to drive
+         *     the busy spinner + progress bar. Returns only templates touched since
+         *     process start; absent keys mean "idle". Shape: `{template_key:
+         *     {status, message, pct, started_at, finished_at, error}}`.
+         *
+         *     NOTE: declared BEFORE `/{template_key}` so this static path isn't
+         *     swallowed by the path-param route.
+         */
+        get: operations["universe_template_refresh_status_api_universe_templates_refresh_status_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2934,6 +2986,8 @@ export interface components {
             config: {
                 [key: string]: unknown;
             };
+            /** Daily Records */
+            daily_records?: unknown[] | null;
             /** Monthly Records */
             monthly_records?: unknown[] | null;
             /** Name */
@@ -2944,6 +2998,8 @@ export interface components {
             } | null;
             /** Universe */
             universe: unknown[];
+            /** Universe Daily Records */
+            universe_daily_records?: unknown[] | null;
             /** Variants */
             variants?: unknown[] | null;
         };
@@ -2970,11 +3026,17 @@ export interface components {
             frequency: string;
             /** Name */
             name: string;
+            /** Start Date */
+            start_date?: string | null;
         };
         /** ScheduledStrategyPatch */
         ScheduledStrategyPatch: {
+            /** Clear Start Date */
+            clear_start_date?: boolean | null;
             /** Enabled */
             enabled?: boolean | null;
+            /** Start Date */
+            start_date?: string | null;
         };
         /** ScreenRequest */
         ScreenRequest: {
@@ -5884,6 +5946,38 @@ export interface operations {
             };
         };
     };
+    prices_at_api_momentum_prices_at_get: {
+        parameters: {
+            query: {
+                as_of: string;
+                company_ids: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     signal_breakdown_api_momentum_signal_breakdown_post: {
         parameters: {
             query?: never;
@@ -6163,6 +6257,26 @@ export interface operations {
         };
     };
     list_universe_templates_api_universe_templates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    universe_template_refresh_status_api_universe_templates_refresh_status_get: {
         parameters: {
             query?: never;
             header?: never;

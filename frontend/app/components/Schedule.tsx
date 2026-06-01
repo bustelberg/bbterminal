@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import DailyMtdRefreshCard from './DailyMtdRefreshCard';
+import Spinner from './Spinner';
 import ScheduledStrategyDetail, { type StrategyRunHistory } from './ScheduledStrategyDetail';
 import LoadingDots from './LoadingDots';
 import { type StepDef, type StepState } from './ProgressTimeline';
@@ -318,6 +319,10 @@ export default function Schedule() {
   const [strategiesLoading, setStrategiesLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedStrategyId, setExpandedStrategyId] = useState<number | null>(null);
+  // Latest available close-price date across all companies (the freshest
+  // data the pipeline could compute against). Shown on every strategy row
+  // so the user can tell at a glance how current the underlying data is.
+  const [latestPriceDate, setLatestPriceDate] = useState<string | null>(null);
   // Per-strategy run-history cache. Survives collapse/re-expand so the
   // detail view renders instantly on a second click; the detail still
   // fires a silent revalidate fetch on every mount to pick up updates.
@@ -346,6 +351,18 @@ export default function Schedule() {
   useEffect(() => {
     void loadStrategies();
   }, [loadStrategies]);
+
+  // Fetch the latest available close-price date once on mount.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_URL}/api/data/latest-price-date`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { date?: string | null } | null) => {
+        if (!cancelled && d?.date) setLatestPriceDate(d.date);
+      })
+      .catch(() => { /* non-critical — row just omits the date */ });
+    return () => { cancelled = true; };
+  }, []);
 
   const toggleStrategy = useCallback(async (id: number, enabled: boolean) => {
     try {
@@ -527,6 +544,12 @@ export default function Schedule() {
                                 {' · '}next {fmtTimestamp(s.next_due_at)}
                               </span>
                             )}
+                            {latestPriceDate && (
+                              <span className="text-gray-500">
+                                {' · '}latest price{' '}
+                                <span className="text-gray-400">{latestPriceDate}</span>
+                              </span>
+                            )}
                           </div>
                           {s.last_snapshot && (
                             <div className="text-xs text-gray-500 mt-0.5 font-mono flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -622,6 +645,11 @@ function TemplateUniversesCard() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [triggering, setTriggering] = useState(false);
   const [triggerError, setTriggerError] = useState<string | null>(null);
+  // Live per-template refresh status, polled from the in-process registry
+  // so the busy spinner + progress bar reflect ANY refresh (manual click,
+  // scheduled month-end tick, or the daily pipeline) — not just one the
+  // current tab triggered.
+  const [statuses, setStatuses] = useState<Record<string, TemplateRefreshStatus>>({});
 
   const load = useCallback(async () => {
     try {
@@ -639,6 +667,36 @@ function TemplateUniversesCard() {
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  // Poll the cheap (no-DB) status endpoint. When a template transitions
+  // out of 'running' (a refresh just finished), refetch the summary so its
+  // latest-month / last-refreshed / member-count update.
+  const runningKeysRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const r = await fetch(`${API_URL}/api/universe-templates/refresh-status`);
+        if (!r.ok || cancelled) return;
+        const data = (await r.json()) as Record<string, TemplateRefreshStatus>;
+        if (cancelled) return;
+        setStatuses(data);
+        const nowRunning = new Set(
+          Object.entries(data).filter(([, s]) => s.status === 'running').map(([k]) => k),
+        );
+        // A key that was running last poll but isn't now → just finished.
+        let finished = false;
+        runningKeysRef.current.forEach((k) => { if (!nowRunning.has(k)) finished = true; });
+        runningKeysRef.current = nowRunning;
+        if (finished) void load();
+      } catch {
+        // Network blip — next tick retries.
+      }
+    };
+    void poll();
+    const id = window.setInterval(poll, 3000);
+    return () => { cancelled = true; window.clearInterval(id); };
   }, [load]);
 
   const triggerPipeline = useCallback(async () => {
@@ -727,7 +785,7 @@ function TemplateUniversesCard() {
         {templates && templates.length > 0 && (
           <div className="divide-y divide-gray-800/30">
             {templates.map((t) => (
-              <TemplateRow key={t.template_key} t={t} />
+              <TemplateRow key={t.template_key} t={t} status={statuses[t.template_key]} />
             ))}
           </div>
         )}
@@ -737,54 +795,139 @@ function TemplateUniversesCard() {
 }
 
 
+/** Live refresh status for one template, from the in-process registry
+ * (`GET /api/universe-templates/refresh-status`). Absent when the template
+ * hasn't been refreshed since the backend process started. */
+type TemplateRefreshStatus = {
+  status: 'running' | 'done' | 'error';
+  message?: string;
+  pct?: number | null;
+  started_at?: string;
+  finished_at?: string | null;
+  error?: string | null;
+};
+
 /** Per-template row in the templates section. Collapsible — click to
- * expand into the recent additions/removals diff. Shows last refresh +
- * next-refresh ETA so the user can tell at a glance when the data
- * was last updated and when it'll auto-refresh next. */
-function TemplateRow({ t }: { t: UniverseTemplateSummary }) {
+ * expand into a live progress bar (while refreshing) + the recent
+ * additions/removals diff. Shows a busy spinner whenever a refresh is in
+ * flight (manual or scheduled), last refresh + next-refresh ETA, and a
+ * per-row "Refresh" button that triggers a catch-up on demand. */
+function TemplateRow({ t, status }: { t: UniverseTemplateSummary; status?: TemplateRefreshStatus }) {
   const [expanded, setExpanded] = useState(false);
+  const [triggering, setTriggering] = useState(false);
   const neverRefreshed = t.last_refreshed_at == null;
+  const busy = status?.status === 'running' || triggering;
+
+  // Once the poll confirms this template is running, drop the optimistic
+  // local flag (the registry status now drives the spinner).
+  useEffect(() => {
+    if (status?.status === 'running') setTriggering(false);
+  }, [status?.status]);
+
+  const triggerRefresh = () => {
+    setTriggering(true);
+    setExpanded(true); // reveal the progress bar immediately
+    void (async () => {
+      try {
+        const r = await apiFetch(
+          `${API_URL}/api/universe-templates/${encodeURIComponent(t.template_key)}/refresh`,
+          { method: 'POST', headers: { Accept: 'text/event-stream' } },
+        );
+        // Drain + discard so the connection closes cleanly; the status
+        // poll in the parent drives the spinner / progress bar / refetch.
+        const reader = r.body?.getReader();
+        if (reader) { while (true) { const { done } = await reader.read(); if (done) break; } }
+      } catch {
+        // The status poll surfaces any error state.
+      } finally {
+        setTriggering(false);
+      }
+    })();
+  };
+
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="w-full px-5 py-3 flex items-center gap-3 flex-wrap hover:bg-white/[0.02] transition-colors text-left"
-      >
-        <span className="text-gray-500 text-xs font-mono w-3 inline-block">
-          {expanded ? '▾' : '▸'}
-        </span>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className={`text-sm font-medium ${neverRefreshed ? 'text-amber-200' : 'text-white'}`}>
-              {t.label}
-            </span>
-            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-gray-500/10 text-gray-400 border-gray-500/30 font-mono">
-              {t.template_key}
-            </span>
-            {neverRefreshed && (
-              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-amber-500/15 text-amber-300 border-amber-500/40">
-                never refreshed
+      <div className="w-full px-5 py-3 flex items-center gap-3 hover:bg-white/[0.02] transition-colors">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="flex items-center gap-3 flex-1 min-w-0 text-left"
+        >
+          <span className="text-gray-500 text-xs font-mono w-3 inline-block shrink-0">
+            {expanded ? '▾' : '▸'}
+          </span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`text-sm font-medium ${neverRefreshed ? 'text-amber-200' : 'text-white'}`}>
+                {t.label}
               </span>
-            )}
+              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-gray-500/10 text-gray-400 border-gray-500/30 font-mono">
+                {t.template_key}
+              </span>
+              {busy && <Spinner className="h-3.5 w-3.5 text-indigo-400" />}
+              {neverRefreshed && !busy && (
+                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-amber-500/15 text-amber-300 border-amber-500/40">
+                  never refreshed
+                </span>
+              )}
+            </div>
+            <div className="text-xs text-gray-500 mt-0.5 font-mono">
+              {neverRefreshed ? (
+                <span className="text-amber-300/80">no membership data yet</span>
+              ) : (
+                <>
+                  {t.latest_membership_count} member{t.latest_membership_count === 1 ? '' : 's'}
+                  {t.latest_captured_month && ` · latest month ${t.latest_captured_month}`}
+                  {' · last refresh '}
+                  {fmtTimestamp(t.last_refreshed_at)}
+                  {' · next refresh '}
+                  <span className="text-gray-400">{fmtTimestamp(nextDailyTemplateRefresh())}</span>
+                </>
+              )}
+            </div>
           </div>
-          <div className="text-xs text-gray-500 mt-0.5 font-mono">
-            {neverRefreshed ? (
-              <span className="text-amber-300/80">no membership data yet</span>
-            ) : (
-              <>
-                {t.latest_membership_count} member{t.latest_membership_count === 1 ? '' : 's'}
-                {t.latest_captured_month && ` · latest month ${t.latest_captured_month}`}
-                {' · last refresh '}
-                {fmtTimestamp(t.last_refreshed_at)}
-                {' · next refresh '}
-                <span className="text-gray-400">{fmtTimestamp(nextDailyTemplateRefresh())}</span>
-              </>
-            )}
-          </div>
-        </div>
-      </button>
-      {expanded && <TemplateRecentChanges templateKey={t.template_key} />}
+        </button>
+        <button
+          type="button"
+          onClick={triggerRefresh}
+          disabled={busy}
+          className="shrink-0 text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors"
+        >
+          {busy ? 'Refreshing…' : 'Refresh'}
+        </button>
+      </div>
+      {expanded && (
+        <>
+          {status && (status.status === 'running' || status.status === 'error') && (
+            <div className="px-5 pt-3 pb-1 space-y-1">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className={status.status === 'error' ? 'text-rose-300' : 'text-indigo-300'}>
+                  {status.status === 'error'
+                    ? 'Refresh failed'
+                    : (status.message || 'Refreshing…')}
+                </span>
+                {status.status === 'running' && status.pct != null && (
+                  <span className="font-mono text-gray-400">{status.pct}%</span>
+                )}
+              </div>
+              <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                <div
+                  className={`h-full transition-all duration-300 ${status.status === 'error' ? 'bg-rose-500' : 'bg-indigo-500'}`}
+                  // Indeterminate (no pct) → a partial bar so the user still
+                  // sees motion via the changing message above.
+                  style={{ width: `${status.status === 'error' ? 100 : (status.pct ?? 35)}%` }}
+                />
+              </div>
+              {status.status === 'error' && status.error && (
+                <div className="text-[11px] text-rose-300/80 font-mono truncate" title={status.error}>
+                  {status.error}
+                </div>
+              )}
+            </div>
+          )}
+          <TemplateRecentChanges templateKey={t.template_key} />
+        </>
+      )}
     </div>
   );
 }

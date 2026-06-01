@@ -1,8 +1,9 @@
 'use client';
 
+import { useMemo } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  CartesianGrid, Legend, ReferenceArea,
+  CartesianGrid, Legend, ReferenceArea, ReferenceLine,
 } from 'recharts';
 import CollapsibleCard from '../CollapsibleCard';
 import { tooltipStyle } from '../utils';
@@ -20,6 +21,7 @@ export default function EquityChart({
   setLogScale,
   hoveredDrawdown,
   setHoveredDrawdown,
+  markerDate,
 }: {
   displayChartData: Record<string, string | number | null>[];
   alignedSeries: AlignedResult;
@@ -28,7 +30,28 @@ export default function EquityChart({
   setLogScale: (v: boolean) => void;
   hoveredDrawdown: number | null;
   setHoveredDrawdown: (v: number | null) => void;
+  /** Optional "go-live" date (YYYY-MM-DD) drawn as a red dashed vertical
+   * line. Snapped to the nearest chart x-value at/after the date so it
+   * renders on this category axis even when the exact day isn't a point. */
+  markerDate?: string;
 }) {
+  // The x-axis is categorical (date strings), so a ReferenceLine's `x`
+  // must equal an existing data point's date. Snap the marker to the first
+  // chart date at/after it (or the last point when it's past the curve's
+  // end). Dates are ISO so lexical comparison is chronological; slicing to
+  // the data point's own length lets a YYYY-MM-DD marker match YYYY-MM
+  // monthly points too.
+  const markerX = useMemo<string | null>(() => {
+    if (!markerDate || displayChartData.length === 0) return null;
+    for (const row of displayChartData) {
+      const d = row.date;
+      if (typeof d !== 'string') continue;
+      if (d >= markerDate.slice(0, d.length)) return d;
+    }
+    const last = displayChartData[displayChartData.length - 1]?.date;
+    return typeof last === 'string' ? last : null;
+  }, [markerDate, displayChartData]);
+
   return (
     <CollapsibleCard
       title={`Equity Curve (${logScale ? 'Log' : 'Cumulative'} Return %)`}
@@ -113,6 +136,16 @@ export default function EquityChart({
               connectNulls
             />
           ))}
+          {markerX != null && (
+            <ReferenceLine
+              x={markerX}
+              stroke="#ef4444"
+              strokeDasharray="5 5"
+              strokeWidth={1.5}
+              ifOverflow="extendDomain"
+              label={{ value: 'Go-live', position: 'insideTopRight', fill: '#f87171', fontSize: 10 }}
+            />
+          )}
         </LineChart>
       </ResponsiveContainer>
     </CollapsibleCard>

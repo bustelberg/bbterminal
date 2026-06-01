@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import SnapshotHoldings from './SnapshotHoldings';
 import LoadingDots from './LoadingDots';
+import DatePartsPicker from './DatePartsPicker';
+import { apiFetch } from '../../lib/apiFetch';
 import { StrategyConfigDetail, type IngestRun } from './Schedule';
 import { colorForSector } from '../../lib/sectorColors';
 
@@ -54,6 +56,10 @@ export type StrategyRunHistory = {
   config: Record<string, unknown>;
   enabled: boolean;
   created_at: string;
+  /** Configurable go-live date (YYYY-MM-DD). Red dashed marker on the
+   * source-backtest equity curve + live cutoff for the run history.
+   * Null → defaults to the strategy's created_at. */
+  start_date: string | null;
   last_run_at: string | null;
   next_due_at: string | null;
   backfill: BackfillState | null;
@@ -108,6 +114,7 @@ export default function ScheduledStrategyDetail({
   useEffect(() => { onLoadedRef.current = onLoaded; }, [onLoaded]);
   const [expandedSnapshotId, setExpandedSnapshotId] = useState<number | null>(null);
   const [showConfig, setShowConfig] = useState(false);
+  const [savingStartDate, setSavingStartDate] = useState(false);
 
   /** Per-row sector → column assignment for the run-history grid.
    *
@@ -214,6 +221,26 @@ export default function ScheduledStrategyDetail({
     return () => clearInterval(id);
   }, [data?.backfill?.status, load]);
 
+  // Persist the configurable go-live date. Empty string clears it (falls
+  // back to created_at). PATCHes then reloads so the marker + cutoff
+  // re-derive from the authoritative server value.
+  const saveStartDate = async (value: string) => {
+    setSavingStartDate(true);
+    try {
+      const body = value
+        ? { start_date: value }
+        : { clear_start_date: true };
+      const r = await apiFetch(`${API_URL}/api/scheduled-strategies/${strategyId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (r.ok) await load();
+    } finally {
+      setSavingStartDate(false);
+    }
+  };
+
   if (loading) {
     return <div className="px-5 py-4 bg-[#0b0d13] text-xs text-gray-500 border-t border-gray-800/30"><LoadingDots label="Loading run history" /></div>;
   }
@@ -221,6 +248,11 @@ export default function ScheduledStrategyDetail({
     return <div className="px-5 py-4 bg-[#0b0d13] text-xs text-rose-300 border-t border-gray-800/30">{error}</div>;
   }
   if (!data) return null;
+
+  // Go-live cutoff (YYYY-MM-DD): the configured start_date, or the
+  // strategy's scheduled date when unset. Snapshots dated before this are
+  // backtest/pre-live; on-or-after are live forward performance.
+  const effectiveStart = (data.start_date ?? data.created_at).slice(0, 10);
 
   return (
     <div className="px-5 py-4 bg-[#0b0d13] border-t border-gray-800/30 space-y-4">
@@ -267,18 +299,48 @@ export default function ScheduledStrategyDetail({
         </div>
       )}
 
-      {/* Source backtest (only when added via the "+ Schedule" button on
-          /backtest). Renders the variant's full equity curve + headline
-          stats with a red vertical line at the date this strategy was
-          scheduled, so the cutover between backtest history and live
-          performance is unmistakable. */}
-      {data.backtest_run_id != null && (
-        <SourceBacktestCard
-          runId={data.backtest_run_id}
-          scheduledAt={data.created_at}
-          liveSnapshots={data.runs}
-        />
-      )}
+      {/* Go-live date editor. Drives the red dashed marker on the equity
+          curve below + the live cutoff in the run history. Defaults to the
+          strategy's created_at when never set. */}
+      {data.backtest_run_id != null && (() => {
+        const isCustom = data.start_date != null;
+        return (
+          <>
+            <div className="flex items-center flex-wrap gap-x-3 gap-y-1.5 text-xs">
+              <span className="text-gray-400">Go-live date</span>
+              <DatePartsPicker
+                value={effectiveStart}
+                onChange={(iso) => { if (iso) void saveStartDate(iso); }}
+                minYear={2002}
+                maxYear={new Date().getUTCFullYear() + 1}
+              />
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-gray-500">
+                <span className="inline-block w-3 border-t-2 border-dashed border-rose-400" />
+                marker on the curve · live cutoff
+              </span>
+              {!isCustom && (
+                <span className="text-[11px] text-gray-600">defaults to scheduled date</span>
+              )}
+              {isCustom && (
+                <button
+                  type="button"
+                  disabled={savingStartDate}
+                  onClick={() => void saveStartDate('')}
+                  className="text-[11px] text-gray-500 hover:text-gray-300 underline disabled:opacity-50"
+                >
+                  reset
+                </button>
+              )}
+              {savingStartDate && <span className="text-[11px] text-indigo-300">saving…</span>}
+            </div>
+
+            {/* Source backtest — the variant's full equity curve, sector
+                timeline + per-month holdings, exactly as on /backtest, with
+                the red dashed go-live marker at the date above. */}
+            <SourceBacktestCard runId={data.backtest_run_id} markerDate={effectiveStart} />
+          </>
+        );
+      })()}
 
       {/* Run history */}
       <div>
@@ -337,6 +399,14 @@ export default function ScheduledStrategyDetail({
                           title="Synthetic preview — what the strategy would have produced. NOT a real pipeline run."
                         >
                           backfill
+                        </span>
+                      )}
+                      {!entry.is_backfill && entry.as_of_date < effectiveStart && (
+                        <span
+                          className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-gray-500/15 text-gray-400 border-gray-500/30"
+                          title="Dated before the go-live date — counts as backtest / pre-live, not live forward performance."
+                        >
+                          pre-live
                         </span>
                       )}
                       <span

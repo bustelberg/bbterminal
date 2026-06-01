@@ -94,10 +94,19 @@ class ScheduledStrategyCreate(BaseModel):
     frequency: str
     config: dict
     backtest_run_id: int
+    # Optional go-live date. NULL/omitted → the strategy's created_at is
+    # used as the equity-curve marker + live cutoff.
+    start_date: date | None = None
 
 
 class ScheduledStrategyPatch(BaseModel):
     enabled: bool | None = None
+    # Configurable go-live date (red dashed marker + live cutoff). A
+    # present `start_date` sets it; `clear_start_date=True` resets it to
+    # NULL (fall back to created_at). They're mutually exclusive — a
+    # non-null start_date wins if both are sent.
+    start_date: date | None = None
+    clear_start_date: bool | None = None
 
 
 # ─── Frequency math ───────────────────────────────────────────────
@@ -860,6 +869,9 @@ def _hydrate(rows: list[dict]) -> list[dict]:
             "enabled": r.get("enabled", True),
             "created_at": r.get("created_at"),
             "updated_at": r.get("updated_at"),
+            # Configurable go-live date (red dashed equity-curve marker +
+            # live cutoff). NULL → frontend defaults to created_at.
+            "start_date": r.get("start_date"),
             "last_run_at": r.get("last_run_at"),
             "next_due_at": r.get("next_due_at"),
             "backfill": {
@@ -1157,6 +1169,8 @@ async def add_scheduled_strategy(body: ScheduledStrategyCreate):
             "next_due_at": next_due,
             "backtest_run_id": body.backtest_run_id,
         }
+        if body.start_date is not None:
+            insert_row["start_date"] = body.start_date.isoformat()
         try:
             resp = (
                 supabase.table("scheduled_strategy")
@@ -1177,18 +1191,28 @@ async def add_scheduled_strategy(body: ScheduledStrategyCreate):
 
 @router.patch("/api/scheduled-strategies/{strategy_id}")
 async def patch_scheduled_strategy(strategy_id: int, body: ScheduledStrategyPatch):
-    """Toggle `enabled`. Re-pointing at a different config isn't
-    allowed in place — delete + re-add to keep per-snapshot
-    attribution unambiguous."""
-    if body.enabled is None:
-        raise HTTPException(400, "Nothing to update (pass `enabled`).")
+    """Toggle `enabled` and/or set the configurable `start_date` (the
+    go-live marker + live cutoff). Re-pointing at a different config isn't
+    allowed in place — delete + re-add to keep per-snapshot attribution
+    unambiguous."""
+    update_dict: dict = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    if body.enabled is not None:
+        update_dict["enabled"] = body.enabled
+    if body.clear_start_date:
+        update_dict["start_date"] = None
+    elif body.start_date is not None:
+        update_dict["start_date"] = body.start_date.isoformat()
+    # `updated_at` is always present — require at least one real field so a
+    # no-op PATCH is a clear 400 rather than a silent timestamp bump.
+    if len(update_dict) == 1:
+        raise HTTPException(
+            400, "Nothing to update (pass `enabled`, `start_date`, or `clear_start_date`).",
+        )
+
     def _update() -> dict:
         resp = (
             supabase.table("scheduled_strategy")
-            .update({
-                "enabled": body.enabled,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            })
+            .update(update_dict)
             .eq("id", strategy_id)
             .execute()
         )
@@ -1337,12 +1361,15 @@ async def list_strategy_runs(strategy_id: int, limit: int = 50):
             "config": sched.get("config") or {},
             "enabled": sched.get("enabled", True),
             "created_at": sched.get("created_at"),
+            # Configurable go-live date (red dashed equity-curve marker +
+            # live cutoff). NULL → frontend defaults to created_at.
+            "start_date": sched.get("start_date"),
             "last_run_at": sched.get("last_run_at"),
             "next_due_at": sched.get("next_due_at"),
             # Variant-add flow stores the source backtest here. Frontend
             # fetches /api/momentum/backtests/{run_id} on expansion to
-            # render the full equity curve + monthly history with a
-            # "scheduled at" demarcation line at `created_at`.
+            # render the full equity curve + monthly history with the
+            # red dashed go-live marker at `start_date` (or created_at).
             "backtest_run_id": sched.get("backtest_run_id"),
             "backfill": {
                 "status": sched.get("backfill_status"),

@@ -22,6 +22,64 @@ log = logging.getLogger(__name__)
 _BUCKET = "gurufocus-raw"
 
 
+def _clear_membership_batched(
+    supabase: Client,
+    universe_id: int,
+    emit: Callable[[str], None],
+) -> None:
+    """Delete every membership row for a universe WITHOUT a single huge
+    DELETE.
+
+    A `DELETE ... WHERE universe_id = ?` over a large universe exceeds
+    Postgres' statement_timeout and 500s with code 57014. ACWI alone is
+    ~9k membership rows PER MONTH × hundreds of months → 500k+ rows in one
+    statement. We instead delete a couple months at a time.
+
+    The month list comes from the `universe_available_months` RPC, which
+    does a server-side `SELECT DISTINCT target_month` — so the list itself
+    is tiny (~290 rows) and never hits PostgREST's max-rows cap. That's the
+    trap the old single-statement delete was working around: the previous
+    "paginate-then-dedupe in Python" approach silently lost months when the
+    SELECT capped out, leaving orphan rows. Using the RPC keeps the
+    every-month-including-orphans guarantee while staying under the timeout.
+    """
+    try:
+        resp = supabase.rpc(
+            "universe_available_months", {"p_universe_id": universe_id}
+        ).execute()
+        months = sorted({
+            r.get("target_month")
+            for r in (resp.data or [])
+            if r.get("target_month")
+        })
+    except Exception as e:
+        log.warning(
+            "universe_available_months RPC failed for universe_id=%s (%s); "
+            "falling back to single-statement delete",
+            universe_id, e,
+        )
+        supabase.table("universe_membership").delete().eq(
+            "universe_id", universe_id
+        ).execute()
+        return
+
+    if not months:
+        return  # nothing to clear
+
+    # Delete 2 months at a time via an `in_` predicate on the indexed
+    # (universe_id, target_month) columns. At ~9k rows/month that's ~18k
+    # rows per statement — well under the timeout (an indexed delete of
+    # that size is sub-second) while keeping round-trips reasonable. Tune
+    # down if a denser universe ever creeps toward the limit.
+    chunk = 2
+    for i in range(0, len(months), chunk):
+        batch = months[i:i + chunk]
+        supabase.table("universe_membership").delete().eq(
+            "universe_id", universe_id
+        ).in_("target_month", batch).execute()
+        emit(f"Clearing existing data: {min(i + chunk, len(months))}/{len(months)} months")
+
+
 def store_index_membership(
     supabase: Client,
     index_name: str,
@@ -44,12 +102,8 @@ def store_index_membership(
     u_resp = supabase.table("universe").select("universe_id").eq("label", index_name).limit(1).execute()
     if u_resp.data:
         universe_id = u_resp.data[0]["universe_id"]
-        # Clear existing membership rows in a single statement. The previous
-        # "read all target_months then delete per month" approach silently lost
-        # months when the SELECT hit PostgREST's max-rows cap, leaving orphan
-        # rows from older saves that showed up as fluctuating monthly counts.
         emit(f"Clearing existing {index_name} membership data...")
-        supabase.table("universe_membership").delete().eq("universe_id", universe_id).execute()
+        _clear_membership_batched(supabase, universe_id, emit)
     else:
         resp = supabase.table("universe").insert({"label": index_name, "description": f"{index_name} index"}).execute()
         universe_id = resp.data[0]["universe_id"]

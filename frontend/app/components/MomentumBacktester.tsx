@@ -5,8 +5,6 @@ import { Fragment, useState, useEffect, useMemo, useRef } from 'react';
 import ApiUsageBadge from './ApiUsageBadge';
 import LoadingDots from './LoadingDots';
 import Spinner from './Spinner';
-import { dialog } from '../../lib/dialog';
-import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
 import ProgressTimeline from './ProgressTimeline';
 import NotificationsPanel from './momentum/NotificationsPanel';
@@ -22,17 +20,10 @@ import {
   loadCurrentPicksSnapshots,
   loadCurrentPicksSnapshot,
   refreshCurrentPicksMTD,
-  deleteCurrentPicksSnapshot,
-  renameCurrentPicksSnapshot,
   VARIANT_DEFS,
-  makeVariantKey,
   parseVariantKey,
   variantLabel,
-  type RebalanceFrequency,
-  type StrategyType,
   type VariantKey,
-  type VariantOutcome,
-  type VariantParams,
 } from '../../lib/stores/momentum';
 import CellInfoTip from './momentum/CellInfoTip';
 import CollapsibleCard from './momentum/CollapsibleCard';
@@ -50,9 +41,11 @@ import VariantAttribution from './momentum/VariantAttribution';
 import VariantsPanel from './momentum/VariantsPanel';
 import TableDownloadButton from './TableDownloadButton';
 import VariantSummaryTable from './momentum/VariantSummaryTable';
-import { parseMinScoreList, parseNumList } from './momentum/variantHelpers';
 import { useBacktestConfig } from './momentum/useBacktestConfig';
 import { useBacktestRun } from './momentum/useBacktestRun';
+import { useCurrentPicksSnapshots } from './momentum/useCurrentPicksSnapshots';
+import { useSavedRuns } from './momentum/useSavedRuns';
+import { useVariantsBundle } from './momentum/useVariantsBundle';
 import { useSectorEtfs } from './momentum/useSectorEtfs';
 import { useVariantSelection } from './momentum/useVariantSelection';
 import {
@@ -61,9 +54,6 @@ import {
   fmtPrice,
   guruFocusUrl,
 } from './momentum/utils';
-import type {
-  SavedRun,
-} from './momentum/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -93,12 +83,11 @@ export default function MomentumBacktester() {
     categoryWeights, setCategoryWeights,
     startDate, setStartDate,
     endDate, setEndDate,
-    topSectors, setTopSectors,
-    topPerSector, setTopPerSector,
-    grouping, setGrouping,
+    topSectors,
+    topPerSector,
     noCache, setNoCache,
     maxCompanies, setMaxCompanies,
-    minPriceScore, setMinPriceScore,
+    minPriceScore,
     selectionMode, setSelectionMode,
     randomSeed, setRandomSeed,
     nTrials, setNTrials,
@@ -123,21 +112,13 @@ export default function MomentumBacktester() {
   // config's top_n / per_sector flow in so `variantSize` can fall back
   // to them when a variant leaves the axis undefined.
   const variantSel = useVariantSelection({ topSectors, topPerSector });
-  // `variantSel` is passed whole to <VariantsPanel/>; this component only
-  // destructures the fields it still uses directly — the axis selections
-  // (for the saved-bundle naming + universe date-autofill effect), the
-  // sweep-input values (read by saveVariantsBundle), `allPermutations` /
-  // `variantsToRun` (for the totalPerms / eligibleVariants derivations
-  // below), and `setDisabledPerms` (the load-saved-run flow resets it).
+  // `variantSel` is passed whole to <VariantsPanel/>, <useVariantsBundle>, and
+  // <useSavedRuns> (which write through its setters). This component reads
+  // only `selectedUniverses` (the universe date-autofill effect) and
+  // `allPermutations` / `variantsToRun` (the totalPerms / eligibleVariants
+  // derivations below).
   const {
-    selectedFreqs, setSelectedFreqs,
-    selectedStrategies, setSelectedStrategies,
-    selectedUniverses, setSelectedUniverses,
-    selectedGroupings, setSelectedGroupings,
-    topSectorsSweep, setTopSectorsSweep,
-    perSectorSweep, setPerSectorSweep,
-    minScoreSweep, setMinScoreSweep,
-    setDisabledPerms,
+    selectedUniverses,
     allPermutations, variantsToRun,
   } = variantSel;
   // Backend rejects `long_short` + `random` (long-short without a
@@ -244,8 +225,6 @@ export default function MomentumBacktester() {
   const [showInfos, setShowInfos] = useState(false);
 
   // Save/load state
-  const [savedRuns, setSavedRuns] = useState<SavedRun[]>([]);
-  const [saving, setSaving] = useState(false);
 
   const [picksDropdownOpen, setPicksDropdownOpen] = useState(false);
   const picksDropdownRef = useRef<HTMLDivElement>(null);
@@ -258,18 +237,16 @@ export default function MomentumBacktester() {
   // Per-row spinners for the saved-backtests dropdown. The current-picks
   // dropdown reads its equivalents from the store so the actions can also
   // be driven from elsewhere (e.g. an inline rename in the picks card).
-  const [loadingRunId, setLoadingRunId] = useState<number | null>(null);
-  const [deletingRunId, setDeletingRunId] = useState<number | null>(null);
-  const [renamingRunId, setRenamingRunId] = useState<number | null>(null);
   const loadingSnapshotId = momentumStore.use((s) => s.loadingSnapshotId);
   const deletingSnapshotId = momentumStore.use((s) => s.deletingSnapshotId);
   const renamingSnapshotId = momentumStore.use((s) => s.renamingSnapshotId);
   // Multi-select set for the current-picks dropdown's bulk delete. The
   // saved-backtests dropdown owns its own selection internally now (the
   // component was extracted into SavedRunsDropdown.tsx).
-  const [selectedSnapshotIds, setSelectedSnapshotIds] = useState<Set<number>>(new Set());
-  const [bulkDeletingRuns, setBulkDeletingRuns] = useState(false);
-  const [bulkDeletingSnapshots, setBulkDeletingSnapshots] = useState(false);
+  const {
+    selectedSnapshotIds, setSelectedSnapshotIds, bulkDeletingSnapshots,
+    snapshotLabel, renameSnapshot, confirmDeleteSnapshot, bulkDeleteSnapshots, toggleSnapshotSelected,
+  } = useCurrentPicksSnapshots();
 
   // Universe selection state — only TEMPLATE-MANAGED universes are
   // listed here (currently just ACWI). User-created static snapshots
@@ -352,6 +329,9 @@ export default function MomentumBacktester() {
       .then((d: { date: string | null }) => setLatestPriceDate(d.date))
       .catch(() => { /* silent — the user can still pick a date manually */ });
     return () => undefined;
+    // Intentionally mount-only — `loadSavedRuns` (from useSavedRuns) is a
+    // fresh reference each render, so including it would re-fire every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // When universe selection changes, auto-set start/end dates per the
@@ -386,22 +366,17 @@ export default function MomentumBacktester() {
   // its own selection internally.
   useEffect(() => {
     if (!picksDropdownOpen) setSelectedSnapshotIds(new Set());
-  }, [picksDropdownOpen]);
+  }, [picksDropdownOpen, setSelectedSnapshotIds]);
 
   // null = first fetch in flight; [] = loaded but empty; non-empty array =
   // populated. The header dropdown reads this to show a spinner + "Loading
   // saved backtests…" instead of disappearing while the request is in
   // flight (which previously made the dropdown look like it materialized
   // out of nowhere when the response landed).
-  const [savedRunsLoading, setSavedRunsLoading] = useState(true);
-  const loadSavedRuns = () => {
-    setSavedRunsLoading(true);
-    fetch(`${API_URL}/api/momentum/backtests`)
-      .then((r) => r.json())
-      .then((data) => setSavedRuns(Array.isArray(data) ? data : []))
-      .catch(() => {})
-      .finally(() => setSavedRunsLoading(false));
-  };
+  const {
+    savedRuns, savedRunsLoading, loadingRunId, deletingRunId, renamingRunId, bulkDeletingRuns,
+    loadSavedRuns, loadBacktest, deleteBacktest, bulkDeleteRuns, renameBacktest,
+  } = useSavedRuns({ config, variantSel, setSectorEtfs, setSelectedIndexUniverse });
 
 
   // Long-short variants are filtered out when the selection mode
@@ -433,639 +408,18 @@ export default function MomentumBacktester() {
     recomputeCurrentPortfolio,
   } = useBacktestRun({ config, selectedIndexUniverse, sectorEtfs, eligibleVariants });
 
-  // Pin a single variant from a completed sweep to /schedule. The
-  // pipeline will then keep its current-picks snapshot up to date on
-  // every tick, AND surface its full backtest stats on /schedule's
-  // per-strategy run history. The user reaches this via the "+ Schedule"
-  // hover button on each OK row in the variants summary table.
-  const handleAddVariantToSchedule = async (variantKey: VariantKey, variantLabel: string) => {
-    const v = parseVariantKey(variantKey);
-    if (!v) {
-      await dialog.alert(`Couldn't parse variant key "${variantKey}".`, { title: 'Schedule add failed' });
-      return;
-    }
-    // Map the variant's `rebalance_frequency` to a schedule cadence.
-    // Off-cadence months (4/5/7/8/10/11) round to quarterly — those
-    // variants are rare and the cadence pinning isn't strict (the
-    // strategy still rebalances on its own internal cadence; this
-    // controls how often the pipeline refreshes the snapshot).
-    const FREQ_MAP: Record<string, string> = {
-      daily: 'daily', weekly: 'weekly', monthly: 'monthly',
-      every_2_months: 'bimonthly',
-      every_3_months: 'quarterly', every_4_months: 'quarterly',
-      every_5_months: 'quarterly', every_6_months: 'quarterly',
-      every_7_months: 'quarterly', every_8_months: 'quarterly',
-      every_9_months: 'quarterly', every_10_months: 'quarterly',
-      every_11_months: 'quarterly', every_12_months: 'quarterly',
-    };
-    const scheduleFreq = FREQ_MAP[v.frequency] ?? 'monthly';
+  const {
+    saving,
+    handleAddVariantToSchedule,
+    saveVariantsBundle,
+    defaultVariantsBundleName,
+  } = useVariantsBundle({ config, variantSel, selectedIndexUniverse, sectorEtfs, loadSavedRuns });
 
-    const defaultName = `${variantLabel} · ${v.universe ?? selectedIndexUniverse ?? 'ACWI_LEONTEQ'}`;
-    const enteredName = await dialog.prompt(
-      `Save this variant to /schedule. Pipeline cadence: ${scheduleFreq} (mapped from "${v.frequency}").`,
-      { title: 'Add variant to schedule', defaultValue: defaultName, placeholder: 'Strategy name' },
-    );
-    if (!enteredName || !enteredName.trim()) return;
 
-    // Build the full config. Merge order: base from this component's
-    // state, then variant overrides (frequency, strategy_type, and any
-    // per-axis dials that differ from base).
-    const config: Record<string, unknown> = {
-      selection_mode: selectionMode,
-      index_universe: v.universe ?? selectedIndexUniverse ?? null,
-      universe_label: null,
-      max_companies: maxCompanies,
-      strategy_type: v.strategy,
-      rebalance_frequency: v.frequency,
-      top_n_sectors: v.top_n_sectors ?? topSectors,
-      top_n_per_sector: v.top_n_per_sector ?? topPerSector,
-      grouping: v.grouping ?? grouping,
-      start_date: `${startDate}-01`,
-      end_date: `${endDate}-01`,
-    };
-    if (selectionMode === 'momentum') {
-      const baseMs = minPriceScore.trim() === '' ? null : Number(minPriceScore);
-      // Variant `min_price_score === null` means "explicit OFF" (sweep
-      // axis entered "none"/"off"); undefined means "inherit base".
-      config.min_price_score =
-        v.min_price_score === undefined ? baseMs : v.min_price_score;
-      config.signal_weights = weights;
-      config.category_weights = categoryWeights;
-    }
-    if (selectionMode === 'random') {
-      config.random_seed = randomSeed;
-      config.n_trials = Math.max(1, nTrials);
-    }
-    if (selectionMode === 'sector_etf') {
-      config.sector_etfs = sectorEtfs;
-    }
-
-    // Grab the variant's actual BacktestResult so we can persist it as
-    // a saved backtest_run. The scheduled_strategy then links to that
-    // run via `backtest_run_id` — /schedule renders the full equity
-    // curve + monthly history from this on expansion, no recompute
-    // needed. The pipeline still produces live snapshots on every
-    // tick; those get appended past the "scheduled at" date with
-    // visually-distinct styling so the cutover is clear.
-    const variantOutcome = momentumStore.get().variants[variantKey];
-    if (!variantOutcome || variantOutcome.status !== 'ok') {
-      await dialog.alert('Variant has no completed backtest result to save.', { title: 'Schedule add failed' });
-      return;
-    }
-    const result = variantOutcome.result;
-    try {
-      // 1. Persist the variant's BacktestResult as a backtest_run row.
-      const saveResp = await apiFetch(`${API_URL}/api/momentum/backtests`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: enteredName.trim(),
-          config,
-          summary: result.summary,
-          monthly_records: result.monthly_records,
-          daily_records: result.daily_records,
-          universe: momentumStore.get().universe,
-        }),
-      });
-      if (!saveResp.ok) {
-        const body = await saveResp.text().catch(() => '');
-        await dialog.alert(
-          `Could not save backtest before scheduling: ${saveResp.status} ${body.slice(0, 240)}`,
-          { title: 'Schedule add failed' },
-        );
-        return;
-      }
-      const saved = await saveResp.json() as { run_id?: number };
-      const backtest_run_id = saved.run_id ?? null;
-
-      // 2. Create the scheduled_strategy linked to the saved backtest.
-      const r = await apiFetch(`${API_URL}/api/scheduled-strategies`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: enteredName.trim(),
-          frequency: scheduleFreq,
-          config,
-          backtest_run_id,
-        }),
-      });
-      if (!r.ok) {
-        const body = await r.text().catch(() => '');
-        await dialog.alert(
-          `Failed to schedule "${enteredName}": ${r.status} ${body.slice(0, 240)}`,
-          { title: 'Schedule add failed' },
-        );
-        return;
-      }
-      await dialog.alert(
-        `"${enteredName}" added to /schedule. The full backtest history is preserved; the next pipeline tick will start appending live snapshots.`,
-        { title: 'Variant scheduled' },
-      );
-    } catch (e) {
-      await dialog.alert(
-        `Failed to schedule "${enteredName}": ${e instanceof Error ? e.message : String(e)}`,
-        { title: 'Schedule add failed' },
-      );
-    }
-  };
-
-  // Persist every `ok` variant from the current sweep as one row. Variants
-  // still pending / running / cancelled / errored are skipped — only
-  // completed-ok payloads land in the bundle. Loading later rehydrates the
-  // sweep state so the detail views switch between variants exactly like
-  // they did during the live sweep.
-  /** Auto-save default: "{universes} · {strategy}[ · price≥X] · {range} ·
-   * {N} vars [ · ({axis×k, ...})]". Includes:
-   *   - universe(s): all selected sweep universes joined with `+`, or the
-   *     base universe when the sweep axis is empty.
-   *   - strategy label: includes `+L/S` when long_short is also swept.
-   *   - variant count: omitted for single-variant runs.
-   *   - swept-axes annotation: every axis with >1 value shows as
-   *     `axis×k` (e.g. `freq×4, top×2`). Lets the user tell a "frequency
-   *     sweep" apart from a "top-N sweep" of identical variant count.
-   *
-   * Two sweeps with byte-identical config still produce the same default
-   * name — the user can rename via the saved-runs dropdown if they want
-   * to keep both. */
-  const defaultVariantsBundleName = (): string => {
-    // Universe(s): when the picker has explicit universe selections, list
-    // them (they're what ran). When empty, the base universe applies to
-    // every variant.
-    const uniList = Array.from(selectedUniverses);
-    const universe = uniList.length > 1
-      ? uniList.join('+')
-      : uniList.length === 1
-        ? uniList[0]
-        : ((selectedIndexUniverse || '').trim() || 'All companies');
-
-    // Strategy label: when multiple strategies were swept, list them
-    // ("Long+L/S") so it's obvious from the name. For random / all /
-    // sector_etf the strategy axis is N/A — the selection mode label
-    // wins.
-    const stratList = Array.from(selectedStrategies);
-    const strategyLabel = selectionMode === 'random'
-      ? 'Random'
-      : selectionMode === 'all'
-        ? 'All-universe'
-        : selectionMode === 'sector_etf'
-          ? 'Sector ETF'
-          : stratList.length > 1
-            ? stratList.map((s) => s === 'long_short' ? 'L/S' : 'Long').join('+')
-            : 'Momentum';
-
-    const startYear = startDate.slice(0, 4);
-    const endYear = endDate.slice(0, 4);
-    const range = startYear === endYear ? startYear : `${startYear}-${endYear}`;
-    const trimmedFloor = minPriceScore.trim();
-    const floorPart = trimmedFloor === '' ? '' : ` · price≥${trimmedFloor}`;
-
-    const n = variantsToRun.length;
-    const nPart = n > 1 ? ` · ${n} vars` : '';
-
-    // Compact swept-axes annotation: every axis with >1 selected value
-    // gets an `axis×k` entry. Helps distinguish e.g. an 8-variant freq
-    // sweep from an 8-variant top-N sweep — without this they'd produce
-    // identical names.
-    const sweptAxes: string[] = [];
-    if (selectedFreqs.size > 1) sweptAxes.push(`freq×${selectedFreqs.size}`);
-    if (stratList.length > 1 && selectionMode !== 'random' && selectionMode !== 'all' && selectionMode !== 'sector_etf') {
-      sweptAxes.push(`strat×${stratList.length}`);
-    }
-    if (uniList.length > 1) sweptAxes.push(`uni×${uniList.length}`);
-    if (selectedGroupings.size > 1) sweptAxes.push(`grp×${selectedGroupings.size}`);
-    const topList = parseNumList(topSectorsSweep);
-    if (topList.length > 1) sweptAxes.push(`top×${topList.length}`);
-    const perList = parseNumList(perSectorSweep);
-    if (perList.length > 1) sweptAxes.push(`per×${perList.length}`);
-    const minList = parseMinScoreList(minScoreSweep);
-    if (minList.length > 1) sweptAxes.push(`min×${minList.length}`);
-    const sweepPart = sweptAxes.length > 0 ? ` (${sweptAxes.join(', ')})` : '';
-
-    return `${universe} · ${strategyLabel}${floorPart} · ${range}${nPart}${sweepPart}`;
-  };
-
-  const saveVariantsBundle = async (overrideName?: string) => {
-    const name = (overrideName ?? defaultVariantsBundleName()).trim();
-    if (!name) return;
-    // Iterate the live `variants` map rather than VARIANT_DEFS so
-    // cross-product keys (e.g. `monthly__long_only__s4__p6`) survive.
-    // The parsed `params` powers the per-entry `label` so the saved
-    // bundle reads naturally on reload no matter which axes overrode.
-    const okEntries = Object.entries(variants).flatMap(([key, o]) => {
-      if (o?.status !== 'ok') return [];
-      const params = parseVariantKey(key as VariantKey);
-      if (!params) return [];
-      return [{ key: key as VariantKey, params, result: o.result }];
-    });
-    if (okEntries.length === 0) return;
-    setSaving(true);
-    try {
-      const resp = await apiFetch(`${API_URL}/api/momentum/backtests`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          config: {
-            start_date: `${startDate}-01`,
-            end_date: `${endDate}-01`,
-            signal_weights: weights,
-            category_weights: categoryWeights,
-            top_n_sectors: topSectors,
-            top_n_per_sector: topPerSector,
-            min_price_score: minPriceScore.trim() === '' ? null : Number(minPriceScore),
-            universe_label: null,
-            index_universe: selectedIndexUniverse || null,
-            grouping,
-            // Persist the actual selection_mode used for this sweep —
-            // "momentum" was hardcoded, which made All-universe and
-            // Random saves report the wrong strategy on reload.
-            selection_mode: selectionMode,
-            random_seed: selectionMode === 'random' ? randomSeed : null,
-            n_trials: selectionMode === 'random' ? Math.max(1, nTrials) : 1,
-            sector_etfs: selectionMode === 'sector_etf' ? sectorEtfs : null,
-          },
-          variants: okEntries.map(({ key, params, result: r }) => ({
-            key,
-            label: variantLabel(params),
-            frequency: params.frequency,
-            strategy: params.strategy,
-            top_n_sectors: params.top_n_sectors,
-            top_n_per_sector: params.top_n_per_sector,
-            min_price_score: params.min_price_score,
-            summary: r.summary,
-            // Strip per-period `holdings` for EVERY cross-product bundle
-            // (not just selection_mode='all'). A 5-axis sweep can easily
-            // produce 50+ variants × 288 periods; even at 30 holdings
-            // per period that's 432k holding rows per bundle and trips
-            // Supabase's statement_timeout on save. The user can drill
-            // into any single variant by re-running it standalone.
-            monthly_records: r.monthly_records.map((rec) => ({ ...rec, holdings: [] })),
-            // Keep the daily equity curve so the chart line, intra-period
-            // max-DD overlays, and the √252 Sharpe recompute survive reload.
-            // The backend compacts these into a `{dates, returns}`
-            // parallel-array form before insert (~3× smaller JSONB) and
-            // re-expands them on load, so even a 24y × 14-variant bundle
-            // fits comfortably under Supabase's statement_timeout.
-            daily_records: r.daily_records ?? [],
-          })),
-          universe,
-        }),
-      });
-      if (resp.ok) {
-        const saved = await resp.json();
-        momentumStore.set({ loadedRunId: saved.run_id });
-        loadSavedRuns();
-      } else {
-        // Surface save failures instead of swallowing — the previous
-        // catch-all hid the All-universe statement-timeout case, which
-        // looked to the user like "auto-save just doesn't fire".
-        let detail = `${resp.status}`;
-        try { detail = `${resp.status} ${await resp.text()}`.slice(0, 240); } catch {}
-        console.error('[momentum] auto-save failed:', detail);
-        momentumStore.set((s) => ({
-          warnings: [...s.warnings, { scope: 'save', message: `Auto-save failed (${detail}). Bundle was not persisted.` }],
-        }));
-      }
-    } catch (e) {
-      console.error('[momentum] auto-save threw:', e);
-      momentumStore.set((s) => ({
-        warnings: [...s.warnings, { scope: 'save', message: `Auto-save error: ${e instanceof Error ? e.message : String(e)}` }],
-      }));
-    }
-    setSaving(false);
-  };
-
-  const loadBacktest = async (runId: number) => {
-    setLoadingRunId(runId);
-    try {
-      const resp = await fetch(`${API_URL}/api/momentum/backtests/${runId}`);
-      if (!resp.ok) return;
-      const data = await resp.json();
-
-      // Restore config
-      const cfg = data.config ?? {};
-      if (cfg.start_date) setStartDate(cfg.start_date.slice(0, 7));
-      if (cfg.end_date) setEndDate(cfg.end_date.slice(0, 7));
-      if (cfg.signal_weights) setWeights(cfg.signal_weights);
-      if (cfg.category_weights) setCategoryWeights(cfg.category_weights);
-      if (cfg.top_n_sectors) setTopSectors(cfg.top_n_sectors);
-      if (cfg.top_n_per_sector) setTopPerSector(cfg.top_n_per_sector);
-      // Saved runs from before the grouping feature have no `grouping`
-      // field — default to 'sector' (the historic behavior). The auto-
-      // coerce effect kicks in if the loaded run had grouping='industry'
-      // but the universe doesn't carry industry data anymore.
-      setGrouping(cfg.grouping === 'industry' ? 'industry' : 'sector');
-      // min_price_score may be null/undefined (no floor) or a number 0-100.
-      // Convert to a string so the input's empty/zero distinction round-trips.
-      setMinPriceScore(
-        cfg.min_price_score == null ? '' : String(cfg.min_price_score)
-      );
-      if (
-        cfg.selection_mode === 'random'
-        || cfg.selection_mode === 'momentum'
-        || cfg.selection_mode === 'all'
-        || cfg.selection_mode === 'sector_etf'
-      ) setSelectionMode(cfg.selection_mode);
-      if (cfg.selection_mode === 'sector_etf' && cfg.sector_etfs && typeof cfg.sector_etfs === 'object') {
-        // Rehydrate the saved sector→benchmark_id mapping so the badge
-        // status under the strategy dropdown matches what the saved run
-        // was using (and a re-run goes through the same mapping).
-        setSectorEtfs(cfg.sector_etfs as Record<string, number>);
-      }
-      if (typeof cfg.random_seed === 'number') setRandomSeed(cfg.random_seed);
-      if (typeof cfg.n_trials === 'number') setNTrials(cfg.n_trials);
-      // Legacy saved runs may have used universe_label; both hit the same table now.
-      setSelectedIndexUniverse(cfg.index_universe ?? cfg.universe_label ?? '');
-
-      // Restore result — saved runs store the payload under `result`.
-      const saved = data.result ?? data;
-
-      // Variant bundle: rehydrate the sweep state instead of the single
-      // `result`. The detail views (equity curve, holdings, sector
-      // timeline) switch on `activeVariantKey`, so they pick this up
-      // automatically.
-      if (saved.kind === 'variants' && Array.isArray(saved.variants)) {
-        const next: Partial<Record<VariantKey, VariantOutcome>> = {};
-        let firstKey: VariantKey | null = null;
-        const savedKeys = new Set<VariantKey>();
-        const paramsList: VariantParams[] = [];
-        for (const v of saved.variants) {
-          const key = v?.key as VariantKey | undefined;
-          if (!key) continue;
-          next[key] = {
-            status: 'ok',
-            result: {
-              summary: v.summary,
-              monthly_records: v.monthly_records ?? [],
-              daily_records: v.daily_records ?? [],
-            },
-          };
-          if (firstKey == null) firstKey = key;
-          savedKeys.add(key);
-          const p = parseVariantKey(key);
-          if (p) paramsList.push(p);
-        }
-
-        // ── Restore the picker state so a re-run produces the same
-        //    set of variants. Without this, the user loads a saved
-        //    bundle of 32 variants but the picker still points at
-        //    whatever axes were selected before — hitting "Run
-        //    variants" then yields a completely different sweep.
-        //
-        //    Logic per axis:
-        //      - frequency / strategy: every variant carries these,
-        //        collect the distinct values into the multi-select.
-        //      - universe / grouping: collect distinct values when
-        //        any variant overrode the axis; otherwise leave the
-        //        current selection alone (legacy 2-segment bundles
-        //        inherit from the base config which we already set
-        //        above).
-        //      - top_n_sectors / top_n_per_sector / min_price_score:
-        //        collect distinct override values across variants
-        //        and write them as a comma-joined string into the
-        //        sweep text input. Variants that inherited (no
-        //        override) contribute nothing to the text input —
-        //        the result is an exact axis representation when all
-        //        variants either all-overrode or all-inherited that
-        //        axis, and a lossy "use the override values, ignore
-        //        the inheritors" when mixed (rare).
-        //      - disabledPerms: when the picker's cross-product
-        //        would produce permutations the saved bundle DOESN'T
-        //        include (e.g. the user originally disabled some
-        //        rows in the permutations preview), reconstruct
-        //        those marks so a re-run produces exactly the saved
-        //        set, not a superset.
-        if (paramsList.length > 0) {
-          const freqs = new Set<RebalanceFrequency>(paramsList.map((p) => p.frequency));
-          const strats = new Set<StrategyType>(paramsList.map((p) => p.strategy));
-          const universes = new Set<string>(
-            paramsList.map((p) => p.universe).filter((u): u is string => u != null),
-          );
-          const groupings = new Set<'sector' | 'industry'>(
-            paramsList.map((p) => p.grouping).filter((g): g is 'sector' | 'industry' => g != null),
-          );
-
-          const distinctNums = (k: 'top_n_sectors' | 'top_n_per_sector'): number[] => {
-            const out = new Set<number>();
-            for (const p of paramsList) {
-              const v = p[k];
-              if (v != null) out.add(v);
-            }
-            return Array.from(out).sort((a, b) => a - b);
-          };
-          const distinctMins = (): (number | null)[] => {
-            const seen = new Set<string>();
-            const out: (number | null)[] = [];
-            for (const p of paramsList) {
-              const v = p.min_price_score;
-              if (v === undefined) continue;
-              const tok = v === null ? 'off' : String(v);
-              if (!seen.has(tok)) {
-                seen.add(tok);
-                out.push(v);
-              }
-            }
-            return out;
-          };
-
-          const topList = distinctNums('top_n_sectors');
-          const perList = distinctNums('top_n_per_sector');
-          const minList = distinctMins();
-
-          setSelectedFreqs(freqs);
-          setSelectedStrategies(strats);
-          if (universes.size > 0) setSelectedUniverses(universes);
-          if (groupings.size > 0) setSelectedGroupings(groupings);
-          setTopSectorsSweep(topList.join(','));
-          setPerSectorSweep(perList.join(','));
-          setMinScoreSweep(minList.map((v) => (v === null ? 'off' : String(v))).join(','));
-
-          // Reconstruct the cross-product the picker WOULD generate
-          // from those axes, then mark every permutation that isn't
-          // in the saved set as user-disabled. Mirrors the same
-          // algorithm as the `allPermutations` memo so a round-trip
-          // produces the same cross-product.
-          const topAxis: (number | undefined)[] = topList.length === 0 ? [undefined] : topList;
-          const perAxis: (number | undefined)[] = perList.length === 0 ? [undefined] : perList;
-          const minAxis: (number | null | undefined)[] = minList.length === 0 ? [undefined] : minList;
-          const uniAxis: (string | undefined)[] = universes.size === 0 ? [undefined] : Array.from(universes);
-          const grpAxis: ('sector' | 'industry' | undefined)[] =
-            groupings.size === 0 ? [undefined] : Array.from(groupings);
-          const disabled = new Set<VariantKey>();
-          for (const def of VARIANT_DEFS) {
-            if (!freqs.has(def.frequency)) continue;
-            if (!strats.has(def.strategy)) continue;
-            for (const t of topAxis) for (const p of perAxis) for (const m of minAxis)
-            for (const u of uniAxis) for (const g of grpAxis) {
-              const candidate: VariantParams = {
-                frequency: def.frequency,
-                strategy: def.strategy,
-                ...(t !== undefined ? { top_n_sectors: t } : {}),
-                ...(p !== undefined ? { top_n_per_sector: p } : {}),
-                ...(m !== undefined ? { min_price_score: m } : {}),
-                ...(u !== undefined ? { universe: u } : {}),
-                ...(g !== undefined ? { grouping: g } : {}),
-              };
-              const k = makeVariantKey(candidate);
-              if (!savedKeys.has(k)) disabled.add(k);
-            }
-          }
-          setDisabledPerms(disabled);
-        }
-
-        momentumStore.set({
-          result: null,
-          variants: next,
-          activeVariantKey: firstKey,
-          variantsRun: null,
-          universe: saved.universe ?? [],
-          loadedRunId: runId,
-          error: null,
-          warnings: [],
-          infos: [],
-          progress: [],
-        });
-        return;
-      }
-
-      // Single-run shape (legacy + default).
-      momentumStore.set({
-        result: {
-          monthly_records: saved.monthly_records ?? [],
-          daily_records: saved.daily_records ?? [],
-          summary: saved.summary ?? {
-            total_return_pct: 0,
-            annualized_return_pct: 0,
-            max_drawdown_pct: 0,
-            sharpe_ratio: null,
-            avg_monthly_turnover_pct: 0,
-            total_months: 0,
-            avg_holdings: 0,
-            top_drawdowns: [],
-          },
-        },
-        variants: {},
-        activeVariantKey: null,
-        variantsRun: null,
-        universe: saved.universe ?? [],
-        loadedRunId: runId,
-        error: null,
-        warnings: [],
-        infos: [],
-        progress: [],
-      });
-    } catch {
-      momentumStore.set({ error: 'Failed to load backtest' });
-    } finally {
-      setLoadingRunId(null);
-    }
-  };
-
-  const deleteBacktest = async (runId: number) => {
-    setDeletingRunId(runId);
-    if (loadedRunId === runId) momentumStore.set({ loadedRunId: null });
-    // Optimistic remove — the prod round-trip is ~500ms and the user
-    // shouldn't watch the row sit there waiting. Refetch on failure so
-    // a row only stays gone when the server actually deleted it.
-    setSavedRuns(prev => prev.filter(r => r.run_id !== runId));
-    try {
-      const resp = await apiFetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' });
-      if (!resp.ok) loadSavedRuns();
-    } catch {
-      loadSavedRuns();
-    } finally {
-      setDeletingRunId(null);
-    }
-  };
 
   /** Display label for a current-picks snapshot. Prefers the user's custom
    * name when set; otherwise falls back to the auto-generated date/trigger
    * pair so the dropdown is never empty. */
-  const snapshotLabel = (s: { name?: string | null; created_at: string; triggered_by: string; as_of_date: string }): string => {
-    const trimmed = (s.name ?? '').trim();
-    if (trimmed) return trimmed;
-    return `${s.created_at.slice(0, 10)} · ${s.triggered_by} · ${s.as_of_date.slice(0, 7)}`;
-  };
-
-  const renameSnapshot = async (snapshotId: number, currentName: string | null | undefined) => {
-    const next = await dialog.prompt('Name for this snapshot (leave empty to clear):', {
-      title: 'Rename snapshot',
-      defaultValue: currentName ?? '',
-    });
-    if (next == null) return; // user cancelled
-    const trimmed = next.trim();
-    if (trimmed === (currentName ?? '').trim()) return; // no change
-    await renameCurrentPicksSnapshot(snapshotId, trimmed === '' ? null : trimmed);
-  };
-
-  const confirmDeleteSnapshot = async (s: { snapshot_id: number; name?: string | null; created_at: string; triggered_by: string; as_of_date: string }) => {
-    const label = snapshotLabel(s);
-    if (await dialog.confirm(`Delete snapshot "${label}"?`, { destructive: true, confirmLabel: 'Delete' })) {
-      await deleteCurrentPicksSnapshot(s.snapshot_id);
-    }
-  };
-
-  /** Bulk-delete handler fires all DELETE requests in parallel. The
-   * dropdown component owns selection state and passes the selected
-   * `ids` in; we confirm once up front, fire in parallel, then prune the
-   * list + clear `loadedRunId` if the active run was caught in the
-   * delete. */
-  const bulkDeleteRuns = async (ids: number[]) => {
-    if (ids.length === 0) return;
-    const ok = await dialog.confirm(
-      `Delete ${ids.length} saved backtest${ids.length === 1 ? '' : 's'}?`,
-      { destructive: true, confirmLabel: `Delete ${ids.length}` },
-    );
-    if (!ok) return;
-    const idSet = new Set(ids);
-    setBulkDeletingRuns(true);
-    // Optimistic remove — same reasoning as deleteBacktest above. If
-    // anything failed server-side, the refetch below restores those rows.
-    setSavedRuns((prev) => prev.filter((r) => !idSet.has(r.run_id)));
-    if (loadedRunId != null && idSet.has(loadedRunId)) {
-      momentumStore.set({ loadedRunId: null });
-    }
-    try {
-      const results = await Promise.all(
-        ids.map((runId) =>
-          apiFetch(`${API_URL}/api/momentum/backtests/${runId}`, { method: 'DELETE' })
-            .then((r) => r.ok)
-            .catch(() => false)
-        ),
-      );
-      if (results.some((ok) => !ok)) loadSavedRuns();
-    } finally {
-      setBulkDeletingRuns(false);
-    }
-  };
-
-  const bulkDeleteSnapshots = async () => {
-    const ids = Array.from(selectedSnapshotIds);
-    if (ids.length === 0) return;
-    const ok = await dialog.confirm(
-      `Delete ${ids.length} current-picks snapshot${ids.length === 1 ? '' : 's'}?`,
-      { destructive: true, confirmLabel: `Delete ${ids.length}` },
-    );
-    if (!ok) return;
-    setBulkDeletingSnapshots(true);
-    try {
-      // deleteCurrentPicksSnapshot already updates the store (removes
-      // from currentPicksSnapshots, clears currentPortfolio if matched).
-      // Run in parallel for speed.
-      await Promise.all(ids.map((id) => deleteCurrentPicksSnapshot(id)));
-      setSelectedSnapshotIds(new Set());
-    } finally {
-      setBulkDeletingSnapshots(false);
-    }
-  };
-
-  const toggleSnapshotSelected = (snapshotId: number) => {
-    setSelectedSnapshotIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(snapshotId)) next.delete(snapshotId); else next.add(snapshotId);
-      return next;
-    });
-  };
 
   // Auto-save the variant bundle when a sweep finishes successfully. Fires
   // exactly once per sweep, keyed on `runStartedAt` so re-runs trigger again.
@@ -1118,27 +472,6 @@ export default function MomentumBacktester() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [running, runEndedAt, runStartedAt, variants, loadedRunId, saving]);
 
-  const renameBacktest = async (runId: number, currentName: string) => {
-    const next = await dialog.prompt('New name for this backtest:', {
-      title: 'Rename backtest',
-      defaultValue: currentName,
-    });
-    if (!next || next.trim() === '' || next === currentName) return;
-    setRenamingRunId(runId);
-    try {
-      const resp = await apiFetch(`${API_URL}/api/momentum/backtests/${runId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: next.trim() }),
-      });
-      if (!resp.ok) throw new Error(String(resp.status));
-      loadSavedRuns();
-    } catch (e) {
-      dialog.alert(`Rename failed: ${e instanceof Error ? e.message : e}`, { title: 'Rename failed' });
-    } finally {
-      setRenamingRunId(null);
-    }
-  };
 
   return (
     <div className="flex flex-col h-full overflow-x-hidden">

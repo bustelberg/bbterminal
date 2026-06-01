@@ -58,6 +58,10 @@ type Props = {
    * strategy params + active variant key so the row reads like a saved
    * backtest rather than a generic "Strategy" placeholder. */
   activeStrategyLabel?: string;
+  /** Optional "go-live" date (YYYY-MM-DD) drawn as a red dashed vertical
+   * marker on the equity chart. Used by /schedule to mark where a
+   * scheduled strategy went live. */
+  markerDate?: string;
 };
 
 /** "Equity Curve" card cluster: comparison pill row, summary stats,
@@ -65,7 +69,7 @@ type Props = {
  * own benchmark/saved comparison state and all the chart-derived memos
  * — the parent only feeds it the active strategy plus the saved-run
  * list. */
-function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompany, activeStrategyLabel }: Props) {
+function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompany, activeStrategyLabel, markerDate }: Props) {
   // Benchmark options for the "add series" dropdown — fetched via the
   // shared cached hook so a sibling component (e.g. MomentumBacktester's
   // sector-ETF lookup) reuses the same fetch instead of re-requesting.
@@ -492,6 +496,7 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
         setCustomFromMonth={setCustomFromMonth}
         yearlyExportRows={yearlyExportRows}
         yearlyExportColumns={yearlyExportColumns}
+        markerDate={markerDate}
       />
 
       {/* Equity Curve */}
@@ -503,14 +508,15 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
         setLogScale={setLogScale}
         hoveredDrawdown={hoveredDrawdown}
         setHoveredDrawdown={setHoveredDrawdown}
+        markerDate={markerDate}
       />
 
       {/* Per-year small multiples — cumulative + alpha. Both reuse the
           same `computeYearlySubplots` result; the grid component branches
           on `mode`. Renders nothing on saved runs without a universe
           baseline. */}
-      <YearlySubplotsGrid subplots={yearlySubplots} mode="cumulative" strategyColor={strategyColor} />
-      <YearlySubplotsGrid subplots={yearlySubplots} mode="alpha" strategyColor={strategyColor} />
+      <YearlySubplotsGrid subplots={yearlySubplots} mode="cumulative" strategyColor={strategyColor} markerDate={markerDate} />
+      <YearlySubplotsGrid subplots={yearlySubplots} mode="alpha" strategyColor={strategyColor} markerDate={markerDate} />
     </>
   );
 }

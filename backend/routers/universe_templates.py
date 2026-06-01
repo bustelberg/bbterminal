@@ -32,6 +32,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from deps import supabase
 from index_universe.templates import all_templates, get_template
+from index_universe.templates import _refresh_status
 from index_universe.templates._cache import (
     list_summary_get,
     list_summary_set,
@@ -110,6 +111,20 @@ async def list_universe_templates(response: Response):
         list_summary_set(data)
         return data
     return await asyncio.to_thread(_q)
+
+
+@router.get("/api/universe-templates/refresh-status")
+async def universe_template_refresh_status():
+    """Live per-template refresh status from the in-process registry.
+
+    Cheap (no DB) so the frontend can poll it every couple seconds to drive
+    the busy spinner + progress bar. Returns only templates touched since
+    process start; absent keys mean "idle". Shape: `{template_key:
+    {status, message, pct, started_at, finished_at, error}}`.
+
+    NOTE: declared BEFORE `/{template_key}` so this static path isn't
+    swallowed by the path-param route."""
+    return _refresh_status.get_all()
 
 
 @router.get("/api/universe-templates/{template_key}")
@@ -310,14 +325,31 @@ async def refresh_universe_template(template_key: str):
 
     q: _queue.Queue = _queue.Queue()
 
+    # Already refreshing (e.g. a scheduled tick, or another tab triggered
+    # it)? Don't kick a duplicate heavy reconstruction — tell the client to
+    # watch the shared progress instead. The registry-backed status endpoint
+    # + the UI's poll keep the spinner/progress bar live either way.
+    if _refresh_status.is_running(template_key):
+        async def _busy_gen():
+            yield "data: " + json.dumps({
+                "type": "progress",
+                "message": f"'{t.label}' is already refreshing — watching shared progress.",
+            }) + "\n\n"
+        return StreamingResponse(_busy_gen(), media_type="text/event-stream")
+
     def _worker():
-        def on_progress(message: str, pct: int | None = None):
+        def push(message: str, pct: int | None = None):
             payload: dict = {"type": "progress", "message": message}
             if pct is not None:
                 payload["pct"] = pct
             q.put(json.dumps(payload))
         try:
-            result = t.refresh(supabase, on_progress=on_progress)
+            # tracked_refresh updates the in-process registry (busy + live
+            # progress) AND forwards each event to `push` for this client's
+            # SSE stream.
+            result = _refresh_status.tracked_refresh(
+                t, supabase, extra_on_progress=push,
+            )
             q.put(json.dumps({
                 "type": "done",
                 "message": (

@@ -79,6 +79,7 @@ export default function YearlyBreakdown({
   setCustomFromMonth,
   yearlyExportRows,
   yearlyExportColumns,
+  markerDate,
 }: {
   yearlyBreakdown: YB;
   alignedSeries: AlignedResult;
@@ -87,6 +88,10 @@ export default function YearlyBreakdown({
   setCustomFromMonth: (v: string) => void;
   yearlyExportRows: YearlyExportRow[];
   yearlyExportColumns: Column<YearlyExportRow>[];
+  /** Optional "go-live" date (YYYY-MM-DD). The row for the year that
+   * contains it gets a red dashed marker + "go-live" tag, matching the
+   * line on the equity chart. */
+  markerDate?: string;
 }) {
   const [expandedYear, setExpandedYear] = useState<string | null>(null);
   const monthlyForExpanded = useMemo(
@@ -129,16 +134,26 @@ export default function YearlyBreakdown({
           <tbody>
             {yearlyBreakdown.years.map((y) => {
               const isExpanded = expandedYear === y;
+              const isGoLiveYear = markerDate != null && String(y) === markerDate.slice(0, 4);
               return (
                 <Fragment key={y}>
                   <tr
-                    className="border-b border-gray-800/20 hover:bg-white/[0.02] cursor-pointer"
+                    className={`border-b border-gray-800/20 hover:bg-white/[0.02] cursor-pointer ${isGoLiveYear ? 'border-l-2 border-l-rose-500/70' : ''}`}
                     onClick={() => setExpandedYear(isExpanded ? null : y)}
                   >
                     <td className="px-5 py-2 text-gray-200 font-mono">
                       <span className="inline-flex items-center gap-1.5">
                         <span className="text-gray-500 w-3 text-xs">{isExpanded ? '▾' : '▸'}</span>
                         {y}
+                        {isGoLiveYear && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[10px] text-rose-400"
+                            title={`Strategy went live ${markerDate}`}
+                          >
+                            <span className="inline-block w-2.5 border-t border-dashed border-rose-400" />
+                            go-live {markerDate!.slice(5)}
+                          </span>
+                        )}
                       </span>
                     </td>
                     {alignedSeries.series.map((s) => {
@@ -164,10 +179,23 @@ export default function YearlyBreakdown({
                       );
                     })}
                   </tr>
-                  {isExpanded && monthlyForExpanded?.months.map((m) => (
-                    <tr key={`${y}-${m}`} className="border-b border-gray-800/10 bg-white/[0.015]">
+                  {isExpanded && monthlyForExpanded?.months.map((m) => {
+                    const isGoLiveMonth = markerDate != null && m === markerDate.slice(0, 7);
+                    return (
+                    <tr key={`${y}-${m}`} className={`border-b border-gray-800/10 bg-white/[0.015] ${isGoLiveMonth ? 'border-l-2 border-l-rose-500/70' : ''}`}>
                       <td className="pl-12 pr-5 py-1.5 text-gray-500 font-mono text-xs">
-                        {MONTH_NAMES[parseInt(m.slice(5), 10) - 1]}
+                        <span className="inline-flex items-center gap-1.5">
+                          {MONTH_NAMES[parseInt(m.slice(5), 10) - 1]}
+                          {isGoLiveMonth && (
+                            <span
+                              className="inline-flex items-center gap-1 text-[10px] text-rose-400"
+                              title={`Strategy went live ${markerDate}`}
+                            >
+                              <span className="inline-block w-2.5 border-t border-dashed border-rose-400" />
+                              go-live {markerDate!.slice(5)}
+                            </span>
+                          )}
+                        </span>
                       </td>
                       {alignedSeries.series.map((s) => {
                         const v = monthlyForExpanded.bySeries[s.id]?.[m];
@@ -181,7 +209,8 @@ export default function YearlyBreakdown({
                         );
                       })}
                     </tr>
-                  ))}
+                    );
+                  })}
                 </Fragment>
               );
             })}

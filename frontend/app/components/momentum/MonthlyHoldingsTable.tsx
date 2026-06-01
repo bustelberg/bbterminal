@@ -1,8 +1,9 @@
 'use client';
 
-import { Fragment, memo, useMemo, useRef, useState } from 'react';
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import type { BacktestResult } from '../../../lib/stores/momentum';
+import type { BacktestResult, Holding, PeriodRecord } from '../../../lib/stores/momentum';
+import { API_URL } from '../../../lib/apiUrl';
 import type { Column } from '../../../lib/tableExport';
 import TableDownloadButton from '../TableDownloadButton';
 import CellInfoTip from './CellInfoTip';
@@ -33,6 +34,11 @@ type Props = {
   categories: string[];
   exchangeByCompany: Map<number, string>;
   scoringConfig: ScoringConfig;
+  /** Optional "go-live" date (YYYY-MM-DD). The one period whose window
+   * contains it is split into two rows — the part of the period before
+   * go-live and the part from go-live to the period end — with returns
+   * recomputed from the daily curve. Used by /schedule. */
+  markerDate?: string;
 };
 
 /** "Monthly Portfolios" card: one row per rebalance month, expandable to
@@ -42,10 +48,22 @@ type Props = {
  * that changes — new run, loaded saved run, etc. — the table resets its
  * expansion automatically.
  */
-function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scoringConfig }: Props) {
+function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scoringConfig, markerDate }: Props) {
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
   // company_id whose timeline modal is open, or null for closed.
   const [timelineCompanyId, setTimelineCompanyId] = useState<number | null>(null);
+  // Per-company close price (local + EUR) at the go-live date, fetched
+  // on demand so the split sub-period rows can show each holding's
+  // entry/exit prices for ITS dates rather than the full month's.
+  const [goLivePrices, setGoLivePrices] = useState<
+    Record<string, { price_local: number; price_eur?: number; target_date: string }> | null
+  >(null);
+  // Re-price of the trailing OPEN period to the latest available close, so
+  // the last row isn't frozen at the backtest's run-time as-of date when
+  // newer price data exists. { date, prices } or null.
+  const [openReprice, setOpenReprice] = useState<
+    { date: string; prices: Record<string, { price_local: number; price_eur?: number; target_date: string }> } | null
+  >(null);
 
   // Every distinct company ever held during this backtest — one entry per
   // company_id, regardless of how many months it appeared in. Drives the
@@ -112,6 +130,240 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
     }
     return map;
   }, [result]);
+
+  // Fetch the go-live-date close prices for the holdings of the period
+  // that contains the marker, so the two split sub-rows can re-price each
+  // holding at the split boundary. Read-only; runs only when a marker is set.
+  useEffect(() => {
+    // Find the cids of the period that contains the marker (if any).
+    const records = result.monthly_records;
+    let cids: number[] = [];
+    if (markerDate) {
+      for (let i = 0; i < records.length; i++) {
+        const start = records[i].date.slice(0, 10);
+        const end = i + 1 < records.length ? records[i + 1].date.slice(0, 10) : (records[i].as_of_date ?? null);
+        if (markerDate > start && (end == null || markerDate < end)) {
+          cids = records[i].holdings.map((h) => h.company_id).filter((c): c is number => c != null);
+          break;
+        }
+      }
+    }
+    if (cids.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setGoLivePrices(null);
+      return;
+    }
+    // Stale prices from a previous marker can't be mis-applied — they're
+    // keyed by company_id, and a different period has different cids — so
+    // we just overwrite on resolve without an interim reset.
+    let cancelled = false;
+    fetch(`${API_URL}/api/momentum/prices-at?as_of=${markerDate}&company_ids=${cids.join(',')}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { prices?: Record<string, { price_local: number; price_eur?: number; target_date: string }> } | null) => {
+        if (!cancelled && d?.prices) setGoLivePrices(d.prices);
+      })
+      .catch(() => { /* split rows fall back to full-period prices */ });
+    return () => { cancelled = true; };
+  }, [markerDate, result]);
+
+  // Re-price the trailing OPEN period to its freshest *common* date — the
+  // most recent date with a close for EVERY held name (the engine's
+  // definition, shown in the row tooltip). NOT the global latest: if 23 of
+  // 24 names only have data through the 26th and one has the 28th, the
+  // honest "as of" is the 26th, since the portfolio return needs all names
+  // priced on the same day. Only fires when that common date is genuinely
+  // newer than the backtest's saved as-of.
+  type PriceMap = Record<string, { price_local: number; price_eur?: number; target_date: string }>;
+  useEffect(() => {
+    const records = result.monthly_records;
+    const last = records[records.length - 1];
+    if (!last || !last.is_open || last.holdings.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setOpenReprice(null);
+      return;
+    }
+    const cids = last.holdings.map((h) => h.company_id).filter((c): c is number => c != null);
+    if (cids.length === 0) {
+      setOpenReprice(null);
+      return;
+    }
+    const savedAsOf = last.as_of_date?.slice(0, 10);
+    let cancelled = false;
+    (async () => {
+      try {
+        const ld = await fetch(`${API_URL}/api/data/latest-price-date`).then((r) => (r.ok ? r.json() : null));
+        const globalLatest: string | undefined = ld?.date;
+        if (!globalLatest || (savedAsOf && globalLatest <= savedAsOf)) return;
+        // Each name's latest close on/before today — its own freshest mark.
+        const pr: { prices?: PriceMap } | null = await fetch(
+          `${API_URL}/api/momentum/prices-at?as_of=${globalLatest}&company_ids=${cids.join(',')}`,
+        ).then((r) => (r.ok ? r.json() : null));
+        const dates = Object.values(pr?.prices ?? {}).map((p) => p.target_date.slice(0, 10));
+        if (dates.length === 0 || !pr?.prices) return;
+        // Header date = the freshest mark present in the portfolio. Each
+        // holding is shown at ITS OWN latest below; a name with no newer
+        // trade keeps its existing (older) close. Only re-price when at
+        // least one name has data newer than the backtest's saved as-of.
+        const maxHeld = dates.reduce((mx, d) => (d > mx ? d : mx), dates[0]);
+        if (savedAsOf && maxHeld <= savedAsOf) return;
+        if (!cancelled) setOpenReprice({ date: maxHeld, prices: pr.prices });
+      } catch {
+        /* leave the open period at its backtest as-of date */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [result]);
+
+  // Records with the trailing open period re-priced to the latest close
+  // (when newer data than the backtest's as-of exists). Re-prices each
+  // open holding, then recomputes the period return (long weight-mean −
+  // short weight-mean, matching the engine) + the chained cumulative.
+  const repricedRecords = useMemo<PeriodRecord[]>(() => {
+    const recs = result.monthly_records;
+    if (!openReprice || recs.length === 0) return recs;
+    const lastIdx = recs.length - 1;
+    const last = recs[lastIdx];
+    if (!last.is_open) return recs;
+    const newHoldings = last.holdings.map((h) => {
+      const p = openReprice.prices[String(h.company_id)];
+      if (!p) return h;
+      const exitEur = p.price_eur ?? h.exit_price_eur;
+      const entryEur = h.entry_price_eur;
+      return {
+        ...h,
+        exit_price_local: p.price_local,
+        exit_price_eur: exitEur,
+        exit_date: p.target_date.slice(0, 10),
+        forward_return_pct: exitEur != null && entryEur ? (exitEur / entryEur - 1) * 100 : h.forward_return_pct,
+      };
+    });
+    const wmean = (arr: Holding[]): number | null => {
+      let w = 0, r = 0;
+      for (const h of arr) {
+        if (h.forward_return_pct == null) continue;
+        const wt = h.weight ?? 1;
+        w += wt; r += wt * h.forward_return_pct;
+      }
+      return w > 0 ? r / w : null;
+    };
+    const longRet = wmean(newHoldings.filter((h) => h.side !== 'short'));
+    const shorts = newHoldings.filter((h) => h.side === 'short');
+    const shortRet = shorts.length ? wmean(shorts) : null;
+    const portRet = longRet != null ? (shortRet != null ? longRet - shortRet : longRet) : last.portfolio_return_pct;
+    const prevCum = lastIdx >= 1 ? (recs[lastIdx - 1].cumulative_return_pct ?? 0) : 0;
+    const cum = portRet != null ? ((1 + prevCum / 100) * (1 + portRet / 100) - 1) * 100 : last.cumulative_return_pct;
+    const reLast: PeriodRecord = {
+      ...last,
+      holdings: newHoldings,
+      portfolio_return_pct: portRet,
+      cumulative_return_pct: cum,
+      as_of_date: openReprice.date,
+    };
+    return [...recs.slice(0, lastIdx), reLast];
+  }, [result, openReprice]);
+
+  // Display rows = the period records, except the ONE period whose window
+  // contains the go-live date is split into two: the slice before go-live
+  // and the slice from go-live to the period end. Per-period + cumulative
+  // returns (strategy and universe) are recomputed from the daily curve so
+  // each slice reads like a standalone period. Holdings are identical for
+  // both slices (no rebalance happens at go-live).
+  const displayRows = useMemo<{
+    row: PeriodRecord;
+    key: string;
+    label: string | null;
+    turnoverDate: string | null;
+    net: boolean;
+  }[]>(() => {
+    const records = repricedRecords;
+    const passthrough = () =>
+      records.map((r) => ({ row: r, key: r.date, label: null, turnoverDate: r.date, net: true }));
+    if (!markerDate) return passthrough();
+
+    const stratSeries = (result.daily_records ?? []).map((d) => ({ date: d.date.slice(0, 10), cum: d.cumulative_return_pct }));
+    const uniSeries = (result.universe_daily_records ?? []).map((d) => ({ date: d.date.slice(0, 10), cum: d.cumulative_return_pct }));
+    if (stratSeries.length === 0) return passthrough();
+
+    const cumAt = (series: { date: string; cum: number }[], date: string): number | null => {
+      let v: number | null = null;
+      for (const p of series) { if (p.date <= date) v = p.cum; else break; }
+      return v;
+    };
+    const rel = (a: number | null, b: number | null): number | null =>
+      a != null && b != null ? ((1 + a / 100) / (1 + b / 100) - 1) * 100 : null;
+
+    const out: { row: PeriodRecord; key: string; label: string | null; turnoverDate: string | null; net: boolean }[] = [];
+    for (let i = 0; i < records.length; i++) {
+      const r = records[i];
+      const start = r.date.slice(0, 10);
+      const end = i + 1 < records.length ? records[i + 1].date.slice(0, 10) : (r.as_of_date ?? null);
+      const inside = markerDate > start && (end == null || markerDate < end);
+      if (!inside) { out.push({ row: r, key: r.date, label: null, turnoverDate: r.date, net: true }); continue; }
+
+      const cStart = cumAt(stratSeries, start);
+      const cGo = cumAt(stratSeries, markerDate);
+      const cEnd = end ? cumAt(stratSeries, end) : stratSeries[stratSeries.length - 1].cum;
+      const uStart = cumAt(uniSeries, start);
+      const uGo = cumAt(uniSeries, markerDate);
+      const uEnd = end ? cumAt(uniSeries, end) : (uniSeries.length ? uniSeries[uniSeries.length - 1].cum : null);
+
+      // Re-price each holding at the go-live boundary so the expanded
+      // detail shows entry/exit prices for the sub-period's own dates.
+      // `pre` ends at go-live (exit = go-live price); `post` starts at
+      // go-live (entry = go-live price). Falls back to the original holding
+      // when the go-live price isn't (yet) available for a cid.
+      const repricePre = (h: Holding): Holding => {
+        const p = goLivePrices?.[String(h.company_id)];
+        if (!p) return h;
+        const exitEur = p.price_eur ?? h.exit_price_eur;
+        const entryEur = h.entry_price_eur;
+        return {
+          ...h,
+          exit_price_local: p.price_local,
+          exit_price_eur: exitEur,
+          exit_date: markerDate,
+          forward_return_pct: exitEur != null && entryEur ? (exitEur / entryEur - 1) * 100 : h.forward_return_pct,
+        };
+      };
+      const repricePost = (h: Holding): Holding => {
+        const p = goLivePrices?.[String(h.company_id)];
+        if (!p) return h;
+        const entryEur = p.price_eur ?? h.entry_price_eur;
+        const exitEur = h.exit_price_eur;
+        return {
+          ...h,
+          entry_price_local: p.price_local,
+          entry_price_eur: entryEur,
+          entry_date: markerDate,
+          forward_return_pct: entryEur != null && exitEur ? (exitEur / entryEur - 1) * 100 : h.forward_return_pct,
+        };
+      };
+
+      const pre: PeriodRecord = {
+        ...r,
+        holdings: r.holdings.map(repricePre),
+        portfolio_return_pct: rel(cGo, cStart),
+        universe_return_pct: rel(uGo, uStart),
+        cumulative_return_pct: cGo ?? r.cumulative_return_pct,
+        universe_cumulative_return_pct: uGo,
+        is_open: false,
+        as_of_date: undefined,
+      };
+      const post: PeriodRecord = {
+        ...r,
+        holdings: r.holdings.map(repricePost),
+        portfolio_return_pct: rel(cEnd, cGo),
+        universe_return_pct: rel(uEnd, uGo),
+        cumulative_return_pct: cEnd ?? r.cumulative_return_pct,
+        universe_cumulative_return_pct: uEnd,
+        is_open: r.is_open,
+        as_of_date: r.as_of_date,
+      };
+      out.push({ row: pre, key: `${r.date}__pre`, label: `${start} → ${markerDate} · pre go-live`, turnoverDate: r.date, net: false });
+      out.push({ row: post, key: `${r.date}__post`, label: `${markerDate} → ${end ?? 'now'} · go-live →`, turnoverDate: null, net: false });
+    }
+    return out;
+  }, [repricedRecords, result, markerDate, goLivePrices]);
 
   // When the active result changes (new run / loaded saved run) collapse
   // any open month so the user starts at a clean view. React 19's
@@ -265,21 +517,21 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
             </tr>
           </thead>
           <tbody>
-            {result.monthly_records.map((r) => (
-              <Fragment key={r.date}>
+            {displayRows.map(({ row: r, key: rowKey, label: rowLabel, turnoverDate: rowTurnover, net: showNet }) => (
+              <Fragment key={rowKey}>
                 <tr
-                  className="border-b border-gray-800/20 hover:bg-white/[0.02] cursor-pointer transition-colors"
-                  onClick={() => setExpandedMonth(expandedMonth === r.date ? null : r.date)}
+                  className={`border-b border-gray-800/20 hover:bg-white/[0.02] cursor-pointer transition-colors ${rowLabel ? 'border-l-2 border-l-rose-500/60' : ''}`}
+                  onClick={() => setExpandedMonth(expandedMonth === rowKey ? null : rowKey)}
                 >
                   <td className="px-5 py-2.5 text-gray-300 font-mono">
-                    <span className="text-gray-600 mr-2">{expandedMonth === r.date ? '▾' : '▸'}</span>
-                    {r.date}
+                    <span className="text-gray-600 mr-2">{expandedMonth === rowKey ? '▾' : '▸'}</span>
+                    {rowLabel ? <span className="text-rose-300/90 text-xs">{rowLabel}</span> : r.date}
                     {r.is_open && (
                       <span
                         className="ml-2 inline-flex items-center text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30"
                         title={
                           r.as_of_date
-                            ? `Return is calculated through ${r.as_of_date} — the most recent date with prices for every held name`
+                            ? `Open period — valued through ${r.as_of_date}. Each held name uses its own latest available close; names with no newer trade keep their last price, so some end dates may be earlier.`
                             : 'Open period — return reflects the partial window from the last rebalance through today'
                         }
                       >
@@ -290,7 +542,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                   <td className="text-right px-3 py-2.5 text-gray-400 font-mono">{r.holdings.length}</td>
                   <td className={`text-right px-3 py-2.5 font-mono ${r.portfolio_return_pct != null ? (r.portfolio_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
                     {fmtPct(r.portfolio_return_pct)}
-                    <span className="text-gray-500">{parenPct(netByDate.get(r.date)?.portRet)}</span>
+                    <span className="text-gray-500">{parenPct(showNet ? netByDate.get(r.date)?.portRet : undefined)}</span>
                   </td>
                   <td
                     className="text-right px-3 py-2.5 font-mono text-gray-500"
@@ -331,18 +583,20 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                     );
                   })()}
                   <td className="text-right px-3 py-2.5 font-mono text-gray-400">
-                    {turnoverByDate[r.date] != null ? `${turnoverByDate[r.date]!.toFixed(1)}%` : '—'}
+                    {rowTurnover == null
+                      ? '0.0%'
+                      : turnoverByDate[rowTurnover] != null ? `${turnoverByDate[rowTurnover]!.toFixed(1)}%` : '—'}
                   </td>
                   <td className={`text-right px-3 py-2.5 font-mono ${r.cumulative_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                     {fmtPct(r.cumulative_return_pct)}
-                    <span className="text-gray-500">{parenPct(netByDate.get(r.date)?.cumRet)}</span>
+                    <span className="text-gray-500">{parenPct(showNet ? netByDate.get(r.date)?.cumRet : undefined)}</span>
                   </td>
                   <td className="text-right px-5 py-2.5 font-mono text-gray-500">
                     {r.universe_cumulative_return_pct != null ? fmtPct(r.universe_cumulative_return_pct) : '—'}
                   </td>
                 </tr>
-                {expandedMonth === r.date && r.holdings.length > 0 && (
-                  <tr key={`${r.date}-detail`}>
+                {expandedMonth === rowKey && r.holdings.length > 0 && (
+                  <tr key={`${rowKey}-detail`}>
                     <td colSpan={8} className="bg-[#0f1117] px-5 py-3">
                       <table className="w-full text-xs">
                         <thead>
@@ -581,8 +835,8 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                     </td>
                   </tr>
                 )}
-                {expandedMonth === r.date && r.holdings.length === 0 && (
-                  <tr key={`${r.date}-empty`}>
+                {expandedMonth === rowKey && r.holdings.length === 0 && (
+                  <tr key={`${rowKey}-empty`}>
                     <td colSpan={4} className="bg-[#0f1117] px-5 py-4">
                       <div className="text-xs text-gray-500">
                         {r.empty_reason || 'No holdings for this period (unknown reason)'}
