@@ -79,4 +79,15 @@ test.describe('/backtest', () => {
     await expect(currentPicks).toBeEnabled();
     await expect(page.getByText('12-1 momentum')).toBeVisible();
   });
+
+  test('variants panel renders the cross-product axes', async ({ page }) => {
+    await page.goto('/backtest');
+
+    await expect(page.getByRole('heading', { name: 'Variants' })).toBeVisible();
+    await expect(page.getByText('Permutations')).toBeVisible();
+    // The cross-product axis columns ("Strategy" is omitted — it collides
+    // with the mode-select label above).
+    await expect(page.getByText('Frequency')).toBeVisible();
+    await expect(page.getByText('Grouping')).toBeVisible();
+  });
 });
