@@ -13,9 +13,12 @@ export async function mockBacktestPageReads(page: Page) {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
+        // Shape must match `SignalDef` (app/components/momentum/types.ts):
+        // the weight map is keyed on `key`, so a `code` field here would
+        // render the sliders against `weights[undefined]`.
         signals: [
-          { code: 'mom_12_1', label: '12-1 momentum', group: 'price', default_weight: 1.0 },
-          { code: 'vol_20d_vs_60d', label: '20d vs 60d volume', group: 'volume', default_weight: 1.0 },
+          { key: 'mom_12_1', label: '12-1 momentum', description: '12-month return skipping the last month.', group: 'price', default_weight: 1.0 },
+          { key: 'vol_20d_vs_60d', label: '20d vs 60d volume', description: '20-day vs 60-day average volume ratio.', group: 'volume', default_weight: 1.0 },
         ],
         categories: ['price', 'volume'],
       }),

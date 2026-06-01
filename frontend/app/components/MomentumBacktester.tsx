@@ -13,14 +13,11 @@ import NotificationsPanel from './momentum/NotificationsPanel';
 import { useClickOutside } from '../../lib/hooks/useClickOutside';
 import {
   useCompanyExchangeMap,
-  useMomentumSignals,
   useUniverseTemplates,
 } from '../../lib/hooks/apiData';
 import {
   momentumStore,
-  startBacktest,
   cancelBacktest,
-  startVariantsBacktest,
   cancelVariantsBacktest,
   loadCurrentPicksSnapshots,
   loadCurrentPicksSnapshot,
@@ -31,7 +28,6 @@ import {
   makeVariantKey,
   parseVariantKey,
   variantLabel,
-  type BacktestStartConfig,
   type RebalanceFrequency,
   type StrategyType,
   type VariantKey,
@@ -46,10 +42,13 @@ import EquityCurveCard from './momentum/EquityCurveCard';
 import MonthlyHoldingsTable from './momentum/MonthlyHoldingsTable';
 import SavedRunsDropdown from './momentum/SavedRunsDropdown';
 import SectorTimelineChart from './momentum/SectorTimelineChart';
+import SignalWeightSliders from './momentum/SignalWeightSliders';
 import VariantAttribution from './momentum/VariantAttribution';
 import TableDownloadButton from './TableDownloadButton';
 import VariantSummaryTable from './momentum/VariantSummaryTable';
 import { parseMinScoreList, parseNumList, toggleInSet } from './momentum/variantHelpers';
+import { useBacktestConfig } from './momentum/useBacktestConfig';
+import { useBacktestRun } from './momentum/useBacktestRun';
 import { useSectorEtfs } from './momentum/useSectorEtfs';
 import { useVariantSelection } from './momentum/useVariantSelection';
 import {
@@ -60,7 +59,6 @@ import {
 } from './momentum/utils';
 import type {
   SavedRun,
-  SignalDef,
 } from './momentum/types';
 
 // ---------------------------------------------------------------------------
@@ -77,33 +75,32 @@ import type {
 // ---------------------------------------------------------------------------
 
 export default function MomentumBacktester() {
-  // Signal definitions from backend
-  const [signalDefs, setSignalDefs] = useState<SignalDef[]>([]);
-  const [weights, setWeights] = useState<Record<string, number>>({});
-  const [categories, setCategories] = useState<string[]>([]);
-  const [categoryWeights, setCategoryWeights] = useState<Record<string, number>>({});
-
-  // Config
+  // Core backtest configuration (signal/category weights, dates, sizing,
+  // grouping, selection mode, random-baseline knobs) lives in its own
+  // hook so this component stops owning ~15 useState slots + the
+  // signal-defaults effect. Each value comes back with the setter the
+  // config panel, the universe date-autofill effect, and the saved-config
+  // loader write through.
+  const config = useBacktestConfig();
+  const {
+    signalDefs,
+    weights, setWeights,
+    categories,
+    categoryWeights, setCategoryWeights,
+    startDate, setStartDate,
+    endDate, setEndDate,
+    topSectors, setTopSectors,
+    topPerSector, setTopPerSector,
+    grouping, setGrouping,
+    noCache, setNoCache,
+    maxCompanies, setMaxCompanies,
+    minPriceScore, setMinPriceScore,
+    selectionMode, setSelectionMode,
+    randomSeed, setRandomSeed,
+    nTrials, setNTrials,
+  } = config;
+  // Still used by the date `<input type="month">` max attributes below.
   const currentYear = new Date().getFullYear();
-  const [startDate, setStartDate] = useState('2017-01');
-  const [endDate, setEndDate] = useState(`${currentYear}-01`);
-  const [topSectors, setTopSectors] = useState(4);
-  const [topPerSector, setTopPerSector] = useState(6);
-  // 'sector' is universal; 'industry' is only meaningful for LEONTEQ /
-  // ACWI_LEONTEQ universes (where universe_membership.industry is
-  // populated). The UI guards on `groupingAllowed` below; if a user
-  // switches to a non-Leonteq universe while grouping='industry' we
-  // coerce back to 'sector' so the next run doesn't error out.
-  const [grouping, setGrouping] = useState<'sector' | 'industry'>('sector');
-  const [noCache, setNoCache] = useState(false);
-  const [maxCompanies, setMaxCompanies] = useState(0);
-  // Optional price-score floor for long selection. Empty string = no
-  // filter (sent to backend as null); a number sets a strict
-  // greater-than gate, so e.g. 30 means "must beat 30/100".
-  const [minPriceScore, setMinPriceScore] = useState<string>('');
-  const [selectionMode, setSelectionMode] = useState<'momentum' | 'random' | 'all' | 'sector_etf'>('momentum');
-  const [randomSeed, setRandomSeed] = useState<number>(42);
-  const [nTrials, setNTrials] = useState<number>(1);
 
   // Sector → benchmark_id mapping for selection_mode='sector_etf'.
   // Encapsulated in `useSectorEtfs`: lazy-loads from /api/benchmarks
@@ -322,22 +319,6 @@ export default function MomentumBacktester() {
     category_weights: categoryWeights,
   }), [selectedIndexUniverse, weights, categoryWeights]);
 
-  // Signal definitions — shared cached hook.
-  const { data: _signalsData } = useMomentumSignals();
-  useEffect(() => {
-    if (!_signalsData) return;
-    const defs = _signalsData.signals;
-    setSignalDefs(defs);
-    const w: Record<string, number> = {};
-    defs.forEach((s) => (w[s.key] = s.default_weight));
-    setWeights(w);
-    const cats = _signalsData.categories;
-    setCategories(cats);
-    const cw: Record<string, number> = {};
-    cats.forEach((c) => (cw[c] = 50));
-    setCategoryWeights(cw);
-  }, [_signalsData]);
-
   // Universe templates — shared cached hook. The Variants AxisColumn
   // wants the locally-shaped `IndexUniverseEntry` so we map after load.
   const { data: _utRaw } = useUniverseTemplates();
@@ -394,10 +375,9 @@ export default function MomentumBacktester() {
     if (!entry) return;
     setStartDate(entry.hard_backstop.slice(0, 7));
     setEndDate((latestPriceDate ?? entry.end_month).slice(0, 7));
-    // setStartDate / setEndDate are stable React setters — omitting
-    // them keeps the effect re-runs scoped to actual universe / data
-    // changes.
-  }, [selectedUniverses, indexUniverses, latestPriceDate]);
+    // setStartDate / setEndDate are referentially-stable hook setters, so
+    // listing them doesn't widen the effect's re-run scope.
+  }, [selectedUniverses, indexUniverses, latestPriceDate, setStartDate, setEndDate]);
 
   useClickOutside(picksDropdownRef, () => setPicksDropdownOpen(false), picksDropdownOpen);
 
@@ -444,44 +424,14 @@ export default function MomentumBacktester() {
   const variantsBlockReason: string | null =
     selectedUniverses.size === 0 ? 'Pick at least one universe.' : null;
 
-  // Variant sweep — fans the current config out across the cross-product
-  // permutations selected in the inline picker. The picker derives the
-  // base config's `index_universe` + `grouping` from the first selected
-  // variant, since the legacy top-row inputs for those are gone.
-  const runVariantsBacktest = () => {
-    const targets = eligibleVariants;
-    if (targets.length === 0) return;
-    // Base config carries everything the per-variant overrides DON'T
-    // touch (signals, category weights, date range, max companies,
-    // selection mode, trials/seed, sector ETFs). `index_universe` +
-    // `grouping` are derived from the first variant when one was picked;
-    // that mirrors what the picker's universe / grouping columns set
-    // per variant when only one universe is selected.
-    const universeFromVariants = targets[0]?.universe ?? null;
-    const groupingFromVariants = targets[0]?.grouping ?? 'sector';
-    momentumStore.set({ result: null, loadedRunId: null });
-    return startVariantsBacktest(
-      {
-        start_date: `${startDate}-01`,
-        end_date: `${endDate}-01`,
-        signal_weights: weights,
-        category_weights: categoryWeights,
-        top_n_sectors: topSectors,
-        top_n_per_sector: topPerSector,
-        max_companies: maxCompanies,
-        min_price_score: minPriceScore.trim() === '' ? null : Number(minPriceScore),
-        universe_label: null,
-        index_universe: universeFromVariants,
-        grouping: groupingFromVariants,
-        selection_mode: selectionMode,
-        random_seed: selectionMode === 'random' ? randomSeed : null,
-        n_trials: selectionMode === 'random' ? Math.max(1, nTrials) : 1,
-        sector_etfs: selectionMode === 'sector_etf' ? sectorEtfs : undefined,
-        force_recompute: noCache,
-      },
-      targets,
-    );
-  };
+  // Run / current-portfolio orchestration — assembles the request from
+  // the current config + selections and dispatches to the store. Lives in
+  // `useBacktestRun` so this component just wires the buttons to it.
+  const {
+    runVariantsBacktest,
+    showCurrentPicks,
+    recomputeCurrentPortfolio,
+  } = useBacktestRun({ config, selectedIndexUniverse, sectorEtfs, eligibleVariants });
 
   // Pin a single variant from a completed sweep to /schedule. The
   // pipeline will then keep its current-picks snapshot up to date on
@@ -617,44 +567,6 @@ export default function MomentumBacktester() {
         { title: 'Schedule add failed' },
       );
     }
-  };
-
-  const _currentPortfolioConfig = (opts: { force: boolean; dbOnly: boolean }): BacktestStartConfig => ({
-    start_date: `${startDate}-01`,
-    end_date: `${endDate}-01`,
-    signal_weights: weights,
-    category_weights: categoryWeights,
-    top_n_sectors: topSectors,
-    top_n_per_sector: topPerSector,
-    max_companies: maxCompanies,
-    universe_label: null,
-    index_universe: selectedIndexUniverse || null,
-    grouping,
-    selection_mode: 'momentum',
-    random_seed: null,
-    n_trials: 1,
-    mode: 'current_portfolio',
-    force_recompute: opts.force,
-    db_only: opts.dbOnly,
-  });
-
-  // Hit the backend for "what is my strategy holding right now?". By
-  // default, runs DB-only — no GuruFocus / ECB calls, just whatever is
-  // already in Supabase. With "Don't use cache" checked, both the
-  // snapshot cache AND the db_only guard are disabled, so missing
-  // prices/volumes/FX are fetched fresh (same path as Recompute).
-  const showCurrentPicks = async () => {
-    await startBacktest(_currentPortfolioConfig({ force: noCache, dbOnly: !noCache }));
-    loadCurrentPicksSnapshots();
-  };
-
-  // "Recompute" is the explicit "I want fresh data" path: it bypasses
-  // both the snapshot cache (force_recompute) AND the db_only guard, so
-  // the backend will fetch any missing prices / volumes / FX from the
-  // upstream APIs. Slow, but produces a new snapshot.
-  const recomputeCurrentPortfolio = async () => {
-    await startBacktest(_currentPortfolioConfig({ force: true, dbOnly: false }));
-    loadCurrentPicksSnapshots();
   };
 
   // Persist every `ok` variant from the current sweep as one row. Variants
@@ -1891,69 +1803,14 @@ export default function MomentumBacktester() {
                 to sweep across them. */}
 
             {selectionMode === 'momentum' && (
-              <div className="space-y-4">
-                {['price', 'volume'].map((group) => {
-                  const groupSignals = signalDefs.filter((s) => (s.group ?? 'price') === group);
-                  if (groupSignals.length === 0) return null;
-                  return (
-                    <div key={group}>
-                      <h3 className="text-gray-400 text-xs font-medium mb-2.5 uppercase tracking-wider">
-                        {group === 'price' ? 'Price Momentum' : 'Volume Confirmation'}
-                      </h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2.5">
-                        {groupSignals.map((s) => (
-                          <div key={s.key} className="flex items-center gap-3">
-                            <div className="w-36 shrink-0 flex items-center gap-1.5">
-                              <span className="text-gray-300 text-xs font-medium">{s.label}</span>
-                              <span className="relative group/tip">
-                                <span className="text-gray-600 hover:text-gray-400 cursor-help text-xs">&#9432;</span>
-                                <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover/tip:block w-64 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-300 text-xs leading-relaxed shadow-xl z-50 pointer-events-none">
-                                  {s.description}
-                                </span>
-                              </span>
-                            </div>
-                            <input
-                              type="range"
-                              min={0}
-                              max={10}
-                              step={1}
-                              value={weights[s.key] ?? 0}
-                              onChange={(e) => setWeights((prev) => ({ ...prev, [s.key]: Number(e.target.value) }))}
-                              className="flex-1 h-1 accent-indigo-500 cursor-pointer"
-                            />
-                            <span className="text-gray-500 text-xs w-5 text-right font-mono shrink-0">{weights[s.key] ?? 0}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-                {/* Category Weights */}
-                {categories.length > 1 && (
-                  <div>
-                    <h3 className="text-gray-400 text-xs font-medium mb-2.5 uppercase tracking-wider">Category Weights</h3>
-                    <div className="flex items-center gap-6">
-                      {categories.map((cat) => (
-                        <div key={cat} className="flex items-center gap-2">
-                          <span className="text-gray-300 text-xs font-medium w-28">
-                            {cat === 'price' ? 'Price Momentum' : cat === 'volume' ? 'Volume Confirmation' : cat}
-                          </span>
-                          <input
-                            type="range"
-                            min={0}
-                            max={100}
-                            step={5}
-                            value={categoryWeights[cat] ?? 50}
-                            onChange={(e) => setCategoryWeights((prev) => ({ ...prev, [cat]: Number(e.target.value) }))}
-                            className="w-32 h-1 accent-indigo-500 cursor-pointer"
-                          />
-                          <span className="text-gray-500 text-xs w-8 text-right font-mono">{categoryWeights[cat] ?? 50}%</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+              <SignalWeightSliders
+                signalDefs={signalDefs}
+                weights={weights}
+                setWeights={setWeights}
+                categories={categories}
+                categoryWeights={categoryWeights}
+                setCategoryWeights={setCategoryWeights}
+              />
             )}
 
             {selectionMode === 'random' && (
