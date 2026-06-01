@@ -408,6 +408,34 @@ jobs:
           psql -h localhost -p 54322 -U postgres -c "\dt public.*" || true
           exit 1
 
+      # supabase-py (the backend's DB client) addresses PostgREST as
+      # {SUPABASE_URL}/rest/v1/* — in real Supabase that path is routed to
+      # PostgREST by the Kong gateway. Our lightweight stack runs bare
+      # PostgREST (serves at root), so without a shim EVERY backend query
+      # hits /rest/v1/* → 404 and surfaces as a 500 (PostgREST's empty `{}`
+      # error body even crashes postgrest-py's error parser). A tiny nginx
+      # that strips the /rest/v1/ prefix emulates the gateway — ~20MB,
+      # instant, vs pulling all of `supabase start` just for Kong. Runs on
+      # the host network: listens on :54320, forwards to PostgREST on
+      # :54321. The backend then points at :54320 (see below).
+      - name: Start Supabase-style /rest/v1 proxy (nginx → PostgREST)
+        run: |
+          docker run -d --name pgrst-proxy --network host \
+            -v "$GITHUB_WORKSPACE/scripts/ci-rest-proxy.conf:/etc/nginx/nginx.conf:ro" \
+            nginx:alpine
+          for i in $(seq 1 30); do
+            code=$(curl -sS -m 3 -o /dev/null -w "%{http_code}" \
+              "http://localhost:54320/rest/v1/company?limit=1" || echo 000)
+            if [[ "$code" == "200" ]]; then
+              echo "proxy ready: /rest/v1/company=200 (${i}s)"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::/rest/v1 proxy never became ready"
+          docker logs pgrst-proxy || true
+          exit 1
+
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
         with:
@@ -418,13 +446,14 @@ jobs:
         working-directory: backend
         run: uv sync --frozen
 
-      # Boot uvicorn in the background. SUPABASE_URL points at the
-      # PostgREST service-container port. DISABLE_SCHEDULER=1 stops the
-      # APScheduler from firing weekly/monthly jobs inside CI.
+      # Boot uvicorn in the background. SUPABASE_URL points at the /rest/v1
+      # proxy (NOT PostgREST directly — supabase-py appends /rest/v1, which
+      # only the proxy routes). DISABLE_SCHEDULER=1 stops the APScheduler
+      # from firing weekly/monthly jobs inside CI.
       - name: Start backend
         working-directory: backend
         env:
-          SUPABASE_URL: http://localhost:54321
+          SUPABASE_URL: http://localhost:54320
           SUPABASE_SERVICE_KEY: ${{ env.SUPABASE_DEMO_SERVICE_KEY }}
           DISABLE_SCHEDULER: "1"
         run: |
@@ -455,9 +484,8 @@ jobs:
       #   * fx/latest (falls back to live ECB call on empty DB)
       #   * required-query-param endpoints (4xx without fixture-specific
       #     params the empty CI DB can't provide — see EXCLUDE below)
-      #   * heavy/diagnostic + external-fan-out endpoints (validate
-      #     re-screens the whole universe; acwi/fetch-all-details streams
-      #     ~2k GuruFocus lookups) — they hang or need an API key
+      #   * acwi/fetch-all-details (SSE that fans out ~2k GuruFocus lookups —
+      #     needs an API key; slow/flaky without one)
       # Path-param endpoints are skipped automatically (anything with
       # `{` in the URL). To add a new endpoint to the smoke, just add
       # `@router.get("/api/...")` on the backend — it'll appear in the
@@ -481,11 +509,8 @@ jobs:
             /api/acwi/announcement-detail      # needs ?url=
             /api/index-universe/tickers        # needs ?month=
             /api/longequity/companies          # needs ?target_date=
-            # Heavy diagnostic — re-runs the full universe screen; hangs on
-            # an empty DB. Not a "safe read".
-            /api/universe/validate
             # SSE that fans out ~2k detail lookups to GuruFocus (needs an
-            # API key; times out without one).
+            # API key; slow/flaky without one).
             /api/acwi/fetch-all-details
           )
           # Tags whose endpoints we never smoke. admin + auth need a
