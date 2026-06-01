@@ -153,6 +153,34 @@ def run_acwi_save_universe(
     feasible = acwi_feasible_holdings_for_db()
     emit(f"Found {len(feasible)} feasible holdings", 5)
 
+    # Post-XLS MSCI additions: load the XLS as-of date, resolve any
+    # ADDED announcements with eff_date past it via OpenFIGI + GF probe,
+    # then mix the verified hits into `feasible` so they get the same
+    # company-sync / dedup / membership treatment as XLS holdings.
+    # Unresolved entries are kept aside and surfaced to the caller for
+    # /schedule's per-template warning section.
+    from index_universe.acwi.forward_additions import resolve_post_xls_additions  # noqa: PLC0415
+    from index_universe.acwi.holdings import load_acwi_holdings as _load_holdings  # noqa: PLC0415
+    _, _xls_as_of_str = _load_holdings()
+    emit(f"Resolving post-XLS MSCI additions (XLS as-of {_xls_as_of_str})...", 6)
+    resolved_fwd, unresolved_fwd = resolve_post_xls_additions(_xls_as_of_str)
+    emit(
+        f"Forward additions: {len(resolved_fwd)} resolved via OpenFIGI+GF, "
+        f"{len(unresolved_fwd)} unresolved (need manual GF link)",
+        8,
+    )
+    for r in resolved_fwd:
+        feasible.append({
+            "db_exchange": r["gf_exchange"],
+            "gf_ticker": r["gf_ticker"],
+            "company_name": r["name"],
+            "sector": r.get("sector"),
+            "symbol": r["symbol"],
+            "ishares_ticker": r["synthetic_ticker"],
+            "ishares_exchange": "(forward-resolved)",
+            "unavailable_reason": None,
+        })
+
     # Cross-exchange dedup pass — iShares lists dual-listed names (e.g.
     # ICBC on HKSE:01398 AND SHSE:601398) as separate holdings. Without
     # this we'd insert both as distinct `company` rows. Group by
@@ -389,10 +417,22 @@ def run_acwi_save_universe(
     )
 
     emit(f"Reconstructing monthly holdings {start_date}..{end_date}...", 45)
-    monthly, stats = reconstruct_acwi_monthly_holdings(start_date, end_date)
+    monthly, stats = reconstruct_acwi_monthly_holdings(
+        start_date, end_date, extra_holdings=resolved_fwd,
+    )
+    fwd_msg = (
+        f", {stats['forward_removals']} post-XLS removals applied"
+        if stats.get("forward_removals") else ""
+    )
+    fwd_add_msg = (
+        f", +{stats['forward_additions']} post-XLS additions injected"
+        if stats.get("forward_additions") else ""
+    )
     emit(
         f"Built {stats['months']} months: {stats['feasible_count']} feasible tickers "
-        f"({stats['with_addition']} with matched addition, {stats['grandfathered']} grandfathered)",
+        f"({stats['with_addition']} with matched addition, "
+        f"{stats['grandfathered']} grandfathered{fwd_msg}{fwd_add_msg}) "
+        f"[XLS as-of {stats.get('xls_as_of') or '?'}]",
         55,
     )
 
@@ -417,6 +457,9 @@ def run_acwi_save_universe(
         "feasible_count": stats["feasible_count"],
         "grandfathered": stats["grandfathered"],
         "with_addition": stats["with_addition"],
+        "forward_additions": stats.get("forward_additions", 0),
+        "forward_removals": stats.get("forward_removals", 0),
+        "unresolved_forward_additions": unresolved_fwd,
     }
 
 

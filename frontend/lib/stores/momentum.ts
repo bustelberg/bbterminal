@@ -2,6 +2,10 @@ import { createStore } from '../store';
 import { runSSE } from '../stream';
 import { apiFetch } from '../apiFetch';
 import { API_URL } from '../apiUrl';
+import type {
+  BacktestRequest as ApiBacktestRequest,
+  VariantSpec as ApiVariantSpec,
+} from '../types/api';
 
 export type Holding = {
   company_id: number;
@@ -190,19 +194,19 @@ export type UniverseEntry = {
 };
 
 export type ProgressEntry = { pct: number; message: string; t: number };
-export type WarningEntry = { scope: string; message: string };
+export type WarningEntry = { scope: string; message: string; id?: string };
 export type InfoEntry = { scope: string; message: string };
 
 // Phase 3 — variants. The "Run variants" button fans out to a fixed
 // cross-product of rebalance frequencies × strategy types so the user can
 // compare them side-by-side. Variants are run sequentially against the
 // same base config (signal/category weights, sectors, top-N, universe).
-export type RebalanceFrequency =
-  | 'daily' | 'weekly' | 'monthly'
-  | 'every_2_months' | 'every_3_months' | 'every_4_months' | 'every_5_months'
-  | 'every_6_months' | 'every_7_months' | 'every_8_months' | 'every_9_months'
-  | 'every_10_months' | 'every_11_months' | 'every_12_months';
-export type StrategyType = 'long_only' | 'long_short';
+// Derived from the wire shape — `VariantSpec` carries the canonical
+// frequency + strategy enums and both are required there, so we use it
+// (instead of the optional fields on `BacktestRequest`) to avoid
+// `NonNullable<...>` gymnastics.
+export type RebalanceFrequency = ApiVariantSpec['frequency'];
+export type StrategyType = ApiVariantSpec['strategy_type'];
 // Loose enough to accept both legacy 2-segment keys
 // (`monthly__long_only`) and the cross-product sweep's extended form
 // (`monthly__long_only__s4__p6__m30__uACWI__gsector`). The parser /
@@ -380,59 +384,28 @@ export type MomentumState = {
   renamingSnapshotId: number | null;
 };
 
-export type BacktestStartConfig = {
-  start_date: string;
-  end_date: string;
-  signal_weights: Record<string, number>;
-  category_weights: Record<string, number>;
-  top_n_sectors: number;
-  top_n_per_sector: number;
-  max_companies: number;
-  /** Optional 0-100 floor on each candidate's `score_price`. When set,
-   * the long bucket only picks companies whose price-category score
-   * strictly exceeds this value. Null disables the filter. */
-  min_price_score?: number | null;
-  universe_label: string | null;
-  index_universe: string | null;
-  /** How `top_n_sectors` buckets companies. 'sector' (default) works for
-   * every universe. 'industry' only works for Leonteq-derived universes
-   * (LEONTEQ, ACWI_LEONTEQ) because that's where the industry column is
-   * populated. The backend rejects 'industry' against any other universe. */
-  grouping?: 'sector' | 'industry';
-  selection_mode: 'momentum' | 'random' | 'all' | 'sector_etf';
-  random_seed: number | null;
-  n_trials: number;
-  // {sector: benchmark_id} — required when selection_mode === 'sector_etf'.
-  // The momentum backtester populates this from the benchmarks tagged with
-  // a sector on /benchmarks; the backend looks up benchmark_price for each
-  // mapped ETF and uses those returns for the chosen sectors.
-  sector_etfs?: Record<string, number>;
-  mode?: 'backtest' | 'current_portfolio';
-  force_recompute?: boolean;
-  // When true (the backend default), the run uses only data already in
-  // the DB — no GuruFocus / ECB calls. The Recompute button overrides
-  // this to fetch fresh data when prices have fallen behind.
-  db_only?: boolean;
-  // Optional variant axes — backend defaults match Phase 1/2 (long-only,
-  // monthly). Variant sweep populates both per request.
-  rebalance_frequency?: RebalanceFrequency;
-  strategy_type?: StrategyType;
-  // When set, the request becomes a sweep: backend loads data once and
-  // runs the backtest computation per variant, streaming a separate
-  // `variant_result` event per (frequency × strategy_type × overrides).
-  // Optional override fields are the cross-product axes — see
-  // `VariantParams`. Backend `VariantSpec` defaults None on each field.
-  variants?: {
-    frequency: RebalanceFrequency;
-    strategy_type: StrategyType;
-    top_n_sectors?: number;
-    top_n_per_sector?: number;
-    min_price_score?: number | null;
-    universe_label?: string;
-    index_universe?: string;
-    grouping?: 'sector' | 'industry';
-  }[];
-};
+/**
+ * Wire shape for `POST /api/momentum/backtest`. Re-exported from the
+ * generated `BacktestRequest` so the frontend can't drift from the
+ * Pydantic model — see `lib/types/api.ts` for the pipeline and
+ * `backend/openapi.json` for the source of truth.
+ *
+ * Field semantics (kept here because they're frontend-relevant context
+ * the generated types don't carry):
+ *   - `min_price_score`: 0-100 floor on each candidate's `score_price`;
+ *     the long bucket only picks companies whose price-category score
+ *     strictly exceeds it. Null disables.
+ *   - `grouping`: 'sector' (default) works for every universe;
+ *     'industry' only works for Leonteq-derived universes.
+ *   - `sector_etfs`: {sector: benchmark_id}, required when
+ *     `selection_mode === 'sector_etf'`.
+ *   - `db_only`: true (backend default) skips GuruFocus / ECB. The
+ *     Recompute button passes false to refresh upstream data.
+ *   - `variants`: when set, the request becomes a sweep — backend
+ *     loads data once and runs the backtest per variant, streaming a
+ *     separate `variant_result` event per cross-product entry.
+ */
+export type BacktestStartConfig = ApiBacktestRequest;
 
 export const momentumStore = createStore<MomentumState>({
   running: false,
@@ -504,9 +477,33 @@ export async function startBacktest(cfg: BacktestStartConfig): Promise<void> {
             progress: [...s.progress, { pct: data.pct ?? 0, message: data.message ?? '', t: Date.now() }],
           }));
         } else if (data.type === 'warning') {
-          momentumStore.set((s) => ({
-            warnings: [...s.warnings, { scope: data.scope ?? 'backtest', message: data.message ?? '' }],
-          }));
+          const id = (data as { id?: string }).id;
+          const dismiss = (data as { dismiss?: boolean }).dismiss === true;
+          momentumStore.set((s) => {
+            // Dismiss request: drop any warning with this id (live self-heal
+            // updates fire dismiss=true when everything's recovered).
+            if (id && dismiss) {
+              return { warnings: s.warnings.filter((w) => w.id !== id) };
+            }
+            // Last-write-wins on `id`: replace existing same-id warning so
+            // live updates (e.g. self-heal "X of Y still missing…")
+            // visually supersede the original audit warning instead of
+            // stacking under it.
+            const entry: WarningEntry = {
+              scope: data.scope ?? 'backtest',
+              message: data.message ?? '',
+              ...(id ? { id } : {}),
+            };
+            if (id) {
+              const idx = s.warnings.findIndex((w) => w.id === id);
+              if (idx >= 0) {
+                const next = [...s.warnings];
+                next[idx] = entry;
+                return { warnings: next };
+              }
+            }
+            return { warnings: [...s.warnings, entry] };
+          });
         } else if (data.type === 'info') {
           momentumStore.set((s) => ({
             infos: [...s.infos, { scope: data.scope ?? 'backtest', message: data.message ?? '' }],

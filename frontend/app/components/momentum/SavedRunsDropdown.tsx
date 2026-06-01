@@ -134,6 +134,11 @@ export default function SavedRunsDropdown({
 
   useClickOutside(ref, () => setOpen(false), open);
   useEffect(() => {
+    // Clear the multi-select when the dropdown closes. React 19's
+    // set-state-in-effect rule flags this; the alternatives (clearing
+    // in the close handler in two places, or remounting via key) are
+    // more error-prone for a one-line reset.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!open) setSelectedIds(new Set());
   }, [open]);
 

@@ -194,17 +194,37 @@ export function ttmSeries(quarterly: { date: string; value: number }[]): { date:
   return out;
 }
 
+/** True when the series's observations are spaced ~quarterly (median
+ * gap ≤ 120 days). Used to gate the TTM construction below: many
+ * European reporters (notably German names like 2G Energy) populate
+ * the `quarterly__...` code with semi-annual entries (Jun-30, Dec-31)
+ * — summing 4 of those is "trailing 24 months", not TTM. */
+function isQuarterlyCadence(series: { date: string }[]): boolean {
+  if (series.length < 4) return false;
+  const gaps: number[] = [];
+  for (let i = 1; i < series.length; i++) {
+    const d = (new Date(series[i].date).getTime() - new Date(series[i - 1].date).getTime()) / 86400000;
+    if (d > 0) gaps.push(d);
+  }
+  if (gaps.length === 0) return false;
+  gaps.sort((a, b) => a - b);
+  const median = gaps[Math.floor(gaps.length / 2)];
+  return median <= 120;
+}
+
 /** Build the freshest reasonable flow series for a financials code: prefer
  * the quarterly twin's TTM (anchored to the latest reported quarter) when
- * we have enough quarterly history; fall back to the annual series. The
- * annual fallback covers companies / periods where GuruFocus only ships
- * annual values. */
+ * we have enough quarterly history AND the underlying cadence is actually
+ * quarterly. Falls back to the annual series for semi-annual reporters
+ * and for companies / periods where GuruFocus only ships annual values. */
 export function flowSeriesPreferQuarterlyTTM(metrics: MetricRow[], annualsCode: string): { date: string; value: number }[] {
   if (annualsCode.startsWith('annuals__')) {
     const qCode = 'quarterly__' + annualsCode.slice('annuals__'.length);
     const q = timeSeries(metrics, qCode);
-    const ttm = ttmSeries(q);
-    if (ttm.length >= 5) return ttm;
+    if (isQuarterlyCadence(q)) {
+      const ttm = ttmSeries(q);
+      if (ttm.length >= 5) return ttm;
+    }
   }
   return annualSeries(metrics, annualsCode);
 }
@@ -260,15 +280,61 @@ export function logLinearR2(series: { date: string; value: number }[]): number |
   return r * r;
 }
 
-/** Filter a daily/annual series to entries within the trailing N years of its last point. */
+/** Walk backward from the last point and return the longest run of
+ * strictly-positive contiguous values ending at that point, along with
+ * its span in years. Use to salvage CAGR / R² on FCF for companies whose
+ * 5Y window starts in a heavy-CAPEX / loss-making era — Dino Polska
+ * 2021-22 is the canonical case (sparse positive points before the
+ * 2023+ positive-FCF era; the contiguous tail picks the actual era).
+ *
+ * Why contiguous rather than "all positives": a lone positive point
+ * inside a sea of negative quarters (e.g. Dino's 2022-Q3 = +60 in the
+ * middle of a -200…-300 range) would inflate CAGR wildly when treated
+ * as the series start. Restricting to the tail gives the most recent
+ * coherent positive era. Returns `{ trimmed: [], spanYears: 0 }` when
+ * the tail is fewer than 2 points. */
+export function trailingPositiveRun(
+  series: { date: string; value: number }[],
+): { trimmed: { date: string; value: number }[]; spanYears: number } {
+  if (series.length === 0) return { trimmed: [], spanYears: 0 };
+  let start = series.length;
+  for (let i = series.length - 1; i >= 0; i--) {
+    if (series[i].value > 0) start = i; else break;
+  }
+  const trimmed = series.slice(start);
+  if (trimmed.length < 2) return { trimmed: [], spanYears: 0 };
+  const spanYears =
+    (new Date(trimmed[trimmed.length - 1].date).getTime() -
+      new Date(trimmed[0].date).getTime()) /
+    (365.25 * 86400000);
+  return { trimmed, spanYears };
+}
+
+/** Filter a daily/annual series to entries within the trailing N years
+ * of its last point. Uses real calendar-year subtraction for the cutoff
+ * — NOT `N * 365.25 days`, which misses by ~1 day when the window
+ * straddles two leap years (e.g. 2019-12-31 to 2024-12-31 is 1827 days,
+ * but 5 * 365.25 = 1826.25, so a year-end entry 5 calendar years before
+ * the anchor was wrongly excluded). The boundary entry stays included
+ * by the inclusive `>=` comparison. */
 export function trailingYearsWindow(series: { date: string; value: number }[], years: number): { date: string; value: number }[] {
   if (series.length === 0) return [];
-  const endMs = new Date(series[series.length - 1].date).getTime();
-  const cutoffMs = endMs - years * 365.25 * 86400000;
-  // Tolerance: the earliest point should not be more recent than (years - 0.5) ago,
-  // i.e. we need enough span to actually represent N years.
+  const endStr = series[series.length - 1].date;
+  const endMs = new Date(endStr).getTime();
+  // Calendar-year subtraction. Date.UTC handles month-end edge cases
+  // (e.g. Feb-29 - 5 years → Feb-28 of a non-leap year) the way the
+  // intent of "exactly N calendar years ago" suggests.
+  const endDate = new Date(endStr);
+  const cutoffDate = new Date(Date.UTC(
+    endDate.getUTCFullYear() - years,
+    endDate.getUTCMonth(),
+    endDate.getUTCDate(),
+  ));
+  const cutoffMs = cutoffDate.getTime();
   const filtered = series.filter((p) => new Date(p.date).getTime() >= cutoffMs);
   if (filtered.length < 2) return [];
+  // Tolerance: the earliest point should not be more recent than (years
+  // - 0.5) ago, i.e. we need enough span to actually represent N years.
   const span = (endMs - new Date(filtered[0].date).getTime()) / (365.25 * 86400000);
   if (span < years - 0.5) return [];
   return filtered;

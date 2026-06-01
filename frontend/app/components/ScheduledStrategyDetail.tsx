@@ -1,12 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import SnapshotHoldings from './SnapshotHoldings';
 import LoadingDots from './LoadingDots';
 import { StrategyConfigDetail, type IngestRun } from './Schedule';
 import { colorForSector } from '../../lib/sectorColors';
 
 import { API_URL } from '../../lib/apiUrl';
+
+// Recharts is ~100KB gzipped — only ship it when a strategy detail
+// actually opens AND has a linked backtest_run_id.
+const SourceBacktestCard = dynamic(() => import('./SourceBacktestCard'), { ssr: false });
 
 type RunHistoryEntry = {
   snapshot_id: number;
@@ -52,6 +57,12 @@ export type StrategyRunHistory = {
   last_run_at: string | null;
   next_due_at: string | null;
   backfill: BackfillState | null;
+  /** When this scheduled strategy was created from a /backtest variant,
+   * the variant's BacktestResult was persisted as a backtest_run before
+   * the scheduled_strategy row was inserted. The detail panel fetches
+   * that result and renders its equity curve / monthly history on
+   * expansion. Null for strategies added manually via /schedule. */
+  backtest_run_id: number | null;
   runs: RunHistoryEntry[];
 };
 
@@ -254,6 +265,19 @@ export default function ScheduledStrategyDetail({
           <div className="font-medium mb-0.5">Backfill failed</div>
           <div className="font-mono whitespace-pre-wrap">{data.backfill.error ?? 'Unknown error'}</div>
         </div>
+      )}
+
+      {/* Source backtest (only when added via the "+ Schedule" button on
+          /backtest). Renders the variant's full equity curve + headline
+          stats with a red vertical line at the date this strategy was
+          scheduled, so the cutover between backtest history and live
+          performance is unmistakable. */}
+      {data.backtest_run_id != null && (
+        <SourceBacktestCard
+          runId={data.backtest_run_id}
+          scheduledAt={data.created_at}
+          liveSnapshots={data.runs}
+        />
       )}
 
       {/* Run history */}

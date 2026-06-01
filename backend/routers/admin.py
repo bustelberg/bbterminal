@@ -1152,3 +1152,121 @@ async def resolve_missing_exchanges(
         }
 
     return await asyncio.to_thread(_resolve)
+
+
+@router.get("/api/admin/companies/flagged")
+async def list_flagged_companies(
+    window_days: int = 10,
+    authorization: str = Header(None),
+):
+    """Ad-hoc audit for manual review: companies that look suspicious
+    based on two heuristics. Pure triage — nothing is auto-modified.
+
+      * `adr_in_name`: company_name contains 'ADR' (case-insensitive).
+        Often surfaces wrong-variant mappings — an ADR depositary
+        listing got linked instead of the primary local security,
+        which then poisons everything downstream (sector, returns).
+      * `flat_prices`: latest `window_days` close_price observations
+        are all the exact same value. Strong signal for a stale /
+        dead listing OR a wrong (primary→ADR or similar) mapping
+        whose ticker continues to ship a stub. Companies already
+        stamped `delisted_at` are excluded — flat prices on those
+        are expected.
+
+    Backed by the `company_flat_price_run` RPC (single SQL query,
+    way faster than paginating metric_data from Python) plus a
+    direct `ILIKE` on company.company_name for the ADR check.
+    """
+    _require_admin(authorization)
+
+    def _query() -> dict:
+        # ADR-in-name — direct query.
+        adr_resp = (
+            supabase.table("company")
+            .select(
+                "company_id, company_name, gurufocus_ticker, "
+                "delisted_at, out_of_scope_at, out_of_scope_reason, "
+                "gurufocus_exchange:gurufocus_exchange(exchange_code)"
+            )
+            .ilike("company_name", "%ADR%")
+            .order("company_name")
+            .limit(5000)
+            .execute()
+        )
+        adr_rows = []
+        for r in (adr_resp.data or []):
+            adr_rows.append({
+                "company_id": r["company_id"],
+                "company_name": r.get("company_name"),
+                "gurufocus_ticker": r.get("gurufocus_ticker"),
+                "gurufocus_exchange": (r.get("gurufocus_exchange") or {}).get("exchange_code"),
+                "delisted_at": r.get("delisted_at"),
+                "out_of_scope_at": r.get("out_of_scope_at"),
+                "out_of_scope_reason": r.get("out_of_scope_reason"),
+            })
+
+        # Flat-prices — via RPC.
+        try:
+            flat_resp = supabase.rpc(
+                "company_flat_price_run",
+                {"window_days": window_days},
+            ).execute()
+            flat_raw = flat_resp.data or []
+        except APIError as e:
+            # Most common cause: migration not applied yet. Return an
+            # empty list rather than 500ing the whole endpoint so the
+            # ADR-name half still works.
+            flat_raw = []
+            adr_rows.insert(0, {
+                "_warning": (
+                    f"company_flat_price_run RPC unavailable "
+                    f"({e.message if hasattr(e, 'message') else e}). "
+                    f"Apply migration 20260530000000_company_flag_rpcs.sql."
+                ),
+            })
+
+        # Hydrate flat-prices rows with name/ticker/exchange + drop
+        # already-known-delisted companies (flat prices there are
+        # expected, not suspicious).
+        flat_info_by_cid = {int(r["company_id"]): r for r in flat_raw}
+        flat_cids = list(flat_info_by_cid.keys())
+        flat_rows = []
+        for i in range(0, len(flat_cids), IN_CHUNK_SIZE):
+            chunk = flat_cids[i:i + IN_CHUNK_SIZE]
+            comp_resp = (
+                supabase.table("company")
+                .select(
+                    "company_id, company_name, gurufocus_ticker, "
+                    "delisted_at, out_of_scope_at, out_of_scope_reason, "
+                    "gurufocus_exchange:gurufocus_exchange(exchange_code)"
+                )
+                .in_("company_id", chunk)
+                .execute()
+            )
+            for r in (comp_resp.data or []):
+                cid = int(r["company_id"])
+                if r.get("delisted_at") is not None:
+                    continue  # flat prices expected on delisted listings
+                info = flat_info_by_cid.get(cid, {})
+                flat_rows.append({
+                    "company_id": cid,
+                    "company_name": r.get("company_name"),
+                    "gurufocus_ticker": r.get("gurufocus_ticker"),
+                    "gurufocus_exchange": (r.get("gurufocus_exchange") or {}).get("exchange_code"),
+                    "delisted_at": r.get("delisted_at"),
+                    "out_of_scope_at": r.get("out_of_scope_at"),
+                    "out_of_scope_reason": r.get("out_of_scope_reason"),
+                    "flat_value": info.get("flat_value"),
+                    "window_start": info.get("window_start"),
+                    "window_end": info.get("window_end"),
+                    "row_count": info.get("row_count"),
+                })
+        flat_rows.sort(key=lambda x: (x.get("company_name") or "").lower())
+
+        return {
+            "window_days": window_days,
+            "adr_in_name": {"count": len(adr_rows), "companies": adr_rows},
+            "flat_prices": {"count": len(flat_rows), "companies": flat_rows},
+        }
+
+    return await asyncio.to_thread(_query)

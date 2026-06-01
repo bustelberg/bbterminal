@@ -100,10 +100,87 @@ function TemplateRunSection({ run, t }: { run: IngestRun; t: TemplateDiff }) {
             />
           </div>
         )}
+        {!t.error && (t.unresolved_additions?.length ?? 0) > 0 && (
+          <UnresolvedAdditionsSection items={t.unresolved_additions ?? []} />
+        )}
         {!t.error && t.universe_id != null && t.this_month && (
           <TemplateMembership runId={run.run_id} templateKey={t.template_key} targetMonth={t.this_month} />
         )}
       </div>
+    </div>
+  );
+}
+
+/** Post-XLS MSCI additions the pipeline couldn't verify on GuruFocus.
+ * Surfaced prominently in amber so the user notices on the next
+ * /schedule visit and can add a manual override (typically: extend
+ * `_ISHARES_TO_GF` / `_EXCHCODE_MAP`, or wait for the next iShares XLS
+ * commit which usually fills the gap). */
+function UnresolvedAdditionsSection({
+  items,
+}: {
+  items: NonNullable<TemplateDiff['unresolved_additions']>;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="bg-amber-500/[0.06] border border-amber-500/30 rounded-lg overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full px-3 py-2 flex items-center justify-between hover:bg-amber-500/[0.04] cursor-pointer"
+      >
+        <span className="flex items-center gap-2">
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border text-amber-300 bg-amber-500/10 border-amber-500/40">
+            Unresolved post-XLS additions
+          </span>
+          <span className="text-amber-200 font-mono">{items.length}</span>
+          <span className="text-[11px] text-amber-200/70">
+            need a manual GuruFocus link before the next pipeline tick can include them
+          </span>
+        </span>
+        <span className="text-amber-300 font-mono text-xs">{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        <div className="border-t border-amber-500/30 max-h-96 overflow-y-auto divide-y divide-amber-500/15">
+          {items.map((u, idx) => (
+            <div key={`${u.msci_href ?? u.name}-${idx}`} className="px-3 py-2 text-xs space-y-1">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="font-mono text-gray-200">{u.name}</span>
+                <span className="text-[10px] uppercase tracking-wider px-1 py-0.5 rounded border border-gray-700 text-gray-400">
+                  {u.country}
+                </span>
+                {u.eff_date && (
+                  <span className="text-[10px] text-gray-500 font-mono">eff {u.eff_date}</span>
+                )}
+                <span className="text-[10px] uppercase tracking-wider px-1 py-0.5 rounded border border-rose-500/30 text-rose-300 bg-rose-500/10 ml-auto">
+                  {u.reason}
+                </span>
+              </div>
+              {u.openfigi_candidate && (
+                <div className="text-[11px] text-gray-400 font-mono">
+                  OpenFIGI says: {u.openfigi_candidate.exch_code ?? '?'}:{u.openfigi_candidate.ticker ?? '?'}
+                  {u.openfigi_candidate.name && (
+                    <span className="text-gray-500"> ({u.openfigi_candidate.name})</span>
+                  )}
+                </div>
+              )}
+              {u.gf_url && (
+                <a
+                  href={u.gf_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[11px] text-amber-300 hover:text-amber-200 underline font-mono break-all inline-block"
+                >
+                  {u.gf_url}
+                </a>
+              )}
+              {u.detail && (
+                <div className="text-[10px] text-gray-500 italic">{u.detail}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

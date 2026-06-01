@@ -28,7 +28,3 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 
-[tool.ruff]
-# `diagnose.py` and `playground/` are explicitly scratch/one-off per
-# CLAUDE.md — exclude them so their experimental state doesn't gate CI.
-extend-exclude = ["diagnose.py", "playground"]

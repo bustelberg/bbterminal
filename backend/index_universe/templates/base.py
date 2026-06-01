@@ -46,6 +46,10 @@ class TemplateDiff:
     additions: list[dict] = field(default_factory=list)
     removals: list[dict] = field(default_factory=list)
     renames: list[dict] = field(default_factory=list)
+    # Post-XLS MSCI additions a template couldn't resolve to a verified
+    # (exchange, ticker) on GuruFocus — surfaced to /schedule so the user
+    # can manually map them. Only the ACWI template populates this today.
+    unresolved_additions: list[dict] = field(default_factory=list)
 
     def to_summary_entry(self) -> dict:
         return {
@@ -59,6 +63,7 @@ class TemplateDiff:
             "additions": self.additions,
             "removals": self.removals,
             "renames": self.renames,
+            "unresolved_additions": self.unresolved_additions,
         }
 
 

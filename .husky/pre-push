@@ -1,0 +1,56 @@
+# Same Windows-GUI PATH guard as pre-commit — see that file for why.
+case ":$PATH:" in
+  *":/c/Program Files/nodejs:"*) ;;
+  *) [ -x "/c/Program Files/nodejs/node.exe" ] && export PATH="/c/Program Files/nodejs:$PATH" ;;
+esac
+
+# Same WSL `bash.exe`-shim guard as pre-commit — see that file for why.
+# Ensures a real Git-for-Windows bash precedes the System32 WSL stub on
+# PATH so GUI clients don't die with "execvpe(/bin/bash) failed".
+_gx=$(git --exec-path 2>/dev/null)
+case "$_gx" in
+  */libexec/git-core) _gx="${_gx%/*/libexec/git-core}/usr/bin" ;;
+  *) _gx="" ;;
+esac
+case "$_gx" in
+  [A-Za-z]:/*)
+    _drv=${_gx%%:*}; _rest=${_gx#*:}
+    case "$_drv" in
+      [Cc]) _gx="/c$_rest" ;; [Dd]) _gx="/d$_rest" ;; [Ee]) _gx="/e$_rest" ;; *) _gx="" ;;
+    esac ;;
+esac
+for _gitusr in \
+  "$_gx" \
+  "$HOME/AppData/Local/Programs/Git/usr/bin" \
+  "/c/Program Files/Git/usr/bin" \
+  "/c/Program Files (x86)/Git/usr/bin"; do
+  [ -n "$_gitusr" ] || continue
+  if [ -x "$_gitusr/bash.exe" ]; then
+    case ":$PATH:" in
+      *":$_gitusr:"*) ;;
+      *) export PATH="$_gitusr:$PATH" ;;
+    esac
+    break
+  fi
+done
+
+# Heavier checks that need the whole project — runs once per push, not
+# per commit. Catches the same trivial failures CI would, ~3 minutes
+# earlier.
+#
+# Compares against the upstream tracking branch when one exists,
+# otherwise against `origin/main` so the first push to a new branch
+# still gets checked. `--diff-filter=ACMR` lists added / modified /
+# renamed paths only; deletions don't need rechecking.
+
+UPSTREAM=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || echo "origin/main")
+CHANGED=$(git diff --name-only --diff-filter=ACMR "$UPSTREAM"...HEAD 2>/dev/null || git diff --name-only --diff-filter=ACMR HEAD)
+
+# Frontend typecheck — only when any .ts/.tsx will be pushed.
+if echo "$CHANGED" | grep -qE '^frontend/.*\.(ts|tsx)$'; then
+  echo "frontend: tsc --noEmit"
+  (cd frontend && npx tsc --noEmit) || {
+    echo "✗ Typecheck failed. Fix the errors above, or push with --no-verify to skip."
+    exit 1
+  }
+fi

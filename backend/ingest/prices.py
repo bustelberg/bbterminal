@@ -26,6 +26,7 @@ from ingest._gurufocus_http import (
 )
 from ingest.staleness import is_cache_fresh, is_daily_data_fresh
 from ingest.api_usage import track_api_call
+from .gurufocus_url import US_EXCHANGE_CODES as US_EXCHANGES  # single source of truth
 
 # Boot-time diagnostic. Same line both clients log — grepping the
 # Railway logs for `gurufocus` immediately shows which fingerprint
@@ -43,8 +44,6 @@ else:
 
 _BUCKET = "gurufocus-raw"
 _PRICE_CUTOFF = date(1998, 1, 1)
-
-US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX", "CBOE"}
 
 # When GuruFocus returns 404 "Stock not found" for a (ticker, exchange)
 # pair, try these alternative exchanges before giving up. iShares ACWI

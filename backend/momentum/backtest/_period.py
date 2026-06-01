@@ -294,21 +294,22 @@ def adjust_open_period_holdings(
     return adjusted, common_max_date
 
 
-def make_period_holding(
-    row: pd.Series,
-    side: HoldingSide,
-    weight: float,
-    *,
-    price_index: dict[int, pd.Series],
-    local_price_index: dict[int, pd.Series] | None,
-    company_currency: dict[int, str | None] | None,
+def _compute_holding_prices(
+    cid: int,
     entry_ts: pd.Timestamp,
     exit_ts: pd.Timestamp,
-) -> tuple[PeriodHolding, float | None]:
-    """Build one PeriodHolding from a scored row. Returns the holding plus
-    its forward-return so the caller can route the return into the long
-    or short bucket."""
-    cid = int(row["company_id"])
+    price_index: dict[int, pd.Series],
+    local_price_index: dict[int, pd.Series] | None,
+) -> tuple[
+    float | None, float | None, float | None,  # entry_eur, exit_eur, fwd_return
+    float | None, float | None,                  # entry_local, exit_local
+    object, object,                              # entry_dt, exit_dt
+]:
+    """The cacheable part of `make_period_holding` — depends only on
+    (cid, entry_ts, exit_ts) plus the shared price indices that the
+    variants sweep precomputes once for every variant. Holding-level
+    fields that vary per-variant (score, side, weight, sector_rank,
+    company_rank) come from the per-variant `row` and are NOT cached."""
     series = price_index.get(cid)
     entry_price = _price_on_or_after(series, entry_ts) if series is not None else None
     exit_price = _price_on_or_after(series, exit_ts) if series is not None else None
@@ -320,10 +321,58 @@ def make_period_holding(
     entry_local = _price_on_or_after(local_series, entry_ts) if local_series is not None else None
     exit_local = _price_on_or_after(local_series, exit_ts) if local_series is not None else None
 
-    # Actual trading dates (prefer local series, fall back to EUR series).
     date_series = local_series if local_series is not None else series
     entry_dt = _date_on_or_after(date_series, entry_ts) if date_series is not None else None
     exit_dt = _date_on_or_after(date_series, exit_ts) if date_series is not None else None
+
+    return (
+        entry_price, exit_price, fwd_return,
+        entry_local, exit_local,
+        entry_dt, exit_dt,
+    )
+
+
+def make_period_holding(
+    row: pd.Series,
+    side: HoldingSide,
+    weight: float,
+    *,
+    price_index: dict[int, pd.Series],
+    local_price_index: dict[int, pd.Series] | None,
+    company_currency: dict[int, str | None] | None,
+    entry_ts: pd.Timestamp,
+    exit_ts: pd.Timestamp,
+    price_cache: dict | None = None,
+) -> tuple[PeriodHolding, float | None]:
+    """Build one PeriodHolding from a scored row. Returns the holding plus
+    its forward-return so the caller can route the return into the long
+    or short bucket.
+
+    `price_cache` (Win #3): when supplied, caches the per-cid price
+    lookups + forward-return computation by `(cid, entry_ts.value,
+    exit_ts.value)`. Multiple variants on the same `(combo, freq)`
+    share the same entry/exit timestamps and frequently the same cids
+    across their selections — the price math is identical, only the
+    row-derived score/side/weight differ. Variants sweep allocates one
+    dict per sweep and passes it to every variant.
+    """
+    cid = int(row["company_id"])
+    cache_key = (cid, entry_ts.value, exit_ts.value) if price_cache is not None else None
+    cached = price_cache.get(cache_key) if cache_key is not None else None
+    if cached is None:
+        cached = _compute_holding_prices(
+            cid, entry_ts, exit_ts, price_index, local_price_index,
+        )
+        if cache_key is not None:
+            # CPython dict assignment is atomic per-key; a concurrent
+            # double-compute by parallel variant workers is harmless
+            # (identical recomputation, second write idempotent).
+            price_cache[cache_key] = cached
+    (
+        entry_price, exit_price, fwd_return,
+        entry_local, exit_local,
+        entry_dt, exit_dt,
+    ) = cached
 
     cat_scores: dict[str, float | None] = {}
     for cat in _get_category_keys():
@@ -476,6 +525,15 @@ def compute_selection_period(
     local_price_index: dict[int, pd.Series] | None,
     company_currency: dict[int, str | None] | None,
     record_label: str,
+    # Win #3: optional per-sweep cache for `make_period_holding`'s price
+    # lookups. See `make_period_holding` docstring.
+    price_cache: dict | None = None,
+    # Win #5: optional per-sweep cache for `select_from_scored`. Keyed
+    # by `(period_date, top_n_sectors, top_n_per_sector, min_price_score,
+    # direction)`. Variants sharing those params on the same combo +
+    # weights produce byte-identical selection frames — caching dedupes
+    # the pandas filter/groupby/nlargest work across the sweep.
+    selection_cache: dict | None = None,
     # Pre-scored DataFrame from `score_universe` (computed once per
     # period by the runner, possibly served from a cross-variant
     # cache). When supplied, the long+short selections skip scoring
@@ -522,20 +580,36 @@ def compute_selection_period(
                 config.signal_weights,
                 config.category_weights,
             )
-        selected_top = select_from_scored(
-            scored_df,
-            top_n_sectors=config.top_n_sectors,
-            top_n_per_sector=config.top_n_per_sector,
-            direction="top",
-            min_price_score=config.min_price_score,
-        )
-        if config.strategy_type == "long_short":
-            selected_bottom = select_from_scored(
+
+        def _sel(direction: str, *, with_min_score: bool):
+            ms = config.min_price_score if with_min_score else None
+            if selection_cache is not None:
+                k = (
+                    period_date, config.top_n_sectors,
+                    config.top_n_per_sector, ms, direction,
+                )
+                hit = selection_cache.get(k)
+                if hit is not None:
+                    return hit
+            df = select_from_scored(
                 scored_df,
                 top_n_sectors=config.top_n_sectors,
                 top_n_per_sector=config.top_n_per_sector,
-                direction="bottom",
+                direction=direction,
+                min_price_score=ms,
             )
+            if selection_cache is not None:
+                # CPython dict assignment is atomic per-key; the
+                # parallel-worker race is harmless (identical recompute).
+                selection_cache[k] = df
+            return df
+
+        selected_top = _sel("top", with_min_score=True)
+        if config.strategy_type == "long_short":
+            # Shorts don't apply min_price_score (the filter is a "quality
+            # floor" for longs — symmetric application would silently keep
+            # the same names in both books).
+            selected_bottom = _sel("bottom", with_min_score=False)
             # If a name lands in both books (small universe / overlapping
             # sector sets), drop it from both. The intent is "go long the
             # best and short the worst" — keeping a name on both sides
@@ -562,10 +636,56 @@ def compute_selection_period(
     if selected_top.empty and selected_bottom.empty:
         n_signals = len(signals_df)
         sectors = signals_df["sector"].nunique() if "sector" in signals_df.columns else 0
+        # Diagnostic: figure out WHY the selection is empty so the
+        # rolled-up warning in run_backtest gives a useful root cause
+        # instead of the generic "no holdings" message. Four buckets:
+        #   1. min_price_score filtered everyone out
+        #   2. score_price is NaN for every row (scoring pipeline gap)
+        #   3. min_price_score is OK but selection still empty (unusual —
+        #      would indicate a bug)
+        #   4. min_price_score is unset and selection is empty (very
+        #      unusual — only-empty-when-scored_df-is-empty)
+        diag = ""
+        if scored_df is not None and not scored_df.empty:
+            n_scored = len(scored_df)
+            if "score_price" in scored_df.columns:
+                price_nan = int(scored_df["score_price"].isna().sum())
+                if price_nan == n_scored:
+                    diag = (
+                        f" — DIAGNOSTIC: ALL {n_scored} rows have NaN "
+                        f"score_price (scoring pipeline didn't produce a "
+                        f"price score for this period; min_price_score "
+                        f"filter rejects all NaN by default)"
+                    )
+                elif config.min_price_score is not None:
+                    passed = int(
+                        (scored_df["score_price"].notna() &
+                         (scored_df["score_price"] > config.min_price_score)).sum()
+                    )
+                    if passed == 0:
+                        diag = (
+                            f" — DIAGNOSTIC: 0 of {n_scored} companies "
+                            f"have score_price > min_price_score="
+                            f"{config.min_price_score} (this filter is "
+                            f"removing everyone in this period)"
+                        )
+                    else:
+                        diag = (
+                            f" — DIAGNOSTIC: {passed} of {n_scored} passed "
+                            f"min_price_score={config.min_price_score} "
+                            f"but selection still returned empty — likely "
+                            f"a bug, please report"
+                        )
+                else:
+                    diag = (
+                        f" — DIAGNOSTIC: {n_scored} scored companies, "
+                        f"min_price_score unset, selection still empty — "
+                        f"likely a bug, please report"
+                    )
         out.empty_reason = (
             f"{n_signals} companies had signals across {sectors} sectors but none passed "
             f"selection (top_n_sectors={config.top_n_sectors}, "
-            f"top_n_per_sector={config.top_n_per_sector})"
+            f"top_n_per_sector={config.top_n_per_sector}){diag}"
         )
         return out
 
@@ -590,6 +710,7 @@ def compute_selection_period(
             local_price_index=local_price_index,
             company_currency=company_currency,
             entry_ts=entry_ts, exit_ts=exit_ts,
+            price_cache=price_cache,
         )
         holdings.append(h)
         if ret is not None:
@@ -601,6 +722,7 @@ def compute_selection_period(
             local_price_index=local_price_index,
             company_currency=company_currency,
             entry_ts=entry_ts, exit_ts=exit_ts,
+            price_cache=price_cache,
         )
         holdings.append(h)
         if ret is not None:

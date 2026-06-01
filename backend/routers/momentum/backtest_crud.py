@@ -13,24 +13,70 @@ ballooned the response to >50 MB and made the dropdown unusable. Full
 payload is fetched on demand via the per-run GET when the user clicks
 into a saved run.
 
-`daily_records` are transparently re-encoded into a parallel-array
-`{dates, returns}` form on save and re-expanded to the verbose
-`[{date, cumulative_return_pct}, ...]` shape on load. For a 24y × 14-variant
-bundle this drops the JSONB blob from ~5.6 MB to ~2 MB — well under
-Supabase's statement_timeout — so the daily equity curve survives a save
-+ reload instead of falling back to the period-step line.
+`daily_records` and `universe_daily_records` are transparently re-encoded
+into a parallel-array `{dates, returns}` form on save and re-expanded to
+the verbose `[{date, cumulative_return_pct}, ...]` shape on load.
+
+Result storage: the compacted blob is gzipped and uploaded to the
+`backtest-results` Supabase Storage bucket; the DB row stores only the
+bucket path in `result_path`. The in-row `result` JSONB column is
+preserved for legacy rows written before this change — load transparently
+falls back to it when `result_path` is null. This lifts the size ceiling
+entirely (Storage uploads aren't subject to statement_timeout) so a
+24y × 14-variant bundle no longer 500s on insert.
 """
 
 from __future__ import annotations
 
 import asyncio
+import gzip
+import json
+import logging
+import uuid
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from deps import supabase
 
+log = logging.getLogger(__name__)
+
 router = APIRouter(tags=["momentum"])
+
+# Bucket lives in Supabase Storage. Created by migration
+# 20260529000000_backtest_results_storage.sql; the storage call below
+# also self-heals via `create_bucket` if the migration hasn't been run.
+_RESULT_BUCKET = "backtest-results"
+_GZIP_MAGIC = b"\x1f\x8b"
+
+
+def _ensure_result_bucket() -> None:
+    """Idempotent bucket creation — safe to call repeatedly. The
+    migration creates the bucket in prod; this guards against a freshly-
+    reset local Supabase where the migration may not have re-run yet."""
+    try:
+        supabase.storage.create_bucket(_RESULT_BUCKET, options={"public": False})
+    except Exception:
+        # 409 / "already exists" / "Bucket already exists" — the most
+        # common case after the migration has run. Storage's REST layer
+        # returns various error shapes, so we don't try to parse them;
+        # subsequent upload/download will surface real failures.
+        pass
+
+
+def _decode_result_payload(raw: bytes) -> dict:
+    """Parse a downloaded result blob, transparently gunzip'ing when the
+    bytes start with the gzip magic. Mirrors the price-cache decoder so
+    both code paths handle the same on-disk format."""
+    if raw.startswith(_GZIP_MAGIC):
+        raw = gzip.decompress(raw)
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            f"Stored backtest result is not a dict (got {type(parsed).__name__}); "
+            f"the storage object may be corrupt."
+        )
+    return parsed
 
 
 def _compact_daily_records(records):
@@ -71,28 +117,48 @@ def _expand_daily_records(value):
 
 
 def _compact_in_place(blob: dict) -> None:
-    """Compact every `daily_records` field inside a result blob — both the
-    top-level (single-run shape) and per-variant copies (variant-bundle
-    shape). Mutates the blob in place; safe to call on either shape."""
-    if "daily_records" in blob:
-        blob["daily_records"] = _compact_daily_records(blob["daily_records"])
+    """Compact every daily curve inside a result blob — both
+    `daily_records` (the strategy's chained equity curve) AND
+    `universe_daily_records` (the equal-weight baseline curve), at the
+    top level (single-run shape) and inside every variant (bundle
+    shape). Each daily list goes from
+    ``[{date, cumulative_return_pct}, ...]`` to the parallel-array
+    ``{dates, returns}`` form — same algorithm for both fields. For a
+    24y × 14-variant bundle the universe baseline is the same size as
+    the strategy curve, so compacting it ~halves the JSONB blob over
+    just compacting `daily_records` alone (the difference between
+    fitting under Supabase's statement_timeout and a 500). Mutates the
+    blob in place; safe to call on either shape."""
+    _DAILY_FIELDS = ("daily_records", "universe_daily_records")
+    for f in _DAILY_FIELDS:
+        if f in blob:
+            blob[f] = _compact_daily_records(blob[f])
     variants = blob.get("variants")
     if isinstance(variants, list):
         for v in variants:
-            if isinstance(v, dict) and "daily_records" in v:
-                v["daily_records"] = _compact_daily_records(v["daily_records"])
+            if not isinstance(v, dict):
+                continue
+            for f in _DAILY_FIELDS:
+                if f in v:
+                    v[f] = _compact_daily_records(v[f])
 
 
 def _expand_in_place(blob: dict) -> None:
     """Inverse of `_compact_in_place`. Handles legacy verbose rows
-    transparently (passthrough)."""
-    if "daily_records" in blob:
-        blob["daily_records"] = _expand_daily_records(blob["daily_records"])
+    transparently (passthrough), including legacy rows that only
+    compacted `daily_records`."""
+    _DAILY_FIELDS = ("daily_records", "universe_daily_records")
+    for f in _DAILY_FIELDS:
+        if f in blob:
+            blob[f] = _expand_daily_records(blob[f])
     variants = blob.get("variants")
     if isinstance(variants, list):
         for v in variants:
-            if isinstance(v, dict) and "daily_records" in v:
-                v["daily_records"] = _expand_daily_records(v["daily_records"])
+            if not isinstance(v, dict):
+                continue
+            for f in _DAILY_FIELDS:
+                if f in v:
+                    v[f] = _expand_daily_records(v[f])
 
 
 class SaveBacktestRequest(BaseModel):
@@ -117,11 +183,12 @@ class RenameBacktestRequest(BaseModel):
 async def save_backtest(req: SaveBacktestRequest):
     """Save a backtest run. Accepts single-run or variant-bundle shape.
 
-    `daily_records` on the inbound payload — verbose
-    `[{date, cumulative_return_pct}, ...]` from the frontend — is encoded
-    into the compact parallel-array form before insert so the JSONB blob
-    stays small enough to clear Supabase's statement_timeout for
-    multi-decade × N-variant bundles."""
+    The result blob is compacted (daily-curve parallel-array encoding),
+    gzipped, and uploaded to the `backtest-results` Storage bucket. The
+    DB row stores only the bucket path in `result_path` — the in-row
+    `result` JSONB column is left NULL on new saves. This lifts the
+    statement_timeout ceiling that previously bit multi-decade
+    × N-variant bundles even after compaction (postgrest 57014)."""
     if req.variants is not None:
         result_blob = {
             "kind": "variants",
@@ -140,15 +207,80 @@ async def save_backtest(req: SaveBacktestRequest):
             "universe": req.universe,
         }
     _compact_in_place(result_blob)
+
+    # Serialize + gzip. JSON is canonical (sorted=False; preserve insert
+    # order from the frontend so visual debugging matches the saved
+    # form). gzip is a big win — variant bundles are mostly repeated
+    # tickers/dates, which compress to ~15-25% of the raw size.
+    payload = gzip.compress(
+        json.dumps(result_blob, ensure_ascii=False).encode("utf-8"),
+        compresslevel=6,
+    )
+
+    # Upload BEFORE inserting the row. If the upload fails, no row gets
+    # created (clean failure mode). If the insert fails afterward, we
+    # clean up the orphan storage object below.
+    _ensure_result_bucket()
+    path = f"{uuid.uuid4().hex}.json"
+    file_options = {
+        "content-type": "application/json",
+        "content-encoding": "gzip",
+    }
+    try:
+        await asyncio.to_thread(
+            lambda: supabase.storage.from_(_RESULT_BUCKET).upload(
+                path, payload, file_options=file_options,
+            )
+        )
+    except Exception as e:
+        log.error(
+            "[backtest_crud] storage upload failed for %s: %s: %s",
+            path, type(e).__name__, e,
+        )
+        raise HTTPException(
+            500,
+            f"Failed to upload backtest result to storage: {type(e).__name__}: {e}",
+        ) from e
+
     row = {
         "name": req.name.strip(),
         "config": req.config,
-        "result": result_blob,
+        "result_path": path,
+        # `result` is intentionally NOT set — legacy rows keep theirs;
+        # new saves store the blob in Storage only.
     }
-    resp = await asyncio.to_thread(
-        lambda: supabase.table("backtest_run").insert(row).execute()
-    )
+    try:
+        resp = await asyncio.to_thread(
+            lambda: supabase.table("backtest_run").insert(row).execute()
+        )
+    except Exception as e:
+        # Roll back the storage upload so we don't accumulate orphan
+        # files when the row insert fails for any reason (RLS, schema
+        # mismatch, network). Best-effort: a failed cleanup is logged
+        # but not propagated — the user already has an insert error.
+        try:
+            await asyncio.to_thread(
+                lambda: supabase.storage.from_(_RESULT_BUCKET).remove([path])
+            )
+        except Exception as cleanup_e:
+            log.warning(
+                "[backtest_crud] orphan-cleanup failed for %s: %s: %s",
+                path, type(cleanup_e).__name__, cleanup_e,
+            )
+        raise HTTPException(
+            500,
+            f"Failed to save backtest row after storage upload: {type(e).__name__}: {e}",
+        ) from e
+
     if not resp.data:
+        # Same orphan-cleanup logic as above — the insert call returned
+        # but produced no row (PostgREST sometimes returns 201 with []).
+        try:
+            await asyncio.to_thread(
+                lambda: supabase.storage.from_(_RESULT_BUCKET).remove([path])
+            )
+        except Exception:
+            pass
         raise HTTPException(500, "Failed to save backtest")
     return resp.data[0]
 
@@ -175,10 +307,17 @@ async def list_backtests():
 
 @router.get("/api/momentum/backtests/{run_id}")
 async def load_backtest(run_id: int):
-    """Full backtest payload for one run. Re-expands compact `daily_records`
-    back to the verbose `[{date, cumulative_return_pct}, ...]` shape so the
-    frontend can keep treating saved runs identically to in-memory ones.
-    Legacy rows (verbose-on-disk) pass through unchanged."""
+    """Full backtest payload for one run. Two source paths, transparent to
+    the caller:
+
+      * `result_path` populated → download the gzipped JSON from the
+        `backtest-results` Storage bucket and decode.
+      * `result_path` null → use the in-row `result` JSONB (legacy rows
+        written before the storage move).
+
+    Compacted daily-curve fields are re-expanded back to the verbose
+    `[{date, cumulative_return_pct}, ...]` shape so the frontend can
+    keep treating saved runs identically to in-memory ones."""
     resp = await asyncio.to_thread(
         lambda: supabase.table("backtest_run")
         .select("*")
@@ -188,15 +327,70 @@ async def load_backtest(run_id: int):
     if not resp.data:
         raise HTTPException(404, "Backtest not found")
     row = resp.data[0]
-    result = row.get("result")
+
+    result: dict | None = None
+    path = row.get("result_path")
+    if path:
+        try:
+            raw = await asyncio.to_thread(
+                lambda: supabase.storage.from_(_RESULT_BUCKET).download(path)
+            )
+        except Exception as e:
+            log.error(
+                "[backtest_crud] storage download failed for run_id=%s path=%s: %s: %s",
+                run_id, path, type(e).__name__, e,
+            )
+            raise HTTPException(
+                500,
+                f"Backtest row exists but its result blob could not be fetched from "
+                f"storage ({type(e).__name__}: {e}). The object may have been "
+                f"deleted out-of-band.",
+            ) from e
+        try:
+            result = _decode_result_payload(raw)
+        except Exception as e:
+            log.error(
+                "[backtest_crud] storage decode failed for run_id=%s path=%s: %s: %s",
+                run_id, path, type(e).__name__, e,
+            )
+            raise HTTPException(
+                500,
+                f"Backtest result blob downloaded but couldn't be decoded "
+                f"({type(e).__name__}: {e}).",
+            ) from e
+    else:
+        in_row = row.get("result")
+        if isinstance(in_row, dict):
+            result = in_row
+
     if isinstance(result, dict):
         _expand_in_place(result)
+    # Always expose the result under `row.result` for backwards compat
+    # with the frontend (which reads `row.result`, not `row.result_path`).
+    row["result"] = result
     return row
 
 
 @router.delete("/api/momentum/backtests/{run_id}")
 async def delete_backtest(run_id: int):
-    """Delete a saved backtest run."""
+    """Delete a saved backtest run + its Storage object (if any). Storage
+    cleanup is best-effort — an orphaned file is acceptable and visible
+    in the bucket; an orphaned DB row is not (the user would still see
+    the row in the dropdown). So the DB delete always runs; the storage
+    delete failures are logged but don't fail the request."""
+    # Capture the path BEFORE deleting the row so we know what to clean
+    # up afterwards.
+    fetch = await asyncio.to_thread(
+        lambda: supabase.table("backtest_run")
+        .select("result_path")
+        .eq("run_id", run_id)
+        .limit(1)
+        .execute()
+    )
+    path: str | None = None
+    if fetch.data:
+        path = fetch.data[0].get("result_path")
+
     resp = await asyncio.to_thread(
         lambda: supabase.table("backtest_run")
         .delete()
@@ -205,6 +399,18 @@ async def delete_backtest(run_id: int):
     )
     if not resp.data:
         raise HTTPException(404, "Backtest not found")
+
+    if path:
+        try:
+            await asyncio.to_thread(
+                lambda: supabase.storage.from_(_RESULT_BUCKET).remove([path])
+            )
+        except Exception as e:
+            log.warning(
+                "[backtest_crud] storage remove failed for run_id=%s path=%s: "
+                "%s: %s — orphan file remains.",
+                run_id, path, type(e).__name__, e,
+            )
     return {"ok": True}
 
 

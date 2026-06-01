@@ -34,6 +34,139 @@ from .base import (
 log = logging.getLogger(__name__)
 
 
+# ── Cross-exchange ticker collision: disambiguation tables ───────────
+#
+# Leonteq's /underlyings rows carry `country` and `ric` (Reuters
+# Identification Code, e.g. "2801.T" for Tokyo or "2801.TW" for
+# Taipei). Either signal lets us resolve which of two same-ticker
+# companies (TSE:2801 Kikkoman vs TPE:2801 Chang Hwa) the row actually
+# describes. Without this, `_match_company` would fall back to bare-
+# ticker lookup and silently pick whichever company loaded last.
+#
+# Mappings cover the exchanges in `gurufocus_exchange` — anything else
+# falls through to the next tier (country → ISIN → bare ticker).
+
+# Suffix after the dot in a RIC → our `gurufocus_exchange.exchange_code`.
+# Refinitiv assigns suffixes per Market Information Code (MIC).
+_RIC_SUFFIX_TO_EXCHANGE: dict[str, str] = {
+    "T": "TSE",       # Tokyo
+    "OS": "TSE",
+    "TW": "TPE",      # Taipei
+    "HK": "HKSE",     # Hong Kong
+    "L": "LSE",       # London
+    "PA": "XPAR",     # Paris
+    "DE": "XTER",     # Xetra
+    "F": "FRA",       # Frankfurt
+    "MI": "MIL",      # Milan
+    "MC": "XMAD",     # Madrid
+    "AS": "XAMS",     # Amsterdam
+    "BR": "XBRU",     # Brussels
+    "LS": "XLIS",     # Lisbon
+    "HE": "OHEL",     # Helsinki
+    "ST": "OSTO",     # Stockholm
+    "OL": "OSL",      # Oslo
+    "CO": "OCSE",     # Copenhagen
+    "IS": "IST",      # Istanbul
+    "WA": "WAR",      # Warsaw
+    "BU": "BUD",      # Budapest
+    "PR": "XPRA",     # Prague
+    "VI": "WBO",      # Vienna
+    "SW": "XSWX",     # Zurich (SIX)
+    "S": "XSWX",
+    "I": "DUB",       # Dublin
+    "AT": "ATH",      # Athens
+    "TA": "XTAE",     # Tel Aviv
+    "MX": "MEX",      # Mexico City
+    "SA": "BSP",      # B3 Brazil
+    "SN": "XSGO",     # Santiago
+    "JO": "JSE",      # Johannesburg
+    "CA": "CAI",      # Cairo
+    "QA": "DSMD",     # Doha
+    "DU": "DFM",      # Dubai
+    "AD": "ADX",      # Abu Dhabi
+    "KW": "KUW",      # Kuwait
+    "SR": "SAU",      # Saudi (Tadawul)
+    "BK": "BKK",      # Bangkok
+    "SI": "SGX",      # Singapore
+    "SS": "SHSE",     # Shanghai
+    "SZ": "SZSE",     # Shenzhen
+    "PS": "PHS",      # Philippines
+    "KS": "XKRX",     # Korea KOSPI
+    "KQ": "XKRX",     # Korea KOSDAQ
+    "KL": "XKLS",     # Kuala Lumpur
+    "NS": "NSE",      # NSE India
+    "BO": "BSE",      # BSE India
+    "NZ": "NZSE",     # New Zealand
+    "N": "NYSE",
+    "O": "NASDAQ",
+    "P": "NYSE",      # NYSE Arca / Amex sometimes carries P
+    "MX_OTC": "NASDAQ",
+}
+
+# Leonteq country → list of candidate exchange_codes in order of
+# preference. Used when RIC is missing or its suffix isn't mapped.
+# A list (not a single code) so multi-exchange countries (US, China,
+# India, Canada) try each in turn — the first hit on
+# `(ticker, exchange)` wins.
+_COUNTRY_TO_EXCHANGES: dict[str, list[str]] = {
+    "United States": ["NYSE", "NASDAQ", "CBOE"],
+    "Japan": ["TSE"],
+    "Taiwan": ["TPE", "ROCO"],
+    "Hong Kong": ["HKSE"],
+    "United Kingdom": ["LSE"],
+    "France": ["XPAR"],
+    "Germany": ["XTER", "FRA"],
+    "Italy": ["MIL"],
+    "Spain": ["XMAD"],
+    "Netherlands": ["XAMS"],
+    "Belgium": ["XBRU"],
+    "Portugal": ["XLIS"],
+    "Finland": ["OHEL"],
+    "Sweden": ["OSTO"],
+    "Norway": ["OSL"],
+    "Denmark": ["OCSE"],
+    "Turkey": ["IST"],
+    "Poland": ["WAR"],
+    "Hungary": ["BUD"],
+    "Czech Republic": ["XPRA"],
+    "Austria": ["WBO"],
+    "Switzerland": ["XSWX"],
+    "Ireland": ["DUB"],
+    "China": ["SHSE", "SZSE"],
+    "South Korea": ["XKRX"],
+    "Malaysia": ["XKLS"],
+    "Thailand": ["BKK"],
+    "Singapore": ["SGX"],
+    "Philippines": ["PHS"],
+    "India": ["NSE", "BSE"],
+    "Greece": ["ATH"],
+    "Israel": ["XTAE"],
+    "Mexico": ["MEX"],
+    "Brazil": ["BSP"],
+    "Chile": ["XSGO"],
+    "South Africa": ["JSE"],
+    "Egypt": ["CAI"],
+    "Qatar": ["DSMD"],
+    "United Arab Emirates": ["ADX", "DFM"],
+    "Kuwait": ["KUW"],
+    "Saudi Arabia": ["SAU"],
+    "Canada": ["TSX", "TSXV"],
+    "New Zealand": ["NZSE"],
+}
+
+
+def _exchange_from_ric(ric: str | None) -> str | None:
+    """Pull the GuruFocus exchange_code out of a Reuters RIC. Returns
+    None when the RIC is empty, malformed, or its suffix isn't in our
+    mapping (which is fine — the caller falls back to country)."""
+    if not ric:
+        return None
+    parts = ric.rsplit(".", 1)
+    if len(parts) != 2:
+        return None
+    return _RIC_SUFFIX_TO_EXCHANGE.get(parts[1].strip().upper())
+
+
 class LeonteqTemplate(UniverseTemplate):
     template_key = "LEONTEQ"
     label = "Leonteq"
@@ -102,32 +235,63 @@ class LeonteqTemplate(UniverseTemplate):
             )
 
         emit(f"Reconciling {len(scraped)} equities to company rows", 60)
-        # Three-pass reconciliation:
-        #   1. Ticker match against existing `company` rows.
-        #   2. ISIN match against the previous `leonteq_equity` snapshot
-        #      (stable across refreshes even when the Leonteq ticker
-        #      doesn't equal the GuruFocus ticker).
-        #   3. OpenFIGI ISIN resolution → auto-create new `company`
+        # Three-pass reconciliation, in order of declining reliability:
+        #   1. `_match_company`: (ticker, exchange) via RIC suffix,
+        #      then via country, then ISIN-from-prior-snapshot, then
+        #      bare ticker as a last-resort with ambiguity warning.
+        #   2. OpenFIGI ISIN resolution → auto-create new `company`
         #      rows for the long tail. Greyed-out chips on /leonteq
         #      turn white on the next refresh.
-        company_by_ticker, company_by_id = self._load_company_index(supabase)
-
-        for row in scraped:
-            row["company_id"] = self._match_company(row, company_by_ticker)
-
+        company_by_te, company_by_bare, company_by_id = self._load_company_index(supabase)
+        # Load prior ISIN→company_id mapping BEFORE pass-1 so the
+        # matcher can use it as its ISIN tier (was previously a
+        # separate fallback pass — the inversion is what fixes the
+        # bare-ticker collision bug, see _match_company docstring).
         prior_isin_map = self._load_prior_isin_company_map(supabase)
-        prior_hits = 0
+
         for row in scraped:
-            if row.get("company_id") is None and row.get("isin"):
-                cid = prior_isin_map.get(row["isin"])
-                if cid is not None and cid in company_by_id:
-                    row["company_id"] = cid
-                    prior_hits += 1
+            row["company_id"] = self._match_company(
+                row, company_by_te, company_by_bare, company_by_id, prior_isin_map,
+            )
+
+        # Audit: flag matches whose scraped name has zero token overlap
+        # with the matched company's name. That's almost always a
+        # cross-exchange ticker collision (Kikkoman/Chang Hwa) that
+        # slipped through the tiers — the warning makes it visible
+        # without auto-rejecting it (the next refresh can review).
+        name_mismatches = 0
+        for row in scraped:
+            cid = row.get("company_id")
+            if cid is None:
+                continue
+            matched_company = company_by_id.get(int(cid))
+            if not matched_company:
+                continue
+            if not self._name_token_overlap(
+                row.get("name", ""), matched_company.get("company_name", ""),
+            ):
+                name_mismatches += 1
+                if name_mismatches <= 10:
+                    log.warning(
+                        "[leonteq] NAME MISMATCH: scraped=%r isin=%s ticker=%s "
+                        "ric=%s country=%s → matched company_id=%s name=%r "
+                        "exchange=%s. Likely a wrong ticker-collision mapping.",
+                        row.get("name"), row.get("isin"), row.get("ticker"),
+                        row.get("ric"), row.get("country"), cid,
+                        matched_company.get("company_name"),
+                        (matched_company.get("gurufocus_exchange") or {}).get("exchange_code"),
+                    )
+        if name_mismatches > 10:
+            log.warning(
+                "[leonteq] NAME MISMATCH: %d additional rows suppressed "
+                "(only first 10 logged in detail).",
+                name_mismatches - 10,
+            )
 
         auto_created = self._auto_create_via_openfigi(supabase, scraped, on_progress)
         if auto_created > 0:
             # Pick up the freshly-inserted companies for URL building.
-            _by_ticker, company_by_id = self._load_company_index(supabase)
+            company_by_te, company_by_bare, company_by_id = self._load_company_index(supabase)
 
         for row in scraped:
             row["gurufocus_url"] = self._gurufocus_url(
@@ -137,9 +301,15 @@ class LeonteqTemplate(UniverseTemplate):
         matched = sum(1 for r in scraped if r.get("company_id") is not None)
         emit(
             f"Resolved {matched}/{len(scraped)} equities to companies "
-            f"(prior-isin={prior_hits}, openfigi-autoresolved={auto_created}).",
+            f"(openfigi-autoresolved={auto_created}, name-mismatches={name_mismatches}).",
             72,
         )
+        if name_mismatches > 0:
+            emit(
+                f"⚠ {name_mismatches} match(es) where scraped name doesn't overlap "
+                f"matched company name — review log for AMBIGUOUS / NAME MISMATCH lines.",
+                None,
+            )
 
         # Replace the leonteq_equity table contents wholesale — the
         # scrape IS the snapshot, no merging.
@@ -343,15 +513,20 @@ class LeonteqTemplate(UniverseTemplate):
 
     def _load_company_index(
         self, supabase: Client,
-    ) -> tuple[dict[str, dict], dict[int, dict]]:
-        """Build {ticker: company_row} + {company_id: company_row}
-        indexes covering every company. The ticker map drives pass-1
-        matching of scraped equities; the id map backs URL building
-        (so OpenFIGI-resolved rows whose Leonteq ticker differs from
-        the GuruFocus ticker still get a working link). Duplicate
-        tickers (rare — same symbol on two exchanges) collide and the
-        last wins in `by_ticker` only."""
-        by_ticker: dict[str, dict] = {}
+    ) -> tuple[dict[tuple[str, str], dict], dict[str, list[dict]], dict[int, dict]]:
+        """Build three indexes of every company row, used by the
+        matching tiers in `_match_company`:
+
+          - by_ticker_exchange : ``{(ticker, exchange_code): row}``
+              primary lookup — both keys uppercase + stripped. Same
+              ticker on different exchanges no longer collides.
+          - by_bare_ticker     : ``{ticker: [row, ...]}``
+              every candidate per bare ticker, so the fallback path
+              can warn loudly when there's ambiguity.
+          - by_id              : ``{company_id: row}``
+              unchanged; backs URL building + diagnostic logging."""
+        by_te: dict[tuple[str, str], dict] = {}
+        by_bare: dict[str, list[dict]] = {}
         by_id: dict[int, dict] = {}
         offset = 0
         page_size = 1000
@@ -370,36 +545,114 @@ class LeonteqTemplate(UniverseTemplate):
                 break
             for r in batch:
                 tkr = (r.get("gurufocus_ticker") or "").strip().upper()
+                exch = ((r.get("gurufocus_exchange") or {}).get("exchange_code") or "").strip().upper()
+                if tkr and exch:
+                    by_te[(tkr, exch)] = r
                 if tkr:
-                    by_ticker[tkr] = r
+                    by_bare.setdefault(tkr, []).append(r)
                 cid = r.get("company_id")
                 if cid is not None:
                     by_id[int(cid)] = r
             if len(batch) < page_size:
                 break
             offset += page_size
-        return by_ticker, by_id
+        return by_te, by_bare, by_id
 
-    def _match_company(self, row: dict, by_ticker: dict[str, dict]) -> int | None:
-        """Best-effort ticker match. Returns the company_id or None.
+    def _match_company(
+        self,
+        row: dict,
+        by_te: dict[tuple[str, str], dict],
+        by_bare: dict[str, list[dict]],
+        by_id: dict[int, dict],
+        prior_isin_map: dict[str, int],
+    ) -> int | None:
+        """Multi-tier company matcher, tried in order of reliability.
 
-        Tries the raw scraped ticker first, then the HKSE 5-digit
-        zero-padded form. Without the second pass, Leonteq's `2628`
-        (China Life) would miss the existing `HKSE:02628` row and trip
-        OpenFIGI auto-resolution into a German depositary listing
-        (`XTER:CHL`) — silently duplicating the issuer."""
+          1. ``(ticker, exchange)`` derived from the row's RIC suffix.
+             Refinitiv's RIC suffix is a per-MIC exchange identifier,
+             so this resolves cross-exchange collisions deterministically
+             (TSE:2801 Kikkoman vs TPE:2801 Chang Hwa).
+          2. ``(ticker, exchange)`` derived from the row's country.
+             Catches rows where RIC is empty or the suffix isn't in
+             our mapping. Multi-exchange countries (US, China, India,
+             Canada) try each candidate exchange in turn.
+          3. ISIN lookup against the prior leonteq_equity snapshot.
+             Carries forward correct mappings from earlier refreshes,
+             even when Leonteq's raw ticker differs from the GuruFocus
+             ticker we previously resolved.
+          4. Bare ticker (last resort). Logs a WARNING when the bare
+             ticker resolves to multiple companies — that's exactly
+             the Kikkoman/Chang Hwa case, and surfacing it lets the
+             user investigate ambiguous mappings."""
         tkr = (row.get("ticker") or "").strip().upper()
         if not tkr:
             return None
-        match = by_ticker.get(tkr)
-        if match is None and tkr.isdigit() and len(tkr) < 5:
-            # HKSE canonical form is 5-digit zero-padded — see
-            # `ingest.prices.normalize_gurufocus_ticker`. The same DB
-            # row will be keyed under the padded ticker.
-            match = by_ticker.get(tkr.zfill(5))
-        if match is None:
+
+        def _by_te(t: str, e: str | None) -> dict | None:
+            if not e:
+                return None
+            m = by_te.get((t, e))
+            if m is None and e == "HKSE" and t.isdigit() and len(t) < 5:
+                m = by_te.get((t.zfill(5), e))
+            return m
+
+        # Tier 1: RIC-derived exchange.
+        ric_exch = _exchange_from_ric(row.get("ric"))
+        match = _by_te(tkr, ric_exch)
+        if match:
+            return int(match["company_id"])
+
+        # Tier 2: country-derived candidates.
+        country = (row.get("country") or "").strip()
+        for cand_exch in _COUNTRY_TO_EXCHANGES.get(country, []):
+            match = _by_te(tkr, cand_exch)
+            if match:
+                return int(match["company_id"])
+
+        # Tier 3: ISIN via prior snapshot. Only trust mappings whose
+        # company_id still exists (`by_id` covers every current row).
+        isin = (row.get("isin") or "").strip()
+        if isin:
+            cid = prior_isin_map.get(isin)
+            if cid is not None and int(cid) in by_id:
+                return int(cid)
+
+        # Tier 4: bare ticker, with ambiguity warning. Single-candidate
+        # lookups are safe; multi-candidate ones leak the kind of bug
+        # the higher tiers are designed to prevent, so log loudly.
+        candidates = by_bare.get(tkr) or []
+        if not candidates and tkr.isdigit() and len(tkr) < 5:
+            candidates = by_bare.get(tkr.zfill(5)) or []
+        if not candidates:
             return None
-        return int(match["company_id"])
+        if len(candidates) > 1:
+            preview = ", ".join(
+                f"{c.get('company_name')!s} on "
+                f"{(c.get('gurufocus_exchange') or {}).get('exchange_code', '?')}"
+                for c in candidates[:4]
+            )
+            log.warning(
+                "[leonteq] AMBIGUOUS bare-ticker match for %s "
+                "(country=%s ric=%s isin=%s) — %d candidates: %s. "
+                "Picking the first; supply RIC/country/ISIN to disambiguate.",
+                tkr, country or "?", row.get("ric") or "?", isin or "?",
+                len(candidates), preview,
+            )
+        return int(candidates[0]["company_id"])
+
+    @staticmethod
+    def _name_token_overlap(a: str, b: str) -> bool:
+        """True when the scraped name and the matched company name
+        share at least one non-trivial token (length >= 3, alnum). Used
+        to flag matches like 'Kikkoman Corp' → 'CHANG HWA COMMERCIAL
+        BANK LTD' (zero overlap, almost certainly wrong)."""
+        import re  # noqa: PLC0415
+        def toks(s: str) -> set[str]:
+            return {t for t in re.findall(r"[A-Za-z0-9]+", (s or "").lower()) if len(t) >= 3}
+        ta, tb = toks(a), toks(b)
+        if not ta or not tb:
+            return True  # can't tell — don't false-positive
+        return bool(ta & tb)
 
     def _gurufocus_url(
         self,
@@ -645,7 +898,7 @@ class LeonteqTemplate(UniverseTemplate):
             )
             return 0
 
-        by_ticker, _by_id = self._load_company_index(supabase)
+        by_te, _by_bare, _by_id = self._load_company_index(supabase)
 
         created = 0
         for row in scraped:
@@ -657,13 +910,16 @@ class LeonteqTemplate(UniverseTemplate):
             res = isin_to_resolution.get(isin)
             if res is None:
                 continue
-            # Look up by the FINAL (override-applied) ticker, not the
-            # OpenFIGI-raw one. Falls back to the raw value for
-            # resolutions that pre-date this code path (e.g. older
-            # legacy mappings whose `isin_to_resolution` entries don't
-            # carry `final_gurufocus_ticker`).
+            # Look up by the FINAL (override-applied) (exchange, ticker),
+            # not the OpenFIGI-raw one. Falls back to the raw values for
+            # resolutions that pre-date the override code path (e.g.
+            # older legacy mappings whose `isin_to_resolution` entries
+            # don't carry `final_*`). Exchange-aware lookup keeps this
+            # path safe from the same bare-ticker collision that bit
+            # the main matcher.
             lookup_tick = (res.get("final_gurufocus_ticker") or res["gurufocus_ticker"]).strip().upper()
-            match = by_ticker.get(lookup_tick)
+            lookup_exch = (res.get("final_gurufocus_exchange") or res.get("gurufocus_exchange") or "").strip().upper()
+            match = by_te.get((lookup_tick, lookup_exch)) if lookup_exch else None
             if match is None:
                 continue
             cid = int(match["company_id"])

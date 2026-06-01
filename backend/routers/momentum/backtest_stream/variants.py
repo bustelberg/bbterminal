@@ -17,7 +17,6 @@ loop calls `prepare_variant_from_shared` to slice it per variant."""
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import json
 import logging
 import os
@@ -70,6 +69,13 @@ async def run_variants_sweep(
     """Async generator: drive the variants sweep loop, yielding SSE
     events. Returns nothing — the orchestrator only needs the streamed
     events."""
+    # Hoisted up so the precompute pools (Win #6, #7) can use the same
+    # worker count as the variant-execution pool below.
+    try:
+        _env_workers = int(os.getenv("VARIANT_MAX_WORKERS", "4"))
+    except ValueError:
+        _env_workers = 4
+
     # Pre-build the sweep-shared inputs ONCE: price/volume indices
     # plus a single signal panel covering the *union* of every
     # variant's cutoff dates. Skip the precompute when
@@ -184,6 +190,28 @@ async def run_variants_sweep(
     period_baseline_cache: dict[tuple, dict[date, tuple[float | None, int]]] = {}
     if shared_backtest is not None and monthly_eligible_by_combo:
         from momentum.backtest._period import compute_universe_period_return  # noqa: PLC0415
+
+        # Win #6: parallelize the per-period inner loop. Each call is
+        # read-only against shared frames (panel_df, price_index) and
+        # independent of every other period, so a thread pool sized to
+        # match the variants pool gives near-linear speedup on the
+        # setup phase. The outer (combo, freq) loop stays sequential —
+        # parallelizing both axes risks oversubscribing the CPU.
+        def _compute_one_period(
+            period_date_inner, next_period_inner, panel_df_inner, eligible_ids_inner,
+        ):
+            if panel_df_inner is None or panel_df_inner.empty or not eligible_ids_inner:
+                return period_date_inner, (None, 0)
+            signals_filtered = panel_df_inner[
+                panel_df_inner["company_id"].isin(eligible_ids_inner)
+            ]
+            ret, n = compute_universe_period_return(
+                signals_filtered, shared_backtest.price_index,
+                entry_ts=pd.Timestamp(period_date_inner),
+                exit_ts=pd.Timestamp(next_period_inner),
+            )
+            return period_date_inner, (ret, n)
+
         seen_combo_freq: set[tuple] = set()
         for _v in req.variants:
             _v_universe_label = _v.universe_label if _v.universe_label is not None else req.universe_label
@@ -212,29 +240,40 @@ async def run_variants_sweep(
                 continue
             if len(periods) < 2:
                 continue
+
+            # Serial execution (parallel pool removed — see variant loop
+            # comment below for the rationale). Period count is small
+            # (~300) and each call is mostly numpy under the hood, so
+            # serial finishes in a few seconds without thread overhead.
+            # Yield throttled progress so the user sees which (universe,
+            # freq, year-month) is being computed live, instead of
+            # waiting silently for the summary at the end.
+            _combo_label = f"{_v_universe_label or _v_index_universe or '?'} · {_v.frequency} · {_v_grouping}"
             per_period: dict[date, tuple[float | None, int]] = {}
-            for i in range(len(periods) - 1):
+            _last_emit_ts = time.monotonic()
+            total_periods = len(periods) - 1
+            for i in range(total_periods):
                 period_date = periods[i]
                 next_period = periods[i + 1]
-                # Get the signal panel for this period from the
-                # SHARED panel (built over the union of every
-                # variant's cutoffs, so it's guaranteed to contain
-                # this date).
                 panel_df = shared_backtest.union_panel.get(period_date)
-                if panel_df is None or panel_df.empty:
-                    per_period[period_date] = (None, 0)
-                    continue
-                eligible_ids = set((me.get(period_date.isoformat()[:7]) or {}).keys())
-                if not eligible_ids:
-                    per_period[period_date] = (None, 0)
-                    continue
-                signals_filtered = panel_df[panel_df["company_id"].isin(eligible_ids)]
-                ret, n = compute_universe_period_return(
-                    signals_filtered, shared_backtest.price_index,
-                    entry_ts=pd.Timestamp(period_date),
-                    exit_ts=pd.Timestamp(next_period),
+                eligible_ids = set(
+                    (me.get(period_date.isoformat()[:7]) or {}).keys()
                 )
-                per_period[period_date] = (ret, n)
+                pd_date, val = _compute_one_period(
+                    period_date, next_period, panel_df, eligible_ids,
+                )
+                per_period[pd_date] = val
+                now = time.monotonic()
+                if now - _last_emit_ts >= 0.4 or i == total_periods - 1:
+                    yield _emit({
+                        "type": "progress",
+                        "pct": 69,
+                        "message": (
+                            f"Universe baseline · {_combo_label} · "
+                            f"{period_date.isoformat()[:7]} ({i + 1}/{total_periods})"
+                        ),
+                    })
+                    _last_emit_ts = now
             period_baseline_cache[cf_key] = per_period
         n_cf = len(period_baseline_cache)
         if n_cf > 1:
@@ -266,6 +305,126 @@ async def run_variants_sweep(
             for combo in monthly_eligible_by_combo:
                 score_cache_by_combo[combo] = {}
 
+    # Win #A: precompute per-period scores upfront, parallelized across
+    # periods, instead of letting the first variant warm them lazily.
+    # `score_universe` is a pure function of (filtered_panel,
+    # signal_weights, category_weights) — those don't vary across
+    # variants in a sweep — so the result for `(combo, period_date)` is
+    # safe to materialize once and reuse for every variant. Without
+    # this, variant 1 pays ~30-60s of per-period scoring; with it,
+    # every variant hits warm cache from period 1.
+    #
+    # Only meaningful for selection modes that call into scoring
+    # (i.e. not 'random' / 'all'). Skipped otherwise.
+    if (
+        shared_backtest is not None
+        and req.selection_mode not in ("random", "all")
+        and score_cache_by_combo
+    ):
+        from momentum.scoring import score_universe  # noqa: PLC0415
+        _sig_weights = req.signal_weights or {
+            s["key"]: s["default_weight"] for s in PRICE_SIGNAL_DEFS
+        }
+        _cat_weights = req.category_weights
+
+        def _score_one(
+            combo_inner, period_date_inner, panel_df_inner,
+            eligible_ids_inner, sector_map_inner,
+        ):
+            if (
+                panel_df_inner is None
+                or panel_df_inner.empty
+                or not eligible_ids_inner
+            ):
+                return combo_inner, period_date_inner, None
+            # Must apply the SAME `.copy()` + sector remap that the
+            # runner does at the top of its per-period loop (see
+            # `runner.py` ~L262-264). Without this, the precomputed
+            # `scored_df` carries the base universe_df's sector
+            # (which is `None` for snapshot universes like ACWI ∩
+            # Leonteq), and aggregate_to_sector inside select_from_scored
+            # silently drops every row because pandas's groupby
+            # default `dropna=True` skips NaN-sector groups → empty
+            # selection. The runner's lazy cache path produced the
+            # correct sectors; the upfront precompute path didn't.
+            filtered = panel_df_inner[
+                panel_df_inner["company_id"].isin(eligible_ids_inner)
+            ].copy()
+            if filtered.empty:
+                return combo_inner, period_date_inner, None
+            filtered["sector"] = filtered["company_id"].map(sector_map_inner)
+            scored = score_universe(filtered, _sig_weights, _cat_weights)
+            return combo_inner, period_date_inner, scored
+
+        # Build (combo, period_date, panel, eligible, sector_map) tasks
+        # once, then run them serially.
+        score_tasks: list[tuple] = []
+        for combo, me_inner in (monthly_eligible_by_combo or {}).items():
+            for cutoff, panel in shared_backtest.union_panel.items():
+                if panel is None or panel.empty:
+                    continue
+                month_key = cutoff.isoformat()[:7]
+                sector_map = me_inner.get(month_key) or {}
+                if not sector_map:
+                    continue
+                eligible_ids = set(sector_map.keys())
+                score_tasks.append((combo, cutoff, panel, eligible_ids, sector_map))
+
+        if score_tasks:
+            yield _emit({
+                "type": "progress",
+                "pct": 70,
+                "message": (
+                    f"Precomputing per-period scores ({len(score_tasks)} "
+                    f"(combo, period) cells)…"
+                ),
+            })
+            # Serial. Each call is pandas+numpy on a ~1500-row frame;
+            # the GIL contention pattern from the previous parallel
+            # version cost more in synchronization than it saved.
+            # Yield throttled per-period progress so the user can see
+            # the year-month being scored live — instead of one summary
+            # at the end of a multi-second loop.
+            _last_emit_ts = time.monotonic()
+            total_tasks = len(score_tasks)
+            for i, t in enumerate(score_tasks):
+                combo_done, period_done, scored_df = _score_one(*t)
+                if scored_df is not None and combo_done in score_cache_by_combo:
+                    score_cache_by_combo[combo_done][period_done] = scored_df
+                now = time.monotonic()
+                if now - _last_emit_ts >= 0.4 or i == total_tasks - 1:
+                    _u_label, _ix_label, _g_label = combo_done
+                    _combo_short = f"{_u_label or _ix_label or '?'} · {_g_label}"
+                    yield _emit({
+                        "type": "progress",
+                        "pct": 70,
+                        "message": (
+                            f"Scoring · {_combo_short} · "
+                            f"{period_done.isoformat()[:7]} ({i + 1}/{total_tasks})"
+                        ),
+                    })
+                    _last_emit_ts = now
+            warmed = sum(len(d) for d in score_cache_by_combo.values())
+            yield _emit({
+                "type": "progress",
+                "pct": 70,
+                "message": (
+                    f"Score cache warmed: {warmed} (combo, period) cells "
+                    f"across {len(score_cache_by_combo)} combo(s) — every "
+                    f"variant on these combos skips per-period scoring."
+                ),
+            })
+
+    # Win #3: per-sweep cache for `make_period_holding`'s price math.
+    # Single dict shared by every variant — the cache key is
+    # `(cid, entry_ts.value, exit_ts.value)` so cross-combo overlap on
+    # the same (cid, entry, exit) triple still hits (price_index is
+    # already a single shared structure across all variants — see
+    # `build_shared_backtest_inputs`). For a 252-variant sweep on the
+    # same (combo, freq) most cids in the selection repeat across
+    # variants — each (cid, entry, exit) is computed exactly once.
+    price_cache: dict = {}
+
     # ===== Win 4: parallel variant execution =====
     # Worker threads run independently; each pushes its lifecycle events
     # (variant_start, optional warnings, terminal variant_result OR
@@ -294,11 +453,6 @@ async def run_variants_sweep(
     # if needed for debugging. Capped at len(variants) so we don't spin
     # up idle workers.
     n_variants = len(req.variants)
-    try:
-        _env_workers = int(os.getenv("VARIANT_MAX_WORKERS", "4"))
-    except ValueError:
-        _env_workers = 4
-    max_workers = max(1, min(n_variants, _env_workers)) if n_variants > 0 else 1
 
     sweep_queue: _queue.Queue = _queue.Queue()
 
@@ -432,6 +586,7 @@ async def run_variants_sweep(
                     monthly_baseline_override=v_monthly_baseline,
                     period_baseline_lookup=v_period_baselines,
                     score_cache=v_score_cache,
+                    price_cache=price_cache,
                 )
 
             sweep_queue.put({
@@ -469,30 +624,31 @@ async def run_variants_sweep(
     yield _emit({
         "type": "progress",
         "pct": 70,
-        "message": f"Running {n_variants} variants ({max_workers} in parallel)...",
+        "message": f"Running {n_variants} variants sequentially (parallel removed; numpy-bound is faster serial than thread-contended)...",
     })
     yield _keepalive()
 
+    # Serial execution. The earlier ThreadPoolExecutor pattern was
+    # contention-bound (wave-of-4 finishers with 8 workers configured)
+    # because pandas/numpy operations release the GIL only partially
+    # and the shared score_cache/selection_cache/price_cache dicts
+    # serialized read access anyway. Going serial:
+    #   - removes thread-spawn + context-switch overhead
+    #   - eliminates cache lock contention (one writer, one reader)
+    #   - makes per-period timings reproducible
+    # We still drain via the same queue + drain loop pattern so the
+    # event interleaving (variant_start → variant_result, progress)
+    # stays identical to the parallel version.
     n_completed = 0
     last_yield = time.monotonic()
-    # `with` block waits for every submitted future on exit. Since the
-    # drain loop only finishes once we've seen N terminals, all workers
-    # have ALREADY completed by then — the wait is a no-op safety net.
-    with concurrent.futures.ThreadPoolExecutor(
-        max_workers=max_workers,
-        thread_name_prefix="variant-worker",
-    ) as executor:
-        for v_idx, vspec in enumerate(req.variants):
-            executor.submit(_run_one_variant, vspec, v_idx)
-
-        while n_completed < n_variants:
+    for v_idx, vspec in enumerate(req.variants):
+        await asyncio.to_thread(_run_one_variant, vspec, v_idx)
+        # Drain whatever the worker put on the queue for this variant.
+        while True:
             try:
-                evt = await asyncio.to_thread(sweep_queue.get, timeout=0.2)
-            except Exception:
-                if time.monotonic() - last_yield >= 15.0:
-                    yield _keepalive()
-                    last_yield = time.monotonic()
-                continue
+                evt = sweep_queue.get_nowait()
+            except _queue.Empty:
+                break
             yield _emit(evt)
             last_yield = time.monotonic()
             if evt["type"] in ("variant_result", "variant_error"):
@@ -502,6 +658,10 @@ async def run_variants_sweep(
                     "pct": 70 + round((n_completed / max(1, n_variants)) * 30),
                     "message": f"{n_completed}/{n_variants} variants complete",
                 })
+        # SSE keepalive every ~15s if a single variant takes a long time.
+        if time.monotonic() - last_yield >= 15.0:
+            yield _keepalive()
+            last_yield = time.monotonic()
 
     # Post-sweep cache warming for /signal-breakdown. The runner's
     # `panel_warm_callback` hook (used by single_run.py) covers the

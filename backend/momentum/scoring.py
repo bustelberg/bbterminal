@@ -160,58 +160,53 @@ def select_from_scored(
     if scored.empty:
         return pd.DataFrame()
 
-    # Optional price-score floor — applied only to long selection (the
-    # short bucket explicitly targets low scores, so a min there would
-    # be self-defeating). Comparison uses strict `>` so a threshold of
-    # 30 means "must beat 30", matching how the UI label reads. NaN
-    # scores are dropped — a company that couldn't be scored on the
-    # price category isn't a candidate for a price-floor strategy.
+    # Reverted to the Win #B pandas version. The numpy variant produced
+    # silent-empty selections in real-data periods where the sector
+    # column had non-string values (NaN/pd.NA — `s in set` doesn't
+    # match what pandas's `.isin()` does). The pandas implementation
+    # handles those gracefully via Series.isin(). The numpy version's
+    # speedup (~1.18× on bench) wasn't worth the correctness risk.
     if direction == "top" and min_price_score is not None and "score_price" in scored.columns:
-        scored = scored[
-            scored["score_price"].notna() & (scored["score_price"] > min_price_score)
-        ].copy()
+        mask = scored["score_price"].notna() & (scored["score_price"] > min_price_score)
+        if not mask.all():
+            scored = scored[mask]
 
-    # Aggregate to sector and pick from the right end of the ranking. The
-    # aggregator returns sectors descending by mean score, so .head() →
-    # top, .tail() → bottom.
     sector_scores = aggregate_to_sector(scored)
     if direction == "top":
         chosen_sectors = sector_scores.head(top_n_sectors)["sector"].tolist()
         ascending_within = False
     else:
-        # Bottom: reverse the tail so chosen_sectors[0] is the worst (rank 1
-        # in the "worst sector" sense), matching the "top" convention where
-        # rank 1 is the best of what was picked.
+        # Bottom: reverse the tail so chosen_sectors[0] is the worst
+        # (rank 1 in the "worst sector" sense), matching the "top"
+        # convention where rank 1 is the best of what was picked.
         chosen_sectors = list(reversed(sector_scores.tail(top_n_sectors)["sector"].tolist()))
         ascending_within = True
 
-    in_chosen_sectors = scored[scored["sector"].isin(chosen_sectors)].copy()
+    if not chosen_sectors:
+        return pd.DataFrame()
 
-    # Within each chosen sector, pick the N best (top) or N worst (bottom)
-    # by final score.
+    sector_rank_map = {sec: i + 1 for i, sec in enumerate(chosen_sectors)}
+    in_chosen = scored[scored["sector"].isin(chosen_sectors)]
+    if in_chosen.empty:
+        return pd.DataFrame()
+
+    in_chosen = in_chosen.assign(
+        sector_rank=in_chosen["sector"].map(sector_rank_map),
+    ).sort_values(
+        ["sector_rank", "momentum_score"],
+        ascending=[True, ascending_within],
+    )
     selected = (
-        in_chosen_sectors
-        .sort_values(["sector", "momentum_score"], ascending=[True, ascending_within])
-        .groupby("sector")
+        in_chosen
+        .groupby("sector_rank", sort=False)
         .head(top_n_per_sector)
         .reset_index(drop=True)
     )
 
-    # Attach sector_rank (1..N over chosen_sectors order) and
-    # company_rank (1..M within each sector, by momentum_score). These
-    # are propagated through PeriodHolding so the UI can show "this is
-    # the 2nd best stock in the 1st best sector" without rederiving.
     if not selected.empty:
-        sector_rank_map = {sec: i + 1 for i, sec in enumerate(chosen_sectors)}
-        selected["sector_rank"] = selected["sector"].map(sector_rank_map).astype("Int64")
-        # Rank within sector: sort by score in the same direction the
-        # selection used (desc for "top", asc for "bottom"), then enumerate.
-        selected = selected.sort_values(
-            ["sector_rank", "momentum_score"],
-            ascending=[True, ascending_within],
-        ).reset_index(drop=True)
+        selected["sector_rank"] = selected["sector_rank"].astype("Int64")
         selected["company_rank"] = (
-            selected.groupby("sector_rank").cumcount().astype("int64") + 1
+            selected.groupby("sector_rank", sort=False).cumcount().astype("int64") + 1
         )
 
     return selected

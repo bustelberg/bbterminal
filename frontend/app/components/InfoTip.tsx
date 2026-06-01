@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 
 /**
  * Small "i" icon that reveals a tooltip on hover. Tooltip is positioned
@@ -8,45 +8,93 @@ import { useRef, useState } from 'react';
  * clipped by overflow:hidden ancestors (the bane of inline tooltips).
  *
  * Renders the tooltip ABOVE the icon (translateY(-100%)). Pass `text`
- * for the body content; multiline strings render as a single block —
- * if you need richer markup use a children prop instead (not exposed
- * today; can be added when the first caller needs it).
+ * for the body content; `\n` is preserved as a line break and `\n\n`
+ * reads as a paragraph break (the `whitespace-pre-line` style on the
+ * inner span keeps newlines without preserving other whitespace
+ * collapsing).
  *
  * Originated in EarningsDashboard; lifted here so any future "help
  * icon next to a label" usage can drop it in.
  */
 export default function InfoTip({ text }: { text: string }) {
   const [show, setShow] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  // Off-screen initial position; useLayoutEffect snaps the tooltip to
+  // its real position after measuring the rendered size, before the
+  // browser paints — so the user never sees the off-screen frame.
+  const [pos, setPos] = useState<{ top: number; left: number }>({
+    top: -9999,
+    left: -9999,
+  });
   const iconRef = useRef<HTMLSpanElement>(null);
+  const tooltipRef = useRef<HTMLSpanElement>(null);
 
-  const tipWidth = 224; // w-56
   const margin = 8;
 
-  // Compute the tooltip's top-left corner directly so we don't have to
-  // reason about how a transform interacts with the clamp. Tooltip is
-  // shown ABOVE the icon (translateY(-100%) handles the vertical shift,
-  // since the rendered height isn't known until after layout); horizontal
-  // position is the icon's center minus half the tooltip's width, then
-  // clamped into the viewport.
-  const handleEnter = () => {
-    if (iconRef.current) {
-      const rect = iconRef.current.getBoundingClientRect();
-      const desiredLeft = rect.left + rect.width / 2 - tipWidth / 2;
-      const maxLeft = window.innerWidth - margin - tipWidth;
-      const clampedLeft = Math.max(margin, Math.min(desiredLeft, maxLeft));
-      setPos({ top: rect.top - 8, left: clampedLeft });
+  // Position the tooltip AFTER it renders, using its actual measured
+  // size. This is the only way to keep it on-screen when the content
+  // height varies wildly (e.g., a 3-paragraph "why empty" disclosure
+  // vs. a one-line metric definition). Strategy:
+  //
+  //   1. Try above the icon — preferred so the tooltip doesn't cover
+  //      the value cell the user is hovering near.
+  //   2. If it would overflow above, place below.
+  //   3. If neither fits fully, clamp to viewport edges and accept
+  //      the `max-h-[80vh] overflow-hidden` cap on the tooltip span.
+  //
+  // Runs synchronously before paint, so position changes don't flash.
+  useLayoutEffect(() => {
+    if (!show || !tooltipRef.current || !iconRef.current) return;
+    const tipRect = tooltipRef.current.getBoundingClientRect();
+    const iconRect = iconRef.current.getBoundingClientRect();
+    const vh = window.innerHeight;
+    const vw = window.innerWidth;
+
+    // Horizontal: center on icon, clamped to viewport width.
+    const cx = iconRect.left + iconRect.width / 2;
+    const desiredLeft = cx - tipRect.width / 2;
+    const maxLeft = vw - margin - tipRect.width;
+    const left = Math.max(margin, Math.min(desiredLeft, maxLeft));
+
+    // Vertical: above → below → clamp.
+    const above = iconRect.top - 8 - tipRect.height;
+    const below = iconRect.bottom + 8;
+    let top: number;
+    if (above >= margin) {
+      top = above;
+    } else if (below + tipRect.height <= vh - margin) {
+      top = below;
+    } else {
+      // Last resort — tooltip is taller than either side's space.
+      // Pin to whichever edge gives more space; the inner span's
+      // max-h-[80vh] truncates the content.
+      const spaceAbove = iconRect.top - margin;
+      const spaceBelow = vh - iconRect.bottom - margin;
+      top = spaceAbove >= spaceBelow ? margin : Math.max(margin, vh - margin - tipRect.height);
     }
-    setShow(true);
-  };
+
+    if (top !== pos.top || left !== pos.left) {
+      setPos({ top, left });
+    }
+    // pos is intentionally excluded — we only want this to run when
+    // visibility or content changes. Re-running on pos updates would
+    // be infinite-loopy.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show, text]);
 
   return (
-    <span className="relative cursor-help" onMouseEnter={handleEnter} onMouseLeave={() => setShow(false)}>
+    <span className="relative cursor-help" onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
       <span ref={iconRef} className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-gray-600 text-gray-500 text-[10px] leading-none hover:border-indigo-400 hover:text-indigo-400 transition-colors">i</span>
       {show && (
         <span
-          className="fixed w-56 px-3 py-2 bg-[#1e2130] border border-gray-700 rounded-lg text-xs text-gray-300 leading-relaxed z-[9999] shadow-xl pointer-events-none"
-          style={{ top: pos.top, left: pos.left, transform: 'translateY(-100%)' }}
+          ref={tooltipRef}
+          // `max-h-[80vh]` + `overflow-hidden` keep the tooltip inside
+          // the viewport when neither above nor below has room for the
+          // full content. `pointer-events-none` means the user can't
+          // scroll inside it; in that case the most important content
+          // (whyEmpty paragraph) is below the metric definition, so
+          // ideally we'd reverse the order — left as a future tweak.
+          className="fixed w-72 max-h-[80vh] overflow-hidden px-3 py-2 bg-[#1e2130] border border-gray-700 rounded-lg text-xs text-gray-300 leading-relaxed z-[9999] shadow-xl pointer-events-none whitespace-pre-line"
+          style={{ top: pos.top, left: pos.left }}
         >
           {text}
         </span>
