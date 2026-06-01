@@ -382,6 +382,31 @@ export default function Schedule() {
     }
   }, [loadStrategies]);
 
+  const renameStrategy = useCallback(async (id: number, currentName: string) => {
+    const next = await dialog.prompt('New name for this scheduled strategy:', {
+      title: 'Rename strategy',
+      defaultValue: currentName,
+    });
+    if (next == null) return; // cancelled
+    const trimmed = next.trim();
+    if (!trimmed || trimmed === currentName) return; // no change
+    try {
+      const r = await apiFetch(`${API_URL}/api/scheduled-strategies/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (!r.ok) {
+        const body = await r.text().catch(() => '');
+        setError(`Rename failed: ${r.status} ${body.slice(0, 200)}`);
+        return;
+      }
+      await loadStrategies();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [loadStrategies]);
+
   const removeStrategy = useCallback(async (id: number) => {
     const ok = await dialog.confirm(
       'Remove this strategy from the schedule? Existing snapshots will be preserved.',
@@ -600,6 +625,14 @@ export default function Schedule() {
                         />
                         enabled
                       </label>
+                      <button
+                        type="button"
+                        onClick={() => void renameStrategy(s.id, s.name || `Strategy #${s.id}`)}
+                        className="text-xs px-2 py-1 rounded-lg text-gray-400 hover:bg-white/5 hover:text-gray-200 transition-colors"
+                        title="Rename strategy"
+                      >
+                        Rename
+                      </button>
                       <button
                         type="button"
                         onClick={() => void removeStrategy(s.id)}

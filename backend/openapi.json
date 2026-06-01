@@ -716,6 +716,17 @@
             ],
             "title": "Enabled"
           },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
           "start_date": {
             "anyOf": [
               {

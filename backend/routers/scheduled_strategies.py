@@ -101,6 +101,8 @@ class ScheduledStrategyCreate(BaseModel):
 
 class ScheduledStrategyPatch(BaseModel):
     enabled: bool | None = None
+    # Rename the strategy. Whitespace-trimmed; empty/blank is rejected.
+    name: str | None = None
     # Configurable go-live date (red dashed marker + live cutoff). A
     # present `start_date` sets it; `clear_start_date=True` resets it to
     # NULL (fall back to created_at). They're mutually exclusive — a
@@ -1198,6 +1200,11 @@ async def patch_scheduled_strategy(strategy_id: int, body: ScheduledStrategyPatc
     update_dict: dict = {"updated_at": datetime.now(timezone.utc).isoformat()}
     if body.enabled is not None:
         update_dict["enabled"] = body.enabled
+    if body.name is not None:
+        trimmed = body.name.strip()
+        if not trimmed:
+            raise HTTPException(400, "name must be non-empty")
+        update_dict["name"] = trimmed
     if body.clear_start_date:
         update_dict["start_date"] = None
     elif body.start_date is not None:
@@ -1206,7 +1213,7 @@ async def patch_scheduled_strategy(strategy_id: int, body: ScheduledStrategyPatc
     # no-op PATCH is a clear 400 rather than a silent timestamp bump.
     if len(update_dict) == 1:
         raise HTTPException(
-            400, "Nothing to update (pass `enabled`, `start_date`, or `clear_start_date`).",
+            400, "Nothing to update (pass `enabled`, `name`, `start_date`, or `clear_start_date`).",
         )
 
     def _update() -> dict:

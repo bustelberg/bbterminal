@@ -3035,6 +3035,8 @@ export interface components {
             clear_start_date?: boolean | null;
             /** Enabled */
             enabled?: boolean | null;
+            /** Name */
+            name?: string | null;
             /** Start Date */
             start_date?: string | null;
         };

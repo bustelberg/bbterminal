@@ -101,7 +101,7 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
     return computeNetStats(result.monthly_records, feesByExchange, exchangeByCompany, result.daily_records);
   }, [feesByExchange, exchangeByCompany, result.monthly_records, result.daily_records]);
 
-  /** Map of comparison series id â†’ NetStats. Computed per-comparison so
+  /** Map of comparison series id → NetStats. Computed per-comparison so
    * saved runs added via "Add series" get the same `gross (net)` treatment
    * the active row does. Benchmarks aren't keyed here at all. */
   const comparisonNetStats = useMemo<Map<string, NetStats | null>>(() => {
@@ -222,7 +222,7 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
   const variantPickerRef = useRef<HTMLDivElement>(null);
   useClickOutside(variantPickerRef, () => setVariantPickerOpen(null), !!variantPickerOpen);
 
-  // Resolve every series into a (date â†’ growth factor) map. Date keys are
+  // Resolve every series into a (date → growth factor) map. Date keys are
   // normalized to YYYY-MM-DD so that string comparison correctly orders dates
   // across mixed cadences — a saved variant with monthly_records ("2002-01")
   // sits at the *end of January* on the timeline, lining up with a daily
@@ -472,7 +472,7 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
           </div>
           {alignedSeries.windowStart && alignedSeries.windowEnd && alignedSeries.series.length > 1 && (
             <span className="text-[11px] text-gray-500 font-mono ml-auto">
-              aligned {alignedSeries.windowStart} â†’ {alignedSeries.windowEnd}
+              aligned {alignedSeries.windowStart} → {alignedSeries.windowEnd}
             </span>
           )}
         </div>
