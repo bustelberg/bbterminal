@@ -4912,25 +4912,39 @@
     },
     "/api/momentum/prices-at": {
       "get": {
-        "description": "Close price (local + EUR) for each company at the nearest trading day\non/before `as_of`. Read-only DB lookup \u2014 the Portfolio table uses it to\nre-price holdings at a go-live split boundary so each sub-period shows\nthe entry/exit prices for its own dates. `company_ids` is comma-separated.",
+        "description": "Close price (local + EUR) for each company at the nearest trading day\non/before `as_of`. Read-only DB lookup \u2014 the Portfolio table uses it to\nre-price holdings at a go-live split boundary so each sub-period shows\nthe entry/exit prices for its own dates. `company_ids` is comma-separated.\n\nBoth params are optional so a no-arg probe (e.g. CI's GET smoke) gets a\nvalid empty `{prices: {}}` rather than a 422 \u2014 the frontend always sends\nboth.",
         "operationId": "prices_at_api_momentum_prices_at_get",
         "parameters": [
           {
             "in": "query",
             "name": "as_of",
-            "required": true,
+            "required": false,
             "schema": {
-              "title": "As Of",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As Of"
             }
           },
           {
             "in": "query",
             "name": "company_ids",
-            "required": true,
+            "required": false,
             "schema": {
-              "title": "Company Ids",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Ids"
             }
           }
         ],

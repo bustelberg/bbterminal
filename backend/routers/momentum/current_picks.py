@@ -214,13 +214,19 @@ def _refresh_mtd_for_holdings(holdings: list[dict]) -> tuple[list[dict], str | N
 
 
 @router.get("/api/momentum/prices-at")
-async def prices_at(as_of: str, company_ids: str):
+async def prices_at(as_of: str | None = None, company_ids: str | None = None):
     """Close price (local + EUR) for each company at the nearest trading day
     on/before `as_of`. Read-only DB lookup — the Portfolio table uses it to
     re-price holdings at a go-live split boundary so each sub-period shows
     the entry/exit prices for its own dates. `company_ids` is comma-separated.
+
+    Both params are optional so a no-arg probe (e.g. CI's GET smoke) gets a
+    valid empty `{prices: {}}` rather than a 422 — the frontend always sends
+    both.
     """
     def _q() -> dict:
+        if not as_of or not company_ids:
+            return {"prices": {}}
         try:
             target = date.fromisoformat(as_of[:10])
         except ValueError:

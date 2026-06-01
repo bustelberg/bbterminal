@@ -2032,6 +2032,10 @@ export interface paths {
          *     on/before `as_of`. Read-only DB lookup — the Portfolio table uses it to
          *     re-price holdings at a go-live split boundary so each sub-period shows
          *     the entry/exit prices for its own dates. `company_ids` is comma-separated.
+         *
+         *     Both params are optional so a no-arg probe (e.g. CI's GET smoke) gets a
+         *     valid empty `{prices: {}}` rather than a 422 — the frontend always sends
+         *     both.
          */
         get: operations["prices_at_api_momentum_prices_at_get"];
         put?: never;
@@ -5950,9 +5954,9 @@ export interface operations {
     };
     prices_at_api_momentum_prices_at_get: {
         parameters: {
-            query: {
-                as_of: string;
-                company_ids: string;
+            query?: {
+                as_of?: string | null;
+                company_ids?: string | null;
             };
             header?: never;
             path?: never;
