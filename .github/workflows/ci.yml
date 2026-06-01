@@ -600,11 +600,59 @@ jobs:
           grep -q '2026-04-01' <<<"$snaps" || { echo "::error::seeded snapshot 2026-04-01 missing"; exit 1; }
           grep -q '2026-05-01' <<<"$snaps" || { echo "::error::seeded snapshot 2026-05-01 missing"; exit 1; }
 
+          # The backtest fixture seeds daily prices through late May 2026,
+          # so the latest close is in 2026-05 (exact weekday varies).
           lpd=$(curl -fsS -m 30 "$BACKEND/api/data/latest-price-date" | jq -r '.date // empty')
           echo "latest-price-date = $lpd"
-          [[ "$lpd" == "2026-05-01" ]] || { echo "::error::latest-price-date expected 2026-05-01, got '$lpd'"; exit 1; }
+          [[ "$lpd" == 2026-05-* ]] || { echo "::error::latest-price-date expected 2026-05-*, got '$lpd'"; exit 1; }
 
-          echo "✓ seeded data surfaces correctly through the backend"
+          echo "seeded data surfaces correctly through the backend"
+
+      # Correctness gate for the strategy engine itself — the product's core
+      # IP, otherwise only unit-tested in isolation. Drives a real momentum
+      # backtest over the seeded ACWI fixture (POST is admin-gated; the proxy
+      # stubs /auth/v1/user as admin) and asserts a coherent result flows
+      # back through the whole path: DB load → signals → scoring → selection
+      # → returns → SSE. Catches regressions in the engine OR the data
+      # loaders that the GET probe + unit tests can't see.
+      - name: Assert backtest engine runs end-to-end
+        run: |
+          python3 - <<'PY'
+          import json, sys, urllib.request
+          B = "http://127.0.0.1:8000"
+          body = json.dumps({
+              "start_date": "2026-03-01", "end_date": "2026-05-31",
+              "index_universe": "ACWI", "selection_mode": "momentum",
+              "rebalance_frequency": "monthly",
+              "top_n_sectors": 2, "top_n_per_sector": 2, "db_only": True,
+          }).encode()
+          req = urllib.request.Request(
+              B + "/api/momentum/backtest", data=body,
+              headers={"Content-Type": "application/json", "Authorization": "Bearer ci-admin"})
+          result, errors = None, []
+          with urllib.request.urlopen(req, timeout=240) as resp:
+              for raw in resp:
+                  line = raw.decode("utf-8").strip()
+                  if not line.startswith("data:"):
+                      continue
+                  evt = json.loads(line[5:].strip())
+                  if evt.get("type") == "result": result = evt["data"]
+                  elif evt.get("type") == "error": errors.append(evt)
+          if not result:
+              print(f"::error::backtest produced no result event. errors={errors[:2]}"); sys.exit(1)
+          mr = result.get("monthly_records") or []
+          with_h = [p for p in mr if p.get("holdings")]
+          tr = (result.get("summary") or {}).get("total_return_pct")
+          print(f"monthly_records={len(mr)} periods_with_holdings={len(with_h)} total_return_pct={tr}")
+          if with_h:
+              p0 = with_h[0]
+              print(f"  {p0.get('date')}: {[h['ticker'] for h in p0['holdings']]}")
+          ok = len(mr) >= 1 and len(with_h) >= 1 and isinstance(tr, (int, float))
+          if not ok:
+              print("::error::backtest result incoherent (need >=1 period with holdings + numeric total_return_pct)")
+              sys.exit(1)
+          print("backtest engine produced a coherent result end-to-end")
+          PY
 
       - name: Backend logs (on failure)
         if: failure()
