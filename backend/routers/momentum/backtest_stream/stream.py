@@ -21,7 +21,7 @@ as their last value; the orchestrator picks that up via a small
 from __future__ import annotations
 
 import asyncio
-import json
+from routers._sse import sse_event as _emit, sse_keepalive as _keepalive
 import logging
 import threading
 from datetime import date, timedelta
@@ -57,14 +57,6 @@ from .variants import run_variants_sweep
 _log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["momentum"])
-
-
-def _emit(data: dict) -> str:
-    return f"data: {json.dumps(data)}\n\n"
-
-
-def _keepalive() -> str:
-    return ": keepalive\n\n"
 
 
 async def _collect_result(agen, sink_yield):

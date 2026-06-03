@@ -16,7 +16,7 @@ in the audit. Only transient API failures need a second attempt."""
 from __future__ import annotations
 
 import asyncio
-import json
+from routers._sse import sse_event as _emit, sse_keepalive as _keepalive
 import queue as _queue
 import threading
 
@@ -31,14 +31,6 @@ from momentum.data import (
 )
 
 from .audit import AuditResult
-
-
-def _emit(data: dict) -> str:
-    return f"data: {json.dumps(data)}\n\n"
-
-
-def _keepalive() -> str:
-    return ": keepalive\n\n"
 
 
 def compute_gap_cids(

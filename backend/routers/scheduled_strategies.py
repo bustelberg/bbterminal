@@ -30,7 +30,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from deps import supabase, IN_CHUNK_SIZE
+from deps import supabase, fetch_in_chunks
 
 _log = logging.getLogger(__name__)
 
@@ -210,22 +210,19 @@ def compute_and_save_price_update(
     # DISTINCT ON via PostgREST.
     cids = [h.get("company_id") for h in holdings if h.get("company_id") is not None]
     latest_by_cid: dict[int, dict] = {}
-    if cids:
-        # Chunk by IN_CHUNK_SIZE to stay under PostgREST URL limits.
-        for i in range(0, len(cids), IN_CHUNK_SIZE):
-            chunk = cids[i:i + IN_CHUNK_SIZE]
-            p_resp = (
-                supabase.table("metric_data")
-                .select("company_id, target_date, numeric_value")
-                .eq("metric_code", "close_price")
-                .in_("company_id", chunk)
-                .order("target_date", desc=True)
-                .execute()
-            )
-            for r in (p_resp.data or []):
-                cid = r["company_id"]
-                if cid not in latest_by_cid:
-                    latest_by_cid[cid] = r
+    # Chunk to stay under the PostgREST URL-length window (see fetch_in_chunks).
+    for r in fetch_in_chunks(
+        cids,
+        lambda chunk: supabase.table("metric_data")
+        .select("company_id, target_date, numeric_value")
+        .eq("metric_code", "close_price")
+        .in_("company_id", chunk)
+        .order("target_date", desc=True)
+        .execute(),
+    ):
+        cid = r["company_id"]
+        if cid not in latest_by_cid:
+            latest_by_cid[cid] = r
 
     updated_holdings: list[dict] = []
     weighted_return_sum = 0.0
@@ -836,17 +833,14 @@ def _hydrate(rows: list[dict]) -> list[dict]:
         if hist:
             latest_ids.append(int(hist[-1]["snapshot_id"]))
     holdings_by_snap: dict[int, list[dict]] = {}
-    if latest_ids:
-        for start in range(0, len(latest_ids), IN_CHUNK_SIZE):
-            chunk = latest_ids[start : start + IN_CHUNK_SIZE]
-            h_resp = (
-                supabase.table("current_picks_snapshot")
-                .select("snapshot_id, holdings")
-                .in_("snapshot_id", chunk)
-                .execute()
-            )
-            for hr in h_resp.data or []:
-                holdings_by_snap[int(hr["snapshot_id"])] = hr.get("holdings") or []
+    for hr in fetch_in_chunks(
+        latest_ids,
+        lambda chunk: supabase.table("current_picks_snapshot")
+        .select("snapshot_id, holdings")
+        .in_("snapshot_id", chunk)
+        .execute(),
+    ):
+        holdings_by_snap[int(hr["snapshot_id"])] = hr.get("holdings") or []
 
     today = date.today()
 
@@ -1026,30 +1020,28 @@ async def list_held_companies():
         # `gurufocus_exchange`. Batched by IN_CHUNK_SIZE to stay under
         # the PostgREST URL-length window.
         cids = list(pooled.keys())
-        for start in range(0, len(cids), IN_CHUNK_SIZE):
-            chunk = cids[start : start + IN_CHUNK_SIZE]
-            comp_resp = (
-                supabase.table("company")
-                .select(
-                    "company_id, company_name, gurufocus_ticker, "
-                    "gurufocus_exchange:gurufocus_exchange(exchange_code)"
-                )
-                .in_("company_id", chunk)
-                .execute()
+        for r in fetch_in_chunks(
+            cids,
+            lambda chunk: supabase.table("company")
+            .select(
+                "company_id, company_name, gurufocus_ticker, "
+                "gurufocus_exchange:gurufocus_exchange(exchange_code)"
             )
-            for r in (comp_resp.data or []):
-                cid = int(r["company_id"])
-                if cid not in pooled:
-                    continue
-                exch = (r.get("gurufocus_exchange") or {}).get("exchange_code") or ""
-                pooled[cid]["exchange"] = exch
-                # Prefer the authoritative ticker/name from `company`
-                # — the snapshot's holdings can carry slightly stale
-                # values after a renamed-ticker override.
-                if r.get("gurufocus_ticker"):
-                    pooled[cid]["ticker"] = r["gurufocus_ticker"]
-                if r.get("company_name"):
-                    pooled[cid]["company_name"] = r["company_name"]
+            .in_("company_id", chunk)
+            .execute(),
+        ):
+            cid = int(r["company_id"])
+            if cid not in pooled:
+                continue
+            exch = (r.get("gurufocus_exchange") or {}).get("exchange_code") or ""
+            pooled[cid]["exchange"] = exch
+            # Prefer the authoritative ticker/name from `company`
+            # — the snapshot's holdings can carry slightly stale
+            # values after a renamed-ticker override.
+            if r.get("gurufocus_ticker"):
+                pooled[cid]["ticker"] = r["gurufocus_ticker"]
+            if r.get("company_name"):
+                pooled[cid]["company_name"] = r["company_name"]
 
         # Step 5 — freshness lookup. For each held company, fetch its
         # actual latest `close_price` target_date from `metric_data`

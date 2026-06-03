@@ -11,7 +11,8 @@ import asyncio
 import queue as _queue
 from datetime import date
 
-from deps import supabase, IN_CHUNK_SIZE
+from deps import supabase, fetch_in_chunks
+from routers._sse import sse_keepalive, sse_raw
 
 
 def _cutoff_for_target_month(target_month: str) -> date:
@@ -31,25 +32,23 @@ def _load_derived_metrics(
     Returns {company_id -> [(fy_end_date, {code: value}), …]}, sorted by
     date asc. Batched in IN_CHUNK_SIZE chunks (Cloudflare 502 avoidance)."""
     out: dict[int, dict[str, dict[str, float]]] = {}  # cid -> {iso_date -> {code -> value}}
-    for i in range(0, len(company_ids), IN_CHUNK_SIZE):
-        batch = company_ids[i:i + IN_CHUNK_SIZE]
-        resp = (
-            supabase.table("metric_data")
-            .select("company_id, metric_code, target_date, numeric_value")
-            .in_("company_id", batch)
-            .eq("source_code", "derived")
-            .in_("metric_code", metric_codes)
-            .limit(100000)
-            .execute()
-        )
-        for row in (resp.data or []):
-            cid = row["company_id"]
-            d = row["target_date"]
-            code = row["metric_code"]
-            v = row["numeric_value"]
-            if v is None:
-                continue
-            out.setdefault(cid, {}).setdefault(d, {})[code] = float(v)
+    for row in fetch_in_chunks(
+        company_ids,
+        lambda chunk: supabase.table("metric_data")
+        .select("company_id, metric_code, target_date, numeric_value")
+        .in_("company_id", chunk)
+        .eq("source_code", "derived")
+        .in_("metric_code", metric_codes)
+        .limit(100000)
+        .execute(),
+    ):
+        cid = row["company_id"]
+        d = row["target_date"]
+        code = row["metric_code"]
+        v = row["numeric_value"]
+        if v is None:
+            continue
+        out.setdefault(cid, {}).setdefault(d, {})[code] = float(v)
 
     result: dict[int, list[tuple[date, dict[str, float]]]] = {}
     for cid, by_date in out.items():
@@ -89,7 +88,7 @@ async def drain_sse_queue(q: _queue.Queue, task):
     when the sentinel arrives or the background task is done and the
     queue is empty. A leading keepalive is yielded so the proxy doesn't
     close the connection during the worker's startup."""
-    yield ": keepalive\n\n"
+    yield sse_keepalive()
     while True:
         try:
             msg = await asyncio.to_thread(q.get, timeout=0.15)
@@ -98,9 +97,9 @@ async def drain_sse_queue(q: _queue.Queue, task):
                 while not q.empty():
                     m = q.get_nowait()
                     if m is not None:
-                        yield f"data: {m}\n\n"
+                        yield sse_raw(m)
                 break
             continue
         if msg is None:
             break
-        yield f"data: {msg}\n\n"
+        yield sse_raw(msg)

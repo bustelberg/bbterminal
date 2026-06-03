@@ -38,6 +38,7 @@ from index_universe.templates._cache import (
     list_summary_set,
 )
 from routers._cache_headers import CACHE_PIPELINE
+from routers._sse import sse_event
 from routers.index_universe._helpers import drain_thread_queue
 
 router = APIRouter(tags=["universe-templates"])
@@ -331,10 +332,10 @@ async def refresh_universe_template(template_key: str):
     # + the UI's poll keep the spinner/progress bar live either way.
     if _refresh_status.is_running(template_key):
         async def _busy_gen():
-            yield "data: " + json.dumps({
+            yield sse_event({
                 "type": "progress",
                 "message": f"'{t.label}' is already refreshing — watching shared progress.",
-            }) + "\n\n"
+            })
         return StreamingResponse(_busy_gen(), media_type="text/event-stream")
 
     def _worker():

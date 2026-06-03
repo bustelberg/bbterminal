@@ -12,7 +12,8 @@ from __future__ import annotations
 import asyncio
 import queue as _queue
 
-from deps import supabase, IN_CHUNK_SIZE
+from deps import supabase, fetch_in_chunks
+from routers._sse import sse_keepalive, sse_raw
 
 
 # Module-level cache for the universe-stats list. The underlying view does
@@ -32,17 +33,17 @@ def _enrich_tickers(rows: list[dict]) -> list[dict]:
     from ingest.gurufocus_url import gurufocus_url  # noqa: PLC0415
     company_ids = [r["company_id"] for r in rows if r["company_id"]]
     company_info: dict[int, dict] = {}
-    for i in range(0, len(company_ids), IN_CHUNK_SIZE):
-        chunk = company_ids[i:i + IN_CHUNK_SIZE]
-        resp = supabase.table("company").select(
+    for c in fetch_in_chunks(
+        company_ids,
+        lambda chunk: supabase.table("company").select(
             "company_id, company_name, gurufocus_exchange:gurufocus_exchange(exchange_code)"
-        ).in_("company_id", chunk).execute()
-        for c in resp.data or []:
-            exch_info = c.get("gurufocus_exchange") or {}
-            company_info[c["company_id"]] = {
-                "company_name": c.get("company_name") or "",
-                "exchange": exch_info.get("exchange_code") or "",
-            }
+        ).in_("company_id", chunk).execute(),
+    ):
+        exch_info = c.get("gurufocus_exchange") or {}
+        company_info[c["company_id"]] = {
+            "company_name": c.get("company_name") or "",
+            "exchange": exch_info.get("exchange_code") or "",
+        }
 
     result = []
     for r in rows:
@@ -63,7 +64,7 @@ async def drain_executor_queue(q: _queue.Queue, task):
     """Drain a queue fed by an executor-launched `_run`. The executor task
     eventually finishes; the queue's sentinel is None. Used by the SSE
     endpoints whose worker is launched via `loop.run_in_executor`."""
-    yield ": keepalive\n\n"
+    yield sse_keepalive()
     while True:
         try:
             msg = await asyncio.to_thread(q.get, timeout=0.15)
@@ -72,21 +73,21 @@ async def drain_executor_queue(q: _queue.Queue, task):
                 while not q.empty():
                     msg = q.get_nowait()
                     if msg is not None:
-                        yield f"data: {msg}\n\n"
+                        yield sse_raw(msg)
                 break
             continue
         if msg is None:
             break
-        yield f"data: {msg}\n\n"
+        yield sse_raw(msg)
 
 
 async def drain_thread_queue(q: _queue.Queue):
     """Drain a queue fed by a daemon `threading.Thread` worker. The thread
     pushes None when done so we just block on `q.get` and exit on the
     sentinel — there's no task handle to inspect."""
-    yield ": keepalive\n\n"
+    yield sse_keepalive()
     while True:
         msg = await asyncio.to_thread(q.get)
         if msg is None:
             break
-        yield f"data: {msg}\n\n"
+        yield sse_raw(msg)

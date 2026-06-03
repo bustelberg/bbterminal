@@ -8,7 +8,7 @@ replay cache) before emitting the terminal `done` event."""
 from __future__ import annotations
 
 import asyncio
-import json
+from routers._sse import sse_event as _emit, sse_keepalive as _keepalive
 import queue as _queue
 import time
 
@@ -32,14 +32,6 @@ from .._helpers import (
 )
 from ..signals import warm_breakdown_panel_cache
 from .benchmarks import fetch_benchmark_price_index
-
-
-def _emit(data: dict) -> str:
-    return f"data: {json.dumps(data)}\n\n"
-
-
-def _keepalive() -> str:
-    return ": keepalive\n\n"
 
 
 async def run_single(

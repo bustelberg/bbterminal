@@ -8,7 +8,7 @@ can emit events in the right order and the self-heal path can pick up
 the gap lists."""
 from __future__ import annotations
 
-import json
+from routers._sse import sse_event as _emit
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -31,10 +31,6 @@ _KNOWN_UNSUBSCRIBED_EXCHANGES = frozenset({
 })
 
 
-def _emit(data: dict) -> str:
-    return f"data: {json.dumps(data)}\n\n"
-
-
 def _load_delisted_cids(candidate_cids: list[int]) -> set[int]:
     """Look up which of the given company_ids the pipeline has marked
     `delisted_at` OR `out_of_scope_at` in `company`. Used to exclude
@@ -48,25 +44,23 @@ def _load_delisted_cids(candidate_cids: list[int]) -> set[int]:
     includes out-of-scope rows.)"""
     if not candidate_cids:
         return set()
-    from deps import supabase, IN_CHUNK_SIZE  # noqa: PLC0415
+    from deps import supabase, fetch_in_chunks  # noqa: PLC0415
 
     out: set[int] = set()
     try:
-        for start in range(0, len(candidate_cids), IN_CHUNK_SIZE):
-            chunk = candidate_cids[start : start + IN_CHUNK_SIZE]
-            # Two filtered queries against the same chunk — PostgREST
-            # doesn't compose OR-on-different-cols cleanly through
-            # supabase-py without raw SQL. Both pages are tiny.
-            for column in ("delisted_at", "out_of_scope_at"):
-                resp = (
-                    supabase.table("company")
-                    .select(f"company_id, {column}")
-                    .in_("company_id", chunk)
-                    .not_.is_(column, "null")
-                    .execute()
-                )
-                for row in (resp.data or []):
-                    out.add(int(row["company_id"]))
+        # One chunked pass per column — PostgREST doesn't compose
+        # OR-on-different-cols cleanly through supabase-py without raw SQL.
+        # `col=column` binds the loop var into the lambda (avoids late binding).
+        for column in ("delisted_at", "out_of_scope_at"):
+            for row in fetch_in_chunks(
+                candidate_cids,
+                lambda chunk, col=column: supabase.table("company")
+                .select(f"company_id, {col}")
+                .in_("company_id", chunk)
+                .not_.is_(col, "null")
+                .execute(),
+            ):
+                out.add(int(row["company_id"]))
     except Exception:
         # Audit is non-critical; swallow + return empty.
         return set()

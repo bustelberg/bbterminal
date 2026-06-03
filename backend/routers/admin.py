@@ -38,7 +38,7 @@ from fastapi import APIRouter, Header, HTTPException
 from postgrest.exceptions import APIError
 from pydantic import BaseModel
 
-from deps import supabase, IN_CHUNK_SIZE
+from deps import supabase, fetch_in_chunks
 from routers.auth import _require_admin
 
 router = APIRouter(tags=["admin"])
@@ -80,21 +80,15 @@ def _build_portfolio_payload(snapshot_row: dict) -> dict:
     # table joined to gurufocus_exchange.
     cids = [int(h["company_id"]) for h in raw_holdings if h.get("company_id") is not None]
     exchange_by_cid: dict[int, str] = {}
-    if cids:
-        for chunk_start in range(0, len(cids), IN_CHUNK_SIZE):
-            chunk = cids[chunk_start : chunk_start + IN_CHUNK_SIZE]
-            resp = (
-                supabase.table("company")
-                .select(
-                    "company_id, "
-                    "gurufocus_exchange:gurufocus_exchange(exchange_code)"
-                )
-                .in_("company_id", chunk)
-                .execute()
-            )
-            for row in (resp.data or []):
-                exch = (row.get("gurufocus_exchange") or {}).get("exchange_code") or ""
-                exchange_by_cid[int(row["company_id"])] = exch
+    for row in fetch_in_chunks(
+        cids,
+        lambda chunk: supabase.table("company")
+        .select("company_id, gurufocus_exchange:gurufocus_exchange(exchange_code)")
+        .in_("company_id", chunk)
+        .execute(),
+    ):
+        exch = (row.get("gurufocus_exchange") or {}).get("exchange_code") or ""
+        exchange_by_cid[int(row["company_id"])] = exch
 
     total_weight = 0.0
     holdings_out: list[dict] = []
@@ -446,23 +440,19 @@ def _fetch_latest_snapshots_for(strategy_ids: list[int]) -> dict[int, dict]:
     """For each strategy id, return its most-recent snapshot row (or omit
     when none exists). Batches in IN_CHUNK_SIZE chunks to dodge
     Cloudflare 502s on Supabase, same convention as elsewhere."""
-    if not strategy_ids:
-        return {}
     latest: dict[int, dict] = {}
-    for chunk_start in range(0, len(strategy_ids), IN_CHUNK_SIZE):
-        chunk = strategy_ids[chunk_start : chunk_start + IN_CHUNK_SIZE]
-        resp = (
-            supabase.table("current_picks_snapshot")
-            .select("*")
-            .in_("scheduled_strategy_id", chunk)
-            .order("created_at", desc=True)
-            .execute()
-        )
-        for row in (resp.data or []):
-            sid = row.get("scheduled_strategy_id")
-            if sid is None or sid in latest:
-                continue
-            latest[int(sid)] = row
+    for row in fetch_in_chunks(
+        strategy_ids,
+        lambda chunk: supabase.table("current_picks_snapshot")
+        .select("*")
+        .in_("scheduled_strategy_id", chunk)
+        .order("created_at", desc=True)
+        .execute(),
+    ):
+        sid = row.get("scheduled_strategy_id")
+        if sid is None or sid in latest:
+            continue
+        latest[int(sid)] = row
     return latest
 
 
@@ -967,17 +957,15 @@ async def list_companies_missing_exchange(authorization: str = Header(None)):
         # No country in universe_membership today, but the universe label
         # often hints at it (e.g. ACWI-Italy memberships → Italian).
         mem_by_cid: dict[int, list[dict]] = {}
-        for i in range(0, len(cids), IN_CHUNK_SIZE):
-            chunk = cids[i:i + IN_CHUNK_SIZE]
-            m_resp = (
-                supabase.table("universe_membership")
-                .select("company_id, universe_ticker, sector, target_month, universe_id")
-                .in_("company_id", chunk)
-                .order("target_month", desc=True)
-                .execute()
-            )
-            for m in (m_resp.data or []):
-                mem_by_cid.setdefault(m["company_id"], []).append(m)
+        for m in fetch_in_chunks(
+            cids,
+            lambda chunk: supabase.table("universe_membership")
+            .select("company_id, universe_ticker, sector, target_month, universe_id")
+            .in_("company_id", chunk)
+            .order("target_month", desc=True)
+            .execute(),
+        ):
+            mem_by_cid.setdefault(m["company_id"], []).append(m)
         out = []
         for r in rows:
             cid = r["company_id"]
@@ -1231,36 +1219,34 @@ async def list_flagged_companies(
         flat_info_by_cid = {int(r["company_id"]): r for r in flat_raw}
         flat_cids = list(flat_info_by_cid.keys())
         flat_rows = []
-        for i in range(0, len(flat_cids), IN_CHUNK_SIZE):
-            chunk = flat_cids[i:i + IN_CHUNK_SIZE]
-            comp_resp = (
-                supabase.table("company")
-                .select(
-                    "company_id, company_name, gurufocus_ticker, "
-                    "delisted_at, out_of_scope_at, out_of_scope_reason, "
-                    "gurufocus_exchange:gurufocus_exchange(exchange_code)"
-                )
-                .in_("company_id", chunk)
-                .execute()
+        for r in fetch_in_chunks(
+            flat_cids,
+            lambda chunk: supabase.table("company")
+            .select(
+                "company_id, company_name, gurufocus_ticker, "
+                "delisted_at, out_of_scope_at, out_of_scope_reason, "
+                "gurufocus_exchange:gurufocus_exchange(exchange_code)"
             )
-            for r in (comp_resp.data or []):
-                cid = int(r["company_id"])
-                if r.get("delisted_at") is not None:
-                    continue  # flat prices expected on delisted listings
-                info = flat_info_by_cid.get(cid, {})
-                flat_rows.append({
-                    "company_id": cid,
-                    "company_name": r.get("company_name"),
-                    "gurufocus_ticker": r.get("gurufocus_ticker"),
-                    "gurufocus_exchange": (r.get("gurufocus_exchange") or {}).get("exchange_code"),
-                    "delisted_at": r.get("delisted_at"),
-                    "out_of_scope_at": r.get("out_of_scope_at"),
-                    "out_of_scope_reason": r.get("out_of_scope_reason"),
-                    "flat_value": info.get("flat_value"),
-                    "window_start": info.get("window_start"),
-                    "window_end": info.get("window_end"),
-                    "row_count": info.get("row_count"),
-                })
+            .in_("company_id", chunk)
+            .execute(),
+        ):
+            cid = int(r["company_id"])
+            if r.get("delisted_at") is not None:
+                continue  # flat prices expected on delisted listings
+            info = flat_info_by_cid.get(cid, {})
+            flat_rows.append({
+                "company_id": cid,
+                "company_name": r.get("company_name"),
+                "gurufocus_ticker": r.get("gurufocus_ticker"),
+                "gurufocus_exchange": (r.get("gurufocus_exchange") or {}).get("exchange_code"),
+                "delisted_at": r.get("delisted_at"),
+                "out_of_scope_at": r.get("out_of_scope_at"),
+                "out_of_scope_reason": r.get("out_of_scope_reason"),
+                "flat_value": info.get("flat_value"),
+                "window_start": info.get("window_start"),
+                "window_end": info.get("window_end"),
+                "row_count": info.get("row_count"),
+            })
         flat_rows.sort(key=lambda x: (x.get("company_name") or "").lower())
 
         return {

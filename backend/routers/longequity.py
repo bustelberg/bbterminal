@@ -32,6 +32,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from deps import supabase
+from routers._sse import sse_keepalive, sse_raw, sse_message as event
 from ingest.acquire import acquire_raw_longequity_backfill, check_latest_available_month
 from ingest.extend_primary import enrich_flattened_df_with_primary_listing
 from ingest.flatten import flatten_excel
@@ -259,9 +260,6 @@ async def _ingest_long_equity_stream():
     tickers → enrich → transform → load → de-dup. Each step yields its
     own `info`/`error` events; only new months (not already in DB) are
     processed."""
-    def event(msg_type: str, message: str) -> str:
-        return f"data: {json.dumps({'type': msg_type, 'message': message})}\n\n"
-
     existing_months = await asyncio.to_thread(_get_db_longequity_months)
     yield event("info", f"{len(existing_months)} month(s) already in DB.")
 
@@ -596,12 +594,12 @@ async def longequity_save_universe(req: LongEquitySaveUniverseRequest):
     threading.Thread(target=_run, args=(q,), daemon=True).start()
 
     async def generate():
-        yield ': keepalive\n\n'
+        yield sse_keepalive()
         while True:
             msg = await asyncio.to_thread(q.get)
             if msg is None:
                 break
-            yield f'data: {msg}\n\n'
+            yield sse_raw(msg)
 
     return StreamingResponse(generate(), media_type='text/event-stream')
 

@@ -17,7 +17,7 @@ loop calls `prepare_variant_from_shared` to slice it per variant."""
 from __future__ import annotations
 
 import asyncio
-import json
+from routers._sse import sse_event as _emit, sse_keepalive as _keepalive
 import logging
 import os
 import queue as _queue
@@ -38,14 +38,6 @@ from momentum.signals import PRICE_SIGNAL_DEFS
 
 from ..signals import warm_breakdown_panel_cache
 from .benchmarks import fetch_benchmark_price_index
-
-
-def _emit(data: dict) -> str:
-    return f"data: {json.dumps(data)}\n\n"
-
-
-def _keepalive() -> str:
-    return ": keepalive\n\n"
 
 
 async def run_variants_sweep(

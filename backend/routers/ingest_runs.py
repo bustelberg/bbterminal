@@ -44,7 +44,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Header, HTTPException
 
-from deps import supabase, IN_CHUNK_SIZE
+from deps import supabase, fetch_in_chunks
 
 router = APIRouter(tags=["ingest"])
 
@@ -1046,32 +1046,28 @@ def _collect_held_companies(run_id: int) -> list[dict]:
     if not company_ids:
         return []
 
-    # Batch the IN(...) lookup to stay under the Cloudflare-502
-    # URL-length window. IN_CHUNK_SIZE is the codebase-wide constant from
-    # deps.py.
+    # Batch the IN(...) lookup to stay under the Cloudflare-502 URL-length
+    # window (see deps.fetch_in_chunks / IN_CHUNK_SIZE).
     out: list[dict] = []
-    cids_list = list(company_ids)
-    for start in range(0, len(cids_list), IN_CHUNK_SIZE):
-        batch = cids_list[start : start + IN_CHUNK_SIZE]
-        meta_resp = (
-            supabase.table("company")
-            .select(
-                "company_id, gurufocus_ticker, "
-                "gurufocus_exchange:gurufocus_exchange(exchange_code)"
-            )
-            .in_("company_id", batch)
-            .execute()
+    for r in fetch_in_chunks(
+        list(company_ids),
+        lambda chunk: supabase.table("company")
+        .select(
+            "company_id, gurufocus_ticker, "
+            "gurufocus_exchange:gurufocus_exchange(exchange_code)"
         )
-        for r in (meta_resp.data or []):
-            exch = (r.get("gurufocus_exchange") or {}).get("exchange_code") or ""
-            ticker = r.get("gurufocus_ticker") or ""
-            if not ticker or not exch:
-                continue
-            out.append({
-                "cid": int(r["company_id"]),
-                "ticker": ticker,
-                "exchange": exch,
-            })
+        .in_("company_id", chunk)
+        .execute(),
+    ):
+        exch = (r.get("gurufocus_exchange") or {}).get("exchange_code") or ""
+        ticker = r.get("gurufocus_ticker") or ""
+        if not ticker or not exch:
+            continue
+        out.append({
+            "cid": int(r["company_id"]),
+            "ticker": ticker,
+            "exchange": exch,
+        })
     return out
 
 
