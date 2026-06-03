@@ -7,6 +7,7 @@ import type { Column } from '../../lib/tableExport';
 import TableDownloadButton from './TableDownloadButton';
 import LoadingDots from './LoadingDots';
 import { API_URL } from '../../lib/apiUrl';
+import { useApiData } from '../../lib/hooks/useApiData';
 const TEMPLATE_KEY = 'ACWI';
 
 type Summary = {
@@ -336,18 +337,13 @@ function Stat({ label, value }: { label: string; value: string }) {
  * yesterday's holdings. Shown only when actually stale (>= 14 days)
  * to avoid cluttering the page on a healthy install. */
 function XlsAgeBadge() {
-  const [age, setAge] = useState<number | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`${API_URL}/api/acwi/xls-age`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { available?: boolean; age_days?: number } | null) => {
-        if (cancelled || !d?.available || d.age_days == null) return;
-        setAge(d.age_days);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
+  const { data: age } = useApiData<number | null, { available?: boolean; age_days?: number } | null>(
+    '/api/acwi/xls-age',
+    {
+      transform: (d) => (d?.available && d.age_days != null ? d.age_days : null),
+      fallbackData: null,
+    },
+  );
   if (age == null || age < 14) return null;
   return (
     <p className="text-xs text-amber-300 mt-2 max-w-3xl">

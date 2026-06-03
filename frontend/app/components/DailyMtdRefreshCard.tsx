@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
+import { useApiData } from '../../lib/hooks/useApiData';
 import type { IngestRun } from './Schedule';
 import LoadingDots from './LoadingDots';
 import Spinner from './Spinner';
@@ -104,11 +105,16 @@ export default function DailyMtdRefreshCard() {
   const [triggering, setTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
-  // Held-companies panel state. Fetched lazily on first expand to avoid
-  // the (still cheap, but extra) roundtrip when the user isn't looking.
-  const [held, setHeld] = useState<HeldCompaniesResponse | null>(null);
-  const [heldLoading, setHeldLoading] = useState(false);
-  const [heldError, setHeldError] = useState<string | null>(null);
+  // Held-companies panel — fetched lazily once the card is expanded, and
+  // re-fetched on re-expand / while a run is active (via reloadHeld).
+  const {
+    data: held,
+    loading: heldLoading,
+    error: heldError,
+    reload: reloadHeld,
+  } = useApiData<HeldCompaniesResponse>('/api/scheduled-strategies/held-companies', {
+    enabled: expanded,
+  });
   // Which run is currently click-expanded for per-strategy detail.
   // null = none. Survives revalidate fetches.
   const [expandedRunId, setExpandedRunId] = useState<number | null>(null);
@@ -126,34 +132,9 @@ export default function DailyMtdRefreshCard() {
     }
   }, []);
 
-  const loadHeld = useCallback(async () => {
-    setHeldLoading(true);
-    setHeldError(null);
-    try {
-      const r = await fetch(`${API_URL}/api/scheduled-strategies/held-companies`);
-      if (!r.ok) {
-        setHeldError(`Fetch failed: HTTP ${r.status}`);
-        return;
-      }
-      const data = (await r.json()) as HeldCompaniesResponse;
-      setHeld(data);
-    } catch (e) {
-      setHeldError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setHeldLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
     void load();
   }, [load]);
-
-  // Fetch held companies the first time the user expands the card —
-  // and re-fetch on every subsequent expand so the panel stays current
-  // (cheap query, runs only when the panel is visible).
-  useEffect(() => {
-    if (expanded) void loadHeld();
-  }, [expanded, loadHeld]);
 
   // Poll every 5s while the last run is in 'running' so the UI moves
   // through the phases live. Idle otherwise.
@@ -171,9 +152,9 @@ export default function DailyMtdRefreshCard() {
   // expanded so we don't waste round-trips when no one's looking.
   useEffect(() => {
     if (!expanded || lastStatus !== 'running') return;
-    const id = setInterval(() => void loadHeld(), 10_000);
+    const id = setInterval(() => reloadHeld(), 10_000);
     return () => clearInterval(id);
-  }, [expanded, lastStatus, loadHeld]);
+  }, [expanded, lastStatus, reloadHeld]);
 
   const runNow = useCallback(async () => {
     setTriggering(true);
@@ -295,7 +276,7 @@ export default function DailyMtdRefreshCard() {
               data={held}
               loading={heldLoading}
               error={heldError}
-              onRetry={() => void loadHeld()}
+              onRetry={() => reloadHeld()}
             />
           </div>
 
