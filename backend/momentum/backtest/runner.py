@@ -145,6 +145,7 @@ def run_backtest(
             prices_local_df=prices_local_df,
             monthly_eligible=monthly_eligible,
             frequency=config.rebalance_frequency,
+            rebalance_weekday=config.rebalance_weekday,
         )
     periods = prepared.periods
     price_index = prepared.price_index
@@ -164,15 +165,32 @@ def run_backtest(
     # an extra "exit" date. The main loop then naturally processes
     # periods[-2] → periods[-1] as the open period; we mark that record
     # is_open=True and skip its return when accumulating headline stats.
+    # Latest available close across all companies — used both to drop
+    # future rebalance dates and to anchor the open period.
+    last_avail_ts: pd.Timestamp | None = None
+    for s in price_index.values():
+        if s.empty:
+            continue
+        m = s.index.max()
+        if last_avail_ts is None or m > last_avail_ts:
+            last_avail_ts = m
+
+    # Drop trailing rebalance dates that fall AFTER the latest available
+    # close. Such a rebalance hasn't happened yet — there's no price to
+    # enter at — so keeping it would (a) leave an un-enterable trailing
+    # period and (b) null out the PRIOR period's forward return, whose
+    # exit is anchored to that date with no data. Dropping it lets the
+    # prior period become the open period valued at the latest close.
+    # e.g. a first-Wednesday grid evaluated before that Wednesday's close
+    # has settled: the June-3 rebalance is dropped so the May-6 holding
+    # shows its return through the latest available date instead of "—".
+    # The `> 2` floor keeps at least one entry + one exit for the loop.
+    if last_avail_ts is not None:
+        while len(periods) > 2 and pd.Timestamp(periods[-1]) > last_avail_ts:
+            periods = periods[:-1]
+
     open_iter_idx = -1
     if config.include_open_period:
-        last_avail_ts: pd.Timestamp | None = None
-        for s in price_index.values():
-            if s.empty:
-                continue
-            m = s.index.max()
-            if last_avail_ts is None or m > last_avail_ts:
-                last_avail_ts = m
         if last_avail_ts is not None and pd.Timestamp(periods[-1]) < last_avail_ts:
             periods = list(periods) + [last_avail_ts.date()]
             open_iter_idx = len(periods) - 2  # index in periods[:-1] for the open entry
@@ -645,6 +663,7 @@ def run_multi_trial_backtest(
         prices_local_df=prices_local_df,
         monthly_eligible=monthly_eligible,
         frequency=config.rebalance_frequency,
+        rebalance_weekday=config.rebalance_weekday,
     )
 
     trial_results: list[BacktestResult] = []

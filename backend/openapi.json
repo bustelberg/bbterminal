@@ -114,6 +114,11 @@
             "title": "Rebalance Frequency",
             "type": "string"
           },
+          "rebalance_weekday": {
+            "default": 0,
+            "title": "Rebalance Weekday",
+            "type": "integer"
+          },
           "sector_etfs": {
             "anyOf": [
               {
@@ -387,6 +392,42 @@
           "fee_bps"
         ],
         "title": "ExchangeFeeIn",
+        "type": "object"
+      },
+      "FeeConfigIn": {
+        "properties": {
+          "bustelberg_mgmt_bps": {
+            "maximum": 10000.0,
+            "minimum": 0.0,
+            "title": "Bustelberg Mgmt Bps",
+            "type": "number"
+          },
+          "bustelberg_perf_pct": {
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Bustelberg Perf Pct",
+            "type": "number"
+          },
+          "leonteq_annual_bps": {
+            "maximum": 10000.0,
+            "minimum": 0.0,
+            "title": "Leonteq Annual Bps",
+            "type": "number"
+          },
+          "transaction_bps": {
+            "maximum": 10000.0,
+            "minimum": 0.0,
+            "title": "Transaction Bps",
+            "type": "number"
+          }
+        },
+        "required": [
+          "leonteq_annual_bps",
+          "transaction_bps",
+          "bustelberg_mgmt_bps",
+          "bustelberg_perf_pct"
+        ],
+        "title": "FeeConfigIn",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -726,6 +767,17 @@
               }
             ],
             "title": "Name"
+          },
+          "rebalance_weekday": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rebalance Weekday"
           },
           "start_date": {
             "anyOf": [
@@ -3313,6 +3365,64 @@
         ]
       }
     },
+    "/api/fee-config": {
+      "get": {
+        "description": "The single global fee config. Self-heals a missing row to defaults.",
+        "operationId": "get_fee_config_api_fee_config_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Fee Config",
+        "tags": [
+          "fees"
+        ]
+      },
+      "put": {
+        "description": "Upsert all four fee parameters on the single config row.",
+        "operationId": "put_fee_config_api_fee_config_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeeConfigIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Fee Config",
+        "tags": [
+          "fees"
+        ]
+      }
+    },
     "/api/fx/coverage": {
       "get": {
         "description": "Compare ACWI currencies against ECB FX rate availability.",
@@ -5070,6 +5180,26 @@
         "summary": "Parse Portfolio",
         "tags": [
           "airs"
+        ]
+      }
+    },
+    "/api/schedule/upcoming": {
+      "get": {
+        "description": "Backs the /schedule \"Pipeline activity\" strip.\n\nReturns the live scheduler job list (with next-fire times, straight\nfrom the in-process APScheduler so it's the single source of truth \u2014\nincluding one-shot catch-up jobs the bootstrap path schedules on app\nstart) plus every `ingest_run` currently in `status='running'`. The\nfrontend renders the running set as a \"Running now\" group and the\nrest as a chronological \"Upcoming\" list, marking a job busy when a\nrun that fires it is in flight.",
+        "operationId": "schedule_upcoming_api_schedule_upcoming_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Schedule Upcoming",
+        "tags": [
+          "ingest"
         ]
       }
     },

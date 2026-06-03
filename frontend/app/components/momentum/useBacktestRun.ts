@@ -36,7 +36,7 @@ export function useBacktestRun({
   const {
     startDate, endDate, weights, categoryWeights, topSectors, topPerSector,
     maxCompanies, minPriceScore, selectionMode, randomSeed, nTrials,
-    grouping, noCache,
+    grouping, noCache, rebalanceWeekday,
   } = config;
 
   // Variant sweep — fans the current config out across the cross-product
@@ -67,6 +67,7 @@ export function useBacktestRun({
         n_trials: selectionMode === 'random' ? Math.max(1, nTrials) : 1,
         sector_etfs: selectionMode === 'sector_etf' ? sectorEtfs : undefined,
         force_recompute: noCache,
+        rebalance_weekday: rebalanceWeekday,
       },
       targets,
     );
@@ -91,6 +92,7 @@ export function useBacktestRun({
     mode: 'current_portfolio',
     force_recompute: opts.force,
     db_only: opts.dbOnly,
+    rebalance_weekday: rebalanceWeekday,
   });
 
   // "Current Picks": what is my strategy holding right now? DB-only by

@@ -19,8 +19,9 @@ import TableDownloadButton from '../TableDownloadButton';
 import CellInfoTip from './CellInfoTip';
 import CollapsibleCard from './CollapsibleCard';
 import { fmtPct } from './utils';
-import { computeNetStats, parenPct } from './feeStats';
-import { useExchangeFeeMap } from '../../../lib/hooks/apiData';
+import { parenPct } from './feeStats';
+import { computeFeeWaterfall, type FeeConfig } from './feeModel';
+import { useFeeConfig } from '../../../lib/hooks/apiData';
 
 // One row per VARIANT_DEFS entry. Click to make that variant the active one
 // (the detail views below — equity curve, holdings table, sector timeline —
@@ -34,10 +35,6 @@ import { useExchangeFeeMap } from '../../../lib/hooks/apiData';
 // observable.
 
 type Props = {
-  /** Per-company exchange lookup, needed to compute the (net) parenthetical
-   * for each variant's stats. Optional — when omitted the table just shows
-   * gross figures. */
-  exchangeByCompany?: Map<number, string>;
   /** Called when the user clicks the "+ Schedule" button on an OK-status
    * row. Parent has the base BacktestRequest state and builds the schedule
    * `config` by merging base + variant overrides. */
@@ -112,14 +109,14 @@ function rankBorderClass(rank: number | undefined): string {
   return '';
 }
 
-function VariantSummaryTableInner({ exchangeByCompany, onAddToSchedule }: Props) {
+function VariantSummaryTableInner({ onAddToSchedule }: Props) {
   const variants = momentumStore.use((s) => s.variants);
   const active = momentumStore.use((s) => s.activeVariantKey);
   const run = momentumStore.use((s) => s.variantsRun);
 
-  // Per-exchange fees — shared cached hook, null when no non-zero fees
-  // are configured so each variant row just shows gross figures.
-  const feesByExchange = useExchangeFeeMap();
+  // Global fee config — the (net) column means "net to client, after
+  // Leonteq + Bustelberg fees" (same layered model as the Fee waterfall).
+  const feeConfig = useFeeConfig();
 
   // Hide entirely when no sweep has ever run. The wrapper component decides
   // when to render us based on whether `variants` has any entries.
@@ -331,8 +328,7 @@ function VariantSummaryTableInner({ exchangeByCompany, onAddToSchedule }: Props)
               label={v.label}
               outcome={variants[v.key]}
               isActive={active === v.key}
-              feesByExchange={feesByExchange}
-              exchangeByCompany={exchangeByCompany}
+              feeConfig={feeConfig}
               ranksByColumn={ranksByColumn}
               onAddToSchedule={onAddToSchedule}
             />
@@ -345,8 +341,8 @@ function VariantSummaryTableInner({ exchangeByCompany, onAddToSchedule }: Props)
 
 /** React.memo barrier — see MonthlyHoldingsTable for the rationale.
  * This component subscribes to the `momentumStore` for the variants
- * map + active key directly, so its only prop is `exchangeByCompany`
- * which the parent already memoizes. */
+ * map + active key directly; its only prop is the `onAddToSchedule`
+ * callback (the fee config comes from the shared cached hook). */
 const VariantSummaryTable = memo(VariantSummaryTableInner);
 export default VariantSummaryTable;
 
@@ -432,8 +428,7 @@ function VariantRow({
   label,
   outcome,
   isActive,
-  feesByExchange,
-  exchangeByCompany,
+  feeConfig,
   ranksByColumn,
   onAddToSchedule,
 }: {
@@ -441,8 +436,7 @@ function VariantRow({
   label: string;
   outcome: VariantOutcome | undefined;
   isActive: boolean;
-  feesByExchange: Map<string, number> | null;
-  exchangeByCompany: Map<number, string> | undefined;
+  feeConfig: FeeConfig;
   ranksByColumn: Map<ColumnKey, Map<number, number>>;
   onAddToSchedule?: (variantKey: VariantKey, label: string) => void;
 }) {
@@ -492,8 +486,7 @@ function VariantRow({
       </td>
       <SummaryCells
         outcome={outcome}
-        feesByExchange={feesByExchange}
-        exchangeByCompany={exchangeByCompany}
+        feeConfig={feeConfig}
         ranksByColumn={ranksByColumn}
       />
     </tr>
@@ -502,13 +495,11 @@ function VariantRow({
 
 function SummaryCells({
   outcome,
-  feesByExchange,
-  exchangeByCompany,
+  feeConfig,
   ranksByColumn,
 }: {
   outcome: VariantOutcome | undefined;
-  feesByExchange: Map<string, number> | null;
-  exchangeByCompany: Map<number, string> | undefined;
+  feeConfig: FeeConfig;
   ranksByColumn: Map<ColumnKey, Map<number, number>>;
 }) {
   // 6 placeholder cells (Start, End, Annualized, Sharpe, Total, DD) so the
@@ -516,9 +507,14 @@ function SummaryCells({
   // Note: hooks must be called unconditionally — `net` is computed before
   // any early return.
   const net = useMemo(() => {
-    if (outcome?.status !== 'ok' || !feesByExchange || !exchangeByCompany) return null;
-    return computeNetStats(outcome.result.monthly_records, feesByExchange, exchangeByCompany, outcome.result.daily_records);
-  }, [outcome, feesByExchange, exchangeByCompany]);
+    if (outcome?.status !== 'ok') return null;
+    return computeFeeWaterfall(
+      outcome.result.monthly_records,
+      outcome.result.daily_records,
+      feeConfig,
+      { grossTotalReturnPct: outcome.result.summary?.total_return_pct },
+    )?.net ?? null;
+  }, [outcome, feeConfig]);
 
   if (outcome?.status !== 'ok') {
     // 10 placeholders: Start, End, Annualized, Universe annualized,

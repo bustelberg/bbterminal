@@ -431,6 +431,36 @@ def _maybe_catchup_stale_prices(sched: BackgroundScheduler) -> None:
     )
 
 
+def list_scheduled_jobs() -> list[dict]:
+    """Snapshot of every job currently registered on the in-process
+    scheduler, for the /schedule "Pipeline activity" strip. Returns one
+    dict per job with its id, the underlying job_name it fires
+    (`args[0]` — for the one-shot catch-up jobs this differs from the
+    job id, e.g. `startup_template_catchup` fires `daily_template_refresh`),
+    and its next fire time as an ISO string (None if the scheduler paused
+    it). Empty list when the scheduler isn't running (DISABLE_SCHEDULER,
+    or before startup). Best-effort: never raises."""
+    if _scheduler is None:
+        return []
+    jobs: list[dict] = []
+    try:
+        for j in _scheduler.get_jobs():
+            try:
+                fires = j.args[0] if getattr(j, "args", None) else j.id
+            except Exception:
+                fires = j.id
+            nrt = getattr(j, "next_run_time", None)
+            jobs.append({
+                "id": j.id,
+                "fires": fires,
+                "next_run_at": nrt.isoformat() if nrt is not None else None,
+            })
+    except Exception as e:
+        _log.warning("[scheduler] list_scheduled_jobs failed: %s: %s", type(e).__name__, e)
+        return []
+    return jobs
+
+
 def _fire_job(job_name: str) -> None:
     """Wrapper passed to APScheduler — guards against an uncaught exception
     inside the dispatcher killing the scheduler thread."""

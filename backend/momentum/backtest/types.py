@@ -117,6 +117,13 @@ class BacktestConfig:
     # read from benchmark_price.
     sector_etfs: dict[str, int] | None = None
     rebalance_frequency: RebalanceFrequency = _DEFAULT_FREQUENCY
+    # Weekday each rebalance lands on within its period: Mon=0..Sun=6.
+    # 0 (Monday) is the historical default — every period's rebalance is
+    # the first Monday of the month/quarter/etc. Set to 2 (Wednesday) to
+    # rebalance on the first Wednesday, computing signals from data
+    # through the prior trading day's close. Ignored for `daily`
+    # frequency (which rebalances every trading day).
+    rebalance_weekday: int = 0
     strategy_type: StrategyType = _DEFAULT_STRATEGY
     # Optional gate: drop any company whose `score_price` (the 0-100
     # price-category score) is at or below this threshold before
@@ -151,6 +158,7 @@ class BacktestConfig:
             random_seed=d.get("random_seed"),
             sector_etfs=d.get("sector_etfs"),
             rebalance_frequency=d.get("rebalance_frequency", _DEFAULT_FREQUENCY),
+            rebalance_weekday=int(d.get("rebalance_weekday", 0) or 0),
             strategy_type=d.get("strategy_type", _DEFAULT_STRATEGY),
             min_price_score=d.get("min_price_score"),
             include_open_period=d.get("include_open_period", True),
@@ -289,8 +297,10 @@ class DailyPick:
 @dataclass
 class CurrentPortfolio:
     """Snapshot of what the strategy would hold right now (rebalance on
-    the first of the current month, MTD return through the latest price)."""
-    as_of_date: str       # YYYY-MM-01 — start of current month
+    the latest rebalance weekday on-or-before today — e.g. the first
+    Wednesday of the current month — MTD return through the latest
+    price)."""
+    as_of_date: str       # YYYY-MM-DD — the effective rebalance date
     latest_price_date: str | None  # most recent price date observed across the portfolio
     holdings: list[PeriodHolding]
     daily_picks: list[DailyPick] = field(default_factory=list)

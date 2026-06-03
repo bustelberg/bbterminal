@@ -15,6 +15,13 @@ export const SERIES_COLORS = [
 export const fmtPct = (v: number | null) =>
   v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}%` : '—';
 
+/** Weekday labels indexed by the backend's `rebalance_weekday`
+ * convention: 0=Mon … 6=Sun (Python's `date.weekday()`). Used by the
+ * /backtest rebalance-day picker and the /schedule editor. */
+export const WEEKDAY_LABELS = [
+  'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
+] as const;
+
 /** Annualized return derived from a compound return + duration in months:
  * (1 + compound_return/100)^(12/months) − 1, expressed as %. Returns null
  * when not computable (non-positive factor, zero months). The math

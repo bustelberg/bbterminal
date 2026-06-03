@@ -8,6 +8,7 @@ import LoadingDots from './LoadingDots';
 import { type StepDef, type StepState } from './ProgressTimeline';
 import { apiFetch } from '../../lib/apiFetch';
 import { dialog } from '../../lib/dialog';
+import { WEEKDAY_LABELS } from './momentum/utils';
 
 import { API_URL } from '../../lib/apiUrl';
 
@@ -382,6 +383,24 @@ export default function Schedule() {
     }
   }, [loadStrategies]);
 
+  const setRebalanceDay = useCallback(async (id: number, weekday: number) => {
+    try {
+      const r = await apiFetch(`${API_URL}/api/scheduled-strategies/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rebalance_weekday: weekday }),
+      });
+      if (!r.ok) {
+        const body = await r.text().catch(() => '');
+        setError(`Rebalance-day update failed: ${r.status} ${body.slice(0, 200)}`);
+        return;
+      }
+      await loadStrategies();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [loadStrategies]);
+
   const renameStrategy = useCallback(async (id: number, currentName: string) => {
     const next = await dialog.prompt('New name for this scheduled strategy:', {
       title: 'Rename strategy',
@@ -451,11 +470,18 @@ export default function Schedule() {
 
   return (
     <div className="min-h-screen bg-[#0f1117] text-gray-200">
-      <div className="px-8 py-5 border-b border-gray-800/40">
-        <h1 className="text-xl font-semibold text-white">Schedule</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          The pipeline fires Tuesday 02:00 UTC (after Monday global close). Each strategy either rebalances (per its frequency) or has its prior holdings re-priced — every tick produces exactly one snapshot per strategy.
-        </p>
+      <div className="px-8 py-5 border-b border-gray-800/40 flex items-end justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold text-white">Schedule</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            The automated pipeline and the strategies it keeps up to date.
+          </p>
+        </div>
+        {latestPriceDate && (
+          <div className="text-xs text-gray-500 shrink-0">
+            price data through <span className="text-gray-300 font-mono">{latestPriceDate}</span>
+          </div>
+        )}
       </div>
 
       <div className="px-8 py-6 space-y-6 max-w-screen-2xl">
@@ -465,6 +491,12 @@ export default function Schedule() {
             <button type="button" onClick={() => setError(null)} className="text-rose-200 hover:text-white text-xs">dismiss</button>
           </div>
         )}
+
+        {/* Pipeline activity — what's running right now + what fires next.
+            Polls the live scheduler so the user has a single at-a-glance
+            oversight strip: running jobs (spinner + live phase) on top,
+            then every scheduled job in chronological fire order. */}
+        <PipelineActivityCard />
 
         {/* Template universes — visibility into the canonical universes
             (ACWI, LEONTEQ, ACWI_LEONTEQ, ...) and whether any of them
@@ -478,27 +510,12 @@ export default function Schedule() {
             per-strategy momentum compute. Today this hosts the daily
             held-companies price refresh; designed as a section so future
             misc jobs slot in alongside without churning the layout. */}
-        <div className="space-y-3">
-          <div className="flex items-baseline justify-between">
-            <h2 className="text-sm uppercase tracking-wider text-gray-400 font-medium">
-              Misc jobs
-            </h2>
-            <p className="text-xs text-gray-600">
-              Recurring side-tasks (not per-strategy compute)
-            </p>
-          </div>
-          <DailyMtdRefreshCard />
-        </div>
+        <DailyMtdRefreshCard />
 
         {/* Scheduled strategies */}
         <div className="bg-[#151821] rounded-xl border border-gray-800/40">
           <div className="px-5 py-3 border-b border-gray-800/40 flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-medium text-white">Scheduled strategies</h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Each pipeline run computes a fresh holdings snapshot for every enabled strategy. Click a strategy to see its run history.
-              </p>
-            </div>
+            <h3 className="text-sm font-medium text-white">Scheduled strategies</h3>
             <div className="flex items-center gap-2 shrink-0">
               {strategies.length > 0 && (
                 <button
@@ -569,12 +586,6 @@ export default function Schedule() {
                                 {' · '}next {fmtTimestamp(s.next_due_at)}
                               </span>
                             )}
-                            {latestPriceDate && (
-                              <span className="text-gray-500">
-                                {' · '}latest price{' '}
-                                <span className="text-gray-400">{latestPriceDate}</span>
-                              </span>
-                            )}
                           </div>
                           {s.last_snapshot && (
                             <div className="text-xs text-gray-500 mt-0.5 font-mono flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -616,6 +627,19 @@ export default function Schedule() {
                           )}
                         </div>
                       </button>
+                      <label className="flex items-center gap-1.5 text-xs text-gray-400 shrink-0">
+                        <span className="text-gray-500">rebal</span>
+                        <select
+                          value={(s.config.rebalance_weekday as number | undefined) ?? 0}
+                          onChange={(e) => void setRebalanceDay(s.id, Number(e.target.value))}
+                          className="bg-[#0f1117] border border-gray-700 rounded-lg px-2 py-1 text-gray-200 text-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                          title="Weekday each rebalance period enters on (first <day> of the period)"
+                        >
+                          {WEEKDAY_LABELS.map((label, i) => (
+                            <option key={i} value={i}>{label.slice(0, 3)}</option>
+                          ))}
+                        </select>
+                      </label>
                       <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
                         <input
                           type="checkbox"
@@ -657,6 +681,204 @@ export default function Schedule() {
           )}
         </div>
 
+      </div>
+    </div>
+  );
+}
+
+/** One scheduled job from `GET /api/schedule/upcoming`'s `jobs` array. */
+type UpcomingJob = {
+  id: string;
+  fires: string;
+  next_run_at: string | null;
+  label: string;
+  description: string;
+  cadence: string;
+  running: boolean;
+};
+
+/** One in-flight run from the same endpoint's `running` array. */
+type RunningJob = {
+  run_id: number;
+  job_name: string;
+  triggered_by: 'auto' | 'manual' | string;
+  started_at: string;
+  current_phase: string | null;
+  current_message: string | null;
+  label: string;
+};
+
+type ScheduleUpcoming = {
+  now: string;
+  scheduler_enabled: boolean;
+  jobs: UpcomingJob[];
+  running: RunningJob[];
+};
+
+/** Compact "in 18h" / "in 6d" / "in 12m" / "now" relative formatter for a
+ * future ISO timestamp, relative to `nowMs`. Returns '—' when null. */
+function relTime(iso: string | null, nowMs: number): string {
+  if (!iso) return '—';
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '—';
+  const diffSec = Math.round((t - nowMs) / 1000);
+  if (diffSec <= 0) return 'now';
+  const m = Math.round(diffSec / 60);
+  if (m < 60) return `in ${m}m`;
+  const h = Math.round(diffSec / 3600);
+  if (h < 48) return `in ${h}h`;
+  const d = Math.round(diffSec / 86400);
+  return `in ${d}d`;
+}
+
+/** Short clock label for a future ISO timestamp (local time, HH:MM). */
+function fmtClock(iso: string | null): string {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      weekday: 'short', hour: '2-digit', minute: '2-digit',
+    });
+  } catch {
+    return '';
+  }
+}
+
+/** "Pipeline activity" strip at the top of /schedule. Running jobs (with
+ * a live spinner + phase) render first; then every scheduled job in
+ * chronological fire order. Polls the live scheduler every 3s so the view
+ * reflects ANY activity — scheduled ticks, the startup catch-up one-shots,
+ * or a manual Run-now — not just something this tab kicked off. */
+function PipelineActivityCard() {
+  const [data, setData] = useState<ScheduleUpcoming | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Local clock so relative times tick down between polls.
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const r = await fetch(`${API_URL}/api/schedule/upcoming`);
+        if (!r.ok || cancelled) return;
+        const d = (await r.json()) as ScheduleUpcoming;
+        if (!cancelled) { setData(d); setLoadError(null); }
+      } catch (e) {
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e));
+      }
+    };
+    void poll();
+    const id = window.setInterval(poll, 3000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
+
+  // Tick the local clock every 30s so "in 18h" stays roughly current
+  // without hammering re-renders.
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 30000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const running = data?.running ?? [];
+  const jobs = data?.jobs ?? [];
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-sm uppercase tracking-wider text-gray-400 font-medium">
+          Pipeline activity
+        </h2>
+        <p className="text-xs text-gray-600">
+          What&apos;s running now + what fires next
+        </p>
+      </div>
+
+      <div className="bg-[#151821] rounded-xl border border-gray-800/40">
+        {loadError && data == null && (
+          <div className="px-5 py-3 text-xs text-rose-300">
+            Failed to load schedule activity: {loadError}
+          </div>
+        )}
+        {!loadError && data == null && (
+          <div className="px-5 py-3 text-sm text-gray-500">
+            <LoadingDots label="Loading" />
+          </div>
+        )}
+
+        {data && data.scheduler_enabled === false && running.length === 0 && (
+          <div className="px-5 py-3 text-xs text-amber-300/90">
+            In-process scheduler is disabled (DISABLE_SCHEDULER) — no jobs will fire automatically.
+          </div>
+        )}
+
+        {data && (
+          <div>
+            {/* Running now */}
+            {running.length > 0 && (
+              <div className="px-5 py-3 border-b border-gray-800/30">
+                <div className="text-[10px] uppercase tracking-wider text-indigo-300/80 mb-2">
+                  Running now
+                </div>
+                <div className="space-y-2">
+                  {running.map((r) => (
+                    <div key={r.run_id} className="flex items-center gap-3 text-sm">
+                      <Spinner className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+                      <span className="text-white font-medium shrink-0">{r.label}</span>
+                      {r.current_phase && (
+                        <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-indigo-500/10 text-indigo-300 border-indigo-500/30 font-mono shrink-0">
+                          {r.current_phase}
+                        </span>
+                      )}
+                      <span className="text-xs text-gray-500 truncate min-w-0" title={r.current_message ?? ''}>
+                        {r.current_message ?? ''}
+                      </span>
+                      <span className="text-[10px] text-gray-600 font-mono ml-auto shrink-0">
+                        run #{r.run_id} · {r.triggered_by}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Upcoming */}
+            <div className="px-5 py-3">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">
+                Upcoming
+              </div>
+              {jobs.length === 0 ? (
+                <div className="text-xs text-gray-500">
+                  No jobs scheduled.
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {jobs.map((j) => (
+                    <div key={j.id} className="flex items-center gap-3 text-sm">
+                      <span className="shrink-0 w-4 flex justify-center">
+                        {j.running
+                          ? <Spinner className="h-3.5 w-3.5 text-indigo-400" />
+                          : <span className="text-gray-600">•</span>}
+                      </span>
+                      <span className={`shrink-0 ${j.running ? 'text-white' : 'text-gray-200'}`}>
+                        {j.label}
+                      </span>
+                      <span className="text-xs text-gray-600 truncate min-w-0" title={j.cadence}>
+                        {j.description}
+                      </span>
+                      <span className="ml-auto shrink-0 flex items-baseline gap-2 font-mono text-xs">
+                        <span className={j.running ? 'text-indigo-300' : 'text-gray-300'}>
+                          {j.running ? 'running' : relTime(j.next_run_at, nowMs)}
+                        </span>
+                        {!j.running && (
+                          <span className="text-gray-600">{fmtClock(j.next_run_at)}</span>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -913,8 +1135,6 @@ function TemplateRow({ t, status }: { t: UniverseTemplateSummary; status?: Templ
                   {t.latest_captured_month && ` · latest month ${t.latest_captured_month}`}
                   {' · last refresh '}
                   {fmtTimestamp(t.last_refreshed_at)}
-                  {' · next refresh '}
-                  <span className="text-gray-400">{fmtTimestamp(nextDailyTemplateRefresh())}</span>
                 </>
               )}
             </div>
@@ -963,24 +1183,6 @@ function TemplateRow({ t, status }: { t: UniverseTemplateSummary; status?: Templ
       )}
     </div>
   );
-}
-
-/** Compute the next 02:30 UTC after `now` that ISN'T a Tuesday (the
- * weekly full pipeline covers Tue, so the daily template-refresh job
- * skips it — see scheduler.py). Returns an ISO timestamp string. */
-function nextDailyTemplateRefresh(): string {
-  const now = new Date();
-  const target = new Date(now);
-  target.setUTCHours(2, 30, 0, 0);
-  // If today's 02:30 UTC is already past, jump to tomorrow.
-  if (target.getTime() <= now.getTime()) {
-    target.setUTCDate(target.getUTCDate() + 1);
-  }
-  // Skip Tuesdays (UTC day = 2).
-  while (target.getUTCDay() === 2) {
-    target.setUTCDate(target.getUTCDate() + 1);
-  }
-  return target.toISOString();
 }
 
 /** Recent additions/removals for one template. Fetched lazily on
@@ -1125,6 +1327,7 @@ export function StrategyConfigDetail({ cfg }: { cfg: Record<string, unknown> }) 
   const maxCompanies = cfg.max_companies as number | null | undefined;
   const minPriceScore = cfg.min_price_score as number | null | undefined;
   const rebalanceFrequency = (cfg.rebalance_frequency as string | undefined) ?? 'monthly';
+  const rebalanceWeekday = (cfg.rebalance_weekday as number | undefined) ?? 0;
   const signalWeights = (cfg.signal_weights as Record<string, number> | undefined) ?? {};
   const categoryWeights = (cfg.category_weights as Record<string, number> | undefined) ?? {};
 
@@ -1140,6 +1343,7 @@ export function StrategyConfigDetail({ cfg }: { cfg: Record<string, unknown> }) 
         <ConfigRow label="Universe" value={universe} />
         <ConfigRow label="Date range" value={`${startDate} → ${endDate}`} />
         <ConfigRow label="Rebalance" value={rebalanceFrequency} />
+        <ConfigRow label="Rebalance day" value={`first ${WEEKDAY_LABELS[rebalanceWeekday] ?? 'Monday'}`} />
         <ConfigRow label="Top N sectors" value={topNSectors != null ? String(topNSectors) : '—'} />
         <ConfigRow label="Top N per sector" value={topNPerSector != null ? String(topNPerSector) : '—'} />
         <ConfigRow label="Max companies" value={maxCompanies != null ? String(maxCompanies) : 'unlimited'} />

@@ -50,6 +50,10 @@ export function useBacktestConfig() {
   const [selectionMode, setSelectionMode] = useState<SelectionMode>('momentum');
   const [randomSeed, setRandomSeed] = useState<number>(42);
   const [nTrials, setNTrials] = useState<number>(1);
+  // Weekday each rebalance lands on within its period: 0=Mon … 6=Sun.
+  // Default Monday matches the historical engine behavior; the saved-
+  // config loader overwrites it from a loaded run's config.
+  const [rebalanceWeekday, setRebalanceWeekday] = useState<number>(0);
 
   // Seed the weight + category maps from the signal definitions once the
   // shared cached hook resolves. The saved-config loader may overwrite
@@ -91,5 +95,6 @@ export function useBacktestConfig() {
     selectionMode, setSelectionMode,
     randomSeed, setRandomSeed,
     nTrials, setNTrials,
+    rebalanceWeekday, setRebalanceWeekday,
   };
 }

@@ -29,6 +29,7 @@ import CellInfoTip from './momentum/CellInfoTip';
 import CollapsibleCard from './momentum/CollapsibleCard';
 import DailyPicksHistory from './momentum/DailyPicksHistory';
 import DateRangeRow from './momentum/DateRangeRow';
+import FeeWaterfallPanel from './momentum/FeeWaterfallPanel';
 import EquityCurveCard from './momentum/EquityCurveCard';
 import MonthlyHoldingsTable from './momentum/MonthlyHoldingsTable';
 import RandomParamsInputs from './momentum/RandomParamsInputs';
@@ -91,6 +92,7 @@ export default function MomentumBacktester() {
     selectionMode, setSelectionMode,
     randomSeed, setRandomSeed,
     nTrials, setNTrials,
+    rebalanceWeekday, setRebalanceWeekday,
   } = config;
 
   // Sector → benchmark_id mapping for selection_mode='sector_etf'.
@@ -647,6 +649,8 @@ export default function MomentumBacktester() {
               setEndDate={setEndDate}
               maxCompanies={maxCompanies}
               setMaxCompanies={setMaxCompanies}
+              rebalanceWeekday={rebalanceWeekday}
+              setRebalanceWeekday={setRebalanceWeekday}
             />
             {/* Top Sectors / Per Sector / Min Price Score moved to the
                 Strategy parameters section below — they only apply to
@@ -1081,7 +1085,6 @@ export default function MomentumBacktester() {
             views below. Hidden entirely when no sweep has run. */}
         {hasVariants && (
           <VariantSummaryTable
-            exchangeByCompany={exchangeByCompany}
             onAddToSchedule={handleAddVariantToSchedule}
           />
         )}
@@ -1128,9 +1131,10 @@ export default function MomentumBacktester() {
               result={displayResult}
               loadedRunId={activeVariantResult ? null : loadedRunId}
               savedRuns={savedRuns}
-              exchangeByCompany={exchangeByCompany}
               activeStrategyLabel={activeStrategyLabel}
             />
+
+            <FeeWaterfallPanel result={displayResult} />
 
             <SectorTimelineChart result={displayResult} />
 

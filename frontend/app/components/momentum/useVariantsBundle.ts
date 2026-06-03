@@ -46,7 +46,7 @@ export function useVariantsBundle({
   const {
     selectionMode, maxCompanies, topSectors, topPerSector, grouping,
     startDate, endDate, minPriceScore, weights, categoryWeights,
-    randomSeed, nTrials,
+    randomSeed, nTrials, rebalanceWeekday,
   } = config;
   const {
     selectedUniverses, selectedStrategies, selectedFreqs, selectedGroupings,
@@ -75,7 +75,12 @@ export function useVariantsBundle({
     };
     const scheduleFreq = FREQ_MAP[v.frequency] ?? 'monthly';
 
-    const defaultName = `${variantLabel} · ${v.universe ?? selectedIndexUniverse ?? 'ACWI_LEONTEQ'}`;
+    // Include the selection sizing (top N sectors × top N per sector) in
+    // the default name so scheduled strategies are distinguishable at a
+    // glance on /schedule even when they differ only in those dials.
+    const nameTopSectors = v.top_n_sectors ?? topSectors;
+    const nameTopPer = v.top_n_per_sector ?? topPerSector;
+    const defaultName = `${variantLabel} · ${v.universe ?? selectedIndexUniverse ?? 'ACWI_LEONTEQ'} · top ${nameTopSectors}×${nameTopPer}`;
     const enteredName = await dialog.prompt(
       `Save this variant to /schedule. Pipeline cadence: ${scheduleFreq} (mapped from "${v.frequency}").`,
       { title: 'Add variant to schedule', defaultValue: defaultName, placeholder: 'Strategy name' },
@@ -92,6 +97,7 @@ export function useVariantsBundle({
       max_companies: maxCompanies,
       strategy_type: v.strategy,
       rebalance_frequency: v.frequency,
+      rebalance_weekday: rebalanceWeekday,
       top_n_sectors: v.top_n_sectors ?? topSectors,
       top_n_per_sector: v.top_n_per_sector ?? topPerSector,
       grouping: v.grouping ?? grouping,

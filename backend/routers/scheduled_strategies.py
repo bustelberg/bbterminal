@@ -109,6 +109,12 @@ class ScheduledStrategyPatch(BaseModel):
     # non-null start_date wins if both are sent.
     start_date: date | None = None
     clear_start_date: bool | None = None
+    # Edit the rebalance weekday (Mon=0..Sun=6) in-place on the stored
+    # config blob. This is the one config field we allow patching on the
+    # schedule — it's a pure scheduling knob (which weekday of the period
+    # the strategy rebalances on) and doesn't change selection identity,
+    # so it's safe to tweak without a delete + re-add. None = leave as-is.
+    rebalance_weekday: int | None = None
 
 
 # ─── Frequency math ───────────────────────────────────────────────
@@ -1209,14 +1215,33 @@ async def patch_scheduled_strategy(strategy_id: int, body: ScheduledStrategyPatc
         update_dict["start_date"] = None
     elif body.start_date is not None:
         update_dict["start_date"] = body.start_date.isoformat()
+    if body.rebalance_weekday is not None and not (0 <= body.rebalance_weekday <= 6):
+        raise HTTPException(400, "rebalance_weekday must be 0 (Mon) … 6 (Sun)")
     # `updated_at` is always present — require at least one real field so a
     # no-op PATCH is a clear 400 rather than a silent timestamp bump.
-    if len(update_dict) == 1:
+    if len(update_dict) == 1 and body.rebalance_weekday is None:
         raise HTTPException(
-            400, "Nothing to update (pass `enabled`, `name`, `start_date`, or `clear_start_date`).",
+            400,
+            "Nothing to update (pass `enabled`, `name`, `start_date`, "
+            "`clear_start_date`, or `rebalance_weekday`).",
         )
 
     def _update() -> dict:
+        # Merge rebalance_weekday into the stored config blob (read-modify-
+        # write — config is JSONB and we only touch this one key).
+        if body.rebalance_weekday is not None:
+            cur = (
+                supabase.table("scheduled_strategy")
+                .select("config")
+                .eq("id", strategy_id)
+                .limit(1)
+                .execute()
+            )
+            if not cur.data:
+                raise HTTPException(404, f"Scheduled strategy #{strategy_id} not found")
+            cfg = dict(cur.data[0].get("config") or {})
+            cfg["rebalance_weekday"] = body.rebalance_weekday
+            update_dict["config"] = cfg
         resp = (
             supabase.table("scheduled_strategy")
             .update(update_dict)

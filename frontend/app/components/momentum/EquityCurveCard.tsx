@@ -11,9 +11,10 @@ import type {
 import type { Column } from '../../../lib/tableExport';
 import { SERIES_COLORS } from './utils';
 import type { BenchmarkOption, BenchmarkPrice, ComparisonItem, SavedRun, SavedVariant } from './types';
-import { computeNetStats, type NetStats } from './feeStats';
+import { type NetStats } from './feeStats';
+import { computeFeeWaterfall, type FeeBreakdownRow, type FeeWaterfall } from './feeModel';
 import { useClickOutside } from '../../../lib/hooks/useClickOutside';
-import { useBenchmarks, useExchangeFeeMap } from '../../../lib/hooks/apiData';
+import { useBenchmarks, useFeeConfig } from '../../../lib/hooks/apiData';
 import { API_URL } from '../../../lib/apiUrl';
 import {
   alignSeries,
@@ -46,12 +47,6 @@ type Props = {
   loadedRunId: number | null;
   /** Saved backtests available for comparison. */
   savedRuns: SavedRun[];
-  /** Per-company exchange lookup. When provided alongside non-zero
-   * `/api/exchange-fees`, every stat surfaced on the active strategy
-   * gets a `gross (net)` parenthetical computed from the fee model in
-   * `feeStats.ts`. Optional so the card stays usable when the parent
-   * doesn't pipe it through (e.g. saved-bundle reload flows). */
-  exchangeByCompany?: Map<number, string>;
   /** Full label for the active strategy row — same format as a saved
    * comparison's label (e.g. "ACWI-mei · Momentum · 2002-2026 · Every
    * 12 months · Long-only"). Parent computes this from the actual
@@ -69,17 +64,17 @@ type Props = {
  * own benchmark/saved comparison state and all the chart-derived memos
  * — the parent only feeds it the active strategy plus the saved-run
  * list. */
-function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompany, activeStrategyLabel, markerDate }: Props) {
+function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLabel, markerDate }: Props) {
   // Benchmark options for the "add series" dropdown — fetched via the
   // shared cached hook so a sibling component (e.g. MomentumBacktester's
   // sector-ETF lookup) reuses the same fetch instead of re-requesting.
   const { data: _benchmarks } = useBenchmarks();
   const benchmarkOptions = (_benchmarks ?? []) as BenchmarkOption[];
   const [comparisons, setComparisons] = useState<ComparisonItem[]>([]);
-  // Per-exchange fees (bps) for the (net) parenthetical — shared cached
-  // hook, returns null when no non-zero fees are configured so the
-  // `parenPct(...)` calls below render as empty strings.
-  const feesByExchange = useExchangeFeeMap();
+  // Global fee config for the net-to-client `(net)` parenthetical. The
+  // parenthetical now means "after Leonteq + Bustelberg fees" (see the
+  // Fee waterfall panel), computed via the layered model in feeModel.ts.
+  const feeConfig = useFeeConfig();
   const [addSeriesOpen, setAddSeriesOpen] = useState(false);
   const addSeriesRef = useRef<HTMLDivElement>(null);
   const [logScale, setLogScale] = useState(false);
@@ -96,23 +91,41 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
   // entire directory, so a saved run on a different universe still
   // resolves its holdings' exchanges. Benchmarks have no holdings to
   // trade so they always sit out (net == gross by definition).
-  const activeNetStats = useMemo<NetStats | null>(() => {
-    if (!feesByExchange || !exchangeByCompany) return null;
-    return computeNetStats(result.monthly_records, feesByExchange, exchangeByCompany, result.daily_records);
-  }, [feesByExchange, exchangeByCompany, result.monthly_records, result.daily_records]);
+  // Full fee waterfall for the active strategy — its `.net` feeds the
+  // per-stat `(net)` parentheticals + custom-range walker, and its
+  // `.breakdown` (per-year, reconciled) drives the yearly table so the
+  // two views agree exactly.
+  const activeWaterfall = useMemo<FeeWaterfall | null>(
+    () =>
+      computeFeeWaterfall(result.monthly_records, result.daily_records, feeConfig, {
+        grossTotalReturnPct: result.summary?.total_return_pct,
+      }),
+    [feeConfig, result.monthly_records, result.daily_records, result.summary?.total_return_pct],
+  );
+  const activeNetStats = activeWaterfall?.net ?? null;
 
-  /** Map of comparison series id → NetStats. Computed per-comparison so
-   * saved runs added via "Add series" get the same `gross (net)` treatment
-   * the active row does. Benchmarks aren't keyed here at all. */
-  const comparisonNetStats = useMemo<Map<string, NetStats | null>>(() => {
-    const m = new Map<string, NetStats | null>();
-    if (!feesByExchange || !exchangeByCompany) return m;
+  /** Per-comparison fee waterfall (saved runs only — benchmarks have no
+   * holdings to fee). Keyed by series id. */
+  const comparisonWaterfalls = useMemo<Map<string, FeeWaterfall | null>>(() => {
+    const m = new Map<string, FeeWaterfall | null>();
     for (const c of comparisons) {
       if (c.kind !== 'saved') continue;
-      m.set(c.id, computeNetStats(c.monthly, feesByExchange, exchangeByCompany, c.daily));
+      m.set(c.id, computeFeeWaterfall(c.monthly, c.daily, feeConfig));
     }
     return m;
-  }, [comparisons, feesByExchange, exchangeByCompany]);
+  }, [comparisons, feeConfig]);
+  const comparisonNetStats = useMemo<Map<string, NetStats | null>>(() => {
+    const m = new Map<string, NetStats | null>();
+    for (const [id, wf] of comparisonWaterfalls) m.set(id, wf?.net ?? null);
+    return m;
+  }, [comparisonWaterfalls]);
+
+  /** Per-year fee breakdowns keyed by series id, for the yearly table. */
+  const feeBreakdownsBySeries = useMemo<Record<string, FeeBreakdownRow[] | null>>(() => {
+    const m: Record<string, FeeBreakdownRow[] | null> = { active: activeWaterfall?.breakdown ?? null };
+    for (const [id, wf] of comparisonWaterfalls) m[id] = wf?.breakdown ?? null;
+    return m;
+  }, [activeWaterfall, comparisonWaterfalls]);
 
   useClickOutside(addSeriesRef, () => setAddSeriesOpen(false), addSeriesOpen);
 
@@ -248,8 +261,8 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
 
   // Yearly performance breakdown — moved to seriesMath:computeYearlyBreakdown.
   const yearlyBreakdown = useMemo(
-    () => computeYearlyBreakdown(alignedSeries, activeNetStats, comparisons, comparisonNetStats),
-    [alignedSeries, activeNetStats, comparisons, comparisonNetStats],
+    () => computeYearlyBreakdown(alignedSeries, feeBreakdownsBySeries),
+    [alignedSeries, feeBreakdownsBySeries],
   );
 
   // Export columns for the Summary stats table. One row per aligned

@@ -48,8 +48,11 @@ def _prepare_backtest(
     prices_local_df: pd.DataFrame | None,
     monthly_eligible: dict[str, dict[int, str | None]] | None,
     frequency: RebalanceFrequency = _DEFAULT_FREQUENCY,
+    rebalance_weekday: int = 0,
 ) -> _BacktestPrepared:
-    periods = _generate_rebalance_dates(start_date, end_date, frequency, prices_df)
+    periods = _generate_rebalance_dates(
+        start_date, end_date, frequency, prices_df, weekday=rebalance_weekday,
+    )
     if len(periods) < 2:
         raise ValueError(f"Need at least 2 rebalance periods for a {frequency} backtest (got {len(periods)})")
 
@@ -180,6 +183,7 @@ def prepare_variant_from_shared(
     end_date: date,
     frequency: RebalanceFrequency,
     prices_df: pd.DataFrame,
+    rebalance_weekday: int = 0,
 ) -> _BacktestPrepared:
     """Build a `_BacktestPrepared` for one variant from sweep-shared
     inputs. The signal panel is filtered to just this variant's cutoffs;
@@ -187,7 +191,9 @@ def prepare_variant_from_shared(
     when you've already called `build_shared_backtest_inputs` for the
     sweep — gives byte-identical results, just without re-doing the
     expensive per-company rolling panel scan."""
-    periods = _generate_rebalance_dates(start_date, end_date, frequency, prices_df)
+    periods = _generate_rebalance_dates(
+        start_date, end_date, frequency, prices_df, weekday=rebalance_weekday,
+    )
     if len(periods) < 2:
         raise ValueError(f"Need at least 2 rebalance periods for a {frequency} backtest (got {len(periods)})")
     # Include all periods as cutoffs (see _prepare_backtest above for the

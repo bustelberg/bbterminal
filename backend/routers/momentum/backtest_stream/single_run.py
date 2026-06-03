@@ -66,6 +66,7 @@ async def run_single(
         "selection_mode": req.selection_mode,
         "random_seed": req.random_seed,
         "rebalance_frequency": req.rebalance_frequency,
+        "rebalance_weekday": req.rebalance_weekday,
         "strategy_type": req.strategy_type,
         "sector_etfs": req.sector_etfs,
     })

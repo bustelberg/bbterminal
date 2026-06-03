@@ -1460,6 +1460,128 @@ async def list_ingest_runs(limit: int = 25, job_name: str | None = None):
     return await asyncio.to_thread(_query)
 
 
+# Human-facing metadata for each known scheduler job id, keyed by the
+# APScheduler job id (see `scheduler.py`). `label`/`description` drive the
+# /schedule "Pipeline activity" strip; `cadence` is the recurring trigger
+# in words. One-shot catch-up jobs are included so a bootstrap/catch-up
+# that's still pending (or just fired) reads sensibly instead of as a raw
+# id. Unknown ids fall back to a humanized id + the run's own job_name.
+_JOB_META: dict[str, dict[str, str]] = {
+    "weekly_price_volume": {
+        "label": "Weekly full pipeline",
+        "description": "acquisition → templates → prune → prices → momentum",
+        "cadence": "Tuesday 02:00 UTC",
+    },
+    "daily_holdings_refresh": {
+        "label": "Daily MTD refresh",
+        "description": "re-prices held companies + recomputes MTD per strategy",
+        "cadence": "Mon, Wed–Sun 02:00 UTC",
+    },
+    "daily_template_refresh": {
+        "label": "Daily template refresh",
+        "description": "reconstructs template universes (no prices/momentum)",
+        "cadence": "Mon, Wed–Sun 02:30 UTC",
+    },
+    "monthly_template_refresh": {
+        "label": "Monthly template refresh",
+        "description": "month-boundary template capture",
+        "cadence": "1st of month 00:30 UTC",
+    },
+    "bootstrap_template_refresh": {
+        "label": "Full pipeline (bootstrap)",
+        "description": "one-shot first population on app start",
+        "cadence": "one-shot",
+    },
+    "startup_template_catchup": {
+        "label": "Template catch-up",
+        "description": "one-shot — templates fell behind the month while down",
+        "cadence": "one-shot",
+    },
+    "startup_price_catchup": {
+        "label": "Price catch-up",
+        "description": "one-shot — held prices fell behind while down",
+        "cadence": "one-shot",
+    },
+    "manual": {
+        "label": "Manual run",
+        "description": "triggered from the UI",
+        "cadence": "on demand",
+    },
+}
+
+
+def _job_meta(key: str | None) -> dict[str, str]:
+    """Look up display metadata for a scheduler job id / job_name, with a
+    humanized fallback for ids we don't have a hard-coded entry for."""
+    if key and key in _JOB_META:
+        return _JOB_META[key]
+    pretty = (key or "job").replace("_", " ").strip().capitalize()
+    return {"label": pretty, "description": "", "cadence": ""}
+
+
+@router.get("/api/schedule/upcoming")
+async def schedule_upcoming():
+    """Backs the /schedule "Pipeline activity" strip.
+
+    Returns the live scheduler job list (with next-fire times, straight
+    from the in-process APScheduler so it's the single source of truth —
+    including one-shot catch-up jobs the bootstrap path schedules on app
+    start) plus every `ingest_run` currently in `status='running'`. The
+    frontend renders the running set as a "Running now" group and the
+    rest as a chronological "Upcoming" list, marking a job busy when a
+    run that fires it is in flight."""
+    from scheduler import list_scheduled_jobs  # noqa: PLC0415 — avoid import cycle
+
+    def _running() -> list[dict]:
+        resp = (
+            supabase.table("ingest_run")
+            .select(
+                "run_id, job_name, triggered_by, started_at, "
+                "current_phase, current_message"
+            )
+            .eq("status", "running")
+            .order("started_at", desc=False)
+            .execute()
+        )
+        return resp.data or []
+
+    running = await asyncio.to_thread(_running)
+    running_job_names = {r.get("job_name") for r in running}
+
+    raw_jobs = list_scheduled_jobs()
+    jobs: list[dict] = []
+    for j in raw_jobs:
+        meta = _job_meta(j.get("id"))
+        fires = j.get("fires")
+        jobs.append({
+            "id": j.get("id"),
+            "fires": fires,
+            "next_run_at": j.get("next_run_at"),
+            "label": meta["label"],
+            "description": meta["description"],
+            "cadence": meta["cadence"],
+            # Busy when a run that fires this job is currently in flight.
+            "running": fires in running_job_names or j.get("id") in running_job_names,
+        })
+    # Chronological — jobs with no next_run_at (paused) sort last.
+    jobs.sort(key=lambda x: (x["next_run_at"] is None, x["next_run_at"] or ""))
+
+    running_out = [
+        {
+            **r,
+            "label": _job_meta(r.get("job_name"))["label"],
+        }
+        for r in running
+    ]
+
+    return {
+        "now": datetime.now(timezone.utc).isoformat(),
+        "scheduler_enabled": bool(raw_jobs),
+        "jobs": jobs,
+        "running": running_out,
+    }
+
+
 @router.get("/api/ingest/runs/{run_id}")
 async def get_ingest_run(run_id: int):
     """Single ingest_run row by id."""

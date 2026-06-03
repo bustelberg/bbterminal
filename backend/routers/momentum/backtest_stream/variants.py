@@ -90,6 +90,7 @@ async def run_variants_sweep(
             try:
                 _periods = _generate_rebalance_dates(
                     _start_d, _end_d, _v.frequency, prices_df,
+                    weekday=req.rebalance_weekday,
                 )
             except Exception:
                 # If a variant can't even produce dates, skip it
@@ -231,6 +232,7 @@ async def run_variants_sweep(
                     date.fromisoformat(req.end_date),
                     _v.frequency,
                     prices_df,
+                    weekday=req.rebalance_weekday,
                 )
             except Exception as _gen_err:
                 logging.getLogger(__name__).warning(
@@ -527,6 +529,7 @@ async def run_variants_sweep(
                 "selection_mode": req.selection_mode,
                 "random_seed": req.random_seed,
                 "rebalance_frequency": vspec_inner.frequency,
+                "rebalance_weekday": req.rebalance_weekday,
                 "strategy_type": vspec_inner.strategy_type,
                 "sector_etfs": req.sector_etfs,
                 "min_price_score": v_min_score,
@@ -543,6 +546,7 @@ async def run_variants_sweep(
                         end_date=date.fromisoformat(req.end_date),
                         frequency=vspec_inner.frequency,
                         prices_df=prices_df,
+                        rebalance_weekday=req.rebalance_weekday,
                     )
                 except Exception as _prep_err:
                     v_prepared = None

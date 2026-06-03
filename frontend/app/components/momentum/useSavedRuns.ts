@@ -50,7 +50,7 @@ export function useSavedRuns({
   const {
     setWeights, setCategoryWeights, setStartDate, setEndDate,
     setTopSectors, setTopPerSector, setGrouping, setMinPriceScore,
-    setSelectionMode, setRandomSeed, setNTrials,
+    setSelectionMode, setRandomSeed, setNTrials, setRebalanceWeekday,
   } = config;
   const {
     setSelectedFreqs, setSelectedStrategies, setSelectedUniverses,
@@ -106,6 +106,11 @@ export function useSavedRuns({
       }
       if (typeof cfg.random_seed === 'number') setRandomSeed(cfg.random_seed);
       if (typeof cfg.n_trials === 'number') setNTrials(cfg.n_trials);
+      // Pre-feature saved runs have no `rebalance_weekday` → default to
+      // Monday (0), the historical first-Monday grid.
+      setRebalanceWeekday(
+        typeof cfg.rebalance_weekday === 'number' ? cfg.rebalance_weekday : 0,
+      );
       // Legacy saved runs may have used universe_label; both hit the same table now.
       setSelectedIndexUniverse(cfg.index_universe ?? cfg.universe_label ?? '');
 

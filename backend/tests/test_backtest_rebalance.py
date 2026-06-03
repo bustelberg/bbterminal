@@ -108,6 +108,52 @@ class TestGenerateRebalanceDates:
             _generate_rebalance_dates(date(2024, 1, 1), date(2024, 1, 10), "daily", None)
 
 
+class TestRebalanceWeekday:
+    """The `weekday` knob shifts every period's rebalance off Monday onto
+    the chosen weekday (Mon=0..Sun=6). Default stays Monday so existing
+    callers are unaffected; weekday=2 gives the first Wednesday of each
+    period (the user's strategy)."""
+
+    def test_monthly_first_wednesday(self):
+        dates = _generate_rebalance_dates(
+            date(2024, 1, 1), date(2024, 6, 1), "monthly", weekday=2,
+        )
+        assert dates == [
+            date(2024, 1, 3),   # Jan 1 is Mon → first Wed Jan 3
+            date(2024, 2, 7),   # Feb 1 is Thu → first Wed Feb 7
+            date(2024, 3, 6),   # Mar 1 is Fri → first Wed Mar 6
+            date(2024, 4, 3),   # Apr 1 is Mon → first Wed Apr 3
+            date(2024, 5, 1),   # May 1 is Wed → itself
+            date(2024, 6, 5),   # Jun 1 is Sat → first Wed Jun 5
+        ]
+        assert all(d.weekday() == 2 for d in dates)
+
+    def test_monthly_2026_06_first_wednesday(self):
+        # The user's concrete case: June 2026 first Wednesday is the 3rd.
+        dates = _generate_rebalance_dates(
+            date(2026, 6, 1), date(2026, 7, 1), "monthly", weekday=2,
+        )
+        assert dates[0] == date(2026, 6, 3)
+
+    def test_weekly_picks_chosen_weekday(self):
+        dates = _generate_rebalance_dates(
+            date(2024, 1, 1), date(2024, 1, 22), "weekly", weekday=2,
+        )
+        assert dates == [
+            date(2024, 1, 3), date(2024, 1, 10), date(2024, 1, 17),
+        ]
+        assert all(d.weekday() == 2 for d in dates)
+
+    def test_default_weekday_is_monday(self):
+        # No weekday arg == weekday=0 == the historical first-Monday grid.
+        default = _generate_rebalance_dates(date(2024, 1, 1), date(2024, 6, 1), "monthly")
+        explicit = _generate_rebalance_dates(
+            date(2024, 1, 1), date(2024, 6, 1), "monthly", weekday=0,
+        )
+        assert default == explicit
+        assert all(d.weekday() == 0 for d in default)
+
+
 class TestEvery2MonthsBacktest:
     """End-to-end: same universe, every_2_months cadence emits half as many
     rebalance periods as monthly across the same date range. Selection +

@@ -12,9 +12,10 @@ import CollapsibleCard from './CollapsibleCard';
 // mounts when a user clicks a row. next/dynamic puts it in a separate
 // chunk that ships only when the modal is actually opened.
 const TickerTimelineModal = dynamic(() => import('./TickerTimelineModal'), { ssr: false });
-import { computeNetStats, parenPct } from './feeStats';
+import { parenPct } from './feeStats';
+import { computeFeeWaterfall } from './feeModel';
 import { useClickOutside } from '../../../lib/hooks/useClickOutside';
-import { useExchangeFeeMap } from '../../../lib/hooks/apiData';
+import { useFeeConfig } from '../../../lib/hooks/apiData';
 import { EXCHANGE_NAMES, displayExchange, fmtPct, fmtPrice, guruFocusUrl } from './utils';
 
 type HeldCompany = { company_id: number; ticker: string; company_name: string };
@@ -84,21 +85,19 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
     return Array.from(seen.values()).sort((a, b) => a.ticker.localeCompare(b.ticker));
   }, [result]);
 
-  // Per-exchange fees (bps) for the (net) parentheticals in the Return /
-  // Cumulative columns. Fetched once on mount; null when the user hasn't
-  // configured any non-zero fees, in which case every parenPct(...) call
-  // below renders as the empty string (no parens, no visual noise).
-  const feesByExchange = useExchangeFeeMap();
+  // Global fee config for the net-to-client (net) parentheticals in the
+  // Return / Cumulative columns — the same layered model (Leonteq +
+  // Bustelberg) as the Fee waterfall panel.
+  const feeConfig = useFeeConfig();
 
   // Net per-period + cumulative returns for the active result, keyed by
-  // the same `r.date` the outer rows render. `computeNetStats` returns
-  // null when fees aren't configured OR when the parent passed an empty
-  // exchangeByCompany (e.g. ScheduleRunDetail) — both fall through to
-  // gross-only display below.
+  // the same `r.date` the outer rows render. Null when there's no closed-
+  // period data, in which case every parenPct(...) below renders empty.
   const netStats = useMemo(() => {
-    if (!feesByExchange || exchangeByCompany.size === 0) return null;
-    return computeNetStats(result.monthly_records, feesByExchange, exchangeByCompany, result.daily_records);
-  }, [feesByExchange, exchangeByCompany, result.monthly_records, result.daily_records]);
+    return computeFeeWaterfall(result.monthly_records, result.daily_records, feeConfig, {
+      grossTotalReturnPct: result.summary?.total_return_pct,
+    })?.net ?? null;
+  }, [feeConfig, result.monthly_records, result.daily_records, result.summary?.total_return_pct]);
 
   const netByDate = useMemo<Map<string, { portRet: number; cumRet: number }>>(() => {
     const m = new Map<string, { portRet: number; cumRet: number }>();

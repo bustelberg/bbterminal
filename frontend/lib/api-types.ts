@@ -1138,6 +1138,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/fee-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fee Config
+         * @description The single global fee config. Self-heals a missing row to defaults.
+         */
+        get: operations["get_fee_config_api_fee_config_get"];
+        /**
+         * Put Fee Config
+         * @description Upsert all four fee parameters on the single config row.
+         */
+        put: operations["put_fee_config_api_fee_config_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/fx/coverage": {
         parameters: {
             query?: never;
@@ -2106,6 +2130,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/schedule/upcoming": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Schedule Upcoming
+         * @description Backs the /schedule "Pipeline activity" strip.
+         *
+         *     Returns the live scheduler job list (with next-fire times, straight
+         *     from the in-process APScheduler so it's the single source of truth —
+         *     including one-shot catch-up jobs the bootstrap path schedules on app
+         *     start) plus every `ingest_run` currently in `status='running'`. The
+         *     frontend renders the running set as a "Running now" group and the
+         *     rest as a chronological "Upcoming" list, marking a job busy when a
+         *     run that fires it is in flight.
+         */
+        get: operations["schedule_upcoming_api_schedule_upcoming_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scheduled-strategies": {
         parameters: {
             query?: never;
@@ -2807,6 +2859,11 @@ export interface components {
              * @enum {string}
              */
             rebalance_frequency?: "daily" | "weekly" | "monthly" | "every_2_months" | "every_3_months" | "every_4_months" | "every_5_months" | "every_6_months" | "every_7_months" | "every_8_months" | "every_9_months" | "every_10_months" | "every_11_months" | "every_12_months";
+            /**
+             * Rebalance Weekday
+             * @default 0
+             */
+            rebalance_weekday?: number;
             /** Sector Etfs */
             sector_etfs?: {
                 [key: string]: number;
@@ -2927,6 +2984,17 @@ export interface components {
              */
             is_broker_supported?: boolean;
         };
+        /** FeeConfigIn */
+        FeeConfigIn: {
+            /** Bustelberg Mgmt Bps */
+            bustelberg_mgmt_bps: number;
+            /** Bustelberg Perf Pct */
+            bustelberg_perf_pct: number;
+            /** Leonteq Annual Bps */
+            leonteq_annual_bps: number;
+            /** Transaction Bps */
+            transaction_bps: number;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -3041,6 +3109,8 @@ export interface components {
             enabled?: boolean | null;
             /** Name */
             name?: string | null;
+            /** Rebalance Weekday */
+            rebalance_weekday?: number | null;
             /** Start Date */
             start_date?: string | null;
         };
@@ -4741,6 +4811,59 @@ export interface operations {
             };
         };
     };
+    get_fee_config_api_fee_config_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    put_fee_config_api_fee_config_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeeConfigIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     fx_coverage_api_fx_coverage_get: {
         parameters: {
             query?: never;
@@ -6066,6 +6189,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    schedule_upcoming_api_schedule_upcoming_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };
