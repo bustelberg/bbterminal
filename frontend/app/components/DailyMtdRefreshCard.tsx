@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import { useApiData } from '../../lib/hooks/useApiData';
+import { fmtTimestamp, fmtDateTime } from '../../lib/format';
 import type { IngestRun } from './Schedule';
 import LoadingDots from './LoadingDots';
 import Spinner from './Spinner';
@@ -72,25 +73,6 @@ function computeNextDailyTickUtc(now: Date): Date {
     next.setUTCDate(next.getUTCDate() + 1);
   }
   return next;
-}
-
-function fmtTimestamp(iso: string | null): string {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      year: 'numeric', month: 'short', day: '2-digit',
-      hour: '2-digit', minute: '2-digit',
-    });
-  } catch {
-    return iso;
-  }
-}
-
-function fmtDate(d: Date): string {
-  return d.toLocaleString(undefined, {
-    year: 'numeric', month: 'short', day: '2-digit',
-    hour: '2-digit', minute: '2-digit',
-  });
 }
 
 function statusBadgeCls(status: IngestRun['status'] | undefined): string {
@@ -231,7 +213,7 @@ export default function DailyMtdRefreshCard() {
         </div>
         <div>
           <span className="text-gray-500">Next:</span>{' '}
-          <span className="text-gray-300 font-mono">{nextTick ? fmtDate(nextTick) : '—'}</span>
+          <span className="text-gray-300 font-mono">{nextTick ? fmtDateTime(nextTick) : '—'}</span>
         </div>
         <div className="text-gray-400 truncate flex-1 min-w-0" title={summaryLine}>
           {summaryLine}

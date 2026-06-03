@@ -8,6 +8,7 @@ import LoadingDots from './LoadingDots';
 import { type StepDef, type StepState } from './ProgressTimeline';
 import { apiFetch } from '../../lib/apiFetch';
 import { dialog } from '../../lib/dialog';
+import { fmtTimestamp, fmtClock } from '../../lib/format';
 import { WEEKDAY_LABELS } from './momentum/utils';
 
 import { API_URL } from '../../lib/apiUrl';
@@ -148,17 +149,6 @@ export type ScheduledStrategy = {
 // have been removed — each scheduled strategy's run history is shown
 // in its own expandable detail view (see ScheduledStrategyDetail).
 
-function fmtTimestamp(iso: string | null): string {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      year: 'numeric', month: 'short', day: '2-digit',
-      hour: '2-digit', minute: '2-digit',
-    });
-  } catch {
-    return iso;
-  }
-}
 
 export const PIPELINE_STEPS: StepDef[] = [
   { key: 'acquisition', label: 'Source acquisition' },
@@ -731,17 +721,6 @@ function relTime(iso: string | null, nowMs: number): string {
   return `in ${d}d`;
 }
 
-/** Short clock label for a future ISO timestamp (local time, HH:MM). */
-function fmtClock(iso: string | null): string {
-  if (!iso) return '';
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      weekday: 'short', hour: '2-digit', minute: '2-digit',
-    });
-  } catch {
-    return '';
-  }
-}
 
 /** "Pipeline activity" strip at the top of /schedule. Running jobs (with
  * a live spinner + phase) render first; then every scheduled job in

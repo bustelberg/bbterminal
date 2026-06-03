@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import ProgressTimeline from './ProgressTimeline';
 import { apiFetch } from '../../lib/apiFetch';
 import { colorForSector } from '../../lib/sectorColors';
+import { fmtTimestamp } from '../../lib/format';
 import type { Column } from '../../lib/tableExport';
 import TableDownloadButton from './TableDownloadButton';
 import LoadingDots from './LoadingDots';
@@ -37,18 +38,6 @@ type Overview = {
   scraped_at: string | null;
   sectors: Sector[];
 };
-
-function fmtTimestamp(iso: string | null): string {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      year: 'numeric', month: 'short', day: '2-digit',
-      hour: '2-digit', minute: '2-digit',
-    });
-  } catch {
-    return iso;
-  }
-}
 
 /** /leonteq — hierarchical view of Leonteq's underlying equities,
  * grouped by sector → industry → company. Each company carries a
