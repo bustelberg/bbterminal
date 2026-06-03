@@ -55,14 +55,6 @@ export async function mockBacktestPageReads(page: Page) {
     });
   });
 
-  await page.route('**/api/momentum/current-picks', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify([]),
-    });
-  });
-
   await page.route('**/api/data/latest-price-date', async (route) => {
     await route.fulfill({
       status: 200,

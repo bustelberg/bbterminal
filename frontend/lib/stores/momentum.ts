@@ -1,6 +1,5 @@
 import { createStore } from '../store';
 import { runSSE } from '../stream';
-import { apiFetch } from '../apiFetch';
 import { API_URL } from '../apiUrl';
 import type {
   BacktestRequest as ApiBacktestRequest,
@@ -131,57 +130,6 @@ export type BacktestResult = {
   // line's daily granularity. Absent on legacy saved runs predating
   // this feature.
   universe_daily_records?: DailyRecord[];
-};
-
-// Per-day pick holding has the same shape as a Holding for newer snapshots
-// (price/return fields populated). Older snapshots persist a slim version
-// where the price/return/category_scores fields are absent — all extra
-// fields are therefore optional.
-export type DailyPickHolding = {
-  company_id: number;
-  ticker: string;
-  company_name: string;
-  sector: string;
-  score: number;
-  category_scores?: Record<string, number | null>;
-  weight?: number;
-  forward_return_pct?: number | null;
-  currency?: string | null;
-  entry_price_local?: number | null;
-  exit_price_local?: number | null;
-  entry_price_eur?: number | null;
-  exit_price_eur?: number | null;
-  entry_date?: string | null;
-  exit_date?: string | null;
-};
-
-export type DailyPick = {
-  date: string;                   // YYYY-MM-DD
-  holdings: DailyPickHolding[];
-  turnover_abs: number;           // # stocks added (= removed for fixed-size) vs previous day
-  turnover_pct: number;           // turnover_abs / portfolio_size * 100
-  portfolio_return_pct?: number | null;  // chain-linked cumulative MTD through this day
-  next_day_return_pct?: number | null;   // 1-day forward return of THIS day's portfolio (null on the latest day)
-};
-
-export type CurrentPortfolio = {
-  as_of_date: string;             // YYYY-MM-01 — start of current month
-  latest_price_date: string | null; // most recent observed price across holdings
-  holdings: Holding[];
-  daily_picks?: DailyPick[];      // current-month days produced by the most recent compute
-  daily_picks_history?: DailyPick[]; // all stored days for this strategy across months
-  snapshot_id?: number;           // present when loaded from DB (or persisted post-compute)
-  strategy_hash?: string;
-  from_cache?: boolean;           // true when the backend served from cache
-};
-
-export type CurrentPicksSnapshotMeta = {
-  snapshot_id: number;
-  created_at: string;             // ISO timestamp
-  triggered_by: 'auto' | 'manual';
-  as_of_date: string;
-  latest_price_date: string | null;
-  name?: string | null;           // optional custom label set via rename
 };
 
 export type UniverseEntry = {
@@ -354,9 +302,6 @@ export type MomentumState = {
   running: boolean;
   progress: ProgressEntry[];
   result: BacktestResult | null;
-  currentPortfolio: CurrentPortfolio | null;
-  currentPicksSnapshots: CurrentPicksSnapshotMeta[];
-  refreshingMTD: boolean;
   universe: UniverseEntry[];
   error: string | null;
   warnings: WarningEntry[];
@@ -374,14 +319,6 @@ export type MomentumState = {
   activeVariantKey: VariantKey | null;
   /** Sweep progress, or null when no sweep is in flight. */
   variantsRun: VariantsRunState | null;
-  /** Snapshot id currently being loaded from the current-picks dropdown, or
-   * null when idle. Drives the per-row spinner in the header dropdown. */
-  loadingSnapshotId: number | null;
-  /** Snapshot id currently being deleted (so the row can show a spinner
-   * + the rest of the dropdown stays interactive). */
-  deletingSnapshotId: number | null;
-  /** Snapshot id currently being renamed. */
-  renamingSnapshotId: number | null;
 };
 
 /**
@@ -411,9 +348,6 @@ export const momentumStore = createStore<MomentumState>({
   running: false,
   progress: [],
   result: null,
-  currentPortfolio: null,
-  currentPicksSnapshots: [],
-  refreshingMTD: false,
   universe: [],
   error: null,
   warnings: [],
@@ -424,143 +358,7 @@ export const momentumStore = createStore<MomentumState>({
   variants: {},
   activeVariantKey: null,
   variantsRun: null,
-  loadingSnapshotId: null,
-  deletingSnapshotId: null,
-  renamingSnapshotId: null,
 });
-
-let abortController: AbortController | null = null;
-
-export async function startBacktest(cfg: BacktestStartConfig): Promise<void> {
-  abortController?.abort();
-  const controller = new AbortController();
-  abortController = controller;
-
-  momentumStore.set({
-    running: true,
-    progress: [],
-    result: cfg.mode === 'current_portfolio' ? momentumStore.get().result : null,
-    currentPortfolio: cfg.mode === 'current_portfolio' ? null : momentumStore.get().currentPortfolio,
-    universe: [],
-    error: null,
-    warnings: [],
-    infos: [],
-    loadedRunId: null,
-    runStartedAt: Date.now(),
-    runEndedAt: null,
-  });
-
-  let receivedDone = false;
-  let receivedResult = false;
-  let lastEventTime = Date.now();
-
-  try {
-    await runSSE(
-      `${API_URL}/api/momentum/backtest`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(cfg),
-      },
-      (raw) => {
-        const data = raw as {
-          type: string;
-          pct?: number;
-          message?: string;
-          scope?: string;
-          data?: BacktestResult | CurrentPortfolio;
-          universe?: UniverseEntry[];
-        };
-        lastEventTime = Date.now();
-        if (data.type === 'progress') {
-          momentumStore.set((s) => ({
-            progress: [...s.progress, { pct: data.pct ?? 0, message: data.message ?? '', t: Date.now() }],
-          }));
-        } else if (data.type === 'warning') {
-          const id = (data as { id?: string }).id;
-          const dismiss = (data as { dismiss?: boolean }).dismiss === true;
-          momentumStore.set((s) => {
-            // Dismiss request: drop any warning with this id (live self-heal
-            // updates fire dismiss=true when everything's recovered).
-            if (id && dismiss) {
-              return { warnings: s.warnings.filter((w) => w.id !== id) };
-            }
-            // Last-write-wins on `id`: replace existing same-id warning so
-            // live updates (e.g. self-heal "X of Y still missing…")
-            // visually supersede the original audit warning instead of
-            // stacking under it.
-            const entry: WarningEntry = {
-              scope: data.scope ?? 'backtest',
-              message: data.message ?? '',
-              ...(id ? { id } : {}),
-            };
-            if (id) {
-              const idx = s.warnings.findIndex((w) => w.id === id);
-              if (idx >= 0) {
-                const next = [...s.warnings];
-                next[idx] = entry;
-                return { warnings: next };
-              }
-            }
-            return { warnings: [...s.warnings, entry] };
-          });
-        } else if (data.type === 'info') {
-          momentumStore.set((s) => ({
-            infos: [...s.infos, { scope: data.scope ?? 'backtest', message: data.message ?? '' }],
-          }));
-        } else if (data.type === 'result') {
-          receivedResult = true;
-          momentumStore.set({ result: (data.data as BacktestResult) ?? null });
-          if (data.universe) momentumStore.set({ universe: data.universe });
-        } else if (data.type === 'current_portfolio') {
-          receivedResult = true;
-          momentumStore.set({ currentPortfolio: (data.data as CurrentPortfolio) ?? null });
-          if (data.universe) momentumStore.set({ universe: data.universe });
-        } else if (data.type === 'done') {
-          receivedDone = true;
-          momentumStore.set({ running: false, runEndedAt: Date.now() });
-          if (cfg.mode === 'current_portfolio') {
-            maybeAutoRefreshCurrentMonthMTD(momentumStore.get().currentPortfolio);
-          }
-        } else if (data.type === 'error') {
-          momentumStore.set({ error: data.message ?? 'Unknown error', running: false, runEndedAt: Date.now() });
-        }
-      },
-      controller.signal,
-    );
-
-    if (!receivedDone) {
-      if (receivedResult) {
-        momentumStore.set({ running: false, runEndedAt: Date.now() });
-      } else {
-        const elapsed = Math.round((Date.now() - lastEventTime) / 1000);
-        momentumStore.set({
-          error: `Stream disconnected unexpectedly (last event ${elapsed}s ago). This can happen due to proxy timeouts — try again, the replay cache should make the second attempt fast.`,
-          running: false,
-          runEndedAt: Date.now(),
-        });
-      }
-    }
-  } catch (e) {
-    // Chrome can surface an aborted fetch as `TypeError: Failed to
-    // fetch` rather than a DOMException with name=AbortError. Trust the
-    // signal state to distinguish a user cancel from a real failure.
-    const isCancel =
-      controller.signal.aborted || (e as { name?: string })?.name === 'AbortError';
-    if (!isCancel) {
-      momentumStore.set({ error: e instanceof Error ? e.message : 'Unknown error' });
-    }
-    momentumStore.set({ running: false, runEndedAt: Date.now() });
-  } finally {
-    if (abortController === controller) abortController = null;
-  }
-}
-
-export function cancelBacktest(): void {
-  abortController?.abort();
-  abortController = null;
-  momentumStore.set({ running: false });
-}
 
 // ─── Variants sweep ──────────────────────────────────────────────────────
 //
@@ -786,139 +584,4 @@ export function setActiveVariant(key: VariantKey | null): void {
  * switches back to single-run mode. */
 export function clearVariants(): void {
   momentumStore.set({ variants: {}, activeVariantKey: null, variantsRun: null });
-}
-
-// ─── Current Picks snapshots ─────────────────────────────────────────────
-
-export async function loadCurrentPicksSnapshots(): Promise<void> {
-  try {
-    const resp = await fetch(`${API_URL}/api/momentum/current-picks`);
-    if (!resp.ok) return;
-    const rows = (await resp.json()) as CurrentPicksSnapshotMeta[];
-    momentumStore.set({ currentPicksSnapshots: rows });
-  } catch {
-    // non-fatal — UI just won't show the snapshot picker
-  }
-}
-
-export async function loadCurrentPicksSnapshot(snapshotId: number): Promise<void> {
-  momentumStore.set({ loadingSnapshotId: snapshotId, error: null });
-  try {
-    const resp = await fetch(`${API_URL}/api/momentum/current-picks/${snapshotId}`);
-    if (!resp.ok) {
-      momentumStore.set({ error: `Failed to load snapshot ${snapshotId}` });
-      return;
-    }
-    const row = await resp.json();
-    const cp: CurrentPortfolio = {
-      snapshot_id: row.snapshot_id,
-      as_of_date: row.as_of_date,
-      latest_price_date: row.latest_price_date,
-      holdings: row.holdings ?? [],
-      daily_picks: row.daily_picks ?? [],
-      daily_picks_history: row.daily_picks_history ?? row.daily_picks ?? [],
-      strategy_hash: row.strategy_hash ?? undefined,
-    };
-    momentumStore.set({ currentPortfolio: cp, error: null });
-    maybeAutoRefreshCurrentMonthMTD(cp);
-  } catch (e) {
-    momentumStore.set({ error: e instanceof Error ? e.message : 'Failed to load snapshot' });
-  } finally {
-    momentumStore.set({ loadingSnapshotId: null });
-  }
-}
-
-export async function deleteCurrentPicksSnapshot(snapshotId: number): Promise<void> {
-  momentumStore.set({ deletingSnapshotId: snapshotId, error: null });
-  try {
-    const resp = await apiFetch(`${API_URL}/api/momentum/current-picks/${snapshotId}`, {
-      method: 'DELETE',
-    });
-    if (!resp.ok) {
-      momentumStore.set({ error: `Failed to delete snapshot ${snapshotId}` });
-      return;
-    }
-    momentumStore.set((s) => ({
-      currentPicksSnapshots: s.currentPicksSnapshots.filter((m) => m.snapshot_id !== snapshotId),
-      // If the deleted snapshot was loaded, clear it.
-      currentPortfolio: s.currentPortfolio?.snapshot_id === snapshotId ? null : s.currentPortfolio,
-    }));
-  } catch (e) {
-    momentumStore.set({ error: e instanceof Error ? e.message : 'Delete failed' });
-  } finally {
-    momentumStore.set({ deletingSnapshotId: null });
-  }
-}
-
-export async function renameCurrentPicksSnapshot(
-  snapshotId: number,
-  name: string | null,
-): Promise<void> {
-  momentumStore.set({ renamingSnapshotId: snapshotId, error: null });
-  try {
-    const resp = await apiFetch(`${API_URL}/api/momentum/current-picks/${snapshotId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
-    });
-    if (!resp.ok) {
-      momentumStore.set({ error: `Failed to rename snapshot ${snapshotId}` });
-      return;
-    }
-    const updated = await resp.json();
-    momentumStore.set((s) => ({
-      currentPicksSnapshots: s.currentPicksSnapshots.map((m) =>
-        m.snapshot_id === snapshotId ? { ...m, name: updated.name ?? null } : m,
-      ),
-    }));
-  } catch (e) {
-    momentumStore.set({ error: e instanceof Error ? e.message : 'Rename failed' });
-  } finally {
-    momentumStore.set({ renamingSnapshotId: null });
-  }
-}
-
-// Local YYYY-MM-DD — using local time so the staleness check matches the
-// user's wall-clock day (avoids spurious "stale" reads near UTC midnight).
-function todayIsoLocal(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-// Fire-and-forget MTD refresh when a current-month snapshot's prices lag today.
-// Past-month snapshots are read-only, so we never refresh them. If price data
-// is already current (e.g. a fresh Recompute just finished), this is a no-op.
-function maybeAutoRefreshCurrentMonthMTD(cp: CurrentPortfolio | null): void {
-  if (!cp || cp.snapshot_id == null) return;
-  const today = todayIsoLocal();
-  if (cp.as_of_date.slice(0, 7) !== today.slice(0, 7)) return;
-  if (cp.latest_price_date && cp.latest_price_date >= today) return;
-  void refreshCurrentPicksMTD(cp.snapshot_id);
-}
-
-export async function refreshCurrentPicksMTD(snapshotId: number): Promise<void> {
-  momentumStore.set({ refreshingMTD: true, error: null });
-  try {
-    const resp = await apiFetch(`${API_URL}/api/momentum/current-picks/${snapshotId}/refresh-mtd`, { method: 'POST' });
-    if (!resp.ok) {
-      momentumStore.set({ error: `MTD refresh failed (${resp.status})`, refreshingMTD: false });
-      return;
-    }
-    const data = await resp.json();
-    const cur = momentumStore.get().currentPortfolio;
-    // Only update if the same snapshot is still loaded
-    if (cur && cur.snapshot_id === snapshotId) {
-      momentumStore.set({
-        currentPortfolio: {
-          ...cur,
-          latest_price_date: data.latest_price_date ?? cur.latest_price_date,
-          holdings: data.holdings ?? cur.holdings,
-        },
-      });
-    }
-  } catch (e) {
-    momentumStore.set({ error: e instanceof Error ? e.message : 'MTD refresh failed' });
-  } finally {
-    momentumStore.set({ refreshingMTD: false });
-  }
 }

@@ -3,31 +3,22 @@
 import { Fragment, useState, useEffect, useMemo, useRef } from 'react';
 
 import ApiUsageBadge from './ApiUsageBadge';
-import LoadingDots from './LoadingDots';
 import Spinner from './Spinner';
 import { API_URL } from '../../lib/apiUrl';
 import ProgressTimeline from './ProgressTimeline';
 import NotificationsPanel from './momentum/NotificationsPanel';
-import { useClickOutside } from '../../lib/hooks/useClickOutside';
 import {
   useCompanyExchangeMap,
   useUniverseTemplates,
 } from '../../lib/hooks/apiData';
 import {
   momentumStore,
-  cancelBacktest,
   cancelVariantsBacktest,
-  loadCurrentPicksSnapshots,
-  loadCurrentPicksSnapshot,
-  refreshCurrentPicksMTD,
   VARIANT_DEFS,
   parseVariantKey,
   variantLabel,
   type VariantKey,
 } from '../../lib/stores/momentum';
-import CellInfoTip from './momentum/CellInfoTip';
-import CollapsibleCard from './momentum/CollapsibleCard';
-import DailyPicksHistory from './momentum/DailyPicksHistory';
 import DateRangeRow from './momentum/DateRangeRow';
 import FeeWaterfallPanel from './momentum/FeeWaterfallPanel';
 import EquityCurveCard from './momentum/EquityCurveCard';
@@ -40,21 +31,13 @@ import SignalWeightSliders from './momentum/SignalWeightSliders';
 import StrategyModeSelect from './momentum/StrategyModeSelect';
 import VariantAttribution from './momentum/VariantAttribution';
 import VariantsPanel from './momentum/VariantsPanel';
-import TableDownloadButton from './TableDownloadButton';
 import VariantSummaryTable from './momentum/VariantSummaryTable';
 import { useBacktestConfig } from './momentum/useBacktestConfig';
 import { useBacktestRun } from './momentum/useBacktestRun';
-import { useCurrentPicksSnapshots } from './momentum/useCurrentPicksSnapshots';
 import { useSavedRuns } from './momentum/useSavedRuns';
 import { useVariantsBundle } from './momentum/useVariantsBundle';
 import { useSectorEtfs } from './momentum/useSectorEtfs';
 import { useVariantSelection } from './momentum/useVariantSelection';
-import {
-  EXCHANGE_NAMES,
-  fmtPct,
-  fmtPrice,
-  guruFocusUrl,
-} from './momentum/utils';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -133,9 +116,6 @@ export default function MomentumBacktester() {
   const running = momentumStore.use((s) => s.running);
   const progress = momentumStore.use((s) => s.progress);
   const result = momentumStore.use((s) => s.result);
-  const currentPortfolio = momentumStore.use((s) => s.currentPortfolio);
-  const currentPicksSnapshots = momentumStore.use((s) => s.currentPicksSnapshots);
-  const refreshingMTD = momentumStore.use((s) => s.refreshingMTD);
   const universe = momentumStore.use((s) => s.universe);
   const error = momentumStore.use((s) => s.error);
   const warnings = momentumStore.use((s) => s.warnings);
@@ -228,28 +208,6 @@ export default function MomentumBacktester() {
 
   // Save/load state
 
-  const [picksDropdownOpen, setPicksDropdownOpen] = useState(false);
-  const picksDropdownRef = useRef<HTMLDivElement>(null);
-  // First-fetch loading state for the current-picks dropdown (the saved-
-  // backtests dropdown has its own `savedRunsLoading` further down). Both
-  // header dropdowns render unconditionally and surface this as a spinner
-  // + "Loading saved …" label, instead of disappearing until data lands.
-  const [picksListLoading, setPicksListLoading] = useState(true);
-
-  // Per-row spinners for the saved-backtests dropdown. The current-picks
-  // dropdown reads its equivalents from the store so the actions can also
-  // be driven from elsewhere (e.g. an inline rename in the picks card).
-  const loadingSnapshotId = momentumStore.use((s) => s.loadingSnapshotId);
-  const deletingSnapshotId = momentumStore.use((s) => s.deletingSnapshotId);
-  const renamingSnapshotId = momentumStore.use((s) => s.renamingSnapshotId);
-  // Multi-select set for the current-picks dropdown's bulk delete. The
-  // saved-backtests dropdown owns its own selection internally now (the
-  // component was extracted into SavedRunsDropdown.tsx).
-  const {
-    selectedSnapshotIds, setSelectedSnapshotIds, bulkDeletingSnapshots,
-    snapshotLabel, renameSnapshot, confirmDeleteSnapshot, bulkDeleteSnapshots, toggleSnapshotSelected,
-  } = useCurrentPicksSnapshots();
-
   // Universe selection state — only TEMPLATE-MANAGED universes are
   // listed here (currently just ACWI). User-created static snapshots
   // and the SP500 legacy import are intentionally hidden: the only
@@ -319,13 +277,10 @@ export default function MomentumBacktester() {
     );
   }, [_utRaw]);
 
-  // One-time bookkeeping at mount: saved runs, current-picks snapshots,
-  // and the latest-price-date fetch. The endpoint hooks above own all
-  // the recurring fetches.
+  // One-time bookkeeping at mount: saved runs and the latest-price-date
+  // fetch. The endpoint hooks above own all the recurring fetches.
   useEffect(() => {
     loadSavedRuns();
-    setPicksListLoading(true);
-    loadCurrentPicksSnapshots().finally(() => setPicksListLoading(false));
     fetch(`${API_URL}/api/data/latest-price-date`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${r.status}`))))
       .then((d: { date: string | null }) => setLatestPriceDate(d.date))
@@ -361,15 +316,6 @@ export default function MomentumBacktester() {
     // listing them doesn't widen the effect's re-run scope.
   }, [selectedUniverses, indexUniverses, latestPriceDate, setStartDate, setEndDate]);
 
-  useClickOutside(picksDropdownRef, () => setPicksDropdownOpen(false), picksDropdownOpen);
-
-  // Reset current-picks multi-select when its dropdown closes — selection
-  // should not persist across opens. The saved-backtests dropdown manages
-  // its own selection internally.
-  useEffect(() => {
-    if (!picksDropdownOpen) setSelectedSnapshotIds(new Set());
-  }, [picksDropdownOpen, setSelectedSnapshotIds]);
-
   // null = first fetch in flight; [] = loaded but empty; non-empty array =
   // populated. The header dropdown reads this to show a spinner + "Loading
   // saved backtests…" instead of disappearing while the request is in
@@ -401,14 +347,12 @@ export default function MomentumBacktester() {
   const variantsBlockReason: string | null =
     selectedUniverses.size === 0 ? 'Pick at least one universe.' : null;
 
-  // Run / current-portfolio orchestration — assembles the request from
-  // the current config + selections and dispatches to the store. Lives in
+  // Run orchestration — assembles the variant-sweep request from the
+  // current config + selections and dispatches to the store. Lives in
   // `useBacktestRun` so this component just wires the buttons to it.
-  const {
-    runVariantsBacktest,
-    showCurrentPicks,
-    recomputeCurrentPortfolio,
-  } = useBacktestRun({ config, selectedIndexUniverse, sectorEtfs, eligibleVariants });
+  const { runVariantsBacktest } = useBacktestRun({
+    config, sectorEtfs, eligibleVariants,
+  });
 
   const {
     saving,
@@ -487,137 +431,6 @@ export default function MomentumBacktester() {
         </div>
         <div className="flex flex-wrap items-center justify-end gap-3 min-w-0">
           <ApiUsageBadge />
-        {(() => {
-          const picksEmpty = !picksListLoading && currentPicksSnapshots.length === 0;
-          const triggerLabel = picksListLoading
-            ? <LoadingDots label="Loading saved current picks" />
-            : picksEmpty
-              ? 'No saved current picks yet'
-              : currentPortfolio?.snapshot_id != null
-                ? (() => {
-                    const snap = currentPicksSnapshots.find((s) => s.snapshot_id === currentPortfolio.snapshot_id);
-                    return snap ? snapshotLabel(snap) : 'Load saved current picks...';
-                  })()
-                : 'Load saved current picks...';
-          return (
-          <div className="relative" ref={picksDropdownRef}>
-            <button
-              type="button"
-              onClick={() => { if (!picksListLoading && !picksEmpty) setPicksDropdownOpen((o) => !o); }}
-              disabled={picksListLoading || picksEmpty}
-              className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white flex items-center gap-2 hover:border-indigo-500 focus:outline-none focus:border-indigo-500 transition-colors min-w-[220px] disabled:opacity-70 disabled:cursor-default disabled:hover:border-gray-700"
-              title="Load a saved current-picks snapshot"
-            >
-              {(picksListLoading || loadingSnapshotId != null) && <Spinner />}
-              <span className="truncate">{triggerLabel}</span>
-              <svg className={`w-3.5 h-3.5 text-gray-500 ml-auto transition-transform ${picksDropdownOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
-              </svg>
-            </button>
-            {picksDropdownOpen && (
-              <div className="absolute right-0 mt-1 w-max min-w-[280px] max-w-[90vw] bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-96 overflow-auto">
-                {selectedSnapshotIds.size > 0 && (
-                  <div className="sticky top-0 z-10 bg-[#1a1d27] border-b border-gray-700 px-3 py-2 flex items-center justify-between gap-2">
-                    <span className="text-xs text-gray-300">
-                      {selectedSnapshotIds.size} selected
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedSnapshotIds(new Set())}
-                        className="text-[11px] text-gray-500 hover:text-gray-300 px-2 py-1 rounded transition-colors"
-                      >
-                        clear
-                      </button>
-                      <button
-                        type="button"
-                        onClick={bulkDeleteSnapshots}
-                        disabled={bulkDeletingSnapshots}
-                        className="text-[11px] font-medium px-2 py-1 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 hover:bg-rose-500/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
-                      >
-                        {bulkDeletingSnapshots && <Spinner size={12} />}
-                        Delete {selectedSnapshotIds.size}
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {currentPicksSnapshots.map((s) => {
-                  const isActive = s.snapshot_id === currentPortfolio?.snapshot_id;
-                  const isLoadingThis = loadingSnapshotId === s.snapshot_id;
-                  const isDeletingThis = deletingSnapshotId === s.snapshot_id;
-                  const isRenamingThis = renamingSnapshotId === s.snapshot_id;
-                  const isSelected = selectedSnapshotIds.has(s.snapshot_id);
-                  const customName = (s.name ?? '').trim();
-                  return (
-                    <div
-                      key={s.snapshot_id}
-                      className={`group flex items-center gap-2 px-3 py-2 border-b border-gray-800/40 last:border-b-0 hover:bg-white/[0.03] transition-colors ${isActive ? 'bg-indigo-500/10' : ''} ${isSelected ? 'bg-rose-500/[0.06]' : ''}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={(e) => { e.stopPropagation(); toggleSnapshotSelected(s.snapshot_id); }}
-                        onClick={(e) => e.stopPropagation()}
-                        className="accent-indigo-500 w-3.5 h-3.5 shrink-0 cursor-pointer"
-                        title="Select for bulk delete"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => { loadCurrentPicksSnapshot(s.snapshot_id); setPicksDropdownOpen(false); }}
-                        disabled={isLoadingThis || isDeletingThis}
-                        className="flex-1 text-left disabled:opacity-60"
-                      >
-                        <div className={`text-sm flex items-center gap-1.5 whitespace-nowrap ${isActive ? 'text-indigo-300' : 'text-gray-200'}`}>
-                          {isLoadingThis && <Spinner />}
-                          <span>
-                            {customName || `${s.created_at.slice(0, 16).replace('T', ' ')}`}
-                          </span>
-                        </div>
-                        <div className="text-[10px] text-gray-500 font-mono whitespace-nowrap">
-                          {customName
-                            ? `${s.created_at.slice(0, 10)} · ${s.triggered_by} · as of ${s.as_of_date.slice(0, 10)}`
-                            : `${s.triggered_by} · as of ${s.as_of_date.slice(0, 10)}`}
-                          {s.latest_price_date && <> · MTD through {s.latest_price_date}</>}
-                        </div>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); renameSnapshot(s.snapshot_id, s.name); }}
-                        disabled={isRenamingThis || isDeletingThis}
-                        className="p-1.5 rounded text-gray-500 hover:text-indigo-400 hover:bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-100 disabled:cursor-wait"
-                        title="Rename"
-                      >
-                        {isRenamingThis ? (
-                          <Spinner size={14} />
-                        ) : (
-                          <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                            <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-                          </svg>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); confirmDeleteSnapshot(s); }}
-                        disabled={isDeletingThis || isRenamingThis}
-                        className="p-1.5 rounded text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-100 disabled:cursor-wait"
-                        title="Delete"
-                      >
-                        {isDeletingThis ? (
-                          <Spinner size={14} />
-                        ) : (
-                          <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                          </svg>
-                        )}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-          );
-        })()}
         <SavedRunsDropdown
           savedRuns={savedRuns}
           loading={savedRunsLoading}
@@ -671,7 +484,6 @@ export default function MomentumBacktester() {
                 row only has to carry universe-level inputs. */}
             <RunControls
               runVariantsBacktest={runVariantsBacktest}
-              showCurrentPicks={showCurrentPicks}
               running={running}
               variantsRunning={variantsRunning}
               eligibleCount={eligibleCount}
@@ -679,7 +491,6 @@ export default function MomentumBacktester() {
               longShortBlocked={longShortBlocked}
               selectionMode={selectionMode}
               variantsRun={variantsRun}
-              currentPicksSnapshots={currentPicksSnapshots}
             />
             <label
               className="flex items-center gap-2 cursor-pointer select-none self-center pt-4"
@@ -693,14 +504,6 @@ export default function MomentumBacktester() {
               />
               <span className="text-gray-400 text-xs">Don&apos;t use cache</span>
             </label>
-            {running && !variantsRunning && (
-              <button
-                onClick={cancelBacktest}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-              >
-                Cancel
-              </button>
-            )}
             {variantsRunning && (
               <button
                 onClick={cancelVariantsBacktest}
@@ -809,276 +612,6 @@ export default function MomentumBacktester() {
           onToggleWarnings={() => setShowWarnings((v) => !v)}
           onToggleInfos={() => setShowInfos((v) => !v)}
         />
-
-
-        {/* Current Portfolio (MTD) — shown above backtest results, independent */}
-        {currentPortfolio && (() => {
-          const portMTD = (() => {
-            if (currentPortfolio.holdings.length === 0) return null;
-            const validReturns = currentPortfolio.holdings
-              .map(h => h.forward_return_pct)
-              .filter((r): r is number => r != null);
-            if (validReturns.length === 0) return null;
-            return validReturns.reduce((a, b) => a + b, 0) / validReturns.length;
-          })();
-          return (
-          <CollapsibleCard
-            title={
-              <div className="min-w-0">
-                <div>Current Picks</div>
-                <div className="text-xs text-gray-500 font-normal mt-0.5">
-                  Rebalance as of <span className="font-mono text-gray-400">{currentPortfolio.as_of_date}</span>
-                  {currentPortfolio.latest_price_date && (
-                    <> · MTD through <span className="font-mono text-gray-400">{currentPortfolio.latest_price_date}</span></>
-                  )}
-                  {' · '}{currentPortfolio.holdings.length} holdings
-                </div>
-              </div>
-            }
-            rightSlot={
-              <>
-                {/* Refresh MTD button — only meaningful when a saved snapshot is loaded */}
-                {currentPortfolio.snapshot_id != null && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); refreshCurrentPicksMTD(currentPortfolio.snapshot_id!); }}
-                    disabled={refreshingMTD || running}
-                    className="px-2.5 py-1 rounded-lg text-xs font-medium border border-gray-700 text-gray-300 hover:bg-white/5 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
-                    title="Refresh month-to-date returns using the latest available prices (does not re-run signals)"
-                  >
-                    {refreshingMTD ? <Spinner /> : <span className="text-emerald-400">✓</span>}
-                    {refreshingMTD ? 'Refreshing…' : 'Refresh MTD'}
-                  </button>
-                )}
-                {/* Force a new full compute */}
-                <button
-                  onClick={(e) => { e.stopPropagation(); recomputeCurrentPortfolio(); }}
-                  disabled={running}
-                  className="px-2.5 py-1 rounded-lg text-xs font-medium border border-gray-700 text-gray-300 hover:bg-white/5 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
-                  title="Run the full strategy now and save a new snapshot (slow)"
-                >
-                  {running && <Spinner />}
-                  Recompute
-                </button>
-                {portMTD != null && (
-                  <div className="text-right ml-2">
-                    <div className="text-[10px] text-gray-500">Portfolio MTD</div>
-                    <div className={`text-base font-mono font-medium ${portMTD >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {portMTD >= 0 ? '+' : ''}{portMTD.toFixed(2)}%
-                    </div>
-                  </div>
-                )}
-                <TableDownloadButton
-                  rows={currentPortfolio.holdings.map((h) => ({
-                    ...h,
-                    exchange: exchangeByCompany.get(h.company_id) ?? '',
-                  }))}
-                  columns={(() => {
-                    const cols: import('../../lib/tableExport').Column<typeof currentPortfolio.holdings[number] & { exchange: string }>[] = [
-                      { key: 'ticker', header: 'Ticker', accessor: (h) => h.ticker },
-                      { key: 'exchange', header: 'Exchange', accessor: (h) => h.exchange },
-                      { key: 'company_name', header: 'Company', accessor: (h) => h.company_name },
-                      { key: 'sector', header: 'Sector', accessor: (h) => h.sector },
-                    ];
-                    for (const cat of categories) {
-                      cols.push({
-                        key: `score_${cat}`,
-                        header: cat === 'price' ? 'Price score' : cat === 'volume' ? 'Volume score' : `${cat} score`,
-                        accessor: (h) => h.category_scores?.[cat] ?? null,
-                      });
-                    }
-                    cols.push(
-                      { key: 'total_score', header: 'Total score', accessor: (h) => h.score },
-                      { key: 'currency', header: 'Currency', accessor: (h) => h.currency ?? '' },
-                      { key: 'entry_price_local', header: 'Start (local)', accessor: (h) => h.entry_price_local ?? null },
-                      { key: 'exit_price_local', header: 'End (local)', accessor: (h) => h.exit_price_local ?? null },
-                      { key: 'entry_price_eur', header: 'Start (EUR)', accessor: (h) => h.entry_price_eur ?? null },
-                      { key: 'exit_price_eur', header: 'End (EUR)', accessor: (h) => h.exit_price_eur ?? null },
-                      { key: 'return_pct', header: 'Return (%)', accessor: (h) => h.forward_return_pct ?? null },
-                      { key: 'gurufocus_url', header: 'GuruFocus URL', accessor: (h) => guruFocusUrl(h.ticker, h.exchange) },
-                    );
-                    return cols;
-                  })()}
-                  filename={`current_picks_${currentPortfolio.as_of_date}`}
-                  title={`Download ${currentPortfolio.holdings.length} current picks as CSV / XLSX`}
-                />
-              </>
-            }
-          >
-            {currentPortfolio.holdings.length > 0 ? (
-              <div className="bg-[#0f1117] px-5 py-3 overflow-x-auto">
-                <table className="w-full text-xs min-w-max">
-                  <thead>
-                    <tr className="text-gray-600">
-                      <th className="text-left py-1 font-medium">
-                        Ticker<CellInfoTip>The stock&apos;s ticker on its primary exchange. Click to open in GuruFocus.</CellInfoTip>
-                      </th>
-                      <th className="text-left py-1 font-medium">
-                        Company<CellInfoTip>Issuer name. Click to open in GuruFocus.</CellInfoTip>
-                      </th>
-                      <th className="text-left py-1 font-medium">
-                        Sector<CellInfoTip>GICS sector. The strategy picks the top sectors by aggregate momentum, then the top stocks within each.</CellInfoTip>
-                      </th>
-                      {categories.map((cat) => (
-                        <th key={cat} className="text-right py-1 font-medium">
-                          {cat === 'price' ? 'Price' : cat === 'volume' ? 'Vol' : cat}
-                          <CellInfoTip>
-                            {cat === 'price'
-                              ? 'Composite 0–100 score across the price-momentum signals (12-1 return, 6m return, vol-adj return, drawdown, above-200MA), min-max normalized within the universe at this date.'
-                              : cat === 'volume'
-                              ? 'Composite 0–100 score across the volume signals (Volume Surge, Volume Trend 3M), min-max normalized within the universe at this date.'
-                              : `${cat} category score, 0–100 normalized across the universe.`}
-                          </CellInfoTip>
-                        </th>
-                      ))}
-                      <th className="text-right py-1 font-medium">
-                        Total<CellInfoTip>Weighted combination of the category scores. Selection ranks by this number.</CellInfoTip>
-                      </th>
-                      <th className="text-right py-1 font-medium pl-4">
-                        Start (local)<CellInfoTip>Entry price in the stock&apos;s local currency on (or just after) the first of the month.</CellInfoTip>
-                      </th>
-                      <th className="text-right py-1 font-medium">
-                        End (local)<CellInfoTip>Latest available close in local currency through the row&apos;s reporting date.</CellInfoTip>
-                      </th>
-                      <th className="text-right py-1 font-medium pl-4">
-                        Start (€)<CellInfoTip>Entry price converted to EUR using the day&apos;s ECB FX rate.</CellInfoTip>
-                      </th>
-                      <th className="text-right py-1 font-medium">
-                        End (€)<CellInfoTip>Exit price converted to EUR using the day&apos;s ECB FX rate.</CellInfoTip>
-                      </th>
-                      <th className="text-right py-1 font-medium pl-4">
-                        Return<CellInfoTip>Per-stock month-to-date return in EUR: (End € ÷ Start €) − 1, assuming the position was held since month start.</CellInfoTip>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[...currentPortfolio.holdings]
-                      .sort((a, b) => {
-                        const sec = a.sector.localeCompare(b.sector);
-                        return sec !== 0 ? sec : b.score - a.score;
-                      })
-                      .map((h) => {
-                        const exch = exchangeByCompany.get(h.company_id) ?? '';
-                        const href = guruFocusUrl(h.ticker, exch);
-                        return (
-                          <tr key={h.company_id} className="border-t border-gray-800/20">
-                            <td className="py-1.5 font-mono whitespace-nowrap">
-                              <a
-                                href={href}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-indigo-400 hover:text-indigo-300 hover:underline"
-                              >
-                                {h.ticker}
-                              </a>
-                              {exch && (
-                                <span
-                                  className="ml-1 text-[10px] text-gray-500"
-                                  title={EXCHANGE_NAMES[exch.toUpperCase()] ?? exch}
-                                >
-                                  ({exch})
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-1.5 truncate max-w-[200px]">
-                              <a
-                                href={href}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-gray-300 hover:text-indigo-300 hover:underline"
-                              >
-                                {h.company_name}
-                              </a>
-                            </td>
-                            <td className="py-1.5 text-gray-500">{h.sector}</td>
-                            {categories.map((cat) => (
-                              <td key={cat} className="text-right py-1.5 text-gray-400 font-mono">
-                                {h.category_scores?.[cat] != null ? h.category_scores[cat]!.toFixed(0) : '—'}
-                              </td>
-                            ))}
-                            <td className="text-right py-1.5 text-white font-mono font-medium">{h.score.toFixed(1)}</td>
-                            <td className="text-right py-1.5 text-gray-400 font-mono pl-4">
-                              {fmtPrice(h.entry_price_local)}
-                              {h.currency && <span className="text-gray-600 text-[10px] ml-1">{h.currency}</span>}
-                              {h.entry_date && (
-                                <CellInfoTip>
-                                  <div className="text-gray-400">Trading date</div>
-                                  <div className="font-mono text-gray-200">{h.entry_date}</div>
-                                </CellInfoTip>
-                              )}
-                            </td>
-                            <td className="text-right py-1.5 text-gray-400 font-mono">
-                              {fmtPrice(h.exit_price_local)}
-                              {h.exit_date && (
-                                <CellInfoTip>
-                                  <div className="text-gray-400">Trading date</div>
-                                  <div className="font-mono text-gray-200">{h.exit_date}</div>
-                                </CellInfoTip>
-                              )}
-                            </td>
-                            <td className="text-right py-1.5 text-gray-400 font-mono pl-4">
-                              {fmtPrice(h.entry_price_eur)}
-                              {(h.entry_date || (h.entry_price_eur != null && h.entry_price_local)) && (
-                                <CellInfoTip>
-                                  {h.entry_date && (
-                                    <>
-                                      <div className="text-gray-400">Trading date</div>
-                                      <div className="font-mono text-gray-200 mb-1">{h.entry_date}</div>
-                                    </>
-                                  )}
-                                  {h.entry_price_eur != null && h.entry_price_local && h.entry_price_local > 0 && (
-                                    <>
-                                      <div className="text-gray-400">FX rate</div>
-                                      <div className="font-mono text-gray-200">
-                                        1 {h.currency ?? 'LCL'} = {(h.entry_price_eur / h.entry_price_local).toFixed(4)} EUR
-                                      </div>
-                                    </>
-                                  )}
-                                </CellInfoTip>
-                              )}
-                            </td>
-                            <td className="text-right py-1.5 text-gray-400 font-mono">
-                              {fmtPrice(h.exit_price_eur)}
-                              {(h.exit_date || (h.exit_price_eur != null && h.exit_price_local)) && (
-                                <CellInfoTip>
-                                  {h.exit_date && (
-                                    <>
-                                      <div className="text-gray-400">Trading date</div>
-                                      <div className="font-mono text-gray-200 mb-1">{h.exit_date}</div>
-                                    </>
-                                  )}
-                                  {h.exit_price_eur != null && h.exit_price_local && h.exit_price_local > 0 && (
-                                    <>
-                                      <div className="text-gray-400">FX rate</div>
-                                      <div className="font-mono text-gray-200">
-                                        1 {h.currency ?? 'LCL'} = {(h.exit_price_eur / h.exit_price_local).toFixed(4)} EUR
-                                      </div>
-                                    </>
-                                  )}
-                                </CellInfoTip>
-                              )}
-                            </td>
-                            <td className={`text-right py-1.5 font-mono pl-4 ${h.forward_return_pct != null ? (h.forward_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
-                              {fmtPct(h.forward_return_pct)}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="px-4 py-6 text-center text-sm text-gray-500">
-                No holdings selected for this month — universe or signals returned empty.
-              </div>
-            )}
-            <DailyPicksHistory
-              currentPortfolio={currentPortfolio}
-              categories={categories}
-              exchangeByCompany={exchangeByCompany}
-            />
-          </CollapsibleCard>
-          );
-        })()}
 
         {/* Variant sweep summary — appears as soon as one variant outcome
             lands and stays visible alongside the active variant's detail

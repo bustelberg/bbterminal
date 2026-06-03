@@ -52,31 +52,24 @@ test.describe('/backtest', () => {
     await expect(page.getByText('12-1 momentum')).toBeVisible();
     await expect(page.getByText('20d vs 60d volume')).toBeVisible();
 
-    // The two run actions. `exact` on Current Picks avoids the separate
-    // saved-snapshots dropdown trigger ("Load saved current picks…").
+    // The run action.
     await expect(page.getByRole('button', { name: /Run variants/ })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Current Picks', exact: true })).toBeVisible();
   });
 
   test('selection mode drives control state', async ({ page }) => {
     await page.goto('/backtest');
 
     const strategy = page.locator('select:has(option[value="sector_etf"])');
-    const currentPicks = page.getByRole('button', { name: 'Current Picks', exact: true });
 
-    // Momentum (default): Current Picks available, signal sliders shown.
-    await expect(currentPicks).toBeEnabled();
+    // Momentum (default): the momentum signal sliders are shown.
     await expect(page.getByText('12-1 momentum')).toBeVisible();
 
-    // Random baseline: Current Picks is unavailable and the momentum-only
-    // signal sliders disappear.
+    // Random baseline: the momentum-only signal sliders disappear.
     await strategy.selectOption('random');
-    await expect(currentPicks).toBeDisabled();
     await expect(page.getByText('12-1 momentum')).toBeHidden();
 
-    // Back to momentum restores both.
+    // Back to momentum restores them.
     await strategy.selectOption('momentum');
-    await expect(currentPicks).toBeEnabled();
     await expect(page.getByText('12-1 momentum')).toBeVisible();
   });
 
