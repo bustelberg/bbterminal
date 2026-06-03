@@ -1,6 +1,6 @@
 """
 Fetch daily closing prices from GuruFocus, cache raw JSON in Supabase Storage,
-and load into metric_data (only dates >= 2023-01-01).
+and load into metric_data (only dates >= DATA_CUTOFF, see ingest/constants.py).
 """
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from ingest._gurufocus_http import (
     is_available as _cf_is_available,
     ladder as _cf_ladder,
 )
+from ingest.constants import DATA_CUTOFF
 from ingest.staleness import is_cache_fresh, is_daily_data_fresh
 from ingest.api_usage import track_api_call
 from .gurufocus_url import US_EXCHANGE_CODES as US_EXCHANGES  # single source of truth
@@ -43,7 +44,6 @@ else:
     )
 
 _BUCKET = "gurufocus-raw"
-_PRICE_CUTOFF = date(1998, 1, 1)
 
 # When GuruFocus returns 404 "Stock not found" for a (ticker, exchange)
 # pair, try these alternative exchanges before giving up. iShares ACWI
@@ -451,7 +451,7 @@ def _upsert_metric_rows(
             "numeric_value": v,
         }
         for d, v in pairs
-        if d >= _PRICE_CUTOFF and (existing_max is None or d > existing_max)
+        if d >= DATA_CUTOFF and (existing_max is None or d > existing_max)
     ]
     if not rows:
         return 0
@@ -737,7 +737,7 @@ def ensure_prices_for_company(
     result.source = "api"
     result.total_prices = len(parsed)
     result.rows_loaded = load_prices_into_db(supabase, company_id, parsed)
-    _log(f"loaded {result.rows_loaded} rows into DB (>= {_PRICE_CUTOFF})")
+    _log(f"loaded {result.rows_loaded} rows into DB (>= {DATA_CUTOFF})")
 
     # Clear lookup-failed stamp once a fetch succeeds (only if it was set,
     # to avoid the write entirely for the >99% of healthy rows).

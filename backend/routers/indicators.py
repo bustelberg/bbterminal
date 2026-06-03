@@ -23,8 +23,8 @@ from pydantic import BaseModel
 from deps import supabase
 from routers._cache_headers import CACHE_STATIC
 from ingest.api_usage import track_api_call
+from ingest.constants import DATA_CUTOFF
 from ingest.prices import (
-    _PRICE_CUTOFF,
     _USER_AGENT,
     _build_symbol,
     _ensure_bucket,
@@ -139,7 +139,7 @@ async def indicators_fetch(req: IndicatorRequest):
                 "numeric_value": v,
             }
             for d, v in parsed
-            if d >= _PRICE_CUTOFF
+            if d >= DATA_CUTOFF
         ]
         total_loaded = 0
         batch_size = 500

@@ -16,11 +16,11 @@ from urllib.parse import quote
 from supabase import Client
 
 from ingest.api_usage import track_api_call
+from ingest.constants import DATA_CUTOFF
 from ingest.staleness import is_cache_fresh
 
 from ._api_client import _api_request, _build_api_url, _mask_url
 from ._common import (
-    _CUTOFF,
     INDICATOR_KEYS,
     EarningsResult,
     _build_symbol,
@@ -123,7 +123,7 @@ def _extract_indicator_dates(data: Any) -> list[date]:
     dates: list[date] = []
     for d_raw, _ in pairs:
         td = _parse_indicator_date(d_raw)
-        if td and td >= _CUTOFF:
+        if td and td >= DATA_CUTOFF:
             dates.append(td)
     return sorted(set(dates))
 
@@ -135,7 +135,7 @@ def _parse_single_indicator(data: Any, indicator_key: str, company_id: int) -> l
     for d_raw, v_raw in pairs:
         td = _parse_indicator_date(d_raw)
         val = _coerce_float(v_raw)
-        if td is None or val is None or td < _CUTOFF:
+        if td is None or val is None or td < DATA_CUTOFF:
             continue
         rows.append({
             "company_id": company_id,

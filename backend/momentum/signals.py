@@ -12,6 +12,13 @@ import numpy as np
 import pandas as pd
 
 
+# Reject companies whose last available price is older than this many days
+# before the as-of cutoff — otherwise signals get anchored to stale prices
+# (delisted / halted / data-gap names) instead of current state. Applied
+# identically by the single-cutoff and multi-cutoff signal panels below.
+MAX_STALENESS_DAYS = 30
+
+
 # ---------------------------------------------------------------------------
 # Per-company signal helpers (operate on a single price Series)
 # ---------------------------------------------------------------------------
@@ -200,10 +207,6 @@ def compute_price_signals(
         Companies with insufficient data are excluded.
     """
     cutoff = pd.Timestamp(as_of_date)
-    # Reject companies whose last available price is older than this many days
-    # before the cutoff — otherwise signals get anchored to stale prices
-    # (delisted/halted/data-gap names) instead of current state.
-    max_staleness_days = 30
 
     results = []
 
@@ -216,7 +219,7 @@ def compute_price_signals(
             trimmed = series[series.index < cutoff]
             if len(trimmed) < 20:
                 continue
-            if (cutoff - trimmed.index[-1]).days > max_staleness_days:
+            if (cutoff - trimmed.index[-1]).days > MAX_STALENESS_DAYS:
                 continue
             signals = _compute_single_company_signals(trimmed)
             # Volume signals
@@ -239,7 +242,7 @@ def compute_price_signals(
                 index=pd.DatetimeIndex(company_prices["target_date"]),
                 dtype="float64",
             ).sort_index()
-            if (cutoff - series.index[-1]).days > max_staleness_days:
+            if (cutoff - series.index[-1]).days > MAX_STALENESS_DAYS:
                 continue
             signals = _compute_single_company_signals(series)
             signals["company_id"] = cid
@@ -464,7 +467,6 @@ def compute_signals_panel(
 
     cutoff_ts = [pd.Timestamp(c) for c in cutoffs]
     cutoff_ts_index = pd.DatetimeIndex(cutoff_ts)
-    max_staleness_days = 30
 
     cids = list(universe_df["company_id"].unique())
 
@@ -497,7 +499,7 @@ def compute_signals_panel(
             anchor = price_idx[pos]
             if pos + 1 < 20:
                 continue
-            if (c_ts - anchor).days > max_staleness_days:
+            if (c_ts - anchor).days > MAX_STALENESS_DAYS:
                 continue
 
             row = {"company_id": int(cid_)}
