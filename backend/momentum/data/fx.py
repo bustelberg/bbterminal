@@ -20,6 +20,7 @@ from supabase import Client
 
 from deps import IN_CHUNK_SIZE
 from ._helpers import _FX_SYNC_PARALLELISM, _query_with_retry
+from ._pg import load_fx_rate_df_via_copy
 
 
 def sync_fx_rates_to_db(
@@ -159,36 +160,42 @@ def load_fx_rates(
     if not needed:
         return result
 
-    rows: list[dict] = []
-    page_size = 1000
-    chunk_size = IN_CHUNK_SIZE
-    for chunk_start in range(0, len(needed), chunk_size):
-        chunk = needed[chunk_start : chunk_start + chunk_size]
-        offset = 0
-        while True:
-            resp = _query_with_retry(
-                lambda o=offset, c=chunk: (
-                    supabase.table("fx_rate")
-                    .select("currency_code, rate_date, rate")
-                    .in_("currency_code", c)
-                    .gte("rate_date", start_date.isoformat())
-                    .lte("rate_date", end_date.isoformat())
-                    .order("currency_code")
-                    .order("rate_date")
-                    .range(o, o + page_size - 1)
-                    .execute()
-                ),
-                description=f"load_fx_rates chunk {chunk_start // chunk_size + 1}",
-            )
-            if not resp.data:
-                break
-            rows.extend(resp.data)
-            if len(resp.data) < page_size:
-                break
-            offset += page_size
+    # Fast path: one direct-Postgres COPY when SUPABASE_DB_URL is configured;
+    # returns None (→ PostgREST paging below) when unconfigured or on error.
+    df = load_fx_rate_df_via_copy(needed, start_date, end_date)
+    if df is None:
+        rows: list[dict] = []
+        page_size = 1000
+        chunk_size = IN_CHUNK_SIZE
+        for chunk_start in range(0, len(needed), chunk_size):
+            chunk = needed[chunk_start : chunk_start + chunk_size]
+            offset = 0
+            while True:
+                resp = _query_with_retry(
+                    lambda o=offset, c=chunk: (
+                        supabase.table("fx_rate")
+                        .select("currency_code, rate_date, rate")
+                        .in_("currency_code", c)
+                        .gte("rate_date", start_date.isoformat())
+                        .lte("rate_date", end_date.isoformat())
+                        .order("currency_code")
+                        .order("rate_date")
+                        .range(o, o + page_size - 1)
+                        .execute()
+                    ),
+                    description=f"load_fx_rates chunk {chunk_start // chunk_size + 1}",
+                )
+                if not resp.data:
+                    break
+                rows.extend(resp.data)
+                if len(resp.data) < page_size:
+                    break
+                offset += page_size
+        df = pd.DataFrame(rows) if rows else None
 
-    if rows:
-        df = pd.DataFrame(rows)
+    if df is not None and not df.empty:
+        # Conversions are idempotent for the COPY frame (already typed) and
+        # necessary for the PostgREST frame (string columns).
         df["rate_date"] = pd.to_datetime(df["rate_date"])
         df["rate"] = df["rate"].astype(float)
         for code, grp in df.groupby("currency_code"):

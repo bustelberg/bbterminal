@@ -26,6 +26,7 @@ import logging
 import threading
 from datetime import date, timedelta
 
+import pandas as pd
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
@@ -442,22 +443,36 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             yield evt
         audit.events.clear()
 
-        # Load volumes from DB.
-        volumes_df = None
-        async for evt in load_volumes_streamed(company_ids, price_start, price_end):
-            if isinstance(evt, tuple) and evt[0] == "__result__":
-                volumes_df = evt[1]
-                continue
-            yield evt
+        # Load volumes from DB — but only when a volume signal actually carries
+        # weight. A price-only strategy (category_weights with volume=0) skips
+        # the whole volume load + its audit: the score combination multiplies
+        # the volume category by its (zero) weight after fillna(0), so the
+        # result is byte-identical either way. `category_weights=None` means the
+        # default equal split, which DOES use volume, so we still load then.
+        volume_needed = (
+            req.category_weights is None
+            or req.category_weights.get("volume", 0) != 0
+        )
+        volumes_df = pd.DataFrame(columns=["company_id", "target_date", "volume"])
+        if volume_needed:
+            async for evt in load_volumes_streamed(company_ids, price_start, price_end):
+                if isinstance(evt, tuple) and evt[0] == "__result__":
+                    volumes_df = evt[1]
+                    continue
+                yield evt
 
-        n_vol = volumes_df["company_id"].nunique() if not volumes_df.empty else 0
-        yield _emit({"type": "progress", "pct": 67, "message": f"Loaded {len(volumes_df):,} volume records for {n_vol} companies"})
+            n_vol = volumes_df["company_id"].nunique() if not volumes_df.empty else 0
+            yield _emit({"type": "progress", "pct": 67, "message": f"Loaded {len(volumes_df):,} volume records for {n_vol} companies"})
 
-        # Audit volume coverage (mutates `audit` in place — appends events).
-        audit_volume_coverage(audit, volumes_df, company_ids)
-        for evt in audit.events:
-            yield evt
-        audit.events.clear()
+            # Audit volume coverage (mutates `audit` in place — appends events).
+            # Skipped when volume is unused so we don't flag every company as
+            # "no volume" (which would also wrongly feed the self-heal loop).
+            audit_volume_coverage(audit, volumes_df, company_ids)
+            for evt in audit.events:
+                yield evt
+            audit.events.clear()
+        else:
+            yield _emit({"type": "progress", "pct": 67, "message": "Skipping volume load — no volume signal weighted (price-only strategy)."})
 
         # Self-heal: refetch missing data for subscribed-exchange gaps.
         # Runs even in db_only mode (backtest path) — these are TRUE gaps

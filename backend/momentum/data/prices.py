@@ -12,6 +12,7 @@ import pandas as pd
 from supabase import Client
 
 from ._helpers import _load_metric_chunks
+from ._pg import load_metric_df_via_copy
 
 
 def load_all_prices(
@@ -32,6 +33,12 @@ def load_all_prices(
     """
     if not company_ids:
         return pd.DataFrame(columns=["company_id", "target_date", "price"])
+
+    # Fast path: one direct-Postgres COPY when SUPABASE_DB_URL is configured.
+    # Returns None (→ PostgREST path below) when unconfigured or on any error.
+    fast = load_metric_df_via_copy(company_ids, "close_price", start_date, end_date, "price")
+    if fast is not None:
+        return fast
 
     rows = _load_metric_chunks(
         supabase, company_ids, "close_price", start_date, end_date,
@@ -67,6 +74,11 @@ def load_all_volumes(
     """
     if not company_ids:
         return pd.DataFrame(columns=["company_id", "target_date", "volume"])
+
+    # Fast path: one direct-Postgres COPY when SUPABASE_DB_URL is configured.
+    fast = load_metric_df_via_copy(company_ids, "volume", start_date, end_date, "volume")
+    if fast is not None:
+        return fast
 
     rows = _load_metric_chunks(
         supabase, company_ids, "volume", start_date, end_date,
