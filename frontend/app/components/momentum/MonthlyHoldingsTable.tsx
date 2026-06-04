@@ -838,7 +838,13 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                   <tr key={`${rowKey}-empty`}>
                     <td colSpan={4} className="bg-page px-5 py-4">
                       <div className="text-xs text-fg-subtle">
-                        {r.empty_reason || 'No holdings for this period (unknown reason)'}
+                        {r.empty_reason
+                          || (r.portfolio_return_pct != null
+                            // A real return but no holdings = an older saved sweep, from
+                            // before holdings were persisted for every variant. Re-running
+                            // and re-saving the sweep now stores full holdings.
+                            ? 'Holdings weren’t stored for this saved sweep (older save) — re-run and re-save the sweep to keep them, or run this variant on its own to inspect monthly holdings.'
+                            : 'No holdings for this period (unknown reason)')}
                       </div>
                     </td>
                   </tr>

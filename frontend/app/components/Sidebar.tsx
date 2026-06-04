@@ -7,7 +7,6 @@ import { createClient } from '../../lib/supabase/client';
 import { dialog } from '../../lib/dialog';
 import { useClickOutside } from '../../lib/hooks/useClickOutside';
 import { API_URL } from '../../lib/apiUrl';
-import ThemeToggle from './ThemeToggle';
 
 type NavItem = { href: string; label: string; userVisible?: true };
 
@@ -557,7 +556,6 @@ export default function Sidebar({ initialUser }: Props) {
             </div>
           );
         })()}
-        <ThemeToggle />
         <button
           onClick={handleSignOut}
           className="w-full px-3 py-2.5 rounded-lg text-sm font-medium text-fg-subtle hover:text-fg-strong hover:bg-overlay/5 transition-colors text-left"

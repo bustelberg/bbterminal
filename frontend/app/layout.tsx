@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import Script from "next/script";
 import "./globals.css";
 import Sidebar from "./components/Sidebar";
 import DialogHost from "./components/DialogHost";
@@ -45,12 +44,6 @@ export default async function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
     >
-      {/* No-FOUC theme init: apply the stored light choice before first paint.
-          Dark is the default (no attribute), so only light users ever run a
-          mutation here. Runs before hydration via `beforeInteractive`. */}
-      <Script id="theme-init" strategy="beforeInteractive">
-        {`(function(){try{if(localStorage.getItem('bb-theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}})();`}
-      </Script>
       <body className="h-full flex bg-page text-fg">
         <Sidebar initialUser={initialUser} />
         <div className="flex-1 overflow-auto">{children}</div>

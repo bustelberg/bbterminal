@@ -300,13 +300,13 @@ export function useVariantsBundle({
             top_n_per_sector: params.top_n_per_sector,
             min_price_score: params.min_price_score,
             summary: r.summary,
-            // Strip per-period `holdings` for EVERY cross-product bundle
-            // (not just selection_mode='all'). A 5-axis sweep can easily
-            // produce 50+ variants × 288 periods; even at 30 holdings
-            // per period that's 432k holding rows per bundle and trips
-            // Supabase's statement_timeout on save. The user can drill
-            // into any single variant by re-running it standalone.
-            monthly_records: r.monthly_records.map((rec) => ({ ...rec, holdings: [] })),
+            // Full per-period holdings for EVERY variant — so a loaded sweep is
+            // identical to a fresh run. This used to be stripped to dodge
+            // Supabase's statement_timeout, but the backend now gzips the whole
+            // result blob and uploads it to the `backtest-results` Storage
+            // bucket (see backend/routers/momentum/backtest_crud.py), which has
+            // no size ceiling, so stripping is no longer needed.
+            monthly_records: r.monthly_records,
             // Keep the daily equity curve so the chart line, intra-period
             // max-DD overlays, and the √252 Sharpe recompute survive reload.
             // The backend compacts these into a `{dates, returns}`
