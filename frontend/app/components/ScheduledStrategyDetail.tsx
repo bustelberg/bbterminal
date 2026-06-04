@@ -6,7 +6,8 @@ import SnapshotHoldings from './SnapshotHoldings';
 import LoadingDots from './LoadingDots';
 import DatePartsPicker from './DatePartsPicker';
 import { apiFetch } from '../../lib/apiFetch';
-import { StrategyConfigDetail, type IngestRun } from './Schedule';
+import { StrategyConfigDetail } from './schedule/StrategyConfigDetail';
+import type { IngestRun } from './schedule/types';
 import { colorForSector } from '../../lib/sectorColors';
 
 import { API_URL } from '../../lib/apiUrl';

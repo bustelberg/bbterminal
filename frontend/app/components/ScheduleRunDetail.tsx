@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { IngestRun, MomentumStrategyResult, TemplateDiff } from './Schedule';
-import { runToTimelineProps, PIPELINE_STEPS } from './Schedule';
+import type { IngestRun, MomentumStrategyResult, TemplateDiff } from './schedule/types';
+import { runToTimelineProps, PIPELINE_STEPS } from './schedule/timeline';
 import ProgressTimeline from './ProgressTimeline';
 import SnapshotHoldings from './SnapshotHoldings';
 import type { Column } from '../../lib/tableExport';

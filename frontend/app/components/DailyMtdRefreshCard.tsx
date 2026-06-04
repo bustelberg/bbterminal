@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import { useApiData } from '../../lib/hooks/useApiData';
 import { fmtTimestamp, fmtDateTime } from '../../lib/format';
-import type { IngestRun } from './Schedule';
+import type { IngestRun } from './schedule/types';
 import LoadingDots from './LoadingDots';
 import Spinner from './Spinner';
 import { API_URL } from '../../lib/apiUrl';
