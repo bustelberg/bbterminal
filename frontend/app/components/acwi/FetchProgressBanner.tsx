@@ -30,29 +30,29 @@ export default function FetchProgressBanner() {
 
       {/* Fetch summary (persists after completion) */}
       {fetchSummary && !fetching && (
-        <div className={`${fetchSummary.errors > 0 ? 'bg-amber-500/10 border-amber-500/20' : 'bg-emerald-500/10 border-emerald-500/20'} border rounded-lg px-4 py-3 text-sm space-y-2`}>
+        <div className={`${fetchSummary.errors > 0 ? 'bg-warn-500/10 border-warn-500/20' : 'bg-pos-500/10 border-pos-500/20'} border rounded-lg px-4 py-3 text-sm space-y-2`}>
           <div className="flex items-center justify-between">
-            <span className={fetchSummary.errors > 0 ? 'text-amber-400' : 'text-emerald-400'}>
+            <span className={fetchSummary.errors > 0 ? 'text-warn-400' : 'text-pos-400'}>
               {fetchSummary.errors > 0 ? '⚠' : '✓'} {fetchSummary.message}
             </span>
             <button
               onClick={() => acwiFetchStore.set({ summary: null })}
-              className="text-gray-500 hover:text-gray-300 text-xs"
+              className="text-fg-subtle hover:text-fg-soft text-xs"
             >
               dismiss
             </button>
           </div>
           {fetchSummary.errorList.length > 0 && (
             <details className="text-xs">
-              <summary className="text-rose-400 cursor-pointer hover:text-rose-300">
+              <summary className="text-neg-400 cursor-pointer hover:text-neg-300">
                 Show {fetchSummary.errorList.length} failed announcement{fetchSummary.errorList.length !== 1 ? 's' : ''}
               </summary>
               <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
                 {fetchSummary.errorList.map((e, i) => (
-                  <div key={i} className="flex gap-2 text-gray-400">
-                    <span className="text-rose-400 shrink-0">✗</span>
+                  <div key={i} className="flex gap-2 text-fg-muted">
+                    <span className="text-neg-400 shrink-0">✗</span>
                     <span className="truncate">{e.title}</span>
-                    <span className="text-gray-600 shrink-0">— {e.error}</span>
+                    <span className="text-fg-faint shrink-0">— {e.error}</span>
                   </div>
                 ))}
               </div>

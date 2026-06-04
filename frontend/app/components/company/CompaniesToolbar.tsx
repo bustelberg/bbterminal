@@ -44,12 +44,12 @@ export default function CompaniesToolbar({
   ], []);
 
   return (
-    <div className="px-8 py-3 border-b border-gray-800/60 flex items-center gap-3 flex-wrap">
+    <div className="px-8 py-3 border-b border-neutral-800/60 flex items-center gap-3 flex-wrap">
       <input
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         placeholder="Search name, ticker, exchange..."
-        className="bg-[#151821] border border-gray-800/60 rounded-lg px-3 py-2 text-sm text-white w-72 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 placeholder-gray-600 transition-colors"
+        className="bg-card border border-neutral-800/60 rounded-lg px-3 py-2 text-sm text-fg-strong w-72 focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 placeholder-fg-faint transition-colors"
       />
       <MultiSelectFilter
         label="Exchanges"
@@ -76,8 +76,8 @@ export default function CompaniesToolbar({
         onClick={() => setFilterDupes(!filterDupes)}
         className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
           filterDupes
-            ? 'bg-rose-500/20 border border-rose-500/40 text-rose-400'
-            : 'bg-[#151821] border border-gray-800/60 text-gray-400 hover:text-white'
+            ? 'bg-neg-500/20 border border-neg-500/40 text-neg-400'
+            : 'bg-card border border-neutral-800/60 text-fg-muted hover:text-fg-strong'
         }`}
       >
         Duplicates
@@ -85,7 +85,7 @@ export default function CompaniesToolbar({
       {hasActiveFilters && (
         <button
           onClick={clearFilters}
-          className="text-sm text-gray-500 hover:text-white transition-colors"
+          className="text-sm text-fg-subtle hover:text-fg-strong transition-colors"
         >
           Clear filters
         </button>

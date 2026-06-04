@@ -24,26 +24,26 @@ export default function Schedule() {
   const { error, setError, latestPriceDate } = sched;
 
   return (
-    <div className="min-h-screen bg-[#0f1117] text-gray-200">
-      <div className="px-8 py-5 border-b border-gray-800/40 flex items-end justify-between gap-4">
+    <div className="min-h-screen bg-page text-fg">
+      <div className="px-8 py-5 border-b border-neutral-800/40 flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-white">Schedule</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="text-xl font-semibold text-fg-strong">Schedule</h1>
+          <p className="text-sm text-fg-subtle mt-1">
             The automated pipeline and the strategies it keeps up to date.
           </p>
         </div>
         {latestPriceDate && (
-          <div className="text-xs text-gray-500 shrink-0">
-            price data through <span className="text-gray-300 font-mono">{latestPriceDate}</span>
+          <div className="text-xs text-fg-subtle shrink-0">
+            price data through <span className="text-fg-soft font-mono">{latestPriceDate}</span>
           </div>
         )}
       </div>
 
       <div className="px-8 py-6 space-y-6 max-w-screen-2xl">
         {error && (
-          <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg px-4 py-3 text-sm text-rose-300 flex items-center justify-between">
+          <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-4 py-3 text-sm text-neg-300 flex items-center justify-between">
             <span>{error}</span>
-            <button type="button" onClick={() => setError(null)} className="text-rose-200 hover:text-white text-xs">dismiss</button>
+            <button type="button" onClick={() => setError(null)} className="text-neg-200 hover:text-fg-strong text-xs">dismiss</button>
           </div>
         )}
 

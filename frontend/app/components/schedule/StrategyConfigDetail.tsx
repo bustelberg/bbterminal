@@ -25,7 +25,7 @@ export function StrategyConfigDetail({ cfg }: { cfg: Record<string, unknown> }) 
   const sortedCategories = Object.entries(categoryWeights).sort((a, b) => b[1] - a[1]);
 
   return (
-    <div className="bg-[#151821] border border-gray-800/40 rounded-lg p-3">
+    <div className="bg-card border border-neutral-800/40 rounded-lg p-3">
       <div className="grid gap-x-6 gap-y-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 text-xs">
         <ConfigRow label="Selection mode" value={selection} />
         <ConfigRow label="Strategy type" value={strategy} />
@@ -41,13 +41,13 @@ export function StrategyConfigDetail({ cfg }: { cfg: Record<string, unknown> }) 
 
       {sortedCategories.length > 0 && (
         <div className="mt-3">
-          <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Category weights</div>
+          <div className="text-[10px] uppercase tracking-wider text-fg-subtle mb-1">Category weights</div>
           <div className="flex flex-wrap gap-2 text-xs">
             {sortedCategories.map(([cat, w]) => (
-              <span key={cat} className="bg-[#0f1117] border border-gray-800/60 rounded px-2 py-0.5">
-                <span className="text-gray-400 capitalize">{cat}</span>
-                <span className="text-gray-500 mx-1.5">·</span>
-                <span className="font-mono text-gray-200">{w.toFixed(2)}</span>
+              <span key={cat} className="bg-page border border-neutral-800/60 rounded px-2 py-0.5">
+                <span className="text-fg-muted capitalize">{cat}</span>
+                <span className="text-fg-subtle mx-1.5">·</span>
+                <span className="font-mono text-fg">{w.toFixed(2)}</span>
               </span>
             ))}
           </div>
@@ -56,7 +56,7 @@ export function StrategyConfigDetail({ cfg }: { cfg: Record<string, unknown> }) 
 
       {sortedSignals.length > 0 && (
         <div className="mt-3">
-          <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">
+          <div className="text-[10px] uppercase tracking-wider text-fg-subtle mb-1">
             Signal weights ({sortedSignals.filter(([, w]) => w > 0).length} active)
           </div>
           <div className="grid gap-x-4 gap-y-1 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 text-xs">
@@ -65,8 +65,8 @@ export function StrategyConfigDetail({ cfg }: { cfg: Record<string, unknown> }) 
                 key={sig}
                 className={`flex items-baseline justify-between gap-2 ${w === 0 ? 'opacity-50' : ''}`}
               >
-                <span className="text-gray-400 truncate">{sig}</span>
-                <span className="font-mono text-gray-200 shrink-0">{w.toFixed(2)}</span>
+                <span className="text-fg-muted truncate">{sig}</span>
+                <span className="font-mono text-fg shrink-0">{w.toFixed(2)}</span>
               </div>
             ))}
           </div>
@@ -78,9 +78,9 @@ export function StrategyConfigDetail({ cfg }: { cfg: Record<string, unknown> }) 
 
 function ConfigRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-2 border-b border-gray-800/20 pb-1">
-      <span className="text-gray-500">{label}</span>
-      <span className="font-mono text-gray-200 text-right truncate">{value}</span>
+    <div className="flex items-baseline justify-between gap-2 border-b border-neutral-800/20 pb-1">
+      <span className="text-fg-subtle">{label}</span>
+      <span className="font-mono text-fg text-right truncate">{value}</span>
     </div>
   );
 }

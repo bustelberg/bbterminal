@@ -106,22 +106,22 @@ export default function TemplateUniversesCard() {
   return (
     <div className="space-y-3">
       <div className="flex items-baseline justify-between">
-        <h2 className="text-sm uppercase tracking-wider text-gray-400 font-medium">
+        <h2 className="text-sm uppercase tracking-wider text-fg-muted font-medium">
           Template universes
         </h2>
-        <p className="text-xs text-gray-600">
+        <p className="text-xs text-fg-faint">
           Canonical universes refreshed by the pipeline
         </p>
       </div>
 
       {unrefreshed.length > 0 && (
-        <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg px-4 py-3 text-sm">
+        <div className="bg-warn-500/10 border border-warn-500/30 rounded-lg px-4 py-3 text-sm">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-amber-300 font-medium mb-1">
+              <div className="text-warn-300 font-medium mb-1">
                 {unrefreshed.length} template{unrefreshed.length === 1 ? '' : 's'} never refreshed in this environment
               </div>
-              <div className="text-gray-300 text-xs leading-relaxed">
+              <div className="text-fg-soft text-xs leading-relaxed">
                 {unrefreshed.map((t) => t.template_key).join(', ')} —
                 the pipeline will populate {unrefreshed.length === 1 ? 'it' : 'them'} on
                 the next Tuesday 02:00 UTC tick, or click below to trigger now.
@@ -129,14 +129,14 @@ export default function TemplateUniversesCard() {
                 start; if you just deployed, give it a minute.
               </div>
               {triggerError && (
-                <div className="text-rose-300 text-xs mt-2">Trigger failed: {triggerError}</div>
+                <div className="text-neg-300 text-xs mt-2">Trigger failed: {triggerError}</div>
               )}
             </div>
             <button
               type="button"
               onClick={() => void triggerPipeline()}
               disabled={triggering}
-              className="text-xs px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 border border-amber-500/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              className="text-xs px-3 py-1.5 rounded-lg bg-warn-500/20 hover:bg-warn-500/30 text-warn-100 border border-warn-500/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
             >
               {triggering ? 'Triggering…' : 'Run pipeline now'}
             </button>
@@ -144,24 +144,24 @@ export default function TemplateUniversesCard() {
         </div>
       )}
 
-      <div className="bg-[#151821] rounded-xl border border-gray-800/40">
+      <div className="bg-card rounded-xl border border-neutral-800/40">
         {loadError && (
-          <div className="px-5 py-3 text-xs text-rose-300">
+          <div className="px-5 py-3 text-xs text-neg-300">
             Failed to load templates: {loadError}
           </div>
         )}
         {!loadError && templates == null && (
-          <div className="px-5 py-3 text-sm text-gray-500">
+          <div className="px-5 py-3 text-sm text-fg-subtle">
             <LoadingDots label="Loading" />
           </div>
         )}
         {!loadError && templates?.length === 0 && (
-          <div className="px-5 py-4 text-sm text-gray-500">
+          <div className="px-5 py-4 text-sm text-fg-subtle">
             No templates registered.
           </div>
         )}
         {templates && templates.length > 0 && (
-          <div className="divide-y divide-gray-800/30">
+          <div className="divide-y divide-neutral-800/30">
             {templates.map((t) => (
               <TemplateRow key={t.template_key} t={t} status={statuses[t.template_key]} />
             ))}

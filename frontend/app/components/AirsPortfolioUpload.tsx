@@ -73,8 +73,8 @@ function fmtPct(v: number | null): string {
 }
 
 function returnColor(v: number | null): string {
-  if (v == null) return 'text-gray-500';
-  return v >= 0 ? 'text-emerald-400' : 'text-rose-400';
+  if (v == null) return 'text-fg-subtle';
+  return v >= 0 ? 'text-pos-400' : 'text-neg-400';
 }
 
 // ─── Spinner ─────────────────────────────────────────────────────────────────
@@ -98,17 +98,17 @@ function PortfolioDetailView({ detail, onBack }: { detail: PortfolioDetail; onBa
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-8 py-5 border-b border-gray-800/60 flex items-center justify-between gap-4">
+      <div className="px-8 py-5 border-b border-neutral-800/60 flex items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <button
             onClick={onBack}
-            className="px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+            className="px-3 py-1.5 rounded-lg text-sm text-fg-muted hover:text-fg-strong hover:bg-overlay/5 transition-colors"
           >
             &larr; Back
           </button>
           <div>
-            <h1 className="text-lg font-semibold text-white">{detail.portfolio_name}</h1>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <h1 className="text-lg font-semibold text-fg-strong">{detail.portfolio_name}</h1>
+            <p className="text-xs text-fg-subtle mt-0.5">
               {detail.datum_van} to {detail.datum_tot} — {detail.rows.length} period{detail.rows.length !== 1 ? 's' : ''}
             </p>
           </div>
@@ -118,14 +118,14 @@ function PortfolioDetailView({ detail, onBack }: { detail: PortfolioDetail; onBa
             <span className={`text-lg font-semibold ${returnColor(last.cumulatief_rendement)}`}>
               {fmtPct(last.cumulatief_rendement)}
             </span>
-            <p className="text-xs text-gray-500 mt-0.5">YTD cumulative return</p>
+            <p className="text-xs text-fg-subtle mt-0.5">YTD cumulative return</p>
           </div>
         )}
       </div>
 
       <div className="flex-1 overflow-auto px-8 py-4">
-        <div className="bg-[#151821] rounded-xl border border-gray-800/40 overflow-hidden">
-          <div className="px-4 py-2 border-b border-gray-800/40 flex items-center justify-end">
+        <div className="bg-card rounded-xl border border-neutral-800/40 overflow-hidden">
+          <div className="px-4 py-2 border-b border-neutral-800/40 flex items-center justify-end">
             <TableDownloadButton
               rows={detail.rows}
               columns={perfRowExportColumns}
@@ -135,7 +135,7 @@ function PortfolioDetailView({ detail, onBack }: { detail: PortfolioDetail; onBa
           </div>
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-800/60 text-gray-500 text-xs">
+              <tr className="border-b border-neutral-800/60 text-fg-subtle text-xs">
                 <th className="px-4 py-3 text-left font-medium">Periode</th>
                 <th className="px-3 py-3 text-right font-medium">Beginvermogen</th>
                 <th className="px-3 py-3 text-right font-medium">Koersresultaat</th>
@@ -148,13 +148,13 @@ function PortfolioDetailView({ detail, onBack }: { detail: PortfolioDetail; onBa
             </thead>
             <tbody>
               {detail.rows.map((r, i) => (
-                <tr key={i} className="border-b border-gray-800/30 hover:bg-white/[0.02] transition-colors">
-                  <td className="px-4 py-2.5 text-gray-200 font-medium">{r.periode}</td>
-                  <td className="px-3 py-2.5 text-right text-gray-400 font-mono text-xs">{fmtEur(r.beginvermogen)}</td>
+                <tr key={i} className="border-b border-neutral-800/30 hover:bg-overlay/[0.02] transition-colors">
+                  <td className="px-4 py-2.5 text-fg font-medium">{r.periode}</td>
+                  <td className="px-3 py-2.5 text-right text-fg-muted font-mono text-xs">{fmtEur(r.beginvermogen)}</td>
                   <td className={`px-3 py-2.5 text-right font-mono text-xs ${returnColor(r.koersresultaat)}`}>{fmtEur(r.koersresultaat)}</td>
-                  <td className="px-3 py-2.5 text-right text-gray-400 font-mono text-xs">{fmtEur(r.opbrengsten)}</td>
+                  <td className="px-3 py-2.5 text-right text-fg-muted font-mono text-xs">{fmtEur(r.opbrengsten)}</td>
                   <td className={`px-3 py-2.5 text-right font-mono text-xs font-medium ${returnColor(r.beleggingsresultaat)}`}>{fmtEur(r.beleggingsresultaat)}</td>
-                  <td className="px-3 py-2.5 text-right text-gray-300 font-mono text-xs">{fmtEur(r.eindvermogen)}</td>
+                  <td className="px-3 py-2.5 text-right text-fg-soft font-mono text-xs">{fmtEur(r.eindvermogen)}</td>
                   <td className={`px-3 py-2.5 text-right font-mono text-xs font-medium ${returnColor(r.rendement)}`}>{fmtPct(r.rendement)}</td>
                   <td className={`px-3 py-2.5 text-right font-mono text-xs font-medium ${returnColor(r.cumulatief_rendement)}`}>{fmtPct(r.cumulatief_rendement)}</td>
                 </tr>
@@ -312,9 +312,9 @@ export default function AirsPortfolioUpload() {
 
   function renderYtd(name: string) {
     const state = ytdMap[name];
-    if (!state) return { ytd: <span className="text-gray-600">—</span>, asOf: <span className="text-gray-600">—</span> };
-    if (state.status === 'loading') return { ytd: <Spinner className="h-3 w-3 text-indigo-400" />, asOf: null };
-    if (state.status === 'error') return { ytd: <span className="text-rose-400 text-xs">err</span>, asOf: null };
+    if (!state) return { ytd: <span className="text-fg-faint">—</span>, asOf: <span className="text-fg-faint">—</span> };
+    if (state.status === 'loading') return { ytd: <Spinner className="h-3 w-3 text-accent-400" />, asOf: null };
+    if (state.status === 'error') return { ytd: <span className="text-neg-400 text-xs">err</span>, asOf: null };
     return {
       ytd: (
         <span className={`font-mono text-xs font-medium ${returnColor(state.value)}`}>
@@ -322,7 +322,7 @@ export default function AirsPortfolioUpload() {
         </span>
       ),
       asOf: (
-        <span className="text-gray-500 text-xs">
+        <span className="text-fg-subtle text-xs">
           {fmtDate(state.asOf)}
         </span>
       ),
@@ -381,7 +381,7 @@ export default function AirsPortfolioUpload() {
 
   const sortArrow = (key: string) => {
     if (sortKey !== key) return null;
-    return <span className="ml-1 text-indigo-400">{sortAsc ? '\u25B2' : '\u25BC'}</span>;
+    return <span className="ml-1 text-accent-400">{sortAsc ? '\u25B2' : '\u25BC'}</span>;
   };
 
   if (detail) {
@@ -390,21 +390,21 @@ export default function AirsPortfolioUpload() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-8 py-5 border-b border-gray-800/60 flex items-center justify-between gap-4">
+      <div className="px-8 py-5 border-b border-neutral-800/60 flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-lg font-semibold text-white">AIRS Portfolio Scanner</h1>
-          <p className="text-xs text-gray-500 mt-0.5">
+          <h1 className="text-lg font-semibold text-fg-strong">AIRS Portfolio Scanner</h1>
+          <p className="text-xs text-fg-subtle mt-0.5">
             {portfolios.length > 0
               ? `${sortedPortfolios.length} of ${portfolios.length} portfolio${portfolios.length !== 1 ? 's' : ''}`
               : 'Scan broker system for available portfolios'}
           </p>
           {portfolios.length > 0 && (
-            <label className="flex items-center gap-1.5 text-xs text-gray-500 mt-1 cursor-pointer select-none">
+            <label className="flex items-center gap-1.5 text-xs text-fg-subtle mt-1 cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={showZeroReturn}
                 onChange={(e) => setShowZeroReturn(e.target.checked)}
-                className="rounded border-gray-600 bg-[#0f1117] text-indigo-500 focus:ring-indigo-500/30 focus:ring-1 h-3.5 w-3.5"
+                className="rounded border-neutral-600 bg-page text-accent-500 focus:ring-accent-500/30 focus:ring-1 h-3.5 w-3.5"
               />
               Show 0% return portfolios
             </label>
@@ -413,7 +413,7 @@ export default function AirsPortfolioUpload() {
         <button
           onClick={startScan}
           disabled={scanning || loading !== null}
-          className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          className="px-4 py-2 rounded-lg text-sm font-medium bg-accent-600 hover:bg-accent-500 text-fg-strong transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
         >
           {scanning && <Spinner className="h-4 w-4" />}
           {scanning ? 'Scanning...' : portfolios.length > 0 ? 'Rescan' : 'Start Scan'}
@@ -421,21 +421,21 @@ export default function AirsPortfolioUpload() {
       </div>
 
       {error && errorKind === 'ip_forbidden' && (
-        <div className="mx-8 mt-4 px-4 py-3 text-sm bg-rose-500/10 border border-rose-500/20 rounded-lg">
+        <div className="mx-8 mt-4 px-4 py-3 text-sm bg-neg-500/10 border border-neg-500/20 rounded-lg">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-rose-300 font-medium mb-1">
+              <div className="text-neg-300 font-medium mb-1">
                 AirSPMS access denied (403 Forbidden)
               </div>
-              <div className="text-gray-300 text-xs leading-relaxed">
+              <div className="text-fg-soft text-xs leading-relaxed">
                 {error}
               </div>
               {errorDetail && (
                 <details className="mt-2">
-                  <summary className="text-gray-500 text-[11px] cursor-pointer hover:text-gray-300 select-none">
+                  <summary className="text-fg-subtle text-[11px] cursor-pointer hover:text-fg-soft select-none">
                     Show technical details
                   </summary>
-                  <pre className="mt-2 text-[10px] text-gray-500 font-mono whitespace-pre-wrap break-all bg-black/30 border border-gray-800 rounded p-2">
+                  <pre className="mt-2 text-[10px] text-fg-subtle font-mono whitespace-pre-wrap break-all bg-scrim/30 border border-neutral-800 rounded p-2">
                     {errorDetail}
                   </pre>
                 </details>
@@ -443,7 +443,7 @@ export default function AirsPortfolioUpload() {
             </div>
             <button
               onClick={() => setError(null)}
-              className="text-gray-500 hover:text-white text-xs shrink-0"
+              className="text-fg-subtle hover:text-fg-strong text-xs shrink-0"
             >
               Dismiss
             </button>
@@ -451,9 +451,9 @@ export default function AirsPortfolioUpload() {
         </div>
       )}
       {error && errorKind !== 'ip_forbidden' && (
-        <div className="mx-8 mt-4 px-4 py-3 text-sm text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-lg flex items-center justify-between">
+        <div className="mx-8 mt-4 px-4 py-3 text-sm text-neg-400 bg-neg-500/10 border border-neg-500/20 rounded-lg flex items-center justify-between">
           <span>{error}</span>
-          <button onClick={() => setError(null)} className="text-gray-500 hover:text-white ml-3 text-xs">Dismiss</button>
+          <button onClick={() => setError(null)} className="text-fg-subtle hover:text-fg-strong ml-3 text-xs">Dismiss</button>
         </div>
       )}
 
@@ -476,9 +476,9 @@ export default function AirsPortfolioUpload() {
 
         {/* Portfolio table */}
         {portfolios.length > 0 && (
-          <div className="bg-[#151821] rounded-xl border border-gray-800/40 overflow-hidden">
-            <div className="px-5 py-3 border-b border-gray-800/40 flex items-center justify-between">
-              <h2 className="text-sm font-medium text-gray-400">
+          <div className="bg-card rounded-xl border border-neutral-800/40 overflow-hidden">
+            <div className="px-5 py-3 border-b border-neutral-800/40 flex items-center justify-between">
+              <h2 className="text-sm font-medium text-fg-muted">
                 Portfolios — click to view details
               </h2>
               <TableDownloadButton
@@ -490,11 +490,11 @@ export default function AirsPortfolioUpload() {
             </div>
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-800/60 text-gray-500 text-xs">
+                <tr className="border-b border-neutral-800/60 text-fg-subtle text-xs">
                   <th className="px-5 py-3 text-left font-medium w-10">#</th>
-                  <th className="px-3 py-3 text-left font-medium cursor-pointer hover:text-gray-300 select-none" onClick={() => toggleSort('portefeuille')}>Portefeuille{sortArrow('portefeuille')}</th>
-                  <th className="px-3 py-3 text-right font-medium w-24 cursor-pointer hover:text-gray-300 select-none" onClick={() => toggleSort('ytd')}>YTD{sortArrow('ytd')}</th>
-                  <th className="px-3 py-3 text-right font-medium w-28 cursor-pointer hover:text-gray-300 select-none" onClick={() => toggleSort('asOf')}>As of{sortArrow('asOf')}</th>
+                  <th className="px-3 py-3 text-left font-medium cursor-pointer hover:text-fg-soft select-none" onClick={() => toggleSort('portefeuille')}>Portefeuille{sortArrow('portefeuille')}</th>
+                  <th className="px-3 py-3 text-right font-medium w-24 cursor-pointer hover:text-fg-soft select-none" onClick={() => toggleSort('ytd')}>YTD{sortArrow('ytd')}</th>
+                  <th className="px-3 py-3 text-right font-medium w-28 cursor-pointer hover:text-fg-soft select-none" onClick={() => toggleSort('asOf')}>As of{sortArrow('asOf')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -503,14 +503,14 @@ export default function AirsPortfolioUpload() {
                   return (
                     <tr
                       key={i}
-                      className="border-b border-gray-800/30 hover:bg-white/[0.02] transition-colors cursor-pointer group"
+                      className="border-b border-neutral-800/30 hover:bg-overlay/[0.02] transition-colors cursor-pointer group"
                       onClick={() => !loading && openPortfolio(p.portefeuille)}
                     >
-                      <td className="px-5 py-2.5 text-gray-500 font-mono text-xs">{i + 1}</td>
-                      <td className="px-3 py-2.5 text-gray-200 font-medium group-hover:text-indigo-300 transition-colors">
+                      <td className="px-5 py-2.5 text-fg-subtle font-mono text-xs">{i + 1}</td>
+                      <td className="px-3 py-2.5 text-fg font-medium group-hover:text-accent-300 transition-colors">
                         {loading === p.portefeuille ? (
                           <span className="flex items-center gap-2">
-                            <Spinner className="h-3.5 w-3.5 text-indigo-400" />
+                            <Spinner className="h-3.5 w-3.5 text-accent-400" />
                             {p.portefeuille}
                           </span>
                         ) : p.portefeuille}
@@ -528,19 +528,19 @@ export default function AirsPortfolioUpload() {
         {/* Empty state */}
         {portfolios.length === 0 && !scanning && !initialLoading && (
           <div className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-gray-800/50 flex items-center justify-center mb-4">
-              <svg className="w-8 h-8 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <div className="w-16 h-16 rounded-2xl bg-neutral-800/50 flex items-center justify-center mb-4">
+              <svg className="w-8 h-8 text-fg-faint" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
               </svg>
             </div>
-            <p className="text-sm font-medium text-gray-400">No portfolios yet</p>
-            <p className="text-xs text-gray-600 mt-1">Click &quot;Start Scan&quot; to connect to the broker system</p>
+            <p className="text-sm font-medium text-fg-muted">No portfolios yet</p>
+            <p className="text-xs text-fg-faint mt-1">Click &quot;Start Scan&quot; to connect to the broker system</p>
           </div>
         )}
 
         {/* Initial loading */}
         {initialLoading && (
-          <div className="flex items-center justify-center py-20 gap-3 text-gray-400">
+          <div className="flex items-center justify-center py-20 gap-3 text-fg-muted">
             <Spinner className="h-5 w-5" />
             <span className="text-sm"><LoadingDots label="Loading portfolios" /></span>
           </div>

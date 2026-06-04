@@ -136,8 +136,8 @@ export default function UsersPage() {
   return (
     <div className="px-8 py-5 space-y-6 max-w-4xl">
       <div>
-        <h1 className="text-xl font-semibold text-white">Users</h1>
-        <p className="text-sm text-gray-400 mt-1">
+        <h1 className="text-xl font-semibold text-fg-strong">Users</h1>
+        <p className="text-sm text-fg-muted mt-1">
           Admins see every page; regular users only see Welcome and Earnings.
         </p>
       </div>
@@ -145,23 +145,23 @@ export default function UsersPage() {
       {/* Invite form */}
       <form
         onSubmit={createUser}
-        className="bg-[#151821] rounded-xl border border-gray-800/40 p-4 space-y-3"
+        className="bg-card rounded-xl border border-neutral-800/40 p-4 space-y-3"
       >
-        <div className="text-sm font-medium text-white">Add user</div>
+        <div className="text-sm font-medium text-fg-strong">Add user</div>
         <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto_auto] gap-3 items-end">
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Email</label>
+            <label className="block text-xs text-fg-muted mb-1">Email</label>
             <input
               type="email"
               required
               value={newEmail}
               onChange={(e) => setNewEmail(e.target.value)}
               placeholder="someone@example.com"
-              className="w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+              className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-sm text-fg-strong focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Initial password</label>
+            <label className="block text-xs text-fg-muted mb-1">Initial password</label>
             <input
               type="text"
               required
@@ -169,15 +169,15 @@ export default function UsersPage() {
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               placeholder="min 8 chars"
-              className="w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+              className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-sm text-fg-strong font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Role</label>
+            <label className="block text-xs text-fg-muted mb-1">Role</label>
             <select
               value={newRole}
               onChange={(e) => setNewRole(e.target.value as 'user' | 'admin')}
-              className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-indigo-500 outline-none"
+              className="bg-page border border-neutral-700 rounded-lg px-3 py-2 text-sm text-fg-strong focus:border-accent-500 outline-none"
             >
               <option value="user">User</option>
               <option value="admin">Admin</option>
@@ -186,7 +186,7 @@ export default function UsersPage() {
           <button
             type="submit"
             disabled={creating || !newEmail || !newPassword}
-            className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-accent-600 hover:bg-accent-500 text-fg-strong transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {creating ? 'Adding...' : 'Add user'}
           </button>
@@ -194,25 +194,25 @@ export default function UsersPage() {
       </form>
 
       {/* User list */}
-      <div className="bg-[#151821] rounded-xl border border-gray-800/40 overflow-hidden">
-        <div className="px-5 py-3 border-b border-gray-800/40 flex items-center justify-between">
-          <span className="text-sm font-medium text-white">All users</span>
+      <div className="bg-card rounded-xl border border-neutral-800/40 overflow-hidden">
+        <div className="px-5 py-3 border-b border-neutral-800/40 flex items-center justify-between">
+          <span className="text-sm font-medium text-fg-strong">All users</span>
           <button
             onClick={refresh}
-            className="text-xs text-gray-400 hover:text-white"
+            className="text-xs text-fg-muted hover:text-fg-strong"
             disabled={loading}
           >
             {loading ? <LoadingDots label="Loading" /> : 'Refresh'}
           </button>
         </div>
         {error && (
-          <div className="px-5 py-3 text-sm text-rose-400 bg-rose-500/10 border-b border-rose-500/20">
+          <div className="px-5 py-3 text-sm text-neg-400 bg-neg-500/10 border-b border-neg-500/20">
             {error}
           </div>
         )}
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-gray-500 text-xs border-b border-gray-800/40">
+            <tr className="text-fg-subtle text-xs border-b border-neutral-800/40">
               <th className="text-left px-5 py-2.5 font-medium">Email</th>
               <th className="text-left px-3 py-2.5 font-medium">Role</th>
               <th className="text-left px-3 py-2.5 font-medium">Created</th>
@@ -222,23 +222,23 @@ export default function UsersPage() {
           </thead>
           <tbody>
             {users.map((u) => (
-              <tr key={u.id} className="border-b border-gray-800/30 hover:bg-white/[0.02]">
-                <td className="px-5 py-2 text-gray-200 font-mono">{u.email ?? '—'}</td>
+              <tr key={u.id} className="border-b border-neutral-800/30 hover:bg-overlay/[0.02]">
+                <td className="px-5 py-2 text-fg font-mono">{u.email ?? '—'}</td>
                 <td className="px-3 py-2">
                   <span
                     className={`inline-block px-2 py-0.5 text-[10px] font-medium rounded-md ${
                       u.role === 'admin'
-                        ? 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/30'
-                        : 'bg-gray-700/30 text-gray-400 border border-gray-700/50'
+                        ? 'bg-accent-500/15 text-accent-300 border border-accent-500/30'
+                        : 'bg-neutral-700/30 text-fg-muted border border-neutral-700/50'
                     }`}
                   >
                     {u.role}
                   </span>
                 </td>
-                <td className="px-3 py-2 text-gray-500 font-mono text-xs">
+                <td className="px-3 py-2 text-fg-subtle font-mono text-xs">
                   {u.created_at ? u.created_at.slice(0, 10) : '—'}
                 </td>
-                <td className="px-3 py-2 text-gray-500 font-mono text-xs">
+                <td className="px-3 py-2 text-fg-subtle font-mono text-xs">
                   {u.last_sign_in_at ? u.last_sign_in_at.slice(0, 10) : 'never'}
                 </td>
                 <td className="px-5 py-2 text-right">
@@ -246,21 +246,21 @@ export default function UsersPage() {
                     {u.role === 'user' ? (
                       <button
                         onClick={() => setRole(u, 'admin')}
-                        className="text-xs text-indigo-400 hover:text-indigo-300"
+                        className="text-xs text-accent-400 hover:text-accent-300"
                       >
                         Promote
                       </button>
                     ) : (
                       <button
                         onClick={() => setRole(u, 'user')}
-                        className="text-xs text-gray-400 hover:text-amber-400"
+                        className="text-xs text-fg-muted hover:text-warn-400"
                       >
                         Demote
                       </button>
                     )}
                     <button
                       onClick={() => removeUser(u)}
-                      className="text-xs text-gray-500 hover:text-rose-400"
+                      className="text-xs text-fg-subtle hover:text-neg-400"
                     >
                       Delete
                     </button>
@@ -270,7 +270,7 @@ export default function UsersPage() {
             ))}
             {!loading && users.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-5 py-8 text-center text-sm text-gray-500">
+                <td colSpan={5} className="px-5 py-8 text-center text-sm text-fg-subtle">
                   No users yet.
                 </td>
               </tr>

@@ -49,28 +49,28 @@ export default function PipelineActivityCard() {
   return (
     <div className="space-y-3">
       <div className="flex items-baseline justify-between">
-        <h2 className="text-sm uppercase tracking-wider text-gray-400 font-medium">
+        <h2 className="text-sm uppercase tracking-wider text-fg-muted font-medium">
           Pipeline activity
         </h2>
-        <p className="text-xs text-gray-600">
+        <p className="text-xs text-fg-faint">
           What&apos;s running now + what fires next
         </p>
       </div>
 
-      <div className="bg-[#151821] rounded-xl border border-gray-800/40">
+      <div className="bg-card rounded-xl border border-neutral-800/40">
         {loadError && data == null && (
-          <div className="px-5 py-3 text-xs text-rose-300">
+          <div className="px-5 py-3 text-xs text-neg-300">
             Failed to load schedule activity: {loadError}
           </div>
         )}
         {!loadError && data == null && (
-          <div className="px-5 py-3 text-sm text-gray-500">
+          <div className="px-5 py-3 text-sm text-fg-subtle">
             <LoadingDots label="Loading" />
           </div>
         )}
 
         {data && data.scheduler_enabled === false && running.length === 0 && (
-          <div className="px-5 py-3 text-xs text-amber-300/90">
+          <div className="px-5 py-3 text-xs text-warn-300/90">
             In-process scheduler is disabled (DISABLE_SCHEDULER) — no jobs will fire automatically.
           </div>
         )}
@@ -79,24 +79,24 @@ export default function PipelineActivityCard() {
           <div>
             {/* Running now */}
             {running.length > 0 && (
-              <div className="px-5 py-3 border-b border-gray-800/30">
-                <div className="text-[10px] uppercase tracking-wider text-indigo-300/80 mb-2">
+              <div className="px-5 py-3 border-b border-neutral-800/30">
+                <div className="text-[10px] uppercase tracking-wider text-accent-300/80 mb-2">
                   Running now
                 </div>
                 <div className="space-y-2">
                   {running.map((r) => (
                     <div key={r.run_id} className="flex items-center gap-3 text-sm">
-                      <Spinner className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
-                      <span className="text-white font-medium shrink-0">{r.label}</span>
+                      <Spinner className="h-3.5 w-3.5 text-accent-400 shrink-0" />
+                      <span className="text-fg-strong font-medium shrink-0">{r.label}</span>
                       {r.current_phase && (
-                        <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-indigo-500/10 text-indigo-300 border-indigo-500/30 font-mono shrink-0">
+                        <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-accent-500/10 text-accent-300 border-accent-500/30 font-mono shrink-0">
                           {r.current_phase}
                         </span>
                       )}
-                      <span className="text-xs text-gray-500 truncate min-w-0" title={r.current_message ?? ''}>
+                      <span className="text-xs text-fg-subtle truncate min-w-0" title={r.current_message ?? ''}>
                         {r.current_message ?? ''}
                       </span>
-                      <span className="text-[10px] text-gray-600 font-mono ml-auto shrink-0">
+                      <span className="text-[10px] text-fg-faint font-mono ml-auto shrink-0">
                         run #{r.run_id} · {r.triggered_by}
                       </span>
                     </div>
@@ -107,11 +107,11 @@ export default function PipelineActivityCard() {
 
             {/* Upcoming */}
             <div className="px-5 py-3">
-              <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">
+              <div className="text-[10px] uppercase tracking-wider text-fg-subtle mb-2">
                 Upcoming
               </div>
               {jobs.length === 0 ? (
-                <div className="text-xs text-gray-500">
+                <div className="text-xs text-fg-subtle">
                   No jobs scheduled.
                 </div>
               ) : (
@@ -120,21 +120,21 @@ export default function PipelineActivityCard() {
                     <div key={j.id} className="flex items-center gap-3 text-sm">
                       <span className="shrink-0 w-4 flex justify-center">
                         {j.running
-                          ? <Spinner className="h-3.5 w-3.5 text-indigo-400" />
-                          : <span className="text-gray-600">•</span>}
+                          ? <Spinner className="h-3.5 w-3.5 text-accent-400" />
+                          : <span className="text-fg-faint">•</span>}
                       </span>
-                      <span className={`shrink-0 ${j.running ? 'text-white' : 'text-gray-200'}`}>
+                      <span className={`shrink-0 ${j.running ? 'text-fg-strong' : 'text-fg'}`}>
                         {j.label}
                       </span>
-                      <span className="text-xs text-gray-600 truncate min-w-0" title={j.cadence}>
+                      <span className="text-xs text-fg-faint truncate min-w-0" title={j.cadence}>
                         {j.description}
                       </span>
                       <span className="ml-auto shrink-0 flex items-baseline gap-2 font-mono text-xs">
-                        <span className={j.running ? 'text-indigo-300' : 'text-gray-300'}>
+                        <span className={j.running ? 'text-accent-300' : 'text-fg-soft'}>
                           {j.running ? 'running' : relTime(j.next_run_at, nowMs)}
                         </span>
                         {!j.running && (
-                          <span className="text-gray-600">{fmtClock(j.next_run_at)}</span>
+                          <span className="text-fg-faint">{fmtClock(j.next_run_at)}</span>
                         )}
                       </span>
                     </div>

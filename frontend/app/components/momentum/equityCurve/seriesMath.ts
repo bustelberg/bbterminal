@@ -31,6 +31,7 @@ import type {
 } from '../../../../lib/stores/momentum';
 import type { BenchmarkPrice, ComparisonItem } from '../types';
 import { computeTopDrawdowns } from '../utils';
+import { chartTheme } from '../../../../lib/chartTheme';
 import type { NetStats } from '../feeStats';
 import type { FeeBreakdownRow } from '../feeModel';
 
@@ -645,7 +646,7 @@ export function resolveSeries(
     out.push({
       id: 'universe',
       label: 'Universe (equal-weight)',
-      color: '#9ca3af', // gray-400
+      color: chartTheme.universe,
       kind: 'benchmark',
       removable: false,
       factorByMonth: universe.map,

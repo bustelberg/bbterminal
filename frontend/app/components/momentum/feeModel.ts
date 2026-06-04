@@ -189,14 +189,18 @@ function transactionDrags(
 }
 
 /** Year-end crystallization dates inside (start, end], plus `end` itself
- * for the final partial year. */
-function crystallizationDates(startMs: number, endMs: number): number[] {
+ * for the final partial year. `firstTradeMs` (the first rebalance date)
+ * suppresses any year-end that precedes the first actual trade — otherwise
+ * a January rebalance whose entry is priced at the prior trading day (which
+ * can land on the previous Dec 31) would carve out a spurious, near-empty
+ * prior-year bucket. */
+function crystallizationDates(startMs: number, endMs: number, firstTradeMs: number): number[] {
   const out: number[] = [];
   const startYear = new Date(startMs).getUTCFullYear();
   const endYear = new Date(endMs).getUTCFullYear();
   for (let y = startYear; y <= endYear; y++) {
     const dec31 = Date.parse(`${y}-12-31`);
-    if (dec31 > startMs && dec31 < endMs) out.push(dec31);
+    if (dec31 > startMs && dec31 < endMs && dec31 >= firstTradeMs) out.push(dec31);
   }
   out.push(endMs); // final (possibly partial) year
   return out;
@@ -349,8 +353,11 @@ export function computeFeeWaterfall(
   const txnDrags = transactionDrags(monthlyRecords, config.transaction_bps);
   const afterTxn = applyStepDrag(gross, txnDrags);
 
-  // (b) annual deduction at each crystallization point.
-  const crysts = crystallizationDates(startMs, endMs);
+  // (b) annual deduction at each crystallization point. The first trade's
+  // rebalance date anchors year bucketing so a prior-day entry priced into
+  // the previous calendar year doesn't spawn a spurious leading year.
+  const firstTradeMs = parseDate(closed[0].date);
+  const crysts = crystallizationDates(startMs, endMs, firstTradeMs);
   const leonteqRate = config.leonteq_annual_bps / 10000;
   const leonteqDrags: Array<{ t: number; factor: number }> = [];
   let prevC = startMs;

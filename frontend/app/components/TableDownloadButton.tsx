@@ -65,7 +65,7 @@ export default function TableDownloadButton<T>({
         aria-label="Download table"
         aria-haspopup="menu"
         aria-expanded={open}
-        className="inline-flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-indigo-300 hover:bg-white/[0.04] transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
+        className="inline-flex items-center justify-center w-7 h-7 rounded-md text-fg-muted hover:text-accent-300 hover:bg-overlay/[0.04] transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-fg-muted"
       >
         {/* Download icon — simple SVG so we don't pull in another lib. */}
         <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5" aria-hidden="true">
@@ -75,26 +75,26 @@ export default function TableDownloadButton<T>({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-full mt-1 z-30 bg-[#1e2130] border border-gray-700 rounded-lg shadow-2xl min-w-[140px] py-1"
+          className="absolute right-0 top-full mt-1 z-30 bg-popover border border-neutral-700 rounded-lg shadow-2xl min-w-[140px] py-1"
         >
           <button
             type="button"
             role="menuitem"
             onClick={handleCsv}
-            className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-white/[0.04] hover:text-white transition-colors flex items-center justify-between"
+            className="w-full text-left px-3 py-1.5 text-xs text-fg hover:bg-overlay/[0.04] hover:text-fg-strong transition-colors flex items-center justify-between"
           >
             <span>Download CSV</span>
-            <span className="text-gray-500 text-[10px] font-mono">.csv</span>
+            <span className="text-fg-subtle text-[10px] font-mono">.csv</span>
           </button>
           <button
             type="button"
             role="menuitem"
             onClick={handleXlsx}
             disabled={busy}
-            className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-white/[0.04] hover:text-white transition-colors flex items-center justify-between disabled:opacity-50"
+            className="w-full text-left px-3 py-1.5 text-xs text-fg hover:bg-overlay/[0.04] hover:text-fg-strong transition-colors flex items-center justify-between disabled:opacity-50"
           >
             <span>{busy ? 'Building…' : 'Download XLSX'}</span>
-            <span className="text-gray-500 text-[10px] font-mono">.xlsx</span>
+            <span className="text-fg-subtle text-[10px] font-mono">.xlsx</span>
           </button>
         </div>
       )}

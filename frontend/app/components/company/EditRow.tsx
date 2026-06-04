@@ -30,23 +30,23 @@ export default function EditRow({
   }
 
   return (
-    <tr className="border-b border-gray-800/30 bg-indigo-500/5">
-      <td className="px-4 py-2 text-sm text-gray-500">{company.company_id}</td>
+    <tr className="border-b border-neutral-800/30 bg-accent-500/5">
+      <td className="px-4 py-2 text-sm text-fg-subtle">{company.company_id}</td>
       <td className="px-3 py-2"><input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} /></td>
       <td className="px-3 py-2"><input value={ticker} onChange={(e) => setTicker(e.target.value)} className={inputCls} /></td>
       <td className="px-3 py-2">
         <input list="edit-exchange" value={exchange} onChange={(e) => setExchange(e.target.value)} className={inputCls} />
         <datalist id="edit-exchange">{exchangeOptions.map((o) => <option key={o} value={o} />)}</datalist>
       </td>
-      <td className="px-3 py-2 text-gray-400">{company.country ?? '—'}</td>
-      <td className="px-3 py-2 text-gray-600 text-xs">—</td>
+      <td className="px-3 py-2 text-fg-muted">{company.country ?? '—'}</td>
+      <td className="px-3 py-2 text-fg-faint text-xs">—</td>
       <td className="px-3 py-2">
         <div className="flex gap-1.5">
-          <button onClick={handleSave} disabled={saving} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 transition-colors inline-flex items-center gap-1.5">
-            {saving && <Spinner size={12} className="h-3 w-3 text-white" />}
+          <button onClick={handleSave} disabled={saving} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-accent-600 hover:bg-accent-500 text-fg-strong disabled:opacity-50 transition-colors inline-flex items-center gap-1.5">
+            {saving && <Spinner size={12} className="h-3 w-3 text-fg-strong" />}
             {saving ? 'Saving…' : 'Save'}
           </button>
-          <button onClick={onCancel} className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-colors">
+          <button onClick={onCancel} className="px-3 py-1.5 rounded-lg text-xs font-medium text-fg-muted hover:text-fg-strong hover:bg-overlay/5 transition-colors">
             Cancel
           </button>
         </div>

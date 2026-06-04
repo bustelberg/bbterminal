@@ -208,6 +208,25 @@ def run_backtest(
         # "Computing signals for May 2024…".
         return d.isoformat() if sub_monthly else d.strftime("%b %Y")
 
+    # Global trading calendar (union of every company's price dates). Used
+    # to price each rebalance at the PRIOR trading day's close — the same
+    # bar the signals are computed from (strict-`<` the rebalance date). So
+    # a first-Wednesday rebalance enters at Tuesday's close, first-Monday at
+    # the prior Friday's close, etc. — decision and execution on the same
+    # observable close, no look-ahead. The signal cutoff still uses the
+    # unshifted `period_date`; only the price lookups shift.
+    _all_trading_days = (
+        pd.DatetimeIndex(np.unique(np.concatenate([s.index.values for s in price_index.values()])))
+        if price_index else pd.DatetimeIndex([])
+    )
+
+    def _prev_trading_ts(d: date) -> pd.Timestamp:
+        """The last trading day strictly before `d`. Falls back to `d`
+        itself when there's no earlier bar (start of data)."""
+        ts = pd.Timestamp(d)
+        pos = _all_trading_days.searchsorted(ts, side="left")
+        return _all_trading_days[pos - 1] if pos > 0 else ts
+
     period_records: list[PeriodRecord] = []
     # Roll up empty-selection events into a single warning emitted at
     # the end. Each entry is (period_date, empty_reason); we emit a
@@ -324,8 +343,14 @@ def run_backtest(
         # the effective `open_as_of`. Branches 1 and 2 above already
         # `continue`d on empty `signals_df`, so we always have a non-
         # empty candidate set here.
-        entry_ts = pd.Timestamp(period_date)
-        closed_exit_ts = pd.Timestamp(next_period)
+        # Price entries/exits at the prior trading day's close (see
+        # `_prev_trading_ts`). The open period's exit is a valuation at the
+        # latest available close — a "value as of today" point, not a
+        # rebalance boundary — so it is NOT shifted back.
+        entry_ts = _prev_trading_ts(period_date)
+        closed_exit_ts = (
+            pd.Timestamp(next_period) if is_open_iter else _prev_trading_ts(next_period)
+        )
         # Variant-sweep cache short-circuit: when the orchestrator
         # precomputed per-period baselines for this (universe, freq),
         # reuse the cached `(return_pct, n_constituents)` instead of
@@ -376,6 +401,8 @@ def run_backtest(
                 benchmark_price_index=benchmark_price_index,
                 benchmark_meta=benchmark_meta,
                 record_label=_record_label(period_date),
+                price_entry_ts=entry_ts,
+                price_exit_ts=closed_exit_ts,
             )
         else:
             outcome = compute_selection_period(
@@ -390,6 +417,8 @@ def run_backtest(
                 scored_df=scored_df,
                 price_cache=price_cache,
                 selection_cache=selection_cache,
+                price_entry_ts=entry_ts,
+                price_exit_ts=closed_exit_ts,
             )
 
         # Forward any warnings the branch raised. Done before the

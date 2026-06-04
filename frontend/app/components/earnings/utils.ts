@@ -19,6 +19,7 @@
  */
 
 import type { Cadence, MetricRow } from './types';
+import { chartTheme } from '../../../lib/chartTheme';
 
 // ─── Metric extractors ─────────────────────────────────────────────
 
@@ -363,11 +364,7 @@ export function stdDev(values: number[]): number | null {
  * on the /earnings page. Different shape from `momentum/utils.ts`'s
  * `tooltipStyle` (which is an object of style slots); each page has its
  * own to match its visual treatment. */
-export const tooltipStyle = {
-  backgroundColor: '#151821',
-  border: '1px solid #374151',
-  borderRadius: '8px',
-};
+export const tooltipStyle = chartTheme.tooltipCard.contentStyle;
 
 // ─── Number formatters (earnings semantics — input is a FRACTION) ──
 

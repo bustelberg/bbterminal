@@ -1,36 +1,174 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/* Dark is the default theme (tokens below live on :root). A light theme is a
+   set of token overrides under `:root[data-theme="light"]` near the bottom of
+   this file; the no-FOUC script in `app/layout.tsx` sets `data-theme` before
+   paint. Switch at runtime via the sidebar toggle (`ThemeToggle`). */
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0f1117;
-    --foreground: #e5e7eb;
-  }
+/* ── Design tokens ─────────────────────────────────────────────────────────
+   The app's bespoke dark surface palette, centralized. Every surface that was
+   an inline `bg-[#…]` now resolves through one of these (`bg-page`, `bg-card`,
+   …) — so re-theming the whole site is editing the seven values below, not 250
+   scattered literals. Tailwind v4 auto-generates bg-/text-/border-/ring-/divide-
+   utilities (and `/opacity` modifiers, e.g. `bg-page/40`) for each `--color-*`.
+
+   Semantic accent/return colours have their own ramps (below): `accent`
+   (brand), `pos` (return-up), `neg` (return-down), `warn`. Each is aliased to
+   a Tailwind ramp today, so re-skinning is repointing one ramp here — e.g.
+   `--color-accent-500: var(--color-violet-500)` swaps the whole brand colour.
+   ────────────────────────────────────────────────────────────────────────── */
+@theme {
+  --color-page: #0f1117;       /* base page background */
+  --color-sidebar: #0b0d13;    /* left nav rail */
+  --color-card: #151821;       /* card / panel surface */
+  --color-card-alt: #131726;   /* indigo-tinted card (derived universes) */
+  --color-elevated: #1a1d27;   /* elevated surface */
+  --color-inset: #181b25;      /* inset surface */
+  --color-popover: #1e2130;    /* tooltips / floating menus */
+
+  /* Semantic colour ramps. Aliased to Tailwind ramps (zero visual change);
+     repoint a ramp to re-skin every `accent-`/`pos-`/`neg-`/`warn-` class. */
+  /* accent (brand) — buttons, active nav, links, focus rings */
+  --color-accent-200: var(--color-indigo-200);
+  --color-accent-300: var(--color-indigo-300);
+  --color-accent-400: var(--color-indigo-400);
+  --color-accent-500: var(--color-indigo-500);
+  --color-accent-600: var(--color-indigo-600);
+  --color-accent-900: var(--color-indigo-900);
+  /* pos — positive returns / success */
+  --color-pos-300: var(--color-emerald-300);
+  --color-pos-400: var(--color-emerald-400);
+  --color-pos-500: var(--color-emerald-500);
+  --color-pos-600: var(--color-emerald-600);
+  --color-pos-800: var(--color-emerald-800);
+  /* neg — negative returns / errors */
+  --color-neg-100: var(--color-rose-100);
+  --color-neg-200: var(--color-rose-200);
+  --color-neg-300: var(--color-rose-300);
+  --color-neg-400: var(--color-rose-400);
+  --color-neg-500: var(--color-rose-500);
+  --color-neg-600: var(--color-rose-600);
+  /* warn — warnings / out-of-scope */
+  --color-warn-100: var(--color-amber-100);
+  --color-warn-200: var(--color-amber-200);
+  --color-warn-300: var(--color-amber-300);
+  --color-warn-400: var(--color-amber-400);
+  --color-warn-500: var(--color-amber-500);
+  --color-warn-600: var(--color-amber-600);
+  --color-warn-800: var(--color-amber-800);
+
+  /* ── Foreground (text / icon) ramp ──────────────────────────────────────
+     The light-on-dark text scale, brightest → faintest. Aliased to gray
+     today (zero visual change); the [data-theme="light"] block below flips
+     the whole ramp to dark-on-light. Use `text-fg`, `text-fg-muted`, … */
+  --color-fg-strong: var(--color-white);     /* emphasized headings / active values */
+  --color-fg-bright: var(--color-gray-100);  /* brightest body */
+  --color-fg:        var(--color-gray-200);  /* primary body text */
+  --color-fg-soft:   var(--color-gray-300);  /* dimmed body / sub-headings */
+  --color-fg-muted:  var(--color-gray-400);  /* labels / secondary */
+  --color-fg-subtle: var(--color-gray-500);  /* captions / placeholders */
+  --color-fg-faint:  var(--color-gray-600);  /* hints */
+  --color-fg-dim:    var(--color-gray-700);  /* faintest text */
+
+  /* ── Neutral ramp ───────────────────────────────────────────────────────
+     Borders, dividers, neutral chips + control surfaces. Numeric steps
+     mirror Tailwind's gray scale (exact today). Use `border-neutral-800`,
+     `bg-neutral-700`, `divide-neutral-800`, … */
+  --color-neutral-500: var(--color-gray-500);
+  --color-neutral-600: var(--color-gray-600);
+  --color-neutral-700: var(--color-gray-700);
+  --color-neutral-800: var(--color-gray-800);
+  --color-neutral-900: var(--color-gray-900);
+  --color-neutral-950: var(--color-gray-950);
+
+  /* Hover/active wash (white at low alpha) + modal scrim (black). Split so a
+     light theme can flip the wash to black while scrims stay dark. Use
+     `hover:bg-overlay/5`, `bg-scrim/60`. */
+  --color-overlay: var(--color-white);
+  --color-scrim:   var(--color-black);
 }
+
+/* ── Light theme ────────────────────────────────────────────────────────────
+   Token overrides only — every component already routes through the tokens
+   above, so this block is the entire light palette. `:root[data-theme=…]`
+   outranks the `:root` defaults regardless of source order. Surfaces + the
+   fg/neutral ramps invert; the accent/pos/neg/warn *text* shades (300/400)
+   darken for contrast on white while the solid button steps (500/600) stay
+   vivid; the hover wash flips white→black. Tune freely — it's all here.
+   (Charts read `lib/chartTheme.ts`, which is still dark-tuned — a known
+   follow-up if you want chart chrome to follow the theme.) */
+:root[data-theme="light"] {
+  --color-page: #f6f7f9;
+  --color-sidebar: #ffffff;
+  --color-card: #ffffff;
+  --color-card-alt: #eef1fb;   /* accent-tinted card */
+  --color-elevated: #ffffff;
+  --color-inset: #f0f2f5;
+  --color-popover: #ffffff;
+
+  /* Foreground ramp — dark-on-light, brightest(=darkest text) → faintest. */
+  --color-fg-strong: #0b0d13;
+  --color-fg-bright: #111827;
+  --color-fg:        #1f2937;
+  --color-fg-soft:   #374151;
+  --color-fg-muted:  #4b5563;
+  --color-fg-subtle: #6b7280;
+  --color-fg-faint:  #9ca3af;
+  --color-fg-dim:    #cbd1d9;
+
+  /* Neutral ramp — borders/surfaces become light greys. */
+  --color-neutral-500: #9ca3af;
+  --color-neutral-600: #cbd5e1;
+  --color-neutral-700: #d1d5db;
+  --color-neutral-800: #e5e7eb;
+  --color-neutral-900: #eef0f3;
+  --color-neutral-950: #f6f7f9;
+
+  /* Darken the as-text accent/return shades for contrast on white. Solid
+     button/fill steps (500/600) keep the default vivid ramp. */
+  --color-accent-300: var(--color-indigo-600);
+  --color-accent-400: var(--color-indigo-600);
+  --color-pos-300:    var(--color-emerald-600);
+  --color-pos-400:    var(--color-emerald-600);
+  --color-neg-300:    var(--color-rose-600);
+  --color-neg-400:    var(--color-rose-600);
+  --color-warn-300:   var(--color-amber-600);
+  --color-warn-400:   var(--color-amber-600);
+
+  /* Hover/active wash flips to black; scrims stay dark. */
+  --color-overlay: var(--color-black);
+}
+
+/* ── Style presets (optional, orthogonal to the colour theme) ────────────────
+   Flip `data-radius` / `data-density` on <html> (same runtime mechanism as
+   `data-theme`) to reshape the whole UI without touching a single component —
+   corner roundness and overall scale are entirely token-driven. `rounded-full`
+   (pills/avatars) intentionally stays full. Wire a control like `ThemeToggle`
+   if you want these in the UI. */
+:root[data-radius="sharp"] { --radius-sm: 1px; --radius-md: 2px; --radius-lg: 3px; --radius-xl: 4px; --radius-2xl: 6px; }
+:root[data-radius="round"] { --radius-sm: .375rem; --radius-md: .5rem; --radius-lg: .75rem; --radius-xl: 1rem; --radius-2xl: 1.25rem; }
+/* The app sizes everything in `em`/`rem` off the root font-size, so this one
+   value scales the entire interface up or down. */
+:root[data-density="compact"]     { font-size: 20px; }
+:root[data-density="comfortable"] { font-size: 24px; }
 
 html {
   font-size: 22px;
-  background: var(--background);
+  background: var(--color-page);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  color: var(--color-fg);
   font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
 }
 
-/* Smooth scrollbars */
+/* Smooth scrollbars (track transparent; thumb on the neutral ramp so it
+   follows the theme). */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -39,9 +177,9 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #374151;
+  background: var(--color-neutral-700);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #4b5563;
+  background: var(--color-neutral-600);
 }

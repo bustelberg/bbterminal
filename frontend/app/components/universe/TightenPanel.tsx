@@ -140,27 +140,27 @@ export default function TightenPanel({ base, specs, defaults, onClose, onCreated
   };
 
   return (
-    <div className="ml-6 bg-[#131726] border border-indigo-900/40 rounded-xl px-5 py-4 space-y-4">
+    <div className="ml-6 bg-card-alt border border-accent-900/40 rounded-xl px-5 py-4 space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-white text-sm font-medium">Tighten {base.label}</h3>
-        <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-xs">Close</button>
+        <h3 className="text-fg-strong text-sm font-medium">Tighten {base.label}</h3>
+        <button onClick={onClose} className="text-fg-subtle hover:text-fg-soft text-xs">Close</button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
-          <label className="text-gray-500 text-[11px] uppercase tracking-wider">New universe label</label>
+          <label className="text-fg-subtle text-[11px] uppercase tracking-wider">New universe label</label>
           <input
             value={label}
             onChange={e => setLabel(e.target.value)}
-            className="mt-1 w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+            className="mt-1 w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-sm text-fg-strong focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
           />
         </div>
         <div>
-          <label className="text-gray-500 text-[11px] uppercase tracking-wider">Description (optional)</label>
+          <label className="text-fg-subtle text-[11px] uppercase tracking-wider">Description (optional)</label>
           <input
             value={description}
             onChange={e => setDescription(e.target.value)}
-            className="mt-1 w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+            className="mt-1 w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-sm text-fg-strong focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
           />
         </div>
       </div>
@@ -169,17 +169,17 @@ export default function TightenPanel({ base, specs, defaults, onClose, onCreated
         {specs.map(spec => {
           const entry = config[spec.key] ?? { enabled: false };
           return (
-            <div key={spec.key} className="bg-[#0f1117] border border-gray-800 rounded-lg px-3 py-2">
-              <label className="flex items-center gap-2 text-sm text-gray-200 cursor-pointer">
+            <div key={spec.key} className="bg-page border border-neutral-800 rounded-lg px-3 py-2">
+              <label className="flex items-center gap-2 text-sm text-fg cursor-pointer">
                 <input
                   type="checkbox"
                   checked={!!entry.enabled}
                   onChange={e => updateEntry(spec.key, { enabled: e.target.checked })}
-                  className="accent-indigo-500"
+                  className="accent-accent-500"
                 />
                 <span className="font-medium">{spec.label}</span>
                 {!spec.components && spec.op && (
-                  <span className="text-gray-500 text-xs font-mono">{spec.op}</span>
+                  <span className="text-fg-subtle text-xs font-mono">{spec.op}</span>
                 )}
               </label>
               {entry.enabled && (
@@ -189,29 +189,29 @@ export default function TightenPanel({ base, specs, defaults, onClose, onCreated
                       const v = entry.components?.[c.code] ?? c.default;
                       return (
                         <div key={c.code} className="flex items-center gap-2 text-xs">
-                          <span className="text-gray-400 flex-1">{c.label}</span>
+                          <span className="text-fg-muted flex-1">{c.label}</span>
                           <input
                             type="number"
                             step="0.5"
                             value={v}
                             onChange={e => updateComponent(spec.key, c.code, parseFloat(e.target.value))}
-                            className="w-24 bg-[#0f1117] border border-gray-700 rounded px-2 py-1 text-right font-mono text-white focus:border-indigo-500 outline-none"
+                            className="w-24 bg-page border border-neutral-700 rounded px-2 py-1 text-right font-mono text-fg-strong focus:border-accent-500 outline-none"
                           />
-                          <span className="text-gray-500 w-4">%</span>
+                          <span className="text-fg-subtle w-4">%</span>
                         </div>
                       );
                     })
                   ) : (
                     <div className="flex items-center gap-2 text-xs">
-                      <span className="text-gray-400 flex-1">Threshold</span>
+                      <span className="text-fg-muted flex-1">Threshold</span>
                       <input
                         type="number"
                         step="0.5"
                         value={entry.threshold ?? spec.default_threshold}
                         onChange={e => updateEntry(spec.key, { threshold: parseFloat(e.target.value) })}
-                        className="w-24 bg-[#0f1117] border border-gray-700 rounded px-2 py-1 text-right font-mono text-white focus:border-indigo-500 outline-none"
+                        className="w-24 bg-page border border-neutral-700 rounded px-2 py-1 text-right font-mono text-fg-strong focus:border-accent-500 outline-none"
                       />
-                      <span className="text-gray-500 w-4">%</span>
+                      <span className="text-fg-subtle w-4">%</span>
                     </div>
                   )}
                 </div>
@@ -225,43 +225,43 @@ export default function TightenPanel({ base, specs, defaults, onClose, onCreated
         <button
           onClick={runPreview}
           disabled={previewing}
-          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 text-white transition-colors disabled:opacity-50"
+          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-neutral-700 hover:bg-neutral-600 text-fg-strong transition-colors disabled:opacity-50"
         >
           {previewing ? 'Previewing...' : 'Preview'}
         </button>
         <button
           onClick={create}
           disabled={creating}
-          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50"
+          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-accent-600 hover:bg-accent-500 text-fg-strong transition-colors disabled:opacity-50"
         >
           {creating ? 'Creating...' : 'Save derived universe'}
         </button>
-        {errMsg && <span className="text-rose-400 text-xs">{errMsg}</span>}
+        {errMsg && <span className="text-neg-400 text-xs">{errMsg}</span>}
       </div>
 
       {preview && (
-        <div className="bg-[#0f1117] border border-gray-800 rounded-lg p-3 space-y-2">
-          <div className="text-xs text-gray-400">
-            <span className="font-mono text-white">{preview.passed_rows.toLocaleString()}</span>
+        <div className="bg-page border border-neutral-800 rounded-lg p-3 space-y-2">
+          <div className="text-xs text-fg-muted">
+            <span className="font-mono text-fg-strong">{preview.passed_rows.toLocaleString()}</span>
             {' / '}
             <span className="font-mono">{preview.base_rows.toLocaleString()}</span>
             {' rows pass'}
             {preview.missing_metrics > 0 && (
-              <span className="text-amber-400">
+              <span className="text-warn-400">
                 {' '} · {preview.missing_metrics.toLocaleString()} excluded for missing metrics
               </span>
             )}
           </div>
           {preview.monthly_counts.length > 0 && (
             <details>
-              <summary className="text-gray-500 text-xs cursor-pointer hover:text-gray-300">
+              <summary className="text-fg-subtle text-xs cursor-pointer hover:text-fg-soft">
                 Monthly counts ({preview.monthly_counts.length} months)
               </summary>
-              <div className="mt-2 max-h-40 overflow-auto text-xs font-mono text-gray-400 grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1">
+              <div className="mt-2 max-h-40 overflow-auto text-xs font-mono text-fg-muted grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1">
                 {preview.monthly_counts.map(m => (
                   <div key={m.month} className="flex justify-between">
                     <span>{m.month}</span>
-                    <span className="text-gray-500">{m.count}{m.base_count != null && ` / ${m.base_count}`}</span>
+                    <span className="text-fg-subtle">{m.count}{m.base_count != null && ` / ${m.base_count}`}</span>
                   </div>
                 ))}
               </div>

@@ -12,13 +12,14 @@ import {
 } from 'recharts';
 import CollapsibleCard from '../CollapsibleCard';
 import { tooltipStyle } from '../utils';
+import { chartTheme } from '../../../../lib/chartTheme';
 import type { YearSubplot } from './seriesMath';
 
 type Mode = 'cumulative' | 'alpha';
 
-const STRATEGY_COLOR = '#818cf8'; // indigo-400 — matches active series default
-const UNIVERSE_COLOR = '#9ca3af'; // gray-400 — matches universe baseline in main chart
-const ALPHA_COLOR = '#f59e0b';    // amber-500 — distinct from strategy + universe
+const STRATEGY_COLOR = chartTheme.accent;   // matches active series default
+const UNIVERSE_COLOR = chartTheme.universe; // matches universe baseline in main chart
+const ALPHA_COLOR = chartTheme.warn;        // distinct from strategy + universe
 
 type Props = {
   subplots: YearSubplot[];
@@ -59,7 +60,7 @@ export default function YearlySubplotsGrid({
       title={title}
       rightSlot={
         mode === 'cumulative' ? (
-          <span className="flex items-center gap-3 text-[11px] text-gray-500">
+          <span className="flex items-center gap-3 text-[11px] text-fg-subtle">
             <span className="inline-flex items-center gap-1.5">
               <span className="inline-block w-2.5 h-0.5 rounded" style={{ background: strategyColor }} />
               Strategy
@@ -70,7 +71,7 @@ export default function YearlySubplotsGrid({
             </span>
           </span>
         ) : (
-          <span className="flex items-center gap-1.5 text-[11px] text-gray-500">
+          <span className="flex items-center gap-1.5 text-[11px] text-fg-subtle">
             <span className="inline-block w-2.5 h-0.5 rounded" style={{ background: ALPHA_COLOR }} />
             Strategy − Universe (% points)
           </span>
@@ -141,20 +142,20 @@ function YearMiniChart({
       : (lastValid?.alpha ?? 0) > 0;
 
   return (
-    <div className="bg-[#0f1117]/60 border border-gray-800/40 rounded-lg p-2">
+    <div className="bg-page/60 border border-neutral-800/40 rounded-lg p-2">
       <div className="flex items-center justify-between mb-1 px-1">
-        <span className="text-[11px] text-gray-400 font-mono">{subplot.year}</span>
+        <span className="text-[11px] text-fg-muted font-mono">{subplot.year}</span>
         {headline != null && (
           <span className="flex items-center gap-1 text-[11px] font-mono">
             {beat && (
               <span
-                className="text-emerald-400"
+                className="text-pos-400"
                 title={mode === 'cumulative' ? 'Strategy beat the universe this year' : 'Positive alpha this year'}
               >
                 ✓
               </span>
             )}
-            <span className={headline >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+            <span className={headline >= 0 ? 'text-pos-400' : 'text-neg-400'}>
               {`${headline >= 0 ? '+' : ''}${headline.toFixed(1)}%`}
             </span>
           </span>
@@ -162,10 +163,10 @@ function YearMiniChart({
       </div>
       <ResponsiveContainer width="100%" height={110}>
         <LineChart data={rows} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+          <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
           <XAxis dataKey="date" hide />
           <YAxis
-            tick={{ fill: '#6b7280', fontSize: 9 }}
+            tick={{ fill: chartTheme.axisTick, fontSize: 9 }}
             tickLine={false}
             axisLine={false}
             width={28}
@@ -184,7 +185,7 @@ function YearMiniChart({
               return [`${v >= 0 ? '+' : ''}${v.toFixed(2)}%`, label];
             }}
           />
-          <ReferenceLine y={0} stroke="#374151" strokeDasharray="2 2" />
+          <ReferenceLine y={0} stroke={chartTheme.zeroLine} strokeDasharray="2 2" />
           {mode === 'cumulative' ? (
             <>
               <Line
@@ -221,7 +222,7 @@ function YearMiniChart({
           {markerX != null && (
             <ReferenceLine
               x={markerX}
-              stroke="#ef4444"
+              stroke={chartTheme.goLiveLine}
               strokeDasharray="4 3"
               strokeWidth={1}
               ifOverflow="extendDomain"

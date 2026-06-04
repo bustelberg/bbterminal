@@ -9,11 +9,12 @@ import InfoTip from '../InfoTip';
 import Spinner from '../Spinner';
 import { MC, type MetricRow } from './types';
 import { annualSeries, computeCAGR, fmtNum, fmtPct, tooltipStyle } from './utils';
+import { chartTheme } from '../../../lib/chartTheme';
 
 // Series colors — must match ForwardPEChart and RelativeGrowthChart's
 // A/B treatment so the user reads them consistently across panels.
-const COLOR_A = '#818cf8'; // indigo-400
-const COLOR_B = '#f59e0b'; // amber-500
+const COLOR_A = chartTheme.accent; // primary series
+const COLOR_B = chartTheme.warn;   // comparison series
 
 type Props = {
   metrics: MetricRow[];
@@ -54,12 +55,12 @@ export default function FCFShareChart({ metrics, metricsB, labelA, labelB, loadi
   const latestB = seriesB.length > 0 ? seriesB[seriesB.length - 1].value : null;
 
   if (seriesA.length === 0 && seriesB.length === 0) {
-    return <div className="text-gray-500 text-sm py-8 text-center">No FCF/share data. Refresh to load.</div>;
+    return <div className="text-fg-subtle text-sm py-8 text-center">No FCF/share data. Refresh to load.</div>;
   }
 
   return (
     <>
-      <div className="text-gray-500 text-xs mb-2 flex items-center gap-1 flex-wrap">
+      <div className="text-fg-subtle text-xs mb-2 flex items-center gap-1 flex-wrap">
         FCF per share (raw values) <InfoTip text="Free Cash Flow per share over time. Negative values are shaded red. CAGR is computed from positive values only." />
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1 mb-2">
@@ -68,7 +69,7 @@ export default function FCFShareChart({ metrics, metricsB, labelA, labelB, loadi
           <div className="font-mono text-xs" style={{ color: COLOR_A }}>{fmtPct(cagrA)}</div>
         </div>
         <div className="flex items-center gap-1">
-          <div className="text-gray-500 text-[11px]">Latest {labelA ?? 'A'}</div>
+          <div className="text-fg-subtle text-[11px]">Latest {labelA ?? 'A'}</div>
           <div className="font-mono text-xs" style={{ color: COLOR_A }}>{fmtNum(latestA, 2)}</div>
         </div>
         {hasB && seriesB.length > 0 && (
@@ -78,30 +79,30 @@ export default function FCFShareChart({ metrics, metricsB, labelA, labelB, loadi
               <div className="font-mono text-xs" style={{ color: COLOR_B }}>{fmtPct(cagrB)}</div>
             </div>
             <div className="flex items-center gap-1">
-              <div className="text-gray-500 text-[11px]">Latest {labelB ?? 'B'}</div>
+              <div className="text-fg-subtle text-[11px]">Latest {labelB ?? 'B'}</div>
               <div className="font-mono text-xs" style={{ color: COLOR_B }}>{fmtNum(latestB, 2)}</div>
             </div>
           </>
         )}
         {hasB && seriesB.length === 0 && loadingB && (
           <div className="flex items-center gap-1.5">
-            <div className="text-gray-500 text-[11px]">Loading {labelB ?? 'B'}</div>
+            <div className="text-fg-subtle text-[11px]">Loading {labelB ?? 'B'}</div>
             <Spinner size={10} />
           </div>
         )}
       </div>
       <ResponsiveContainer width="100%" height={280}>
         <LineChart data={merged} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1e2330" />
-          <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickFormatter={(v: string) => v.slice(0, 4)} />
+          <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
+          <XAxis dataKey="date" tick={{ fontSize: 10, fill: chartTheme.axisTick }} tickFormatter={(v: string) => v.slice(0, 4)} />
           <YAxis
-            tick={{ fontSize: 11, fill: '#6b7280' }}
+            tick={{ fontSize: 11, fill: chartTheme.axisTick }}
             tickFormatter={(v: number) => v.toFixed(1)}
           />
-          {hasNegative && <ReferenceLine y={0} stroke="#6b7280" strokeDasharray="3 3" />}
+          {hasNegative && <ReferenceLine y={0} stroke={chartTheme.axisTick} strokeDasharray="3 3" />}
           <Tooltip
             contentStyle={tooltipStyle}
-            labelStyle={{ color: '#9ca3af' }}
+            labelStyle={{ color: chartTheme.axisLabel }}
             formatter={(v, name) => {
               const lab = name === 'a' ? (labelA ?? 'A') : name === 'b' ? (labelB ?? 'B') : String(name);
               return [Number(v).toFixed(2), lab];
@@ -117,7 +118,7 @@ export default function FCFShareChart({ metrics, metricsB, labelA, labelB, loadi
             dot={(props: { cx?: number; cy?: number; payload?: { a?: number } }) => {
               const { cx, cy, payload } = props;
               if (payload && payload.a != null && payload.a < 0) {
-                return <circle cx={cx} cy={cy} r={3} fill="#f87171" stroke="#f87171" />;
+                return <circle cx={cx} cy={cy} r={3} fill={chartTheme.neg} stroke={chartTheme.neg} />;
               }
               return <circle cx={cx} cy={cy} r={0} fill="none" stroke="none" />;
             }}
@@ -133,7 +134,7 @@ export default function FCFShareChart({ metrics, metricsB, labelA, labelB, loadi
               dot={(props: { cx?: number; cy?: number; payload?: { b?: number } }) => {
                 const { cx, cy, payload } = props;
                 if (payload && payload.b != null && payload.b < 0) {
-                  return <circle cx={cx} cy={cy} r={3} fill="#dc2626" stroke="#dc2626" />;
+                  return <circle cx={cx} cy={cy} r={3} fill={chartTheme.negDeep} stroke={chartTheme.negDeep} />;
                 }
                 return <circle cx={cx} cy={cy} r={0} fill="none" stroke="none" />;
               }}

@@ -116,7 +116,7 @@ export default function YearlyBreakdown({
       <div className="overflow-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-gray-800/40 text-gray-500 text-xs">
+            <tr className="border-b border-neutral-800/40 text-fg-subtle text-xs">
               <th className="px-5 py-2.5 text-left font-medium">
                 Year<CellInfoTip>Calendar year. Each cell shows the series&apos; cumulative return across that year (Jan 1 → Dec 31, or partial for the latest year).</CellInfoTip>
               </th>
@@ -138,19 +138,19 @@ export default function YearlyBreakdown({
               return (
                 <Fragment key={y}>
                   <tr
-                    className={`border-b border-gray-800/20 hover:bg-white/[0.02] cursor-pointer ${isGoLiveYear ? 'border-l-2 border-l-rose-500/70' : ''}`}
+                    className={`border-b border-neutral-800/20 hover:bg-overlay/[0.02] cursor-pointer ${isGoLiveYear ? 'border-l-2 border-l-neg-500/70' : ''}`}
                     onClick={() => setExpandedYear(isExpanded ? null : y)}
                   >
-                    <td className="px-5 py-2 text-gray-200 font-mono">
+                    <td className="px-5 py-2 text-fg font-mono">
                       <span className="inline-flex items-center gap-1.5">
-                        <span className="text-gray-500 w-3 text-xs">{isExpanded ? '▾' : '▸'}</span>
+                        <span className="text-fg-subtle w-3 text-xs">{isExpanded ? '▾' : '▸'}</span>
                         {y}
                         {isGoLiveYear && (
                           <span
-                            className="inline-flex items-center gap-1 text-[10px] text-rose-400"
+                            className="inline-flex items-center gap-1 text-[10px] text-neg-400"
                             title={`Strategy went live ${markerDate}`}
                           >
-                            <span className="inline-block w-2.5 border-t border-dashed border-rose-400" />
+                            <span className="inline-block w-2.5 border-t border-dashed border-neg-400" />
                             go-live {markerDate!.slice(5)}
                           </span>
                         )}
@@ -171,10 +171,10 @@ export default function YearlyBreakdown({
                       return (
                         <td
                           key={s.id}
-                          className={`px-3 py-2 text-right font-mono ${v != null ? (v >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}
+                          className={`px-3 py-2 text-right font-mono ${v != null ? (v >= 0 ? 'text-pos-400' : 'text-neg-400') : 'text-fg-faint'}`}
                         >
                           {v != null ? fmtPct(v) : '—'}
-                          {netY != null && <span className="text-gray-500">{parenPct(netY)}</span>}
+                          {netY != null && <span className="text-fg-subtle">{parenPct(netY)}</span>}
                         </td>
                       );
                     })}
@@ -182,16 +182,16 @@ export default function YearlyBreakdown({
                   {isExpanded && monthlyForExpanded?.months.map((m) => {
                     const isGoLiveMonth = markerDate != null && m === markerDate.slice(0, 7);
                     return (
-                    <tr key={`${y}-${m}`} className={`border-b border-gray-800/10 bg-white/[0.015] ${isGoLiveMonth ? 'border-l-2 border-l-rose-500/70' : ''}`}>
-                      <td className="pl-12 pr-5 py-1.5 text-gray-500 font-mono text-xs">
+                    <tr key={`${y}-${m}`} className={`border-b border-neutral-800/10 bg-overlay/[0.015] ${isGoLiveMonth ? 'border-l-2 border-l-neg-500/70' : ''}`}>
+                      <td className="pl-12 pr-5 py-1.5 text-fg-subtle font-mono text-xs">
                         <span className="inline-flex items-center gap-1.5">
                           {MONTH_NAMES[parseInt(m.slice(5), 10) - 1]}
                           {isGoLiveMonth && (
                             <span
-                              className="inline-flex items-center gap-1 text-[10px] text-rose-400"
+                              className="inline-flex items-center gap-1 text-[10px] text-neg-400"
                               title={`Strategy went live ${markerDate}`}
                             >
-                              <span className="inline-block w-2.5 border-t border-dashed border-rose-400" />
+                              <span className="inline-block w-2.5 border-t border-dashed border-neg-400" />
                               go-live {markerDate!.slice(5)}
                             </span>
                           )}
@@ -202,7 +202,7 @@ export default function YearlyBreakdown({
                         return (
                           <td
                             key={s.id}
-                            className={`px-3 py-1.5 text-right font-mono text-xs ${v != null ? (v >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}
+                            className={`px-3 py-1.5 text-right font-mono text-xs ${v != null ? (v >= 0 ? 'text-pos-400' : 'text-neg-400') : 'text-fg-faint'}`}
                           >
                             {v != null ? fmtPct(v) : '—'}
                           </td>
@@ -217,44 +217,44 @@ export default function YearlyBreakdown({
           </tbody>
         </table>
       </div>
-      <div className="px-5 py-3 border-t border-gray-800/40 flex items-center gap-4 flex-wrap">
-        <label className="text-xs text-gray-400 font-medium">From month:</label>
+      <div className="px-5 py-3 border-t border-neutral-800/40 flex items-center gap-4 flex-wrap">
+        <label className="text-xs text-fg-muted font-medium">From month:</label>
         <input
           type="month"
           value={customFromMonth}
           min={alignedSeries.windowStart ?? undefined}
           max={alignedSeries.windowEnd ?? undefined}
           onChange={(e) => setCustomFromMonth(e.target.value)}
-          className="bg-[#0f1117] border border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+          className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
         />
         {customFromMonth && (
           <button
             onClick={() => setCustomFromMonth('')}
-            className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+            className="text-xs text-fg-subtle hover:text-fg-soft transition-colors"
           >
             clear
           </button>
         )}
         {customRangeReturn ? (
           <div className="flex items-center gap-4 text-xs ml-auto flex-wrap">
-            <span className="text-gray-500 font-mono">{customRangeReturn.fromDate} → {customRangeReturn.toDate}</span>
+            <span className="text-fg-subtle font-mono">{customRangeReturn.fromDate} → {customRangeReturn.toDate}</span>
             {customRangeReturn.perSeries.map((s) => (
-              <span key={s.id} className="text-gray-400 inline-flex items-center gap-1.5">
+              <span key={s.id} className="text-fg-muted inline-flex items-center gap-1.5">
                 <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: s.color }} />
                 {s.label}:{' '}
                 {s.ret != null ? (
-                  <span className={`font-mono ${s.ret >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  <span className={`font-mono ${s.ret >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
                     {fmtPct(s.ret)}
-                    {s.netRet != null && <span className="text-gray-500">{parenPct(s.netRet)}</span>}
+                    {s.netRet != null && <span className="text-fg-subtle">{parenPct(s.netRet)}</span>}
                   </span>
                 ) : (
-                  <span className="font-mono text-gray-600">—</span>
+                  <span className="font-mono text-fg-faint">—</span>
                 )}
               </span>
             ))}
           </div>
         ) : (
-          <span className="text-xs text-gray-500">Cumulative return from picked month through end of aligned window.</span>
+          <span className="text-xs text-fg-subtle">Cumulative return from picked month through end of aligned window.</span>
         )}
       </div>
     </CollapsibleCard>

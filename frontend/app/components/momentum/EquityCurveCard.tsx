@@ -343,9 +343,9 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
   return (
     <>
       {/* Comparison panel — active strategy + any added backtests/benchmarks */}
-      <div className="bg-[#151821] rounded-xl border border-gray-800/40 px-4 py-3">
+      <div className="bg-card rounded-xl border border-neutral-800/40 px-4 py-3">
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-gray-400 text-sm mr-1">Comparison</span>
+          <span className="text-fg-muted text-sm mr-1">Comparison</span>
           {alignedSeries.series.map((s) => {
             // Look up the underlying ComparisonItem so the badge can offer a
             // variant picker when the saved run is a variant bundle.
@@ -356,7 +356,7 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
             return (
               <span
                 key={s.id}
-                className="relative inline-flex items-center gap-2 bg-[#0f1117] border border-gray-800 rounded-full pl-2 pr-1 py-1 text-xs"
+                className="relative inline-flex items-center gap-2 bg-page border border-neutral-800 rounded-full pl-2 pr-1 py-1 text-xs"
                 ref={pickerOpen ? variantPickerRef : undefined}
               >
                 <span className="inline-block w-2 h-2 rounded-full" style={{ background: s.color }} />
@@ -364,22 +364,22 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
                   <button
                     type="button"
                     onClick={() => setVariantPickerOpen(pickerOpen ? null : s.id)}
-                    className="text-gray-200 hover:text-white inline-flex items-center gap-1"
+                    className="text-fg hover:text-fg-strong inline-flex items-center gap-1"
                     title="Switch variant"
                   >
                     <span>{s.label}</span>
-                    <svg className={`w-3 h-3 text-gray-500 transition-transform ${pickerOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+                    <svg className={`w-3 h-3 text-fg-subtle transition-transform ${pickerOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
                       <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
                     </svg>
                   </button>
                 ) : (
-                  <span className="text-gray-200">{s.label}</span>
+                  <span className="text-fg">{s.label}</span>
                 )}
                 {s.removable && (
                   <button
                     type="button"
                     onClick={() => removeSeries(s.id)}
-                    className="ml-0.5 w-4 h-4 rounded-full text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors flex items-center justify-center"
+                    className="ml-0.5 w-4 h-4 rounded-full text-fg-subtle hover:text-neg-400 hover:bg-neg-500/10 transition-colors flex items-center justify-center"
                     title="Remove from comparison"
                   >
                     <svg className="w-2.5 h-2.5" viewBox="0 0 20 20" fill="currentColor">
@@ -388,8 +388,8 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
                   </button>
                 )}
                 {hasVariantPicker && pickerOpen && cmp.kind === 'saved' && cmp.allVariants && (
-                  <div className="absolute left-0 top-full mt-1 w-64 bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-80 overflow-auto">
-                    <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-500 border-b border-gray-800/60">
+                  <div className="absolute left-0 top-full mt-1 w-64 bg-card border border-neutral-700 rounded-lg shadow-xl z-50 max-h-80 overflow-auto">
+                    <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-fg-subtle border-b border-neutral-800/60">
                       Variants ({cmp.allVariants.length})
                     </div>
                     {cmp.allVariants.map((v, idx) => {
@@ -400,10 +400,10 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
                           type="button"
                           disabled={isCurrent}
                           onClick={() => { switchVariant(s.id, idx); setVariantPickerOpen(null); }}
-                          className={`w-full text-left px-3 py-2 text-xs hover:bg-white/[0.03] disabled:opacity-100 disabled:cursor-default flex items-center justify-between gap-2 ${isCurrent ? 'bg-indigo-500/10 text-indigo-300' : 'text-gray-200'}`}
+                          className={`w-full text-left px-3 py-2 text-xs hover:bg-overlay/[0.03] disabled:opacity-100 disabled:cursor-default flex items-center justify-between gap-2 ${isCurrent ? 'bg-accent-500/10 text-accent-300' : 'text-fg'}`}
                         >
                           <span className="truncate">{v.label}</span>
-                          {isCurrent && <span className="text-[10px] text-indigo-400">current</span>}
+                          {isCurrent && <span className="text-[10px] text-accent-400">current</span>}
                         </button>
                       );
                     })}
@@ -417,11 +417,11 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
               type="button"
               onClick={() => setAddSeriesOpen((o) => !o)}
               disabled={addingSeriesId != null}
-              className="inline-flex items-center gap-1.5 text-xs text-indigo-300 hover:text-indigo-200 border border-indigo-500/40 hover:border-indigo-400/60 bg-indigo-500/10 hover:bg-indigo-500/20 rounded-full px-3 py-1 transition-colors disabled:opacity-70 disabled:cursor-wait"
+              className="inline-flex items-center gap-1.5 text-xs text-accent-300 hover:text-accent-200 border border-accent-500/40 hover:border-accent-400/60 bg-accent-500/10 hover:bg-accent-500/20 rounded-full px-3 py-1 transition-colors disabled:opacity-70 disabled:cursor-wait"
             >
               {addingSeriesId != null ? (
                 <>
-                  <svg className="animate-spin w-3 h-3 text-indigo-300" viewBox="0 0 24 24" fill="none">
+                  <svg className="animate-spin w-3 h-3 text-accent-300" viewBox="0 0 24 24" fill="none">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
@@ -432,10 +432,10 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
               )}
             </button>
             {addSeriesOpen && (
-              <div className="absolute left-0 mt-1 w-72 bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-80 overflow-auto">
+              <div className="absolute left-0 mt-1 w-72 bg-card border border-neutral-700 rounded-lg shadow-xl z-50 max-h-80 overflow-auto">
                 {benchmarkOptions.length > 0 && (
                   <div>
-                    <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-500 border-b border-gray-800/60">Benchmarks</div>
+                    <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-fg-subtle border-b border-neutral-800/60">Benchmarks</div>
                     {benchmarkOptions.map((b) => {
                       const already = comparisons.some((c) => c.kind === 'benchmark' && c.benchmarkId === b.benchmark_id);
                       return (
@@ -444,11 +444,11 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
                           type="button"
                           disabled={already}
                           onClick={() => { addBenchmarkSeries(b.benchmark_id); setAddSeriesOpen(false); }}
-                          className="w-full text-left px-3 py-2 text-xs hover:bg-white/[0.03] disabled:opacity-40 disabled:cursor-not-allowed text-gray-200 flex items-center gap-2"
+                          className="w-full text-left px-3 py-2 text-xs hover:bg-overlay/[0.03] disabled:opacity-40 disabled:cursor-not-allowed text-fg flex items-center gap-2"
                         >
-                          <span className="font-mono text-amber-300">{b.ticker}</span>
-                          <span className="text-gray-500 truncate">{b.name}</span>
-                          {already && <span className="ml-auto text-[10px] text-gray-600">added</span>}
+                          <span className="font-mono text-warn-300">{b.ticker}</span>
+                          <span className="text-fg-subtle truncate">{b.name}</span>
+                          {already && <span className="ml-auto text-[10px] text-fg-faint">added</span>}
                         </button>
                       );
                     })}
@@ -456,7 +456,7 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
                 )}
                 {savedRuns.length > 0 && (
                   <div>
-                    <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-500 border-t border-b border-gray-800/60">Saved Backtests</div>
+                    <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-fg-subtle border-t border-b border-neutral-800/60">Saved Backtests</div>
                     {savedRuns.map((r) => {
                       const already = comparisons.some((c) => c.kind === 'saved' && c.runId === r.run_id);
                       const isLoaded = r.run_id === loadedRunId;
@@ -466,25 +466,25 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
                           type="button"
                           disabled={already || isLoaded}
                           onClick={() => { addSavedSeries(r.run_id); setAddSeriesOpen(false); }}
-                          className="w-full text-left px-3 py-2 text-xs hover:bg-white/[0.03] disabled:opacity-40 disabled:cursor-not-allowed text-gray-200 flex items-center gap-2"
+                          className="w-full text-left px-3 py-2 text-xs hover:bg-overlay/[0.03] disabled:opacity-40 disabled:cursor-not-allowed text-fg flex items-center gap-2"
                           title={isLoaded ? 'Currently loaded as the active strategy' : undefined}
                         >
                           <span className="truncate">{r.name}</span>
-                          {isLoaded && <span className="ml-auto text-[10px] text-gray-600">active</span>}
-                          {!isLoaded && already && <span className="ml-auto text-[10px] text-gray-600">added</span>}
+                          {isLoaded && <span className="ml-auto text-[10px] text-fg-faint">active</span>}
+                          {!isLoaded && already && <span className="ml-auto text-[10px] text-fg-faint">added</span>}
                         </button>
                       );
                     })}
                   </div>
                 )}
                 {benchmarkOptions.length === 0 && savedRuns.length === 0 && (
-                  <div className="px-3 py-4 text-xs text-gray-500">No benchmarks or saved backtests available.</div>
+                  <div className="px-3 py-4 text-xs text-fg-subtle">No benchmarks or saved backtests available.</div>
                 )}
               </div>
             )}
           </div>
           {alignedSeries.windowStart && alignedSeries.windowEnd && alignedSeries.series.length > 1 && (
-            <span className="text-[11px] text-gray-500 font-mono ml-auto">
+            <span className="text-[11px] text-fg-subtle font-mono ml-auto">
               aligned {alignedSeries.windowStart} → {alignedSeries.windowEnd}
             </span>
           )}

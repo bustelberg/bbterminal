@@ -75,10 +75,10 @@ export type StrategyRunHistory = {
 
 function StatusBadge({ status }: { status: 'running' | 'ok' | 'error' }) {
   const cls = status === 'ok'
-    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+    ? 'bg-pos-500/15 text-pos-300 border-pos-500/30'
     : status === 'error'
-      ? 'bg-rose-500/10 text-rose-300 border-rose-500/30'
-      : 'bg-amber-500/15 text-amber-300 border-amber-500/30';
+      ? 'bg-neg-500/10 text-neg-300 border-neg-500/30'
+      : 'bg-warn-500/15 text-warn-300 border-warn-500/30';
   return (
     <span className={`inline-flex items-center text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${cls}`}>
       {status}
@@ -243,10 +243,10 @@ export default function ScheduledStrategyDetail({
   };
 
   if (loading) {
-    return <div className="px-5 py-4 bg-[#0b0d13] text-xs text-gray-500 border-t border-gray-800/30"><LoadingDots label="Loading run history" /></div>;
+    return <div className="px-5 py-4 bg-sidebar text-xs text-fg-subtle border-t border-neutral-800/30"><LoadingDots label="Loading run history" /></div>;
   }
   if (error) {
-    return <div className="px-5 py-4 bg-[#0b0d13] text-xs text-rose-300 border-t border-gray-800/30">{error}</div>;
+    return <div className="px-5 py-4 bg-sidebar text-xs text-neg-300 border-t border-neutral-800/30">{error}</div>;
   }
   if (!data) return null;
 
@@ -256,14 +256,14 @@ export default function ScheduledStrategyDetail({
   const effectiveStart = (data.start_date ?? data.created_at).slice(0, 10);
 
   return (
-    <div className="px-5 py-4 bg-[#0b0d13] border-t border-gray-800/30 space-y-4">
+    <div className="px-5 py-4 bg-sidebar border-t border-neutral-800/30 space-y-4">
       {/* Strategy params (collapsible — verbose enough to want to hide
           unless the user is checking what's actually scheduled). */}
       <div>
         <button
           type="button"
           onClick={() => setShowConfig((v) => !v)}
-          className="text-xs text-gray-400 hover:text-white transition-colors mb-2"
+          className="text-xs text-fg-muted hover:text-fg-strong transition-colors mb-2"
         >
           {showConfig ? '▾' : '▸'} Strategy params
         </button>
@@ -274,19 +274,19 @@ export default function ScheduledStrategyDetail({
           flight (status='running'), shows the engine's live message
           + percentage. Hidden once the backfill lands or errors. */}
       {data.backfill && data.backfill.status === 'running' && (
-        <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-lg px-4 py-3 space-y-2">
+        <div className="bg-accent-500/5 border border-accent-500/20 rounded-lg px-4 py-3 space-y-2">
           <div className="flex items-center justify-between gap-3 text-xs">
-            <span className="text-indigo-300 font-medium">Running backfill…</span>
-            <span className="text-indigo-300/80 font-mono">{data.backfill.progress_pct ?? 0}%</span>
+            <span className="text-accent-300 font-medium">Running backfill…</span>
+            <span className="text-accent-300/80 font-mono">{data.backfill.progress_pct ?? 0}%</span>
           </div>
-          <div className="h-1 bg-indigo-500/15 rounded-full overflow-hidden">
+          <div className="h-1 bg-accent-500/15 rounded-full overflow-hidden">
             <div
-              className="h-full bg-indigo-500 transition-all duration-300"
+              className="h-full bg-accent-500 transition-all duration-300"
               style={{ width: `${data.backfill.progress_pct ?? 0}%` }}
             />
           </div>
           {data.backfill.message && (
-            <div className="text-[11px] text-indigo-200/70 font-mono truncate" title={data.backfill.message}>
+            <div className="text-[11px] text-accent-200/70 font-mono truncate" title={data.backfill.message}>
               {data.backfill.message}
             </div>
           )}
@@ -294,7 +294,7 @@ export default function ScheduledStrategyDetail({
       )}
 
       {data.backfill && data.backfill.status === 'error' && (
-        <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg px-4 py-3 text-xs text-rose-300">
+        <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-4 py-3 text-xs text-neg-300">
           <div className="font-medium mb-0.5">Backfill failed</div>
           <div className="font-mono whitespace-pre-wrap">{data.backfill.error ?? 'Unknown error'}</div>
         </div>
@@ -308,31 +308,31 @@ export default function ScheduledStrategyDetail({
         return (
           <>
             <div className="flex items-center flex-wrap gap-x-3 gap-y-1.5 text-xs">
-              <span className="text-gray-400">Go-live date</span>
+              <span className="text-fg-muted">Go-live date</span>
               <DatePartsPicker
                 value={effectiveStart}
                 onChange={(iso) => { if (iso) void saveStartDate(iso); }}
                 minYear={2002}
                 maxYear={new Date().getUTCFullYear() + 1}
               />
-              <span className="inline-flex items-center gap-1.5 text-[11px] text-gray-500">
-                <span className="inline-block w-3 border-t-2 border-dashed border-rose-400" />
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-fg-subtle">
+                <span className="inline-block w-3 border-t-2 border-dashed border-neg-400" />
                 marker on the curve · live cutoff
               </span>
               {!isCustom && (
-                <span className="text-[11px] text-gray-600">defaults to scheduled date</span>
+                <span className="text-[11px] text-fg-faint">defaults to scheduled date</span>
               )}
               {isCustom && (
                 <button
                   type="button"
                   disabled={savingStartDate}
                   onClick={() => void saveStartDate('')}
-                  className="text-[11px] text-gray-500 hover:text-gray-300 underline disabled:opacity-50"
+                  className="text-[11px] text-fg-subtle hover:text-fg-soft underline disabled:opacity-50"
                 >
                   reset
                 </button>
               )}
-              {savingStartDate && <span className="text-[11px] text-indigo-300">saving…</span>}
+              {savingStartDate && <span className="text-[11px] text-accent-300">saving…</span>}
             </div>
 
             {/* Source backtest — the variant's full equity curve, sector
@@ -345,33 +345,33 @@ export default function ScheduledStrategyDetail({
 
       {/* Run history */}
       <div>
-        <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">
+        <div className="text-[10px] uppercase tracking-wider text-fg-subtle mb-2">
           Run history ({data.runs.length})
         </div>
         {data.runs.length === 0 ? (
-          <div className="text-xs text-gray-500">
+          <div className="text-xs text-fg-subtle">
             No runs yet. The backfill kicks off on add — refresh in a moment to see it land. Real pipeline ticks fire every Tuesday 02:00 UTC.
           </div>
         ) : (
-          <div className="bg-[#151821] border border-gray-800/40 rounded-lg overflow-hidden">
-            <div className="divide-y divide-gray-800/30">
+          <div className="bg-card border border-neutral-800/40 rounded-lg overflow-hidden">
+            <div className="divide-y divide-neutral-800/30">
               {data.runs.map((entry, rowIdx) => {
                 const isExpanded = expandedSnapshotId === entry.snapshot_id;
                 const run = entry.ingest_run;
                 const isRebalance = entry.kind === 'rebalance';
                 const kindCls = isRebalance
-                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                  : 'bg-gray-500/15 text-gray-300 border-gray-500/30';
+                  ? 'bg-pos-500/15 text-pos-300 border-pos-500/30'
+                  : 'bg-neutral-500/15 text-fg-soft border-neutral-500/30';
                 // Period return chip — green when ≥0, rose when <0,
                 // neutral grey when null/missing. The value is the
                 // weighted gain of the picks during the period this
                 // snapshot covers.
                 const ret = entry.period_return_pct;
                 const retCls = ret == null
-                  ? 'text-gray-500'
+                  ? 'text-fg-subtle'
                   : ret >= 0
-                    ? 'text-emerald-400'
-                    : 'text-rose-400';
+                    ? 'text-pos-400'
+                    : 'text-neg-400';
                 const retLabel = ret == null
                   ? '—'
                   : `${ret >= 0 ? '+' : ''}${ret.toFixed(2)}%`;
@@ -380,11 +380,11 @@ export default function ScheduledStrategyDetail({
                     <button
                       type="button"
                       onClick={() => setExpandedSnapshotId(isExpanded ? null : entry.snapshot_id)}
-                      className="w-full px-4 py-2 flex items-center gap-3 text-left hover:bg-white/[0.02] transition-colors flex-wrap"
+                      className="w-full px-4 py-2 flex items-center gap-3 text-left hover:bg-overlay/[0.02] transition-colors flex-wrap"
                     >
-                      <span className="text-gray-500 font-mono text-xs w-4 shrink-0">{isExpanded ? '▾' : '▸'}</span>
+                      <span className="text-fg-subtle font-mono text-xs w-4 shrink-0">{isExpanded ? '▾' : '▸'}</span>
                       <span
-                        className="text-gray-200 font-mono text-xs w-28 shrink-0"
+                        className="text-fg font-mono text-xs w-28 shrink-0"
                         title="Rebalance date (first Monday of the period per the strategy's frequency)"
                       >
                         {entry.as_of_date}
@@ -396,7 +396,7 @@ export default function ScheduledStrategyDetail({
                       )}
                       {entry.is_backfill && (
                         <span
-                          className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-amber-500/15 text-amber-300 border-amber-500/30"
+                          className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-warn-500/15 text-warn-300 border-warn-500/30"
                           title="Synthetic preview — what the strategy would have produced. NOT a real pipeline run."
                         >
                           backfill
@@ -404,7 +404,7 @@ export default function ScheduledStrategyDetail({
                       )}
                       {!entry.is_backfill && entry.as_of_date < effectiveStart && (
                         <span
-                          className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-gray-500/15 text-gray-400 border-gray-500/30"
+                          className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-neutral-500/15 text-fg-muted border-neutral-500/30"
                           title="Dated before the go-live date — counts as backtest / pre-live, not live forward performance."
                         >
                           pre-live
@@ -417,16 +417,16 @@ export default function ScheduledStrategyDetail({
                         {retLabel}
                       </span>
                       {run && <StatusBadge status={run.status} />}
-                      <span className="text-gray-400 text-xs font-mono">
+                      <span className="text-fg-muted text-xs font-mono">
                         {entry.holdings_count} holdings
                       </span>
                       <span
-                        className="text-gray-600 text-xs ml-auto font-mono"
+                        className="text-fg-faint text-xs ml-auto font-mono"
                         title="Latest close-price date used to compute returns on this snapshot"
                       >
                         data through {entry.latest_price_date ?? entry.as_of_date}
                         {run && (
-                          <span className="text-gray-700">
+                          <span className="text-fg-dim">
                             {' · '}run #{run.run_id}
                           </span>
                         )}
@@ -488,9 +488,9 @@ export default function ScheduledStrategyDetail({
                       </div>
                     )}
                     {isExpanded && (
-                      <div className="px-4 py-3 border-t border-gray-800/30 bg-[#0f1117]">
+                      <div className="px-4 py-3 border-t border-neutral-800/30 bg-page">
                         {entry.is_backfill && (
-                          <div className="mb-3 text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                          <div className="mb-3 text-[11px] text-warn-300/90 bg-warn-500/10 border border-warn-500/20 rounded-lg px-3 py-2">
                             Backfill preview — these are synthetic picks the strategy would have produced if it had been on schedule. The next real pipeline run (Tuesday 02:00 UTC) is the first one that actually fires.
                           </div>
                         )}

@@ -322,7 +322,7 @@ function VariantAttributionInner() {
       <div className="overflow-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-gray-500 text-xs border-b border-gray-800/40">
+            <tr className="text-fg-subtle text-xs border-b border-neutral-800/40">
               <th className="text-left font-medium px-3 py-2">Axis value</th>
               <th className="text-right font-medium px-3 py-2">n</th>
               {ALL_METRICS.map((m) => (
@@ -335,13 +335,13 @@ function VariantAttributionInner() {
           <tbody>
             {axisBreakdowns.map((axis) => (
               <Fragment key={axis.axis}>
-                <tr className="bg-[#0f1117] border-y border-gray-800/40">
+                <tr className="bg-page border-y border-neutral-800/40">
                   <td
                     colSpan={ALL_METRICS.length + 2}
-                    className="px-3 py-1.5 text-[11px] uppercase tracking-wider text-indigo-300 font-medium"
+                    className="px-3 py-1.5 text-[11px] uppercase tracking-wider text-accent-300 font-medium"
                   >
                     {axis.label}
-                    <span className="ml-2 text-gray-600 normal-case font-normal">
+                    <span className="ml-2 text-fg-faint normal-case font-normal">
                       ({axis.groups.length} distinct values)
                     </span>
                   </td>
@@ -349,10 +349,10 @@ function VariantAttributionInner() {
                 {axis.groups.map((g) => (
                   <tr
                     key={`${axis.axis}-${g.value}`}
-                    className="border-b border-gray-800/20 hover:bg-white/[0.02]"
+                    className="border-b border-neutral-800/20 hover:bg-overlay/[0.02]"
                   >
-                    <td className="px-3 py-2 text-gray-200 font-mono text-xs">{g.value}</td>
-                    <td className="px-3 py-2 text-right font-mono text-gray-500">{g.n}</td>
+                    <td className="px-3 py-2 text-fg font-mono text-xs">{g.value}</td>
+                    <td className="px-3 py-2 text-right font-mono text-fg-subtle">{g.n}</td>
                     {ALL_METRICS.map((m) => {
                       const stat = g.stats[m] ?? null;
                       const isWinner = axis.winnerPerMetric[m] === g.value;
@@ -361,18 +361,18 @@ function VariantAttributionInner() {
                           key={m}
                           className={`px-3 py-2 text-right font-mono whitespace-nowrap ${
                             isWinner
-                              ? 'text-amber-300 bg-amber-500/[0.04] font-medium'
-                              : 'text-gray-300'
+                              ? 'text-warn-300 bg-warn-500/[0.04] font-medium'
+                              : 'text-fg-soft'
                           }`}
                         >
                           {fmtMetric(m, stat?.mean ?? null)}
                           {stat?.std != null && (
-                            <span className="ml-1 text-gray-500 text-[11px]">
+                            <span className="ml-1 text-fg-subtle text-[11px]">
                               (±{fmtMetricStd(m, stat.std)})
                             </span>
                           )}
                           {isWinner && stat != null && (
-                            <span className="ml-1 text-amber-400">★</span>
+                            <span className="ml-1 text-warn-400">★</span>
                           )}
                         </td>
                       );

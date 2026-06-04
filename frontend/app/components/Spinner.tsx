@@ -13,9 +13,9 @@
 /**
  * Two ways to size + color the spinner — pick whichever fits the call
  * site:
- *   <Spinner />                              defaults: 12px, indigo-400
+ *   <Spinner />                              defaults: 12px, accent-400
  *   <Spinner size={20} />                    explicit pixel size
- *   <Spinner className="h-4 w-4 text-gray-400" />  Tailwind classes
+ *   <Spinner className="h-4 w-4 text-fg-muted" />  Tailwind classes
  *
  * The `className` form wins when both are provided.
  */
@@ -29,7 +29,7 @@ export default function Spinner({
   const useClassName = !!className;
   return (
     <svg
-      className={useClassName ? `animate-spin ${className}` : 'animate-spin text-indigo-400'}
+      className={useClassName ? `animate-spin ${className}` : 'animate-spin text-accent-400'}
       style={useClassName ? undefined : { width: size, height: size }}
       viewBox="0 0 24 24"
       fill="none"

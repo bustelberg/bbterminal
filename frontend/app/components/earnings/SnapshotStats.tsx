@@ -46,9 +46,9 @@ type EarningsSource = 'prices' | 'indicators' | 'financials' | 'analyst_estimate
 type Score = 'good' | 'neutral' | 'poor';
 
 const SCORE_TEXT_COLOR: Record<Score, string> = {
-  good: 'text-emerald-400',
-  neutral: 'text-amber-300',
-  poor: 'text-rose-400',
+  good: 'text-pos-400',
+  neutral: 'text-warn-300',
+  poor: 'text-neg-400',
 };
 
 /** Higher-is-better scorer. `poorBelow` is exclusive lower bound for
@@ -771,12 +771,12 @@ export default function SnapshotStats({
       <div className="space-y-4">
         {sections.map((sec) => (
           <div key={sec.title}>
-            <div className="text-gray-400 text-xs font-semibold uppercase tracking-wider mb-2 flex items-center justify-between gap-2">
+            <div className="text-fg-muted text-xs font-semibold uppercase tracking-wider mb-2 flex items-center justify-between gap-2">
               <span>{sec.title}</span>
               {hasB && (labelA || labelB) && (
                 <span className="text-[10px] normal-case font-mono tracking-normal flex items-center gap-3">
-                  {labelA && <span className="text-indigo-400">{labelA}</span>}
-                  {labelB && <span className="text-amber-400">{labelB}</span>}
+                  {labelA && <span className="text-accent-400">{labelA}</span>}
+                  {labelB && <span className="text-warn-400">{labelB}</span>}
                 </span>
               )}
             </div>
@@ -807,7 +807,7 @@ export default function SnapshotStats({
                   : baseInfo;
                 return (
                   <div key={row.label} className="flex justify-between items-center gap-3">
-                    <span className="text-gray-400 text-sm flex items-center gap-1.5 min-w-0">
+                    <span className="text-fg-muted text-sm flex items-center gap-1.5 min-w-0">
                       <span className="truncate">{row.label}</span>
                       <InfoTip text={infoText} />
                     </span>
@@ -849,13 +849,13 @@ function ValueCell({
 }) {
   // Score color: emerald / amber / rose for graded rows; fall back to
   // white when the metric has no scoring rubric or the value is N/A.
-  const valueColor = cell.score ? SCORE_TEXT_COLOR[cell.score] : 'text-white';
+  const valueColor = cell.score ? SCORE_TEXT_COLOR[cell.score] : 'text-fg-strong';
   if (loading) {
     return (
       <span className="text-right">
         <span className="inline-flex items-center justify-end gap-1.5">
           <Spinner size={10} />
-          <span className="text-gray-500 font-mono text-sm">…</span>
+          <span className="text-fg-subtle font-mono text-sm">…</span>
         </span>
       </span>
     );
@@ -868,7 +868,7 @@ function ValueCell({
         {cell.cadence && <InfoTip text={cadenceHoverText(cell.cadence)} />}
       </span>
       {cell.date && (
-        <span className="block text-gray-500 text-[10px] font-mono">{cell.date}</span>
+        <span className="block text-fg-subtle text-[10px] font-mono">{cell.date}</span>
       )}
     </span>
   );

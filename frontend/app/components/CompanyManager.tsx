@@ -32,10 +32,10 @@ export default function CompanyManager() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-8 py-5 border-b border-gray-800/60 flex items-center justify-between gap-4">
+      <div className="px-8 py-5 border-b border-neutral-800/60 flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-lg font-semibold text-white">Companies</h1>
-          <p className="text-xs text-gray-500 mt-0.5">
+          <h1 className="text-lg font-semibold text-fg-strong">Companies</h1>
+          <p className="text-xs text-fg-subtle mt-0.5">
             {loading ? <LoadingDots label="Loading" /> : `${filtered.length} of ${companies.length} companies`}
             {!loading && duplicateCount > 0 && (
               <>
@@ -43,7 +43,7 @@ export default function CompanyManager() {
                 <button
                   onClick={() => setFilterDupes(!filterDupes)}
                   className={`underline-offset-2 hover:underline transition-colors ${
-                    filterDupes ? 'text-rose-400' : 'text-rose-400/80 hover:text-rose-400'
+                    filterDupes ? 'text-neg-400' : 'text-neg-400/80 hover:text-neg-400'
                   }`}
                   title={filterDupes ? 'Click to clear duplicates filter' : 'Click to show only duplicate entries'}
                 >
@@ -56,7 +56,7 @@ export default function CompanyManager() {
         {isAdmin && (
           <button
             onClick={() => { setAdding(true); setEditingId(null); }}
-            className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-accent-600 hover:bg-accent-500 text-fg-strong transition-colors"
           >
             + Add company
           </button>
@@ -72,9 +72,9 @@ export default function CompanyManager() {
       />
 
       {error && (
-        <div className="mx-8 mt-4 px-4 py-3 text-sm text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-lg flex items-center justify-between">
+        <div className="mx-8 mt-4 px-4 py-3 text-sm text-neg-400 bg-neg-500/10 border border-neg-500/20 rounded-lg flex items-center justify-between">
           <span>{error}</span>
-          <button onClick={() => setError(null)} className="text-gray-500 hover:text-white ml-3 text-xs">Dismiss</button>
+          <button onClick={() => setError(null)} className="text-fg-subtle hover:text-fg-strong ml-3 text-xs">Dismiss</button>
         </div>
       )}
 

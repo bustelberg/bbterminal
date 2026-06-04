@@ -41,22 +41,22 @@ export default function HoldingsTable({ holdings }: { holdings: Holding[] }) {
   }, [holdings, filter, sortCol, sortAsc]);
 
   return (
-    <div className="bg-[#151821] rounded-xl border border-gray-800/40">
-      <div className="px-5 py-4 border-b border-gray-800/40 flex items-center gap-4">
-        <h2 className="text-sm font-medium text-gray-300">All Holdings</h2>
+    <div className="bg-card rounded-xl border border-neutral-800/40">
+      <div className="px-5 py-4 border-b border-neutral-800/40 flex items-center gap-4">
+        <h2 className="text-sm font-medium text-fg-soft">All Holdings</h2>
         <input
           type="text"
           placeholder="Filter by ticker, name, sector, country..."
           value={filter}
           onChange={e => setFilter(e.target.value)}
-          className="ml-auto bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200 placeholder-gray-500 w-72 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+          className="ml-auto bg-page border border-neutral-700 rounded-lg px-3 py-1.5 text-sm text-fg placeholder-fg-subtle w-72 focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
         />
-        <span className="text-gray-500 text-xs">{filtered.length.toLocaleString()} shown</span>
+        <span className="text-fg-subtle text-xs">{filtered.length.toLocaleString()} shown</span>
       </div>
       <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
         <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-[#151821] z-10">
-            <tr className="text-gray-400 text-xs uppercase tracking-wider">
+          <thead className="sticky top-0 bg-card z-10">
+            <tr className="text-fg-muted text-xs uppercase tracking-wider">
               <th className="text-left px-3 py-2.5 font-medium">#</th>
               {([
                 ['Ticker', 'Ticker', 'left'],
@@ -74,7 +74,7 @@ export default function HoldingsTable({ holdings }: { holdings: Holding[] }) {
               ] as const).map(([key, label, align]) => (
                 <th
                   key={label}
-                  className={`text-${align} px-3 py-2.5 font-medium ${key ? 'cursor-pointer select-none hover:text-gray-200 transition-colors' : ''}`}
+                  className={`text-${align} px-3 py-2.5 font-medium ${key ? 'cursor-pointer select-none hover:text-fg transition-colors' : ''}`}
                   onClick={key ? () => {
                     if (sortCol === key) {
                       setSortAsc(!sortAsc);
@@ -86,41 +86,41 @@ export default function HoldingsTable({ holdings }: { holdings: Holding[] }) {
                 >
                   {label}
                   {key && sortCol === key && (
-                    <span className="ml-1 text-indigo-400">{sortAsc ? '▲' : '▼'}</span>
+                    <span className="ml-1 text-accent-400">{sortAsc ? '▲' : '▼'}</span>
                   )}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-800/30">
+          <tbody className="divide-y divide-neutral-800/30">
             {filtered.map((h, i) => (
-              <tr key={`${h.Ticker}-${i}`} className="hover:bg-white/[0.02]">
-                <td className="px-3 py-2.5 text-gray-500 font-mono text-xs">{i + 1}</td>
-                <td className="px-3 py-2.5 text-white font-mono font-medium">{h.Ticker}</td>
-                <td className="px-3 py-2.5 text-gray-200 max-w-[200px] truncate">{h.Name}</td>
+              <tr key={`${h.Ticker}-${i}`} className="hover:bg-overlay/[0.02]">
+                <td className="px-3 py-2.5 text-fg-subtle font-mono text-xs">{i + 1}</td>
+                <td className="px-3 py-2.5 text-fg-strong font-mono font-medium">{h.Ticker}</td>
+                <td className="px-3 py-2.5 text-fg max-w-[200px] truncate">{h.Name}</td>
                 <td className="px-3 py-2.5 text-xs">
                   {h.gurufocus_url ? (
                     <a
                       href={h.gurufocus_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-indigo-400 hover:text-indigo-300 transition-colors"
+                      className="text-accent-400 hover:text-accent-300 transition-colors"
                     >
                       link
                     </a>
                   ) : (
-                    <span className="text-gray-600">—</span>
+                    <span className="text-fg-faint">—</span>
                   )}
                 </td>
-                <td className="px-3 py-2.5 text-gray-400">{h.Sector}</td>
-                <td className="px-3 py-2.5 text-gray-400">{h.Location}</td>
-                <td className="px-3 py-2.5 text-gray-300 font-mono text-right">{fmtNum(h.Price)}</td>
-                <td className="px-3 py-2.5 text-gray-400 text-xs">{h.Exchange}</td>
-                <td className="px-3 py-2.5 text-indigo-400 font-mono text-xs">{h.gf_exchange ?? <span className="text-gray-600">-</span>}</td>
-                <td className="px-3 py-2.5 text-gray-400 font-mono text-xs">{h.Currency}</td>
-                <td className="px-3 py-2.5 text-indigo-400 font-mono text-xs">{h.gf_currency ?? <span className="text-gray-600">-</span>}</td>
-                <td className="px-3 py-2.5 text-gray-300 font-mono text-right">{fmtNum(h['Weight (%)'])}%</td>
-                <td className="px-3 py-2.5 text-gray-300 font-mono text-right">{fmtMv(h['Market Value'])}</td>
+                <td className="px-3 py-2.5 text-fg-muted">{h.Sector}</td>
+                <td className="px-3 py-2.5 text-fg-muted">{h.Location}</td>
+                <td className="px-3 py-2.5 text-fg-soft font-mono text-right">{fmtNum(h.Price)}</td>
+                <td className="px-3 py-2.5 text-fg-muted text-xs">{h.Exchange}</td>
+                <td className="px-3 py-2.5 text-accent-400 font-mono text-xs">{h.gf_exchange ?? <span className="text-fg-faint">-</span>}</td>
+                <td className="px-3 py-2.5 text-fg-muted font-mono text-xs">{h.Currency}</td>
+                <td className="px-3 py-2.5 text-accent-400 font-mono text-xs">{h.gf_currency ?? <span className="text-fg-faint">-</span>}</td>
+                <td className="px-3 py-2.5 text-fg-soft font-mono text-right">{fmtNum(h['Weight (%)'])}%</td>
+                <td className="px-3 py-2.5 text-fg-soft font-mono text-right">{fmtMv(h['Market Value'])}</td>
               </tr>
             ))}
           </tbody>

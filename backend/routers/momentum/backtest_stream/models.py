@@ -32,6 +32,12 @@ class VariantSpec(BaseModel):
     universe_label: str | None = None
     index_universe: str | None = None
     grouping: Literal["sector", "industry"] | None = None
+    # Weekday each rebalance lands on (Mon=0..Sun=6). None inherits the
+    # base request's `rebalance_weekday`. Lets a sweep compare e.g. first-
+    # Monday vs first-Wednesday rebalances — signals are computed strict-`<`
+    # the rebalance date, so a Wednesday variant decides on the prior
+    # trading day's (Tuesday's) close and enters at Wednesday's close.
+    rebalance_weekday: int | None = None
 
 
 class BacktestRequest(BaseModel):

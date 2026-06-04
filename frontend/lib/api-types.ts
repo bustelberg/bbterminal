@@ -3193,6 +3193,8 @@ export interface components {
             index_universe?: string | null;
             /** Min Price Score */
             min_price_score?: number | null;
+            /** Rebalance Weekday */
+            rebalance_weekday?: number | null;
             /**
              * Strategy Type
              * @enum {string}

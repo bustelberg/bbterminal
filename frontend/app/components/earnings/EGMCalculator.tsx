@@ -45,45 +45,45 @@ export default function EGMCalculator({ metrics }: { metrics: MetricRow[] }) {
     ? (fy1Num - epsNum) / epsNum
     : null;
 
-  const inputClass = "w-28 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-1.5 text-white font-mono text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none";
+  const inputClass = "w-28 bg-page border border-neutral-700 rounded-lg px-3 py-1.5 text-fg-strong font-mono text-sm focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none";
 
   return (
     <div className="flex items-center gap-6">
       <div>
-        <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">
-          Current EPS {epsRaw && <span className="text-gray-600">({epsRaw.date})</span>}
+        <div className="text-fg-subtle text-xs mb-1 flex items-center gap-1">
+          Current EPS {epsRaw && <span className="text-fg-faint">({epsRaw.date})</span>}
           <InfoTip text="Diluted EPS (excluding non-recurring items) for the most recent fiscal year. Used as the base for calculating expected growth." />
         </div>
         <input type="number" step="0.01" value={eps} onChange={(e) => setEps(e.target.value)} className={inputClass} />
       </div>
       <div>
-        <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">
-          FY1 EPS Est {fy1Raw && <span className="text-gray-600">({fy1Raw.date})</span>}
+        <div className="text-fg-subtle text-xs mb-1 flex items-center gap-1">
+          FY1 EPS Est {fy1Raw && <span className="text-fg-faint">({fy1Raw.date})</span>}
           <InfoTip text="Analyst consensus EPS estimate for the next fiscal year. The growth from Current EPS to this value determines the EGM." />
         </div>
         <input type="number" step="0.01" value={fy1} onChange={(e) => setFy1(e.target.value)} className={inputClass} />
       </div>
       <div>
-        <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">
+        <div className="text-fg-subtle text-xs mb-1 flex items-center gap-1">
           EGM
           <InfoTip text="Earnings Growth Multiple = (FY1 EPS Est - Current EPS) / Current EPS. Shows expected year-over-year earnings growth. Green if above historic YoY EPS, red if below." />
         </div>
-        <div className={`font-mono text-2xl font-semibold ${egm != null && yoyEpsGrowth ? (egm >= yoyEpsGrowth.value / 100 ? 'text-emerald-400' : 'text-rose-400') : 'text-white'}`}>
+        <div className={`font-mono text-2xl font-semibold ${egm != null && yoyEpsGrowth ? (egm >= yoyEpsGrowth.value / 100 ? 'text-pos-400' : 'text-neg-400') : 'text-fg-strong'}`}>
           {egm != null ? fmtPct(egm) : '—'}
         </div>
       </div>
       <div>
-        <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">
+        <div className="text-fg-subtle text-xs mb-1 flex items-center gap-1">
           Historic YoY EPS
           <InfoTip text={`Year-over-year EPS growth for the most recent fiscal year (${yoyEpsGrowth?.date ?? '—'}). Single year, not a multi-year average. Used as a benchmark for the EGM.`} />
         </div>
-        <div className="font-mono text-2xl font-semibold text-gray-400">
+        <div className="font-mono text-2xl font-semibold text-fg-muted">
           {yoyEpsGrowth ? fmtPct(yoyEpsGrowth.value / 100) : '—'}
         </div>
       </div>
       <div>
-        <div className="text-gray-500 text-xs mb-1">&nbsp;</div>
-        <button onClick={resetDefaults} className="px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5 border border-gray-700 transition-colors">
+        <div className="text-fg-subtle text-xs mb-1">&nbsp;</div>
+        <button onClick={resetDefaults} className="px-3 py-1.5 rounded-lg text-sm text-fg-muted hover:text-fg-strong hover:bg-overlay/5 border border-neutral-700 transition-colors">
           Reset
         </button>
       </div>

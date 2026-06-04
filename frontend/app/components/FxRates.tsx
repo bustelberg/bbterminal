@@ -6,6 +6,7 @@ import {
   CartesianGrid,
 } from 'recharts';
 import { trackedFetch } from '../../lib/loading';
+import { chartTheme } from '../../lib/chartTheme';
 import type { Column } from '../../lib/tableExport';
 import TableDownloadButton from './TableDownloadButton';
 import LoadingDots from './LoadingDots';
@@ -92,90 +93,85 @@ function FxHistoryChart({ currency, history, loading, refreshing, onClose }: {
     : `${currency} per 1 EUR`;
 
   return (
-    <div className="bg-[#151821] rounded-xl border border-gray-800/40 p-5">
+    <div className="bg-card rounded-xl border border-neutral-800/40 p-5">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-3">
-          <h2 className="text-sm font-medium text-white">{label} History (from 2000)</h2>
-          <span className="text-xs text-gray-500">{description}</span>
+          <h2 className="text-sm font-medium text-fg-strong">{label} History (from 2000)</h2>
+          <span className="text-xs text-fg-subtle">{description}</span>
           {refreshing && (
-            <span className="text-xs text-indigo-400 animate-pulse">refreshing…</span>
+            <span className="text-xs text-accent-400 animate-pulse">refreshing…</span>
           )}
         </div>
         <div className="flex items-center gap-3">
           <button
             onClick={() => setInverted(!inverted)}
-            className="px-2.5 py-1 rounded-md text-xs border transition-colors bg-[#0f1117] border-gray-700 text-gray-300 hover:border-indigo-500 hover:text-indigo-400"
+            className="px-2.5 py-1 rounded-md text-xs border transition-colors bg-page border-neutral-700 text-fg-soft hover:border-accent-500 hover:text-accent-400"
           >
             Flip
           </button>
-          <button onClick={onClose} className="text-xs text-gray-500 hover:text-gray-300">close</button>
+          <button onClick={onClose} className="text-xs text-fg-subtle hover:text-fg-soft">close</button>
         </div>
       </div>
       {loading ? (
-        <p className="text-gray-400 text-sm"><LoadingDots label="Loading history" /></p>
+        <p className="text-fg-muted text-sm"><LoadingDots label="Loading history" /></p>
       ) : history.length === 0 ? (
-        <p className="text-gray-500 text-sm">No data available</p>
+        <p className="text-fg-subtle text-sm">No data available</p>
       ) : stats && (
         <div>
           <div className="grid grid-cols-4 gap-4 mb-4">
             <div>
-              <div className="text-lg font-mono text-white">{stats.latest.rate.toFixed(decimals)}</div>
-              <div className="text-xs text-gray-400">Latest ({stats.latest.date})</div>
+              <div className="text-lg font-mono text-fg-strong">{stats.latest.rate.toFixed(decimals)}</div>
+              <div className="text-xs text-fg-muted">Latest ({stats.latest.date})</div>
             </div>
             <div>
-              <div className="text-lg font-mono text-gray-300">{stats.first.rate.toFixed(decimals)}</div>
-              <div className="text-xs text-gray-400">First ({stats.first.date})</div>
+              <div className="text-lg font-mono text-fg-soft">{stats.first.rate.toFixed(decimals)}</div>
+              <div className="text-xs text-fg-muted">First ({stats.first.date})</div>
             </div>
             <div>
-              <div className="text-lg font-mono text-gray-300">{stats.min.toFixed(decimals)}</div>
-              <div className="text-xs text-gray-400">Min</div>
+              <div className="text-lg font-mono text-fg-soft">{stats.min.toFixed(decimals)}</div>
+              <div className="text-xs text-fg-muted">Min</div>
             </div>
             <div>
-              <div className="text-lg font-mono text-gray-300">{stats.max.toFixed(decimals)}</div>
-              <div className="text-xs text-gray-400">Max</div>
+              <div className="text-lg font-mono text-fg-soft">{stats.max.toFixed(decimals)}</div>
+              <div className="text-xs text-fg-muted">Max</div>
             </div>
           </div>
-          <div className="text-xs text-gray-500 mb-3">
+          <div className="text-xs text-fg-subtle mb-3">
             {history.length.toLocaleString()} daily data points from {stats.first.date} to {stats.latest.date}
           </div>
           <ResponsiveContainer width="100%" height={300}>
             <AreaChart data={chartData}>
               <defs>
                 <linearGradient id="fxGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#818cf8" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#818cf8" stopOpacity={0} />
+                  <stop offset="5%" stopColor={chartTheme.accent} stopOpacity={0.3} />
+                  <stop offset="95%" stopColor={chartTheme.accent} stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+              <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
               <XAxis
                 dataKey="date"
-                tick={{ fill: '#6b7280', fontSize: 11 }}
+                tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
                 tickLine={false}
                 interval={Math.max(0, Math.floor(chartData.length / 8) - 1)}
                 tickFormatter={(d: string) => d.slice(0, 7)}
               />
               <YAxis
-                tick={{ fill: '#6b7280', fontSize: 11 }}
+                tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
                 tickLine={false}
                 domain={yDomain}
                 tickFormatter={(v: number) => v.toFixed(decimals)}
                 width={65}
               />
               <Tooltip
-                contentStyle={{
-                  backgroundColor: '#1e2230',
-                  border: '1px solid rgba(107,114,128,0.3)',
-                  borderRadius: '8px',
-                  fontSize: 12,
-                }}
-                labelStyle={{ color: '#9ca3af' }}
+                contentStyle={chartTheme.tooltipPopover.contentStyle}
+                labelStyle={chartTheme.tooltipPopover.labelStyle}
                 formatter={(value) => [Number(value).toFixed(decimals), label]}
                 labelFormatter={(l) => String(l)}
               />
               <Area
                 type="monotone"
                 dataKey="rate"
-                stroke="#818cf8"
+                stroke={chartTheme.accent}
                 strokeWidth={1.5}
                 fill="url(#fxGradient)"
                 dot={false}
@@ -370,8 +366,8 @@ export default function FxRates() {
   if (loading) {
     return (
       <div className="px-8 py-5">
-        <h1 className="text-xl font-semibold text-white mb-4">FX Rates</h1>
-        <p className="text-gray-400"><LoadingDots label="Loading ECB exchange rates" /></p>
+        <h1 className="text-xl font-semibold text-fg-strong mb-4">FX Rates</h1>
+        <p className="text-fg-muted"><LoadingDots label="Loading ECB exchange rates" /></p>
       </div>
     );
   }
@@ -379,8 +375,8 @@ export default function FxRates() {
   if (error) {
     return (
       <div className="px-8 py-5">
-        <h1 className="text-xl font-semibold text-white mb-4">FX Rates</h1>
-        <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg px-4 py-3 text-rose-400">{error}</div>
+        <h1 className="text-xl font-semibold text-fg-strong mb-4">FX Rates</h1>
+        <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-4 py-3 text-neg-400">{error}</div>
       </div>
     );
   }
@@ -397,21 +393,21 @@ export default function FxRates() {
     <div className="px-8 py-5 space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-white">FX Rates</h1>
-          <p className="text-sm text-gray-400 mt-1">ECB daily exchange rates vs EUR &mdash; for converting ACWI prices to a common currency</p>
+          <h1 className="text-xl font-semibold text-fg-strong">FX Rates</h1>
+          <p className="text-sm text-fg-muted mt-1">ECB daily exchange rates vs EUR &mdash; for converting ACWI prices to a common currency</p>
           {latestSource === 'ecb_live' && (
-            <p className="text-xs text-amber-400 mt-2">
+            <p className="text-xs text-warn-400 mt-2">
               Loaded live from ECB (local <span className="font-mono">fx_rate</span> table is empty). Click <b>Sync from ECB</b> once to persist data for fast loads.
             </p>
           )}
           {syncMessage && (
-            <p className="text-xs text-gray-500 mt-2">{syncMessage}</p>
+            <p className="text-xs text-fg-subtle mt-2">{syncMessage}</p>
           )}
         </div>
         <button
           onClick={syncFromEcb}
           disabled={syncing}
-          className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 transition-colors"
+          className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent-600 hover:bg-accent-500 text-fg-strong disabled:opacity-50 transition-colors"
         >
           {syncing ? 'Syncing…' : 'Sync from ECB'}
         </button>
@@ -419,34 +415,34 @@ export default function FxRates() {
 
       {/* Coverage summary */}
       {coverage && (
-        <div className="bg-[#151821] rounded-xl border border-gray-800/40 p-5">
-          <h2 className="text-sm font-medium text-white mb-3">ACWI Currency Coverage</h2>
+        <div className="bg-card rounded-xl border border-neutral-800/40 p-5">
+          <h2 className="text-sm font-medium text-fg-strong mb-3">ACWI Currency Coverage</h2>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
             <div>
-              <div className="text-2xl font-mono text-white">{coverage.acwi_currencies.length}</div>
-              <div className="text-xs text-gray-400">Currencies in ACWI</div>
+              <div className="text-2xl font-mono text-fg-strong">{coverage.acwi_currencies.length}</div>
+              <div className="text-xs text-fg-muted">Currencies in ACWI</div>
             </div>
             <div>
-              <div className="text-2xl font-mono text-emerald-400">{coverage.covered.length + 1}</div>
-              <div className="text-xs text-gray-400">Convertible to EUR (incl. EUR)</div>
+              <div className="text-2xl font-mono text-pos-400">{coverage.covered.length + 1}</div>
+              <div className="text-xs text-fg-muted">Convertible to EUR (incl. EUR)</div>
             </div>
             <div>
-              <div className="text-2xl font-mono text-rose-400">{coverage.missing.length}</div>
-              <div className="text-xs text-gray-400">Missing from ECB</div>
+              <div className="text-2xl font-mono text-neg-400">{coverage.missing.length}</div>
+              <div className="text-xs text-fg-muted">Missing from ECB</div>
             </div>
             <div>
-              <div className="text-2xl font-mono text-indigo-400">{convertiblePct}%</div>
-              <div className="text-xs text-gray-400">Holdings convertible ({convertibleCount}/{totalAcwi})</div>
+              <div className="text-2xl font-mono text-accent-400">{convertiblePct}%</div>
+              <div className="text-xs text-fg-muted">Holdings convertible ({convertibleCount}/{totalAcwi})</div>
             </div>
           </div>
 
           {coverage.missing.length > 0 && (
             <div className="mt-3">
-              <p className="text-xs text-gray-400 mb-1">Missing currencies (no ECB rate):</p>
+              <p className="text-xs text-fg-muted mb-1">Missing currencies (no ECB rate):</p>
               <div className="flex flex-wrap gap-2">
                 {coverage.missing.map(c => (
-                  <span key={c} className="px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-mono">
-                    {c} <span className="text-rose-400/60">({coverage.currency_counts[c]})</span>
+                  <span key={c} className="px-2 py-0.5 rounded bg-neg-500/10 border border-neg-500/20 text-neg-400 text-xs font-mono">
+                    {c} <span className="text-neg-400/60">({coverage.currency_counts[c]})</span>
                   </span>
                 ))}
               </div>
@@ -454,11 +450,11 @@ export default function FxRates() {
           )}
           {Object.keys(coverage.unmapped_exchanges).length > 0 && (
             <div className="mt-3">
-              <p className="text-xs text-gray-400 mb-1">Unmapped exchanges (no currency assigned):</p>
+              <p className="text-xs text-fg-muted mb-1">Unmapped exchanges (no currency assigned):</p>
               <div className="flex flex-wrap gap-2">
                 {Object.entries(coverage.unmapped_exchanges).map(([exch, count]) => (
-                  <span key={exch} className="px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs">
-                    {exch} <span className="text-amber-400/60">({count})</span>
+                  <span key={exch} className="px-2 py-0.5 rounded bg-warn-500/10 border border-warn-500/20 text-warn-400 text-xs">
+                    {exch} <span className="text-warn-400/60">({count})</span>
                   </span>
                 ))}
               </div>
@@ -468,11 +464,11 @@ export default function FxRates() {
       )}
 
       {/* Latest rates table, grouped by ACWI vs non-ACWI */}
-      <div className="bg-[#151821] rounded-xl border border-gray-800/40">
-        <div className="px-5 py-3 border-b border-gray-800/40 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-white">Latest ECB Rates vs EUR</h2>
+      <div className="bg-card rounded-xl border border-neutral-800/40">
+        <div className="px-5 py-3 border-b border-neutral-800/40 flex items-center justify-between">
+          <h2 className="text-sm font-medium text-fg-strong">Latest ECB Rates vs EUR</h2>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-gray-500">as of {rateDate}</span>
+            <span className="text-xs text-fg-subtle">as of {rateDate}</span>
             <TableDownloadButton
               rows={exportRows}
               columns={exportColumns}
@@ -483,8 +479,8 @@ export default function FxRates() {
         </div>
         <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
           <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-[#151821] z-10">
-              <tr className="text-gray-400 text-xs uppercase tracking-wider">
+            <thead className="sticky top-0 bg-card z-10">
+              <tr className="text-fg-muted text-xs uppercase tracking-wider">
                 <th className="text-left px-4 py-2.5 font-medium">Currency</th>
                 <th className="text-left px-4 py-2.5 font-medium">Name</th>
                 <th className="text-left px-4 py-2.5 font-medium">Country</th>
@@ -495,36 +491,36 @@ export default function FxRates() {
                 <th className="text-left px-4 py-2.5 font-medium"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-800/30">
+            <tbody className="divide-y divide-neutral-800/30">
               {/* EUR row first */}
-              <tr className="hover:bg-white/[0.02]">
-                <td className="px-4 py-2.5 font-mono text-white font-medium">EUR</td>
-                <td className="px-4 py-2.5 text-gray-300">Euro</td>
-                <td className="px-4 py-2.5 text-gray-400">Eurozone</td>
-                <td className="px-4 py-2.5 text-right font-mono text-gray-300">1.0000</td>
-                <td className="px-4 py-2.5 text-right font-mono text-gray-300">1.0000</td>
-                <td className="px-4 py-2.5 text-right font-mono text-gray-300">{coverage?.currency_counts['EUR'] ?? 0}</td>
-                <td className="px-4 py-2.5 text-center"><span className="text-emerald-400 text-xs">base</span></td>
+              <tr className="hover:bg-overlay/[0.02]">
+                <td className="px-4 py-2.5 font-mono text-fg-strong font-medium">EUR</td>
+                <td className="px-4 py-2.5 text-fg-soft">Euro</td>
+                <td className="px-4 py-2.5 text-fg-muted">Eurozone</td>
+                <td className="px-4 py-2.5 text-right font-mono text-fg-soft">1.0000</td>
+                <td className="px-4 py-2.5 text-right font-mono text-fg-soft">1.0000</td>
+                <td className="px-4 py-2.5 text-right font-mono text-fg-soft">{coverage?.currency_counts['EUR'] ?? 0}</td>
+                <td className="px-4 py-2.5 text-center"><span className="text-pos-400 text-xs">base</span></td>
                 <td className="px-4 py-2.5"></td>
               </tr>
               {/* ACWI currencies with ECB rates */}
               {coverage?.covered.map(c => {
                 const r = rateMap[c];
                 return (
-                  <tr key={c} className="hover:bg-white/[0.02]">
-                    <td className="px-4 py-2.5 font-mono text-white font-medium">{c}</td>
-                    <td className="px-4 py-2.5 text-gray-300">{ci(c).name}</td>
-                    <td className="px-4 py-2.5 text-gray-400">{ci(c).country}</td>
-                    <td className="px-4 py-2.5 text-right font-mono text-gray-300">{r ? r.rate.toFixed(4) : '-'}</td>
-                    <td className="px-4 py-2.5 text-right font-mono text-gray-300">{r ? (1 / r.rate).toFixed(4) : '-'}</td>
-                    <td className="px-4 py-2.5 text-right font-mono text-gray-300">{coverage.currency_counts[c] ?? 0}</td>
+                  <tr key={c} className="hover:bg-overlay/[0.02]">
+                    <td className="px-4 py-2.5 font-mono text-fg-strong font-medium">{c}</td>
+                    <td className="px-4 py-2.5 text-fg-soft">{ci(c).name}</td>
+                    <td className="px-4 py-2.5 text-fg-muted">{ci(c).country}</td>
+                    <td className="px-4 py-2.5 text-right font-mono text-fg-soft">{r ? r.rate.toFixed(4) : '-'}</td>
+                    <td className="px-4 py-2.5 text-right font-mono text-fg-soft">{r ? (1 / r.rate).toFixed(4) : '-'}</td>
+                    <td className="px-4 py-2.5 text-right font-mono text-fg-soft">{coverage.currency_counts[c] ?? 0}</td>
                     <td className="px-4 py-2.5 text-center">
-                      <span className="text-emerald-400 text-xs">{r?.source === 'pegged' ? 'pegged' : r?.source === 'yahoo' ? 'yahoo' : 'ecb'}</span>
+                      <span className="text-pos-400 text-xs">{r?.source === 'pegged' ? 'pegged' : r?.source === 'yahoo' ? 'yahoo' : 'ecb'}</span>
                     </td>
                     <td className="px-4 py-2.5">
                       <button
                         onClick={() => loadHistory(c)}
-                        className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                        className="text-xs text-accent-400 hover:text-accent-300 transition-colors"
                       >
                         history
                       </button>
@@ -534,31 +530,31 @@ export default function FxRates() {
               })}
               {/* Missing ACWI currencies */}
               {coverage?.missing.map(c => (
-                <tr key={c} className="hover:bg-white/[0.02]">
-                  <td className="px-4 py-2.5 font-mono text-white font-medium">{c}</td>
-                  <td className="px-4 py-2.5 text-gray-300">{ci(c).name}</td>
-                  <td className="px-4 py-2.5 text-gray-400">{ci(c).country}</td>
-                  <td className="px-4 py-2.5 text-right font-mono text-gray-500">-</td>
-                  <td className="px-4 py-2.5 text-right font-mono text-gray-500">-</td>
-                  <td className="px-4 py-2.5 text-right font-mono text-gray-300">{coverage.currency_counts[c] ?? 0}</td>
-                  <td className="px-4 py-2.5 text-center"><span className="text-rose-400 text-xs">missing</span></td>
+                <tr key={c} className="hover:bg-overlay/[0.02]">
+                  <td className="px-4 py-2.5 font-mono text-fg-strong font-medium">{c}</td>
+                  <td className="px-4 py-2.5 text-fg-soft">{ci(c).name}</td>
+                  <td className="px-4 py-2.5 text-fg-muted">{ci(c).country}</td>
+                  <td className="px-4 py-2.5 text-right font-mono text-fg-subtle">-</td>
+                  <td className="px-4 py-2.5 text-right font-mono text-fg-subtle">-</td>
+                  <td className="px-4 py-2.5 text-right font-mono text-fg-soft">{coverage.currency_counts[c] ?? 0}</td>
+                  <td className="px-4 py-2.5 text-center"><span className="text-neg-400 text-xs">missing</span></td>
                   <td className="px-4 py-2.5"></td>
                 </tr>
               ))}
               {/* ECB-only currencies (not in ACWI) */}
               {latestRates.filter(r => !coverage?.acwi_currencies.includes(r.currency)).map(r => (
-                <tr key={r.currency} className="hover:bg-white/[0.02] opacity-50">
-                  <td className="px-4 py-2.5 font-mono text-gray-400">{r.currency}</td>
-                  <td className="px-4 py-2.5 text-gray-500">{r.name}</td>
-                  <td className="px-4 py-2.5 text-gray-500">{r.country}</td>
-                  <td className="px-4 py-2.5 text-right font-mono text-gray-500">{r.rate.toFixed(4)}</td>
-                  <td className="px-4 py-2.5 text-right font-mono text-gray-500">{(1 / r.rate).toFixed(4)}</td>
-                  <td className="px-4 py-2.5 text-right font-mono text-gray-600">0</td>
-                  <td className="px-4 py-2.5 text-center"><span className="text-gray-600 text-xs">ecb only</span></td>
+                <tr key={r.currency} className="hover:bg-overlay/[0.02] opacity-50">
+                  <td className="px-4 py-2.5 font-mono text-fg-muted">{r.currency}</td>
+                  <td className="px-4 py-2.5 text-fg-subtle">{r.name}</td>
+                  <td className="px-4 py-2.5 text-fg-subtle">{r.country}</td>
+                  <td className="px-4 py-2.5 text-right font-mono text-fg-subtle">{r.rate.toFixed(4)}</td>
+                  <td className="px-4 py-2.5 text-right font-mono text-fg-subtle">{(1 / r.rate).toFixed(4)}</td>
+                  <td className="px-4 py-2.5 text-right font-mono text-fg-faint">0</td>
+                  <td className="px-4 py-2.5 text-center"><span className="text-fg-faint text-xs">ecb only</span></td>
                   <td className="px-4 py-2.5">
                     <button
                       onClick={() => loadHistory(r.currency)}
-                      className="text-xs text-gray-500 hover:text-gray-400 transition-colors"
+                      className="text-xs text-fg-subtle hover:text-fg-muted transition-colors"
                     >
                       history
                     </button>

@@ -49,13 +49,13 @@ export default function UniverseCard({
     : [];
 
   return (
-    <div className={`rounded-xl border overflow-hidden ${u.is_derived ? 'bg-[#131726] border-indigo-900/30' : 'bg-[#151821] border-gray-800/40'}`}>
+    <div className={`rounded-xl border overflow-hidden ${u.is_derived ? 'bg-card-alt border-accent-900/30' : 'bg-card border-neutral-800/40'}`}>
       <div className="flex items-start justify-between gap-3 px-5 py-4">
         <div className="flex items-start gap-3 min-w-0 flex-1">
           <button
             type="button"
             onClick={onToggle}
-            className="mt-0.5 text-gray-500 hover:text-gray-300 transition-colors shrink-0"
+            className="mt-0.5 text-fg-subtle hover:text-fg-soft transition-colors shrink-0"
             aria-label={expanded ? 'Collapse' : 'Expand'}
           >
             <span className="font-mono text-sm">{expanded ? '▾' : '▸'}</span>
@@ -71,30 +71,30 @@ export default function UniverseCard({
                     if (e.key === 'Enter') saveRename(u);
                     if (e.key === 'Escape') cancelRename();
                   }}
-                  className="bg-[#0f1117] border border-gray-700 rounded-lg px-2 py-1 text-base text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                  className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-base text-fg-strong focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
                 />
               ) : (
-                <h3 className="text-white text-base font-semibold">{u.label}</h3>
+                <h3 className="text-fg-strong text-base font-semibold">{u.label}</h3>
               )}
               {u.is_derived ? (
-                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent-500/15 text-accent-300 border border-accent-500/30">
                   Derived{u.parent_label ? ` · from ${u.parent_label}` : ''}
                 </span>
               ) : (
-                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-gray-700/40 text-gray-300 border border-gray-700/60">
+                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-neutral-700/40 text-fg-soft border border-neutral-700/60">
                   Base
                 </span>
               )}
-              <span className="text-gray-500 text-xs font-mono">id:{u.universe_id}</span>
-              <span className="text-gray-500 text-xs">created {createdLabel}</span>
+              <span className="text-fg-subtle text-xs font-mono">id:{u.universe_id}</span>
+              <span className="text-fg-subtle text-xs">created {createdLabel}</span>
             </div>
             {u.description && (
-              <p className="text-gray-400 text-xs mt-1">{u.description}</p>
+              <p className="text-fg-muted text-xs mt-1">{u.description}</p>
             )}
             {filterPills.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-2">
                 {filterPills.map((p, i) => (
-                  <span key={i} className="text-[11px] px-1.5 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 font-mono">
+                  <span key={i} className="text-[11px] px-1.5 py-0.5 rounded bg-accent-500/10 border border-accent-500/20 text-accent-300 font-mono">
                     {p}
                   </span>
                 ))}
@@ -118,30 +118,30 @@ export default function UniverseCard({
               <button
                 onClick={() => saveRename(u)}
                 disabled={isBusy}
-                className="px-2.5 py-1 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50"
+                className="px-2.5 py-1 rounded-lg text-xs font-medium bg-accent-600 hover:bg-accent-500 text-fg-strong transition-colors disabled:opacity-50"
               >
                 Save
               </button>
               <button
                 onClick={cancelRename}
-                className="px-2.5 py-1 rounded-lg text-xs font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+                className="px-2.5 py-1 rounded-lg text-xs font-medium text-fg-muted hover:text-fg-strong hover:bg-overlay/5 transition-colors"
               >
                 Cancel
               </button>
             </>
           ) : isConfirming ? (
             <>
-              <span className="text-xs text-rose-400">Delete?</span>
+              <span className="text-xs text-neg-400">Delete?</span>
               <button
                 onClick={() => deleteOne(u.label)}
                 disabled={isBusy}
-                className="px-2.5 py-1 rounded-lg text-xs font-medium bg-rose-600 hover:bg-rose-500 text-white transition-colors disabled:opacity-50"
+                className="px-2.5 py-1 rounded-lg text-xs font-medium bg-neg-600 hover:bg-neg-500 text-fg-strong transition-colors disabled:opacity-50"
               >
                 {isBusy ? '...' : 'Yes'}
               </button>
               <button
                 onClick={() => setConfirmDelete(null)}
-                className="px-2.5 py-1 rounded-lg text-xs font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+                className="px-2.5 py-1 rounded-lg text-xs font-medium text-fg-muted hover:text-fg-strong hover:bg-overlay/5 transition-colors"
               >
                 Cancel
               </button>
@@ -151,20 +151,20 @@ export default function UniverseCard({
               {onTighten && (
                 <button
                   onClick={onTighten}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${tightening ? 'bg-indigo-600 text-white' : 'text-indigo-300 hover:text-indigo-200 hover:bg-indigo-500/10'}`}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${tightening ? 'bg-accent-600 text-fg-strong' : 'text-accent-300 hover:text-accent-200 hover:bg-accent-500/10'}`}
                 >
                   {tightening ? 'Close' : 'Tighten'}
                 </button>
               )}
               <button
                 onClick={() => startRename(u)}
-                className="px-2.5 py-1 rounded-lg text-xs font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+                className="px-2.5 py-1 rounded-lg text-xs font-medium text-fg-muted hover:text-fg-strong hover:bg-overlay/5 transition-colors"
               >
                 Rename
               </button>
               <button
                 onClick={() => setConfirmDelete(u.label)}
-                className="px-2.5 py-1 rounded-lg text-xs font-medium text-gray-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                className="px-2.5 py-1 rounded-lg text-xs font-medium text-fg-muted hover:text-neg-400 hover:bg-neg-500/10 transition-colors"
               >
                 Delete
               </button>
@@ -174,7 +174,7 @@ export default function UniverseCard({
       </div>
 
       {expanded && (
-        <div className="border-t border-gray-800/40 grid grid-cols-1 lg:grid-cols-2 gap-0">
+        <div className="border-t border-neutral-800/40 grid grid-cols-1 lg:grid-cols-2 gap-0">
           <MonthlySparkline monthly={u.monthly_counts} />
           <SectorBreakdown sectors={u.sectors} totalRows={u.total_rows} />
         </div>

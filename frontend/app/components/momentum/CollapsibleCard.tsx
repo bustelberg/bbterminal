@@ -36,12 +36,12 @@ export default function CollapsibleCard({
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const toggle = () => setCollapsed((c) => !c);
   return (
-    <div className="bg-[#151821] rounded-xl border border-gray-800/40 overflow-hidden">
+    <div className="bg-card rounded-xl border border-neutral-800/40 overflow-hidden">
       <div
         role="button"
         tabIndex={0}
         aria-expanded={!collapsed}
-        className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-white/[0.02] transition-colors cursor-pointer select-none"
+        className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-overlay/[0.02] transition-colors cursor-pointer select-none"
         onClick={toggle}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -50,12 +50,12 @@ export default function CollapsibleCard({
           }
         }}
       >
-        <h3 className="text-white text-sm font-medium flex items-center gap-2 min-w-0">
+        <h3 className="text-fg-strong text-sm font-medium flex items-center gap-2 min-w-0">
           <Chevron collapsed={collapsed} />
           {title}
         </h3>
         {rightSlot != null && (
-          <div className="text-[11px] text-gray-500 ml-3 flex items-center gap-2 flex-wrap">{rightSlot}</div>
+          <div className="text-[11px] text-fg-subtle ml-3 flex items-center gap-2 flex-wrap">{rightSlot}</div>
         )}
       </div>
       {!collapsed && (
@@ -83,7 +83,7 @@ function Chevron({ collapsed }: { collapsed: boolean }) {
       width="10"
       height="10"
       viewBox="0 0 10 10"
-      className={`text-gray-500 transition-transform ${collapsed ? '' : 'rotate-90'}`}
+      className={`text-fg-subtle transition-transform ${collapsed ? '' : 'rotate-90'}`}
       fill="currentColor"
       aria-hidden="true"
     >

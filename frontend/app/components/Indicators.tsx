@@ -7,6 +7,7 @@ import {
 } from 'recharts';
 import DatePartsPicker from './DatePartsPicker';
 import { apiFetch } from '../../lib/apiFetch';
+import { chartTheme } from '../../lib/chartTheme';
 import { guruFocusUrl } from '../../lib/gurufocusUrl';
 import TableDownloadButton from './TableDownloadButton';
 import LoadingDots from './LoadingDots';
@@ -118,48 +119,48 @@ export default function Indicators() {
   return (
     <div className="px-8 py-5 space-y-6">
       <div>
-        <h1 className="text-xl font-semibold text-white">Indicators</h1>
-        <p className="text-sm text-gray-400 mt-1">
+        <h1 className="text-xl font-semibold text-fg-strong">Indicators</h1>
+        <p className="text-sm text-fg-muted mt-1">
           Fetch indicator data from GuruFocus, cache in storage, store in DB
         </p>
       </div>
 
       {/* Input form */}
-      <div className="bg-[#151821] rounded-xl border border-gray-800/40 p-5">
+      <div className="bg-card rounded-xl border border-neutral-800/40 p-5">
         <div className="flex flex-wrap items-end gap-4">
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Exchange</label>
+            <label className="block text-xs text-fg-muted mb-1">Exchange</label>
             <input
               type="text"
               value={exchange}
               onChange={e => setExchange(e.target.value)}
               placeholder="TPE"
-              className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white w-28 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+              className="bg-page border border-neutral-700 rounded-lg px-3 py-2 text-sm text-fg-strong w-28 focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Ticker</label>
+            <label className="block text-xs text-fg-muted mb-1">Ticker</label>
             <input
               type="text"
               value={ticker}
               onChange={e => setTicker(e.target.value)}
               placeholder="2330"
-              className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white w-32 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+              className="bg-page border border-neutral-700 rounded-lg px-3 py-2 text-sm text-fg-strong w-32 focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Indicator</label>
+            <label className="block text-xs text-fg-muted mb-1">Indicator</label>
             <select
               value={indicator}
               onChange={e => setIndicator(e.target.value)}
-              className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white w-32 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+              className="bg-page border border-neutral-700 rounded-lg px-3 py-2 text-sm text-fg-strong w-32 focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
             >
               <option value="price">price</option>
               <option value="volume">volume</option>
             </select>
           </div>
           <div>
-            <label className="block text-xs text-gray-400 mb-1">From</label>
+            <label className="block text-xs text-fg-muted mb-1">From</label>
             <DatePartsPicker
               value={fromDate}
               onChange={setFromDate}
@@ -169,7 +170,7 @@ export default function Indicators() {
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-400 mb-1">To</label>
+            <label className="block text-xs text-fg-muted mb-1">To</label>
             <DatePartsPicker
               value={toDate}
               onChange={setToDate}
@@ -184,22 +185,22 @@ export default function Indicators() {
               id="force-refresh"
               checked={forceRefresh}
               onChange={e => setForceRefresh(e.target.checked)}
-              className="rounded border-gray-600 bg-[#0f1117] text-indigo-500 focus:ring-indigo-500/30"
+              className="rounded border-neutral-600 bg-page text-accent-500 focus:ring-accent-500/30"
             />
-            <label htmlFor="force-refresh" className="text-xs text-gray-400">Force refresh</label>
+            <label htmlFor="force-refresh" className="text-xs text-fg-muted">Force refresh</label>
           </div>
           <button
             onClick={fetchIndicator}
             disabled={loading || !exchange || !ticker}
-            className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="px-4 py-2 rounded-lg bg-accent-600 hover:bg-accent-500 text-fg-strong text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {loading ? 'Fetching...' : 'Fetch'}
           </button>
         </div>
-        <p className="text-xs text-gray-500 mt-3">
-          GuruFocus URL: <span className="font-mono text-gray-400">{guruFocusUrl(ticker, exchange)}</span>
+        <p className="text-xs text-fg-subtle mt-3">
+          GuruFocus URL: <span className="font-mono text-fg-muted">{guruFocusUrl(ticker, exchange)}</span>
           {!fromDate && !toDate && (
-            <span className="ml-3 text-gray-600">Tip: set From/To to see the full series per date.</span>
+            <span className="ml-3 text-fg-faint">Tip: set From/To to see the full series per date.</span>
           )}
         </p>
       </div>
@@ -209,59 +210,59 @@ export default function Indicators() {
         <div className="space-y-4">
           {/* Status banner */}
           {result.success ? (
-            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-4 py-3">
+            <div className="bg-pos-500/10 border border-pos-500/20 rounded-lg px-4 py-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <span className="text-emerald-400 font-medium text-sm">{result.symbol}</span>
-                  <span className="text-gray-400 text-sm ml-2">
+                  <span className="text-pos-400 font-medium text-sm">{result.symbol}</span>
+                  <span className="text-fg-muted text-sm ml-2">
                     {result.indicator} &middot; {result.total_points?.toLocaleString()} data points &middot;
                     {result.rows_loaded?.toLocaleString()} rows loaded &middot;
                     source: {result.source}
                   </span>
                 </div>
-                <span className="text-xs text-gray-500 font-mono">
+                <span className="text-xs text-fg-subtle font-mono">
                   company_id={result.company_id} &middot; metric_code={result.metric_code}
                 </span>
               </div>
               {result.date_range && (
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-xs text-fg-subtle mt-1">
                   Range: {result.date_range.first} to {result.date_range.last}
                 </p>
               )}
             </div>
           ) : (
-            <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg px-4 py-3">
-              <span className="text-rose-400 font-medium text-sm">{result.symbol}</span>
-              <span className="text-rose-400/80 text-sm ml-2">{result.error}</span>
+            <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-4 py-3">
+              <span className="text-neg-400 font-medium text-sm">{result.symbol}</span>
+              <span className="text-neg-400/80 text-sm ml-2">{result.error}</span>
               {result.raw_preview && (
-                <pre className="text-xs text-gray-500 mt-2 overflow-x-auto">{result.raw_preview}</pre>
+                <pre className="text-xs text-fg-subtle mt-2 overflow-x-auto">{result.raw_preview}</pre>
               )}
             </div>
           )}
 
           {/* Chart of recent data */}
           {result.success && chartData.length > 0 && (
-            <div className="bg-[#151821] rounded-xl border border-gray-800/40 p-5">
-              <h2 className="text-sm font-medium text-white mb-3">
+            <div className="bg-card rounded-xl border border-neutral-800/40 p-5">
+              <h2 className="text-sm font-medium text-fg-strong mb-3">
                 Last {chartData.length} data points
               </h2>
               <ResponsiveContainer width="100%" height={300}>
                 <AreaChart data={chartData}>
                   <defs>
                     <linearGradient id="indGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#818cf8" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#818cf8" stopOpacity={0} />
+                      <stop offset="5%" stopColor={chartTheme.accent} stopOpacity={0.3} />
+                      <stop offset="95%" stopColor={chartTheme.accent} stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
                   <XAxis
                     dataKey="date"
-                    tick={{ fill: '#6b7280', fontSize: 11 }}
+                    tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
                     tickLine={false}
                     interval={Math.max(0, Math.floor(chartData.length / 6) - 1)}
                   />
                   <YAxis
-                    tick={{ fill: '#6b7280', fontSize: 11 }}
+                    tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
                     tickLine={false}
                     domain={yDomain}
                     width={70}
@@ -272,13 +273,8 @@ export default function Indicators() {
                     }}
                   />
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#1e2230',
-                      border: '1px solid rgba(107,114,128,0.3)',
-                      borderRadius: '8px',
-                      fontSize: 12,
-                    }}
-                    labelStyle={{ color: '#9ca3af' }}
+                    contentStyle={chartTheme.tooltipPopover.contentStyle}
+                    labelStyle={chartTheme.tooltipPopover.labelStyle}
                     formatter={(value) => {
                       const v = Number(value);
                       const formatted = v >= 1_000_000
@@ -292,7 +288,7 @@ export default function Indicators() {
                   <Area
                     type="monotone"
                     dataKey="value"
-                    stroke="#818cf8"
+                    stroke={chartTheme.accent}
                     strokeWidth={1.5}
                     fill="url(#indGradient)"
                     dot={false}
@@ -304,13 +300,13 @@ export default function Indicators() {
 
           {/* Date → value table */}
           {result.success && chartData.length > 0 && (
-            <div className="bg-[#151821] rounded-xl border border-gray-800/40">
-              <div className="px-5 py-3 border-b border-gray-800/40 flex items-center justify-between">
-                <h2 className="text-sm font-medium text-white">
-                  Values per date <span className="text-gray-500 font-normal">({chartData.length.toLocaleString()} rows)</span>
+            <div className="bg-card rounded-xl border border-neutral-800/40">
+              <div className="px-5 py-3 border-b border-neutral-800/40 flex items-center justify-between">
+                <h2 className="text-sm font-medium text-fg-strong">
+                  Values per date <span className="text-fg-subtle font-normal">({chartData.length.toLocaleString()} rows)</span>
                 </h2>
                 <div className="flex items-center gap-3">
-                  <span className="text-xs text-gray-500">
+                  <span className="text-xs text-fg-subtle">
                     {fromDate || toDate ? 'Filtered window' : 'Last 30 trading days (set From/To to widen)'}
                   </span>
                   <TableDownloadButton
@@ -326,19 +322,19 @@ export default function Indicators() {
               </div>
               <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
                 <table className="w-full text-sm">
-                  <thead className="sticky top-0 bg-[#151821] z-10">
-                    <tr className="text-gray-400 text-xs uppercase tracking-wider">
+                  <thead className="sticky top-0 bg-card z-10">
+                    <tr className="text-fg-muted text-xs uppercase tracking-wider">
                       <th className="text-left px-4 py-2 font-medium w-12">#</th>
                       <th className="text-left px-4 py-2 font-medium">Date</th>
                       <th className="text-right px-4 py-2 font-medium">{indicator === 'volume' ? 'Volume' : 'Price'}</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-800/30">
+                  <tbody className="divide-y divide-neutral-800/30">
                     {[...chartData].reverse().map((d, i) => (
-                      <tr key={d.date} className="hover:bg-white/[0.02]">
-                        <td className="px-4 py-1.5 text-gray-500 font-mono text-xs">{i + 1}</td>
-                        <td className="px-4 py-1.5 text-gray-200 font-mono text-xs">{d.date}</td>
-                        <td className="px-4 py-1.5 text-gray-200 font-mono text-right">
+                      <tr key={d.date} className="hover:bg-overlay/[0.02]">
+                        <td className="px-4 py-1.5 text-fg-subtle font-mono text-xs">{i + 1}</td>
+                        <td className="px-4 py-1.5 text-fg font-mono text-xs">{d.date}</td>
+                        <td className="px-4 py-1.5 text-fg font-mono text-right">
                           {indicator === 'volume'
                             ? d.value.toLocaleString(undefined, { maximumFractionDigits: 0 })
                             : d.value.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
@@ -353,10 +349,10 @@ export default function Indicators() {
 
           {/* Logs */}
           {result.logs && result.logs.length > 0 && (
-            <div className="bg-[#151821] rounded-xl border border-gray-800/40">
+            <div className="bg-card rounded-xl border border-neutral-800/40">
               <button
                 onClick={() => setShowLogs(!showLogs)}
-                className="w-full px-5 py-3 flex items-center justify-between text-sm text-gray-400 hover:text-gray-200 transition-colors"
+                className="w-full px-5 py-3 flex items-center justify-between text-sm text-fg-muted hover:text-fg transition-colors"
               >
                 <span>Logs ({result.logs.length})</span>
                 <span>{showLogs ? '\u25B2' : '\u25BC'}</span>
@@ -364,7 +360,7 @@ export default function Indicators() {
               {showLogs && (
                 <div className="px-5 pb-4 space-y-1">
                   {result.logs.map((log, i) => (
-                    <p key={i} className="text-xs font-mono text-gray-500">{log}</p>
+                    <p key={i} className="text-xs font-mono text-fg-subtle">{log}</p>
                   ))}
                 </div>
               )}
@@ -374,12 +370,12 @@ export default function Indicators() {
       )}
 
       {/* Supported exchanges table */}
-      <div className="bg-[#151821] rounded-xl border border-gray-800/40">
-        <div className="px-5 py-3 border-b border-gray-800/40 flex items-center justify-between">
+      <div className="bg-card rounded-xl border border-neutral-800/40">
+        <div className="px-5 py-3 border-b border-neutral-800/40 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <h2 className="text-sm font-medium text-white">Supported GuruFocus Exchanges</h2>
+            <h2 className="text-sm font-medium text-fg-strong">Supported GuruFocus Exchanges</h2>
             {exchanges && (
-              <span className="text-xs text-gray-500">
+              <span className="text-xs text-fg-subtle">
                 {Object.keys(exchanges).length} countries &middot; {Object.values(exchanges).flat().length} exchanges
                 &middot; source: {exchangesSource}
               </span>
@@ -389,7 +385,7 @@ export default function Indicators() {
             <button
               onClick={() => loadCurrencyMap(false)}
               disabled={currencyMapLoading}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 bg-[#0f1117] border border-gray-700 text-gray-300 hover:border-indigo-500 hover:text-indigo-400"
+              className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 bg-page border border-neutral-700 text-fg-soft hover:border-accent-500 hover:text-accent-400"
             >
               {currencyMapLoading ? <LoadingDots label="Loading" /> : currencyMapLoaded ? 'Currencies loaded' : 'Load currencies'}
             </button>
@@ -397,7 +393,7 @@ export default function Indicators() {
               <button
                 onClick={() => loadCurrencyMap(true)}
                 disabled={currencyMapLoading}
-                className="px-2 py-1.5 rounded-lg text-xs text-gray-500 hover:text-gray-300 transition-colors disabled:opacity-50"
+                className="px-2 py-1.5 rounded-lg text-xs text-fg-subtle hover:text-fg-soft transition-colors disabled:opacity-50"
               >
                 refresh
               </button>
@@ -407,7 +403,7 @@ export default function Indicators() {
               value={exchangeSearch}
               onChange={e => setExchangeSearch(e.target.value)}
               placeholder="Search..."
-              className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white w-40 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+              className="bg-page border border-neutral-700 rounded-lg px-3 py-1.5 text-xs text-fg-strong w-40 focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
             />
             <TableDownloadButton
               rows={(() => {
@@ -439,12 +435,12 @@ export default function Indicators() {
           </div>
         </div>
         {exchangesLoading ? (
-          <div className="px-5 py-4 text-gray-400 text-sm"><LoadingDots label="Loading exchanges" /></div>
+          <div className="px-5 py-4 text-fg-muted text-sm"><LoadingDots label="Loading exchanges" /></div>
         ) : exchanges ? (
           <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
             <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-[#151821] z-10">
-                <tr className="text-gray-400 text-xs uppercase tracking-wider">
+              <thead className="sticky top-0 bg-card z-10">
+                <tr className="text-fg-muted text-xs uppercase tracking-wider">
                   <th className="text-left px-4 py-2.5 font-medium w-8">#</th>
                   <th className="text-left px-4 py-2.5 font-medium">Country</th>
                   <th className="text-left px-4 py-2.5 font-medium">Exchanges</th>
@@ -452,7 +448,7 @@ export default function Indicators() {
                   <th className="text-right px-4 py-2.5 font-medium">Count</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-800/30">
+              <tbody className="divide-y divide-neutral-800/30">
                 {Object.entries(exchanges)
                   .filter(([country, codes]) => {
                     if (!exchangeSearch) return true;
@@ -464,16 +460,16 @@ export default function Indicators() {
                   .map(([country, codes], i) => {
                     const curr = currencyMapLoaded ? currencyMap[codes[0]]?.currency : null;
                     return (
-                      <tr key={country} className="hover:bg-white/[0.02]">
-                        <td className="px-4 py-2.5 text-gray-500 font-mono text-xs">{i + 1}</td>
-                        <td className="px-4 py-2.5 text-white">{country}</td>
+                      <tr key={country} className="hover:bg-overlay/[0.02]">
+                        <td className="px-4 py-2.5 text-fg-subtle font-mono text-xs">{i + 1}</td>
+                        <td className="px-4 py-2.5 text-fg-strong">{country}</td>
                         <td className="px-4 py-2.5">
                           <div className="flex flex-wrap gap-1.5">
                             {codes.map(code => (
                               <button
                                 key={code}
                                 onClick={() => setExchange(code)}
-                                className="px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-mono hover:bg-indigo-500/20 transition-colors cursor-pointer"
+                                className="px-2 py-0.5 rounded bg-accent-500/10 border border-accent-500/20 text-accent-400 text-xs font-mono hover:bg-accent-500/20 transition-colors cursor-pointer"
                               >
                                 {code}
                               </button>
@@ -481,11 +477,11 @@ export default function Indicators() {
                           </div>
                         </td>
                         {currencyMapLoaded && (
-                          <td className="px-4 py-2.5 font-mono text-xs text-gray-300">
-                            {curr ?? <span className="text-gray-600">-</span>}
+                          <td className="px-4 py-2.5 font-mono text-xs text-fg-soft">
+                            {curr ?? <span className="text-fg-faint">-</span>}
                           </td>
                         )}
-                        <td className="px-4 py-2.5 text-right text-gray-400 font-mono text-xs">{codes.length}</td>
+                        <td className="px-4 py-2.5 text-right text-fg-muted font-mono text-xs">{codes.length}</td>
                       </tr>
                     );
                   })}
@@ -493,7 +489,7 @@ export default function Indicators() {
             </table>
           </div>
         ) : (
-          <div className="px-5 py-4 text-gray-500 text-sm">Failed to load exchanges</div>
+          <div className="px-5 py-4 text-fg-subtle text-sm">Failed to load exchanges</div>
         )}
       </div>
     </div>

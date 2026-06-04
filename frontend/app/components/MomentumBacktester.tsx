@@ -75,7 +75,6 @@ export default function MomentumBacktester() {
     selectionMode, setSelectionMode,
     randomSeed, setRandomSeed,
     nTrials, setNTrials,
-    rebalanceWeekday, setRebalanceWeekday,
   } = config;
 
   // Sector → benchmark_id mapping for selection_mode='sector_etf'.
@@ -422,10 +421,10 @@ export default function MomentumBacktester() {
   return (
     <div className="flex flex-col h-full overflow-x-hidden">
       {/* Header */}
-      <div className="px-8 py-5 border-b border-gray-800/60 flex flex-wrap items-center justify-between gap-y-3">
+      <div className="px-8 py-5 border-b border-neutral-800/60 flex flex-wrap items-center justify-between gap-y-3">
         <div className="min-w-0">
-          <h1 className="text-lg font-semibold text-white">Momentum Backtester</h1>
-          <p className="text-xs text-gray-500 mt-0.5">
+          <h1 className="text-lg font-semibold text-fg-strong">Momentum Backtester</h1>
+          <p className="text-xs text-fg-subtle mt-0.5">
             Price momentum portfolio — equal-weight, monthly rebalancing, sector-filtered
           </p>
         </div>
@@ -449,7 +448,7 @@ export default function MomentumBacktester() {
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden px-8 py-5 space-y-5">
         {/* Config Panel */}
-        <div className="bg-[#151821] rounded-xl border border-gray-800/40 p-5">
+        <div className="bg-card rounded-xl border border-neutral-800/40 p-5">
           <div className="flex flex-wrap items-end gap-5 mb-5">
             {/* Universe is now picked per-variant in the Variants panel
                 below — no top-level dropdown. The first selected variant
@@ -462,8 +461,6 @@ export default function MomentumBacktester() {
               setEndDate={setEndDate}
               maxCompanies={maxCompanies}
               setMaxCompanies={setMaxCompanies}
-              rebalanceWeekday={rebalanceWeekday}
-              setRebalanceWeekday={setRebalanceWeekday}
             />
             {/* Top Sectors / Per Sector / Min Price Score moved to the
                 Strategy parameters section below — they only apply to
@@ -500,14 +497,14 @@ export default function MomentumBacktester() {
                 type="checkbox"
                 checked={noCache}
                 onChange={(e) => setNoCache(e.target.checked)}
-                className="accent-indigo-500 w-4 h-4 cursor-pointer"
+                className="accent-accent-500 w-4 h-4 cursor-pointer"
               />
-              <span className="text-gray-400 text-xs">Don&apos;t use cache</span>
+              <span className="text-fg-muted text-xs">Don&apos;t use cache</span>
             </label>
             {variantsRunning && (
               <button
                 onClick={cancelVariantsBacktest}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                className="px-4 py-2 rounded-lg text-sm font-medium text-fg-muted hover:text-neg-400 hover:bg-neg-500/10 transition-colors"
               >
                 Cancel variants
               </button>
@@ -535,12 +532,12 @@ export default function MomentumBacktester() {
               selections are run in parallel for the mean ± std
               reporting). The header makes the section's role explicit
               so it's not mistaken for a generic config block. */}
-          <div className="border-t border-gray-800/60 pt-4">
+          <div className="border-t border-neutral-800/60 pt-4">
             <div className="flex items-baseline gap-3 mb-3">
-              <h2 className="text-gray-300 text-xs font-semibold uppercase tracking-wider">
+              <h2 className="text-fg-soft text-xs font-semibold uppercase tracking-wider">
                 Strategy parameters
               </h2>
-              <span className="text-[10px] text-gray-500">
+              <span className="text-[10px] text-fg-subtle">
                 {selectionMode === 'random'
                   ? 'Random baseline · trials run independently with sequential seeds'
                   : selectionMode === 'all'
@@ -579,11 +576,11 @@ export default function MomentumBacktester() {
             )}
 
             {selectionMode === 'all' && (
-              <div className="bg-[#0f1117] border border-gray-800/60 rounded-lg px-4 py-3 text-xs text-gray-400 leading-relaxed max-w-[640px]">
-                <div className="text-gray-300 font-medium mb-1">No tunable parameters.</div>
+              <div className="bg-page border border-neutral-800/60 rounded-lg px-4 py-3 text-xs text-fg-muted leading-relaxed max-w-[640px]">
+                <div className="text-fg-soft font-medium mb-1">No tunable parameters.</div>
                 Each rebalance period holds every company in the selected universe&apos;s month-snapshot,
                 equal-weighted. Use this as an index-proxy benchmark to compare against the momentum
-                strategy. Only <span className="text-gray-300">long-only</span> is supported — long-short would need a top/bottom split that doesn&apos;t exist in this mode.
+                strategy. Only <span className="text-fg-soft">long-only</span> is supported — long-short would need a top/bottom split that doesn&apos;t exist in this mode.
               </div>
             )}
           </div>
@@ -683,19 +680,19 @@ export default function MomentumBacktester() {
                 The pill shows the resulting name; rename / delete are in
                 the saved-backtests dropdown in the page header. */}
             {saving && hasVariants && (
-              <div className="bg-[#151821] border border-gray-800/40 rounded-lg px-4 py-3 text-gray-400 text-sm flex items-center gap-2">
+              <div className="bg-card border border-neutral-800/40 rounded-lg px-4 py-3 text-fg-muted text-sm flex items-center gap-2">
                 <Spinner />
                 <span>Auto-saving variant bundle…</span>
               </div>
             )}
             {loadedRunId && (
-              <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-lg px-4 py-3 text-indigo-400 text-sm flex items-center gap-2">
+              <div className="bg-accent-500/10 border border-accent-500/20 rounded-lg px-4 py-3 text-accent-400 text-sm flex items-center gap-2">
                 <span>Saved as</span>
-                <span className="text-indigo-300 font-medium">
+                <span className="text-accent-300 font-medium">
                   {savedRuns.find((r) => r.run_id === loadedRunId)?.name}
                 </span>
                 {hasVariants && (
-                  <span className="text-indigo-400/70 text-xs">
+                  <span className="text-accent-400/70 text-xs">
                     · {Object.keys(variants).length} variants
                   </span>
                 )}
@@ -703,7 +700,7 @@ export default function MomentumBacktester() {
             )}
 
             {/* Disclaimer */}
-            <p className="text-gray-600 text-xs">
+            <p className="text-fg-faint text-xs">
               Note: Uses current company universe applied retroactively (survivorship bias). Returns are hypothetical and do not account for transaction costs.
             </p>
           </>

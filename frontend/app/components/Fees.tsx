@@ -131,8 +131,8 @@ function FeeStructureCard() {
   const field = (f: FeeField) => (
     <div key={f.key} className="flex items-center justify-between gap-3 py-2">
       <div className="min-w-0">
-        <div className="text-sm text-gray-200">{f.label}</div>
-        <div className="text-[11px] text-gray-600">{f.hint}</div>
+        <div className="text-sm text-fg">{f.label}</div>
+        <div className="text-[11px] text-fg-faint">{f.hint}</div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
         <input
@@ -141,36 +141,36 @@ function FeeStructureCard() {
           step="1"
           value={cfg[f.key]}
           onChange={(e) => setCfg((c) => ({ ...c, [f.key]: e.target.value }))}
-          className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-1.5 text-sm font-mono w-24 text-right text-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+          className="bg-page border border-neutral-700 rounded-lg px-3 py-1.5 text-sm font-mono w-24 text-right text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
         />
-        <span className="text-xs text-gray-500 w-20">{f.suffix}</span>
+        <span className="text-xs text-fg-subtle w-20">{f.suffix}</span>
       </div>
     </div>
   );
 
   return (
-    <div className="bg-[#151821] rounded-xl border border-gray-800/40 mb-6">
-      <div className="px-5 py-3 border-b border-gray-800/40 flex items-center justify-between">
-        <h2 className="text-sm font-medium text-white">Fee structure</h2>
+    <div className="bg-card rounded-xl border border-neutral-800/40 mb-6">
+      <div className="px-5 py-3 border-b border-neutral-800/40 flex items-center justify-between">
+        <h2 className="text-sm font-medium text-fg-strong">Fee structure</h2>
         {loading && <LoadingDots label="Loading" />}
       </div>
       <div className="px-5 py-4 grid gap-x-8 gap-y-2 md:grid-cols-2">
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Leonteq costs</div>
-          <div className="divide-y divide-gray-800/30">{LEONTEQ_FIELDS.map(field)}</div>
+          <div className="text-[10px] uppercase tracking-wider text-fg-subtle mb-1">Leonteq costs</div>
+          <div className="divide-y divide-neutral-800/30">{LEONTEQ_FIELDS.map(field)}</div>
         </div>
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Bustelberg fees</div>
-          <div className="divide-y divide-gray-800/30">{BUSTELBERG_FIELDS.map(field)}</div>
+          <div className="text-[10px] uppercase tracking-wider text-fg-subtle mb-1">Bustelberg fees</div>
+          <div className="divide-y divide-neutral-800/30">{BUSTELBERG_FIELDS.map(field)}</div>
         </div>
       </div>
-      <div className="px-5 py-3 border-t border-gray-800/40 flex items-center justify-between gap-3">
-        <span className="text-xs text-gray-600">
+      <div className="px-5 py-3 border-t border-neutral-800/40 flex items-center justify-between gap-3">
+        <span className="text-xs text-fg-faint">
           Applied to every backtest&apos;s fee waterfall: gross → after Leonteq → after Bustelberg.
         </span>
         <div className="flex items-center gap-3">
           {msg && (
-            <span className={`text-xs ${msg.kind === 'ok' ? 'text-emerald-300' : 'text-rose-300'}`}>
+            <span className={`text-xs ${msg.kind === 'ok' ? 'text-pos-300' : 'text-neg-300'}`}>
               {msg.text}
             </span>
           )}
@@ -178,7 +178,7 @@ function FeeStructureCard() {
             type="button"
             onClick={() => void save()}
             disabled={saving || !dirty || !parsed}
-            className="text-xs px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
+            className="text-xs px-4 py-1.5 rounded-lg bg-accent-600 hover:bg-accent-500 disabled:opacity-40 disabled:cursor-not-allowed text-fg-strong transition-colors"
           >
             {saving ? 'Saving…' : dirty ? 'Save fee structure' : 'Saved'}
           </button>
@@ -340,10 +340,10 @@ export default function Fees() {
   ], []);
 
   return (
-    <div className="min-h-screen bg-[#0f1117] text-gray-200">
-      <div className="px-8 py-5 border-b border-gray-800/40">
-        <h1 className="text-xl font-semibold text-white">Fees</h1>
-        <p className="text-sm text-gray-500 mt-1">
+    <div className="min-h-screen bg-page text-fg">
+      <div className="px-8 py-5 border-b border-neutral-800/40">
+        <h1 className="text-xl font-semibold text-fg-strong">Fees</h1>
+        <p className="text-sm text-fg-subtle mt-1">
           The global fee structure (Leonteq + Bustelberg) feeds every backtest&apos;s fee waterfall. Below, mark which exchanges your broker can trade — unsupported exchanges are dropped from the backtest universe entirely before signals are computed.
         </p>
       </div>
@@ -352,30 +352,30 @@ export default function Fees() {
         <FeeStructureCard />
 
         {loadError && (
-          <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg px-4 py-3 text-sm text-rose-300 mb-4">
+          <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-4 py-3 text-sm text-neg-300 mb-4">
             {loadError}
           </div>
         )}
 
-        <div className="bg-[#151821] rounded-xl border border-gray-800/40">
-          <div className="px-5 py-3 border-b border-gray-800/40 flex items-center justify-between gap-3 flex-wrap">
-            <div className="text-sm text-gray-400 flex items-center gap-4 flex-wrap">
+        <div className="bg-card rounded-xl border border-neutral-800/40">
+          <div className="px-5 py-3 border-b border-neutral-800/40 flex items-center justify-between gap-3 flex-wrap">
+            <div className="text-sm text-fg-muted flex items-center gap-4 flex-wrap">
               {loading ? <LoadingDots label="Loading exchanges" /> : (
                 <>
-                  <span className="text-white font-medium">Broker-supported exchanges</span>
-                  <span><span className="text-gray-200 font-mono">{rows.length}</span> exchanges</span>
-                  <span className="text-emerald-400">{totals.supported} supported</span>
-                  <span className="text-rose-400">{totals.unsupported} unsupported</span>
+                  <span className="text-fg-strong font-medium">Broker-supported exchanges</span>
+                  <span><span className="text-fg font-mono">{rows.length}</span> exchanges</span>
+                  <span className="text-pos-400">{totals.supported} supported</span>
+                  <span className="text-neg-400">{totals.unsupported} unsupported</span>
                 </>
               )}
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              <label className="text-xs text-gray-400 inline-flex items-center gap-1.5 cursor-pointer select-none">
+              <label className="text-xs text-fg-muted inline-flex items-center gap-1.5 cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={showOnlyUnsupported}
                   onChange={(e) => setShowOnlyUnsupported(e.target.checked)}
-                  className="accent-rose-500 w-3.5 h-3.5"
+                  className="accent-neg-500 w-3.5 h-3.5"
                 />
                 Show only unsupported
               </label>
@@ -384,7 +384,7 @@ export default function Fees() {
                 placeholder="Filter…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 focus:outline-none w-56"
+                className="bg-page border border-neutral-700 rounded-lg px-3 py-1.5 text-xs text-fg placeholder-fg-subtle focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 focus:outline-none w-56"
               />
               <TableDownloadButton
                 rows={filtered}
@@ -397,8 +397,8 @@ export default function Fees() {
 
           <div className="overflow-auto">
             <table className="w-full text-sm">
-              <thead className="text-gray-500 text-xs sticky top-0 bg-[#151821] z-10">
-                <tr className="border-b border-gray-800/40">
+              <thead className="text-fg-subtle text-xs sticky top-0 bg-card z-10">
+                <tr className="border-b border-neutral-800/40">
                   <th className="text-center px-3 py-2.5 font-medium w-12">Supported</th>
                   <th className="text-left px-3 py-2.5 font-medium">Code</th>
                   <th className="text-left px-3 py-2.5 font-medium">Name</th>
@@ -415,7 +415,7 @@ export default function Fees() {
                   return (
                     <tr
                       key={row.exchange_code}
-                      className={`border-b border-gray-800/20 hover:bg-white/[0.02] ${pending ? 'bg-indigo-500/[0.04]' : ''}`}
+                      className={`border-b border-neutral-800/20 hover:bg-overlay/[0.02] ${pending ? 'bg-accent-500/[0.04]' : ''}`}
                     >
                       <td className="px-3 py-2 text-center">
                         <input
@@ -427,21 +427,21 @@ export default function Fees() {
                               [row.exchange_code]: { ...st[row.exchange_code], is_supported: e.target.checked, error: null },
                             }))
                           }
-                          className="accent-emerald-500 w-4 h-4 cursor-pointer"
+                          className="accent-pos-500 w-4 h-4 cursor-pointer"
                           title={s.is_supported ? 'Supported by broker — companies on this exchange stay in the universe' : 'NOT supported — companies on this exchange are dropped before backtest'}
                         />
-                        {s.error && <div className="text-[10px] text-rose-400 mt-0.5">{s.error}</div>}
+                        {s.error && <div className="text-[10px] text-neg-400 mt-0.5">{s.error}</div>}
                       </td>
-                      <td className={`px-3 py-2 font-mono ${muted ? 'text-gray-500' : 'text-gray-200'}`}>{row.exchange_code}</td>
-                      <td className={`px-3 py-2 truncate max-w-[260px] ${muted ? 'text-gray-600' : 'text-gray-300'}`}>{row.exchange_name ?? '—'}</td>
-                      <td className={`px-3 py-2 font-mono ${muted ? 'text-gray-600' : 'text-gray-500'}`}>{row.country_code ?? '—'}</td>
-                      <td className={`px-3 py-2 font-mono ${muted ? 'text-gray-600' : 'text-gray-500'}`}>{row.currency_code ?? '—'}</td>
+                      <td className={`px-3 py-2 font-mono ${muted ? 'text-fg-subtle' : 'text-fg'}`}>{row.exchange_code}</td>
+                      <td className={`px-3 py-2 truncate max-w-[260px] ${muted ? 'text-fg-faint' : 'text-fg-soft'}`}>{row.exchange_name ?? '—'}</td>
+                      <td className={`px-3 py-2 font-mono ${muted ? 'text-fg-faint' : 'text-fg-subtle'}`}>{row.country_code ?? '—'}</td>
+                      <td className={`px-3 py-2 font-mono ${muted ? 'text-fg-faint' : 'text-fg-subtle'}`}>{row.currency_code ?? '—'}</td>
                     </tr>
                   );
                 })}
                 {!loading && filtered.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-5 py-6 text-sm text-gray-500 text-center">
+                    <td colSpan={5} className="px-5 py-6 text-sm text-fg-subtle text-center">
                       {rows.length === 0 ? 'No exchanges configured.' : 'No exchanges match the filter.'}
                     </td>
                   </tr>
@@ -452,15 +452,15 @@ export default function Fees() {
         </div>
 
         {pendingCount > 0 && (
-          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-[#151821] border border-indigo-500/40 rounded-xl shadow-2xl px-5 py-3 flex items-center gap-4 z-30">
-            <span className="text-sm text-gray-300">
-              <span className="font-mono text-indigo-300">{pendingCount}</span> unsaved change{pendingCount === 1 ? '' : 's'}
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-card border border-accent-500/40 rounded-xl shadow-2xl px-5 py-3 flex items-center gap-4 z-30">
+            <span className="text-sm text-fg-soft">
+              <span className="font-mono text-accent-300">{pendingCount}</span> unsaved change{pendingCount === 1 ? '' : 's'}
             </span>
             <button
               type="button"
               onClick={handleReset}
               disabled={saving}
-              className="text-xs text-gray-500 hover:text-gray-300 transition-colors disabled:opacity-50"
+              className="text-xs text-fg-subtle hover:text-fg-soft transition-colors disabled:opacity-50"
             >
               Reset
             </button>
@@ -468,7 +468,7 @@ export default function Fees() {
               type="button"
               onClick={handleSave}
               disabled={saving}
-              className="text-xs px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors"
+              className="text-xs px-4 py-1.5 rounded-lg bg-accent-600 hover:bg-accent-500 disabled:opacity-50 text-fg-strong transition-colors"
             >
               {saving ? 'Saving…' : `Save ${pendingCount} change${pendingCount === 1 ? '' : 's'}`}
             </button>
@@ -476,17 +476,17 @@ export default function Fees() {
         )}
 
         {saveError && (
-          <div className="mt-4 bg-rose-500/10 border border-rose-500/20 rounded-lg px-4 py-3 text-sm text-rose-300">
+          <div className="mt-4 bg-neg-500/10 border border-neg-500/20 rounded-lg px-4 py-3 text-sm text-neg-300">
             {saveError}
           </div>
         )}
         {saveOk && !saveError && (
-          <div className="mt-4 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-4 py-3 text-sm text-emerald-300">
+          <div className="mt-4 bg-pos-500/10 border border-pos-500/20 rounded-lg px-4 py-3 text-sm text-pos-300">
             {saveOk}
           </div>
         )}
 
-        <p className="text-xs text-gray-500 mt-4">
+        <p className="text-xs text-fg-subtle mt-4">
           Uncheck an exchange to drop every company listed there from the backtest universe before signals are computed.
         </p>
       </div>

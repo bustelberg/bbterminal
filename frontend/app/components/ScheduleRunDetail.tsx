@@ -32,19 +32,19 @@ function Section({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="bg-[#0f1117] border border-gray-800/60 rounded-lg overflow-hidden">
+    <div className="bg-page border border-neutral-800/60 rounded-lg overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="w-full px-4 py-2 flex items-center justify-between hover:bg-white/[0.02] transition-colors"
+        className="w-full px-4 py-2 flex items-center justify-between hover:bg-overlay/[0.02] transition-colors"
       >
         <span className="flex items-center gap-2">
-          <span className="text-gray-500 font-mono text-xs">{open ? '▾' : '▸'}</span>
-          <span className="text-sm font-medium text-gray-200">{title}</span>
+          <span className="text-fg-subtle font-mono text-xs">{open ? '▾' : '▸'}</span>
+          <span className="text-sm font-medium text-fg">{title}</span>
         </span>
         {rightSlot}
       </button>
-      {open && <div className="px-4 py-3 border-t border-gray-800/40">{children}</div>}
+      {open && <div className="px-4 py-3 border-t border-neutral-800/40">{children}</div>}
     </div>
   );
 }
@@ -55,28 +55,28 @@ function Section({
  * visually unambiguous. */
 function TemplateRunSection({ run, t }: { run: IngestRun; t: TemplateDiff }) {
   return (
-    <div className="bg-[#151821] border border-gray-800/40 rounded-lg overflow-hidden">
-      <div className="px-3 py-2 flex items-center gap-3 flex-wrap border-b border-gray-800/40">
-        <span className="text-sm font-medium text-gray-200">{t.template_key}</span>
+    <div className="bg-card border border-neutral-800/40 rounded-lg overflow-hidden">
+      <div className="px-3 py-2 flex items-center gap-3 flex-wrap border-b border-neutral-800/40">
+        <span className="text-sm font-medium text-fg">{t.template_key}</span>
         {t.error ? (
-          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-rose-500/10 text-rose-300 border-rose-500/30">
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-neg-500/10 text-neg-300 border-neg-500/30">
             error
           </span>
         ) : (
-          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-emerald-500/15 text-emerald-300 border-emerald-500/30">
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-pos-500/15 text-pos-300 border-pos-500/30">
             ok
           </span>
         )}
-        <span className="text-xs text-gray-500 font-mono">
-          {t.this_month ?? '—'}{t.prev_month && <span className="text-gray-600"> vs {t.prev_month}</span>}
+        <span className="text-xs text-fg-subtle font-mono">
+          {t.this_month ?? '—'}{t.prev_month && <span className="text-fg-faint"> vs {t.prev_month}</span>}
         </span>
-        <span className="text-xs text-gray-400 font-mono ml-auto">
+        <span className="text-xs text-fg-muted font-mono ml-auto">
           +{t.additions_count} / −{t.removals_count}{t.renames_count > 0 && <span> / r{t.renames_count}</span>}
         </span>
       </div>
       <div className="px-3 py-3 space-y-3">
         {t.error && (
-          <div className="text-xs text-rose-300 font-mono whitespace-pre-wrap">{t.error}</div>
+          <div className="text-xs text-neg-300 font-mono whitespace-pre-wrap">{t.error}</div>
         )}
         {!t.error && (
           <div className="grid gap-3 md:grid-cols-3">
@@ -123,44 +123,44 @@ function UnresolvedAdditionsSection({
 }) {
   const [open, setOpen] = useState(true);
   return (
-    <div className="bg-amber-500/[0.06] border border-amber-500/30 rounded-lg overflow-hidden">
+    <div className="bg-warn-500/[0.06] border border-warn-500/30 rounded-lg overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="w-full px-3 py-2 flex items-center justify-between hover:bg-amber-500/[0.04] cursor-pointer"
+        className="w-full px-3 py-2 flex items-center justify-between hover:bg-warn-500/[0.04] cursor-pointer"
       >
         <span className="flex items-center gap-2">
-          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border text-amber-300 bg-amber-500/10 border-amber-500/40">
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border text-warn-300 bg-warn-500/10 border-warn-500/40">
             Unresolved post-XLS additions
           </span>
-          <span className="text-amber-200 font-mono">{items.length}</span>
-          <span className="text-[11px] text-amber-200/70">
+          <span className="text-warn-200 font-mono">{items.length}</span>
+          <span className="text-[11px] text-warn-200/70">
             need a manual GuruFocus link before the next pipeline tick can include them
           </span>
         </span>
-        <span className="text-amber-300 font-mono text-xs">{open ? '▾' : '▸'}</span>
+        <span className="text-warn-300 font-mono text-xs">{open ? '▾' : '▸'}</span>
       </button>
       {open && (
-        <div className="border-t border-amber-500/30 max-h-96 overflow-y-auto divide-y divide-amber-500/15">
+        <div className="border-t border-warn-500/30 max-h-96 overflow-y-auto divide-y divide-warn-500/15">
           {items.map((u, idx) => (
             <div key={`${u.msci_href ?? u.name}-${idx}`} className="px-3 py-2 text-xs space-y-1">
               <div className="flex items-baseline gap-2 flex-wrap">
-                <span className="font-mono text-gray-200">{u.name}</span>
-                <span className="text-[10px] uppercase tracking-wider px-1 py-0.5 rounded border border-gray-700 text-gray-400">
+                <span className="font-mono text-fg">{u.name}</span>
+                <span className="text-[10px] uppercase tracking-wider px-1 py-0.5 rounded border border-neutral-700 text-fg-muted">
                   {u.country}
                 </span>
                 {u.eff_date && (
-                  <span className="text-[10px] text-gray-500 font-mono">eff {u.eff_date}</span>
+                  <span className="text-[10px] text-fg-subtle font-mono">eff {u.eff_date}</span>
                 )}
-                <span className="text-[10px] uppercase tracking-wider px-1 py-0.5 rounded border border-rose-500/30 text-rose-300 bg-rose-500/10 ml-auto">
+                <span className="text-[10px] uppercase tracking-wider px-1 py-0.5 rounded border border-neg-500/30 text-neg-300 bg-neg-500/10 ml-auto">
                   {u.reason}
                 </span>
               </div>
               {u.openfigi_candidate && (
-                <div className="text-[11px] text-gray-400 font-mono">
+                <div className="text-[11px] text-fg-muted font-mono">
                   OpenFIGI says: {u.openfigi_candidate.exch_code ?? '?'}:{u.openfigi_candidate.ticker ?? '?'}
                   {u.openfigi_candidate.name && (
-                    <span className="text-gray-500"> ({u.openfigi_candidate.name})</span>
+                    <span className="text-fg-subtle"> ({u.openfigi_candidate.name})</span>
                   )}
                 </div>
               )}
@@ -169,13 +169,13 @@ function UnresolvedAdditionsSection({
                   href={u.gf_url}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-[11px] text-amber-300 hover:text-amber-200 underline font-mono break-all inline-block"
+                  className="text-[11px] text-warn-300 hover:text-warn-200 underline font-mono break-all inline-block"
                 >
                   {u.gf_url}
                 </a>
               )}
               {u.detail && (
-                <div className="text-[10px] text-gray-500 italic">{u.detail}</div>
+                <div className="text-[10px] text-fg-subtle italic">{u.detail}</div>
               )}
             </div>
           ))}
@@ -198,34 +198,34 @@ function DiffList({
 }) {
   const [open, setOpen] = useState(false);
   const colorMap = {
-    emerald: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30',
-    rose: 'text-rose-300 bg-rose-500/10 border-rose-500/30',
-    amber: 'text-amber-300 bg-amber-500/10 border-amber-500/30',
+    emerald: 'text-pos-300 bg-pos-500/10 border-pos-500/30',
+    rose: 'text-neg-300 bg-neg-500/10 border-neg-500/30',
+    amber: 'text-warn-300 bg-warn-500/10 border-warn-500/30',
   };
   return (
-    <div className="bg-[#0f1117] rounded-lg border border-gray-800/40">
+    <div className="bg-page rounded-lg border border-neutral-800/40">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         disabled={count === 0}
-        className={`w-full px-3 py-2 flex items-center justify-between disabled:cursor-default ${count > 0 ? 'hover:bg-white/[0.02] cursor-pointer' : ''}`}
+        className={`w-full px-3 py-2 flex items-center justify-between disabled:cursor-default ${count > 0 ? 'hover:bg-overlay/[0.02] cursor-pointer' : ''}`}
       >
         <span className="flex items-center gap-2">
           <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${colorMap[color]}`}>
             {label}
           </span>
-          <span className="text-gray-200 font-mono">{count}</span>
+          <span className="text-fg font-mono">{count}</span>
         </span>
-        {count > 0 && <span className="text-gray-500 font-mono text-xs">{open ? '▾' : '▸'}</span>}
+        {count > 0 && <span className="text-fg-subtle font-mono text-xs">{open ? '▾' : '▸'}</span>}
       </button>
       {open && items.length > 0 && (
-        <div className="border-t border-gray-800/40 max-h-72 overflow-y-auto divide-y divide-gray-800/20">
+        <div className="border-t border-neutral-800/40 max-h-72 overflow-y-auto divide-y divide-neutral-800/20">
           {items.map((it) => (
             <div key={it.company_id} className="px-3 py-1.5">
-              <div className="font-mono text-xs text-gray-200">{it.primary}</div>
-              <div className="text-[10px] text-gray-500 truncate">
+              <div className="font-mono text-xs text-fg">{it.primary}</div>
+              <div className="text-[10px] text-fg-subtle truncate">
                 {it.secondary ?? '—'}
-                {it.sector && <span className="text-gray-600"> · {it.sector}</span>}
+                {it.sector && <span className="text-fg-faint"> · {it.sector}</span>}
               </div>
             </div>
           ))}
@@ -293,29 +293,29 @@ function TemplateMembership({
   ], []);
 
   return (
-    <div className="border border-gray-800/40 rounded-lg overflow-hidden">
+    <div className="border border-neutral-800/40 rounded-lg overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full px-3 py-2 flex items-center justify-between text-left hover:bg-white/[0.02] transition-colors"
+        className="w-full px-3 py-2 flex items-center justify-between text-left hover:bg-overlay/[0.02] transition-colors"
       >
         <span className="flex items-center gap-2">
-          <span className="text-gray-500 font-mono text-xs">{open ? '▾' : '▸'}</span>
-          <span className="text-sm text-gray-200">Membership ({targetMonth})</span>
+          <span className="text-fg-subtle font-mono text-xs">{open ? '▾' : '▸'}</span>
+          <span className="text-sm text-fg">Membership ({targetMonth})</span>
         </span>
-        <span className="text-xs text-gray-500 font-mono">{loaded ? `${rows.length} holdings` : 'click to load'}</span>
+        <span className="text-xs text-fg-subtle font-mono">{loaded ? `${rows.length} holdings` : 'click to load'}</span>
       </button>
       {open && (
-        <div className="px-3 py-2 border-t border-gray-800/40 space-y-2">
+        <div className="px-3 py-2 border-t border-neutral-800/40 space-y-2">
           <div className="flex items-center gap-3 flex-wrap">
             <input
               type="search"
               placeholder="Search by ticker, name, exchange, sector…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="bg-[#151821] border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 focus:outline-none flex-1 min-w-[200px]"
+              className="bg-card border border-neutral-700 rounded-lg px-3 py-1.5 text-xs text-fg placeholder-fg-subtle focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 focus:outline-none flex-1 min-w-[200px]"
             />
-            <span className="text-xs text-gray-500 font-mono">
+            <span className="text-xs text-fg-subtle font-mono">
               {loading ? 'loading…' : `${filtered.length} / ${rows.length}`}
             </span>
             <TableDownloadButton
@@ -325,12 +325,12 @@ function TemplateMembership({
               title={`Download ${filtered.length} holdings as CSV / XLSX`}
             />
           </div>
-          {error && <div className="text-xs text-rose-300">{error}</div>}
+          {error && <div className="text-xs text-neg-300">{error}</div>}
           {filtered.length > 0 && (
-            <div className="max-h-80 overflow-auto border border-gray-800/40 rounded-lg">
+            <div className="max-h-80 overflow-auto border border-neutral-800/40 rounded-lg">
               <table className="w-full text-xs">
-                <thead className="text-gray-500 text-[10px] uppercase sticky top-0 bg-[#151821]">
-                  <tr className="border-b border-gray-800/40">
+                <thead className="text-fg-subtle text-[10px] uppercase sticky top-0 bg-card">
+                  <tr className="border-b border-neutral-800/40">
                     <th className="text-left px-3 py-1.5 font-medium">Ticker</th>
                     <th className="text-left px-3 py-1.5 font-medium">Name</th>
                     <th className="text-left px-3 py-1.5 font-medium">Exchange</th>
@@ -339,11 +339,11 @@ function TemplateMembership({
                 </thead>
                 <tbody>
                   {filtered.map((r) => (
-                    <tr key={r.company_id} className="border-b border-gray-800/20 hover:bg-white/[0.02]">
-                      <td className="px-3 py-1.5 font-mono text-gray-200">{r.ticker || '—'}</td>
-                      <td className="px-3 py-1.5 text-gray-300 truncate max-w-[280px]">{r.company_name || '—'}</td>
-                      <td className="px-3 py-1.5 font-mono text-gray-500">{r.exchange || '—'}</td>
-                      <td className="px-3 py-1.5 text-gray-400">{r.sector || '—'}</td>
+                    <tr key={r.company_id} className="border-b border-neutral-800/20 hover:bg-overlay/[0.02]">
+                      <td className="px-3 py-1.5 font-mono text-fg">{r.ticker || '—'}</td>
+                      <td className="px-3 py-1.5 text-fg-soft truncate max-w-[280px]">{r.company_name || '—'}</td>
+                      <td className="px-3 py-1.5 font-mono text-fg-subtle">{r.exchange || '—'}</td>
+                      <td className="px-3 py-1.5 text-fg-muted">{r.sector || '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -362,37 +362,37 @@ function MomentumStrategyEntry({ result }: { result: MomentumStrategyResult }) {
   const [cfgOpen, setCfgOpen] = useState(false);
   const isError = result.status === 'error';
   const statusCls = isError
-    ? 'bg-rose-500/10 text-rose-300 border-rose-500/30'
-    : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+    ? 'bg-neg-500/10 text-neg-300 border-neg-500/30'
+    : 'bg-pos-500/15 text-pos-300 border-pos-500/30';
   // Always allow expansion — even on a hard error there's debug info to
   // surface (error message, traceback, the config that ran).
   return (
-    <div className="bg-[#151821] border border-gray-800/40 rounded-lg overflow-hidden">
+    <div className="bg-card border border-neutral-800/40 rounded-lg overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full px-3 py-2 flex items-center gap-3 hover:bg-white/[0.02] transition-colors"
+        className="w-full px-3 py-2 flex items-center gap-3 hover:bg-overlay/[0.02] transition-colors"
       >
-        <span className="text-gray-500 font-mono text-xs w-4">{open ? '▾' : '▸'}</span>
+        <span className="text-fg-subtle font-mono text-xs w-4">{open ? '▾' : '▸'}</span>
         <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${statusCls}`}>
           {result.status}
         </span>
-        <span className="text-sm text-gray-200 font-medium truncate">{result.strategy_name}</span>
+        <span className="text-sm text-fg font-medium truncate">{result.strategy_name}</span>
         {result.frequency && (
-          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-indigo-500/10 text-indigo-300 border-indigo-500/30">
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-accent-500/10 text-accent-300 border-accent-500/30">
             {result.frequency}
           </span>
         )}
-        <span className="text-xs text-gray-500 font-mono ml-auto">
+        <span className="text-xs text-fg-subtle font-mono ml-auto">
           {result.holdings_count > 0 && `${result.holdings_count} holdings · `}
           {result.latest_price_date && `as of ${result.latest_price_date}`}
         </span>
       </button>
       {open && (
-        <div className="border-t border-gray-800/40 bg-[#0f1117] divide-y divide-gray-800/30">
+        <div className="border-t border-neutral-800/40 bg-page divide-y divide-neutral-800/30">
           {isError && (
             <div className="px-3 py-3 space-y-2">
-              <div className="text-xs text-rose-300 font-mono whitespace-pre-wrap">
+              <div className="text-xs text-neg-300 font-mono whitespace-pre-wrap">
                 {result.error_message ?? 'Unknown error'}
               </div>
               {result.error_traceback && (
@@ -400,12 +400,12 @@ function MomentumStrategyEntry({ result }: { result: MomentumStrategyResult }) {
                   <button
                     type="button"
                     onClick={() => setTbOpen((v) => !v)}
-                    className="text-[10px] uppercase tracking-wider text-gray-500 hover:text-gray-300 transition-colors"
+                    className="text-[10px] uppercase tracking-wider text-fg-subtle hover:text-fg-soft transition-colors"
                   >
                     {tbOpen ? '▾' : '▸'} Full traceback
                   </button>
                   {tbOpen && (
-                    <pre className="mt-2 bg-[#0b0d13] border border-gray-800/60 rounded-lg px-3 py-2 text-rose-200 text-[11px] font-mono whitespace-pre-wrap overflow-x-auto max-h-72 overflow-y-auto">
+                    <pre className="mt-2 bg-sidebar border border-neutral-800/60 rounded-lg px-3 py-2 text-neg-200 text-[11px] font-mono whitespace-pre-wrap overflow-x-auto max-h-72 overflow-y-auto">
                       {result.error_traceback}
                     </pre>
                   )}
@@ -419,19 +419,19 @@ function MomentumStrategyEntry({ result }: { result: MomentumStrategyResult }) {
             </div>
           )}
           {!isError && result.snapshot_id == null && (
-            <div className="px-3 py-3 text-xs text-gray-500">No snapshot saved.</div>
+            <div className="px-3 py-3 text-xs text-fg-subtle">No snapshot saved.</div>
           )}
           {result.config && Object.keys(result.config).length > 0 && (
             <div className="px-3 py-3">
               <button
                 type="button"
                 onClick={() => setCfgOpen((v) => !v)}
-                className="text-[10px] uppercase tracking-wider text-gray-500 hover:text-gray-300 transition-colors"
+                className="text-[10px] uppercase tracking-wider text-fg-subtle hover:text-fg-soft transition-colors"
               >
                 {cfgOpen ? '▾' : '▸'} Raw stored config
               </button>
               {cfgOpen && (
-                <pre className="mt-2 bg-[#0b0d13] border border-gray-800/60 rounded-lg px-3 py-2 text-gray-300 text-[11px] font-mono whitespace-pre-wrap overflow-x-auto max-h-72 overflow-y-auto">
+                <pre className="mt-2 bg-sidebar border border-neutral-800/60 rounded-lg px-3 py-2 text-fg-soft text-[11px] font-mono whitespace-pre-wrap overflow-x-auto max-h-72 overflow-y-auto">
                   {JSON.stringify(result.config, null, 2)}
                 </pre>
               )}
@@ -448,10 +448,10 @@ function TemplatesSection({ run }: { run: IngestRun }) {
   if (templates.length === 0) {
     const phase = run.current_phase;
     if (phase === 'templates' && run.status === 'running') {
-      return <div className="text-xs text-gray-500">Templates phase running…</div>;
+      return <div className="text-xs text-fg-subtle">Templates phase running…</div>;
     }
     return (
-      <div className="text-xs text-gray-500">
+      <div className="text-xs text-fg-subtle">
         No template universes were refreshed for this run. (Are any registered?)
       </div>
     );
@@ -470,10 +470,10 @@ function MomentumSection({ run }: { run: IngestRun }) {
   if (results.length === 0) {
     const phase = run.current_phase;
     if (phase === 'momentum' && run.status === 'running') {
-      return <div className="text-xs text-gray-500">Momentum phase running…</div>;
+      return <div className="text-xs text-fg-subtle">Momentum phase running…</div>;
     }
     return (
-      <div className="text-xs text-gray-500">
+      <div className="text-xs text-fg-subtle">
         No strategies were scheduled when this pipeline ran. Add one to the schedule above and the next run will compute holdings for it.
       </div>
     );
@@ -490,7 +490,7 @@ function MomentumSection({ run }: { run: IngestRun }) {
 export default function ScheduleRunDetail({ run }: { run: IngestRun }) {
   const tp = runToTimelineProps(run);
   return (
-    <div className="px-5 py-3 bg-[#0b0d13] space-y-3 border-t border-gray-800/30">
+    <div className="px-5 py-3 bg-sidebar space-y-3 border-t border-neutral-800/30">
       <ProgressTimeline
         title={`Pipeline run #${run.run_id}`}
         steps={PIPELINE_STEPS}

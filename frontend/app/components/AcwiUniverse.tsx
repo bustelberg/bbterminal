@@ -51,8 +51,8 @@ export default function AcwiUniverse() {
   return (
     <div className="p-8 space-y-6 max-w-[1400px] mx-auto">
       <div>
-        <h1 className="text-2xl font-semibold text-white">MSCI ACWI Universe</h1>
-        <p className="text-gray-400 text-sm mt-1">
+        <h1 className="text-2xl font-semibold text-fg-strong">MSCI ACWI Universe</h1>
+        <p className="text-fg-muted text-sm mt-1">
           The canonical universe (template-managed) sits at the top — that&apos;s what backtests and the scheduled pipeline use.
           Below: live iShares fund holdings + MSCI announcement explorer for diagnosing the reconstruction.
         </p>
@@ -61,7 +61,7 @@ export default function AcwiUniverse() {
       <AcwiCanonicalView />
 
       {error && (
-        <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg px-4 py-3 text-rose-400 text-sm">
+        <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-4 py-3 text-neg-400 text-sm">
           {error}
         </div>
       )}
@@ -69,7 +69,7 @@ export default function AcwiUniverse() {
       <FetchProgressBanner />
 
       {loading ? (
-        <div className="text-gray-400 text-sm"><LoadingDots label="Loading holdings" /></div>
+        <div className="text-fg-muted text-sm"><LoadingDots label="Loading holdings" /></div>
       ) : (
         <>
           <BreakdownCards sectorBreakdown={sectorBreakdown} countryBreakdown={countryBreakdown} />

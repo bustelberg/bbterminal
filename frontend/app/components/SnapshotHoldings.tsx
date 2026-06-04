@@ -93,9 +93,9 @@ export default function SnapshotHoldings({ snapshotId }: { snapshotId: number })
     };
   }, [snapshot]);
 
-  if (loading) return <div className="text-xs text-gray-500"><LoadingDots label="Loading snapshot" /></div>;
-  if (error) return <div className="text-xs text-rose-300">Failed to load snapshot: {error}</div>;
-  if (!result || !scoringConfig) return <div className="text-xs text-gray-500">No data.</div>;
+  if (loading) return <div className="text-xs text-fg-subtle"><LoadingDots label="Loading snapshot" /></div>;
+  if (error) return <div className="text-xs text-neg-300">Failed to load snapshot: {error}</div>;
+  if (!result || !scoringConfig) return <div className="text-xs text-fg-subtle">No data.</div>;
 
   return (
     <MonthlyHoldingsTable

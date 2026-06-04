@@ -181,7 +181,16 @@ export type VariantParams = {
   min_price_score?: number | null;
   universe?: string;
   grouping?: 'sector' | 'industry';
+  // Weekday each rebalance lands on (0=Mon..6=Sun). Undefined inherits the
+  // base request's rebalance weekday; set it to sweep first-Monday vs
+  // first-Wednesday etc. Signals are computed strict-`<` the rebalance
+  // date, so a Wednesday variant decides on Tuesday's close.
+  rebalance_weekday?: number;
 };
+
+/** Short weekday labels indexed 0=Mon..6=Sun (Python `date.weekday()`).
+ * Local copy to avoid a store→component import cycle with momentum/utils. */
+const VARIANT_WEEKDAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
 
 /** Encode a VariantParams into the canonical sweep key. The backend
  * mirrors this exact ordering in `variants.py`. Legacy 2-axis variants
@@ -194,6 +203,7 @@ export function makeVariantKey(p: VariantParams): VariantKey {
   if (p.min_price_score != null) parts.push(`m${p.min_price_score}`);
   if (p.universe != null) parts.push(`u${p.universe}`);
   if (p.grouping != null) parts.push(`g${p.grouping}`);
+  if (p.rebalance_weekday != null) parts.push(`w${p.rebalance_weekday}`);
   return parts.join('__');
 }
 
@@ -217,6 +227,7 @@ export function parseVariantKey(key: VariantKey): VariantParams | null {
     else if (tag === 'm') { const n = Number(rest); if (Number.isFinite(n)) out.min_price_score = n; }
     else if (tag === 'u') { out.universe = rest; }
     else if (tag === 'g') { if (rest === 'sector' || rest === 'industry') out.grouping = rest; }
+    else if (tag === 'w') { const n = Number(rest); if (Number.isFinite(n)) out.rebalance_weekday = n; }
   }
   return out;
 }
@@ -241,6 +252,7 @@ export function variantLabel(p: VariantParams): string {
   if (p.top_n_sectors != null) parts.push(`top ${p.top_n_sectors} ${p.top_n_sectors === 1 ? bucketSingular : bucketPlural}`);
   if (p.top_n_per_sector != null) parts.push(`${p.top_n_per_sector} per ${bucketSingular}`);
   if (p.min_price_score != null) parts.push(`min ${p.min_price_score}`);
+  if (p.rebalance_weekday != null) parts.push(`${VARIANT_WEEKDAY_SHORT[p.rebalance_weekday] ?? `wd${p.rebalance_weekday}`} rebal`);
   return parts.join(' · ');
 }
 
@@ -430,6 +442,7 @@ export async function startVariantsBacktest(
       ...(v.min_price_score != null ? { min_price_score: v.min_price_score } : {}),
       ...(v.universe != null ? { index_universe: v.universe } : {}),
       ...(v.grouping != null ? { grouping: v.grouping } : {}),
+      ...(v.rebalance_weekday != null ? { rebalance_weekday: v.rebalance_weekday } : {}),
     })),
   };
 

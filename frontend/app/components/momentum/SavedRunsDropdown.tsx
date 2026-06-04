@@ -175,24 +175,24 @@ export default function SavedRunsDropdown({
         type="button"
         onClick={() => { if (!loading && !empty) setOpen((o) => !o); }}
         disabled={loading || empty}
-        className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white flex items-center gap-2 hover:border-indigo-500 focus:outline-none focus:border-indigo-500 transition-colors min-w-[220px] disabled:opacity-70 disabled:cursor-default disabled:hover:border-gray-700"
+        className="bg-page border border-neutral-700 rounded-lg px-3 py-2 text-sm text-fg-strong flex items-center gap-2 hover:border-accent-500 focus:outline-none focus:border-accent-500 transition-colors min-w-[220px] disabled:opacity-70 disabled:cursor-default disabled:hover:border-neutral-700"
       >
         {(loading || loadingRunId != null) && <Spinner />}
         <span className="truncate">{triggerLabel}</span>
-        <svg className={`w-3.5 h-3.5 text-gray-500 ml-auto transition-transform ${open ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+        <svg className={`w-3.5 h-3.5 text-fg-subtle ml-auto transition-transform ${open ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
         </svg>
       </button>
       {open && (
-        <div className="absolute right-0 mt-1 w-max min-w-[280px] max-w-[90vw] bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-96 overflow-auto">
+        <div className="absolute right-0 mt-1 w-max min-w-[280px] max-w-[90vw] bg-card border border-neutral-700 rounded-lg shadow-xl z-50 max-h-96 overflow-auto">
           {selectedIds.size > 0 && (
-            <div className="sticky top-0 z-10 bg-[#1a1d27] border-b border-gray-700 px-3 py-2 flex items-center justify-between gap-2">
-              <span className="text-xs text-gray-300">{selectedIds.size} selected</span>
+            <div className="sticky top-0 z-10 bg-elevated border-b border-neutral-700 px-3 py-2 flex items-center justify-between gap-2">
+              <span className="text-xs text-fg-soft">{selectedIds.size} selected</span>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setSelectedIds(new Set())}
-                  className="text-[11px] text-gray-500 hover:text-gray-300 px-2 py-1 rounded transition-colors"
+                  className="text-[11px] text-fg-subtle hover:text-fg-soft px-2 py-1 rounded transition-colors"
                 >
                   clear
                 </button>
@@ -200,7 +200,7 @@ export default function SavedRunsDropdown({
                   type="button"
                   onClick={() => void handleBulkDelete()}
                   disabled={bulkDeleting}
-                  className="text-[11px] font-medium px-2 py-1 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 hover:bg-rose-500/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+                  className="text-[11px] font-medium px-2 py-1 rounded bg-neg-500/15 text-neg-300 border border-neg-500/30 hover:bg-neg-500/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
                 >
                   {bulkDeleting && <Spinner size={12} />}
                   Delete {selectedIds.size}
@@ -219,14 +219,14 @@ export default function SavedRunsDropdown({
             return (
               <div
                 key={r.run_id}
-                className={`group flex items-start gap-2 px-3 py-2 border-b border-gray-800/40 last:border-b-0 hover:bg-white/[0.03] transition-colors ${isActive ? 'bg-indigo-500/10' : ''} ${isSelected ? 'bg-rose-500/[0.06]' : ''}`}
+                className={`group flex items-start gap-2 px-3 py-2 border-b border-neutral-800/40 last:border-b-0 hover:bg-overlay/[0.03] transition-colors ${isActive ? 'bg-accent-500/10' : ''} ${isSelected ? 'bg-neg-500/[0.06]' : ''}`}
               >
                 <input
                   type="checkbox"
                   checked={isSelected}
                   onChange={(e) => { e.stopPropagation(); toggleSelected(r.run_id); }}
                   onClick={(e) => e.stopPropagation()}
-                  className="accent-indigo-500 w-3.5 h-3.5 shrink-0 cursor-pointer mt-1"
+                  className="accent-accent-500 w-3.5 h-3.5 shrink-0 cursor-pointer mt-1"
                   title="Select for bulk delete"
                 />
                 <button
@@ -235,23 +235,23 @@ export default function SavedRunsDropdown({
                   disabled={isLoadingThis || isDeletingThis}
                   className="flex-1 text-left disabled:opacity-60 min-w-0"
                 >
-                  <div className={`text-sm flex items-center gap-1.5 whitespace-nowrap ${isActive ? 'text-indigo-300' : 'text-gray-200'}`}>
+                  <div className={`text-sm flex items-center gap-1.5 whitespace-nowrap ${isActive ? 'text-accent-300' : 'text-fg'}`}>
                     {isLoadingThis && <Spinner />}
                     <span>{r.name}</span>
                   </div>
                   {paramsLine && (
-                    <div className="text-[11px] text-gray-400 mt-0.5 whitespace-nowrap">{paramsLine}</div>
+                    <div className="text-[11px] text-fg-muted mt-0.5 whitespace-nowrap">{paramsLine}</div>
                   )}
                   {signalsLine && (
-                    <div className="text-[10px] text-gray-500 font-mono mt-0.5 whitespace-nowrap">{signalsLine}</div>
+                    <div className="text-[10px] text-fg-subtle font-mono mt-0.5 whitespace-nowrap">{signalsLine}</div>
                   )}
-                  <div className="text-[10px] text-gray-600 font-mono mt-0.5">{new Date(r.created_at).toLocaleDateString()}</div>
+                  <div className="text-[10px] text-fg-faint font-mono mt-0.5">{new Date(r.created_at).toLocaleDateString()}</div>
                 </button>
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); onRename(r.run_id, r.name); }}
                   disabled={isRenamingThis || isDeletingThis}
-                  className="p-1.5 rounded text-gray-500 hover:text-indigo-400 hover:bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-100 disabled:cursor-wait"
+                  className="p-1.5 rounded text-fg-subtle hover:text-accent-400 hover:bg-overlay/5 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-100 disabled:cursor-wait"
                   title="Rename"
                 >
                   {isRenamingThis ? (
@@ -271,7 +271,7 @@ export default function SavedRunsDropdown({
                     }
                   }}
                   disabled={isDeletingThis || isRenamingThis}
-                  className="p-1.5 rounded text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-100 disabled:cursor-wait"
+                  className="p-1.5 rounded text-fg-subtle hover:text-neg-400 hover:bg-neg-500/10 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-100 disabled:cursor-wait"
                   title="Delete"
                 >
                   {isDeletingThis ? (

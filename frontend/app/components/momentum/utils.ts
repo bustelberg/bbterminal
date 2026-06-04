@@ -1,16 +1,9 @@
 import type { DrawdownPeriod } from '../../../lib/stores/momentum';
+import { chartTheme } from '../../../lib/chartTheme';
 
-// Palette for series lines (index 0 = active strategy).
-export const SERIES_COLORS = [
-  '#818cf8', // indigo
-  '#f59e0b', // amber
-  '#34d399', // emerald
-  '#f472b6', // pink
-  '#60a5fa', // sky
-  '#a78bfa', // violet
-  '#fb7185', // rose
-  '#22d3ee', // cyan
-];
+// Palette for series lines (index 0 = active strategy). Centralized in
+// `lib/chartTheme.ts` — see that file to re-skin charts.
+export const SERIES_COLORS = chartTheme.series;
 
 export const fmtPct = (v: number | null) =>
   v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}%` : '—';
@@ -206,8 +199,6 @@ export function computeTopDrawdowns(
   return selected;
 }
 
-export const tooltipStyle = {
-  contentStyle: { background: '#1a1d27', border: '1px solid rgba(75,85,99,0.4)', borderRadius: 8, fontSize: 13 },
-  labelStyle: { color: '#9ca3af' },
-  itemStyle: { color: '#e5e7eb' },
-};
+// Recharts `<Tooltip>` style for the momentum/backtest charts. Centralized
+// in `lib/chartTheme.ts`; kept as a re-export for the many call sites here.
+export const tooltipStyle = chartTheme.tooltip;

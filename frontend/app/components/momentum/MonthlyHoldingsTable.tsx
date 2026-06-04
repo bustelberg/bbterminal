@@ -485,10 +485,10 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
           of the screen instead of capping at a fixed 500px window. The
           sticky thead inside this container keeps column labels pinned
           while the user scrolls through tall portfolios. */}
-      <div className="max-h-[calc(100vh-12rem)] overflow-auto border-t border-gray-800/40">
+      <div className="max-h-[calc(100vh-12rem)] overflow-auto border-t border-neutral-800/40">
         <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-[#151821] z-20">
-            <tr className="text-gray-500 text-xs border-b border-gray-800/40">
+          <thead className="sticky top-0 bg-card z-20">
+            <tr className="text-fg-subtle text-xs border-b border-neutral-800/40">
               <th className="text-left px-5 py-2.5 font-medium">
                 Period<CellInfoTip>Rebalance period start. The strategy enters this period&apos;s portfolio at the first trading day and holds until the next rebalance. Format is YYYY-MM for monthly+ cadences and YYYY-MM-DD for daily/weekly.</CellInfoTip>
               </th>
@@ -519,15 +519,15 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
             {displayRows.map(({ row: r, key: rowKey, label: rowLabel, turnoverDate: rowTurnover, net: showNet }) => (
               <Fragment key={rowKey}>
                 <tr
-                  className={`border-b border-gray-800/20 hover:bg-white/[0.02] cursor-pointer transition-colors ${rowLabel ? 'border-l-2 border-l-rose-500/60' : ''}`}
+                  className={`border-b border-neutral-800/20 hover:bg-overlay/[0.02] cursor-pointer transition-colors ${rowLabel ? 'border-l-2 border-l-neg-500/60' : ''}`}
                   onClick={() => setExpandedMonth(expandedMonth === rowKey ? null : rowKey)}
                 >
-                  <td className="px-5 py-2.5 text-gray-300 font-mono">
-                    <span className="text-gray-600 mr-2">{expandedMonth === rowKey ? '▾' : '▸'}</span>
-                    {rowLabel ? <span className="text-rose-300/90 text-xs">{rowLabel}</span> : r.date}
+                  <td className="px-5 py-2.5 text-fg-soft font-mono">
+                    <span className="text-fg-faint mr-2">{expandedMonth === rowKey ? '▾' : '▸'}</span>
+                    {rowLabel ? <span className="text-neg-300/90 text-xs">{rowLabel}</span> : r.date}
                     {r.is_open && (
                       <span
-                        className="ml-2 inline-flex items-center text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30"
+                        className="ml-2 inline-flex items-center text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-warn-500/15 text-warn-300 border border-warn-500/30"
                         title={
                           r.as_of_date
                             ? `Open period — valued through ${r.as_of_date}. Each held name uses its own latest available close; names with no newer trade keep their last price, so some end dates may be earlier.`
@@ -538,13 +538,13 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                       </span>
                     )}
                   </td>
-                  <td className="text-right px-3 py-2.5 text-gray-400 font-mono">{r.holdings.length}</td>
-                  <td className={`text-right px-3 py-2.5 font-mono ${r.portfolio_return_pct != null ? (r.portfolio_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
+                  <td className="text-right px-3 py-2.5 text-fg-muted font-mono">{r.holdings.length}</td>
+                  <td className={`text-right px-3 py-2.5 font-mono ${r.portfolio_return_pct != null ? (r.portfolio_return_pct >= 0 ? 'text-pos-400' : 'text-neg-400') : 'text-fg-faint'}`}>
                     {fmtPct(r.portfolio_return_pct)}
-                    <span className="text-gray-500">{parenPct(showNet ? netByDate.get(r.date)?.portRet : undefined)}</span>
+                    <span className="text-fg-subtle">{parenPct(showNet ? netByDate.get(r.date)?.portRet : undefined)}</span>
                   </td>
                   <td
-                    className="text-right px-3 py-2.5 font-mono text-gray-500"
+                    className="text-right px-3 py-2.5 font-mono text-fg-subtle"
                     title={
                       r.universe_constituents != null
                         ? `Equal-weight across ${r.universe_constituents} eligible companies for this period`
@@ -566,10 +566,10 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                       <td
                         className={`text-right px-3 py-2.5 font-mono font-medium ${
                           alpha == null
-                            ? 'text-gray-600'
+                            ? 'text-fg-faint'
                             : alpha >= 0
-                            ? 'text-emerald-400'
-                            : 'text-rose-400'
+                            ? 'text-pos-400'
+                            : 'text-neg-400'
                         }`}
                         title={
                           alpha != null
@@ -581,25 +581,25 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                       </td>
                     );
                   })()}
-                  <td className="text-right px-3 py-2.5 font-mono text-gray-400">
+                  <td className="text-right px-3 py-2.5 font-mono text-fg-muted">
                     {rowTurnover == null
                       ? '0.0%'
                       : turnoverByDate[rowTurnover] != null ? `${turnoverByDate[rowTurnover]!.toFixed(1)}%` : '—'}
                   </td>
-                  <td className={`text-right px-3 py-2.5 font-mono ${r.cumulative_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  <td className={`text-right px-3 py-2.5 font-mono ${r.cumulative_return_pct >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
                     {fmtPct(r.cumulative_return_pct)}
-                    <span className="text-gray-500">{parenPct(showNet ? netByDate.get(r.date)?.cumRet : undefined)}</span>
+                    <span className="text-fg-subtle">{parenPct(showNet ? netByDate.get(r.date)?.cumRet : undefined)}</span>
                   </td>
-                  <td className="text-right px-5 py-2.5 font-mono text-gray-500">
+                  <td className="text-right px-5 py-2.5 font-mono text-fg-subtle">
                     {r.universe_cumulative_return_pct != null ? fmtPct(r.universe_cumulative_return_pct) : '—'}
                   </td>
                 </tr>
                 {expandedMonth === rowKey && r.holdings.length > 0 && (
                   <tr key={`${rowKey}-detail`}>
-                    <td colSpan={8} className="bg-[#0f1117] px-5 py-3">
+                    <td colSpan={8} className="bg-page px-5 py-3">
                       <table className="w-full text-xs">
                         <thead>
-                          <tr className="text-gray-600">
+                          <tr className="text-fg-faint">
                             <th className="text-left py-1 font-medium">
                               Side<CellInfoTip>Direction of the position. Long-only backtests are all &quot;Long&quot;. Long-short backtests group longs at the top and shorts at the bottom of each portfolio.</CellInfoTip>
                             </th>
@@ -684,13 +684,13 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                               const href = guruFocusUrl(h.ticker, exchRaw);
                               const isShort = h.side === 'short';
                               return (
-                                <tr key={`${h.side ?? 'long'}-${h.company_id}`} className={`border-t border-gray-800/20 ${isShort ? 'bg-rose-500/[0.04]' : ''}`}>
+                                <tr key={`${h.side ?? 'long'}-${h.company_id}`} className={`border-t border-neutral-800/20 ${isShort ? 'bg-neg-500/[0.04]' : ''}`}>
                                   <td className="py-1.5 pr-2 whitespace-nowrap">
                                     <span
                                       className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${
                                         isShort
-                                          ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
-                                          : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/25'
+                                          ? 'bg-neg-500/15 text-neg-300 border border-neg-500/30'
+                                          : 'bg-pos-500/10 text-pos-300 border border-pos-500/25'
                                       }`}
                                     >
                                       {isShort ? 'Short' : 'Long'}
@@ -700,7 +700,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                                     <button
                                       type="button"
                                       onClick={() => setTimelineCompanyId(h.company_id)}
-                                      className="mr-1.5 inline-flex w-3.5 h-3.5 items-center justify-center text-gray-500 hover:text-indigo-300 transition-colors align-middle"
+                                      className="mr-1.5 inline-flex w-3.5 h-3.5 items-center justify-center text-fg-subtle hover:text-accent-300 transition-colors align-middle"
                                       title={`Show ${h.ticker} holding history across the backtest`}
                                       aria-label={`Show ${h.ticker} timeline`}
                                     >
@@ -712,13 +712,13 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                                       href={href}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      className="text-indigo-400 hover:text-indigo-300 hover:underline"
+                                      className="text-accent-400 hover:text-accent-300 hover:underline"
                                     >
                                       {h.ticker}
                                     </a>
                                     {exch && (
                                       <span
-                                        className="ml-1 text-[10px] text-gray-500"
+                                        className="ml-1 text-[10px] text-fg-subtle"
                                         title={EXCHANGE_NAMES[exch.toUpperCase()] ?? exch}
                                       >
                                         ({exch})
@@ -726,7 +726,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                                     )}
                                   </td>
                                   <td
-                                    className="py-1.5 text-gray-400 font-mono whitespace-nowrap"
+                                    className="py-1.5 text-fg-muted font-mono whitespace-nowrap"
                                     title={exch ? (EXCHANGE_NAMES[exch.toUpperCase()] ?? exch) : ''}
                                   >
                                     {exch || '—'}
@@ -736,65 +736,65 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                                       href={href}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      className="text-gray-300 hover:text-indigo-300 hover:underline"
+                                      className="text-fg-soft hover:text-accent-300 hover:underline"
                                     >
                                       {h.company_name}
                                     </a>
                                   </td>
-                                  <td className="py-1.5 text-gray-500">{h.sector}</td>
+                                  <td className="py-1.5 text-fg-subtle">{h.sector}</td>
                                   <td className="text-right py-1.5 font-mono">
                                     {h.sector_rank != null ? (
-                                      <span className="text-indigo-300">{h.sector_rank}</span>
+                                      <span className="text-accent-300">{h.sector_rank}</span>
                                     ) : (
-                                      <span className="text-gray-600 text-[10px]">—</span>
+                                      <span className="text-fg-faint text-[10px]">—</span>
                                     )}
                                   </td>
                                   <td className="text-right py-1.5 font-mono">
                                     {h.company_rank != null ? (
-                                      <span className="text-gray-200">{h.company_rank}</span>
+                                      <span className="text-fg">{h.company_rank}</span>
                                     ) : (
-                                      <span className="text-gray-600 text-[10px]">—</span>
+                                      <span className="text-fg-faint text-[10px]">—</span>
                                     )}
                                   </td>
                                   {categories.map((cat) => (
-                                    <td key={cat} className="text-right py-1.5 text-gray-400 font-mono">
+                                    <td key={cat} className="text-right py-1.5 text-fg-muted font-mono">
                                       {h.category_scores?.[cat] != null ? h.category_scores[cat]!.toFixed(0) : '—'}
                                     </td>
                                   ))}
-                                  <td className="text-right py-1.5 text-white font-mono font-medium">{h.score.toFixed(1)}</td>
-                                  <td className="text-right py-1.5 text-gray-400 font-mono pl-4">
+                                  <td className="text-right py-1.5 text-fg-strong font-mono font-medium">{h.score.toFixed(1)}</td>
+                                  <td className="text-right py-1.5 text-fg-muted font-mono pl-4">
                                     {fmtPrice(h.entry_price_local)}
-                                    {h.currency && <span className="text-gray-600 text-[10px] ml-1">{h.currency}</span>}
+                                    {h.currency && <span className="text-fg-faint text-[10px] ml-1">{h.currency}</span>}
                                     {h.entry_date && (
                                       <CellInfoTip>
-                                        <div className="text-gray-400">Trading date</div>
-                                        <div className="font-mono text-gray-200">{h.entry_date}</div>
+                                        <div className="text-fg-muted">Trading date</div>
+                                        <div className="font-mono text-fg">{h.entry_date}</div>
                                       </CellInfoTip>
                                     )}
                                   </td>
-                                  <td className="text-right py-1.5 text-gray-400 font-mono">
+                                  <td className="text-right py-1.5 text-fg-muted font-mono">
                                     {fmtPrice(h.exit_price_local)}
                                     {h.exit_date && (
                                       <CellInfoTip>
-                                        <div className="text-gray-400">Trading date</div>
-                                        <div className="font-mono text-gray-200">{h.exit_date}</div>
+                                        <div className="text-fg-muted">Trading date</div>
+                                        <div className="font-mono text-fg">{h.exit_date}</div>
                                       </CellInfoTip>
                                     )}
                                   </td>
-                                  <td className="text-right py-1.5 text-gray-400 font-mono pl-4">
+                                  <td className="text-right py-1.5 text-fg-muted font-mono pl-4">
                                     {fmtPrice(h.entry_price_eur)}
                                     {(h.entry_date || (h.entry_price_eur != null && h.entry_price_local)) && (
                                       <CellInfoTip>
                                         {h.entry_date && (
                                           <>
-                                            <div className="text-gray-400">Trading date</div>
-                                            <div className="font-mono text-gray-200 mb-1">{h.entry_date}</div>
+                                            <div className="text-fg-muted">Trading date</div>
+                                            <div className="font-mono text-fg mb-1">{h.entry_date}</div>
                                           </>
                                         )}
                                         {h.entry_price_eur != null && h.entry_price_local && h.entry_price_local > 0 && (
                                           <>
-                                            <div className="text-gray-400">FX rate</div>
-                                            <div className="font-mono text-gray-200">
+                                            <div className="text-fg-muted">FX rate</div>
+                                            <div className="font-mono text-fg">
                                               1 {h.currency ?? 'LCL'} = {(h.entry_price_eur / h.entry_price_local).toFixed(4)} EUR
                                             </div>
                                           </>
@@ -802,20 +802,20 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                                       </CellInfoTip>
                                     )}
                                   </td>
-                                  <td className="text-right py-1.5 text-gray-400 font-mono">
+                                  <td className="text-right py-1.5 text-fg-muted font-mono">
                                     {fmtPrice(h.exit_price_eur)}
                                     {(h.exit_date || (h.exit_price_eur != null && h.exit_price_local)) && (
                                       <CellInfoTip>
                                         {h.exit_date && (
                                           <>
-                                            <div className="text-gray-400">Trading date</div>
-                                            <div className="font-mono text-gray-200 mb-1">{h.exit_date}</div>
+                                            <div className="text-fg-muted">Trading date</div>
+                                            <div className="font-mono text-fg mb-1">{h.exit_date}</div>
                                           </>
                                         )}
                                         {h.exit_price_eur != null && h.exit_price_local && h.exit_price_local > 0 && (
                                           <>
-                                            <div className="text-gray-400">FX rate</div>
-                                            <div className="font-mono text-gray-200">
+                                            <div className="text-fg-muted">FX rate</div>
+                                            <div className="font-mono text-fg">
                                               1 {h.currency ?? 'LCL'} = {(h.exit_price_eur / h.exit_price_local).toFixed(4)} EUR
                                             </div>
                                           </>
@@ -823,7 +823,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                                       </CellInfoTip>
                                     )}
                                   </td>
-                                  <td className={`text-right py-1.5 font-mono pl-4 ${h.forward_return_pct != null ? (h.forward_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
+                                  <td className={`text-right py-1.5 font-mono pl-4 ${h.forward_return_pct != null ? (h.forward_return_pct >= 0 ? 'text-pos-400' : 'text-neg-400') : 'text-fg-faint'}`}>
                                     {fmtPct(h.forward_return_pct)}
                                   </td>
                                 </tr>
@@ -836,8 +836,8 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                 )}
                 {expandedMonth === rowKey && r.holdings.length === 0 && (
                   <tr key={`${rowKey}-empty`}>
-                    <td colSpan={4} className="bg-[#0f1117] px-5 py-4">
-                      <div className="text-xs text-gray-500">
+                    <td colSpan={4} className="bg-page px-5 py-4">
+                      <div className="text-xs text-fg-subtle">
                         {r.empty_reason || 'No holdings for this period (unknown reason)'}
                       </div>
                     </td>
@@ -964,12 +964,12 @@ function CompanySearch({
           }
         }}
         placeholder={`Search ${companies.length} stocks…`}
-        className="bg-[#0f1117] border border-gray-700 rounded-lg px-2.5 py-1 text-xs text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 focus:outline-none w-48"
+        className="bg-page border border-neutral-700 rounded-lg px-2.5 py-1 text-xs text-fg placeholder-fg-subtle focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 focus:outline-none w-48"
       />
       {open && query.trim() && (
-        <div className="absolute right-0 top-full mt-1 w-72 max-h-80 overflow-y-auto bg-[#1e2130] border border-gray-700 rounded-lg shadow-2xl z-30">
+        <div className="absolute right-0 top-full mt-1 w-72 max-h-80 overflow-y-auto bg-popover border border-neutral-700 rounded-lg shadow-2xl z-30">
           {matches.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-gray-500">No matches in this backtest</div>
+            <div className="px-3 py-2 text-xs text-fg-subtle">No matches in this backtest</div>
           ) : (
             matches.map((c, i) => (
               <button
@@ -977,12 +977,12 @@ function CompanySearch({
                 type="button"
                 onMouseEnter={() => setActiveIdx(i)}
                 onClick={() => choose(c.company_id)}
-                className={`w-full text-left px-3 py-1.5 border-b border-gray-800/30 last:border-b-0 ${
-                  i === activeIdx ? 'bg-white/[0.05]' : 'hover:bg-white/[0.03]'
+                className={`w-full text-left px-3 py-1.5 border-b border-neutral-800/30 last:border-b-0 ${
+                  i === activeIdx ? 'bg-overlay/[0.05]' : 'hover:bg-overlay/[0.03]'
                 }`}
               >
-                <div className="font-mono text-xs text-gray-200">{c.ticker || '—'}</div>
-                <div className="text-[10px] text-gray-500 truncate">{c.company_name || '—'}</div>
+                <div className="font-mono text-xs text-fg">{c.ticker || '—'}</div>
+                <div className="text-[10px] text-fg-subtle truncate">{c.company_name || '—'}</div>
               </button>
             ))
           )}

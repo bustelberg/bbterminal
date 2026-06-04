@@ -35,10 +35,10 @@ export type ProgressTimelineProps = {
 };
 
 function StepIcon({ status }: { status: StepStatus }) {
-  if (status === 'done') return <span className="text-emerald-400 mt-0.5">✓</span>;
-  if (status === 'in_progress') return <span className="text-indigo-400 animate-pulse mt-0.5">●</span>;
-  if (status === 'error') return <span className="text-rose-400 mt-0.5">✗</span>;
-  return <span className="text-gray-600 mt-0.5">○</span>;
+  if (status === 'done') return <span className="text-pos-400 mt-0.5">✓</span>;
+  if (status === 'in_progress') return <span className="text-accent-400 animate-pulse mt-0.5">●</span>;
+  if (status === 'error') return <span className="text-neg-400 mt-0.5">✗</span>;
+  return <span className="text-fg-faint mt-0.5">○</span>;
 }
 
 function derivedPct(steps: StepDef[], state: Record<string, StepState>): number {
@@ -128,32 +128,32 @@ export default function ProgressTimeline({
   const totalEstMs = remainingMs != null ? totalElapsedMs! + remainingMs : null;
 
   return (
-    <div className={`bg-[#0f1117] border border-gray-800 rounded-lg p-3 space-y-2 ${className ?? ''}`}>
+    <div className={`bg-page border border-neutral-800 rounded-lg p-3 space-y-2 ${className ?? ''}`}>
       {(title || onDismiss || totalElapsedMs != null) && (
         <div className="flex items-center justify-between gap-3">
-          {title && <div className="text-xs font-medium text-gray-300">{title}</div>}
+          {title && <div className="text-xs font-medium text-fg-soft">{title}</div>}
           {totalElapsedMs != null && (
             <div className={
               running
-                ? 'flex items-center gap-2 px-3 py-1.5 rounded-md bg-indigo-500/10 border border-indigo-500/30 ml-auto'
-                : 'flex items-center gap-2 px-3 py-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 ml-auto'
+                ? 'flex items-center gap-2 px-3 py-1.5 rounded-md bg-accent-500/10 border border-accent-500/30 ml-auto'
+                : 'flex items-center gap-2 px-3 py-1.5 rounded-md bg-pos-500/10 border border-pos-500/30 ml-auto'
             }>
               {running ? (
                 <>
-                  <span className="text-[11px] uppercase tracking-wide text-gray-400">Elapsed</span>
-                  <span className="text-[13px] font-mono font-semibold text-gray-100 tabular-nums">
+                  <span className="text-[11px] uppercase tracking-wide text-fg-muted">Elapsed</span>
+                  <span className="text-[13px] font-mono font-semibold text-fg-bright tabular-nums">
                     {formatCompact(totalElapsedMs)}
                   </span>
                   {remainingMs != null && totalEstMs != null && (
                     <>
-                      <span className="text-gray-700">·</span>
-                      <span className="text-[11px] uppercase tracking-wide text-gray-400">Left</span>
-                      <span className="text-[13px] font-mono font-semibold text-indigo-300 tabular-nums">
+                      <span className="text-fg-dim">·</span>
+                      <span className="text-[11px] uppercase tracking-wide text-fg-muted">Left</span>
+                      <span className="text-[13px] font-mono font-semibold text-accent-300 tabular-nums">
                         ~{formatCompact(remainingMs)}
                       </span>
-                      <span className="text-gray-700">·</span>
-                      <span className="text-[11px] uppercase tracking-wide text-gray-400">Total</span>
-                      <span className="text-[13px] font-mono font-semibold text-gray-100 tabular-nums">
+                      <span className="text-fg-dim">·</span>
+                      <span className="text-[11px] uppercase tracking-wide text-fg-muted">Total</span>
+                      <span className="text-[13px] font-mono font-semibold text-fg-bright tabular-nums">
                         ~{formatCompact(totalEstMs)}
                       </span>
                     </>
@@ -161,8 +161,8 @@ export default function ProgressTimeline({
                 </>
               ) : (
                 <>
-                  <span className="text-[11px] uppercase tracking-wide text-gray-400">Completed in</span>
-                  <span className="text-[13px] font-mono font-semibold text-gray-100 tabular-nums">
+                  <span className="text-[11px] uppercase tracking-wide text-fg-muted">Completed in</span>
+                  <span className="text-[13px] font-mono font-semibold text-fg-bright tabular-nums">
                     {formatCompact(totalElapsedMs)}
                   </span>
                 </>
@@ -172,7 +172,7 @@ export default function ProgressTimeline({
           {onDismiss && (
             <button
               onClick={onDismiss}
-              className="text-gray-500 hover:text-gray-300 transition-colors ml-auto"
+              className="text-fg-subtle hover:text-fg-soft transition-colors ml-auto"
               aria-label="Dismiss"
             >
               <svg viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
@@ -185,14 +185,14 @@ export default function ProgressTimeline({
       {/* Unified progress bar */}
       {showProgressBar && (
         <div className="space-y-1">
-          <div className="flex items-center justify-between text-[11px] text-gray-500">
+          <div className="flex items-center justify-between text-[11px] text-fg-subtle">
             <span>{running ? 'Running…' : (errorMessage ? 'Failed' : doneSummary ? 'Complete' : 'Idle')}</span>
             <span className="font-mono">{computedPct}%</span>
           </div>
-          <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+          <div className="h-1.5 bg-neutral-800 rounded-full overflow-hidden">
             <div
               className={`h-full transition-all duration-300 ${
-                errorMessage ? 'bg-rose-500' : computedPct === 100 ? 'bg-emerald-500' : 'bg-indigo-500'
+                errorMessage ? 'bg-neg-500' : computedPct === 100 ? 'bg-pos-500' : 'bg-accent-500'
               }`}
               style={{ width: `${computedPct}%` }}
             />
@@ -210,13 +210,13 @@ export default function ProgressTimeline({
               <div key={s.key} className="flex items-start gap-2 text-xs">
                 <StepIcon status={status} />
                 <span className={
-                  status === 'done' ? 'text-gray-400'
-                  : status === 'in_progress' ? 'text-gray-200'
-                  : status === 'error' ? 'text-rose-400'
-                  : 'text-gray-600'
+                  status === 'done' ? 'text-fg-muted'
+                  : status === 'in_progress' ? 'text-fg'
+                  : status === 'error' ? 'text-neg-400'
+                  : 'text-fg-faint'
                 }>
                   <span className="font-medium">{s.label}</span>
-                  {st?.message && <span className="text-gray-500"> — {st.message}</span>}
+                  {st?.message && <span className="text-fg-subtle"> — {st.message}</span>}
                 </span>
               </div>
             );
@@ -225,13 +225,13 @@ export default function ProgressTimeline({
       )}
 
       {doneSummary && (
-        <div className="text-xs text-emerald-400 font-medium pt-1 border-t border-gray-800/60">
+        <div className="text-xs text-pos-400 font-medium pt-1 border-t border-neutral-800/60">
           {doneSummary}
         </div>
       )}
 
       {errorMessage && (
-        <div className="text-xs text-rose-400 pt-1 border-t border-gray-800/60 whitespace-pre-wrap">
+        <div className="text-xs text-neg-400 pt-1 border-t border-neutral-800/60 whitespace-pre-wrap">
           {errorMessage}
         </div>
       )}
@@ -241,7 +241,7 @@ export default function ProgressTimeline({
           if (typeof l === 'string') return <div key={i}>{l}</div>;
           return (
             <div key={i} className="flex gap-2">
-              <span className="text-gray-600 shrink-0 w-12 text-right">
+              <span className="text-fg-faint shrink-0 w-12 text-right">
                 {l.relativeMs != null ? formatRelative(l.relativeMs) : ''}
               </span>
               <span>{l.message}</span>
@@ -249,19 +249,19 @@ export default function ProgressTimeline({
           );
         };
         const inner = (
-          <div className="max-h-48 overflow-auto text-[11px] font-mono text-gray-400 space-y-0.5">
+          <div className="max-h-48 overflow-auto text-[11px] font-mono text-fg-muted space-y-0.5">
             {log.map(renderLine)}
             <div ref={logEndRef} />
           </div>
         );
         return defaultLogOpen ? (
           <div>
-            <div className="text-gray-500 text-xs mb-1">Verbose log ({log.length} events)</div>
+            <div className="text-fg-subtle text-xs mb-1">Verbose log ({log.length} events)</div>
             {inner}
           </div>
         ) : (
           <details>
-            <summary className="text-gray-500 text-xs cursor-pointer hover:text-gray-300 select-none">
+            <summary className="text-fg-subtle text-xs cursor-pointer hover:text-fg-soft select-none">
               Verbose log ({log.length} events)
             </summary>
             <div className="mt-2">{inner}</div>

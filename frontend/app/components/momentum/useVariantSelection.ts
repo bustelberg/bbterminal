@@ -73,6 +73,11 @@ export function useVariantSelection({
   const [selectedGroupings, setSelectedGroupings] = useState<Set<'sector' | 'industry'>>(
     () => new Set<'sector' | 'industry'>(['sector']),
   );
+  // Rebalance weekdays to sweep (0=Mon..6=Sun). Empty = don't sweep the
+  // dimension (every variant inherits the base config's rebalance weekday).
+  const [selectedWeekdays, setSelectedWeekdays] = useState<Set<number>>(
+    () => new Set<number>(),
+  );
   // Comma-separated numeric overrides; empty means "inherit base, don't
   // sweep this dimension." Parsing lives in `./variantHelpers.ts`.
   const [topSectorsSweep, setTopSectorsSweep] = useState<string>('');
@@ -111,11 +116,12 @@ export function useVariantSelection({
       selectedStrategies,
       selectedUniverses,
       selectedGroupings,
+      selectedWeekdays,
       topSectorsSweep,
       perSectorSweep,
       minScoreSweep,
     }),
-    [selectedFreqs, selectedStrategies, selectedUniverses, selectedGroupings, topSectorsSweep, perSectorSweep, minScoreSweep],
+    [selectedFreqs, selectedStrategies, selectedUniverses, selectedGroupings, selectedWeekdays, topSectorsSweep, perSectorSweep, minScoreSweep],
   );
 
   // ── Effective size + min/max filters ─────────────────────────────
@@ -162,6 +168,7 @@ export function useVariantSelection({
     selectedStrategies, setSelectedStrategies,
     selectedUniverses, setSelectedUniverses,
     selectedGroupings, setSelectedGroupings,
+    selectedWeekdays, setSelectedWeekdays,
     topSectorsSweep, setTopSectorsSweep,
     perSectorSweep, setPerSectorSweep,
     minScoreSweep, setMinScoreSweep,

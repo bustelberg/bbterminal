@@ -7,6 +7,7 @@ import {
 } from 'recharts';
 import CollapsibleCard from '../CollapsibleCard';
 import { tooltipStyle } from '../utils';
+import { chartTheme } from '../../../../lib/chartTheme';
 import type { AlignedResult } from './seriesMath';
 
 /** Cumulative-return line chart with log-scale toggle + drawdown
@@ -64,7 +65,7 @@ export default function EquityChart({
             type="checkbox"
             checked={logScale}
             onChange={(e) => setLogScale(e.target.checked)}
-            className="accent-indigo-500 w-3.5 h-3.5"
+            className="accent-accent-500 w-3.5 h-3.5"
           />
           Log scale
         </label>
@@ -73,15 +74,15 @@ export default function EquityChart({
     >
       <ResponsiveContainer width="100%" height={350}>
         <LineChart data={displayChartData}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+          <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
           <XAxis
             dataKey="date"
-            tick={{ fill: '#6b7280', fontSize: 11 }}
+            tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
             tickLine={false}
             interval={Math.max(0, Math.floor(displayChartData.length / 12) - 1)}
           />
           <YAxis
-            tick={{ fill: '#6b7280', fontSize: 11 }}
+            tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
             tickLine={false}
             tickFormatter={(v: number) => `${v}%`}
             domain={chartYDomain}
@@ -96,7 +97,7 @@ export default function EquityChart({
           />
           {alignedSeries.series.length > 1 && (
             <Legend
-              wrapperStyle={{ fontSize: 12, color: '#9ca3af' }}
+              wrapperStyle={{ fontSize: 12, color: chartTheme.axisLabel }}
               formatter={(value) => {
                 const s = alignedSeries.series.find((x) => x.id === value);
                 return s?.label ?? String(value);
@@ -115,7 +116,7 @@ export default function EquityChart({
                 x2={dd.recovery_date ?? (displayChartData[displayChartData.length - 1]?.date as string | undefined)}
                 y1={chartYDomain[0]}
                 y2={chartYDomain[1]}
-                fill={`rgba(244,63,94,${opacity})`}
+                fill={chartTheme.drawdown(opacity)}
                 strokeOpacity={0}
                 style={{ cursor: 'pointer' }}
                 onMouseEnter={() => setHoveredDrawdown(i)}
@@ -139,11 +140,11 @@ export default function EquityChart({
           {markerX != null && (
             <ReferenceLine
               x={markerX}
-              stroke="#ef4444"
+              stroke={chartTheme.goLiveLine}
               strokeDasharray="5 5"
               strokeWidth={1.5}
               ifOverflow="extendDomain"
-              label={{ value: 'Go-live', position: 'insideTopRight', fill: '#f87171', fontSize: 10 }}
+              label={{ value: 'Go-live', position: 'insideTopRight', fill: chartTheme.goLiveLabel, fontSize: 10 }}
             />
           )}
         </LineChart>

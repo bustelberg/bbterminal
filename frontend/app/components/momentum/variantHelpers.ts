@@ -81,6 +81,7 @@ export function buildAllPermutations({
   selectedStrategies,
   selectedUniverses,
   selectedGroupings,
+  selectedWeekdays,
   topSectorsSweep,
   perSectorSweep,
   minScoreSweep,
@@ -89,6 +90,9 @@ export function buildAllPermutations({
   selectedStrategies: ReadonlySet<StrategyType>;
   selectedUniverses: ReadonlySet<string>;
   selectedGroupings: ReadonlySet<'sector' | 'industry'>;
+  // Rebalance weekdays to sweep (0=Mon..6=Sun). Empty/omitted → don't
+  // sweep the dimension (inherit the base request's rebalance weekday).
+  selectedWeekdays?: ReadonlySet<number>;
   topSectorsSweep: string;
   perSectorSweep: string;
   minScoreSweep: string;
@@ -98,18 +102,20 @@ export function buildAllPermutations({
   const minList = parseMinScoreList(minScoreSweep);
   const uniList = Array.from(selectedUniverses);
   const grpList = Array.from(selectedGroupings);
+  const wdList = Array.from(selectedWeekdays ?? []);
   const topAxis: (number | undefined)[] = topList.length === 0 ? [undefined] : topList;
   const perAxis: (number | undefined)[] = perList.length === 0 ? [undefined] : perList;
   const minAxis: (number | null | undefined)[] = minList.length === 0 ? [undefined] : minList;
   const uniAxis: (string | undefined)[] = uniList.length === 0 ? [undefined] : uniList;
   const grpAxis: ('sector' | 'industry' | undefined)[] =
     grpList.length === 0 ? [undefined] : grpList;
+  const wdAxis: (number | undefined)[] = wdList.length === 0 ? [undefined] : wdList;
   const out: VariantParams[] = [];
   for (const v of VARIANT_DEFS) {
     if (!selectedFreqs.has(v.frequency)) continue;
     if (!selectedStrategies.has(v.strategy)) continue;
     for (const t of topAxis) for (const p of perAxis) for (const m of minAxis)
-    for (const u of uniAxis) for (const g of grpAxis) {
+    for (const u of uniAxis) for (const g of grpAxis) for (const w of wdAxis) {
       out.push({
         frequency: v.frequency,
         strategy: v.strategy,
@@ -118,6 +124,7 @@ export function buildAllPermutations({
         ...(m !== undefined ? { min_price_score: m } : {}),
         ...(u !== undefined ? { universe: u } : {}),
         ...(g !== undefined ? { grouping: g } : {}),
+        ...(w !== undefined ? { rebalance_weekday: w } : {}),
       });
     }
   }

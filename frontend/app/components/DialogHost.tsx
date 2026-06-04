@@ -52,22 +52,22 @@ export default function DialogHost() {
   }
 
   const confirmClass = open.destructive
-    ? 'bg-rose-600 hover:bg-rose-500 text-white'
-    : 'bg-indigo-600 hover:bg-indigo-500 text-white';
+    ? 'bg-neg-600 hover:bg-neg-500 text-fg-strong'
+    : 'bg-accent-600 hover:bg-accent-500 text-fg-strong';
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/60 backdrop-blur-sm"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) cancel();
       }}
     >
-      <div className="w-full max-w-md mx-4 bg-[#151821] border border-gray-800/60 rounded-xl shadow-2xl">
+      <div className="w-full max-w-md mx-4 bg-card border border-neutral-800/60 rounded-xl shadow-2xl">
         <div className="px-5 pt-4 pb-3">
           {open.title && (
-            <div className="text-sm font-semibold text-white mb-1">{open.title}</div>
+            <div className="text-sm font-semibold text-fg-strong mb-1">{open.title}</div>
           )}
-          <div className="text-sm text-gray-300 whitespace-pre-wrap">{open.message}</div>
+          <div className="text-sm text-fg-soft whitespace-pre-wrap">{open.message}</div>
           {open.kind === 'prompt' && (
             <input
               ref={inputRef}
@@ -80,15 +80,15 @@ export default function DialogHost() {
                 }
               }}
               placeholder={open.placeholder}
-              className="mt-3 w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+              className="mt-3 w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-sm text-fg-strong placeholder-fg-subtle focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
             />
           )}
         </div>
-        <div className="px-5 py-3 border-t border-gray-800/60 flex items-center justify-end gap-2">
+        <div className="px-5 py-3 border-t border-neutral-800/60 flex items-center justify-end gap-2">
           {open.kind !== 'alert' && (
             <button
               onClick={cancel}
-              className="px-3 py-1.5 rounded-lg text-sm text-gray-300 hover:bg-white/5 transition-colors"
+              className="px-3 py-1.5 rounded-lg text-sm text-fg-soft hover:bg-overlay/5 transition-colors"
             >
               {open.cancelLabel ?? 'Cancel'}
             </button>

@@ -32,7 +32,7 @@ export default function RunControls({
     <button
       onClick={runVariantsBacktest}
       disabled={running || variantsRunning || eligibleCount === 0 || variantsBlockReason != null}
-      className="px-5 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      className="px-5 py-2 rounded-lg text-sm font-medium bg-accent-600 hover:bg-accent-500 text-fg-strong transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       title={
         variantsBlockReason
           ? variantsBlockReason

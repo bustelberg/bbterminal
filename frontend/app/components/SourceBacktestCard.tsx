@@ -138,21 +138,21 @@ export default function SourceBacktestCard({
 
   if (loading) {
     return (
-      <div className="bg-[#151821] border border-gray-800/40 rounded-lg px-4 py-3">
+      <div className="bg-card border border-neutral-800/40 rounded-lg px-4 py-3">
         <LoadingDots label="Loading source backtest" />
       </div>
     );
   }
   if (error) {
     return (
-      <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg px-4 py-3 text-xs text-rose-300">
+      <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-4 py-3 text-xs text-neg-300">
         Couldn&apos;t load source backtest #{runId}: {error}
       </div>
     );
   }
   if (!data?.result || (data.result.monthly_records?.length ?? 0) === 0) {
     return (
-      <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-3 text-xs text-amber-300">
+      <div className="bg-warn-500/10 border border-warn-500/20 rounded-lg px-4 py-3 text-xs text-warn-300">
         Source backtest #{runId} loaded but has no results to display.
       </div>
     );
@@ -161,38 +161,38 @@ export default function SourceBacktestCard({
   return (
     <div className="space-y-4">
       {sinceGoLive && (
-        <div className="bg-[#151821] border border-gray-800/40 rounded-lg px-4 py-3">
+        <div className="bg-card border border-neutral-800/40 rounded-lg px-4 py-3">
           <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
             <div className="flex items-baseline gap-2">
-              <span className="text-xs text-gray-400 font-medium">Since go-live</span>
-              <span className={`font-mono font-semibold text-base ${sinceGoLive.strat >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              <span className="text-xs text-fg-muted font-medium">Since go-live</span>
+              <span className={`font-mono font-semibold text-base ${sinceGoLive.strat >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
                 {sinceGoLive.strat >= 0 ? '+' : ''}{sinceGoLive.strat.toFixed(2)}%
               </span>
             </div>
             {sinceGoLive.uni != null && (
               <div className="flex items-baseline gap-1.5 text-xs">
-                <span className="text-gray-500">vs universe</span>
-                <span className={`font-mono ${sinceGoLive.uni >= 0 ? 'text-emerald-400/80' : 'text-rose-400/80'}`}>
+                <span className="text-fg-subtle">vs universe</span>
+                <span className={`font-mono ${sinceGoLive.uni >= 0 ? 'text-pos-400/80' : 'text-neg-400/80'}`}>
                   {sinceGoLive.uni >= 0 ? '+' : ''}{sinceGoLive.uni.toFixed(2)}%
                 </span>
               </div>
             )}
             {sinceGoLive.alpha != null && (
               <div className="flex items-baseline gap-1.5 text-xs">
-                <span className="text-gray-500">alpha</span>
-                <span className={`font-mono font-medium ${sinceGoLive.alpha >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                <span className="text-fg-subtle">alpha</span>
+                <span className={`font-mono font-medium ${sinceGoLive.alpha >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
                   {sinceGoLive.alpha >= 0 ? '+' : ''}{sinceGoLive.alpha.toFixed(2)}%
                 </span>
               </div>
             )}
-            <span className="text-[11px] text-gray-500 font-mono ml-auto">{sinceGoLive.from} → {sinceGoLive.to}</span>
+            <span className="text-[11px] text-fg-subtle font-mono ml-auto">{sinceGoLive.from} → {sinceGoLive.to}</span>
           </div>
-          <p className="text-[10px] text-gray-600 mt-1.5">
+          <p className="text-[10px] text-fg-faint mt-1.5">
             Backtested return from the go-live date through the latest available data ({sinceGoLive.to}). Live pipeline performance, once it accrues, appears in the run history below.
           </p>
         </div>
       )}
-      <div className="text-[10px] uppercase tracking-wider text-gray-500">
+      <div className="text-[10px] uppercase tracking-wider text-fg-subtle">
         Source backtest{data.name ? ` · ${data.name}` : ''}
       </div>
       <BacktestResultView

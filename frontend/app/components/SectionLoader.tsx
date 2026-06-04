@@ -16,8 +16,8 @@ export default function SectionLoader({ label }: { label: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-10 gap-3">
       <div className="flex items-center gap-2">
-        <Spinner className="h-4 w-4 text-indigo-400" />
-        <span className="text-gray-400 text-sm">Loading {label}...</span>
+        <Spinner className="h-4 w-4 text-accent-400" />
+        <span className="text-fg-muted text-sm">Loading {label}...</span>
       </div>
     </div>
   );

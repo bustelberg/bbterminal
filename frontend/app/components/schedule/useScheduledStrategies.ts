@@ -87,24 +87,6 @@ export function useScheduledStrategies() {
     }
   }, [loadStrategies]);
 
-  const setRebalanceDay = useCallback(async (id: number, weekday: number) => {
-    try {
-      const r = await apiFetch(`${API_URL}/api/scheduled-strategies/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rebalance_weekday: weekday }),
-      });
-      if (!r.ok) {
-        const body = await r.text().catch(() => '');
-        setError(`Rebalance-day update failed: ${r.status} ${body.slice(0, 200)}`);
-        return;
-      }
-      await loadStrategies();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, [loadStrategies]);
-
   const renameStrategy = useCallback(async (id: number, currentName: string) => {
     const next = await dialog.prompt('New name for this scheduled strategy:', {
       title: 'Rename strategy',
@@ -184,7 +166,6 @@ export function useScheduledStrategies() {
     cacheRunHistory,
     loadStrategies,
     toggleStrategy,
-    setRebalanceDay,
     renameStrategy,
     removeStrategy,
     removeAllStrategies,

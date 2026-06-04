@@ -37,17 +37,17 @@ export default function TemplateRecentChanges({ templateKey }: { templateKey: st
 
   if (error) {
     return (
-      <div className="px-12 pb-3 text-xs text-rose-300">Failed to load recent changes: {error}</div>
+      <div className="px-12 pb-3 text-xs text-neg-300">Failed to load recent changes: {error}</div>
     );
   }
   if (data == null) {
     return (
-      <div className="px-12 pb-3 text-xs text-gray-500"><LoadingDots label="Loading recent changes" /></div>
+      <div className="px-12 pb-3 text-xs text-fg-subtle"><LoadingDots label="Loading recent changes" /></div>
     );
   }
   if (data.length === 0) {
     return (
-      <div className="px-12 pb-3 text-xs text-gray-500">No pipeline runs have refreshed this template yet — recent additions/removals will appear here after the next tick.</div>
+      <div className="px-12 pb-3 text-xs text-fg-subtle">No pipeline runs have refreshed this template yet — recent additions/removals will appear here after the next tick.</div>
     );
   }
   return (
@@ -55,21 +55,21 @@ export default function TemplateRecentChanges({ templateKey }: { templateKey: st
       {data.map((entry) => {
         const noChanges = entry.additions_count === 0 && entry.removals_count === 0 && entry.renames_count === 0;
         return (
-          <div key={`${entry.run_id}-${entry.this_month}`} className="bg-[#0f1117] border border-gray-800/40 rounded-lg overflow-hidden">
-            <div className="px-3 py-2 border-b border-gray-800/40 flex items-baseline gap-3 flex-wrap text-xs">
-              <span className="text-gray-300 font-mono">{fmtTimestamp(entry.started_at)}</span>
-              <span className="text-gray-500 font-mono">
+          <div key={`${entry.run_id}-${entry.this_month}`} className="bg-page border border-neutral-800/40 rounded-lg overflow-hidden">
+            <div className="px-3 py-2 border-b border-neutral-800/40 flex items-baseline gap-3 flex-wrap text-xs">
+              <span className="text-fg-soft font-mono">{fmtTimestamp(entry.started_at)}</span>
+              <span className="text-fg-subtle font-mono">
                 {entry.this_month ?? '—'}
-                {entry.prev_month && <span className="text-gray-600"> vs {entry.prev_month}</span>}
+                {entry.prev_month && <span className="text-fg-faint"> vs {entry.prev_month}</span>}
               </span>
-              <span className="text-[10px] text-gray-500 font-mono ml-auto">run #{entry.run_id}</span>
-              <span className="text-xs text-gray-400 font-mono">
+              <span className="text-[10px] text-fg-subtle font-mono ml-auto">run #{entry.run_id}</span>
+              <span className="text-xs text-fg-muted font-mono">
                 +{entry.additions_count} / −{entry.removals_count}
                 {entry.renames_count > 0 && <span> / r{entry.renames_count}</span>}
               </span>
             </div>
             {noChanges ? (
-              <div className="px-3 py-2 text-[11px] text-gray-500 italic">No constituent changes vs the prior month.</div>
+              <div className="px-3 py-2 text-[11px] text-fg-subtle italic">No constituent changes vs the prior month.</div>
             ) : (
               <div className="grid gap-2 md:grid-cols-3 p-3">
                 {entry.additions_count > 0 && (
@@ -108,25 +108,25 @@ function DiffPanel({
   items: Array<{ key: number; primary: string; secondary: string | null }>;
 }) {
   const colorCls = color === 'emerald'
-    ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30'
+    ? 'text-pos-300 bg-pos-500/10 border-pos-500/30'
     : color === 'rose'
-      ? 'text-rose-300 bg-rose-500/10 border-rose-500/30'
-      : 'text-amber-300 bg-amber-500/10 border-amber-500/30';
+      ? 'text-neg-300 bg-neg-500/10 border-neg-500/30'
+      : 'text-warn-300 bg-warn-500/10 border-warn-500/30';
   return (
-    <div className="bg-[#151821] rounded border border-gray-800/40">
-      <div className="px-2.5 py-1 flex items-center gap-2 border-b border-gray-800/40">
+    <div className="bg-card rounded border border-neutral-800/40">
+      <div className="px-2.5 py-1 flex items-center gap-2 border-b border-neutral-800/40">
         <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${colorCls}`}>{label}</span>
-        <span className="text-xs text-gray-300 font-mono">{count}</span>
+        <span className="text-xs text-fg-soft font-mono">{count}</span>
       </div>
-      <div className="max-h-48 overflow-auto divide-y divide-gray-800/30">
+      <div className="max-h-48 overflow-auto divide-y divide-neutral-800/30">
         {items.slice(0, 50).map((it) => (
           <div key={it.key} className="px-2.5 py-1">
-            <div className="text-xs font-mono text-gray-200">{it.primary}</div>
-            {it.secondary && <div className="text-[10px] text-gray-500 truncate">{it.secondary}</div>}
+            <div className="text-xs font-mono text-fg">{it.primary}</div>
+            {it.secondary && <div className="text-[10px] text-fg-subtle truncate">{it.secondary}</div>}
           </div>
         ))}
         {items.length > 50 && (
-          <div className="px-2.5 py-1 text-[10px] text-gray-600 italic">+ {items.length - 50} more (open the run on /schedule for the full list)</div>
+          <div className="px-2.5 py-1 text-[10px] text-fg-faint italic">+ {items.length - 50} more (open the run on /schedule for the full list)</div>
         )}
       </div>
     </div>

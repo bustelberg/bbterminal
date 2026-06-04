@@ -97,7 +97,10 @@ export function useVariantsBundle({
       max_companies: maxCompanies,
       strategy_type: v.strategy,
       rebalance_frequency: v.frequency,
-      rebalance_weekday: rebalanceWeekday,
+      // Pin the variant's OWN rebalance weekday (falls back to the base
+      // inherit value when the variant didn't sweep the dimension). This
+      // is fixed at schedule time and is read-only on /schedule.
+      rebalance_weekday: v.rebalance_weekday ?? rebalanceWeekday,
       top_n_sectors: v.top_n_sectors ?? topSectors,
       top_n_per_sector: v.top_n_per_sector ?? topPerSector,
       grouping: v.grouping ?? grouping,

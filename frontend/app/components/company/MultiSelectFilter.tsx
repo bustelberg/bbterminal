@@ -53,15 +53,15 @@ export default function MultiSelectFilter({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className={`bg-[#151821] border rounded-lg px-3 py-2 text-sm text-white transition-colors inline-flex items-center gap-2 ${
+        className={`bg-card border rounded-lg px-3 py-2 text-sm text-fg-strong transition-colors inline-flex items-center gap-2 ${
           selected.length > 0
-            ? 'border-indigo-500/60 text-indigo-200'
-            : 'border-gray-800/60 hover:border-gray-700'
+            ? 'border-accent-500/60 text-accent-200'
+            : 'border-neutral-800/60 hover:border-neutral-700'
         }`}
       >
         <span className="truncate max-w-[180px]">{buttonLabel}</span>
         <svg
-          className={`w-3.5 h-3.5 text-gray-500 transition-transform ${open ? 'rotate-180' : ''}`}
+          className={`w-3.5 h-3.5 text-fg-subtle transition-transform ${open ? 'rotate-180' : ''}`}
           viewBox="0 0 20 20"
           fill="currentColor"
         >
@@ -73,12 +73,12 @@ export default function MultiSelectFilter({
         </svg>
       </button>
       {open && (
-        <div className="absolute left-0 mt-1 w-64 bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-80 overflow-hidden flex flex-col">
-          <div className="px-3 py-2 border-b border-gray-800/60 flex items-center justify-between gap-2">
-            <span className="text-xs text-gray-400">
+        <div className="absolute left-0 mt-1 w-64 bg-card border border-neutral-700 rounded-lg shadow-xl z-50 max-h-80 overflow-hidden flex flex-col">
+          <div className="px-3 py-2 border-b border-neutral-800/60 flex items-center justify-between gap-2">
+            <span className="text-xs text-fg-muted">
               {label}
               {combineMode && selected.length >= 2 && (
-                <span className="ml-1.5 text-[10px] uppercase tracking-wide text-gray-600">
+                <span className="ml-1.5 text-[10px] uppercase tracking-wide text-fg-faint">
                   ({combineMode})
                 </span>
               )}
@@ -87,7 +87,7 @@ export default function MultiSelectFilter({
               <button
                 type="button"
                 onClick={() => onChange([])}
-                className="text-[11px] text-gray-500 hover:text-white"
+                className="text-[11px] text-fg-subtle hover:text-fg-strong"
               >
                 Clear
               </button>
@@ -99,28 +99,28 @@ export default function MultiSelectFilter({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Filter…"
-                className="w-full bg-[#0f1117] border border-gray-700 rounded px-2 py-1 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                className="w-full bg-page border border-neutral-700 rounded px-2 py-1 text-xs text-fg-strong placeholder-fg-faint focus:outline-none focus:border-accent-500"
               />
             </div>
           )}
           <div className="flex-1 overflow-auto p-1">
             {filtered.length === 0 ? (
-              <div className="px-3 py-2 text-xs text-gray-600">No matches</div>
+              <div className="px-3 py-2 text-xs text-fg-faint">No matches</div>
             ) : (
               filtered.map((opt) => {
                 const checked = selected.includes(opt);
                 return (
                   <label
                     key={opt}
-                    className={`flex items-center gap-2 px-2 py-1.5 rounded hover:bg-white/[0.04] cursor-pointer text-sm ${
-                      checked ? 'text-white' : 'text-gray-300'
+                    className={`flex items-center gap-2 px-2 py-1.5 rounded hover:bg-overlay/[0.04] cursor-pointer text-sm ${
+                      checked ? 'text-fg-strong' : 'text-fg-soft'
                     }`}
                   >
                     <input
                       type="checkbox"
                       checked={checked}
                       onChange={() => toggle(opt)}
-                      className="accent-indigo-500 w-3.5 h-3.5"
+                      className="accent-accent-500 w-3.5 h-3.5"
                     />
                     <span className="truncate">{opt}</span>
                   </label>

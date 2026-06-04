@@ -218,16 +218,16 @@ export default function LeonteqUniverse() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0f1117] text-gray-200">
-      <div className="px-8 py-5 border-b border-gray-800/40">
-        <h1 className="text-xl font-semibold text-white">Leonteq</h1>
-        <p className="text-sm text-gray-500 mt-1">
+    <div className="min-h-screen bg-page text-fg">
+      <div className="px-8 py-5 border-b border-neutral-800/40">
+        <h1 className="text-xl font-semibold text-fg-strong">Leonteq</h1>
+        <p className="text-sm text-fg-subtle mt-1">
           Equities Leonteq lists as underlyings for their structured products. Scraped from{' '}
           <a
             href="https://structuredproducts-ch.leonteq.com/services/underlyings"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-indigo-400 hover:underline"
+            className="text-accent-400 hover:underline"
           >
             structuredproducts-ch.leonteq.com
           </a>
@@ -237,13 +237,13 @@ export default function LeonteqUniverse() {
 
       <div className="px-8 py-6 space-y-6 max-w-6xl">
         {error && (
-          <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg px-4 py-3 text-sm text-rose-300">
+          <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-4 py-3 text-sm text-neg-300">
             {error}
           </div>
         )}
 
         {/* Stats + refresh */}
-        <div className="bg-[#151821] rounded-xl border border-gray-800/40 px-5 py-4 flex items-start justify-between gap-4 flex-wrap">
+        <div className="bg-card rounded-xl border border-neutral-800/40 px-5 py-4 flex items-start justify-between gap-4 flex-wrap">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs flex-1">
             <Stat label="Equities" value={data ? String(data.total_equities) : '—'} />
             <Stat label="Sectors" value={data ? String(data.unique_sectors) : '—'} />
@@ -254,7 +254,7 @@ export default function LeonteqUniverse() {
             type="button"
             onClick={() => void triggerRefresh()}
             disabled={refreshing}
-            className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors shrink-0"
+            className="text-xs px-3 py-1.5 rounded-lg bg-accent-600 hover:bg-accent-500 disabled:opacity-50 disabled:cursor-not-allowed text-fg-strong transition-colors shrink-0"
           >
             {refreshing ? 'Scraping…' : 'Refresh now'}
           </button>
@@ -281,20 +281,20 @@ export default function LeonteqUniverse() {
               placeholder="Search sectors, industries, tickers, ISINs…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="bg-[#151821] border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 focus:outline-none flex-1 min-w-[240px]"
+              className="bg-card border border-neutral-700 rounded-lg px-3 py-2 text-sm text-fg placeholder-fg-subtle focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 focus:outline-none flex-1 min-w-[240px]"
             />
             <button
               type="button"
               onClick={() => setExpandedSectors(new Set(filtered.map((s) => s.name)))}
-              className="text-xs text-gray-400 hover:text-gray-200 transition-colors"
+              className="text-xs text-fg-muted hover:text-fg transition-colors"
             >
               Expand all
             </button>
-            <span className="text-gray-700">·</span>
+            <span className="text-fg-dim">·</span>
             <button
               type="button"
               onClick={() => setExpandedSectors(new Set())}
-              className="text-xs text-gray-400 hover:text-gray-200 transition-colors"
+              className="text-xs text-fg-muted hover:text-fg transition-colors"
             >
               Collapse all
             </button>
@@ -310,10 +310,10 @@ export default function LeonteqUniverse() {
         )}
 
         {loading && !data ? (
-          <div className="text-sm text-gray-500"><LoadingDots label="Loading Leonteq universe" /></div>
+          <div className="text-sm text-fg-subtle"><LoadingDots label="Loading Leonteq universe" /></div>
         ) : !data || data.total_equities === 0 ? (
-          <div className="bg-[#151821] rounded-xl border border-gray-800/40 px-5 py-6 text-sm text-gray-400">
-            No equities scraped yet. Click <span className="text-gray-200">Refresh now</span> to scrape the Leonteq page.
+          <div className="bg-card rounded-xl border border-neutral-800/40 px-5 py-6 text-sm text-fg-muted">
+            No equities scraped yet. Click <span className="text-fg">Refresh now</span> to scrape the Leonteq page.
             The first scrape takes ~30-60 seconds (headless Chromium has to load the SPA).
           </div>
         ) : (
@@ -324,33 +324,33 @@ export default function LeonteqUniverse() {
               return (
                 <div
                   key={sec.name}
-                  className="bg-[#151821] rounded-xl border border-gray-800/40 overflow-hidden"
+                  className="bg-card rounded-xl border border-neutral-800/40 overflow-hidden"
                   style={{ borderLeftColor: color, borderLeftWidth: '3px' }}
                 >
                   <button
                     type="button"
                     onClick={() => toggleSector(sec.name)}
-                    className="w-full px-5 py-3 flex items-center gap-3 text-left hover:bg-white/[0.02] transition-colors"
+                    className="w-full px-5 py-3 flex items-center gap-3 text-left hover:bg-overlay/[0.02] transition-colors"
                   >
-                    <span className="text-gray-500 font-mono text-xs w-4 shrink-0">{isOpen ? '▾' : '▸'}</span>
+                    <span className="text-fg-subtle font-mono text-xs w-4 shrink-0">{isOpen ? '▾' : '▸'}</span>
                     <span
                       className="inline-block w-2 h-2 rounded-full shrink-0"
                       style={{ background: color }}
                     />
-                    <h3 className="text-sm font-medium text-white" style={{ color }}>
+                    <h3 className="text-sm font-medium text-fg-strong" style={{ color }}>
                       {sec.name}
                     </h3>
-                    <span className="text-xs text-gray-500 font-mono ml-auto">
+                    <span className="text-xs text-fg-subtle font-mono ml-auto">
                       {sec.industries.length} industr{sec.industries.length === 1 ? 'y' : 'ies'} · {sec.company_count} equities
                     </span>
                   </button>
                   {isOpen && (
-                    <div className="border-t border-gray-800/40 divide-y divide-gray-800/30">
+                    <div className="border-t border-neutral-800/40 divide-y divide-neutral-800/30">
                       {sec.industries.map((ind) => (
                         <div key={ind.name} className="px-5 py-3">
                           <div className="flex items-baseline gap-3 mb-2">
-                            <span className="text-xs font-medium text-gray-300">{ind.name}</span>
-                            <span className="text-[10px] text-gray-500 font-mono">{ind.company_count}</span>
+                            <span className="text-xs font-medium text-fg-soft">{ind.name}</span>
+                            <span className="text-[10px] text-fg-subtle font-mono">{ind.company_count}</span>
                           </div>
                           <div className="flex flex-wrap gap-1.5">
                             {ind.companies.map((c, idx) => (
@@ -374,7 +374,7 @@ export default function LeonteqUniverse() {
               );
             })}
             {filtered.length === 0 && (
-              <div className="text-sm text-gray-500">No matches for &ldquo;{search}&rdquo;.</div>
+              <div className="text-sm text-fg-subtle">No matches for &ldquo;{search}&rdquo;.</div>
             )}
           </div>
         )}
@@ -385,9 +385,9 @@ export default function LeonteqUniverse() {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-[#0f1117] border border-gray-800/40 rounded-lg px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-gray-500">{label}</div>
-      <div className="font-mono text-sm text-gray-200 mt-0.5 truncate">{value}</div>
+    <div className="bg-page border border-neutral-800/40 rounded-lg px-3 py-2">
+      <div className="text-[10px] uppercase tracking-wider text-fg-subtle">{label}</div>
+      <div className="font-mono text-sm text-fg mt-0.5 truncate">{value}</div>
     </div>
   );
 }
@@ -395,12 +395,12 @@ function Stat({ label, value }: { label: string; value: string }) {
 function CompanyChip({ c }: { c: Company }) {
   const inner = (
     <>
-      <span className="text-gray-200 truncate max-w-[220px]" title={c.name}>{c.name}</span>
-      {c.ticker && <span className="text-gray-500 font-mono text-[10px]">{c.ticker}</span>}
+      <span className="text-fg truncate max-w-[220px]" title={c.name}>{c.name}</span>
+      {c.ticker && <span className="text-fg-subtle font-mono text-[10px]">{c.ticker}</span>}
     </>
   );
   const className =
-    'bg-[#0f1117] border border-gray-800/60 rounded px-2 py-1 flex items-baseline gap-1.5 text-[11px] hover:border-indigo-500/40 transition-colors';
+    'bg-page border border-neutral-800/60 rounded px-2 py-1 flex items-baseline gap-1.5 text-[11px] hover:border-accent-500/40 transition-colors';
   if (c.gurufocus_url) {
     return (
       <a
@@ -411,7 +411,7 @@ function CompanyChip({ c }: { c: Company }) {
         title={`${c.name}${c.isin ? ` · ${c.isin}` : ''} — open on GuruFocus`}
       >
         {inner}
-        <span className="text-indigo-400 text-[9px]">↗</span>
+        <span className="text-accent-400 text-[9px]">↗</span>
       </a>
     );
   }

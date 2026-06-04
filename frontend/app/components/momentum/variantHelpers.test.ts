@@ -105,6 +105,35 @@ describe('buildAllPermutations', () => {
     ]);
   });
 
+  it('fans out across selected rebalance weekdays', () => {
+    const out = buildAllPermutations({
+      ...base,
+      selectedWeekdays: new Set<number>([0, 2]), // Mon, Wed
+    });
+    expect(out).toHaveLength(2);
+    expect(out.map((p) => p.rebalance_weekday).sort()).toEqual([0, 2]);
+  });
+
+  it('omits rebalance_weekday entirely when the weekday axis is empty', () => {
+    const out = buildAllPermutations({ ...base, selectedWeekdays: new Set<number>() });
+    expect(out).toHaveLength(1);
+    expect('rebalance_weekday' in out[0]).toBe(false);
+  });
+
+  it('includes weekday=0 as an explicit value (distinct from inherit)', () => {
+    const out = buildAllPermutations({ ...base, selectedWeekdays: new Set<number>([0]) });
+    expect(out[0].rebalance_weekday).toBe(0);
+  });
+
+  it('multiplies the weekday axis into the full cross-product', () => {
+    const out = buildAllPermutations({
+      ...base,
+      topSectorsSweep: '4,6',                 // 2
+      selectedWeekdays: new Set<number>([0, 2, 4]), // 3
+    });
+    expect(out).toHaveLength(6);
+  });
+
   it('threads min_price_score `null` through as an explicit value', () => {
     const out = buildAllPermutations({ ...base, minScoreSweep: 'none, 30' });
     expect(out).toHaveLength(2);

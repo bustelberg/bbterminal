@@ -97,8 +97,8 @@ export default async function Home() {
   return (
     <div className="px-8 py-8 max-w-6xl">
       <div className="mb-8">
-        <h1 className="text-2xl font-semibold text-white mb-2">Welcome to BBTerminal</h1>
-        <p className="text-sm text-gray-400 leading-relaxed">
+        <h1 className="text-2xl font-semibold text-fg-strong mb-2">Welcome to BBTerminal</h1>
+        <p className="text-sm text-fg-muted leading-relaxed">
           Analyse stocks based on data from LongEquity and index universes, enriched with data from GuruFocus.
         </p>
       </div>
@@ -107,19 +107,19 @@ export default async function Home() {
           <Link
             key={href}
             href={href}
-            className="group block bg-[#151821] rounded-xl border border-gray-800/40 p-5 hover:border-indigo-500/40 hover:bg-[#181b25] transition-colors"
+            className="group block bg-card rounded-xl border border-neutral-800/40 p-5 hover:border-accent-500/40 hover:bg-inset transition-colors"
           >
             <div className="flex items-start justify-between gap-3 mb-2">
-              <h2 className="text-base font-semibold text-white group-hover:text-indigo-400 transition-colors">
+              <h2 className="text-base font-semibold text-fg-strong group-hover:text-accent-400 transition-colors">
                 {label}
               </h2>
               {badge && (
-                <span className="shrink-0 text-xs font-medium px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                <span className="shrink-0 text-xs font-medium px-2 py-0.5 rounded-md bg-warn-500/10 text-warn-400 border border-warn-500/20">
                   {badge}
                 </span>
               )}
             </div>
-            <p className="text-sm text-gray-400 leading-relaxed">
+            <p className="text-sm text-fg-muted leading-relaxed">
               {description}
             </p>
           </Link>

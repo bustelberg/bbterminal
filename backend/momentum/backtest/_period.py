@@ -31,7 +31,7 @@ from ..scoring import (
     score_universe,
     select_from_scored,
 )
-from .indices import _date_on_or_after, _price_on_or_after, _price_on_or_before
+from .indices import _price_on_or_after, _price_on_or_before
 from .types import (
     BacktestConfig,
     HoldingSide,
@@ -160,8 +160,13 @@ def compute_universe_period_return(
         series = price_index.get(int(cid))
         if series is None or len(series) == 0:
             continue
-        entry = _price_on_or_after(series, entry_ts)
-        exit_p = _price_on_or_after(series, exit_ts)
+        # On-or-BEFORE (not after): entry_ts/exit_ts are already the prior
+        # trading day, and a forward lookup would fall onto the rebalance
+        # day itself for any company that didn't trade that prior day.
+        entry_pair = _price_on_or_before(series, entry_ts)
+        exit_pair = _price_on_or_before(series, exit_ts)
+        entry = entry_pair[0] if entry_pair is not None else None
+        exit_p = exit_pair[0] if exit_pair is not None else None
         if entry is None or exit_p is None or entry <= 0:
             continue
         returns.append((exit_p / entry - 1) * 100.0)
@@ -310,20 +315,36 @@ def _compute_holding_prices(
     variants sweep precomputes once for every variant. Holding-level
     fields that vary per-variant (score, side, weight, sector_rank,
     company_rank) come from the per-variant `row` and are NOT cached."""
+    # On-or-BEFORE (not after): `entry_ts`/`exit_ts` are the prior trading
+    # day (set by the runner). A forward lookup would land on the rebalance
+    # day's close for any company that didn't trade that prior day (a data
+    # gap), which is exactly the "some holdings still use Monday" bug. Going
+    # backward, the worst case is the company's last close before the
+    # rebalance — never the rebalance day itself. `_price_on_or_before`
+    # returns (price, trading_date) so we get the entry/exit DATE for free.
     series = price_index.get(cid)
-    entry_price = _price_on_or_after(series, entry_ts) if series is not None else None
-    exit_price = _price_on_or_after(series, exit_ts) if series is not None else None
+    entry_pair = _price_on_or_before(series, entry_ts) if series is not None else None
+    exit_pair = _price_on_or_before(series, exit_ts) if series is not None else None
+    entry_price = entry_pair[0] if entry_pair is not None else None
+    exit_price = exit_pair[0] if exit_pair is not None else None
     fwd_return: float | None = None
     if entry_price and exit_price and entry_price > 0:
         fwd_return = round((exit_price / entry_price - 1) * 100, 2)
 
     local_series = local_price_index.get(cid) if local_price_index is not None else None
-    entry_local = _price_on_or_after(local_series, entry_ts) if local_series is not None else None
-    exit_local = _price_on_or_after(local_series, exit_ts) if local_series is not None else None
+    entry_local_pair = _price_on_or_before(local_series, entry_ts) if local_series is not None else None
+    exit_local_pair = _price_on_or_before(local_series, exit_ts) if local_series is not None else None
+    entry_local = entry_local_pair[0] if entry_local_pair is not None else None
+    exit_local = exit_local_pair[0] if exit_local_pair is not None else None
 
-    date_series = local_series if local_series is not None else series
-    entry_dt = _date_on_or_after(date_series, entry_ts) if date_series is not None else None
-    exit_dt = _date_on_or_after(date_series, exit_ts) if date_series is not None else None
+    # Display dates come from the local series when present (same calendar),
+    # else the EUR series — matching the price actually used.
+    if local_series is not None:
+        entry_dt = entry_local_pair[1].strftime("%Y-%m-%d") if entry_local_pair is not None else None
+        exit_dt = exit_local_pair[1].strftime("%Y-%m-%d") if exit_local_pair is not None else None
+    else:
+        entry_dt = entry_pair[1].strftime("%Y-%m-%d") if entry_pair is not None else None
+        exit_dt = exit_pair[1].strftime("%Y-%m-%d") if exit_pair is not None else None
 
     return (
         entry_price, exit_price, fwd_return,
@@ -416,6 +437,9 @@ def compute_sector_etf_period(
     benchmark_price_index: dict[int, pd.Series] | None,
     benchmark_meta: dict[int, tuple[str, str]] | None,
     record_label: str,
+    # See `compute_selection_period` — prior-trading-day entry/exit pricing.
+    price_entry_ts: pd.Timestamp | None = None,
+    price_exit_ts: pd.Timestamp | None = None,
 ) -> _PeriodOutcome:
     """Sector-ETF branch. Ranks sectors via stock-aggregate momentum and
     holds the user-mapped ETF for each picked sector (one holding per
@@ -471,21 +495,25 @@ def compute_sector_etf_period(
         )
         return out
 
-    entry_ts = pd.Timestamp(period_date)
-    exit_ts = pd.Timestamp(next_period)
+    entry_ts = price_entry_ts if price_entry_ts is not None else pd.Timestamp(period_date)
+    exit_ts = price_exit_ts if price_exit_ts is not None else pd.Timestamp(next_period)
     weight = 1.0 / len(chosen_pairs)
     holdings: list[PeriodHolding] = []
     long_returns: list[float] = []
     for sec, bid, agg_score in chosen_pairs:
         series = benchmark_price_index.get(bid)
-        entry_price = _price_on_or_after(series, entry_ts) if series is not None else None
-        exit_price = _price_on_or_after(series, exit_ts) if series is not None else None
+        # On-or-before (see _compute_holding_prices): price the ETF at the
+        # prior trading day, never falling forward onto the rebalance day.
+        entry_pair = _price_on_or_before(series, entry_ts) if series is not None else None
+        exit_pair = _price_on_or_before(series, exit_ts) if series is not None else None
+        entry_price = entry_pair[0] if entry_pair is not None else None
+        exit_price = exit_pair[0] if exit_pair is not None else None
         fwd_return: float | None = None
         if entry_price and exit_price and entry_price > 0:
             fwd_return = round((exit_price / entry_price - 1) * 100, 2)
         bm_ticker, bm_name = (benchmark_meta or {}).get(bid, (f"BM:{bid}", f"Benchmark {bid}"))
-        entry_dt = _date_on_or_after(series, entry_ts) if series is not None else None
-        exit_dt = _date_on_or_after(series, exit_ts) if series is not None else None
+        entry_dt = entry_pair[1].strftime("%Y-%m-%d") if entry_pair is not None else None
+        exit_dt = exit_pair[1].strftime("%Y-%m-%d") if exit_pair is not None else None
         holdings.append(PeriodHolding(
             # Negative IDs distinguish ETF holdings from real company
             # rows downstream (frontend never queries metric_data for
@@ -542,6 +570,12 @@ def compute_selection_period(
     # that don't go through `run_backtest`, though there aren't any
     # today — the runner is the sole caller).
     scored_df: pd.DataFrame | None = None,
+    # Explicit entry/exit price timestamps. The runner passes the PRIOR
+    # trading day's close (so the trade is priced on the same bar the
+    # signal saw — strict-`<` the rebalance date). None falls back to the
+    # rebalance dates themselves, preserving behavior for any direct caller.
+    price_entry_ts: pd.Timestamp | None = None,
+    price_exit_ts: pd.Timestamp | None = None,
 ) -> _PeriodOutcome:
     """Regular stock-picking branch — momentum / random / all selection
     modes, with optional long-short. Builds the long bucket (always) and
@@ -697,8 +731,8 @@ def compute_selection_period(
     long_weight = 1.0 / n_long if n_long > 0 else 0.0
     short_weight = 1.0 / n_short if n_short > 0 else 0.0
 
-    entry_ts = pd.Timestamp(period_date)
-    exit_ts = pd.Timestamp(next_period)
+    entry_ts = price_entry_ts if price_entry_ts is not None else pd.Timestamp(period_date)
+    exit_ts = price_exit_ts if price_exit_ts is not None else pd.Timestamp(next_period)
 
     holdings: list[PeriodHolding] = []
     long_returns: list[float] = []

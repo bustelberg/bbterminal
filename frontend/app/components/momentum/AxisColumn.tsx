@@ -30,25 +30,25 @@ export default function AxisColumn<T>({
   return (
     <div>
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-gray-500 text-xs">
+        <span className="text-fg-subtle text-xs">
           {label}{' '}
-          <span className="text-gray-600 text-[10px]">
+          <span className="text-fg-faint text-[10px]">
             ({selected.size}/{options.length})
           </span>
         </span>
         <div className="flex items-center gap-2 text-[11px]">
-          <button type="button" onClick={onAll} className="text-indigo-400 hover:text-indigo-300">
+          <button type="button" onClick={onAll} className="text-accent-400 hover:text-accent-300">
             All
           </button>
-          <span className="text-gray-700">·</span>
-          <button type="button" onClick={onNone} className="text-gray-400 hover:text-gray-200">
+          <span className="text-fg-dim">·</span>
+          <button type="button" onClick={onNone} className="text-fg-muted hover:text-fg">
             None
           </button>
         </div>
       </div>
-      <ul className={`border border-gray-800/60 rounded-lg p-1 overflow-auto ${maxHClass}`}>
+      <ul className={`border border-neutral-800/60 rounded-lg p-1 overflow-auto ${maxHClass}`}>
         {options.length === 0 ? (
-          <li className="px-3 py-2 text-xs text-gray-600">No options</li>
+          <li className="px-3 py-2 text-xs text-fg-faint">No options</li>
         ) : (
           options.map((opt) => <li key={String(opt)}>{renderItem(opt)}</li>)
         )}

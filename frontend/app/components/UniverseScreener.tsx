@@ -17,10 +17,10 @@ export default function UniverseScreener() {
   const ctl = useUniverses();
 
   return (
-    <div className="h-full flex flex-col bg-[#0f1117]">
-      <div className="px-8 py-5 border-b border-gray-800/60">
-        <h1 className="text-white text-xl font-semibold">Universe Overview</h1>
-        <p className="text-gray-500 text-sm mt-1">Quality criteria reference and detailed stats for every saved universe.</p>
+    <div className="h-full flex flex-col bg-page">
+      <div className="px-8 py-5 border-b border-neutral-800/60">
+        <h1 className="text-fg-strong text-xl font-semibold">Universe Overview</h1>
+        <p className="text-fg-subtle text-sm mt-1">Quality criteria reference and detailed stats for every saved universe.</p>
       </div>
 
       <div className="flex-1 overflow-auto px-8 py-5 space-y-5">

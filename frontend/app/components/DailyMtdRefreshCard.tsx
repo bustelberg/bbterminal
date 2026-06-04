@@ -76,10 +76,10 @@ function computeNextDailyTickUtc(now: Date): Date {
 }
 
 function statusBadgeCls(status: IngestRun['status'] | undefined): string {
-  if (status === 'ok') return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
-  if (status === 'error') return 'bg-rose-500/10 text-rose-300 border-rose-500/30';
-  if (status === 'running') return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
-  return 'bg-gray-500/10 text-gray-400 border-gray-500/30';
+  if (status === 'ok') return 'bg-pos-500/15 text-pos-300 border-pos-500/30';
+  if (status === 'error') return 'bg-neg-500/10 text-neg-300 border-neg-500/30';
+  if (status === 'running') return 'bg-warn-500/15 text-warn-300 border-warn-500/30';
+  return 'bg-neutral-500/10 text-fg-muted border-neutral-500/30';
 }
 
 export default function DailyMtdRefreshCard() {
@@ -175,17 +175,17 @@ export default function DailyMtdRefreshCard() {
   })();
 
   return (
-    <div className="bg-[#151821] rounded-xl border border-gray-800/40">
-      <div className="px-5 py-3 border-b border-gray-800/40 flex items-center justify-between gap-3">
+    <div className="bg-card rounded-xl border border-neutral-800/40">
+      <div className="px-5 py-3 border-b border-neutral-800/40 flex items-center justify-between gap-3">
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
           className="flex items-center gap-3 flex-1 min-w-0 text-left"
         >
-          <span className="text-gray-500 font-mono text-xs w-4 shrink-0">{expanded ? '▾' : '▸'}</span>
+          <span className="text-fg-subtle font-mono text-xs w-4 shrink-0">{expanded ? '▾' : '▸'}</span>
           <div className="flex-1 min-w-0">
-            <h3 className="text-sm font-medium text-white">Daily MTD refresh</h3>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <h3 className="text-sm font-medium text-fg-strong">Daily MTD refresh</h3>
+            <p className="text-xs text-fg-subtle mt-0.5">
               Daily (except Tue) 02:00 UTC + an automatic catch-up on startup when snapshots are stale · pools held companies across all enabled strategies, refreshes prices, then persists MTD onto each strategy&apos;s latest snapshot
             </p>
           </div>
@@ -200,33 +200,33 @@ export default function DailyMtdRefreshCard() {
             type="button"
             onClick={() => void runNow()}
             disabled={triggering || isRunning}
-            className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="text-xs px-3 py-1.5 rounded-lg bg-accent-600 hover:bg-accent-500 text-fg-strong transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {triggering ? 'Starting…' : isRunning ? 'Running…' : 'Run now'}
           </button>
         </div>
       </div>
-      <div className="px-5 py-3 text-xs text-gray-400 flex items-center gap-6 flex-wrap">
+      <div className="px-5 py-3 text-xs text-fg-muted flex items-center gap-6 flex-wrap">
         <div>
-          <span className="text-gray-500">Last:</span>{' '}
-          <span className="text-gray-300 font-mono">{fmtTimestamp(last?.finished_at ?? last?.started_at ?? null)}</span>
+          <span className="text-fg-subtle">Last:</span>{' '}
+          <span className="text-fg-soft font-mono">{fmtTimestamp(last?.finished_at ?? last?.started_at ?? null)}</span>
         </div>
         <div>
-          <span className="text-gray-500">Next:</span>{' '}
-          <span className="text-gray-300 font-mono">{nextTick ? fmtDateTime(nextTick) : '—'}</span>
+          <span className="text-fg-subtle">Next:</span>{' '}
+          <span className="text-fg-soft font-mono">{nextTick ? fmtDateTime(nextTick) : '—'}</span>
         </div>
-        <div className="text-gray-400 truncate flex-1 min-w-0" title={summaryLine}>
+        <div className="text-fg-muted truncate flex-1 min-w-0" title={summaryLine}>
           {summaryLine}
         </div>
       </div>
       {error && (
-        <div className="px-5 py-2 bg-rose-500/10 border-t border-rose-500/20 text-xs text-rose-300 flex items-center justify-between">
+        <div className="px-5 py-2 bg-neg-500/10 border-t border-neg-500/20 text-xs text-neg-300 flex items-center justify-between">
           <span>{error}</span>
-          <button type="button" onClick={() => setError(null)} className="text-rose-200 hover:text-white">dismiss</button>
+          <button type="button" onClick={() => setError(null)} className="text-neg-200 hover:text-fg-strong">dismiss</button>
         </div>
       )}
       {expanded && (
-        <div className="border-t border-gray-800/30 divide-y divide-gray-800/30">
+        <div className="border-t border-neutral-800/30 divide-y divide-neutral-800/30">
           {/* ── In-flight live progress (only while a run is active) ── */}
           {last && last.status === 'running' && (
             <LiveProgressPanel run={last} />
@@ -241,15 +241,15 @@ export default function DailyMtdRefreshCard() {
           <div>
             <div className="px-5 py-3 flex items-baseline justify-between gap-3">
               <div>
-                <h4 className="text-xs font-medium text-gray-300 uppercase tracking-wider">
+                <h4 className="text-xs font-medium text-fg-soft uppercase tracking-wider">
                   Currently held companies
                 </h4>
-                <p className="text-[11px] text-gray-500 mt-0.5">
+                <p className="text-[11px] text-fg-subtle mt-0.5">
                   Pooled across every enabled strategy&apos;s latest snapshot — these are the rows the next daily refresh will price.
                 </p>
               </div>
               {held && (
-                <div className="text-[11px] text-gray-500 shrink-0 font-mono">
+                <div className="text-[11px] text-fg-subtle shrink-0 font-mono">
                   {held.total_companies} compan{held.total_companies === 1 ? 'y' : 'ies'} · {held.total_strategies} strateg{held.total_strategies === 1 ? 'y' : 'ies'}
                 </div>
               )}
@@ -265,19 +265,19 @@ export default function DailyMtdRefreshCard() {
           {/* ── Sub-section 2: Recent runs (click to expand) ──── */}
           <div>
             <div className="px-5 py-3">
-              <h4 className="text-xs font-medium text-gray-300 uppercase tracking-wider">
+              <h4 className="text-xs font-medium text-fg-soft uppercase tracking-wider">
                 Recent runs
               </h4>
-              <p className="text-[11px] text-gray-500 mt-0.5">
+              <p className="text-[11px] text-fg-subtle mt-0.5">
                 Click a row to see per-strategy outcome, error messages, and Python tracebacks.
               </p>
             </div>
             {runs === null ? (
-              <div className="px-5 py-4 text-sm text-gray-500"><LoadingDots label="Loading" /></div>
+              <div className="px-5 py-4 text-sm text-fg-subtle"><LoadingDots label="Loading" /></div>
             ) : runs.length === 0 ? (
-              <div className="px-5 py-4 text-sm text-gray-500">No runs yet.</div>
+              <div className="px-5 py-4 text-sm text-fg-subtle">No runs yet.</div>
             ) : (
-              <div className="divide-y divide-gray-800/30">
+              <div className="divide-y divide-neutral-800/30">
                 {runs.map((r) => (
                   <DailyRunRow
                     key={r.run_id}
@@ -313,12 +313,12 @@ function HeldCompaniesTable({
 }) {
   if (error) {
     return (
-      <div className="px-5 py-4 text-xs flex items-center justify-between bg-rose-500/5 border-t border-rose-500/20 text-rose-300">
+      <div className="px-5 py-4 text-xs flex items-center justify-between bg-neg-500/5 border-t border-neg-500/20 text-neg-300">
         <span>Couldn&apos;t load held companies: {error}</span>
         <button
           type="button"
           onClick={onRetry}
-          className="text-rose-200 hover:text-white"
+          className="text-neg-200 hover:text-fg-strong"
         >
           Retry
         </button>
@@ -327,7 +327,7 @@ function HeldCompaniesTable({
   }
   if (loading && !data) {
     return (
-      <div className="px-5 py-4 text-sm text-gray-500 inline-flex items-center gap-2">
+      <div className="px-5 py-4 text-sm text-fg-subtle inline-flex items-center gap-2">
         <Spinner size={12} />
         <span>Loading held companies…</span>
       </div>
@@ -335,7 +335,7 @@ function HeldCompaniesTable({
   }
   if (!data || data.companies.length === 0) {
     return (
-      <div className="px-5 py-4 text-sm text-gray-500">
+      <div className="px-5 py-4 text-sm text-fg-subtle">
         No companies held — either no enabled strategies, or none have produced a snapshot yet.
       </div>
     );
@@ -344,10 +344,10 @@ function HeldCompaniesTable({
   const latestCloseDate = data.freshness_summary?.latest_close_date ?? null;
   return (
     <div className="px-5 pb-4">
-      <div className="overflow-x-auto rounded-lg border border-gray-800/40">
+      <div className="overflow-x-auto rounded-lg border border-neutral-800/40">
         <table className="w-full text-xs">
           <thead>
-            <tr className="border-b border-gray-800/40 text-gray-500 text-left">
+            <tr className="border-b border-neutral-800/40 text-fg-subtle text-left">
               <th className="px-3 py-2 font-medium">Company</th>
               <th className="px-3 py-2 font-medium w-32">Sector</th>
               <th className="px-3 py-2 font-medium w-28">Latest price</th>
@@ -356,16 +356,16 @@ function HeldCompaniesTable({
           </thead>
           <tbody>
             {data.companies.map((c) => (
-              <tr key={c.company_id} className="border-b border-gray-800/20 last:border-0 hover:bg-white/[0.02]">
+              <tr key={c.company_id} className="border-b border-neutral-800/20 last:border-0 hover:bg-overlay/[0.02]">
                 <td className="px-3 py-2 align-top">
-                  <div className="text-gray-200 font-medium truncate max-w-[20rem]" title={c.company_name ?? undefined}>
+                  <div className="text-fg font-medium truncate max-w-[20rem]" title={c.company_name ?? undefined}>
                     {c.company_name ?? '—'}
                   </div>
-                  <div className="text-[10px] text-gray-500 font-mono mt-0.5">
+                  <div className="text-[10px] text-fg-subtle font-mono mt-0.5">
                     {c.exchange ? `${c.exchange}:${c.ticker}` : c.ticker}
                   </div>
                 </td>
-                <td className="px-3 py-2 align-top text-gray-400 text-[11px]">
+                <td className="px-3 py-2 align-top text-fg-muted text-[11px]">
                   {c.sector ?? '—'}
                 </td>
                 <td className="px-3 py-2 align-top">
@@ -405,10 +405,10 @@ function HeldByChip({ entry }: { entry: HeldByEntry }) {
   return (
     <span
       title={tooltipLines}
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-indigo-500/10 border-indigo-500/25 text-indigo-200 text-[10px] font-medium cursor-help"
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-accent-500/10 border-accent-500/25 text-accent-200 text-[10px] font-medium cursor-help"
     >
       <span className="truncate max-w-[10rem]">{entry.strategy_name}</span>
-      <span className="text-indigo-400/70 font-mono">
+      <span className="text-accent-400/70 font-mono">
         {entry.as_of_date ? `· ${entry.as_of_date}` : ''}
       </span>
     </span>
@@ -442,18 +442,18 @@ function DailyRunRow({
       <button
         type="button"
         onClick={onToggle}
-        className="w-full px-5 py-2 text-xs flex items-center gap-3 hover:bg-white/[0.02] text-left"
+        className="w-full px-5 py-2 text-xs flex items-center gap-3 hover:bg-overlay/[0.02] text-left"
       >
-        <span className="text-gray-500 font-mono text-[10px] w-3 shrink-0">{expanded ? '▾' : '▸'}</span>
+        <span className="text-fg-subtle font-mono text-[10px] w-3 shrink-0">{expanded ? '▾' : '▸'}</span>
         <span className={`inline-flex items-center text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border shrink-0 ${statusBadgeCls(run.status)}`}>
           {run.status}
         </span>
-        <span className="text-gray-300 font-mono shrink-0">{fmtTimestamp(run.finished_at ?? run.started_at)}</span>
-        <span className="text-gray-500 text-[10px] uppercase tracking-wider shrink-0">{run.triggered_by}</span>
-        <span className="text-gray-400 truncate flex-1 min-w-0" title={detail}>{detail}</span>
+        <span className="text-fg-soft font-mono shrink-0">{fmtTimestamp(run.finished_at ?? run.started_at)}</span>
+        <span className="text-fg-subtle text-[10px] uppercase tracking-wider shrink-0">{run.triggered_by}</span>
+        <span className="text-fg-muted truncate flex-1 min-w-0" title={detail}>{detail}</span>
       </button>
       {expanded && (
-        <div className="px-8 py-3 bg-[#0f1117]/40 space-y-3">
+        <div className="px-8 py-3 bg-page/40 space-y-3">
           {/* Top-line counters */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[11px]">
             <CounterCell label="Processed" value={`${run.companies_processed}${run.companies_total ? ` / ${run.companies_total}` : ''}`} />
@@ -464,18 +464,18 @@ function DailyRunRow({
 
           {/* Top-level error_summary (first ~5 errors, captured by the orchestrator) */}
           {run.error_summary && (
-            <div className="bg-rose-500/5 border border-rose-500/20 rounded-lg p-3 text-[11px] text-rose-200">
-              <div className="text-rose-300 font-medium mb-1">Pipeline-level error summary</div>
-              <pre className="whitespace-pre-wrap font-mono text-rose-200/90">{run.error_summary}</pre>
+            <div className="bg-neg-500/5 border border-neg-500/20 rounded-lg p-3 text-[11px] text-neg-200">
+              <div className="text-neg-300 font-medium mb-1">Pipeline-level error summary</div>
+              <pre className="whitespace-pre-wrap font-mono text-neg-200/90">{run.error_summary}</pre>
             </div>
           )}
 
           {/* Per-strategy results */}
           {mom.length === 0 ? (
-            <div className="text-[11px] text-gray-500">No per-strategy results recorded — the prices phase may not have reached the momentum phase.</div>
+            <div className="text-[11px] text-fg-subtle">No per-strategy results recorded — the prices phase may not have reached the momentum phase.</div>
           ) : (
             <div className="space-y-2">
-              <div className="text-[10px] uppercase tracking-wider text-gray-500">Per-strategy outcomes ({mom.length})</div>
+              <div className="text-[10px] uppercase tracking-wider text-fg-subtle">Per-strategy outcomes ({mom.length})</div>
               {mom.map((m, i) => (
                 <PerStrategyResult key={`${run.run_id}-${m.strategy_id ?? i}`} entry={m} />
               ))}
@@ -497,15 +497,15 @@ function CounterCell({
   tone?: 'rose' | 'amber' | 'emerald';
 }) {
   const valueCls = tone === 'rose'
-    ? 'text-rose-300'
+    ? 'text-neg-300'
     : tone === 'amber'
-    ? 'text-amber-300'
+    ? 'text-warn-300'
     : tone === 'emerald'
-    ? 'text-emerald-300'
-    : 'text-gray-200';
+    ? 'text-pos-300'
+    : 'text-fg';
   return (
-    <div className="bg-[#151821] border border-gray-800/40 rounded-lg px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-gray-500">{label}</div>
+    <div className="bg-card border border-neutral-800/40 rounded-lg px-3 py-2">
+      <div className="text-[10px] uppercase tracking-wider text-fg-subtle">{label}</div>
       <div className={`font-mono text-sm mt-0.5 ${valueCls}`}>{value}</div>
     </div>
   );
@@ -521,54 +521,54 @@ function PerStrategyResult({
   const [showTraceback, setShowTraceback] = useState(false);
   const isError = entry.status === 'error';
   return (
-    <div className={`rounded-lg border px-3 py-2 ${isError ? 'bg-rose-500/5 border-rose-500/20' : 'bg-[#151821] border-gray-800/40'}`}>
+    <div className={`rounded-lg border px-3 py-2 ${isError ? 'bg-neg-500/5 border-neg-500/20' : 'bg-card border-neutral-800/40'}`}>
       <div className="flex items-center gap-3 text-[11px]">
         <span className={`inline-flex items-center text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border shrink-0 ${
           isError
-            ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
-            : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+            ? 'bg-neg-500/15 text-neg-300 border-neg-500/30'
+            : 'bg-pos-500/15 text-pos-300 border-pos-500/30'
         }`}>
           {entry.status}
         </span>
-        <span className="text-gray-200 font-medium truncate flex-1 min-w-0">{entry.strategy_name}</span>
+        <span className="text-fg font-medium truncate flex-1 min-w-0">{entry.strategy_name}</span>
         {entry.frequency && (
-          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-gray-500/10 text-gray-400 border-gray-500/30 shrink-0">
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-neutral-500/10 text-fg-muted border-neutral-500/30 shrink-0">
             {entry.frequency}
           </span>
         )}
-        <span className="text-gray-500 text-[10px] uppercase tracking-wider shrink-0">{entry.kind ?? '—'}</span>
+        <span className="text-fg-subtle text-[10px] uppercase tracking-wider shrink-0">{entry.kind ?? '—'}</span>
       </div>
-      <div className="text-[11px] text-gray-400 mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+      <div className="text-[11px] text-fg-muted mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <span>
-          <span className="text-gray-500">Holdings:</span>{' '}
-          <span className="font-mono text-gray-300">{entry.holdings_count}</span>
+          <span className="text-fg-subtle">Holdings:</span>{' '}
+          <span className="font-mono text-fg-soft">{entry.holdings_count}</span>
         </span>
         <span>
-          <span className="text-gray-500">Latest price:</span>{' '}
-          <span className="font-mono text-gray-300">{entry.latest_price_date ?? '—'}</span>
+          <span className="text-fg-subtle">Latest price:</span>{' '}
+          <span className="font-mono text-fg-soft">{entry.latest_price_date ?? '—'}</span>
         </span>
         {entry.snapshot_id != null && (
           <span>
-            <span className="text-gray-500">Snapshot:</span>{' '}
-            <span className="font-mono text-gray-300">#{entry.snapshot_id}</span>
+            <span className="text-fg-subtle">Snapshot:</span>{' '}
+            <span className="font-mono text-fg-soft">#{entry.snapshot_id}</span>
           </span>
         )}
       </div>
       {entry.error_message && (
         <div className="mt-2 text-[11px]">
-          <div className="text-rose-300 font-medium">Error</div>
-          <div className="text-rose-200 font-mono whitespace-pre-wrap break-words">{entry.error_message}</div>
+          <div className="text-neg-300 font-medium">Error</div>
+          <div className="text-neg-200 font-mono whitespace-pre-wrap break-words">{entry.error_message}</div>
           {entry.error_traceback && (
             <div className="mt-1">
               <button
                 type="button"
                 onClick={() => setShowTraceback((v) => !v)}
-                className="text-[10px] uppercase tracking-wider text-rose-300 hover:text-rose-100"
+                className="text-[10px] uppercase tracking-wider text-neg-300 hover:text-neg-100"
               >
                 {showTraceback ? '▾ hide' : '▸ show'} Python traceback
               </button>
               {showTraceback && (
-                <pre className="mt-1 text-[10px] font-mono text-rose-200/80 bg-[#0b0d13] border border-rose-500/20 rounded p-2 max-h-64 overflow-auto whitespace-pre">
+                <pre className="mt-1 text-[10px] font-mono text-neg-200/80 bg-sidebar border border-neg-500/20 rounded p-2 max-h-64 overflow-auto whitespace-pre">
                   {entry.error_traceback}
                 </pre>
               )}
@@ -623,37 +623,37 @@ function LiveProgressPanel({ run }: { run: IngestRun }) {
     : null;
 
   return (
-    <div className="px-5 py-3 bg-amber-500/5">
+    <div className="px-5 py-3 bg-warn-500/5">
       <div className="flex items-center gap-2 mb-2">
-        <Spinner size={12} className="h-3 w-3 text-amber-400" />
-        <span className="text-xs font-medium text-amber-300">
+        <Spinner size={12} className="h-3 w-3 text-warn-400" />
+        <span className="text-xs font-medium text-warn-300">
           Run #{run.run_id} in progress · phase: {phaseLabel}
         </span>
         {elapsedSec != null && (
-          <span className="text-[10px] text-gray-500 ml-auto">
+          <span className="text-[10px] text-fg-subtle ml-auto">
             elapsed {elapsedSec < 60 ? `${elapsedSec}s` : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`}
           </span>
         )}
       </div>
       {run.current_message && (
-        <div className="text-[11px] text-gray-300 font-mono mb-2 break-words">
+        <div className="text-[11px] text-fg-soft font-mono mb-2 break-words">
           {run.current_message}
         </div>
       )}
       {denom > 0 && (
         <>
-          <div className="h-1.5 bg-gray-800/60 rounded-full overflow-hidden">
+          <div className="h-1.5 bg-neutral-800/60 rounded-full overflow-hidden">
             <div
-              className="h-full bg-amber-400/70 transition-all duration-500"
+              className="h-full bg-warn-400/70 transition-all duration-500"
               style={{ width: `${pctCompanies}%` }}
             />
           </div>
-          <div className="flex items-center gap-4 text-[10px] text-gray-500 mt-1.5">
-            <span><span className="font-mono text-gray-300">{num}/{denom}</span> companies</span>
-            <span><span className="font-mono text-gray-300">{run.prices_refreshed}</span> prices refreshed</span>
-            <span><span className="font-mono text-gray-300">{run.volumes_refreshed}</span> volumes refreshed</span>
+          <div className="flex items-center gap-4 text-[10px] text-fg-subtle mt-1.5">
+            <span><span className="font-mono text-fg-soft">{num}/{denom}</span> companies</span>
+            <span><span className="font-mono text-fg-soft">{run.prices_refreshed}</span> prices refreshed</span>
+            <span><span className="font-mono text-fg-soft">{run.volumes_refreshed}</span> volumes refreshed</span>
             {run.error_count > 0 && (
-              <span className="text-rose-400">
+              <span className="text-neg-400">
                 <span className="font-mono">{run.error_count}</span> errors
               </span>
             )}
@@ -678,16 +678,16 @@ function DataFreshnessPanel({
 }) {
   if (loading) {
     return (
-      <div className="px-5 py-3 text-xs text-gray-500 inline-flex items-center gap-2">
-        <Spinner size={10} className="h-2.5 w-2.5 text-gray-500" />
+      <div className="px-5 py-3 text-xs text-fg-subtle inline-flex items-center gap-2">
+        <Spinner size={10} className="h-2.5 w-2.5 text-fg-subtle" />
         <span>Computing data freshness…</span>
       </div>
     );
   }
   if (!summary || summary.latest_close_date == null) {
     return (
-      <div className="px-5 py-3 text-xs text-gray-500">
-        <div className="font-medium uppercase tracking-wider text-gray-400 mb-1">Data freshness</div>
+      <div className="px-5 py-3 text-xs text-fg-subtle">
+        <div className="font-medium uppercase tracking-wider text-fg-muted mb-1">Data freshness</div>
         No close-price data found for any held company yet.
       </div>
     );
@@ -709,20 +709,20 @@ function DataFreshnessPanel({
     <div className="px-5 py-3">
       <div className="flex items-baseline justify-between gap-3 mb-2">
         <div>
-          <h4 className="text-xs font-medium text-gray-300 uppercase tracking-wider">
+          <h4 className="text-xs font-medium text-fg-soft uppercase tracking-wider">
             Data freshness
           </h4>
-          <p className="text-[11px] text-gray-500 mt-0.5">
+          <p className="text-[11px] text-fg-subtle mt-0.5">
             Latest close-price observation across held companies. Daily refresh extends this by one trading day.
           </p>
         </div>
         {calDaysBehind != null && (
           <div className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border shrink-0 ${
             calDaysBehind <= 1
-              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+              ? 'bg-pos-500/15 text-pos-300 border-pos-500/30'
               : calDaysBehind <= 4
-              ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-              : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+              ? 'bg-warn-500/15 text-warn-300 border-warn-500/30'
+              : 'bg-neg-500/15 text-neg-300 border-neg-500/30'
           }`}>
             {calDaysBehind === 0 ? "today's date" : `${calDaysBehind} day${calDaysBehind === 1 ? '' : 's'} behind`}
           </div>
@@ -762,16 +762,16 @@ function LatestPriceCell({
   if (!latestDate) {
     return (
       <span className="inline-flex items-center gap-1.5">
-        <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
-        <span className="text-rose-300 text-[10px] font-mono">no data</span>
+        <span className="w-1.5 h-1.5 rounded-full bg-neg-400" />
+        <span className="text-neg-300 text-[10px] font-mono">no data</span>
       </span>
     );
   }
   const isFresh = freshestAcrossSet != null && latestDate === freshestAcrossSet;
   return (
     <span className="inline-flex items-center gap-1.5" title={isFresh ? 'At latest date' : `Stale vs latest (${freshestAcrossSet ?? '—'})`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${isFresh ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-      <span className={`text-[10px] font-mono ${isFresh ? 'text-emerald-300' : 'text-amber-300'}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${isFresh ? 'bg-pos-400' : 'bg-warn-400'}`} />
+      <span className={`text-[10px] font-mono ${isFresh ? 'text-pos-300' : 'text-warn-300'}`}>
         {latestDate}
       </span>
     </span>

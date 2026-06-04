@@ -25,9 +25,9 @@ export function fmtMv(v: string): string {
  * DELETED / ADDED+DELETED / fallback). */
 export function actionStyle(action: string): string {
   switch (action) {
-    case 'ADDED': return 'bg-emerald-500/15 text-emerald-400';
-    case 'DELETED': return 'bg-rose-500/15 text-rose-400';
-    case 'ADDED+DELETED': return 'bg-amber-500/15 text-amber-400';
-    default: return 'bg-gray-500/15 text-gray-400';
+    case 'ADDED': return 'bg-pos-500/15 text-pos-400';
+    case 'DELETED': return 'bg-neg-500/15 text-neg-400';
+    case 'ADDED+DELETED': return 'bg-warn-500/15 text-warn-400';
+    default: return 'bg-neutral-500/15 text-fg-muted';
   }
 }

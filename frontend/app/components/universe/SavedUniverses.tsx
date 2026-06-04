@@ -28,23 +28,23 @@ export default function SavedUniverses({ ctl }: { ctl: UseUniversesResult }) {
   return (
     <>
       <div className="flex items-center justify-between">
-        <h2 className="text-white text-sm font-medium">
-          Saved Universes {universes.length > 0 && <span className="text-gray-500 font-normal">({universes.length})</span>}
+        <h2 className="text-fg-strong text-sm font-medium">
+          Saved Universes {universes.length > 0 && <span className="text-fg-subtle font-normal">({universes.length})</span>}
         </h2>
         {universes.length > 0 && (
           confirmDeleteAll ? (
             <div className="flex items-center gap-2">
-              <span className="text-sm text-rose-400">Delete all {universes.length}?</span>
+              <span className="text-sm text-neg-400">Delete all {universes.length}?</span>
               <button
                 onClick={deleteAll}
                 disabled={busyLabel === '__all__'}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-600 hover:bg-rose-500 text-white transition-colors disabled:opacity-50"
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-neg-600 hover:bg-neg-500 text-fg-strong transition-colors disabled:opacity-50"
               >
                 {busyLabel === '__all__' ? 'Deleting...' : 'Yes, delete all'}
               </button>
               <button
                 onClick={() => setConfirmDeleteAll(false)}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+                className="px-3 py-1.5 rounded-lg text-xs font-medium text-fg-muted hover:text-fg-strong hover:bg-overlay/5 transition-colors"
               >
                 Cancel
               </button>
@@ -52,7 +52,7 @@ export default function SavedUniverses({ ctl }: { ctl: UseUniversesResult }) {
           ) : (
             <button
               onClick={() => setConfirmDeleteAll(true)}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+              className="px-3 py-1.5 rounded-lg text-xs font-medium text-fg-subtle hover:text-neg-400 hover:bg-neg-500/10 transition-colors"
             >
               Delete all
             </button>
@@ -61,15 +61,15 @@ export default function SavedUniverses({ ctl }: { ctl: UseUniversesResult }) {
       </div>
 
       {loading ? (
-        <div className="bg-[#151821] rounded-xl border border-gray-800/40 px-5 py-8 text-sm text-gray-500">
+        <div className="bg-card rounded-xl border border-neutral-800/40 px-5 py-8 text-sm text-fg-subtle">
           <LoadingDots label="Loading" />
         </div>
       ) : error ? (
-        <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg px-5 py-4 text-sm text-rose-400">
+        <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-5 py-4 text-sm text-neg-400">
           Failed to load: {error}
         </div>
       ) : universes.length === 0 ? (
-        <div className="bg-[#151821] rounded-xl border border-gray-800/40 px-5 py-8 text-sm text-gray-500">
+        <div className="bg-card rounded-xl border border-neutral-800/40 px-5 py-8 text-sm text-fg-subtle">
           No universes saved yet.
         </div>
       ) : (
@@ -114,7 +114,7 @@ export default function SavedUniverses({ ctl }: { ctl: UseUniversesResult }) {
           })}
           {grouped.orphans.length > 0 && (
             <div className="pt-2">
-              <div className="text-xs text-gray-500 mb-2">Derived universes with no matching parent</div>
+              <div className="text-xs text-fg-subtle mb-2">Derived universes with no matching parent</div>
               {grouped.orphans.map(u => (
                 <UniverseCard
                   key={u.universe_id}
