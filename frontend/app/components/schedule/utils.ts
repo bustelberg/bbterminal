@@ -2,19 +2,77 @@
  * Small pure helpers for the `/schedule` page sub-components.
  * Display-formatting only — no React, no I/O.
  */
+import type { CSSProperties } from 'react';
+import { WEEKDAY_LABELS } from '../momentum/utils';
 
-/** Curated subset of the strategy config to display on the strategy list
- * row + the add picker. The full breakdown lives in the detail view. */
-export function strategySummary(cfg: Record<string, unknown> | null): string {
-  if (!cfg) return '';
-  const selection = (cfg.selection_mode as string | undefined) ?? 'momentum';
-  const universe = (cfg.index_universe as string | null | undefined) ?? (cfg.universe_label as string | null | undefined) ?? 'all';
-  const topSectors = cfg.top_n_sectors as number | undefined;
-  const topPer = cfg.top_n_per_sector as number | undefined;
-  const parts: string[] = [selection];
-  if (universe) parts.push(`${universe}`);
-  if (topSectors != null && topPer != null) parts.push(`top ${topSectors}×${topPer}`);
-  return parts.join(' · ');
+const FREQ_DISPLAY: Record<string, string> = {
+  daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly',
+  bimonthly: 'Bimonthly', quarterly: 'Quarterly',
+};
+
+// Pretty display name per universe key (the raw keys are SHOUTY).
+const UNIVERSE_DISPLAY: Record<string, string> = {
+  LEONTEQ: 'Leonteq',
+  ACWI: 'ACWI',
+  ACWI_LEONTEQ: 'ACWI×Leonteq',
+  SP500: 'S&P 500',
+};
+
+function universeName(u: string): string {
+  return UNIVERSE_DISPLAY[u] ?? (u.charAt(0).toUpperCase() + u.slice(1).toLowerCase());
+}
+
+/** One config-derived property chip: its text + a fixed hue so the COLOUR
+ * encodes which property it is (frequency=blue, direction=green, …). */
+export type StrategyChip = { text: string; hue: number };
+
+/** Derive the labelled property chips for a scheduled strategy from its
+ * config blob — what the /schedule row shows after the name. Each property
+ * category has a stable hue so the colour itself signals the property. */
+export function strategyChips(
+  cfg: Record<string, unknown> | null,
+  frequency?: string | null,
+): StrategyChip[] {
+  if (!cfg) return [];
+  const chips: StrategyChip[] = [];
+
+  const freq = frequency ?? (cfg.rebalance_frequency as string | undefined);
+  if (freq) chips.push({ text: FREQ_DISPLAY[freq] ?? (freq.charAt(0).toUpperCase() + freq.slice(1)), hue: 212 });
+
+  const dir = (cfg.strategy_type as string | undefined) ?? 'long_only';
+  chips.push({ text: dir === 'long_short' ? 'Long-short' : 'Long-only', hue: 150 });
+
+  const uni = (cfg.index_universe as string | null | undefined)
+    ?? (cfg.universe_label as string | null | undefined);
+  if (uni) chips.push({ text: universeName(uni), hue: 34 });
+
+  const grouping = (cfg.grouping as string | undefined) ?? 'sector';
+  chips.push({ text: grouping === 'industry' ? 'By industry' : 'By sector', hue: 186 });
+
+  const minScore = cfg.min_price_score as number | null | undefined;
+  if (minScore != null && minScore > 0) chips.push({ text: `Min ${minScore}`, hue: 276 });
+
+  const wd = (cfg.rebalance_weekday as number | undefined) ?? 0;
+  chips.push({ text: `${WEEKDAY_LABELS[wd] ?? 'Monday'} rebalance`, hue: 246 });
+
+  const topS = cfg.top_n_sectors as number | undefined;
+  if (topS != null) chips.push({ text: `Top ${topS} sector${topS === 1 ? '' : 's'}`, hue: 320 });
+
+  const topP = cfg.top_n_per_sector as number | undefined;
+  if (topP != null) chips.push({ text: `Top ${topP} compan${topP === 1 ? 'y' : 'ies'}`, hue: 96 });
+
+  return chips;
+}
+
+/** Inline style for a property chip (the @theme tokens only cover 4 colour
+ * ramps, so qualitative per-property hues use HSL inline — same pattern as
+ * `company/styles.ts::universeChipStyle` + `lib/sectorColors`). */
+export function chipStyle(hue: number): CSSProperties {
+  return {
+    backgroundColor: `hsl(${hue} 60% 20% / 0.5)`,
+    borderColor: `hsl(${hue} 55% 50% / 0.45)`,
+    color: `hsl(${hue} 75% 80%)`,
+  };
 }
 
 /** Compact "in 18h" / "in 6d" / "in 12m" / "now" relative formatter for a

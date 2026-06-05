@@ -15,12 +15,18 @@ from deps import supabase
 from .runlog import _Throttle, _update_run
 
 
-def _run_templates_phase(run_id: int) -> None:
-    """Phase 1 — refresh every registered `UniverseTemplate` (currently
-    just ACWI). Each template's `refresh()` is delegated to in turn;
-    per-template failures are captured in the result array as
-    `status='error'` entries (instead of bringing down the whole phase),
-    matching the per-strategy isolation pattern in the momentum phase.
+def _run_templates_phase(run_id: int, only_keys: set[str] | None = None) -> int:
+    """Phase 1 — refresh registered `UniverseTemplate`s. Each template's
+    `refresh()` is delegated to in turn; per-template failures are captured
+    in the result array as `status='error'` entries (instead of bringing
+    down the whole phase), matching the per-strategy isolation pattern in
+    the momentum phase.
+
+    `only_keys` scopes the refresh to a subset of `template_key`s (the
+    smart pipeline passes just the universes its enabled strategies use);
+    `None` refreshes every registered template (full/bootstrap pipeline).
+    The registry order is preserved so a derived template's parents refresh
+    first. Returns the number of templates actually refreshed.
 
     The final `templates_summary` JSONB is the array of per-template
     diff entries; `current_picks_snapshot.backtest_run_id` ties momentum
@@ -29,9 +35,11 @@ def _run_templates_phase(run_id: int) -> None:
     from index_universe.templates import _refresh_status  # noqa: PLC0415
 
     templates = all_templates()
+    if only_keys is not None:
+        templates = [t for t in templates if t.template_key in only_keys]
     if not templates:
         _update_run(run_id, templates_summary=[])
-        return
+        return 0
 
     throttle = _Throttle()
     summaries: list[dict] = []
@@ -82,3 +90,4 @@ def _run_templates_phase(run_id: int) -> None:
             f"{len(errors)} of {len(templates)} templates failed: "
             + " | ".join(errors[:3])
         )
+    return len(templates)

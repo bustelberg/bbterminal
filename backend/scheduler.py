@@ -1,22 +1,22 @@
-"""In-process APScheduler for the weekly + daily pipeline ticks.
+"""In-process APScheduler for the single daily smart pipeline tick.
 
-Two `BackgroundScheduler` cron triggers run inside the FastAPI process:
+One `BackgroundScheduler` cron trigger runs inside the FastAPI process:
 
-    weekly_price_volume     Tue 02:00 UTC          — full pipeline
-        (acquisition → templates → prune → prices → momentum)
-    daily_holdings_refresh  Daily (except Tue) 02:00 UTC — lightweight
-        MTD-only (prices for held companies → MTD persist per strategy)
+    smart_daily   Daily 02:00 UTC — dependency-driven pipeline
 
-The daily tick captures the prior trading day's close (Tue/Wed/Thu/Fri
-US close → next-day 02:00 UTC after ~5h GuruFocus settle) so the
-/schedule "Daily MTD refresh" card surfaces fresh to-date stats every
-trading day. Tuesday is intentionally skipped — the weekly full
-pipeline already does everything the daily would, plus more.
+Each tick derives, from the enabled scheduled strategies, exactly what's
+needed and runs only that (`ingest.phases.pipeline._run_smart_pipeline_sync`):
+refresh only the universes those strategies use, keep every strategy's held
+companies priced daily, and rebalance each strategy on the first occurrence
+of its baked `rebalance_weekday` in its period. A Monday 02:00 UTC tick
+already has Friday's settled close (US close Fri 21:00 UTC + ~5h), so a
+first-Monday rebalance decides on Friday's close. Weekend ticks (and any day
+with no strategy due + fresh held prices) are cheap no-ops via the
+per-company freshness short-circuit.
 
-(The previous monthly 2nd-of-month tick was retired: per-strategy
-`frequency` + `next_due_at` on `scheduled_strategy` now drives whether
-a strategy rebalances on a given Tuesday — there's no longer a need
-for a separate monthly cron. See `scheduled_strategies.py`.)
+The previous fixed-calendar jobs (weekly full pipeline, daily MTD refresh,
+daily/monthly template refresh) are retired — the single smart tick subsumes
+them, scoped to what the strategies actually need.
 
 Each fired tick calls `kick_off_refresh(job_name, "auto")`, which inserts
 an `ingest_run` row tagged `triggered_by='auto'` and starts the daemon
@@ -167,45 +167,6 @@ def _unrefreshed_templates() -> list[str]:
     return unrefreshed
 
 
-def _strategies_lacking_snapshot() -> list[int]:
-    """Enabled scheduled-strategy ids with NO linked `current_picks_snapshot`
-    (none tagged with their `scheduled_strategy_id`). These have never been
-    through the pipeline's momentum phase, so the daily MTD refresh — which
-    pools held companies by `scheduled_strategy_id` — can't see them and
-    they never stay fresh. A full pipeline run creates their first linked
-    snapshot (with fresh prices), after which the daily refresh maintains
-    it. Drives the bootstrap decision alongside `_unrefreshed_templates`."""
-    from deps import supabase  # noqa: PLC0415
-    try:
-        strat = (
-            supabase.table("scheduled_strategy")
-            .select("id")
-            .eq("enabled", True)
-            .execute()
-        )
-        ids = [int(r["id"]) for r in (strat.data or [])]
-        if not ids:
-            return []
-        snaps = (
-            supabase.table("current_picks_snapshot")
-            .select("scheduled_strategy_id")
-            .in_("scheduled_strategy_id", ids)
-            .execute()
-        )
-        linked = {
-            int(s["scheduled_strategy_id"])
-            for s in (snaps.data or [])
-            if s.get("scheduled_strategy_id") is not None
-        }
-        return [sid for sid in ids if sid not in linked]
-    except Exception as e:
-        _log.warning(
-            "[scheduler] lacking-snapshot probe failed: %s: %s",
-            type(e).__name__, e,
-        )
-        return []
-
-
 def _pipeline_already_running() -> bool:
     """True if an `ingest_run` row in `running` state was started in the
     last hour. The bootstrap probe checks this so an in-flight manual run
@@ -230,41 +191,67 @@ def _pipeline_already_running() -> bool:
         return True  # fail-safe: if we can't query, don't double-fire
 
 
-def _maybe_bootstrap_templates(sched: BackgroundScheduler) -> None:
-    """Schedule a one-shot full pipeline via DateTrigger when this env needs
-    an initial population: a template never refreshed, OR an enabled
-    scheduled strategy with no linked snapshot yet (so the daily MTD refresh
-    has something to pool + keep fresh). Idempotent: same job_id +
-    `replace_existing=True` means re-calling on a hot restart doesn't
-    double-book."""
+def _needed_templates_behind(needed_keys: set[str]) -> bool:
+    """True when any NEEDED template (one an enabled strategy uses) has
+    never been refreshed in this env or has fallen behind the current
+    month. Unused templates are intentionally ignored — under the
+    dependency-driven model they go stale until a strategy needs them."""
+    if not needed_keys:
+        return False
     try:
-        unrefreshed = _unrefreshed_templates()
+        behind = set(_unrefreshed_templates()) | set(_stale_templates())
     except Exception as e:
-        _log.warning(
-            "[scheduler] bootstrap-templates probe failed: %s: %s",
-            type(e).__name__, e,
-        )
-        unrefreshed = []
-    lacking = _strategies_lacking_snapshot()
-    if not unrefreshed and not lacking:
-        _log.info("[scheduler] bootstrap: templates refreshed + every strategy has a snapshot — no-op")
+        _log.warning("[scheduler] needed-template-behind probe failed: %s: %s", type(e).__name__, e)
+        return False
+    return bool(behind & needed_keys)
+
+
+def _maybe_kickstart_smart(sched: BackgroundScheduler) -> None:
+    """On startup, schedule a one-shot `smart_daily` when anything the
+    enabled strategies need is behind — so an env that was down across the
+    02:00 UTC tick catches up immediately rather than waiting a day. The
+    smart tick is itself dependency-scoped + idempotent, so firing it is
+    always safe. No enabled strategies → no-op (nothing auto-runs, by
+    design). Idempotent via the fixed job id + `replace_existing=True`."""
+    from ingest.phases.planner import build_plan  # noqa: PLC0415 — avoid import cycle
+
+    try:
+        plan = build_plan(datetime.now(timezone.utc))
+    except Exception as e:
+        _log.warning("[scheduler] smart kickstart: plan build failed: %s: %s", type(e).__name__, e)
+        return
+    if not plan.strategies:
+        _log.info("[scheduler] smart kickstart: no enabled strategies — no-op")
+        return
+
+    needed = set(plan.needed_template_keys)
+    reasons: list[str] = []
+    if plan.due_strategy_ids:
+        reasons.append(f"{len(plan.due_strategy_ids)} strategy(ies) due")
+    if _needed_templates_behind(needed):
+        reasons.append("needed template unrefreshed/behind")
+    try:
+        if _held_prices_stale():
+            reasons.append("held prices stale")
+    except Exception as e:
+        _log.warning("[scheduler] smart kickstart: price-staleness probe failed: %s: %s", type(e).__name__, e)
+
+    if not reasons:
+        _log.info("[scheduler] smart kickstart: everything current — no-op")
         return
     if _pipeline_already_running():
-        _log.info(
-            "[scheduler] bootstrap: needed (%s unrefreshed templates, %s strategies without a snapshot) but a pipeline is already running — skipping",
-            len(unrefreshed), len(lacking),
-        )
+        _log.info("[scheduler] smart kickstart: needed (%s) but a pipeline is already running — skipping", reasons)
         return
     run_at = datetime.now(timezone.utc) + timedelta(seconds=_BOOTSTRAP_DELAY_SECONDS)
     _log.warning(
-        "[scheduler] bootstrap: firing full pipeline at %s — unrefreshed templates=%s, strategies without a linked snapshot=%s",
-        run_at.isoformat(), unrefreshed, lacking,
+        "[scheduler] smart kickstart: firing smart_daily at %s — reasons: %s",
+        run_at.isoformat(), reasons,
     )
     sched.add_job(
         _fire_job,
         DateTrigger(run_date=run_at),
-        args=["bootstrap_template_refresh"],
-        id="bootstrap_template_refresh",
+        args=["smart_daily"],
+        id="startup_smart_kickstart",
         replace_existing=True,
         coalesce=True,
         misfire_grace_time=600,
@@ -295,44 +282,6 @@ def _stale_templates() -> list[str]:
                 template.template_key, type(e).__name__, e,
             )
     return stale
-
-
-def _maybe_catchup_stale_templates(sched: BackgroundScheduler) -> None:
-    """On startup, if any template's latest captured month is behind the
-    current month, fire a one-shot lightweight template refresh so stale
-    data is caught up immediately rather than waiting for the next daily
-    tick. Idempotent via the fixed job id + `replace_existing=True`."""
-    try:
-        stale = _stale_templates()
-    except Exception as e:
-        _log.warning(
-            "[scheduler] staleness catch-up probe failed: %s: %s",
-            type(e).__name__, e,
-        )
-        return
-    if not stale:
-        _log.info("[scheduler] staleness catch-up: all templates current — no-op")
-        return
-    if _pipeline_already_running():
-        _log.info(
-            "[scheduler] staleness catch-up: %s stale (%s) but a pipeline is already running — skipping",
-            len(stale), stale,
-        )
-        return
-    run_at = datetime.now(timezone.utc) + timedelta(seconds=_BOOTSTRAP_DELAY_SECONDS)
-    _log.warning(
-        "[scheduler] staleness catch-up: %s stale (%s) — firing template refresh at %s",
-        len(stale), stale, run_at.isoformat(),
-    )
-    sched.add_job(
-        _fire_job,
-        DateTrigger(run_date=run_at),
-        args=["daily_template_refresh"],
-        id="startup_template_catchup",
-        replace_existing=True,
-        coalesce=True,
-        misfire_grace_time=600,
-    )
 
 
 def _trading_day_age(latest: "date | None") -> "int | None":
@@ -392,51 +341,12 @@ def _held_prices_stale() -> bool:
     return age is not None and age >= 1
 
 
-def _maybe_catchup_stale_prices(sched: BackgroundScheduler) -> None:
-    """On startup, if any enabled strategy's held snapshot is behind the
-    latest trading day, fire a one-shot daily MTD refresh immediately so
-    prices catch up without waiting for the next 02:00 UTC tick. This is
-    what keeps things fresh when the backend isn't up 24/7 (local dev, a
-    redeploy that lands after the cron time, …). Idempotent via the fixed
-    job id + `replace_existing=True`."""
-    try:
-        stale = _held_prices_stale()
-    except Exception as e:
-        _log.warning(
-            "[scheduler] price-staleness probe failed: %s: %s",
-            type(e).__name__, e,
-        )
-        return
-    if not stale:
-        _log.info("[scheduler] price catch-up: held snapshots current — no-op")
-        return
-    if _pipeline_already_running():
-        _log.info(
-            "[scheduler] price catch-up: held snapshots stale but a pipeline is already running — skipping",
-        )
-        return
-    run_at = datetime.now(timezone.utc) + timedelta(seconds=_BOOTSTRAP_DELAY_SECONDS)
-    _log.warning(
-        "[scheduler] price catch-up: held snapshots stale — firing daily_holdings_refresh at %s",
-        run_at.isoformat(),
-    )
-    sched.add_job(
-        _fire_job,
-        DateTrigger(run_date=run_at),
-        args=["daily_holdings_refresh"],
-        id="startup_price_catchup",
-        replace_existing=True,
-        coalesce=True,
-        misfire_grace_time=600,
-    )
-
-
 def list_scheduled_jobs() -> list[dict]:
     """Snapshot of every job currently registered on the in-process
     scheduler, for the /schedule "Pipeline activity" strip. Returns one
     dict per job with its id, the underlying job_name it fires
-    (`args[0]` — for the one-shot catch-up jobs this differs from the
-    job id, e.g. `startup_template_catchup` fires `daily_template_refresh`),
+    (`args[0]` — for the one-shot catch-up job this differs from the
+    job id: `startup_smart_kickstart` fires `smart_daily`),
     and its next fire time as an ISO string (None if the scheduler paused
     it). Empty list when the scheduler isn't running (DISABLE_SCHEDULER,
     or before startup). Best-effort: never raises."""
@@ -492,75 +402,25 @@ def register_scheduler(app) -> None:
             return
 
         sched = BackgroundScheduler(timezone="UTC")
-        # Weekly: Tuesday 02:00 UTC. Captures the previous Monday's worldwide
-        # closes ~5h after the US 21:00 UTC close.
+        # Single daily "smart" tick: every day 02:00 UTC. It derives, from
+        # the enabled scheduled strategies, exactly what's needed and runs
+        # only that (see `ingest.phases.pipeline._run_smart_pipeline_sync`):
+        # refresh only the universes those strategies use, keep every
+        # strategy's held companies priced daily, and rebalance each
+        # strategy on the first occurrence of its baked `rebalance_weekday`
+        # in its period. Monday 02:00 UTC already has Friday's settled close
+        # (US close Fri 21:00 UTC + ~5h), so a first-Monday rebalance decides
+        # on Friday's close. Weekend ticks are cheap no-ops via the
+        # per-company freshness short-circuit.
         sched.add_job(
             _fire_job,
-            CronTrigger(day_of_week="tue", hour=2, minute=0, timezone="UTC"),
-            args=["weekly_price_volume"],
-            id="weekly_price_volume",
+            CronTrigger(day_of_week="mon-sun", hour=2, minute=0, timezone="UTC"),
+            args=["smart_daily"],
+            id="smart_daily",
             replace_existing=True,
-            # If a startup happens to coincide with the tick (e.g. a deploy
-            # right at 02:00 UTC), `coalesce=True` collapses any backlog
-            # into a single run and `misfire_grace_time` gives us 10 min
-            # of slack before we declare it skipped.
-            coalesce=True,
-            misfire_grace_time=600,
-        )
-        # Daily MTD refresh: Wed-Sat 02:00 UTC. Refreshes prices for the
-        # pooled set of held companies (~30-60 vs ~2000 in the weekly
-        # tick) and re-persists MTD on each strategy's latest snapshot.
-        # Fires EVERY day except Tue (the weekly full pipeline covers Tue),
-        # so a scheduled strategy's current-month holdings are always kept
-        # up to date automatically. On days with no fresh closes (Sun/Mon)
-        # the per-company freshness guard short-circuits the GuruFocus
-        # fetch, so those ticks are cheap no-ops. Each fire takes minutes,
-        # not hours.
-        sched.add_job(
-            _fire_job,
-            CronTrigger(
-                day_of_week="mon,wed,thu,fri,sat,sun",
-                hour=2, minute=0, timezone="UTC",
-            ),
-            args=["daily_holdings_refresh"],
-            id="daily_holdings_refresh",
-            replace_existing=True,
-            coalesce=True,
-            misfire_grace_time=600,
-        )
-        # Daily template refresh: Mon, Wed-Sun 02:30 UTC. Lightweight
-        # (acquisition → templates → prune → dedupe, no prices/momentum).
-        # Picks up MSCI announcement changes for ACWI + Leonteq
-        # eligibility list updates within 24h so /schedule's per-
-        # template additions/removals view stays current daily.
-        # Skips Tue (weekly full pipeline already does it). Offset 30
-        # min from the MTD tick so the two daily jobs don't pile on
-        # GuruFocus simultaneously when both happen to fire same day.
-        sched.add_job(
-            _fire_job,
-            CronTrigger(
-                day_of_week="mon,wed,thu,fri,sat,sun",
-                hour=2, minute=30, timezone="UTC",
-            ),
-            args=["daily_template_refresh"],
-            id="daily_template_refresh",
-            replace_existing=True,
-            coalesce=True,
-            misfire_grace_time=600,
-        )
-        # Month-boundary template refresh: 1st of every month, 00:30 UTC.
-        # Explicitly captures the just-completed month into every template
-        # the instant the calendar rolls over. The daily tick would catch
-        # it within ~24h regardless, but this makes the end-of-month
-        # cadence guaranteed and obvious. Same lightweight orchestration
-        # (acquisition → templates → prune → dedupe) — registry-tracked so
-        # the UI shows the busy spinner + progress.
-        sched.add_job(
-            _fire_job,
-            CronTrigger(day=1, hour=0, minute=30, timezone="UTC"),
-            args=["daily_template_refresh"],
-            id="monthly_template_refresh",
-            replace_existing=True,
+            # If a startup coincides with the tick (e.g. a deploy right at
+            # 02:00 UTC), `coalesce=True` collapses any backlog into a single
+            # run and `misfire_grace_time` gives 10 min of slack.
             coalesce=True,
             misfire_grace_time=600,
         )
@@ -578,34 +438,18 @@ def register_scheduler(app) -> None:
                 "[scheduler] reap-orphan-runs wrapper failed: %s: %s",
                 type(e).__name__, e,
             )
-        # Probe for templates that have never been refreshed in this env
-        # and schedule a one-shot full pipeline if so. Wrapped so a probe
-        # failure can never take down the scheduler startup.
+        # On startup, fire a one-shot `smart_daily` if anything the enabled
+        # strategies need is behind (held prices stale, a strategy never
+        # computed, or a NEEDED template unrefreshed/behind the month) — so
+        # an env that was down across the 02:00 UTC tick catches up
+        # immediately instead of waiting for tomorrow. The smart tick is
+        # itself scoped + idempotent, so this is always safe. Wrapped so a
+        # probe failure can never take down scheduler startup.
         try:
-            _maybe_bootstrap_templates(sched)
+            _maybe_kickstart_smart(sched)
         except Exception as e:
             _log.warning(
-                "[scheduler] bootstrap-templates wrapper failed: %s: %s",
-                type(e).__name__, e,
-            )
-        # Catch up any template whose latest captured month fell behind the
-        # current month while the process was down (missed month rollover).
-        try:
-            _maybe_catchup_stale_templates(sched)
-        except Exception as e:
-            _log.warning(
-                "[scheduler] staleness-catchup wrapper failed: %s: %s",
-                type(e).__name__, e,
-            )
-        # Catch up held-company prices/MTD if a strategy's latest snapshot
-        # fell behind the latest trading day (e.g. the daily tick was
-        # missed while the process was down). Keeps the held positions
-        # fresh without waiting for the next scheduled tick.
-        try:
-            _maybe_catchup_stale_prices(sched)
-        except Exception as e:
-            _log.warning(
-                "[scheduler] price-catchup wrapper failed: %s: %s",
+                "[scheduler] smart-kickstart wrapper failed: %s: %s",
                 type(e).__name__, e,
             )
         next_runs = {j.id: str(j.next_run_time) for j in sched.get_jobs()}

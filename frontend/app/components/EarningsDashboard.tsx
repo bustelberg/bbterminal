@@ -303,7 +303,7 @@ export default function EarningsDashboard() {
         {selected && (
           <>
             <RefreshButton label="Refresh All" running={sse.running} onClick={() => refresh('all', noCache)} />
-            <label className="flex items-center gap-2 text-sm text-fg-muted cursor-pointer select-none" title="Bypass GuruFocus storage cache and re-fetch every source from the API.">
+            <label className="flex items-center gap-2 text-sm text-fg-muted cursor-pointer" title="Bypass GuruFocus storage cache and re-fetch every source from the API.">
               <input
                 type="checkbox"
                 checked={noCache}

@@ -58,7 +58,7 @@ export default function EquityChart({
       title={`Equity Curve (${logScale ? 'Log' : 'Cumulative'} Return %)`}
       rightSlot={
         <label
-          className="flex items-center gap-2 cursor-pointer select-none"
+          className="flex items-center gap-2 cursor-pointer"
           onClick={(e) => e.stopPropagation()}
         >
           <input

@@ -1,21 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { loadingStore } from '../../lib/loading';
+import { useNow } from '../../lib/hooks/useNow';
 
 export default function LoadingTracker() {
   const items = loadingStore.use((s) => s.items);
-  // Lazy initializer — Date.now() is impure, calling it inline would
-  // trip react-hooks/purity. The () => Date.now() form runs once at
-  // mount, after which the setInterval below drives updates.
-  const [now, setNow] = useState(() => Date.now());
-
-  // Tick once per second so the elapsed time updates while the panel is open.
-  useEffect(() => {
-    if (items.length === 0) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [items.length]);
+  // Tick once per second (only while the panel has items) so elapsed
+  // times update live.
+  const now = useNow(1000, items.length > 0);
 
   if (items.length === 0) return null;
 

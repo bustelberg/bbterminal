@@ -144,15 +144,9 @@ def _yyyy_mm_to_month_end(yyyy_mm: str) -> date | None:
 
 
 def _upsert_metric_rows(supabase: Client, rows: list[dict]) -> int:
-    if not rows:
-        return 0
-    batch_size = 500
-    total = 0
-    for i in range(0, len(rows), batch_size):
-        batch = rows[i : i + batch_size]
-        resp = supabase.table("metric_data").upsert(
-            batch, on_conflict="company_id,metric_code,source_code,target_date",
-            ignore_duplicates=False,
-        ).execute()
-        total += len(resp.data)
-    return total
+    """Batched metric_data upsert (no retry — earnings rows are pre-validated).
+    Thin wrapper over the shared `ingest.metric_upsert.upsert_metric_rows` so
+    the submodule call sites (`from ._common import _upsert_metric_rows`) stay
+    put."""
+    from ingest.metric_upsert import upsert_metric_rows  # noqa: PLC0415
+    return upsert_metric_rows(supabase, rows)

@@ -73,10 +73,11 @@ export function useVariantSelection({
   const [selectedGroupings, setSelectedGroupings] = useState<Set<'sector' | 'industry'>>(
     () => new Set<'sector' | 'industry'>(['sector']),
   );
-  // Rebalance weekdays to sweep (0=Mon..6=Sun). Empty = don't sweep the
-  // dimension (every variant inherits the base config's rebalance weekday).
+  // Rebalance weekdays to sweep (0=Mon..6=Sun). Defaults to Monday ticked;
+  // empty = don't sweep the dimension (every variant inherits the base
+  // config's rebalance weekday).
   const [selectedWeekdays, setSelectedWeekdays] = useState<Set<number>>(
-    () => new Set<number>(),
+    () => new Set<number>([0]),
   );
   // Comma-separated numeric overrides; empty means "inherit base, don't
   // sweep this dimension." Parsing lives in `./variantHelpers.ts`.

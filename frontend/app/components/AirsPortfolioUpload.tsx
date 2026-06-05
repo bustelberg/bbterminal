@@ -399,7 +399,7 @@ export default function AirsPortfolioUpload() {
               : 'Scan broker system for available portfolios'}
           </p>
           {portfolios.length > 0 && (
-            <label className="flex items-center gap-1.5 text-xs text-fg-subtle mt-1 cursor-pointer select-none">
+            <label className="flex items-center gap-1.5 text-xs text-fg-subtle mt-1 cursor-pointer">
               <input
                 type="checkbox"
                 checked={showZeroReturn}
@@ -432,7 +432,7 @@ export default function AirsPortfolioUpload() {
               </div>
               {errorDetail && (
                 <details className="mt-2">
-                  <summary className="text-fg-subtle text-[11px] cursor-pointer hover:text-fg-soft select-none">
+                  <summary className="text-fg-subtle text-[11px] cursor-pointer hover:text-fg-soft">
                     Show technical details
                   </summary>
                   <pre className="mt-2 text-[10px] text-fg-subtle font-mono whitespace-pre-wrap break-all bg-scrim/30 border border-neutral-800 rounded p-2">
@@ -492,9 +492,9 @@ export default function AirsPortfolioUpload() {
               <thead>
                 <tr className="border-b border-neutral-800/60 text-fg-subtle text-xs">
                   <th className="px-5 py-3 text-left font-medium w-10">#</th>
-                  <th className="px-3 py-3 text-left font-medium cursor-pointer hover:text-fg-soft select-none" onClick={() => toggleSort('portefeuille')}>Portefeuille{sortArrow('portefeuille')}</th>
-                  <th className="px-3 py-3 text-right font-medium w-24 cursor-pointer hover:text-fg-soft select-none" onClick={() => toggleSort('ytd')}>YTD{sortArrow('ytd')}</th>
-                  <th className="px-3 py-3 text-right font-medium w-28 cursor-pointer hover:text-fg-soft select-none" onClick={() => toggleSort('asOf')}>As of{sortArrow('asOf')}</th>
+                  <th className="px-3 py-3 text-left font-medium cursor-pointer hover:text-fg-soft" onClick={() => toggleSort('portefeuille')}>Portefeuille{sortArrow('portefeuille')}</th>
+                  <th className="px-3 py-3 text-right font-medium w-24 cursor-pointer hover:text-fg-soft" onClick={() => toggleSort('ytd')}>YTD{sortArrow('ytd')}</th>
+                  <th className="px-3 py-3 text-right font-medium w-28 cursor-pointer hover:text-fg-soft" onClick={() => toggleSort('asOf')}>As of{sortArrow('asOf')}</th>
                 </tr>
               </thead>
               <tbody>

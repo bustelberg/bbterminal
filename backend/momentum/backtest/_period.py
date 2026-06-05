@@ -27,6 +27,7 @@ from ..scoring import (
     _get_category_keys,
     aggregate_to_sector,
     compute_category_scores,
+    extract_category_scores,
     random_select,
     score_universe,
     select_from_scored,
@@ -395,13 +396,7 @@ def make_period_holding(
         entry_dt, exit_dt,
     ) = cached
 
-    cat_scores: dict[str, float | None] = {}
-    for cat in _get_category_keys():
-        col = f"score_{cat}"
-        if col in row.index and pd.notna(row[col]):
-            cat_scores[cat] = round(float(row[col]), 1)
-        else:
-            cat_scores[cat] = None
+    cat_scores = extract_category_scores(row)
 
     score_val = row.get("momentum_score")
     sec_rank = row.get("sector_rank")
@@ -538,8 +533,85 @@ def compute_sector_etf_period(
         if fwd_return is not None:
             long_returns.append(fwd_return)
     out.holdings = holdings
-    out.port_return = round(float(np.mean(long_returns)), 2) if long_returns else None
+    out.port_return = _aggregate_portfolio_return(long_returns, [], "long_only")
     return out
+
+
+def _diagnose_empty_selection(
+    signals_df: pd.DataFrame, scored_df: pd.DataFrame | None, config: BacktestConfig,
+) -> str:
+    """Root-cause the empty selection so run_backtest's rolled-up warning
+    gives something useful instead of a generic "no holdings". Four buckets:
+      1. min_price_score filtered everyone out
+      2. score_price is NaN for every row (scoring pipeline gap)
+      3. min_price_score is OK but selection still empty (would indicate a bug)
+      4. min_price_score is unset and selection is empty (only when scored_df
+         is itself empty)."""
+    n_signals = len(signals_df)
+    sectors = signals_df["sector"].nunique() if "sector" in signals_df.columns else 0
+    diag = ""
+    if scored_df is not None and not scored_df.empty:
+        n_scored = len(scored_df)
+        if "score_price" in scored_df.columns:
+            price_nan = int(scored_df["score_price"].isna().sum())
+            if price_nan == n_scored:
+                diag = (
+                    f" — DIAGNOSTIC: ALL {n_scored} rows have NaN "
+                    f"score_price (scoring pipeline didn't produce a "
+                    f"price score for this period; min_price_score "
+                    f"filter rejects all NaN by default)"
+                )
+            elif config.min_price_score is not None:
+                passed = int(
+                    (scored_df["score_price"].notna() &
+                     (scored_df["score_price"] > config.min_price_score)).sum()
+                )
+                if passed == 0:
+                    diag = (
+                        f" — DIAGNOSTIC: 0 of {n_scored} companies "
+                        f"have score_price > min_price_score="
+                        f"{config.min_price_score} (this filter is "
+                        f"removing everyone in this period)"
+                    )
+                else:
+                    diag = (
+                        f" — DIAGNOSTIC: {passed} of {n_scored} passed "
+                        f"min_price_score={config.min_price_score} "
+                        f"but selection still returned empty — likely "
+                        f"a bug, please report"
+                    )
+            else:
+                diag = (
+                    f" — DIAGNOSTIC: {n_scored} scored companies, "
+                    f"min_price_score unset, selection still empty — "
+                    f"likely a bug, please report"
+                )
+    return (
+        f"{n_signals} companies had signals across {sectors} sectors but none passed "
+        f"selection (top_n_sectors={config.top_n_sectors}, "
+        f"top_n_per_sector={config.top_n_per_sector}){diag}"
+    )
+
+
+def _aggregate_portfolio_return(
+    long_returns: list[float], short_returns: list[float], strategy_type: str,
+) -> float | None:
+    """Period portfolio return:
+      long-only: equal-weighted mean of long returns.
+      long-short (gross 100% long + 100% short): mean(long) − mean(short).
+    A missing side (degenerate period) falls back to the available side — the
+    book is temporarily one-sided."""
+    if strategy_type == "long_short":
+        long_avg = float(np.mean(long_returns)) if long_returns else None
+        short_avg = float(np.mean(short_returns)) if short_returns else None
+        if long_avg is not None and short_avg is not None:
+            return round(long_avg - short_avg, 2)
+        if long_avg is not None:
+            return round(long_avg, 2)
+        if short_avg is not None:
+            return round(-short_avg, 2)
+        return None
+    return round(float(np.mean(long_returns)), 2) if long_returns else None
 
 
 def compute_selection_period(
@@ -668,59 +740,7 @@ def compute_selection_period(
             selected_bottom = pd.DataFrame()
 
     if selected_top.empty and selected_bottom.empty:
-        n_signals = len(signals_df)
-        sectors = signals_df["sector"].nunique() if "sector" in signals_df.columns else 0
-        # Diagnostic: figure out WHY the selection is empty so the
-        # rolled-up warning in run_backtest gives a useful root cause
-        # instead of the generic "no holdings" message. Four buckets:
-        #   1. min_price_score filtered everyone out
-        #   2. score_price is NaN for every row (scoring pipeline gap)
-        #   3. min_price_score is OK but selection still empty (unusual —
-        #      would indicate a bug)
-        #   4. min_price_score is unset and selection is empty (very
-        #      unusual — only-empty-when-scored_df-is-empty)
-        diag = ""
-        if scored_df is not None and not scored_df.empty:
-            n_scored = len(scored_df)
-            if "score_price" in scored_df.columns:
-                price_nan = int(scored_df["score_price"].isna().sum())
-                if price_nan == n_scored:
-                    diag = (
-                        f" — DIAGNOSTIC: ALL {n_scored} rows have NaN "
-                        f"score_price (scoring pipeline didn't produce a "
-                        f"price score for this period; min_price_score "
-                        f"filter rejects all NaN by default)"
-                    )
-                elif config.min_price_score is not None:
-                    passed = int(
-                        (scored_df["score_price"].notna() &
-                         (scored_df["score_price"] > config.min_price_score)).sum()
-                    )
-                    if passed == 0:
-                        diag = (
-                            f" — DIAGNOSTIC: 0 of {n_scored} companies "
-                            f"have score_price > min_price_score="
-                            f"{config.min_price_score} (this filter is "
-                            f"removing everyone in this period)"
-                        )
-                    else:
-                        diag = (
-                            f" — DIAGNOSTIC: {passed} of {n_scored} passed "
-                            f"min_price_score={config.min_price_score} "
-                            f"but selection still returned empty — likely "
-                            f"a bug, please report"
-                        )
-                else:
-                    diag = (
-                        f" — DIAGNOSTIC: {n_scored} scored companies, "
-                        f"min_price_score unset, selection still empty — "
-                        f"likely a bug, please report"
-                    )
-        out.empty_reason = (
-            f"{n_signals} companies had signals across {sectors} sectors but none passed "
-            f"selection (top_n_sectors={config.top_n_sectors}, "
-            f"top_n_per_sector={config.top_n_per_sector}){diag}"
-        )
+        out.empty_reason = _diagnose_empty_selection(signals_df, scored_df, config)
         return out
 
     # Equal weight per side. For long-only the short bucket is empty so
@@ -762,25 +782,8 @@ def compute_selection_period(
         if ret is not None:
             short_returns.append(ret)
 
-    # Portfolio return:
-    #   long-only: equal-weighted mean of long returns.
-    #   long-short (gross 100% long + 100% short): mean(long) − mean(short).
-    # If a side is empty (degenerate period), fall back to whatever is
-    # available — the strategy temporarily becomes one-sided.
-    if config.strategy_type == "long_short":
-        long_avg = float(np.mean(long_returns)) if long_returns else None
-        short_avg = float(np.mean(short_returns)) if short_returns else None
-        if long_avg is not None and short_avg is not None:
-            port_return = round(long_avg - short_avg, 2)
-        elif long_avg is not None:
-            port_return = round(long_avg, 2)
-        elif short_avg is not None:
-            port_return = round(-short_avg, 2)
-        else:
-            port_return = None
-    else:
-        port_return = round(float(np.mean(long_returns)), 2) if long_returns else None
-
     out.holdings = holdings
-    out.port_return = port_return
+    out.port_return = _aggregate_portfolio_return(
+        long_returns, short_returns, config.strategy_type,
+    )
     return out

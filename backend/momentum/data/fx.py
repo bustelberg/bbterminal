@@ -18,7 +18,7 @@ from datetime import date
 import pandas as pd
 from supabase import Client
 
-from deps import IN_CHUNK_SIZE
+from deps import IN_CHUNK_SIZE, chunked
 from ._helpers import _FX_SYNC_PARALLELISM, _query_with_retry
 from ._pg import load_fx_rate_df_via_copy
 
@@ -103,12 +103,12 @@ def sync_fx_rates_to_db(
         ]
         upserted = 0
         try:
-            for i in range(0, len(rows_to_upsert), 500):
+            for chunk in chunked(rows_to_upsert, 500):
                 supabase.table("fx_rate").upsert(
-                    rows_to_upsert[i : i + 500],
+                    chunk,
                     on_conflict="currency_code,rate_date",
                 ).execute()
-                upserted += len(rows_to_upsert[i : i + 500])
+                upserted += len(chunk)
             return code, {
                 "status": "synced",
                 "rows": upserted,
@@ -167,8 +167,7 @@ def load_fx_rates(
         rows: list[dict] = []
         page_size = 1000
         chunk_size = IN_CHUNK_SIZE
-        for chunk_start in range(0, len(needed), chunk_size):
-            chunk = needed[chunk_start : chunk_start + chunk_size]
+        for ci, chunk in enumerate(chunked(needed, chunk_size)):
             offset = 0
             while True:
                 resp = _query_with_retry(
@@ -183,7 +182,7 @@ def load_fx_rates(
                         .range(o, o + page_size - 1)
                         .execute()
                     ),
-                    description=f"load_fx_rates chunk {chunk_start // chunk_size + 1}",
+                    description=f"load_fx_rates chunk {ci + 1}",
                 )
                 if not resp.data:
                     break

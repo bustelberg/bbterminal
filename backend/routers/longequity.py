@@ -82,41 +82,40 @@ def _get_db_longequity_months() -> set[str]:
     return {str(row["target_date"])[:7] for row in (md_resp.data or [])}
 
 
-def run_longequity_ingest_sync(
-    supabase_client=None,
+# ─── Shared ingest core ────────────────────────────────────────────
+#
+# `run_longequity_ingest_core` is the SINGLE implementation of the
+# acquire → flatten → resolve → enrich → transform → load → fix → merge →
+# cumulative-rebuild pipeline. The two entry points are thin wrappers:
+#   * `run_longequity_ingest_sync`  — the scheduled pipeline calls this and
+#     reads the result dict; it adds the upstream-freshness fast-path.
+#   * `_ingest_long_equity_stream`  — the /api/ingest/long-equity SSE endpoint
+#     runs the core in a worker thread and relays its progress as events.
+# The core reports progress via a `(level, message)` callback so each wrapper
+# renders it the way it needs (a pipeline `current_message` line, or a typed
+# SSE event). Before this they were two ~160-line near-duplicates.
+
+
+def run_longequity_ingest_core(
+    sb,
     *,
-    on_progress: Callable[[str], None] | None = None,
+    progress: Callable[[str, str], None],
 ) -> dict:
-    """Synchronous LongEquity ingest, driven by the scheduled pipeline.
-
-    Same flow as the SSE generator (acquire → flatten → resolve →
-    enrich → transform → load → cumulative-universe rebuild), but
-    returns a result dict instead of yielding events. `on_progress`
-    receives one line per major step so the caller can surface it in
-    the pipeline's `current_message`.
-
-    Short-circuits when upstream has no newer month than what's
-    already loaded — the dominant happy-path on a weekly tick.
-    Returns:
-        {
-            "status": "no_new_data" | "ok" | "error",
-            "files_processed": int,
-            "months_loaded": [YYYY-MM],
-            "companies_inserted": int,
-            "metric_rows_inserted": int,
-            "error": Optional[str],
-        }
+    """Run the full LongEquity ingest against `sb`, reporting progress via
+    `progress(level, message)` (`level` is "info" or "error"). Per-file and
+    post-processing failures are isolated — a bad file is skipped, a failed
+    fix/merge/rebuild is logged non-fatally — so one month never aborts the
+    run. Returns:
+        {status: "no_new_data"|"ok"|"error", files_processed, months_loaded,
+         companies_inserted, metric_rows_inserted, error}
     """
-    sb = supabase_client or supabase
+    def info(msg: str) -> None:
+        progress("info", msg)
 
-    def emit(msg: str) -> None:
-        if on_progress is not None:
-            try:
-                on_progress(msg)
-            except Exception:
-                pass
+    def err(msg: str) -> None:
+        progress("error", msg)
 
-    result = {
+    result: dict = {
         "status": "ok",
         "files_processed": 0,
         "months_loaded": [],
@@ -125,34 +124,20 @@ def run_longequity_ingest_sync(
         "error": None,
     }
 
-    # Fast-path: ask upstream if there's anything newer than what we have.
-    # If `check_latest_available_month` returns None or matches an existing
-    # month, we have nothing to do.
-    try:
-        latest = check_latest_available_month(supabase=sb)
-    except Exception as e:
-        emit(f"latest-available probe failed (continuing with full acquire): {e}")
-        latest = None
-
     existing_months = _get_db_longequity_months()
-    if latest is not None:
-        latest_ym = f"{latest.year:04d}-{latest.month:02d}"
-        emit(f"Upstream latest: {latest_ym}; already loaded: {len(existing_months)} month(s)")
-        if latest_ym in existing_months:
-            result["status"] = "no_new_data"
-            emit("No new LongEquity months upstream — skipping ingest.")
-            return result
+    info(f"{len(existing_months)} month(s) already in DB.")
 
-    emit("Acquiring Long Equity files (Storage → remote URL)…")
+    info("Acquiring Long Equity files (Storage → remote URL)...")
     try:
         all_files = acquire_raw_longequity_backfill(sb)
     except Exception as e:
         result["status"] = "error"
-        result["error"] = f"acquire failed: {e}"
-        emit(result["error"])
+        result["error"] = f"Acquire failed: {e}"
+        err(result["error"])
         return result
 
-    # Filter to only the months we don't already have.
+    # Filter to only the months we don't already have (unparseable filenames
+    # are processed anyway rather than silently dropped).
     files: list[tuple[str, bytes]] = []
     for filename, content in all_files:
         try:
@@ -166,14 +151,17 @@ def run_longequity_ingest_sync(
 
     if not files:
         result["status"] = "no_new_data"
-        emit(f"All {len(all_files)} month(s) already loaded.")
+        info(f"All {len(all_files)} month(s) already loaded.")
         return result
 
-    emit(f"{len(files)} new month(s) to ingest.")
+    info(f"{len(files)} new file(s) to process (skipped {len(all_files) - len(files)} already in DB).")
 
+    # Persisted ticker overrides — shared across all files in this run.
     try:
         db_overrides: list[dict] = get_ticker_overrides(sb)
-    except Exception:
+        info(f"Loaded {len(db_overrides)} ticker override(s) from DB.")
+    except Exception as e:
+        info(f"Could not load ticker overrides (table may not exist yet): {e}")
         db_overrides = []
 
     all_new_resolutions: list[dict] = []
@@ -181,269 +169,225 @@ def run_longequity_ingest_sync(
         try:
             as_of = _as_of_date_from_filename(filename)
         except ValueError as e:
-            emit(f"  [{i}/{len(files)}] {filename}: bad filename ({e}); skipping")
+            err(f"[{i}/{len(files)}] {filename}: bad filename ({e}); skipping")
             continue
-        emit(f"  [{i}/{len(files)}] {filename} (as_of {as_of}) — flatten + load")
+        info("")
+        info(f"[{i}/{len(files)}] {filename}  (as_of: {as_of})")
 
+        info("  Flattening grouped headers...")
         try:
             df = flatten_excel(content)
+        except Exception as e:
+            err(f"  Flatten failed: {e}")
+            continue
+        info(f"  {len(df)} rows, {len(df.columns)} columns")
+
+        # Detect unknown tickers (not in fill_ticker.json or DB overrides).
+        try:
+            unknowns = detect_unknown_tickers(df, db_overrides=db_overrides)
+        except Exception as e:
+            info(f"  Ticker detection failed (skipping): {e}")
+            unknowns = []
+
+        if unknowns:
+            info(f"  {len(unknowns)} unknown ticker(s): {', '.join(u['ticker'] for u in unknowns)}")
+            info("  Resolving via OpenFIGI...")
             try:
-                unknowns = detect_unknown_tickers(df, db_overrides=db_overrides)
-            except Exception:
-                unknowns = []
-            if unknowns:
+                resolved = resolve_via_openfigi(unknowns)
+            except Exception as e:
+                info(f"  OpenFIGI failed (continuing without): {e}")
+                resolved = []
+
+            if resolved:
+                info(f"  Resolved {len(resolved)}/{len(unknowns)} ticker(s).")
                 try:
-                    resolved = resolve_via_openfigi(unknowns)
-                except Exception:
-                    resolved = []
-                if resolved:
-                    try:
-                        save_ticker_overrides(sb, resolved)
-                    except Exception:
-                        pass
-                    db_overrides = db_overrides + resolved
-                    all_new_resolutions.extend(resolved)
+                    saved = save_ticker_overrides(sb, resolved)
+                    if saved:
+                        info(f"  Saved {saved} new resolution(s) to ticker_override table.")
+                except Exception as e:
+                    info(f"  Could not save resolutions to DB: {e}")
+
+                # Update in-memory overrides so later files benefit too.
+                db_overrides = db_overrides + resolved
+                all_new_resolutions.extend(resolved)
+            else:
+                info(f"  Could not resolve {len(unknowns)} ticker(s) — will use fallback values.")
+        else:
+            info("  All tickers covered by existing mappings.")
+
+        info("  Enriching tickers...")
+        try:
             df = enrich_flattened_df_with_primary_listing(
                 df, extra_overrides=db_overrides if db_overrides else None,
             )
+        except Exception as e:
+            err(f"  Enrich failed: {e}")
+            continue
+
+        info("  Transforming to metric_data...")
+        try:
             prepared = prepare_flattened_for_schema(
                 df, as_of_date=as_of, source_code="longequity",
             )
+        except Exception as e:
+            err(f"  Transform failed: {e}")
+            continue
+        info(f"  {len(prepared.company)} companies, {len(prepared.metric_data)} metric rows")
+
+        info("  Loading into Supabase...")
+        try:
             load_result = load_prepared_into_supabase(
                 prepared, sb, universe_label="LongEquity",
             )
         except Exception as e:
-            emit(f"    failed: {e}")
+            err(f"  Load failed: {e}")
             continue
 
         result["files_processed"] += 1
         result["months_loaded"].append(f"{as_of.year:04d}-{as_of.month:02d}")
         result["companies_inserted"] += load_result.company_inserted
         result["metric_rows_inserted"] += load_result.metric_data_inserted
-
-    # Fix any UNKNOWN-exchange rows from prior runs.
-    if all_new_resolutions:
-        try:
-            fix_company_primary_keys(sb, all_new_resolutions)
-        except Exception:
-            pass
-
-    # Merge same-name-different-ticker duplicates that this run may have
-    # introduced (a previously-UNKNOWN row gaining its real ticker).
-    try:
-        merge_duplicate_companies(sb)
-    except Exception:
-        pass
-
-    # Always rebuild the cumulative LongEquity universe at the end so
-    # the momentum backtester sees the new month immediately.
-    emit("Rebuilding cumulative LongEquity universe…")
-    try:
-        from ingest.longequity_universe import (  # noqa: PLC0415
-            rebuild_cumulative_longequity_universe,
+        info(
+            f"  Inserted: {load_result.company_inserted} companies, "
+            f"{load_result.metric_data_inserted} metric rows"
         )
-        rebuild_result = rebuild_cumulative_longequity_universe(
-            sb, on_progress=lambda m: emit(f"  {m}"),
-        )
-        emit(
-            f"  rebuilt: {rebuild_result.companies} companies × "
-            f"{rebuild_result.months} months = {rebuild_result.rows_written} rows"
-        )
-    except Exception as e:
-        emit(f"  cumulative rebuild failed (non-critical): {e}")
-
-    return result
-
-
-async def _ingest_long_equity_stream():
-    """Full LongEquity ingest pipeline as SSE: acquire → flatten → resolve
-    tickers → enrich → transform → load → de-dup. Each step yields its
-    own `info`/`error` events; only new months (not already in DB) are
-    processed."""
-    existing_months = await asyncio.to_thread(_get_db_longequity_months)
-    yield event("info", f"{len(existing_months)} month(s) already in DB.")
-
-    yield event("info", "Acquiring Long Equity files (Storage → remote URL)...")
-    try:
-        all_files = await asyncio.to_thread(acquire_raw_longequity_backfill, supabase)
-    except Exception as e:
-        yield event("error", f"Acquire failed: {e}")
-        return
-
-    files: list[tuple[str, bytes]] = []
-    for filename, content in all_files:
-        try:
-            as_of = _as_of_date_from_filename(filename)
-            ym = f"{as_of.year:04d}-{as_of.month:02d}"
-            if ym in existing_months:
-                continue
-            files.append((filename, content))
-        except ValueError:
-            files.append((filename, content))  # can't parse date — process anyway
-
-    if not files:
-        yield event("done", f"Pipeline finished — all {len(all_files)} month(s) already loaded.")
-        return
-
-    yield event("info", f"{len(files)} new file(s) to process (skipped {len(all_files) - len(files)} already in DB).")
-
-    # Persisted ticker overrides — shared across all files in this run.
-    try:
-        db_overrides: list[dict] = await asyncio.to_thread(get_ticker_overrides, supabase)
-        yield event("info", f"Loaded {len(db_overrides)} ticker override(s) from DB.")
-    except Exception as e:
-        yield event("info", f"Could not load ticker overrides (table may not exist yet): {e}")
-        db_overrides = []
-
-    total_companies = 0
-    total_metric_rows = 0
-    all_new_resolutions: list[dict] = []
-
-    for i, (filename, content) in enumerate(files, 1):
-        as_of = _as_of_date_from_filename(filename)
-        yield event("info", "")
-        yield event("info", f"[{i}/{len(files)}] {filename}  (as_of: {as_of})")
-
-        yield event("info", "  Flattening grouped headers...")
-        try:
-            df = await asyncio.to_thread(flatten_excel, content)
-        except Exception as e:
-            yield event("error", f"  Flatten failed: {e}")
-            continue
-        yield event("info", f"  {len(df)} rows, {len(df.columns)} columns")
-
-        # Detect unknown tickers (not in fill_ticker.json or DB overrides).
-        try:
-            unknowns = await asyncio.to_thread(
-                detect_unknown_tickers, df, db_overrides=db_overrides
-            )
-        except Exception as e:
-            yield event("info", f"  Ticker detection failed (skipping): {e}")
-            unknowns = []
-
-        if unknowns:
-            yield event("info", f"  {len(unknowns)} unknown ticker(s): {', '.join(u['ticker'] for u in unknowns)}")
-            yield event("info", "  Resolving via OpenFIGI...")
-            try:
-                resolved = await asyncio.to_thread(resolve_via_openfigi, unknowns)
-            except Exception as e:
-                yield event("info", f"  OpenFIGI failed (continuing without): {e}")
-                resolved = []
-
-            if resolved:
-                yield event("info", f"  Resolved {len(resolved)}/{len(unknowns)} ticker(s).")
-                try:
-                    saved = await asyncio.to_thread(save_ticker_overrides, supabase, resolved)
-                    if saved:
-                        yield event("info", f"  Saved {saved} new resolution(s) to ticker_override table.")
-                except Exception as e:
-                    yield event("info", f"  Could not save resolutions to DB: {e}")
-
-                # Update in-memory overrides so later files benefit too.
-                db_overrides = db_overrides + resolved
-                all_new_resolutions.extend(resolved)
-            else:
-                yield event("info", f"  Could not resolve {len(unknowns)} ticker(s) — will use fallback values.")
-        else:
-            yield event("info", "  All tickers covered by existing mappings.")
-
-        yield event("info", "  Enriching tickers...")
-        try:
-            df = await asyncio.to_thread(
-                enrich_flattened_df_with_primary_listing, df,
-                extra_overrides=db_overrides if db_overrides else None,
-            )
-        except Exception as e:
-            yield event("error", f"  Enrich failed: {e}")
-            continue
-
-        yield event("info", "  Transforming to metric_data...")
-        try:
-            prepared = await asyncio.to_thread(
-                prepare_flattened_for_schema, df,
-                as_of_date=as_of, source_code="longequity",
-            )
-        except Exception as e:
-            yield event("error", f"  Transform failed: {e}")
-            continue
-        yield event("info", f"  {len(prepared.company)} companies, {len(prepared.metric_data)} metric rows")
-
-        yield event("info", "  Loading into Supabase...")
-        try:
-            result = await asyncio.to_thread(
-                load_prepared_into_supabase, prepared, supabase,
-                universe_label="LongEquity",
-            )
-        except Exception as e:
-            yield event("error", f"  Load failed: {e}")
-            continue
-
-        total_companies += result.company_inserted
-        total_metric_rows += result.metric_data_inserted
-        yield event("info", (
-            f"  Inserted: {result.company_inserted} companies, "
-            f"{result.metric_data_inserted} metric rows"
-        ))
 
     # Fix company rows from prior runs that loaded with exchange_id=NULL
     # (before ticker resolution existed).
     if all_new_resolutions:
-        yield event("info", "")
-        yield event("info", "Fixing company records from previous runs with UNKNOWN exchange...")
+        info("")
+        info("Fixing company records from previous runs with UNKNOWN exchange...")
         try:
-            fixed = await asyncio.to_thread(fix_company_primary_keys, supabase, all_new_resolutions)
-            yield event("info", f"  Fixed {fixed} company record(s)." if fixed else "  No records needed fixing.")
+            fixed = fix_company_primary_keys(sb, all_new_resolutions)
+            info(f"  Fixed {fixed} company record(s)." if fixed else "  No records needed fixing.")
         except Exception as e:
-            yield event("info", f"  Fix step failed (non-critical): {e}")
+            info(f"  Fix step failed (non-critical): {e}")
 
     # Merge duplicates (same name + exchange, different ticker — happens when
     # a later run resolves a previously-UNKNOWN row to its real ticker).
-    yield event("info", "")
-    yield event("info", "Checking for duplicate companies...")
+    info("")
+    info("Checking for duplicate companies...")
     try:
-        merge_logs = await asyncio.to_thread(merge_duplicate_companies, supabase)
+        merge_logs = merge_duplicate_companies(sb)
         if merge_logs:
             for msg in merge_logs:
-                yield event("info", f"  {msg}")
+                info(f"  {msg}")
         else:
-            yield event("info", "  No duplicates found.")
+            info("  No duplicates found.")
     except Exception as e:
-        yield event("info", f"  Dedup step failed (non-critical): {e}")
+        info(f"  Dedup step failed (non-critical): {e}")
 
-    # Rebuild the cumulative `longequity` universe so the momentum
-    # backtester sees every-ever-seen company on every month from
-    # 2002-01 onward. Replaces what used to be a manual button on the
-    # LongEquity page — keeps the universe in sync with metric_data
-    # automatically. Also drops the legacy `longequity_cumulative`
-    # universe (kept as a one-shot user button before this change).
-    yield event("info", "")
-    yield event("info", "Rebuilding cumulative LongEquity universe...")
+    # Always rebuild the cumulative `longequity` universe so the momentum
+    # backtester sees every-ever-seen company on every month from 2002-01
+    # onward, and the new month immediately.
+    info("")
+    info("Rebuilding cumulative LongEquity universe...")
     try:
         from ingest.longequity_universe import (  # noqa: PLC0415
             rebuild_cumulative_longequity_universe,
         )
-        emit_log: list[str] = []
-        res = await asyncio.to_thread(
-            rebuild_cumulative_longequity_universe, supabase,
-            on_progress=emit_log.append,
+        res = rebuild_cumulative_longequity_universe(
+            sb, on_progress=lambda m: info(f"  {m}"),
         )
-        for msg in emit_log:
-            yield event("info", f"  {msg}")
-        yield event(
-            "info",
+        info(
             f"  Done: {res.companies} companies x {res.months} months = "
-            f"{res.rows_written} rows. "
-            f"legacy cumulative dropped: {res.deleted_old_cumulative}",
+            f"{res.rows_written} rows. legacy cumulative dropped: "
+            f"{res.deleted_old_cumulative}"
         )
     except Exception as e:
-        yield event("info", f"  Cumulative rebuild failed (non-critical): {e}")
+        info(f"  Cumulative rebuild failed (non-critical): {e}")
 
-    yield event("info", "")
-    yield event("done", (
-        f"Pipeline complete. {len(files)} file(s) processed. "
-        f"Total new rows — companies: {total_companies}, "
-        f"metric data: {total_metric_rows}."
-    ))
+    return result
+
+
+def run_longequity_ingest_sync(
+    supabase_client=None,
+    *,
+    on_progress: Callable[[str], None] | None = None,
+) -> dict:
+    """Synchronous LongEquity ingest, driven by the scheduled pipeline.
+
+    Thin wrapper over `run_longequity_ingest_core`: adds the upstream-
+    freshness fast-path (skip the whole acquire when upstream has no month
+    newer than what's loaded — the dominant happy-path on a weekly tick) and
+    flattens the core's `(level, message)` progress into the caller's
+    single-line `on_progress`. Returns the core's result dict (see its
+    docstring for the shape)."""
+    sb = supabase_client or supabase
+
+    def progress(_level: str, msg: str) -> None:
+        # The blank-line spacers are SSE cosmetics — skip them for the
+        # pipeline's single-line `current_message`.
+        if on_progress is not None and msg:
+            try:
+                on_progress(msg)
+            except Exception:
+                pass
+
+    # Fast-path: ask upstream if there's anything newer than what we have.
+    try:
+        latest = check_latest_available_month(supabase=sb)
+    except Exception as e:
+        progress("info", f"latest-available probe failed (continuing with full acquire): {e}")
+        latest = None
+    if latest is not None:
+        existing_months = _get_db_longequity_months()
+        latest_ym = f"{latest.year:04d}-{latest.month:02d}"
+        progress("info", f"Upstream latest: {latest_ym}; already loaded: {len(existing_months)} month(s)")
+        if latest_ym in existing_months:
+            progress("info", "No new LongEquity months upstream — skipping ingest.")
+            return {
+                "status": "no_new_data",
+                "files_processed": 0,
+                "months_loaded": [],
+                "companies_inserted": 0,
+                "metric_rows_inserted": 0,
+                "error": None,
+            }
+
+    return run_longequity_ingest_core(sb, progress=progress)
+
+
+async def _ingest_long_equity_stream():
+    """Full LongEquity ingest pipeline as SSE. Runs the shared
+    `run_longequity_ingest_core` in a worker thread (so the blocking
+    Supabase/OpenFIGI calls don't stall the event loop) and relays its
+    progress callbacks as typed `info`/`error` events, then a final `done`
+    summary built from the result dict."""
+    q: _queue.Queue = _queue.Queue()
+    holder: dict = {}
+
+    def _run() -> None:
+        try:
+            holder["result"] = run_longequity_ingest_core(
+                supabase, progress=lambda level, msg: q.put((level, msg)),
+            )
+        except Exception as e:
+            q.put(("error", f"Pipeline failed: {e}"))
+        finally:
+            q.put(None)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    yield sse_keepalive()
+    while True:
+        item = await asyncio.to_thread(q.get)
+        if item is None:
+            break
+        level, msg = item
+        yield event(level, msg)
+
+    res = holder.get("result") or {}
+    if res.get("status") == "no_new_data":
+        yield event("done", "Pipeline finished — all months already loaded.")
+    elif res.get("status") == "error":
+        yield event("done", f"Pipeline stopped: {res.get('error')}")
+    else:
+        yield event("done", (
+            f"Pipeline complete. {res.get('files_processed', 0)} file(s) processed. "
+            f"Total new rows — companies: {res.get('companies_inserted', 0)}, "
+            f"metric data: {res.get('metric_rows_inserted', 0)}."
+        ))
 
 
 @router.get("/api/longequity/latest-available")
@@ -602,5 +546,3 @@ async def longequity_save_universe(req: LongEquitySaveUniverseRequest):
             yield sse_raw(msg)
 
     return StreamingResponse(generate(), media_type='text/event-stream')
-
-

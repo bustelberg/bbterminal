@@ -13,7 +13,7 @@ this module thin; if a helper has a clear home in one of the
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from dotenv import load_dotenv
 from supabase import create_client
@@ -82,6 +82,16 @@ supabase = _LazySupabase()
 IN_CHUNK_SIZE = 200
 
 
+def chunked(items: list, size: int = IN_CHUNK_SIZE) -> Iterator[list]:
+    """Yield successive `size`-length slices of `items`. The canonical
+    list-splitter for the `.in_()` / batched-write chunking the PostgREST +
+    Cloudflare URL/row limits force (see `IN_CHUNK_SIZE`). `fetch_in_chunks`
+    builds on this for the select-and-collect case; callers doing batched
+    DELETE/UPDATE iterate it directly."""
+    for start in range(0, len(items), size):
+        yield items[start:start + size]
+
+
 def fetch_in_chunks(
     ids: list,
     query: Callable[[list], Any],
@@ -106,9 +116,34 @@ def fetch_in_chunks(
     use the purpose-built loaders in `momentum/data/` instead.
     """
     rows: list = []
-    for start in range(0, len(ids), chunk_size):
-        result = query(ids[start:start + chunk_size])
+    for chunk in chunked(ids, chunk_size):
+        result = query(chunk)
         data = getattr(result, "data", result)
         if data:
             rows.extend(data)
     return rows
+
+
+def paginate(query: Callable[[int, int], Any], *, page_size: int = 1000) -> Iterator[dict]:
+    """Yield every row from a `.range()`-paginated PostgREST select.
+
+    `query(lo, hi)` receives inclusive 0-based range bounds (PostgREST
+    `.range(lo, hi)` semantics) and returns an executed response (with a
+    `.data` list) or a plain list of rows. Pages of `page_size` are walked
+    until one comes back short (or empty) — the single home for the
+    offset/`.range()` loop that PostgREST's 1000-row cap forces on every
+    full-table scan.
+
+    Example:
+        for row in paginate(lambda lo, hi:
+            supabase.table("company").select("company_id").range(lo, hi).execute()):
+            ...
+    """
+    offset = 0
+    while True:
+        result = query(offset, offset + page_size - 1)
+        data = getattr(result, "data", result) or []
+        yield from data
+        if len(data) < page_size:
+            return
+        offset += page_size

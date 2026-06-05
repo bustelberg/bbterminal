@@ -130,31 +130,45 @@ def _load_index_universe(
         return {}
     universe_id = u_resp.data[0]["universe_id"]
     last_refreshed = u_resp.data[0].get("last_refreshed_at")
-    rows: list[dict] = []
-    offset = 0
-    page_size = 1000
-    while True:
-        resp = (
-            supabase.table("universe_membership")
-            .select(f"target_month, company_id, {grouping_field}")
-            .eq("universe_id", universe_id)
-            .order("target_month")
-            .range(offset, offset + page_size - 1)
-            .execute()
-        )
-        batch = resp.data or []
-        rows.extend(batch)
-        if len(batch) < page_size:
-            break
-        offset += page_size
-    result: dict[str, dict[int, str | None]] = {}
-    for r in rows:
-        m = (r.get("target_month") or "")[:7]
-        if not m:
-            continue
-        if m not in result:
-            result[m] = {}
-        result[m][r["company_id"]] = r.get(grouping_field)
+
+    # Fast path: one direct-Postgres COPY when SUPABASE_DB_URL is set. This
+    # panel spans every month × company for the universe (ACWI ≈ hundreds of
+    # thousands of rows), so the PostgREST pager below makes hundreds of
+    # round-trips. Self-healing: returns None when unconfigured / on any
+    # error, falling through to the pager.
+    from momentum.data._pg import load_universe_membership_via_copy  # noqa: PLC0415
+    result = load_universe_membership_via_copy(universe_id, grouping_field)
+    if result is None:
+        rows: list[dict] = []
+        offset = 0
+        page_size = 1000
+        while True:
+            resp = (
+                supabase.table("universe_membership")
+                .select(f"target_month, company_id, {grouping_field}")
+                .eq("universe_id", universe_id)
+                # `company_id` tiebreaker is REQUIRED: `target_month` has
+                # thousands of tied rows, and range() (LIMIT/OFFSET) over a
+                # non-unique order silently duplicates + skips rows across
+                # page boundaries — it was dropping ~23% of membership cells.
+                .order("target_month")
+                .order("company_id")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            batch = resp.data or []
+            rows.extend(batch)
+            if len(batch) < page_size:
+                break
+            offset += page_size
+        result = {}
+        for r in rows:
+            m = (r.get("target_month") or "")[:7]
+            if not m:
+                continue
+            if m not in result:
+                result[m] = {}
+            result[m][r["company_id"]] = r.get(grouping_field)
 
     # ACWI_LEONTEQ + industry: ACWI_LEONTEQ rows don't carry industry,
     # so the values above are all None. Backfill from LEONTEQ.

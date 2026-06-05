@@ -1,23 +1,24 @@
 """Pipeline orchestrators — sequence the phase modules.
 
-Three sync orchestrators, each run in a daemon thread spawned by
+Two sync orchestrators, each run in a daemon thread spawned by
 `routers.ingest_runs._spawn_ingest`. Phases run independently: a failure
 is captured in `accumulated_errors` (first ~5 surface in
 `error_summary`) but the next phase still attempts. The run's overall
 `status` is `error` if any phase errored, `ok` otherwise.
 
-  _run_pipeline_sync                       full weekly/manual/bootstrap
-                                           pipeline (all five phases)
-  _run_daily_mtd_pipeline_sync             prices(held) + MTD persist
-  _run_daily_template_refresh_pipeline_sync acquisition → templates →
-                                           prune → dedupe (no prices/momentum)
+  _run_pipeline_sync        full manual/bootstrap pipeline (all five phases)
+  _run_smart_pipeline_sync  the dependency-driven `smart_daily` tick —
+                            refreshes only what the enabled scheduled
+                            strategies need (see the function docstring)
 """
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 from .acquisition import _run_acquisition_phase
-from .momentum import _run_daily_mtd_phase, _run_momentum_phase
+from .momentum import _run_momentum_phase, _run_smart_momentum_phase
+from .planner import build_plan, collect_universe_companies
 from .prices import _collect_held_companies, _run_prices_phase
 from .prune import _run_dedupe_phase, _run_prune_phase
 from .runlog import _now_utc_iso, _update_run
@@ -118,60 +119,121 @@ def _run_pipeline_sync(run_id: int) -> None:
     log.info("[pipeline] run_id=%s finished status=%s", run_id, final_status)
 
 
-def _run_daily_mtd_pipeline_sync(run_id: int) -> None:
-    """Two-phase daily orchestrator. Cheaper sibling of
-    `_run_pipeline_sync`: skips acquisition/templates/prune entirely —
-    only the price+volume refresh (limited to held companies) and the
-    per-strategy MTD persist. Runs Wed-Sat at 02:00 UTC."""
+def _run_smart_pipeline_sync(run_id: int) -> None:
+    """Dependency-driven daily orchestrator (the `smart_daily` tick).
+
+    Derives, from the enabled scheduled strategies, exactly what's needed —
+    then runs ONLY that, in order, recording the derived plan on the run for
+    observability:
+
+      plan        build the SmartPlan; persist to `ingest_run.plan_summary`
+      acquisition scoped to the templates the plan needs
+      templates   refresh ONLY the needed templates
+      prune+dedupe only when a template was refreshed this tick
+      prices      held companies (every enabled strategy — daily MTD freshness)
+      prices      due strategies' full universe (so newly-eligible names have
+                  price history before they're scored) — only when ≥1 strategy
+                  is due to rebalance
+      momentum    rebalance the due strategies / price-update the rest
+
+    Each phase is independent — a failure is captured in `error_summary` but
+    the next phase still attempts."""
     log = logging.getLogger(__name__)
     accumulated_errors: list[str] = []
 
-    # Phase 'prices' — pooled refresh across all held companies.
-    _update_run(
-        run_id,
-        current_phase="prices",
-        current_message="Collecting held companies across enabled strategies…",
-    )
+    # ── Phase: plan ────────────────────────────────────────────
+    _update_run(run_id, current_phase="plan", current_message="Deriving pipeline plan…")
+    plan = None
     try:
-        companies = _collect_held_companies(run_id)
-        if not companies:
-            _update_run(
-                run_id,
-                companies_total=0,
-                current_message="No enabled strategies with snapshots — skipping prices phase.",
-            )
+        plan = build_plan(datetime.now(timezone.utc))
+        _update_run(
+            run_id,
+            plan_summary=plan.to_summary(),
+            current_message=(
+                f"Plan: {len(plan.strategies)} enabled strategies · "
+                f"{len(plan.needed_template_keys)} universe(s) needed · "
+                f"{len(plan.due_strategy_ids)} due to rebalance"
+                + (f" · {len(plan.unresolved_labels)} unresolved" if plan.unresolved_labels else "")
+            ),
+        )
+    except Exception as e:
+        msg = f"Plan phase failed: {type(e).__name__}: {e}"
+        log.warning("[smart] run_id=%s %s", run_id, msg)
+        accumulated_errors.append(msg)
+
+    needed_keys = set(plan.needed_template_keys) if plan else set()
+    any_due = bool(plan and plan.due_strategy_ids)
+
+    # The only universe-side work the smart pipeline does is refreshing the
+    # universe membership at a rebalance (so the strategy re-selects from a
+    # current universe). On a normal day it does JUST the held-company price
+    # refresh. No orphan prune / dedupe / acquisition — those are full-pipeline
+    # maintenance and serve nothing here (we only ever fetch prices for the
+    # held + universe companies anyway).
+    rebalance_today = any_due and bool(needed_keys)
+
+    # ── Phase: templates — refresh the universe (rebalance days only) ──
+    if rebalance_today:
+        _update_run(run_id, current_phase="templates", current_message="Refreshing universe for rebalance…")
+        try:
+            _run_templates_phase(run_id, only_keys=needed_keys)
+        except Exception as e:
+            msg = f"Templates phase failed: {type(e).__name__}: {e}"
+            log.warning("[smart] run_id=%s %s", run_id, msg)
+            accumulated_errors.append(msg)
+
+    # ── Phase: prices — held companies (all enabled strategies) ─
+    held_count = 0
+    _update_run(run_id, current_phase="prices", current_message="Collecting held companies…")
+    try:
+        held = _collect_held_companies(run_id)
+        held_count = len(held)
+        if held:
+            _update_run(run_id, current_message=f"Refreshing {held_count} held companies…")
+            _run_prices_phase(run_id, accumulated_errors, companies_override=held)
         else:
-            _update_run(
-                run_id,
-                companies_total=len(companies),
-                current_message=f"Refreshing {len(companies)} held companies…",
-            )
-            _run_prices_phase(
-                run_id, accumulated_errors, companies_override=companies,
-            )
+            _update_run(run_id, current_message="No held companies yet — skipping held-price refresh.")
     except Exception as e:
-        msg = f"Prices phase failed: {type(e).__name__}: {e}"
-        log.warning("[daily_mtd] run_id=%s %s", run_id, msg)
+        msg = f"Held-price phase failed: {type(e).__name__}: {e}"
+        log.warning("[smart] run_id=%s %s", run_id, msg)
         accumulated_errors.append(msg)
 
-    # Phase 'momentum' — refresh-MTD + persist per strategy.
-    _update_run(
-        run_id,
-        current_phase="momentum",
-        current_message="Recomputing MTD on latest snapshots…",
-    )
-    try:
-        _run_daily_mtd_phase(run_id)
-    except Exception as e:
-        msg = f"MTD persist phase failed: {type(e).__name__}: {e}"
-        log.warning("[daily_mtd] run_id=%s %s", run_id, msg)
-        accumulated_errors.append(msg)
+    # ── Phase: prices — due strategies' full universe ──────────
+    universe_count = 0
+    if any_due and plan is not None:
+        due_plans = [sp for sp in plan.strategies if sp.is_due]
+        _update_run(run_id, current_phase="prices", current_message="Collecting due strategies' universes…")
+        try:
+            universe_companies = collect_universe_companies(due_plans)
+            universe_count = len(universe_companies)
+            if universe_companies:
+                _update_run(run_id, current_message=f"Refreshing {universe_count} universe companies…")
+                _run_prices_phase(run_id, accumulated_errors, companies_override=universe_companies)
+        except Exception as e:
+            msg = f"Universe-price phase failed: {type(e).__name__}: {e}"
+            log.warning("[smart] run_id=%s %s", run_id, msg)
+            accumulated_errors.append(msg)
+
+    # ── Phase: momentum (rebalance due / price-update the rest) ─
+    _update_run(run_id, current_phase="momentum", current_message="Computing current picks…")
+    if plan is not None:
+        try:
+            _run_smart_momentum_phase(run_id, plan)
+        except Exception as e:
+            msg = f"Momentum phase failed: {type(e).__name__}: {e}"
+            log.warning("[smart] run_id=%s %s", run_id, msg)
+            accumulated_errors.append(msg)
+
+    # ── Finalize ───────────────────────────────────────────────
+    # Enrich the persisted plan with what actually happened, for the UI.
+    if plan is not None:
+        plan.universes_refreshed = sorted(needed_keys) if rebalance_today else []
+        plan.held_company_count = held_count
+        plan.universe_company_count = universe_count
+        _update_run(run_id, plan_summary=plan.to_summary())
 
     final_status = "error" if accumulated_errors else "ok"
-    summary = (
-        ("First errors:\n" + "\n".join(accumulated_errors[:5]))[:1000]
-        if accumulated_errors else None
-    )
+    summary = ("First errors:\n" + "\n".join(accumulated_errors[:5]))[:1000] if accumulated_errors else None
     _update_run(
         run_id,
         current_phase="done",
@@ -179,61 +241,4 @@ def _run_daily_mtd_pipeline_sync(run_id: int) -> None:
         error_summary=summary,
         finished_at=_now_utc_iso(),
     )
-    log.info("[daily_mtd] run_id=%s finished status=%s", run_id, final_status)
-
-
-def _run_daily_template_refresh_pipeline_sync(run_id: int) -> None:
-    """Lightweight daily template-refresh pipeline. Runs Phases 0-2.5
-    only — acquisition → templates → prune → dedupe — and skips the
-    heavy prices + momentum phases entirely. Fires daily so
-    /schedule's per-template additions/removals view picks up MSCI
-    announcement changes and Leonteq eligibility list updates within
-    24h instead of waiting for the weekly full pipeline."""
-    log = logging.getLogger(__name__)
-    accumulated_errors: list[str] = []
-
-    _update_run(run_id, current_phase="acquisition", current_message="Probing upstream sources…")
-    try:
-        _run_acquisition_phase(run_id)
-    except Exception as e:
-        msg = f"Acquisition phase failed: {type(e).__name__}: {e}"
-        log.warning("[daily_templates] run_id=%s %s", run_id, msg)
-        accumulated_errors.append(msg)
-
-    _update_run(run_id, current_phase="templates", current_message="Starting template refresh…")
-    try:
-        _run_templates_phase(run_id)
-    except Exception as e:
-        msg = f"Templates phase failed: {type(e).__name__}: {e}"
-        log.warning("[daily_templates] run_id=%s %s", run_id, msg)
-        accumulated_errors.append(msg)
-
-    _update_run(run_id, current_phase="prune", current_message="Pruning orphan companies…")
-    try:
-        _run_prune_phase(run_id)
-    except Exception as e:
-        msg = f"Prune phase failed: {type(e).__name__}: {e}"
-        log.warning("[daily_templates] run_id=%s %s", run_id, msg)
-        accumulated_errors.append(msg)
-
-    _update_run(run_id, current_phase="dedupe", current_message="Merging duplicate companies…")
-    try:
-        _run_dedupe_phase(run_id)
-    except Exception as e:
-        msg = f"Dedupe phase failed: {type(e).__name__}: {e}"
-        log.warning("[daily_templates] run_id=%s %s", run_id, msg)
-        accumulated_errors.append(msg)
-
-    final_status = "error" if accumulated_errors else "ok"
-    summary = (
-        ("First errors:\n" + "\n".join(accumulated_errors[:5]))[:1000]
-        if accumulated_errors else None
-    )
-    _update_run(
-        run_id,
-        current_phase="done",
-        status=final_status,
-        error_summary=summary,
-        finished_at=_now_utc_iso(),
-    )
-    log.info("[daily_templates] run_id=%s finished status=%s", run_id, final_status)
+    log.info("[smart] run_id=%s finished status=%s", run_id, final_status)

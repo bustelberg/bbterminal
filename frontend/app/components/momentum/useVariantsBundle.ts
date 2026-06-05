@@ -53,7 +53,7 @@ export function useVariantsBundle({
     variantsToRun, topSectorsSweep, perSectorSweep, minScoreSweep,
   } = variantSel;
 
-  const handleAddVariantToSchedule = async (variantKey: VariantKey, variantLabel: string) => {
+  const handleAddVariantToSchedule = async (variantKey: VariantKey, _variantLabel: string) => {
     const v = parseVariantKey(variantKey);
     if (!v) {
       await dialog.alert(`Couldn't parse variant key "${variantKey}".`, { title: 'Schedule add failed' });
@@ -75,12 +75,11 @@ export function useVariantsBundle({
     };
     const scheduleFreq = FREQ_MAP[v.frequency] ?? 'monthly';
 
-    // Include the selection sizing (top N sectors × top N per sector) in
-    // the default name so scheduled strategies are distinguishable at a
-    // glance on /schedule even when they differ only in those dials.
-    const nameTopSectors = v.top_n_sectors ?? topSectors;
-    const nameTopPer = v.top_n_per_sector ?? topPerSector;
-    const defaultName = `${variantLabel} · ${v.universe ?? selectedIndexUniverse ?? 'ACWI_LEONTEQ'} · top ${nameTopSectors}×${nameTopPer}`;
+    // Scheduled strategies default to the product name "MomentumTopSelectie";
+    // the distinguishing properties (frequency, universe, sizing, …) are
+    // shown as colored chips on the /schedule row (see `strategyChips`), so
+    // the name itself stays clean. The user can still rename on save.
+    const defaultName = 'MomentumTopSelectie';
     const enteredName = await dialog.prompt(
       `Save this variant to /schedule. Pipeline cadence: ${scheduleFreq} (mapped from "${v.frequency}").`,
       { title: 'Add variant to schedule', defaultValue: defaultName, placeholder: 'Strategy name' },

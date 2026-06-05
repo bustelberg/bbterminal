@@ -14,7 +14,9 @@ export type IngestRun = {
   started_at: string;
   finished_at: string | null;
   status: 'running' | 'ok' | 'error';
-  current_phase: 'acquisition' | 'templates' | 'prune' | 'dedupe' | 'prices' | 'momentum' | 'done' | null;
+  current_phase: 'plan' | 'acquisition' | 'templates' | 'prune' | 'dedupe' | 'prices' | 'momentum' | 'done' | null;
+  /** Smart-pipeline derived plan (only on `smart_daily` runs). */
+  plan_summary?: SmartPlan | null;
   // Array — one entry per template-managed universe the pipeline
   // refreshed in phase 1. Each entry carries that template's per-run
   // diff (additions/removals/renames). Empty when no templates are
@@ -88,24 +90,6 @@ export type MomentumStrategyResult = {
   error_traceback: string | null;
 };
 
-/** One row from `GET /api/universe-templates`. Subset of the backend
- * `_summary()` payload — only the fields the schedule section consumes.
- * `last_refreshed_at === null` is the signal that a template was added
- * but has never been refreshed in this env; the scheduler's bootstrap
- * path is supposed to kick off the first refresh on app start but we
- * still surface the state here so the user knows what's happening. */
-export type UniverseTemplateSummary = {
-  template_key: string;
-  label: string;
-  description: string;
-  earliest_date: string;
-  universe_id: number | null;
-  months_captured: number;
-  latest_captured_month: string | null;
-  latest_membership_count: number;
-  last_refreshed_at: string | null;
-};
-
 export type ScheduledStrategy = {
   id: number;
   name: string;
@@ -126,13 +110,16 @@ export type ScheduledStrategy = {
      * (ties broken alphabetically). Empty list when no sectors are populated
      * on the holdings (e.g. very early backfill rows). */
     sectors: { sector: string; count: number }[];
-    /** Month-to-date / year-to-date return for the strategy as of `as_of_date`,
-     * computed server-side from the snapshot equity curve. Null when there
-     * isn't enough history (e.g. brand-new strategy with no closed period). */
+    /** Month-to-date / year-to-date / since-inception returns, computed
+     * server-side from the strategy's backtest equity curve anchored at the
+     * go-live (inception) date. Null when there's no backtest curve. For a
+     * same-year launch YTD equals since-inception (no pre-launch claim). */
     mtd_return_pct: number | null;
     ytd_return_pct: number | null;
-    /** The latest_price_date of the newest snapshot — i.e. the date these
-     * returns are "as of". Hoisted out for easy display. */
+    since_inception_pct: number | null;
+    /** Go-live date the since-inception return is measured from (YYYY-MM-DD). */
+    inception_date: string | null;
+    /** The date these returns are "as of". */
     as_of_date: string | null;
   } | null;
 };
@@ -157,6 +144,74 @@ export type RunningJob = {
   current_phase: string | null;
   current_message: string | null;
   label: string;
+  plan_summary?: SmartPlan | null;
+  // Live price-refresh counters (present while the prices phase runs).
+  companies_processed?: number | null;
+  companies_total?: number | null;
+  prices_refreshed?: number | null;
+  volumes_refreshed?: number | null;
+  forbidden_count?: number | null;
+  error_count?: number | null;
+};
+
+/** One pooled held company from `GET /api/scheduled-strategies/held-companies`. */
+export type HeldCompany = {
+  company_id: number;
+  ticker: string | null;
+  exchange: string;
+  company_name: string | null;
+  sector: string | null;
+  latest_close_price_date: string | null;
+  held_by: Array<{
+    strategy_id: number;
+    strategy_name: string;
+    snapshot_kind: string | null;
+    as_of_date: string | null;
+    latest_price_date: string | null;
+    target_weight: number;
+  }>;
+};
+
+export type HeldCompaniesResponse = {
+  total_companies: number;
+  total_strategies: number;
+  freshness_summary?: {
+    latest_close_date: string | null;
+    /** Reference the fresh/stale split is measured against (last settled
+     * trading day). A holding is stale when its close is behind this. */
+    expected_close_date?: string | null;
+    fresh_count: number;
+    stale_count: number;
+    missing_count: number;
+  };
+  companies: HeldCompany[];
+};
+
+/** Per-strategy entry in a smart-pipeline plan (`SmartPlan.strategies`). */
+export type SmartPlanStrategy = {
+  strategy_id: number;
+  strategy_name: string;
+  frequency: string | null;
+  rebalance_weekday: number;
+  /** Raw index_universe/universe_label from the strategy's config. */
+  label: string | null;
+  resolved_template_key: string | null;
+  resolved_universe_id: number | null;
+  is_due: boolean;
+  due_reason: 'first_run' | 'due' | 'not_due' | 'unresolved' | string;
+};
+
+/** The derived plan a `smart_daily` tick produced, from
+ * `ingest_run.plan_summary` / `GET /api/schedule/plan`. */
+export type SmartPlan = {
+  as_of: string;
+  needed_template_keys: string[];
+  unresolved_labels: string[];
+  due_strategy_ids: number[];
+  strategies: SmartPlanStrategy[];
+  universes_refreshed: string[];
+  held_company_count: number | null;
+  universe_company_count: number | null;
 };
 
 export type ScheduleUpcoming = {
@@ -164,16 +219,4 @@ export type ScheduleUpcoming = {
   scheduler_enabled: boolean;
   jobs: UpcomingJob[];
   running: RunningJob[];
-};
-
-/** Live refresh status for one template, from the in-process registry
- * (`GET /api/universe-templates/refresh-status`). Absent when the template
- * hasn't been refreshed since the backend process started. */
-export type TemplateRefreshStatus = {
-  status: 'running' | 'done' | 'error';
-  message?: string;
-  pct?: number | null;
-  started_at?: string;
-  finished_at?: string | null;
-  error?: string | null;
 };

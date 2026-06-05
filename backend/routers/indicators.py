@@ -24,6 +24,7 @@ from deps import supabase
 from routers._cache_headers import CACHE_STATIC
 from ingest.api_usage import track_api_call
 from ingest.constants import DATA_CUTOFF
+from ingest.metric_upsert import upsert_metric_rows
 from ingest.prices import (
     _USER_AGENT,
     _build_symbol,
@@ -141,16 +142,9 @@ async def indicators_fetch(req: IndicatorRequest):
             for d, v in parsed
             if d >= DATA_CUTOFF
         ]
-        total_loaded = 0
-        batch_size = 500
-        for i in range(0, len(rows), batch_size):
-            batch = rows[i : i + batch_size]
-            resp = supabase.table("metric_data").upsert(
-                batch,
-                on_conflict="company_id,metric_code,source_code,target_date",
-                ignore_duplicates=False,
-            ).execute()
-            total_loaded += len(resp.data)
+        total_loaded = upsert_metric_rows(
+            supabase, rows, description=f"indicators.fetch({metric_code})",
+        )
 
         logs.append(f"Loaded {total_loaded} rows into metric_data (metric_code={metric_code})")
 

@@ -25,6 +25,8 @@ from datetime import date
 
 from supabase import Client
 
+from deps import chunked
+
 from .base import (
     ProgressCallback,
     RefreshResult,
@@ -334,15 +336,14 @@ class LeonteqTemplate(UniverseTemplate):
         # Batch by 500 — Supabase's PostgREST endpoint chokes on huge
         # multi-row inserts (URL length / timeout).
         persisted = 0
-        for i in range(0, len(rows_to_insert), 500):
-            chunk = rows_to_insert[i:i + 500]
+        for ci, chunk in enumerate(chunked(rows_to_insert, 500)):
             try:
                 supabase.table("leonteq_equity").insert(chunk).execute()
                 persisted += len(chunk)
             except Exception as e:
                 log.warning(
                     "[leonteq] chunk %s insert failed: %s: %s",
-                    i // 500, type(e).__name__, e,
+                    ci, type(e).__name__, e,
                 )
 
         # Replicate today's snapshot across every month from
@@ -430,8 +431,7 @@ class LeonteqTemplate(UniverseTemplate):
                 cid_list = list(seen_company_ids)
                 # Chunk to stay under Cloudflare URL limits.
                 oos_set: set[int] = set()
-                for i in range(0, len(cid_list), 50):
-                    chunk = cid_list[i:i + 50]
+                for chunk in chunked(cid_list, 50):
                     oos_resp = (
                         supabase.table("company")
                         .select("company_id")
@@ -464,8 +464,7 @@ class LeonteqTemplate(UniverseTemplate):
                     **entry,
                 })
         if membership_rows:
-            for i in range(0, len(membership_rows), 500):
-                chunk = membership_rows[i:i + 500]
+            for ci, chunk in enumerate(chunked(membership_rows, 500)):
                 try:
                     supabase.table("universe_membership").upsert(
                         chunk, on_conflict="universe_id,company_id,target_month",
@@ -473,7 +472,7 @@ class LeonteqTemplate(UniverseTemplate):
                 except Exception as e:
                     log.warning(
                         "[leonteq] membership chunk %s upsert failed: %s: %s",
-                        i // 500, type(e).__name__, e,
+                        ci, type(e).__name__, e,
                     )
 
         emit("Computing diff vs previous month…", 95)

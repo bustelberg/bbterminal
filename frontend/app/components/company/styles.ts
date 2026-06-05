@@ -7,7 +7,7 @@ import type { CSSProperties } from 'react';
 
 export const inputCls = 'w-full bg-page border border-neutral-700 rounded-lg px-2.5 py-1.5 text-sm text-fg-strong focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 transition-colors';
 export const inputAddCls = 'w-full bg-page border border-pos-800/50 rounded-lg px-2.5 py-1.5 text-sm text-fg-strong focus:outline-none focus:border-pos-500 focus:ring-1 focus:ring-pos-500/30 transition-colors';
-export const thCls = 'px-3 py-3 text-left text-xs font-medium cursor-pointer select-none hover:text-fg-strong transition-colors';
+export const thCls = 'px-3 py-3 text-left text-xs font-medium cursor-pointer hover:text-fg-strong transition-colors';
 
 // Deterministic hue per universe label so the same universe always gets the
 // same chip colour across renders. Cheap string hash → 0-359 hue, with fixed

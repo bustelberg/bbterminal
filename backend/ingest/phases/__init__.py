@@ -11,8 +11,8 @@ so each phase is importable and unit-testable in isolation:
   templates.py    Phase 1 — UniverseTemplate refresh
   prune.py        Phase 2 + 2.5 — orphan prune + duplicate merge
   prices.py       Phase 3 — price/volume refresh (+ company loaders)
-  momentum.py     Phase 4 — current-picks snapshots (+ daily MTD)
-  pipeline.py     the three orchestrators that sequence the above
+  momentum.py     Phase 4 — current-picks snapshots
+  pipeline.py     the two orchestrators that sequence the above
 
 `routers/ingest_runs.py` keeps only the HTTP layer (router, endpoints,
 job dispatch, `kick_off_refresh`) and imports the orchestrators from
@@ -20,18 +20,13 @@ here.
 """
 from __future__ import annotations
 
-from .pipeline import (
-    _run_daily_mtd_pipeline_sync,
-    _run_daily_template_refresh_pipeline_sync,
-    _run_pipeline_sync,
-)
+from .pipeline import _run_pipeline_sync, _run_smart_pipeline_sync
 from .runlog import _create_run, _now_utc_iso, _update_run
 
 __all__ = [
     "_create_run",
     "_now_utc_iso",
-    "_run_daily_mtd_pipeline_sync",
-    "_run_daily_template_refresh_pipeline_sync",
     "_run_pipeline_sync",
+    "_run_smart_pipeline_sync",
     "_update_run",
 ]

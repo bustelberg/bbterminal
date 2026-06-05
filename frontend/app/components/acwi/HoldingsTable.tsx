@@ -74,7 +74,7 @@ export default function HoldingsTable({ holdings }: { holdings: Holding[] }) {
               ] as const).map(([key, label, align]) => (
                 <th
                   key={label}
-                  className={`text-${align} px-3 py-2.5 font-medium ${key ? 'cursor-pointer select-none hover:text-fg transition-colors' : ''}`}
+                  className={`text-${align} px-3 py-2.5 font-medium ${key ? 'cursor-pointer hover:text-fg transition-colors' : ''}`}
                   onClick={key ? () => {
                     if (sortCol === key) {
                       setSortAsc(!sortAsc);

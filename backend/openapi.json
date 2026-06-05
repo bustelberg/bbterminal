@@ -768,17 +768,6 @@
             ],
             "title": "Name"
           },
-          "rebalance_weekday": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rebalance Weekday"
-          },
           "start_date": {
             "anyOf": [
               {
@@ -4299,7 +4288,7 @@
             "name": "job_name",
             "required": false,
             "schema": {
-              "default": "weekly_price_volume",
+              "default": "smart_daily",
               "title": "Job Name",
               "type": "string"
             }
@@ -5191,6 +5180,26 @@
         "summary": "Parse Portfolio",
         "tags": [
           "airs"
+        ]
+      }
+    },
+    "/api/schedule/plan": {
+      "get": {
+        "description": "The most recent smart-pipeline run's derived plan, for the /schedule\n\"Smart pipeline activity\" section. Returns the plan the last (or\nin-flight) `smart_daily` tick produced \u2014 which universes it needed,\nwhich strategies were due, scoped company counts, and any unresolved\nlabels \u2014 plus the run's status so the UI can show last-result + errors\nin one call. `plan` is null until the first smart tick runs.",
+        "operationId": "schedule_plan_api_schedule_plan_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Schedule Plan",
+        "tags": [
+          "ingest"
         ]
       }
     },

@@ -135,3 +135,137 @@ def load_fx_rate_df_via_copy(
     df["rate_date"] = pd.to_datetime(df["rate_date"])
     df["rate"] = df["rate"].astype(float)
     return df.reset_index(drop=True)
+
+
+# ISO-8601 with microseconds + explicit +00:00 offset, matching how
+# supabase-py/PostgREST serializes a `timestamptz` ("2026-05-27T07:15:19.577638+00:00").
+# `to_char(.US)` always pads to 6 digits; PostgREST trims trailing zeros (and
+# drops the fraction entirely when all-zero), so `_match_postgrest_ts` strips
+# them back off to keep the API response byte-identical to the paged path.
+_TS_ISO_FMT = "to_char(%s AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US+00:00')"
+
+
+def _match_postgrest_ts(s: str | None) -> str | None:
+    """Trim trailing-zero microseconds from a `to_char`'d ISO timestamp so it
+    matches PostgREST's serialization (`.693290` → `.69329`, `.000000` → no
+    fraction). Input shape is always `...SS.UUUUUU+00:00`."""
+    if not s or "." not in s:
+        return s
+    head, rest = s.split(".", 1)
+    frac, off = rest[:6], rest[6:]  # 6-digit micros, then the fixed +00:00
+    frac = frac.rstrip("0")
+    return f"{head}.{frac}{off}" if frac else f"{head}{off}"
+
+
+def load_companies_via_copy() -> list[dict] | None:
+    """Stream the `/companies` list via a single COPY, returning the exact
+    row shape `routers.companies.list_companies` produces from PostgREST:
+    flat company columns + `gurufocus_exchange` (the exchange_code) +
+    `country` (the country_name), ordered by company_name. Returns `None`
+    to signal the PostgREST fall-back (unconfigured, psycopg missing, or any
+    error). `timestamptz` columns are `to_char`'d to PostgREST's ISO format
+    so the API response is byte-identical to the paged path."""
+    if not _db_url():
+        return None
+    sql = (
+        "COPY (SELECT c.company_id, c.company_name, c.gurufocus_ticker, c.exchange_id, "
+        f"{_TS_ISO_FMT % 'c.delisted_at'}, "
+        f"{_TS_ISO_FMT % 'c.gurufocus_lookup_failed_at'}, "
+        f"{_TS_ISO_FMT % 'c.out_of_scope_at'}, "
+        "c.out_of_scope_reason, e.exchange_code, co.country_name "
+        "FROM company c "
+        "LEFT JOIN gurufocus_exchange e ON e.exchange_id = c.exchange_id "
+        "LEFT JOIN country co ON co.country_code = e.country_code "
+        "ORDER BY c.company_name) TO STDOUT WITH (FORMAT csv)"
+    )
+    buf = _run_copy(sql, ())
+    if buf is None:
+        return None
+
+    import csv as _csv  # noqa: PLC0415 — stdlib, local to keep boot cheap
+    out: list[dict] = []
+    reader = _csv.reader(io.TextIOWrapper(buf, encoding="utf-8"))
+    for row in reader:
+        if len(row) != 10:
+            continue
+        cid, name, ticker, exch_id, delisted, gf_failed, oos_at, oos_reason, exch_code, country = row
+        out.append({
+            "company_id": int(cid),
+            "company_name": name or None,
+            "gurufocus_ticker": ticker,
+            "exchange_id": int(exch_id) if exch_id else None,
+            "delisted_at": _match_postgrest_ts(delisted or None),
+            "gurufocus_lookup_failed_at": _match_postgrest_ts(gf_failed or None),
+            "out_of_scope_at": _match_postgrest_ts(oos_at or None),
+            "out_of_scope_reason": oos_reason or None,
+            "gurufocus_exchange": exch_code or None,
+            "country": country or None,
+        })
+    return out
+
+
+def load_latest_close_dates_via_copy(company_ids: list[int]) -> dict[int, str] | None:
+    """Latest `close_price` `target_date` per company, for a SMALL set of
+    company ids (e.g. a strategy's ~24 held names) — a single indexed
+    `GROUP BY max(target_date)` via COPY. Returns `{company_id: 'YYYY-MM-DD'}`
+    (companies with no close_price are simply absent), or `None` for the
+    PostgREST fall-back. Replaces the full-table `company_latest_close_price_dates`
+    RPC for the held-companies freshness view, which times out on the whole
+    metric_data table."""
+    if not _db_url() or not company_ids:
+        return None
+    sql = (
+        "COPY (SELECT company_id, max(target_date)::text FROM metric_data "
+        "WHERE metric_code = 'close_price' AND company_id = ANY(%s) "
+        "GROUP BY company_id) TO STDOUT WITH (FORMAT csv)"
+    )
+    buf = _run_copy(sql, (list(company_ids),))
+    if buf is None:
+        return None
+
+    import csv as _csv  # noqa: PLC0415
+    out: dict[int, str] = {}
+    for row in _csv.reader(io.TextIOWrapper(buf, encoding="utf-8")):
+        if len(row) != 2 or not row[0] or not row[1]:
+            continue
+        out[int(row[0])] = row[1]
+    return out
+
+
+def load_universe_membership_via_copy(
+    universe_id: int, grouping_field: str,
+) -> dict[str, dict[int, str | None]] | None:
+    """Stream a universe's FULL membership panel (every month × company) via
+    a single COPY, returning the same `{YYYY-MM: {company_id: grouping_value}}`
+    shape as the PostgREST pager in `universe_loader._load_index_universe`.
+    Returns `None` for the fall-back. This is the heaviest universe read —
+    ACWI spans ~2k companies × ~290 months (~hundreds of thousands of rows),
+    so the PostgREST pager makes hundreds of round-trips; COPY is one.
+
+    `grouping_field` is validated to `sector`/`industry` before it's
+    interpolated into the SQL (no other caller-controlled SQL text)."""
+    if grouping_field not in ("sector", "industry"):
+        return None
+    if not _db_url():
+        return None
+    sql = (
+        f"COPY (SELECT target_month, company_id, {grouping_field} "
+        "FROM universe_membership WHERE universe_id = %s "
+        "ORDER BY target_month) TO STDOUT WITH (FORMAT csv)"
+    )
+    buf = _run_copy(sql, (universe_id,))
+    if buf is None:
+        return None
+
+    import csv as _csv  # noqa: PLC0415
+    result: dict[str, dict[int, str | None]] = {}
+    reader = _csv.reader(io.TextIOWrapper(buf, encoding="utf-8"))
+    for row in reader:
+        if len(row) != 3:
+            continue
+        month_raw, cid_raw, group_val = row
+        m = (month_raw or "")[:7]
+        if not m or not cid_raw:
+            continue
+        result.setdefault(m, {})[int(cid_raw)] = group_val or None
+    return result

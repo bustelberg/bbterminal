@@ -6,21 +6,18 @@ retries — kept here because every other loader in this package uses it.
 price + volume loaders both call (with different metric codes)."""
 from __future__ import annotations
 
-import logging
 import threading
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
 from supabase import Client
 
-from deps import IN_CHUNK_SIZE
+from common.retry import retry
+from deps import IN_CHUNK_SIZE, chunked
 
-
-_logger = logging.getLogger(__name__)
 
 _MAX_RETRIES = 3
-_RETRY_DELAY = 5  # seconds
+_RETRY_DELAY = 5  # seconds; multiplied by attempt number (linear backoff)
 
 # Worker count for parallel Supabase chunk loads (price + volume reads,
 # paginated 50 company_ids per chunk). Bottleneck is the Supabase client's
@@ -39,19 +36,15 @@ _FX_SYNC_PARALLELISM = 4
 
 
 def _query_with_retry(query_fn, description: str = "query"):
-    """Execute a Supabase query with retry on transient errors (502, etc.)."""
-    for attempt in range(1, _MAX_RETRIES + 1):
-        try:
-            return query_fn()
-        except Exception as e:
-            err = str(e).lower()
-            is_transient = "502" in err or "bad gateway" in err or "timeout" in err
-            if is_transient and attempt < _MAX_RETRIES:
-                wait = _RETRY_DELAY * attempt
-                _logger.warning(f"{description}: attempt {attempt} failed ({e}), retrying in {wait}s...")
-                time.sleep(wait)
-            else:
-                raise
+    """Execute a Supabase query with retry on transient errors (502, timeouts)
+    and linear backoff. Thin binding over `common.retry.retry`."""
+    return retry(
+        query_fn,
+        attempts=_MAX_RETRIES,
+        base_delay=_RETRY_DELAY,
+        backoff="linear",
+        description=description,
+    )
 
 
 def _load_metric_chunks(
@@ -76,10 +69,7 @@ def _load_metric_chunks(
 
     page_size = 1000
     chunk_size = IN_CHUNK_SIZE
-    chunks = [
-        company_ids[i : i + chunk_size]
-        for i in range(0, len(company_ids), chunk_size)
-    ]
+    chunks = list(chunked(company_ids, chunk_size))
     chunks_total = len(chunks)
 
     rows: list[dict] = []

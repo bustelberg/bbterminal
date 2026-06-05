@@ -40,6 +40,61 @@ from .types import (
 from ..scoring import score_universe
 
 
+def _early_empty_record(
+    period_date: date, cumulative: float, reason: str, is_open: bool,
+) -> PeriodRecord:
+    """The bare empty-period record emitted before any universe baseline is
+    computed (month outside the snapshot range, or no company with enough
+    price history). Carries only the running cumulative + the reason."""
+    return PeriodRecord(
+        date=period_date.isoformat(),
+        holdings=[],
+        portfolio_return_pct=None,
+        cumulative_return_pct=round(cumulative, 2),
+        empty_reason=reason,
+        is_open=is_open,
+    )
+
+
+def _chain_strategy_return(
+    accum: _PeriodAccumulators, port_return: float | None, is_open_iter: bool,
+) -> float:
+    """Chain-link this period's strategy return into the equity curve and
+    return the record's cumulative_return_pct (unrounded).
+
+    Closed periods advance `cumulative_factor` / `cumulative` /
+    `all_period_returns`; the open period computes a display cumulative only —
+    no accumulator bump — so total/annualized/Sharpe stay closed-only. A None
+    return leaves the curve flat at the running cumulative."""
+    if port_return is None:
+        return accum.cumulative
+    if is_open_iter:
+        return (accum.cumulative_factor * (1 + port_return / 100) - 1) * 100
+    accum.cumulative_factor *= (1 + port_return / 100)
+    accum.cumulative = (accum.cumulative_factor - 1) * 100
+    accum.all_period_returns.append(port_return)
+    return accum.cumulative
+
+
+def _chain_universe_baseline(
+    accum: _PeriodAccumulators, universe_ret: float | None, is_open_iter: bool,
+) -> float | None:
+    """Chain-link the universe equal-weight baseline the same closed-vs-open
+    way as the strategy chain: closed periods bump
+    `universe_cumulative_factor` + record the period return; the open period
+    computes a display value only (no accumulator bump, keeping headline
+    universe stats apples-to-apples with closed periods). Returns the period's
+    cumulative universe return % for the record (None when universe_ret is
+    None)."""
+    if universe_ret is None:
+        return None
+    if is_open_iter:
+        return (accum.universe_cumulative_factor * (1 + universe_ret / 100) - 1) * 100
+    accum.universe_cumulative_factor *= (1 + universe_ret / 100)
+    accum.universe_period_returns.append(universe_ret)
+    return (accum.universe_cumulative_factor - 1) * 100
+
+
 def run_backtest(
     config: BacktestConfig,
     prices_df: pd.DataFrame,
@@ -281,14 +336,9 @@ def run_backtest(
                         scope="universe",
                         message=f"{_record_label(period_date)}: {reason}",
                     )
-                period_records.append(PeriodRecord(
-                    date=_record_date(period_date),
-                    holdings=[],
-                    portfolio_return_pct=None,
-                    cumulative_return_pct=round(accum.cumulative, 2),
-                    empty_reason=reason,
-                    is_open=is_open_iter,
-                ))
+                period_records.append(
+                    _early_empty_record(period_date, accum.cumulative, reason, is_open_iter)
+                )
                 continue
 
         # Look up signals for this period from the precomputed panel, then
@@ -326,14 +376,9 @@ def run_backtest(
                     scope="backtest",
                     message=f"{_record_label(period_date)}: {reason}",
                 )
-            period_records.append(PeriodRecord(
-                date=_record_date(period_date),
-                holdings=[],
-                portfolio_return_pct=None,
-                cumulative_return_pct=round(accum.cumulative, 2),
-                empty_reason=reason,
-                is_open=is_open_iter,
-            ))
+            period_records.append(
+                _early_empty_record(period_date, accum.cumulative, reason, is_open_iter)
+            )
             continue
 
         # Compute the universe-equal-weight baseline ONCE per period
@@ -489,16 +534,7 @@ def run_backtest(
         # aggressive min_price_score could emit 30-80 of these.
         if outcome.empty_reason is not None:
             _empty_reasons.append((period_date, outcome.empty_reason))
-            universe_cum_record = None
-            if universe_ret is not None:
-                if is_open_iter:
-                    universe_cum_record = (
-                        accum.universe_cumulative_factor * (1 + universe_ret / 100) - 1
-                    ) * 100
-                else:
-                    accum.universe_cumulative_factor *= (1 + universe_ret / 100)
-                    accum.universe_period_returns.append(universe_ret)
-                    universe_cum_record = (accum.universe_cumulative_factor - 1) * 100
+            universe_cum_record = _chain_universe_baseline(accum, universe_ret, is_open_iter)
             period_records.append(PeriodRecord(
                 date=_record_date(period_date),
                 holdings=[],
@@ -521,15 +557,7 @@ def run_backtest(
         # continues, but it doesn't shift `cumulative_factor` / `cumulative`
         # / `all_period_returns` (those drive total_return, annualized,
         # Sharpe, etc., which we keep apples-to-apples with closed periods).
-        record_cum = accum.cumulative
-        if outcome.port_return is not None:
-            if is_open_iter:
-                record_cum = (accum.cumulative_factor * (1 + outcome.port_return / 100) - 1) * 100
-            else:
-                accum.cumulative_factor *= (1 + outcome.port_return / 100)
-                accum.cumulative = (accum.cumulative_factor - 1) * 100
-                accum.all_period_returns.append(outcome.port_return)
-                record_cum = accum.cumulative
+        record_cum = _chain_strategy_return(accum, outcome.port_return, is_open_iter)
 
         # Turnover — skip when the row is the open period (it's a partial
         # holding, comparing it against the prior closed period inflates
@@ -547,16 +575,7 @@ def run_backtest(
         # split the strategy uses above: open period updates the
         # display cumulative but does NOT bump the accumulator (so the
         # summary headline stays apples-to-apples with closed periods).
-        universe_cum_record_v = None
-        if universe_ret is not None:
-            if is_open_iter:
-                universe_cum_record_v = (
-                    accum.universe_cumulative_factor * (1 + universe_ret / 100) - 1
-                ) * 100
-            else:
-                accum.universe_cumulative_factor *= (1 + universe_ret / 100)
-                accum.universe_period_returns.append(universe_ret)
-                universe_cum_record_v = (accum.universe_cumulative_factor - 1) * 100
+        universe_cum_record_v = _chain_universe_baseline(accum, universe_ret, is_open_iter)
 
         period_records.append(PeriodRecord(
             date=_record_date(period_date),

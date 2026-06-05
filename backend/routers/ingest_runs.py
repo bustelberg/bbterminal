@@ -23,12 +23,13 @@ Each run executes these phases in order (see `ingest.phases.pipeline`):
 Phases run independently — a failure in one is captured in
 `error_summary` but the next phase still attempts.
 
-Two scheduled triggers (defined in `scheduler.py`):
-    weekly_price_volume   Tuesday 02:00 UTC      — captures Monday closes
-    monthly_price_volume  2nd of month 02:00 UTC — captures month-start
+One scheduled trigger (defined in `scheduler.py`):
+    smart_daily   Daily 02:00 UTC — dependency-driven pipeline that
+                  refreshes only what the enabled scheduled strategies need
+                  (see `ingest.phases.pipeline._run_smart_pipeline_sync`).
 
-Both run the SAME pipeline; the names just record cadence on the row.
-Manual "Run now" from /schedule uses `triggered_by='manual'`.
+Manual "Run now" from /schedule uses `triggered_by='manual'` and runs the
+full refresh-all pipeline.
 """
 from __future__ import annotations
 
@@ -42,49 +43,30 @@ from fastapi import APIRouter, Header, HTTPException
 from deps import supabase
 from ingest.phases import (
     _create_run,
-    _run_daily_mtd_pipeline_sync,
-    _run_daily_template_refresh_pipeline_sync,
     _run_pipeline_sync,
+    _run_smart_pipeline_sync,
 )
 
 router = APIRouter(tags=["ingest"])
 
 _VALID_JOB_NAMES = {
-    "weekly_price_volume",
-    "monthly_price_volume",
+    # The single dependency-driven daily tick — derives what the enabled
+    # scheduled strategies need and runs only that. See
+    # `ingest.phases.pipeline._run_smart_pipeline_sync` + `scheduler.py`.
+    "smart_daily",
+    # `manual` + `bootstrap_template_refresh` run the full (refresh-all)
+    # pipeline — used by the UI Run-now button and the rare fresh-env
+    # bootstrap respectively.
     "manual",
-    # Daily MTD refresh: fires Wed-Sat 02:00 UTC. Refreshes prices for the
-    # pooled set of held companies across all enabled scheduled strategies,
-    # then recomputes + persists MTD on each strategy's latest snapshot so
-    # the /schedule UI shows fresh "to-date" stats every trading day.
-    "daily_holdings_refresh",
-    # Daily template refresh: fires Mon, Wed-Sun 02:30 UTC (skipping Tue
-    # which the weekly full pipeline covers). Lightweight — runs only
-    # acquisition + templates + prune + dedupe, no prices/momentum.
-    # Picks up MSCI announcement changes for ACWI and Leonteq eligibility
-    # list updates on a daily cadence so /schedule's per-template
-    # additions/removals view stays current.
-    "daily_template_refresh",
-    # One-shot bootstrap fired by `scheduler.py` at app start when one or
-    # more registered templates have never been refreshed in this env
-    # (typically the first request after a deploy that introduced a new
-    # template, or a fresh prod environment where migrations created the
-    # universe row but no pipeline has run yet). Same pipeline as the
-    # weekly/monthly ticks — distinguished by job_name so the run row's
-    # `triggered_by` history is clear.
     "bootstrap_template_refresh",
 }
 
 
 def _spawn_ingest(run_id: int, job_name: str) -> None:
-    """Dispatch by `job_name`. The full pipeline (acquisition → … →
-    momentum) runs for the weekly/manual/bootstrap jobs; the lightweight
-    daily orchestrators run for `daily_holdings_refresh` (prices+MTD)
-    and `daily_template_refresh` (templates+prune+dedupe)."""
-    if job_name == "daily_holdings_refresh":
-        target = _run_daily_mtd_pipeline_sync
-    elif job_name == "daily_template_refresh":
-        target = _run_daily_template_refresh_pipeline_sync
+    """Dispatch by `job_name`. `smart_daily` runs the dependency-driven
+    pipeline; `manual`/`bootstrap` run the full refresh-all pipeline."""
+    if job_name == "smart_daily":
+        target = _run_smart_pipeline_sync
     else:
         target = _run_pipeline_sync
     threading.Thread(
@@ -112,7 +94,7 @@ def kick_off_refresh(job_name: str, triggered_by: str) -> int:
 
 @router.post("/api/ingest/scheduled-refresh/cron")
 async def cron_scheduled_refresh(
-    job_name: str = "weekly_price_volume",
+    job_name: str = "smart_daily",
     x_cron_secret: str = Header(default=""),
 ):
     """Cron entry point. Verifies `X-Cron-Secret`, inserts an `ingest_run`
@@ -178,20 +160,15 @@ async def list_ingest_runs(limit: int = 25, job_name: str | None = None):
 # that's still pending (or just fired) reads sensibly instead of as a raw
 # id. Unknown ids fall back to a humanized id + the run's own job_name.
 _JOB_META: dict[str, dict[str, str]] = {
-    "weekly_price_volume": {
-        "label": "Weekly full pipeline",
-        "description": "acquisition → templates → prune → prices → momentum",
-        "cadence": "Tuesday 02:00 UTC",
+    "smart_daily": {
+        "label": "Smart daily pipeline",
+        "description": "refreshes only what the scheduled strategies need, then rebalances those that are due",
+        "cadence": "Daily 02:00 UTC",
     },
-    "daily_holdings_refresh": {
-        "label": "Daily MTD refresh",
-        "description": "re-prices held companies + recomputes MTD per strategy",
-        "cadence": "Mon, Wed–Sun 02:00 UTC",
-    },
-    "daily_template_refresh": {
-        "label": "Daily template refresh",
-        "description": "reconstructs template universes (no prices/momentum)",
-        "cadence": "Mon, Wed–Sun 02:30 UTC",
+    "startup_smart_kickstart": {
+        "label": "Smart catch-up",
+        "description": "one-shot — fired on startup when something needed fell behind",
+        "cadence": "one-shot",
     },
     "monthly_template_refresh": {
         "label": "Monthly template refresh",
@@ -248,7 +225,11 @@ async def schedule_upcoming():
             supabase.table("ingest_run")
             .select(
                 "run_id, job_name, triggered_by, started_at, "
-                "current_phase, current_message"
+                "current_phase, current_message, plan_summary, "
+                # Live counters so the UI can render a price-refresh progress
+                # bar (processed/total) + per-class tallies.
+                "companies_processed, companies_total, prices_refreshed, "
+                "volumes_refreshed, forbidden_count, error_count"
             )
             .eq("status", "running")
             .order("started_at", desc=False)
@@ -291,6 +272,34 @@ async def schedule_upcoming():
         "jobs": jobs,
         "running": running_out,
     }
+
+
+@router.get("/api/schedule/plan")
+async def schedule_plan():
+    """The most recent smart-pipeline run's derived plan, for the /schedule
+    "Smart pipeline activity" section. Returns the plan the last (or
+    in-flight) `smart_daily` tick produced — which universes it needed,
+    which strategies were due, scoped company counts, and any unresolved
+    labels — plus the run's status so the UI can show last-result + errors
+    in one call. `plan` is null until the first smart tick runs."""
+    def _query() -> dict:
+        resp = (
+            supabase.table("ingest_run")
+            .select(
+                "run_id, status, current_phase, started_at, finished_at, "
+                "error_summary, plan_summary, triggered_by"
+            )
+            .eq("job_name", "smart_daily")
+            .order("started_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        row = (resp.data or [None])[0]
+        if row is None:
+            return {"run": None, "plan": None}
+        return {"run": row, "plan": row.get("plan_summary")}
+
+    return await asyncio.to_thread(_query)
 
 
 @router.get("/api/ingest/runs/{run_id}")
