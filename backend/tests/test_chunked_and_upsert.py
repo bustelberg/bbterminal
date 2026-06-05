@@ -7,7 +7,7 @@ between `ingest.prices` and `ingest.earnings._common`.
 """
 from __future__ import annotations
 
-from deps import IN_CHUNK_SIZE, chunked
+from deps import IN_CHUNK_SIZE, chunked, paginate
 from ingest.metric_upsert import METRIC_CONFLICT, upsert_metric_rows
 
 from tests._fake_supabase import FakeSupabase
@@ -65,3 +65,28 @@ class TestUpsertMetricRows:
 
     def test_conflict_key_is_metric_natural_key(self):
         assert METRIC_CONFLICT == "company_id,metric_code,source_code,target_date"
+
+
+class TestPaginate:
+    def _q(self, fake):
+        return lambda lo, hi: fake.table("company").select("company_id").range(lo, hi).execute()
+
+    def test_walks_every_page(self):
+        fake = FakeSupabase(tables={"company": [{"company_id": i} for i in range(7)]})
+        out = list(paginate(self._q(fake), page_size=3))
+        assert [r["company_id"] for r in out] == list(range(7))
+
+    def test_empty_table_yields_nothing(self):
+        fake = FakeSupabase(tables={"company": []})
+        assert list(paginate(self._q(fake), page_size=3)) == []
+
+    def test_exact_multiple_terminates(self):
+        # 6 rows at page_size 3 → two full pages then an empty probe; must stop.
+        fake = FakeSupabase(tables={"company": [{"company_id": i} for i in range(6)]})
+        out = list(paginate(self._q(fake), page_size=3))
+        assert len(out) == 6
+
+    def test_single_short_page(self):
+        fake = FakeSupabase(tables={"company": [{"company_id": 1}, {"company_id": 2}]})
+        out = list(paginate(self._q(fake), page_size=1000))
+        assert [r["company_id"] for r in out] == [1, 2]

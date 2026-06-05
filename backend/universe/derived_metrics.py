@@ -30,6 +30,8 @@ from typing import Generator
 
 from supabase import Client
 
+from ingest.metric_upsert import upsert_metric_rows
+
 logger = logging.getLogger(__name__)
 
 
@@ -285,20 +287,9 @@ def _get_annuals(data: dict) -> dict | None:
 
 
 def _upsert_rows(supabase: Client, rows: list[dict]) -> int:
-    """Upsert derived metric rows into metric_data in chunks."""
-    if not rows:
-        return 0
-    total = 0
-    batch = 500
-    for i in range(0, len(rows), batch):
-        chunk = rows[i:i + batch]
-        resp = supabase.table("metric_data").upsert(
-            chunk,
-            on_conflict="company_id,metric_code,source_code,target_date",
-            ignore_duplicates=False,
-        ).execute()
-        total += len(resp.data or [])
-    return total
+    """Upsert derived metric rows into metric_data in chunks. Thin wrapper over
+    the shared `ingest.metric_upsert.upsert_metric_rows`."""
+    return upsert_metric_rows(supabase, rows, description="derived_metrics")
 
 
 # ---------------------------------------------------------------------------

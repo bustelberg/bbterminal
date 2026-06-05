@@ -24,6 +24,8 @@ from datetime import date
 
 from supabase import Client
 
+from deps import chunked
+
 from .base import ProgressCallback, RefreshResult, UniverseTemplate
 
 log = logging.getLogger(__name__)
@@ -169,8 +171,7 @@ class ACWILeonteqTemplate(UniverseTemplate):
         # (Supabase PostgREST chokes on huge multi-row inserts; URL
         # length + per-request timeout).
         persisted = 0
-        for i in range(0, len(membership_rows), 500):
-            chunk = membership_rows[i:i + 500]
+        for ci, chunk in enumerate(chunked(membership_rows, 500)):
             try:
                 supabase.table("universe_membership").upsert(
                     chunk, on_conflict="universe_id,company_id,target_month",
@@ -179,7 +180,7 @@ class ACWILeonteqTemplate(UniverseTemplate):
             except Exception as e:
                 log.warning(
                     "[acwi_leonteq] membership chunk %s upsert failed: %s: %s",
-                    i // 500, type(e).__name__, e,
+                    ci, type(e).__name__, e,
                 )
 
         emit(f"Persisted {persisted}/{len(membership_rows)} membership rows.", 90)

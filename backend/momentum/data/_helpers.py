@@ -13,7 +13,7 @@ from datetime import date
 from supabase import Client
 
 from common.retry import retry
-from deps import IN_CHUNK_SIZE
+from deps import IN_CHUNK_SIZE, chunked
 
 
 _MAX_RETRIES = 3
@@ -69,10 +69,7 @@ def _load_metric_chunks(
 
     page_size = 1000
     chunk_size = IN_CHUNK_SIZE
-    chunks = [
-        company_ids[i : i + chunk_size]
-        for i in range(0, len(company_ids), chunk_size)
-    ]
+    chunks = list(chunked(company_ids, chunk_size))
     chunks_total = len(chunks)
 
     rows: list[dict] = []

@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 
 from supabase import Client
 
-from deps import chunked
+from deps import chunked, paginate
 
 _log = logging.getLogger(__name__)
 
@@ -71,25 +71,15 @@ def _load_all_company_ids(supabase: Client) -> set[int]:
     """Every row in `company`. Paginates because Supabase's PostgREST
     caps a single response at 1000 rows."""
     out: set[int] = set()
-    offset = 0
-    page_size = 1000
-    while True:
-        resp = (
-            supabase.table("company")
-            .select("company_id")
-            .range(offset, offset + page_size - 1)
-            .execute()
-        )
-        batch = resp.data or []
-        if not batch:
-            break
-        for r in batch:
-            cid = r.get("company_id")
-            if cid is not None:
-                out.add(int(cid))
-        if len(batch) < page_size:
-            break
-        offset += page_size
+    for r in paginate(
+        lambda lo, hi: supabase.table("company")
+        .select("company_id")
+        .range(lo, hi)
+        .execute()
+    ):
+        cid = r.get("company_id")
+        if cid is not None:
+            out.add(int(cid))
     return out
 
 
@@ -126,26 +116,16 @@ def _load_universe_ids(supabase: Client) -> dict[str, int]:
 def _load_membership_company_ids(supabase: Client, universe_id: int) -> set[int]:
     """Distinct `company_id` across all months for a single universe."""
     out: set[int] = set()
-    offset = 0
-    page_size = 1000
-    while True:
-        resp = (
-            supabase.table("universe_membership")
-            .select("company_id")
-            .eq("universe_id", universe_id)
-            .range(offset, offset + page_size - 1)
-            .execute()
-        )
-        batch = resp.data or []
-        if not batch:
-            break
-        for r in batch:
-            cid = r.get("company_id")
-            if cid is not None:
-                out.add(int(cid))
-        if len(batch) < page_size:
-            break
-        offset += page_size
+    for r in paginate(
+        lambda lo, hi: supabase.table("universe_membership")
+        .select("company_id")
+        .eq("universe_id", universe_id)
+        .range(lo, hi)
+        .execute()
+    ):
+        cid = r.get("company_id")
+        if cid is not None:
+            out.add(int(cid))
     return out
 
 
@@ -155,26 +135,16 @@ def _load_out_of_scope_company_ids(supabase: Client) -> set[int]:
     out-of-scope flag (preserve a row in `company` for visibility).
     Paginates because PostgREST caps at 1000 per request."""
     out: set[int] = set()
-    offset = 0
-    page_size = 1000
-    while True:
-        resp = (
-            supabase.table("company")
-            .select("company_id")
-            .not_.is_("out_of_scope_at", "null")
-            .range(offset, offset + page_size - 1)
-            .execute()
-        )
-        batch = resp.data or []
-        if not batch:
-            break
-        for r in batch:
-            cid = r.get("company_id")
-            if cid is not None:
-                out.add(int(cid))
-        if len(batch) < page_size:
-            break
-        offset += page_size
+    for r in paginate(
+        lambda lo, hi: supabase.table("company")
+        .select("company_id")
+        .not_.is_("out_of_scope_at", "null")
+        .range(lo, hi)
+        .execute()
+    ):
+        cid = r.get("company_id")
+        if cid is not None:
+            out.add(int(cid))
     return out
 
 
@@ -183,26 +153,16 @@ def _load_longequity_metric_company_ids(supabase: Client) -> set[int]:
     with `source_code='longequity'`. Catches the months that were
     ingested before the universe_membership write path existed."""
     out: set[int] = set()
-    offset = 0
-    page_size = 1000
-    while True:
-        resp = (
-            supabase.table("metric_data")
-            .select("company_id")
-            .eq("source_code", "longequity")
-            .range(offset, offset + page_size - 1)
-            .execute()
-        )
-        batch = resp.data or []
-        if not batch:
-            break
-        for r in batch:
-            cid = r.get("company_id")
-            if cid is not None:
-                out.add(int(cid))
-        if len(batch) < page_size:
-            break
-        offset += page_size
+    for r in paginate(
+        lambda lo, hi: supabase.table("metric_data")
+        .select("company_id")
+        .eq("source_code", "longequity")
+        .range(lo, hi)
+        .execute()
+    ):
+        cid = r.get("company_id")
+        if cid is not None:
+            out.add(int(cid))
     return out
 
 

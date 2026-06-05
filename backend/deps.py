@@ -122,3 +122,28 @@ def fetch_in_chunks(
         if data:
             rows.extend(data)
     return rows
+
+
+def paginate(query: Callable[[int, int], Any], *, page_size: int = 1000) -> Iterator[dict]:
+    """Yield every row from a `.range()`-paginated PostgREST select.
+
+    `query(lo, hi)` receives inclusive 0-based range bounds (PostgREST
+    `.range(lo, hi)` semantics) and returns an executed response (with a
+    `.data` list) or a plain list of rows. Pages of `page_size` are walked
+    until one comes back short (or empty) — the single home for the
+    offset/`.range()` loop that PostgREST's 1000-row cap forces on every
+    full-table scan.
+
+    Example:
+        for row in paginate(lambda lo, hi:
+            supabase.table("company").select("company_id").range(lo, hi).execute()):
+            ...
+    """
+    offset = 0
+    while True:
+        result = query(offset, offset + page_size - 1)
+        data = getattr(result, "data", result) or []
+        yield from data
+        if len(data) < page_size:
+            return
+        offset += page_size

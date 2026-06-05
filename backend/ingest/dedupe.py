@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 
 from supabase import Client
 
+from deps import paginate
+
 _log = logging.getLogger(__name__)
 
 
@@ -201,36 +203,26 @@ def find_canonical_match(
 
     # Bucket 2: same canonical name across all exchanges.
     if norm_name:
-        offset = 0
-        page = 1000
-        while True:
-            resp = (
-                supabase.table('company')
-                .select(
-                    'company_id, company_name, gurufocus_ticker, '
-                    'gurufocus_exchange:gurufocus_exchange(exchange_code, exchange_id)'
-                )
-                .range(offset, offset + page - 1)
-                .execute()
+        for r in paginate(
+            lambda lo, hi: supabase.table('company')
+            .select(
+                'company_id, company_name, gurufocus_ticker, '
+                'gurufocus_exchange:gurufocus_exchange(exchange_code, exchange_id)'
             )
-            batch = resp.data or []
-            if not batch:
-                break
-            for r in batch:
-                if r['company_id'] in out:
-                    continue
-                if canonical_name(r.get('company_name')) == norm_name:
-                    exch_obj = r.get('gurufocus_exchange') or {}
-                    out[r['company_id']] = CompanyRow(
-                        company_id=r['company_id'],
-                        company_name=r.get('company_name'),
-                        gurufocus_ticker=r.get('gurufocus_ticker'),
-                        exchange_code=exch_obj.get('exchange_code'),
-                        exchange_id=exch_obj.get('exchange_id'),
-                    )
-            if len(batch) < page:
-                break
-            offset += page
+            .range(lo, hi)
+            .execute()
+        ):
+            if r['company_id'] in out:
+                continue
+            if canonical_name(r.get('company_name')) == norm_name:
+                exch_obj = r.get('gurufocus_exchange') or {}
+                out[r['company_id']] = CompanyRow(
+                    company_id=r['company_id'],
+                    company_name=r.get('company_name'),
+                    gurufocus_ticker=r.get('gurufocus_ticker'),
+                    exchange_code=exch_obj.get('exchange_code'),
+                    exchange_id=exch_obj.get('exchange_id'),
+                )
 
     return sorted(out.values(), key=lambda c: c.company_id)
 
@@ -271,27 +263,17 @@ def _normalize_hkse_tickers(supabase: Client) -> int:
         return 0
     hkse_id = exch.data[0]['exchange_id']
 
-    offset = 0
-    page = 1000
     pending: list[dict] = []
-    while True:
-        resp = (
-            supabase.table('company')
-            .select('company_id, gurufocus_ticker')
-            .eq('exchange_id', hkse_id)
-            .range(offset, offset + page - 1)
-            .execute()
-        )
-        batch = resp.data or []
-        if not batch:
-            break
-        for r in batch:
-            tkr = (r.get('gurufocus_ticker') or '').strip()
-            if tkr.isdigit() and 1 <= len(tkr) < 5:
-                pending.append({'company_id': r['company_id'], 'new': tkr.zfill(5), 'old': tkr})
-        if len(batch) < page:
-            break
-        offset += page
+    for r in paginate(
+        lambda lo, hi: supabase.table('company')
+        .select('company_id, gurufocus_ticker')
+        .eq('exchange_id', hkse_id)
+        .range(lo, hi)
+        .execute()
+    ):
+        tkr = (r.get('gurufocus_ticker') or '').strip()
+        if tkr.isdigit() and 1 <= len(tkr) < 5:
+            pending.append({'company_id': r['company_id'], 'new': tkr.zfill(5), 'old': tkr})
 
     # Apply updates one by one — the (gurufocus_ticker, exchange_id)
     # unique constraint will reject a normalize that would collide
@@ -458,33 +440,23 @@ def merge_existing_duplicates(
 
     # Pull every company row + its exchange code.
     rows: list[CompanyRow] = []
-    offset = 0
-    page = 1000
-    while True:
-        resp = (
-            supabase.table('company')
-            .select(
-                'company_id, company_name, gurufocus_ticker, '
-                'gurufocus_exchange:gurufocus_exchange(exchange_code, exchange_id)'
-            )
-            .range(offset, offset + page - 1)
-            .execute()
+    for r in paginate(
+        lambda lo, hi: supabase.table('company')
+        .select(
+            'company_id, company_name, gurufocus_ticker, '
+            'gurufocus_exchange:gurufocus_exchange(exchange_code, exchange_id)'
         )
-        batch = resp.data or []
-        if not batch:
-            break
-        for r in batch:
-            exch_obj = r.get('gurufocus_exchange') or {}
-            rows.append(CompanyRow(
-                company_id=r['company_id'],
-                company_name=r.get('company_name'),
-                gurufocus_ticker=r.get('gurufocus_ticker'),
-                exchange_code=exch_obj.get('exchange_code'),
-                exchange_id=exch_obj.get('exchange_id'),
-            ))
-        if len(batch) < page:
-            break
-        offset += page
+        .range(lo, hi)
+        .execute()
+    ):
+        exch_obj = r.get('gurufocus_exchange') or {}
+        rows.append(CompanyRow(
+            company_id=r['company_id'],
+            company_name=r.get('company_name'),
+            gurufocus_ticker=r.get('gurufocus_ticker'),
+            exchange_code=exch_obj.get('exchange_code'),
+            exchange_id=exch_obj.get('exchange_id'),
+        ))
 
     # Group by canonical_name. Empty names get skipped — no way to
     # confidently merge a nameless row.

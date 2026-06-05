@@ -2,7 +2,7 @@
 
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import type { BacktestResult, Holding, PeriodRecord } from '../../../lib/stores/momentum';
+import type { BacktestResult, PeriodRecord } from '../../../lib/stores/momentum';
 import { API_URL } from '../../../lib/apiUrl';
 import type { Column } from '../../../lib/tableExport';
 import TableDownloadButton from '../TableDownloadButton';
@@ -17,8 +17,15 @@ import { computeFeeWaterfall } from './feeModel';
 import { useClickOutside } from '../../../lib/hooks/useClickOutside';
 import { useFeeConfig } from '../../../lib/hooks/apiData';
 import { EXCHANGE_NAMES, displayExchange, fmtPct, fmtPrice, guruFocusUrl } from './utils';
-
-type HeldCompany = { company_id: number; ticker: string; company_name: string };
+import {
+  collectHeldCompanies,
+  computeTurnoverByDate,
+  repriceOpenPeriod,
+  splitAtGoLive,
+  type DisplayRow,
+  type HeldCompany,
+  type PriceMap,
+} from './monthlyHoldings';
 
 /** Subset of the active backtest's selection config that the per-ticker
  * timeline modal forwards to the signal-breakdown endpoint. Lets the
@@ -69,21 +76,9 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
   // Every distinct company ever held during this backtest — one entry per
   // company_id, regardless of how many months it appeared in. Drives the
   // header search box; an exact ticker match wins over a fuzzy name hit.
-  const heldCompanies = useMemo<HeldCompany[]>(() => {
-    const seen = new Map<number, HeldCompany>();
-    for (const r of result.monthly_records) {
-      for (const h of r.holdings) {
-        if (!seen.has(h.company_id)) {
-          seen.set(h.company_id, {
-            company_id: h.company_id,
-            ticker: h.ticker ?? '',
-            company_name: h.company_name ?? '',
-          });
-        }
-      }
-    }
-    return Array.from(seen.values()).sort((a, b) => a.ticker.localeCompare(b.ticker));
-  }, [result]);
+  const heldCompanies = useMemo<HeldCompany[]>(
+    () => collectHeldCompanies(result.monthly_records), [result],
+  );
 
   // Global fee config for the net-to-client (net) parentheticals in the
   // Return / Cumulative columns — the same layered model (Leonteq +
@@ -113,22 +108,9 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
 
   // One-way turnover per month: % of current holdings that weren't held
   // last month. First month has no prior portfolio → null.
-  const turnoverByDate = useMemo<Record<string, number | null>>(() => {
-    const map: Record<string, number | null> = {};
-    let prevIds: Set<number> | null = null;
-    for (const r of result.monthly_records) {
-      const currIds = new Set(r.holdings.map((h) => h.company_id));
-      if (prevIds === null || currIds.size === 0) {
-        map[r.date] = null;
-      } else {
-        let added = 0;
-        for (const id of currIds) if (!prevIds.has(id)) added += 1;
-        map[r.date] = (added / currIds.size) * 100;
-      }
-      prevIds = currIds;
-    }
-    return map;
-  }, [result]);
+  const turnoverByDate = useMemo(
+    () => computeTurnoverByDate(result.monthly_records), [result],
+  );
 
   // Fetch the go-live-date close prices for the holdings of the period
   // that contains the marker, so the two split sub-rows can re-price each
@@ -172,7 +154,6 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
   // honest "as of" is the 26th, since the portfolio return needs all names
   // priced on the same day. Only fires when that common date is genuinely
   // newer than the backtest's saved as-of.
-  type PriceMap = Record<string, { price_local: number; price_eur?: number; target_date: string }>;
   useEffect(() => {
     const records = result.monthly_records;
     const last = records[records.length - 1];
@@ -217,49 +198,9 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
   // (when newer data than the backtest's as-of exists). Re-prices each
   // open holding, then recomputes the period return (long weight-mean −
   // short weight-mean, matching the engine) + the chained cumulative.
-  const repricedRecords = useMemo<PeriodRecord[]>(() => {
-    const recs = result.monthly_records;
-    if (!openReprice || recs.length === 0) return recs;
-    const lastIdx = recs.length - 1;
-    const last = recs[lastIdx];
-    if (!last.is_open) return recs;
-    const newHoldings = last.holdings.map((h) => {
-      const p = openReprice.prices[String(h.company_id)];
-      if (!p) return h;
-      const exitEur = p.price_eur ?? h.exit_price_eur;
-      const entryEur = h.entry_price_eur;
-      return {
-        ...h,
-        exit_price_local: p.price_local,
-        exit_price_eur: exitEur,
-        exit_date: p.target_date.slice(0, 10),
-        forward_return_pct: exitEur != null && entryEur ? (exitEur / entryEur - 1) * 100 : h.forward_return_pct,
-      };
-    });
-    const wmean = (arr: Holding[]): number | null => {
-      let w = 0, r = 0;
-      for (const h of arr) {
-        if (h.forward_return_pct == null) continue;
-        const wt = h.weight ?? 1;
-        w += wt; r += wt * h.forward_return_pct;
-      }
-      return w > 0 ? r / w : null;
-    };
-    const longRet = wmean(newHoldings.filter((h) => h.side !== 'short'));
-    const shorts = newHoldings.filter((h) => h.side === 'short');
-    const shortRet = shorts.length ? wmean(shorts) : null;
-    const portRet = longRet != null ? (shortRet != null ? longRet - shortRet : longRet) : last.portfolio_return_pct;
-    const prevCum = lastIdx >= 1 ? (recs[lastIdx - 1].cumulative_return_pct ?? 0) : 0;
-    const cum = portRet != null ? ((1 + prevCum / 100) * (1 + portRet / 100) - 1) * 100 : last.cumulative_return_pct;
-    const reLast: PeriodRecord = {
-      ...last,
-      holdings: newHoldings,
-      portfolio_return_pct: portRet,
-      cumulative_return_pct: cum,
-      as_of_date: openReprice.date,
-    };
-    return [...recs.slice(0, lastIdx), reLast];
-  }, [result, openReprice]);
+  const repricedRecords = useMemo<PeriodRecord[]>(
+    () => repriceOpenPeriod(result.monthly_records, openReprice), [result, openReprice],
+  );
 
   // Display rows = the period records, except the ONE period whose window
   // contains the go-live date is split into two: the slice before go-live
@@ -267,102 +208,16 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
   // returns (strategy and universe) are recomputed from the daily curve so
   // each slice reads like a standalone period. Holdings are identical for
   // both slices (no rebalance happens at go-live).
-  const displayRows = useMemo<{
-    row: PeriodRecord;
-    key: string;
-    label: string | null;
-    turnoverDate: string | null;
-    net: boolean;
-  }[]>(() => {
-    const records = repricedRecords;
-    const passthrough = () =>
-      records.map((r) => ({ row: r, key: r.date, label: null, turnoverDate: r.date, net: true }));
-    if (!markerDate) return passthrough();
-
-    const stratSeries = (result.daily_records ?? []).map((d) => ({ date: d.date.slice(0, 10), cum: d.cumulative_return_pct }));
-    const uniSeries = (result.universe_daily_records ?? []).map((d) => ({ date: d.date.slice(0, 10), cum: d.cumulative_return_pct }));
-    if (stratSeries.length === 0) return passthrough();
-
-    const cumAt = (series: { date: string; cum: number }[], date: string): number | null => {
-      let v: number | null = null;
-      for (const p of series) { if (p.date <= date) v = p.cum; else break; }
-      return v;
-    };
-    const rel = (a: number | null, b: number | null): number | null =>
-      a != null && b != null ? ((1 + a / 100) / (1 + b / 100) - 1) * 100 : null;
-
-    const out: { row: PeriodRecord; key: string; label: string | null; turnoverDate: string | null; net: boolean }[] = [];
-    for (let i = 0; i < records.length; i++) {
-      const r = records[i];
-      const start = r.date.slice(0, 10);
-      const end = i + 1 < records.length ? records[i + 1].date.slice(0, 10) : (r.as_of_date ?? null);
-      const inside = markerDate > start && (end == null || markerDate < end);
-      if (!inside) { out.push({ row: r, key: r.date, label: null, turnoverDate: r.date, net: true }); continue; }
-
-      const cStart = cumAt(stratSeries, start);
-      const cGo = cumAt(stratSeries, markerDate);
-      const cEnd = end ? cumAt(stratSeries, end) : stratSeries[stratSeries.length - 1].cum;
-      const uStart = cumAt(uniSeries, start);
-      const uGo = cumAt(uniSeries, markerDate);
-      const uEnd = end ? cumAt(uniSeries, end) : (uniSeries.length ? uniSeries[uniSeries.length - 1].cum : null);
-
-      // Re-price each holding at the go-live boundary so the expanded
-      // detail shows entry/exit prices for the sub-period's own dates.
-      // `pre` ends at go-live (exit = go-live price); `post` starts at
-      // go-live (entry = go-live price). Falls back to the original holding
-      // when the go-live price isn't (yet) available for a cid.
-      const repricePre = (h: Holding): Holding => {
-        const p = goLivePrices?.[String(h.company_id)];
-        if (!p) return h;
-        const exitEur = p.price_eur ?? h.exit_price_eur;
-        const entryEur = h.entry_price_eur;
-        return {
-          ...h,
-          exit_price_local: p.price_local,
-          exit_price_eur: exitEur,
-          exit_date: markerDate,
-          forward_return_pct: exitEur != null && entryEur ? (exitEur / entryEur - 1) * 100 : h.forward_return_pct,
-        };
-      };
-      const repricePost = (h: Holding): Holding => {
-        const p = goLivePrices?.[String(h.company_id)];
-        if (!p) return h;
-        const entryEur = p.price_eur ?? h.entry_price_eur;
-        const exitEur = h.exit_price_eur;
-        return {
-          ...h,
-          entry_price_local: p.price_local,
-          entry_price_eur: entryEur,
-          entry_date: markerDate,
-          forward_return_pct: entryEur != null && exitEur ? (exitEur / entryEur - 1) * 100 : h.forward_return_pct,
-        };
-      };
-
-      const pre: PeriodRecord = {
-        ...r,
-        holdings: r.holdings.map(repricePre),
-        portfolio_return_pct: rel(cGo, cStart),
-        universe_return_pct: rel(uGo, uStart),
-        cumulative_return_pct: cGo ?? r.cumulative_return_pct,
-        universe_cumulative_return_pct: uGo,
-        is_open: false,
-        as_of_date: undefined,
-      };
-      const post: PeriodRecord = {
-        ...r,
-        holdings: r.holdings.map(repricePost),
-        portfolio_return_pct: rel(cEnd, cGo),
-        universe_return_pct: rel(uEnd, uGo),
-        cumulative_return_pct: cEnd ?? r.cumulative_return_pct,
-        universe_cumulative_return_pct: uEnd,
-        is_open: r.is_open,
-        as_of_date: r.as_of_date,
-      };
-      out.push({ row: pre, key: `${r.date}__pre`, label: `${start} → ${markerDate} · pre go-live`, turnoverDate: r.date, net: false });
-      out.push({ row: post, key: `${r.date}__post`, label: `${markerDate} → ${end ?? 'now'} · go-live →`, turnoverDate: null, net: false });
-    }
-    return out;
-  }, [repricedRecords, result, markerDate, goLivePrices]);
+  const displayRows = useMemo<DisplayRow[]>(
+    () => splitAtGoLive({
+      records: repricedRecords,
+      dailyRecords: result.daily_records,
+      universeDailyRecords: result.universe_daily_records,
+      markerDate,
+      goLivePrices,
+    }),
+    [repricedRecords, result, markerDate, goLivePrices],
+  );
 
   // When the active result changes (new run / loaded saved run) collapse
   // any open month so the user starts at a clean view. React 19's

@@ -32,7 +32,7 @@ import logging
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 
-from deps import fetch_in_chunks, supabase
+from deps import fetch_in_chunks, paginate, supabase
 
 _log = logging.getLogger(__name__)
 
@@ -209,26 +209,17 @@ def _latest_membership_company_ids(universe_id: int) -> set[int]:
         return set()
 
     cids: set[int] = set()
-    offset = 0
-    page = 1000
-    for _ in range(20):
-        rows = (
-            supabase.table("universe_membership")
-            .select("company_id")
-            .eq("universe_id", universe_id)
-            .eq("target_month", month)
-            .range(offset, offset + page - 1)
-            .execute()
-        ).data or []
-        if not rows:
-            break
-        for r in rows:
-            cid = r.get("company_id")
-            if cid is not None:
-                cids.add(int(cid))
-        if len(rows) < page:
-            break
-        offset += page
+    for r in paginate(
+        lambda lo, hi: supabase.table("universe_membership")
+        .select("company_id")
+        .eq("universe_id", universe_id)
+        .eq("target_month", month)
+        .range(lo, hi)
+        .execute()
+    ):
+        cid = r.get("company_id")
+        if cid is not None:
+            cids.add(int(cid))
     return cids
 
 

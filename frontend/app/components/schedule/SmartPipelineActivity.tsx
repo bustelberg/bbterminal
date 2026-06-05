@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import Spinner from '../Spinner';
 import LoadingDots from '../LoadingDots';
 import { API_URL } from '../../../lib/apiUrl';
+import { useNow } from '../../../lib/hooks/useNow';
+import { usePollingFetch } from '../../../lib/hooks/usePollingFetch';
 import { relTime } from './utils';
 import type { ScheduleUpcoming, HeldCompaniesResponse, HeldCompany } from './types';
 
@@ -11,36 +12,10 @@ import type { ScheduleUpcoming, HeldCompaniesResponse, HeldCompany } from './typ
  * it's doing right now, or when it next runs) + the held companies it keeps
  * priced, with each company's latest close so you can watch them refresh. */
 export default function SmartPipelineActivity() {
-  const [upcoming, setUpcoming] = useState<ScheduleUpcoming | null>(null);
-  const [held, setHeld] = useState<HeldCompaniesResponse | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [nowMs, setNowMs] = useState<number>(() => Date.now());
-
-  useEffect(() => {
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const [u, h] = await Promise.all([
-          fetch(`${API_URL}/api/schedule/upcoming`),
-          fetch(`${API_URL}/api/scheduled-strategies/held-companies`),
-        ]);
-        if (cancelled) return;
-        if (u.ok) setUpcoming((await u.json()) as ScheduleUpcoming);
-        if (h.ok) setHeld((await h.json()) as HeldCompaniesResponse);
-        setLoadError(null);
-      } catch (e) {
-        if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e));
-      }
-    };
-    void poll();
-    const id = window.setInterval(poll, 3000);
-    return () => { cancelled = true; window.clearInterval(id); };
-  }, []);
-
-  useEffect(() => {
-    const id = window.setInterval(() => setNowMs(Date.now()), 15000);
-    return () => window.clearInterval(id);
-  }, []);
+  const { data: upcoming, error: upErr } = usePollingFetch<ScheduleUpcoming>(`${API_URL}/api/schedule/upcoming`, 3000);
+  const { data: held, error: heldErr } = usePollingFetch<HeldCompaniesResponse>(`${API_URL}/api/scheduled-strategies/held-companies`, 3000);
+  const loadError = upErr ?? heldErr;
+  const nowMs = useNow(15000);
 
   const running = upcoming?.running?.[0] ?? null;
   const smartJob = upcoming?.jobs?.find((j) => j.id === 'smart_daily') ?? null;

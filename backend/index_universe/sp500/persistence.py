@@ -17,6 +17,8 @@ from typing import Callable
 
 from supabase import Client
 
+from deps import chunked
+
 
 log = logging.getLogger(__name__)
 _BUCKET = "gurufocus-raw"
@@ -71,13 +73,13 @@ def _clear_membership_batched(
     # rows per statement — well under the timeout (an indexed delete of
     # that size is sub-second) while keeping round-trips reasonable. Tune
     # down if a denser universe ever creeps toward the limit.
-    chunk = 2
-    for i in range(0, len(months), chunk):
-        batch = months[i:i + chunk]
+    done = 0
+    for batch in chunked(months, 2):
         supabase.table("universe_membership").delete().eq(
             "universe_id", universe_id
         ).in_("target_month", batch).execute()
-        emit(f"Clearing existing data: {min(i + chunk, len(months))}/{len(months)} months")
+        done += len(batch)
+        emit(f"Clearing existing data: {done}/{len(months)} months")
 
 
 def store_index_membership(

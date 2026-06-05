@@ -149,9 +149,65 @@ def _mask_proxy_url(url: str) -> str:
 # hours) produced 6×_per_call log spam + wasted GuruFocus quota.
 _CIRCUIT_THRESHOLD = 5
 _CIRCUIT_COOLDOWN_S = 600  # 10 minutes
-_circuit_lock = threading.Lock()
-_consecutive_blocks = 0
-_circuit_open_until: float = 0.0
+
+
+class _CircuitBreaker:
+    """Trips OPEN after `threshold` consecutive all-ladder Cloudflare blocks,
+    suppressing calls for `cooldown_s` seconds; the first non-blocked response
+    closes it. Thread-safe — concurrent ladder runs (the backtest worker pool)
+    share the one module-level instance. Consolidates what used to be three
+    module globals + two free functions behind a single internal lock."""
+
+    def __init__(self, *, threshold: int, cooldown_s: int, proxy_env_var: str):
+        self._threshold = threshold
+        self._cooldown_s = cooldown_s
+        self._proxy_env_var = proxy_env_var
+        self._lock = threading.Lock()
+        self._consecutive_blocks = 0
+        self._open_until: float = 0.0
+
+    def note_block(self) -> bool:
+        """Count one all-ladder Cloudflare block; return True if the circuit is
+        now OPEN (callers should short-circuit)."""
+        with self._lock:
+            self._consecutive_blocks += 1
+            if self._consecutive_blocks >= self._threshold:
+                self._open_until = time.time() + self._cooldown_s
+                log.error(
+                    "gurufocus http: circuit OPEN — %s consecutive Cloudflare "
+                    "blocks across all impersonation targets. Suppressing further "
+                    "calls for %ss. Likely an IP-based block on this host; set "
+                    "%s to a residential proxy URL to mitigate.",
+                    self._consecutive_blocks, self._cooldown_s, self._proxy_env_var,
+                )
+                return True
+        return False
+
+    def note_success(self) -> None:
+        """Reset the circuit on a successful (non-blocked) response."""
+        with self._lock:
+            if self._consecutive_blocks > 0 or self._open_until > 0:
+                log.info(
+                    "gurufocus http: circuit CLOSED — recovered after %s blocks.",
+                    self._consecutive_blocks,
+                )
+            self._consecutive_blocks = 0
+            self._open_until = 0.0
+
+    def seconds_remaining(self) -> float:
+        """0 when the circuit is closed; otherwise seconds until auto-reset."""
+        with self._lock:
+            if self._open_until <= 0:
+                return 0.0
+            remaining = self._open_until - time.time()
+            return remaining if remaining > 0 else 0.0
+
+
+_circuit = _CircuitBreaker(
+    threshold=_CIRCUIT_THRESHOLD,
+    cooldown_s=_CIRCUIT_COOLDOWN_S,
+    proxy_env_var=_PROXY_ENV_VAR,
+)
 
 if _HAS_CURL_CFFI:
     log.warning(
@@ -235,50 +291,6 @@ class CfResponse:
         }
 
 
-def _note_block_and_check_circuit() -> bool:
-    """Increment the consecutive-block counter and return True if the
-    circuit is now OPEN (i.e. callers should short-circuit). Thread-
-    safe so concurrent ladder runs don't race."""
-    global _consecutive_blocks, _circuit_open_until
-    with _circuit_lock:
-        _consecutive_blocks += 1
-        if _consecutive_blocks >= _CIRCUIT_THRESHOLD:
-            _circuit_open_until = time.time() + _CIRCUIT_COOLDOWN_S
-            log.error(
-                "gurufocus http: circuit OPEN — %s consecutive Cloudflare "
-                "blocks across all impersonation targets. Suppressing further "
-                "calls for %ss. Likely an IP-based block on this host; set "
-                "%s to a residential proxy URL to mitigate.",
-                _consecutive_blocks, _CIRCUIT_COOLDOWN_S, _PROXY_ENV_VAR,
-            )
-            return True
-    return False
-
-
-def _note_success() -> None:
-    """Reset the circuit on a successful (non-blocked) response."""
-    global _consecutive_blocks, _circuit_open_until
-    with _circuit_lock:
-        if _consecutive_blocks > 0 or _circuit_open_until > 0:
-            log.info(
-                "gurufocus http: circuit CLOSED — recovered after %s blocks.",
-                _consecutive_blocks,
-            )
-        _consecutive_blocks = 0
-        _circuit_open_until = 0.0
-
-
-def _circuit_open_seconds_remaining() -> float:
-    """Returns 0 when the circuit is closed; otherwise the seconds left
-    until it auto-resets. Locked so we don't read a half-written
-    `_circuit_open_until` from a parallel update."""
-    with _circuit_lock:
-        if _circuit_open_until <= 0:
-            return 0.0
-        remaining = _circuit_open_until - time.time()
-        return remaining if remaining > 0 else 0.0
-
-
 def cf_get(
     url: str,
     headers: dict[str, str] | None = None,
@@ -316,7 +328,7 @@ def cf_get(
 
     # Circuit-breaker check — if recently saturated with blocks, skip
     # the ladder entirely and surface an explicit message.
-    cooldown_left = _circuit_open_seconds_remaining()
+    cooldown_left = _circuit.seconds_remaining()
     if cooldown_left > 0:
         return CfResponse(
             status_code=None,
@@ -403,7 +415,7 @@ def cf_get(
                     "(previous was blocked)",
                     preferred, target,
                 )
-            _note_success()
+            _circuit.note_success()
             return CfResponse(
                 status_code=resp.status_code,
                 text=body,
@@ -431,7 +443,7 @@ def cf_get(
     # threshold. Don't count network-error storms — those reset the
     # counter back to zero so a real CF block doesn't get masked.
     if saw_cf_block_this_call:
-        _note_block_and_check_circuit()
+        _circuit.note_block()
 
     if last is not None:
         return last

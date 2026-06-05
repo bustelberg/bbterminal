@@ -90,24 +90,6 @@ export type MomentumStrategyResult = {
   error_traceback: string | null;
 };
 
-/** One row from `GET /api/universe-templates`. Subset of the backend
- * `_summary()` payload — only the fields the schedule section consumes.
- * `last_refreshed_at === null` is the signal that a template was added
- * but has never been refreshed in this env; the scheduler's bootstrap
- * path is supposed to kick off the first refresh on app start but we
- * still surface the state here so the user knows what's happening. */
-export type UniverseTemplateSummary = {
-  template_key: string;
-  label: string;
-  description: string;
-  earliest_date: string;
-  universe_id: number | null;
-  months_captured: number;
-  latest_captured_month: string | null;
-  latest_membership_count: number;
-  last_refreshed_at: string | null;
-};
-
 export type ScheduledStrategy = {
   id: number;
   name: string;
@@ -229,36 +211,9 @@ export type SmartPlan = {
   universe_company_count: number | null;
 };
 
-/** `GET /api/schedule/plan` — the latest smart-pipeline run + its plan. */
-export type SchedulePlanResponse = {
-  run: {
-    run_id: number;
-    status: 'running' | 'ok' | 'error';
-    current_phase: string | null;
-    started_at: string;
-    finished_at: string | null;
-    error_summary: string | null;
-    plan_summary: SmartPlan | null;
-    triggered_by: 'auto' | 'manual' | string;
-  } | null;
-  plan: SmartPlan | null;
-};
-
 export type ScheduleUpcoming = {
   now: string;
   scheduler_enabled: boolean;
   jobs: UpcomingJob[];
   running: RunningJob[];
-};
-
-/** Live refresh status for one template, from the in-process registry
- * (`GET /api/universe-templates/refresh-status`). Absent when the template
- * hasn't been refreshed since the backend process started. */
-export type TemplateRefreshStatus = {
-  status: 'running' | 'done' | 'error';
-  message?: string;
-  pct?: number | null;
-  started_at?: string;
-  finished_at?: string | null;
-  error?: string | null;
 };

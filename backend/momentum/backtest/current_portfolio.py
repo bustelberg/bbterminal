@@ -28,6 +28,48 @@ from .types import BacktestConfig, CurrentPortfolio, DailyPick, PeriodHolding
 _logger = logging.getLogger(__name__)
 
 
+def _build_holding(
+    row: pd.Series,
+    *,
+    weight: float,
+    currency: str | None,
+    entry_price_eur: float | None,
+    exit_price_eur: float | None,
+    entry_price_local: float | None,
+    exit_price_local: float | None,
+    entry_date: str | None,
+    exit_date: str | None,
+    forward_return_pct: float | None,
+) -> PeriodHolding:
+    """Assemble a `PeriodHolding` from a scored selection row + the caller's
+    already-resolved prices/dates. Centralizes the identity + score +
+    category-score + rank + rounding boilerplate shared by the month-start
+    holdings and the per-day picks — which differ only in how they resolve
+    entry/exit prices (on-or-after + latest close vs on-or-before + None)."""
+    score_val = row.get("momentum_score")
+    sec_rank = row.get("sector_rank")
+    co_rank = row.get("company_rank")
+    return PeriodHolding(
+        company_id=int(row["company_id"]),
+        ticker=str(row.get("gurufocus_ticker", "")),
+        company_name=str(row.get("company_name", "")),
+        sector=str(row["sector"]),
+        score=round(float(score_val), 2) if pd.notna(score_val) else 0.0,
+        category_scores=extract_category_scores(row),
+        weight=weight,
+        forward_return_pct=forward_return_pct,
+        currency=currency,
+        entry_price_local=round(entry_price_local, 4) if entry_price_local is not None else None,
+        exit_price_local=round(exit_price_local, 4) if exit_price_local is not None else None,
+        entry_price_eur=round(entry_price_eur, 4) if entry_price_eur is not None else None,
+        exit_price_eur=round(exit_price_eur, 4) if exit_price_eur is not None else None,
+        entry_date=entry_date,
+        exit_date=exit_date,
+        sector_rank=int(sec_rank) if pd.notna(sec_rank) else None,
+        company_rank=int(co_rank) if pd.notna(co_rank) else None,
+    )
+
+
 def run_current_portfolio(
     config: BacktestConfig,
     prices_df: pd.DataFrame,
@@ -231,29 +273,17 @@ def run_current_portfolio(
             else None
         )
 
-        cat_scores = extract_category_scores(row)
-
-        score_val = row.get("momentum_score")
-        sec_rank = row.get("sector_rank")
-        co_rank = row.get("company_rank")
-        holdings.append(PeriodHolding(
-            company_id=cid,
-            ticker=str(row.get("gurufocus_ticker", "")),
-            company_name=str(row.get("company_name", "")),
-            sector=str(row["sector"]),
-            score=round(float(score_val), 2) if pd.notna(score_val) else 0.0,
-            category_scores=cat_scores,
+        holdings.append(_build_holding(
+            row,
             weight=weight,
-            forward_return_pct=mtd_return,
             currency=(company_currency or {}).get(cid),
-            entry_price_local=round(entry_local, 4) if entry_local is not None else None,
-            exit_price_local=round(exit_local, 4) if exit_local is not None else None,
-            entry_price_eur=round(entry_price, 4) if entry_price is not None else None,
-            exit_price_eur=round(exit_price, 4) if exit_price is not None else None,
+            entry_price_eur=entry_price,
+            exit_price_eur=exit_price,
+            entry_price_local=entry_local,
+            exit_price_local=exit_local,
             entry_date=entry_dt,
             exit_date=exit_dt,
-            sector_rank=int(sec_rank) if pd.notna(sec_rank) else None,
-            company_rank=int(co_rank) if pd.notna(co_rank) else None,
+            forward_return_pct=mtd_return,
         ))
 
     if send_event:
@@ -348,7 +378,6 @@ def run_current_portfolio(
         for _, drow in daily_selected.iterrows():
             cid = int(drow["company_id"])
             today_ids.add(cid)
-            score_val = drow.get("momentum_score")
 
             series = price_index.get(cid)
             entry_pair = _price_on_or_before(series, day_ts) if series is not None else None
@@ -362,31 +391,20 @@ def run_current_portfolio(
             entry_dt_pair = _price_on_or_before(date_series, day_ts) if date_series is not None else None
             entry_dt = entry_dt_pair[1].strftime("%Y-%m-%d") if entry_dt_pair is not None else None
 
-            cat_scores = extract_category_scores(drow)
-
-            sec_rank = drow.get("sector_rank")
-            co_rank = drow.get("company_rank")
-            day_holdings.append(PeriodHolding(
-                company_id=cid,
-                ticker=str(drow.get("gurufocus_ticker", "")),
-                company_name=str(drow.get("company_name", "")),
-                sector=str(drow["sector"]),
-                score=round(float(score_val), 2) if pd.notna(score_val) else 0.0,
-                category_scores=cat_scores,
+            # Exit fields are intentionally None here. The next iteration
+            # backfills them once tomorrow's prices are available; the latest
+            # day in the panel keeps None (no next trading day yet).
+            day_holdings.append(_build_holding(
+                drow,
                 weight=day_weight,
-                # Exit fields are intentionally None here. The next iteration
-                # backfills them once tomorrow's prices are available; the
-                # latest day in the panel keeps None (no next trading day yet).
-                forward_return_pct=None,
                 currency=(company_currency or {}).get(cid),
-                entry_price_local=round(entry_local, 4) if entry_local is not None else None,
-                exit_price_local=None,
-                entry_price_eur=round(entry_price, 4) if entry_price is not None else None,
+                entry_price_eur=entry_price,
                 exit_price_eur=None,
+                entry_price_local=entry_local,
+                exit_price_local=None,
                 entry_date=entry_dt,
                 exit_date=None,
-                sector_rank=int(sec_rank) if pd.notna(sec_rank) else None,
-                company_rank=int(co_rank) if pd.notna(co_rank) else None,
+                forward_return_pct=None,
             ))
 
         # Pre-rebalance chain link: today's contribution to cum MTD is the

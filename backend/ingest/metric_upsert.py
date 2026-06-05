@@ -45,5 +45,5 @@ def upsert_metric_rows(
             retry(_do, base_delay=2, backoff="linear", description=description)
             if with_retry else _do()
         )
-        total += len(resp.data)
+        total += len(resp.data or [])
     return total

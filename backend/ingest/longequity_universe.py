@@ -25,6 +25,8 @@ from typing import Callable
 
 from supabase import Client
 
+from deps import chunked, paginate
+
 log = logging.getLogger(__name__)
 
 # The LongEquity universe covers 2002-01 onward. Same backstop ACWI
@@ -48,26 +50,16 @@ def _company_ids_with_longequity_metrics(supabase: Client) -> set[int]:
     appeared in a LongEquity snapshot" — the universe_membership table
     is derived from this, not the other way around."""
     out: set[int] = set()
-    offset = 0
-    page = 1000
-    while True:
-        resp = (
-            supabase.table('metric_data')
-            .select('company_id')
-            .eq('source_code', 'longequity')
-            .range(offset, offset + page - 1)
-            .execute()
-        )
-        batch = resp.data or []
-        if not batch:
-            break
-        for r in batch:
-            cid = r.get('company_id')
-            if cid is not None:
-                out.add(int(cid))
-        if len(batch) < page:
-            break
-        offset += page
+    for r in paginate(
+        lambda lo, hi: supabase.table('metric_data')
+        .select('company_id')
+        .eq('source_code', 'longequity')
+        .range(lo, hi)
+        .execute()
+    ):
+        cid = r.get('company_id')
+        if cid is not None:
+            out.add(int(cid))
     return out
 
 
@@ -91,31 +83,21 @@ def _latest_sector_per_company(supabase: Client, cids: set[int]) -> dict[int, st
     uid = u.data[0]['universe_id']
     out: dict[int, str | None] = {cid: None for cid in cids}
     latest_month: dict[int, str] = {}
-    offset = 0
-    page = 1000
-    while True:
-        resp = (
-            supabase.table('universe_membership')
-            .select('company_id, target_month, sector')
-            .eq('universe_id', uid)
-            .range(offset, offset + page - 1)
-            .execute()
-        )
-        batch = resp.data or []
-        if not batch:
-            break
-        for r in batch:
-            cid = r.get('company_id')
-            if cid not in out:
-                continue
-            sec = r.get('sector')
-            m = r.get('target_month') or ''
-            if sec and (cid not in latest_month or m > latest_month[cid]):
-                latest_month[cid] = m
-                out[cid] = sec
-        if len(batch) < page:
-            break
-        offset += page
+    for r in paginate(
+        lambda lo, hi: supabase.table('universe_membership')
+        .select('company_id, target_month, sector')
+        .eq('universe_id', uid)
+        .range(lo, hi)
+        .execute()
+    ):
+        cid = r.get('company_id')
+        if cid not in out:
+            continue
+        sec = r.get('sector')
+        m = r.get('target_month') or ''
+        if sec and (cid not in latest_month or m > latest_month[cid]):
+            latest_month[cid] = m
+            out[cid] = sec
     return out
 
 
@@ -256,9 +238,7 @@ def rebuild_cumulative_longequity_universe(
             })
 
     written = 0
-    batch_size = 500
-    for i in range(0, len(payload), batch_size):
-        chunk = payload[i:i + batch_size]
+    for ci, chunk in enumerate(chunked(payload, 500)):
         try:
             resp = (
                 supabase.table('universe_membership')
@@ -269,7 +249,7 @@ def rebuild_cumulative_longequity_universe(
         except Exception as e:
             log.warning(
                 '[longequity_universe] insert batch %s failed: %s. Retrying with upsert.',
-                i // batch_size, e,
+                ci, e,
             )
             try:
                 supabase.table('universe_membership').upsert(

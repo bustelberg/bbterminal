@@ -10,7 +10,7 @@ from __future__ import annotations
 import pandas as pd
 from supabase import Client
 
-from deps import IN_CHUNK_SIZE
+from deps import IN_CHUNK_SIZE, chunked
 from ._helpers import _query_with_retry
 
 
@@ -129,8 +129,7 @@ def load_company_currency(
 
     result: dict[int, str | None] = {}
     chunk_size = IN_CHUNK_SIZE
-    for chunk_start in range(0, len(company_ids), chunk_size):
-        chunk = company_ids[chunk_start : chunk_start + chunk_size]
+    for ci, chunk in enumerate(chunked(company_ids, chunk_size)):
         resp = _query_with_retry(
             lambda c=chunk: (
                 supabase.table("company")
@@ -138,7 +137,7 @@ def load_company_currency(
                 .in_("company_id", c)
                 .execute()
             ),
-            description=f"load_company_currency chunk {chunk_start // chunk_size + 1}",
+            description=f"load_company_currency chunk {ci + 1}",
         )
         for row in (resp.data or []):
             exch = row.get("gurufocus_exchange") or {}

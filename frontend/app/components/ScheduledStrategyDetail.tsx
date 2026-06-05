@@ -27,15 +27,6 @@ type RunHistoryEntry = {
   ingest_run: IngestRun | null;
 };
 
-type BackfillState = {
-  status: 'running' | 'done' | 'error' | null;
-  progress_pct: number | null;
-  message: string | null;
-  error: string | null;
-  started_at: string | null;
-  finished_at: string | null;
-};
-
 export type StrategyRunHistory = {
   id: number;
   name: string;
@@ -48,7 +39,6 @@ export type StrategyRunHistory = {
   start_date: string | null;
   last_run_at: string | null;
   next_due_at: string | null;
-  backfill: BackfillState | null;
   /** When this scheduled strategy was created from a /backtest variant,
    * the variant's BacktestResult was persisted as a backtest_run before
    * the scheduled_strategy row was inserted. The detail panel fetches
@@ -114,15 +104,6 @@ export default function ScheduledStrategyDetail({
     void load();
   }, [load]);
 
-  // Poll while the backfill is running so the progress bar advances
-  // in near real-time. Stops as soon as status moves to 'done' / 'error'
-  // — or when `data` is cleared (e.g. on 404 from a deleted strategy).
-  useEffect(() => {
-    if (data?.backfill?.status !== 'running') return;
-    const id = setInterval(() => { void load(); }, 2000);
-    return () => clearInterval(id);
-  }, [data?.backfill?.status, load]);
-
   // Persist the configurable go-live date. Empty string clears it (falls
   // back to created_at). PATCHes then reloads so the marker re-derives
   // from the authoritative server value.
@@ -169,36 +150,6 @@ export default function ScheduledStrategyDetail({
         </button>
         {showConfig && data.config && <StrategyConfigDetail cfg={data.config} />}
       </div>
-
-      {/* Backfill progress bar — visible while the backfill is in
-          flight (status='running'), shows the engine's live message
-          + percentage. Hidden once the backfill lands or errors. */}
-      {data.backfill && data.backfill.status === 'running' && (
-        <div className="bg-accent-500/5 border border-accent-500/20 rounded-lg px-4 py-3 space-y-2">
-          <div className="flex items-center justify-between gap-3 text-xs">
-            <span className="text-accent-300 font-medium">Running backfill…</span>
-            <span className="text-accent-300/80 font-mono">{data.backfill.progress_pct ?? 0}%</span>
-          </div>
-          <div className="h-1 bg-accent-500/15 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-accent-500 transition-all duration-300"
-              style={{ width: `${data.backfill.progress_pct ?? 0}%` }}
-            />
-          </div>
-          {data.backfill.message && (
-            <div className="text-[11px] text-accent-200/70 font-mono truncate" title={data.backfill.message}>
-              {data.backfill.message}
-            </div>
-          )}
-        </div>
-      )}
-
-      {data.backfill && data.backfill.status === 'error' && (
-        <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-4 py-3 text-xs text-neg-300">
-          <div className="font-medium mb-0.5">Backfill failed</div>
-          <div className="font-mono whitespace-pre-wrap">{data.backfill.error ?? 'Unknown error'}</div>
-        </div>
-      )}
 
       {/* Go-live date editor. Drives the red dashed marker on the equity
           curve below. Defaults to the strategy's created_at when never set. */}
