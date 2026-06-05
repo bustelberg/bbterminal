@@ -14,9 +14,14 @@ from __future__ import annotations
 from .runlog import _Throttle, _update_run
 
 
-def _run_acquisition_phase(run_id: int) -> None:
+def _run_acquisition_phase(run_id: int, needed_keys: set[str] | None = None) -> None:
     """Phase 0 — pull fresh source data from upstream before Phase 1
     rebuilds universes against it.
+
+    `needed_keys` scopes the per-source probes to the templates the smart
+    pipeline is actually refreshing this tick (the ACWI XLS check only
+    runs when an enabled strategy uses ACWI). `None` probes every source
+    (full/bootstrap pipeline).
 
     Today this phase only carries the ACWI iShares XLS staleness
     check: the file is committed manually (iShares blocks automated
@@ -42,6 +47,10 @@ def _run_acquisition_phase(run_id: int) -> None:
             _update_run(run_id, current_message=f"[acquisition] {msg}")
 
     # ── ACWI XLS age check ────────────────────────────────────
+    # Only relevant when ACWI is being refreshed this tick.
+    if needed_keys is not None and "ACWI" not in needed_keys:
+        _update_run(run_id, current_message="[acquisition] no ACWI refresh needed — skipping XLS age check.")
+        return
     try:
         from index_universe.acwi.holdings import _FILE as _ACWI_XLS_PATH  # noqa: PLC0415
         import os as _os  # noqa: PLC0415

@@ -384,6 +384,40 @@ async def load_backtest(run_id: int):
     return row
 
 
+def load_backtest_result_sync(run_id: int) -> dict | None:
+    """Sync loader for a saved backtest's result blob (Storage `result_path`
+    or legacy in-row `result`), expanded to the verbose shape. Returns None
+    when the run/result is missing. Best-effort — swallows storage errors.
+
+    Used by the /schedule seed (which runs in a worker thread) to read a
+    strategy's source backtest's current picks. The async HTTP endpoint
+    `load_backtest` above is the request-path equivalent."""
+    try:
+        resp = (
+            supabase.table("backtest_run").select("*").eq("run_id", run_id).execute()
+        )
+        if not resp.data:
+            return None
+        row = resp.data[0]
+        path = row.get("result_path")
+        if path:
+            raw = supabase.storage.from_(_RESULT_BUCKET).download(path)
+            result = _decode_result_payload(raw)
+        else:
+            in_row = row.get("result")
+            result = in_row if isinstance(in_row, dict) else None
+        if isinstance(result, dict):
+            _expand_in_place(result)
+            return result
+        return None
+    except Exception as e:
+        log.warning(
+            "[backtest_crud] load_backtest_result_sync failed run_id=%s: %s: %s",
+            run_id, type(e).__name__, e,
+        )
+        return None
+
+
 @router.delete("/api/momentum/backtests/{run_id}")
 async def delete_backtest(run_id: int):
     """Delete a saved backtest run + its Storage object (if any). Storage

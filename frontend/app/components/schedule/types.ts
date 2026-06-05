@@ -14,7 +14,9 @@ export type IngestRun = {
   started_at: string;
   finished_at: string | null;
   status: 'running' | 'ok' | 'error';
-  current_phase: 'acquisition' | 'templates' | 'prune' | 'dedupe' | 'prices' | 'momentum' | 'done' | null;
+  current_phase: 'plan' | 'acquisition' | 'templates' | 'prune' | 'dedupe' | 'prices' | 'momentum' | 'done' | null;
+  /** Smart-pipeline derived plan (only on `smart_daily` runs). */
+  plan_summary?: SmartPlan | null;
   // Array — one entry per template-managed universe the pipeline
   // refreshed in phase 1. Each entry carries that template's per-run
   // diff (additions/removals/renames). Empty when no templates are
@@ -157,6 +159,89 @@ export type RunningJob = {
   current_phase: string | null;
   current_message: string | null;
   label: string;
+  plan_summary?: SmartPlan | null;
+  // Live price-refresh counters (present while the prices phase runs).
+  companies_processed?: number | null;
+  companies_total?: number | null;
+  prices_refreshed?: number | null;
+  volumes_refreshed?: number | null;
+  forbidden_count?: number | null;
+  error_count?: number | null;
+};
+
+/** One pooled held company from `GET /api/scheduled-strategies/held-companies`. */
+export type HeldCompany = {
+  company_id: number;
+  ticker: string | null;
+  exchange: string;
+  company_name: string | null;
+  sector: string | null;
+  latest_close_price_date: string | null;
+  held_by: Array<{
+    strategy_id: number;
+    strategy_name: string;
+    snapshot_kind: string | null;
+    as_of_date: string | null;
+    latest_price_date: string | null;
+    target_weight: number;
+  }>;
+};
+
+export type HeldCompaniesResponse = {
+  total_companies: number;
+  total_strategies: number;
+  freshness_summary?: {
+    latest_close_date: string | null;
+    /** Reference the fresh/stale split is measured against (last settled
+     * trading day). A holding is stale when its close is behind this. */
+    expected_close_date?: string | null;
+    fresh_count: number;
+    stale_count: number;
+    missing_count: number;
+  };
+  companies: HeldCompany[];
+};
+
+/** Per-strategy entry in a smart-pipeline plan (`SmartPlan.strategies`). */
+export type SmartPlanStrategy = {
+  strategy_id: number;
+  strategy_name: string;
+  frequency: string | null;
+  rebalance_weekday: number;
+  /** Raw index_universe/universe_label from the strategy's config. */
+  label: string | null;
+  resolved_template_key: string | null;
+  resolved_universe_id: number | null;
+  is_due: boolean;
+  due_reason: 'first_run' | 'due' | 'not_due' | 'unresolved' | string;
+};
+
+/** The derived plan a `smart_daily` tick produced, from
+ * `ingest_run.plan_summary` / `GET /api/schedule/plan`. */
+export type SmartPlan = {
+  as_of: string;
+  needed_template_keys: string[];
+  unresolved_labels: string[];
+  due_strategy_ids: number[];
+  strategies: SmartPlanStrategy[];
+  universes_refreshed: string[];
+  held_company_count: number | null;
+  universe_company_count: number | null;
+};
+
+/** `GET /api/schedule/plan` — the latest smart-pipeline run + its plan. */
+export type SchedulePlanResponse = {
+  run: {
+    run_id: number;
+    status: 'running' | 'ok' | 'error';
+    current_phase: string | null;
+    started_at: string;
+    finished_at: string | null;
+    error_summary: string | null;
+    plan_summary: SmartPlan | null;
+    triggered_by: 'auto' | 'manual' | string;
+  } | null;
+  plan: SmartPlan | null;
 };
 
 export type ScheduleUpcoming = {

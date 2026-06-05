@@ -261,7 +261,7 @@ export default function ProgressTimeline({
           </div>
         ) : (
           <details>
-            <summary className="text-fg-subtle text-xs cursor-pointer hover:text-fg-soft select-none">
+            <summary className="text-fg-subtle text-xs cursor-pointer hover:text-fg-soft">
               Verbose log ({log.length} events)
             </summary>
             <div className="mt-2">{inner}</div>

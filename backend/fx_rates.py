@@ -13,10 +13,11 @@ from __future__ import annotations
 import csv
 import io
 import logging
-import time
 from datetime import datetime
 
 import requests
+
+from common.retry import retry
 
 log = logging.getLogger(__name__)
 
@@ -29,23 +30,33 @@ def _ecb_get(url: str, *, timeout: int = 90, max_attempts: int = 3) -> requests.
     The ECB data API is free but flaky — read timeouts and 502/503 responses
     happen regularly, especially when several full-history fetches run in
     parallel (as `sync_fx_rates_to_db` does). 4xx responses are not retried
-    since they signal a malformed request.
+    since they signal a malformed request. Exponential backoff (2s, 4s) via
+    `common.retry.retry`.
     """
-    last_err: Exception | None = None
-    for attempt in range(1, max_attempts + 1):
-        try:
-            resp = requests.get(url, timeout=timeout)
-            if 500 <= resp.status_code < 600:
-                last_err = requests.HTTPError(f"{resp.status_code} from ECB", response=resp)
-                # fall through to retry
-            else:
-                resp.raise_for_status()
-                return resp
-        except (requests.ConnectionError, requests.Timeout) as e:
-            last_err = e
-        if attempt < max_attempts:
-            time.sleep(2 ** attempt)  # 2s, 4s
-    raise last_err  # type: ignore[misc]
+    def _once() -> requests.Response:
+        resp = requests.get(url, timeout=timeout)
+        if 500 <= resp.status_code < 600:
+            raise requests.HTTPError(f"{resp.status_code} from ECB", response=resp)
+        resp.raise_for_status()
+        return resp
+
+    def _retryable(e: BaseException) -> bool:
+        if isinstance(e, (requests.ConnectionError, requests.Timeout)):
+            return True
+        return (
+            isinstance(e, requests.HTTPError)
+            and e.response is not None
+            and 500 <= e.response.status_code < 600
+        )
+
+    return retry(
+        _once,
+        attempts=max_attempts,
+        base_delay=2,
+        backoff="exponential",
+        should_retry=_retryable,
+        description=f"ECB GET {url}",
+    )
 
 # All active ECB currencies (as of Apr 2026)
 ECB_CURRENCIES = [

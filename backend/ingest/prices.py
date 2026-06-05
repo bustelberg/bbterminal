@@ -8,7 +8,6 @@ import gzip
 import json
 import logging
 import os
-import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from urllib.error import HTTPError, URLError
@@ -17,6 +16,7 @@ from urllib.request import Request, urlopen
 
 from supabase import Client
 
+from common.retry import retry
 from ingest._gurufocus_http import (
     cf_get,
     current_preferred_target,
@@ -123,34 +123,20 @@ _BUCKET_READY = False
 
 
 _MAX_RETRIES = 3
-_RETRY_DELAY = 2  # seconds; multiplied by attempt number
-
-
-def _is_transient_error(e: BaseException) -> bool:
-    """Heuristic: catch socket timeouts and HTTP 5xx / bad-gateway errors
-    coming from Supabase Storage and metric_data calls."""
-    name = type(e).__name__.lower()
-    err = str(e).lower()
-    if "timeout" in name or "timeout" in err or "timed out" in err:
-        return True
-    if "502" in err or "503" in err or "504" in err or "bad gateway" in err:
-        return True
-    if "connection" in err and ("reset" in err or "aborted" in err):
-        return True
-    return False
+_RETRY_DELAY = 2  # seconds; multiplied by attempt number (linear backoff)
 
 
 def _retry_transient(fn, *, description: str, max_retries: int = _MAX_RETRIES):
-    """Run fn(), retrying on transient errors (timeouts, 5xx). Other
-    exceptions propagate immediately. Returns fn()'s value."""
-    for attempt in range(1, max_retries + 1):
-        try:
-            return fn()
-        except Exception as e:
-            if _is_transient_error(e) and attempt < max_retries:
-                time.sleep(_RETRY_DELAY * attempt)
-                continue
-            raise
+    """Run fn(), retrying on transient errors (timeouts, 5xx) with linear
+    backoff. Other exceptions propagate immediately. Returns fn()'s value.
+    Thin binding over `common.retry.retry`."""
+    return retry(
+        fn,
+        attempts=max_retries,
+        base_delay=_RETRY_DELAY,
+        backoff="linear",
+        description=description,
+    )
 
 
 def _ensure_bucket(supabase: Client) -> None:

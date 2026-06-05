@@ -370,7 +370,7 @@ export default function Fees() {
               )}
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              <label className="text-xs text-fg-muted inline-flex items-center gap-1.5 cursor-pointer select-none">
+              <label className="text-xs text-fg-muted inline-flex items-center gap-1.5 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={showOnlyUnsupported}

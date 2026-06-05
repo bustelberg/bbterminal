@@ -2130,6 +2130,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/schedule/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Schedule Plan
+         * @description The most recent smart-pipeline run's derived plan, for the /schedule
+         *     "Smart pipeline activity" section. Returns the plan the last (or
+         *     in-flight) `smart_daily` tick produced — which universes it needed,
+         *     which strategies were due, scoped company counts, and any unresolved
+         *     labels — plus the run's status so the UI can show last-result + errors
+         *     in one call. `plan` is null until the first smart tick runs.
+         */
+        get: operations["schedule_plan_api_schedule_plan_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/schedule/upcoming": {
         parameters: {
             query?: never;
@@ -3109,8 +3134,6 @@ export interface components {
             enabled?: boolean | null;
             /** Name */
             name?: string | null;
-            /** Rebalance Weekday */
-            rebalance_weekday?: number | null;
             /** Start Date */
             start_date?: string | null;
         };
@@ -6191,6 +6214,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    schedule_plan_api_schedule_plan_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

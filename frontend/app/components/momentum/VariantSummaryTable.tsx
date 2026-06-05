@@ -412,7 +412,7 @@ function SortableTh({
     <th className={`${alignClass} font-medium px-3 py-2 whitespace-nowrap`}>
       <span
         onClick={() => onSort(col)}
-        className={`cursor-pointer select-none hover:text-fg ${active ? 'text-accent-300' : ''}`}
+        className={`cursor-pointer hover:text-fg ${active ? 'text-accent-300' : ''}`}
         title={`Sort by ${label}`}
       >
         {label}

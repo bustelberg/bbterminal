@@ -637,7 +637,7 @@ function TimelinePanel({
             from anywhere on the panel — including the label column. */}
         <div
           ref={panelRef}
-          className="flex select-none"
+          className="flex"
           style={{ cursor: isDragging ? 'grabbing' : hasOverflow ? 'grab' : 'default' }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMove}
@@ -674,7 +674,7 @@ function TimelinePanel({
           </div>
           <div
             ref={scrollAreaRef}
-            className="overflow-x-auto flex-1 min-w-0"
+            className="overflow-x-auto flex-1 min-w-0 select-none"
           >
             <div style={{ width: innerWidth, position: 'relative' }}>
               {/* Year axis above the cell rows. */}

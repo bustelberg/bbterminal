@@ -78,6 +78,14 @@ async def list_companies():
     project setting hasn't been bumped to match local (10000 in
     `supabase/config.toml`). See `project_postgrest_max_rows_trap`."""
     def _query():
+        # Fast path: one direct-Postgres COPY when SUPABASE_DB_URL is set.
+        # Self-healing — returns None (→ PostgREST pager below) when
+        # unconfigured or on any error, so behaviour is unchanged without it.
+        from momentum.data._pg import load_companies_via_copy  # noqa: PLC0415
+        fast = load_companies_via_copy()
+        if fast is not None:
+            return fast
+
         rows: list[dict] = []
         page = 1000
         offset = 0
@@ -94,7 +102,10 @@ async def list_companies():
                     "gurufocus_exchange:gurufocus_exchange("
                     "exchange_code,country:country(country_name))"
                 )
+                # `company_id` tiebreaker so range() pagination stays stable
+                # across pages even when company_name has duplicates.
                 .order("company_name")
+                .order("company_id")
                 .range(offset, offset + page - 1)
                 .execute()
             )

@@ -21,7 +21,6 @@ Tuesday tick — so the UI can render a clean "next: Tue 2026-06-02
 from __future__ import annotations
 
 import asyncio
-import calendar
 import json as _json
 import logging
 import threading
@@ -109,47 +108,99 @@ class ScheduledStrategyPatch(BaseModel):
     # non-null start_date wins if both are sent.
     start_date: date | None = None
     clear_start_date: bool | None = None
-    # Edit the rebalance weekday (Mon=0..Sun=6) in-place on the stored
-    # config blob. This is the one config field we allow patching on the
-    # schedule — it's a pure scheduling knob (which weekday of the period
-    # the strategy rebalances on) and doesn't change selection identity,
-    # so it's safe to tweak without a delete + re-add. None = leave as-is.
-    rebalance_weekday: int | None = None
+    # NOTE: `rebalance_weekday` is intentionally NOT patchable. It's baked
+    # into the strategy's `config` at schedule time (from the source
+    # backtest variant) and defines the rebalance grid the smart pipeline
+    # keys off — changing it in place would desync `next_due_at` from the
+    # snapshots already produced. Re-create the strategy to change it.
 
 
 # ─── Frequency math ───────────────────────────────────────────────
+#
+# The smart daily pipeline fires every day at 02:00 UTC and rebalances a
+# strategy when `next_due_at <= now`. A strategy's rebalance lands on the
+# first occurrence of its baked `rebalance_weekday` (Mon=0..Sun=6) in its
+# period — e.g. monthly + weekday=0 → the first Monday of the month — and
+# decides on the prior trading day's close (Friday for a Monday, since the
+# Monday 02:00 UTC tick already has Friday's settled close). The grid is
+# anchored to Jan 2000 so bi-/quarterly periods land on the same calendar
+# months the backtest engine uses (`momentum/backtest/dates.py`); the two
+# pure-date helpers below mirror that module so importing it (and pandas)
+# at request time isn't needed.
+
+_ANCHOR_YEAR = 2000
+_ANCHOR_MONTH = 1
+_STRIDE_BY_FREQUENCY = {"monthly": 1, "bimonthly": 2, "quarterly": 3}
 
 
-def _add_months(d: date, months: int) -> date:
-    y = d.year + (d.month - 1 + months) // 12
-    m = (d.month - 1 + months) % 12 + 1
-    last_day = calendar.monthrange(y, m)[1]
-    return d.replace(year=y, month=m, day=min(d.day, last_day))
+def _first_weekday_on_or_after(d: date, weekday: int = 0) -> date:
+    """First date on-or-after `d` falling on `weekday` (Mon=0..Sun=6).
+    Mirror of `momentum.backtest.dates._first_weekday_on_or_after`."""
+    return d + timedelta(days=(weekday - d.weekday()) % 7)
 
 
-def _first_monday_on_or_after(d: date) -> date:
-    """Mon=0, Sun=6 → days to add to land on Monday."""
-    return d + timedelta(days=(0 - d.weekday()) % 7)
+def _months_since_anchor(d: date) -> int:
+    return (d.year - _ANCHOR_YEAR) * 12 + (d.month - _ANCHOR_MONTH)
 
 
-def compute_next_due_at(frequency: str, just_ran_at_utc: datetime) -> datetime:
-    """Given the strategy just ran at a pipeline tick (Tue 02:00 UTC),
-    return when the next eligible pipeline tick will be per frequency.
+def _next_month_1st(d: date) -> date:
+    return date(d.year + 1, 1, 1) if d.month == 12 else date(d.year, d.month + 1, 1)
 
-    - daily/weekly: the next Tuesday (just_ran + 7 days)
-    - monthly/bimonthly/quarterly: the Tuesday following the first
-      Monday on-or-after the 1st of the next/2nd/3rd month."""
+
+def _next_anchored_rebalance_date(after: date, stride_months: int, weekday: int) -> date:
+    """First first-`weekday`-of-an-anchored-month date strictly after
+    `after`. Walks calendar months from `after`'s month forward, picking
+    months whose offset from the Jan-2000 anchor is a multiple of
+    `stride_months` (stride 1 = every month, 2 = bimonthly, 3 = quarterly)
+    and the first `weekday` within them, until that date is > `after`."""
+    cursor = date(after.year, after.month, 1)
+    for _ in range(64):  # safety bound: 64 months covers any stride
+        if _months_since_anchor(cursor) % stride_months == 0:
+            candidate = _first_weekday_on_or_after(cursor, weekday)
+            if candidate > after:
+                return candidate
+        cursor = _next_month_1st(cursor)
+    # Unreachable for valid strides; fall back to a month out.
+    return _first_weekday_on_or_after(_next_month_1st(after), weekday)
+
+
+def _expected_latest_trading_day(today: date) -> date:
+    """Most recent weekday strictly before `today` — the last trading day
+    whose close should have settled and be fetchable (the daily pipeline runs
+    at 02:00 UTC and captures the prior day's close). Used as the freshness
+    reference for held-company prices. A market-holiday calendar isn't
+    available, so weekends are skipped but holidays aren't — that errs toward
+    'stale / go-fetch', which is the safe side."""
+    d = today - timedelta(days=1)
+    while d.weekday() >= 5:  # 5 = Sat, 6 = Sun
+        d -= timedelta(days=1)
+    return d
+
+
+def compute_next_due_at(
+    frequency: str, just_ran_at_utc: datetime, rebalance_weekday: int = 0,
+) -> datetime:
+    """Given a strategy just rebalanced at `just_ran_at_utc`, return the
+    next rebalance tick (the rebalance day's 02:00 UTC) per `frequency` and
+    the strategy's baked `rebalance_weekday`.
+
+    - daily: the next calendar day (the engine's daily grid ignores weekday).
+    - weekly: the next occurrence of `rebalance_weekday` strictly after the
+      run date.
+    - monthly/bimonthly/quarterly: the first `rebalance_weekday` of the next
+      eligible anchored month (Jan-2000 anchored stride 1/2/3)."""
     just_ran_date = just_ran_at_utc.date()
-    if frequency in ("daily", "weekly"):
-        next_tue = just_ran_date + timedelta(days=7)
+    weekday = rebalance_weekday if 0 <= rebalance_weekday <= 6 else 0
+    if frequency == "daily":
+        next_date = just_ran_date + timedelta(days=1)
+    elif frequency == "weekly":
+        # Next `weekday` strictly after the run date.
+        ahead = (weekday - just_ran_date.weekday()) % 7
+        next_date = just_ran_date + timedelta(days=ahead or 7)
     else:
-        months_step = {"monthly": 1, "bimonthly": 2, "quarterly": 3}[frequency]
-        target_month_first = _add_months(just_ran_date.replace(day=1), months_step)
-        first_monday = _first_monday_on_or_after(target_month_first)
-        # Pipeline tick that captures that Monday's close fires the next
-        # day (Tuesday 02:00 UTC).
-        next_tue = first_monday + timedelta(days=1)
-    return datetime.combine(next_tue, time(2, 0), tzinfo=timezone.utc)
+        stride = _STRIDE_BY_FREQUENCY.get(frequency, 1)
+        next_date = _next_anchored_rebalance_date(just_ran_date, stride, weekday)
+    return datetime.combine(next_date, time(2, 0), tzinfo=timezone.utc)
 
 
 def compute_and_save_price_update(
@@ -644,17 +695,81 @@ def _latest_exit_date(rec: dict) -> str | None:
     return out
 
 
-def _initial_next_due_at(reference_now: datetime | None = None) -> datetime:
-    """When a strategy is freshly added (no last run yet), it's due at
-    the next upcoming Tuesday 02:00 UTC pipeline tick. Returns that
-    moment; the pipeline then picks it up the next time it fires."""
+def _initial_next_due_at(
+    frequency: str,
+    rebalance_weekday: int = 0,
+    reference_now: datetime | None = None,
+) -> datetime:
+    """First REBALANCE for a freshly added strategy: the next date on its
+    (frequency, rebalance_weekday) grid (e.g. added June 5 → first Monday of
+    July). The strategy's CURRENT holdings come from its saved backtest's
+    last period (seeded into a snapshot on add — see
+    `_seed_snapshot_from_backtest`), so the daily refresh tracks them right
+    away; the universe is only repriced + the strategy re-selected at this
+    next grid rebalance."""
     now = reference_now or datetime.now(timezone.utc)
-    # Tuesday is weekday 1; days to next Tuesday on-or-after today.
-    days_ahead = (1 - now.weekday()) % 7
-    if days_ahead == 0 and now.time() >= time(2, 0):
-        days_ahead = 7  # Already past today's 02:00 tick → next week
-    target = (now + timedelta(days=days_ahead)).date()
-    return datetime.combine(target, time(2, 0), tzinfo=timezone.utc)
+    return compute_next_due_at(frequency, now, rebalance_weekday)
+
+
+def _seed_snapshot_from_backtest(
+    strategy_id: int, backtest_run_id: int | None, name: str, config: dict,
+) -> int | None:
+    """Seed the strategy's first `current_picks_snapshot` from its saved
+    backtest's most-recent period — so it has live holdings the daily price
+    refresh can track IMMEDIATELY, with no off-cycle rebalance (no universe
+    reprice / template scrape). The holdings ARE the backtest's current
+    picks. Then re-price them against the latest DB closes so the seed
+    reflects today's data, not the backtest's end date.
+
+    Returns the seeded snapshot_id (or None when there's nothing to seed:
+    no backtest run, empty result, or no holdings)."""
+    from routers.momentum.backtest_crud import load_backtest_result_sync  # noqa: PLC0415
+
+    if not backtest_run_id:
+        return None
+    result = load_backtest_result_sync(backtest_run_id)
+    monthly = (result or {}).get("monthly_records") or []
+    if not monthly:
+        return None
+    last = monthly[-1]
+    holdings = last.get("holdings") or []
+    if not holdings:
+        return None
+
+    row = {
+        "triggered_by": "auto",
+        # The backtest's last period is the current open period; its date is
+        # the period's first-<weekday> (e.g. 2026-06-01). Anchor the snapshot
+        # there so it reads as the current-period rebalance.
+        "as_of_date": _coerce_as_of_date(last.get("as_of_date") or last.get("date")),
+        "latest_price_date": _latest_exit_date(last),
+        "config": config,
+        "holdings": holdings,
+        "daily_picks": [],
+        "strategy_hash": None,
+        "name": name,
+        "kind": "rebalance",
+        # Seeded from the backtest, not a live pipeline rebalance.
+        "is_backfill": True,
+        "scheduled_strategy_id": strategy_id,
+        "period_return_pct": last.get("portfolio_return_pct"),
+    }
+    ins = supabase.table("current_picks_snapshot").insert(row).execute()
+    if not ins.data:
+        return None
+    seeded_id = int(ins.data[0]["snapshot_id"])
+    # Re-price against the latest available closes so 'since go-live' starts
+    # from current data. Best-effort — the daily refresh would do it anyway.
+    try:
+        compute_and_save_price_update(strategy_id, ingest_run_id=None, is_backfill=True)
+    except Exception as e:
+        _log.warning(
+            "[seed] strategy=%s post-seed price_update failed: %s: %s",
+            strategy_id, type(e).__name__, e,
+        )
+    _log.info("[seed] strategy=%s seeded snapshot=%s from backtest_run=%s (%s holdings)",
+              strategy_id, seeded_id, backtest_run_id, len(holdings))
+    return seeded_id
 
 
 # ─── Hydration helper ─────────────────────────────────────────────
@@ -1043,58 +1158,51 @@ async def list_held_companies():
             if r.get("company_name"):
                 pooled[cid]["company_name"] = r["company_name"]
 
-        # Step 5 — freshness lookup. For each held company, fetch its
-        # actual latest `close_price` target_date from `metric_data`
-        # via the `company_latest_close_price_dates` RPC (one row per
-        # company, NULL when no close_price data exists). Paginated to
-        # bypass the cloud project's PostgREST max-rows cap — see
-        # `project_postgrest_max_rows_trap`.
+        # Step 5 — freshness lookup. Latest `close_price` target_date per
+        # held company. The held set is tiny (~24 names), so query just those
+        # ids via a fast indexed GROUP BY (direct-Postgres COPY) instead of
+        # the full-table `company_latest_close_price_dates` RPC, which
+        # aggregates ALL of metric_data and times out.
         latest_close_by_cid: dict[int, str | None] = {}
         try:
-            page = 1000
-            offset = 0
-            for _attempt in range(20):
-                latest_resp = (
-                    supabase.rpc("company_latest_close_price_dates", {})
-                    .range(offset, offset + page - 1)
-                    .execute()
-                )
-                batch = latest_resp.data or []
-                if not batch:
-                    break
-                added = 0
-                for row in batch:
-                    cid_raw = row.get("company_id")
-                    if cid_raw is None:
-                        continue
-                    cid = int(cid_raw)
-                    if cid in latest_close_by_cid:
-                        continue
-                    latest_close_by_cid[cid] = row.get("latest_target_date")
-                    added += 1
-                if added == 0 or len(batch) < page:
-                    break
-                offset += page
+            from momentum.data._pg import load_latest_close_dates_via_copy  # noqa: PLC0415
+            fast = load_latest_close_dates_via_copy(cids)
+            if fast is not None:
+                latest_close_by_cid = dict(fast)
+            else:
+                # Fallback (no SUPABASE_DB_URL): per-company latest close,
+                # one cheap indexed query each (held set is small).
+                for cid in cids:
+                    r = (
+                        supabase.table("metric_data")
+                        .select("target_date")
+                        .eq("metric_code", "close_price")
+                        .eq("company_id", cid)
+                        .order("target_date", desc=True)
+                        .limit(1)
+                        .execute()
+                    )
+                    if r.data:
+                        latest_close_by_cid[cid] = r.data[0]["target_date"]
         except Exception:
-            # If the RPC is unavailable (migration not applied) the
-            # endpoint still returns the holdings — freshness data
+            # On any error the endpoint still returns the holdings — freshness
             # just renders as "unknown" in the UI.
             latest_close_by_cid = {}
 
         for cid, bucket in pooled.items():
             bucket["latest_close_price_date"] = latest_close_by_cid.get(cid)
 
-        # Compute the freshness summary. `latest_close_date` is the
-        # max across the held set — i.e. "the freshest close-price
-        # observation that exists for any company we currently hold".
-        # `fresh_count` is "how many held companies actually have data
-        # through this date"; `stale_count` is the held companies that
-        # don't (their last close is older). `missing_count` is the
-        # subset whose `latest_close_price_date` is None entirely (no
-        # close_price data ever — usually a newly added ticker that
-        # hasn't been pulled yet).
+        # Compute the freshness summary against the EXPECTED latest trading
+        # day — NOT the held set's own max (which would call everything
+        # "fresh" the moment they all share the same stale date). The
+        # expected day is the most recent weekday strictly before today (the
+        # last settled close the daily pipeline could have fetched). A held
+        # company is fresh when its latest close ≥ that day, stale when it's
+        # behind (new closes to fetch), missing when it has no close at all.
+        # `latest_close_date` reports the data we actually HAVE (held max).
         dates = [v for v in latest_close_by_cid.values() if v]
         latest_close_date = max(dates) if dates else None
+        expected_iso = _expected_latest_trading_day(date.today()).isoformat()
         fresh_count = 0
         stale_count = 0
         missing_count = 0
@@ -1102,7 +1210,7 @@ async def list_held_companies():
             d = pooled[cid].get("latest_close_price_date")
             if d is None:
                 missing_count += 1
-            elif d == latest_close_date:
+            elif str(d)[:10] >= expected_iso:
                 fresh_count += 1
             else:
                 stale_count += 1
@@ -1120,6 +1228,8 @@ async def list_held_companies():
             "total_strategies": len(latest_by_sched),
             "freshness_summary": {
                 "latest_close_date": latest_close_date,
+                # The reference the fresh/stale split is measured against.
+                "expected_close_date": expected_iso,
                 "fresh_count": fresh_count,
                 "stale_count": stale_count,
                 "missing_count": missing_count,
@@ -1160,7 +1270,8 @@ async def add_scheduled_strategy(body: ScheduledStrategyCreate):
         raise HTTPException(400, "config must be a non-empty object")
 
     def _insert() -> dict:
-        next_due = _initial_next_due_at().isoformat()
+        weekday = int((body.config or {}).get("rebalance_weekday", 0) or 0)
+        next_due = _initial_next_due_at(body.frequency, weekday).isoformat()
         insert_row: dict = {
             "name": body.name.strip(),
             "frequency": body.frequency,
@@ -1182,9 +1293,22 @@ async def add_scheduled_strategy(body: ScheduledStrategyCreate):
         if not resp.data:
             raise HTTPException(500, "Insert returned no row")
         new_row = resp.data[0]
-        # No backfill — the saved backtest_run IS the pre-schedule
-        # history. Live snapshots accumulate from the next pipeline
-        # tick onwards.
+        # Seed the current holdings from the saved backtest's last period so
+        # the daily price refresh can track them immediately — no off-cycle
+        # rebalance needed. The next universe reprice + re-selection happens
+        # at `next_due_at` (the next grid rebalance). Best-effort: a seed
+        # failure leaves the strategy with backtest-only history until its
+        # first live rebalance, which is the prior behaviour.
+        try:
+            _seed_snapshot_from_backtest(
+                int(new_row["id"]), body.backtest_run_id,
+                body.name.strip(), body.config,
+            )
+        except Exception as e:
+            _log.warning(
+                "[add] strategy=%s seed failed: %s: %s",
+                new_row.get("id"), type(e).__name__, e,
+            )
         return _hydrate([new_row])[0]
     return await asyncio.to_thread(_insert)
 
@@ -1207,33 +1331,16 @@ async def patch_scheduled_strategy(strategy_id: int, body: ScheduledStrategyPatc
         update_dict["start_date"] = None
     elif body.start_date is not None:
         update_dict["start_date"] = body.start_date.isoformat()
-    if body.rebalance_weekday is not None and not (0 <= body.rebalance_weekday <= 6):
-        raise HTTPException(400, "rebalance_weekday must be 0 (Mon) … 6 (Sun)")
     # `updated_at` is always present — require at least one real field so a
     # no-op PATCH is a clear 400 rather than a silent timestamp bump.
-    if len(update_dict) == 1 and body.rebalance_weekday is None:
+    if len(update_dict) == 1:
         raise HTTPException(
             400,
             "Nothing to update (pass `enabled`, `name`, `start_date`, "
-            "`clear_start_date`, or `rebalance_weekday`).",
+            "or `clear_start_date`).",
         )
 
     def _update() -> dict:
-        # Merge rebalance_weekday into the stored config blob (read-modify-
-        # write — config is JSONB and we only touch this one key).
-        if body.rebalance_weekday is not None:
-            cur = (
-                supabase.table("scheduled_strategy")
-                .select("config")
-                .eq("id", strategy_id)
-                .limit(1)
-                .execute()
-            )
-            if not cur.data:
-                raise HTTPException(404, f"Scheduled strategy #{strategy_id} not found")
-            cfg = dict(cur.data[0].get("config") or {})
-            cfg["rebalance_weekday"] = body.rebalance_weekday
-            update_dict["config"] = cfg
         resp = (
             supabase.table("scheduled_strategy")
             .update(update_dict)

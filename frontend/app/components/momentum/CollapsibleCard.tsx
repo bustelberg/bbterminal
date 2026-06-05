@@ -41,7 +41,7 @@ export default function CollapsibleCard({
         role="button"
         tabIndex={0}
         aria-expanded={!collapsed}
-        className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-overlay/[0.02] transition-colors cursor-pointer select-none"
+        className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-overlay/[0.02] transition-colors cursor-pointer"
         onClick={toggle}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {

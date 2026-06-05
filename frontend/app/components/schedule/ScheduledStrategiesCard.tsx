@@ -3,8 +3,7 @@
 import LoadingDots from '../LoadingDots';
 import ScheduledStrategyDetail from '../ScheduledStrategyDetail';
 import { fmtTimestamp } from '../../../lib/format';
-import { WEEKDAY_LABELS } from '../momentum/utils';
-import { strategySummary } from './utils';
+import { strategyChips, chipStyle } from './utils';
 import type { UseScheduledStrategiesResult } from './useScheduledStrategies';
 
 /** "Scheduled strategies" card — the expandable list of saved strategies
@@ -20,7 +19,6 @@ export default function ScheduledStrategiesCard({ sched }: { sched: UseScheduled
     historyCache,
     cacheRunHistory,
     loadStrategies,
-    toggleStrategy,
     renameStrategy,
     removeStrategy,
     removeAllStrategies,
@@ -41,13 +39,6 @@ export default function ScheduledStrategiesCard({ sched }: { sched: UseScheduled
               Remove all
             </button>
           )}
-          <a
-            href="/backtest"
-            className="text-xs px-3 py-1.5 rounded-lg bg-accent-600 hover:bg-accent-500 text-fg-strong transition-colors"
-            title="Strategies can only be scheduled from a backtested variant — run a sweep on /backtest, then use the '+ Schedule' button on any OK variant row."
-          >
-            Add via /backtest →
-          </a>
         </div>
       </div>
 
@@ -71,35 +62,32 @@ export default function ScheduledStrategiesCard({ sched }: { sched: UseScheduled
                   >
                     <span className="text-fg-subtle font-mono text-xs w-4 shrink-0">{isExpanded ? '▾' : '▸'}</span>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`text-sm font-medium truncate ${s.enabled ? 'text-fg-strong' : 'text-fg-subtle'}`}>
-                          {s.name || `Strategy #${s.id}`}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className={`text-sm font-semibold ${s.enabled ? 'text-fg-strong' : 'text-fg-subtle'}`}>
+                          {s.name || 'MomentumTopSelectie'}
                         </span>
-                        {s.frequency && (
-                          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-accent-500/10 text-accent-300 border-accent-500/30">
-                            {s.frequency}
-                          </span>
-                        )}
                         {!s.enabled && (
                           <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-neutral-500/10 text-fg-muted border-neutral-500/30">
                             paused
                           </span>
                         )}
+                        {/* Property chips — each colour encodes which
+                            property it is (frequency, direction, universe,
+                            grouping, sizing, …). Derived from the config. */}
+                        {strategyChips(s.config, s.frequency).map((c) => (
+                          <span
+                            key={c.text}
+                            className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium"
+                            style={chipStyle(c.hue)}
+                          >
+                            {c.text}
+                          </span>
+                        ))}
                       </div>
-                      <div className="text-xs text-fg-subtle mt-0.5 font-mono">
-                        {strategySummary(s.config)}
-                        {s.last_run_at ? (
-                          <span className="text-fg-faint">
-                            {' · '}last run {fmtTimestamp(s.last_run_at)}
-                          </span>
-                        ) : (
-                          <span className="text-fg-faint">{' · '}not run yet</span>
-                        )}
-                        {s.next_due_at && (
-                          <span className="text-fg-faint">
-                            {' · '}next {fmtTimestamp(s.next_due_at)}
-                          </span>
-                        )}
+                      <div className="text-xs text-fg-faint mt-1 font-mono">
+                        {s.next_due_at
+                          ? <>next rebalance {fmtTimestamp(s.next_due_at)}</>
+                          : <span className="text-fg-subtle">not scheduled</span>}
                       </div>
                       {s.last_snapshot && (
                         <div className="text-xs text-fg-subtle mt-0.5 font-mono flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -141,26 +129,6 @@ export default function ScheduledStrategiesCard({ sched }: { sched: UseScheduled
                       )}
                     </div>
                   </button>
-                  {/* Rebalance day is fixed at schedule time from the
-                      variant — read-only here (no post-hoc edits). */}
-                  <span
-                    className="flex items-center gap-1.5 text-xs text-fg-muted shrink-0"
-                    title="Weekday each rebalance period enters on (first <day> of the period). Set from the scheduled variant — not editable."
-                  >
-                    <span className="text-fg-subtle">rebal</span>
-                    <span className="text-fg-soft font-mono">
-                      {WEEKDAY_LABELS[(s.config.rebalance_weekday as number | undefined) ?? 0]?.slice(0, 3) ?? 'Mon'}
-                    </span>
-                  </span>
-                  <label className="flex items-center gap-1.5 text-xs text-fg-muted cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={s.enabled}
-                      onChange={(e) => void toggleStrategy(s.id, e.target.checked)}
-                      className="accent-accent-500"
-                    />
-                    enabled
-                  </label>
                   <button
                     type="button"
                     onClick={() => void renameStrategy(s.id, s.name || `Strategy #${s.id}`)}

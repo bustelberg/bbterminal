@@ -490,7 +490,7 @@ export default function MomentumBacktester() {
               variantsRun={variantsRun}
             />
             <label
-              className="flex items-center gap-2 cursor-pointer select-none self-center pt-4"
+              className="flex items-center gap-2 cursor-pointer self-center pt-4"
               title="Bypass the replay cache and recompute the backtest from scratch."
             >
               <input

@@ -33,10 +33,11 @@ a backup path in case the API shape ever changes.
 from __future__ import annotations
 
 import logging
-import time
 from typing import Callable
 
 import requests
+
+from common.retry import retry
 
 _log = logging.getLogger(__name__)
 
@@ -98,37 +99,33 @@ def _empty_filter_body(offset: int) -> dict:
 
 
 def _post_with_retry(url: str, body: dict, retries: int = 3) -> dict | list:
-    """POST with simple exponential-backoff retry on 5xx + network
-    errors. Raises on 401 with an actionable message (token rotation)
-    and on non-2xx after the retry budget is exhausted."""
-    last_exc: Exception | None = None
-    for attempt in range(retries):
-        try:
-            resp = requests.post(
-                url, json=body, headers=_headers(), timeout=_REQUEST_TIMEOUT,
+    """POST with exponential-backoff retry (1s, 2s) on 5xx + network errors.
+    A 401 raises immediately with an actionable token-rotation message (not
+    retried). Thin binding over `common.retry.retry`."""
+    def _once() -> dict | list:
+        resp = requests.post(
+            url, json=body, headers=_headers(), timeout=_REQUEST_TIMEOUT,
+        )
+        if resp.status_code == 401:
+            # RuntimeError (not a RequestException) → not retried, propagates.
+            raise RuntimeError(
+                f"Leonteq returned 401 from {url}. The hardcoded Bearer token "
+                f"has likely expired or been rotated; capture a fresh one from "
+                f"DevTools (Network → any /website-api/* request → request "
+                f"headers → 'authorization') and update _BEARER_TOKEN in "
+                f"backend/leonteq/api_client.py."
             )
-            if resp.status_code == 401:
-                raise RuntimeError(
-                    f"Leonteq returned 401 from {url}. The hardcoded Bearer token "
-                    f"has likely expired or been rotated; capture a fresh one from "
-                    f"DevTools (Network → any /website-api/* request → request "
-                    f"headers → 'authorization') and update _BEARER_TOKEN in "
-                    f"backend/leonteq/api_client.py."
-                )
-            if resp.status_code >= 500:
-                last_exc = RuntimeError(
-                    f"Leonteq {url} → HTTP {resp.status_code}: {resp.text[:200]}"
-                )
-                time.sleep(2 ** attempt)
-                continue
-            resp.raise_for_status()
-            return resp.json()
-        except requests.RequestException as e:
-            last_exc = e
-            time.sleep(2 ** attempt)
-    if last_exc:
-        raise last_exc
-    raise RuntimeError(f"Leonteq {url} failed after {retries} retries (no exception)")
+        resp.raise_for_status()
+        return resp.json()
+
+    return retry(
+        _once,
+        attempts=retries,
+        base_delay=1,
+        backoff="exponential",
+        should_retry=lambda e: isinstance(e, requests.RequestException),
+        description=f"Leonteq POST {url}",
+    )
 
 
 def fetch_all_underlyings(

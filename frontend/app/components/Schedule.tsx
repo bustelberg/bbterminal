@@ -1,23 +1,19 @@
 'use client';
 
-import DailyMtdRefreshCard from './DailyMtdRefreshCard';
-import PipelineActivityCard from './schedule/PipelineActivityCard';
-import TemplateUniversesCard from './schedule/TemplateUniversesCard';
+import SmartPipelineActivity from './schedule/SmartPipelineActivity';
 import ScheduledStrategiesCard from './schedule/ScheduledStrategiesCard';
 import { useScheduledStrategies } from './schedule/useScheduledStrategies';
 
-// The pipeline still fires once a week (Tuesday 02:00 UTC) via the
-// in-process APScheduler in `backend/scheduler.py`. The per-job cards
-// and the global "Recent runs" view that used to live in this page
-// have been removed — each scheduled strategy's run history is shown
-// in its own expandable detail view (see ScheduledStrategyDetail).
+// Two sections only:
+//   1. Scheduled strategies — the strategies the user has pinned.
+//   2. Smart pipeline activity — the single dependency-driven automation
+//      that derives, from those strategies, exactly what's needed
+//      (which universe to refresh, which companies to price, which
+//      strategies are due to rebalance) and runs only that, observably.
+//      It subsumes the old per-job / template-universe / daily-MTD cards.
 //
-// This component was decomposed (2026-06-04) into `app/components/schedule/`:
-// data shapes live in `types.ts`, the pipeline-timeline derivation in
-// `timeline.ts`, display helpers in `utils.ts`, the strategies-list state +
-// mutations in `useScheduledStrategies.ts`, and each section card in its own
-// file. When adding to /schedule, add/extend a hook or section card here —
-// don't regrow this orchestrator.
+// When adding to /schedule, add/extend a hook or section component under
+// `app/components/schedule/` — don't regrow this orchestrator.
 
 export default function Schedule() {
   const sched = useScheduledStrategies();
@@ -29,7 +25,7 @@ export default function Schedule() {
         <div>
           <h1 className="text-xl font-semibold text-fg-strong">Schedule</h1>
           <p className="text-sm text-fg-subtle mt-1">
-            The automated pipeline and the strategies it keeps up to date.
+            Your scheduled strategies and the automation that keeps just them up to date.
           </p>
         </div>
         {latestPriceDate && (
@@ -47,28 +43,14 @@ export default function Schedule() {
           </div>
         )}
 
-        {/* Pipeline activity — what's running right now + what fires next.
-            Polls the live scheduler so the user has a single at-a-glance
-            oversight strip: running jobs (spinner + live phase) on top,
-            then every scheduled job in chronological fire order. */}
-        <PipelineActivityCard />
-
-        {/* Template universes — visibility into the canonical universes
-            (ACWI, LEONTEQ, ACWI_LEONTEQ, ...) and whether any of them
-            need an initial refresh in this env. Placed above Misc jobs
-            because "is this environment fully set up" is the question a
-            user asks first when something looks wrong on /companies or
-            /backtest. */}
-        <TemplateUniversesCard />
-
-        {/* Misc jobs — recurring side-tasks distinct from the
-            per-strategy momentum compute. Today this hosts the daily
-            held-companies price refresh; designed as a section so future
-            misc jobs slot in alongside without churning the layout. */}
-        <DailyMtdRefreshCard />
-
-        {/* Scheduled strategies */}
+        {/* Scheduled strategies — the user's pinned strategies. */}
         <ScheduledStrategiesCard sched={sched} />
+
+        {/* Smart pipeline activity — the automation that supports them:
+            what's running now, when the next daily tick fires, and the
+            derived plan (which universes it refreshes, which strategies
+            are due, scoped counts, errors). */}
+        <SmartPipelineActivity />
       </div>
     </div>
   );

@@ -1,16 +1,15 @@
 """Phase 4 — momentum compute (current-picks snapshots).
 
-Two entry points sharing the per-strategy isolation pattern (a single
-failing strategy never aborts the phase; each result lands as an entry
-in `ingest_run.momentum_summary` with a full traceback on failure):
+Per-strategy isolation pattern: a single failing strategy never aborts the
+phase; each result lands as an entry in `ingest_run.momentum_summary` with a
+full traceback on failure.
 
-  _run_momentum_phase     the weekly/full pipeline's Phase 4. Per enabled
-                          `scheduled_strategy`, either a fresh rebalance
-                          (when `next_due_at` has arrived) or a price
-                          update on the last rebalance's holdings.
-  _run_daily_mtd_phase    the daily MTD refresh's momentum phase. Always
-                          a price_update insert, de-duplicated against an
-                          existing snapshot for the same open period.
+  _run_momentum_phase        per enabled `scheduled_strategy`, either a fresh
+                             rebalance (when due) or a price update on the
+                             last rebalance's holdings.
+  _run_smart_momentum_phase  thin wrapper that drives `_run_momentum_phase`
+                             with the smart plan's per-strategy due decision
+                             + same-period dedup on the price updates.
 
 Heavy imports (pandas-pulling momentum stream, BacktestRequest) are kept
 function-local so importing this module stays cheap at boot.
@@ -27,7 +26,12 @@ from deps import supabase
 from .runlog import _Throttle, _now_utc_iso, _update_run
 
 
-def _run_momentum_phase(run_id: int) -> None:
+def _run_momentum_phase(
+    run_id: int,
+    *,
+    due_override: dict[int, bool] | None = None,
+    dedupe_price_updates: bool = False,
+) -> None:
     """Phase 3 — compute current-portfolio holdings for every enabled row
     in `scheduled_strategy`. Each strategy gets its own
     `current_picks_snapshot` tagged with `ingest_run_id` +
@@ -38,8 +42,20 @@ def _run_momentum_phase(run_id: int) -> None:
     payload) and `frequency`. The phase only computes strategies whose
     `next_due_at` is in the past (or NULL — fresh entries). After a
     successful compute the row's `last_run_at` is set to now and
-    `next_due_at` is advanced per `frequency` (see
+    `next_due_at` is advanced per `frequency` + the baked
+    `rebalance_weekday` (see
     `routers.scheduled_strategies.compute_next_due_at`).
+
+    `due_override` (smart pipeline) supplies the per-strategy due decision
+    from the derived plan instead of re-reading `next_due_at` — keeping the
+    pipeline's behaviour identical to the plan the UI shows. When a
+    strategy isn't in the map it falls back to the `next_due_at` check.
+
+    `dedupe_price_updates` (smart pipeline) makes a non-due strategy's
+    price-update behave like the daily MTD refresh: if an identical
+    snapshot already exists for the same open period + latest-price-date,
+    the freshly-inserted one is deleted so re-running the tick doesn't
+    grow the history.
 
     Per-strategy isolation: a single failing strategy doesn't abort
     the phase. Each result lands as a `templates_summary`-style entry
@@ -93,10 +109,14 @@ def _run_momentum_phase(run_id: int) -> None:
         strategy_name = sched.get("name") or f"Strategy #{strategy_id}"
         frequency = sched.get("frequency")
         next_due_iso = sched.get("next_due_at")
-        # "Due to rebalance" — first-run (next_due_at IS NULL) or its
-        # next-due tick has arrived. Otherwise the tick just does a
-        # price update on the last rebalance.
-        is_due_to_rebalance = (next_due_iso is None) or (next_due_iso <= now_iso)
+        # "Due to rebalance" — the derived plan decides when supplied
+        # (smart pipeline); otherwise first-run (next_due_at IS NULL) or
+        # the next-due tick has arrived. Not due → price update on the last
+        # rebalance's holdings.
+        if due_override is not None and strategy_id in due_override:
+            is_due_to_rebalance = due_override[strategy_id]
+        else:
+            is_due_to_rebalance = (next_due_iso is None) or (next_due_iso <= now_iso)
         kind = "rebalance" if is_due_to_rebalance else "price_update"
         _update_run(
             run_id,
@@ -137,13 +157,30 @@ def _run_momentum_phase(run_id: int) -> None:
                 else:
                     # Hydrate the entry summary from the fresh snapshot.
                     pu_resp = supabase.table("current_picks_snapshot").select(
-                        "holdings, latest_price_date"
+                        "as_of_date, holdings, latest_price_date"
                     ).eq("snapshot_id", snapshot_id).limit(1).execute()
                     pu = (pu_resp.data or [{}])[0]
-                    entry["snapshot_id"] = snapshot_id
-                    entry["holdings_count"] = len(pu.get("holdings") or [])
-                    entry["latest_price_date"] = pu.get("latest_price_date")
                     entry["status"] = "ok"
+                    # Same-period dedup (smart pipeline): if an identical
+                    # snapshot already exists for this strategy's open
+                    # period + latest-price-date, drop the redundant new
+                    # one so re-running the tick doesn't grow history.
+                    deduped_to = (
+                        _dedupe_price_update(strategy_id, snapshot_id, pu)
+                        if dedupe_price_updates else None
+                    )
+                    if deduped_to is not None:
+                        entry["snapshot_id"] = deduped_to
+                        entry["latest_price_date"] = pu.get("latest_price_date")
+                        entry["error_message"] = (
+                            f"no change since prior snapshot for period "
+                            f"as_of={pu.get('as_of_date')} "
+                            f"(lpd={pu.get('latest_price_date')}) — skipped"
+                        )
+                    else:
+                        entry["snapshot_id"] = snapshot_id
+                        entry["holdings_count"] = len(pu.get("holdings") or [])
+                        entry["latest_price_date"] = pu.get("latest_price_date")
                 # Bump last_run_at (but NOT next_due_at — the strategy
                 # didn't actually rebalance, it just got re-priced).
                 supabase.table("scheduled_strategy").update({
@@ -247,8 +284,9 @@ def _run_momentum_phase(run_id: int) -> None:
             # the snapshot.
             try:
                 ran_at = datetime.now(timezone.utc).replace(microsecond=0)
+                weekday = int(cfg.get("rebalance_weekday", 0) or 0)
                 next_due = (
-                    _compute_next_due_at(frequency, ran_at).isoformat()
+                    _compute_next_due_at(frequency, ran_at, weekday).isoformat()
                     if frequency else None
                 )
                 supabase.table("scheduled_strategy").update({
@@ -292,170 +330,43 @@ def _run_momentum_phase(run_id: int) -> None:
         )
 
 
-def _run_daily_mtd_phase(run_id: int) -> None:
-    """Phase 'momentum' for the daily MTD refresh. For each enabled
-    scheduled strategy, INSERTS a fresh `kind='price_update'` snapshot
-    that re-prices the most-recent rebalance's holdings against the
-    latest available closes. Mirrors the weekly pipeline's Branch A
-    (`_run_momentum_phase` → `compute_and_save_price_update`) — same
-    primitive, just fired daily instead of weekly.
+def _dedupe_price_update(strategy_id: int, new_snapshot_id: int, new_row: dict) -> int | None:
+    """Same-period dedup, shared by the smart momentum phase + daily MTD.
 
-    Why insert rather than mutate? Past snapshots (rebalances, prior
-    price_updates, backfill rows) are immutable history. The freshest
-    "to-date" view becomes the newest row at the top of the run
-    history; the UI naturally picks it up on the next fetch.
-
-    Dedup: a fresh price_update for `(strategy, as_of, lpd)` is treated
-    as identical noise if a row with the SAME triple already exists
-    (excluding the row we just inserted). The new row is deleted again
-    so running the daily job twice the same day, or on a day with no
-    new prices, doesn't grow the history.
-
-    Why match on `as_of` AND `lpd` rather than just lpd-vs-most-recent?
-    Backfills insert N rebalance rows for the strategy at once, and
-    earlier buggy code could have left one of them with a misleading
-    lpd. Scoping dedup to "same open period" (same `as_of_date`)
-    isolates the comparison to the row representing the strategy's
-    current period, which is what the dedup actually cares about."""
-    import traceback as _traceback  # noqa: PLC0415
-    from routers.scheduled_strategies import (  # noqa: PLC0415
-        compute_and_save_price_update as _compute_and_save_price_update,
-    )
-
-    log = logging.getLogger(__name__)
-
-    strat_resp = (
-        supabase.table("scheduled_strategy")
-        .select("id, name, frequency, config")
-        .eq("enabled", True)
+    If a snapshot identical to the just-inserted one already exists for the
+    SAME strategy + open period (`as_of_date`) + `latest_price_date`, delete
+    the redundant new row and return the surviving snapshot_id. Returns None
+    when there's no duplicate (the new row stands)."""
+    new_as_of = new_row.get("as_of_date")
+    new_lpd = new_row.get("latest_price_date")
+    if not new_as_of or not new_lpd:
+        return None
+    dup = (
+        supabase.table("current_picks_snapshot")
+        .select("snapshot_id")
+        .eq("scheduled_strategy_id", strategy_id)
+        .eq("as_of_date", new_as_of)
+        .eq("latest_price_date", new_lpd)
+        .neq("snapshot_id", new_snapshot_id)
+        .order("created_at", desc=True)
+        .limit(1)
         .execute()
     )
-    strategies = strat_resp.data or []
-    if not strategies:
-        _update_run(run_id, current_message="No enabled strategies — nothing to refresh.")
-        return
+    if not dup.data:
+        return None
+    surviving = int(dup.data[0]["snapshot_id"])
+    supabase.table("current_picks_snapshot").delete().eq(
+        "snapshot_id", new_snapshot_id
+    ).execute()
+    return surviving
 
-    summaries: list[dict] = []
-    errors: list[str] = []
-    total = len(strategies)
-    for idx, strat in enumerate(strategies, 1):
-        sid = strat["id"]
-        sname = strat.get("name") or f"Strategy #{sid}"
-        entry: dict = {
-            "strategy_id": sid,
-            "strategy_name": sname,
-            "frequency": strat.get("frequency"),
-            "kind": "price_update",
-            "config": strat.get("config") or {},
-            "snapshot_id": None,
-            "holdings_count": 0,
-            "latest_price_date": None,
-            "status": "ok",
-            "error_message": None,
-            "error_traceback": None,
-        }
 
-        try:
-            new_snapshot_id = _compute_and_save_price_update(
-                strategy_id=sid,
-                ingest_run_id=run_id,
-                is_backfill=False,
-            )
-            if new_snapshot_id is None:
-                # No prior rebalance to price-update from — strategy
-                # has never produced a real picks row (and has no
-                # backfill rebalance either). Skip silently.
-                entry["error_message"] = "no rebalance to price-update from"
-                summaries.append(entry)
-                _update_run(
-                    run_id,
-                    momentum_summary=summaries,
-                    current_message=f"MTD refresh: {idx}/{total} ({sname}: skipped)",
-                )
-                continue
+def _run_smart_momentum_phase(run_id: int, plan) -> None:
+    """Phase 4 for the smart pipeline. Drives `_run_momentum_phase` with the
+    derived plan's per-strategy due decision (so the pipeline rebalances
+    exactly the strategies the plan marked due) and the daily-MTD dedup on
+    the non-due price updates (so re-running the tick doesn't grow history).
 
-            # Read back the newly-inserted row so we can (a) report
-            # accurate counts and (b) check whether an identical
-            # snapshot already exists for the same open period.
-            new_resp = (
-                supabase.table("current_picks_snapshot")
-                .select("snapshot_id, as_of_date, latest_price_date, holdings")
-                .eq("snapshot_id", new_snapshot_id)
-                .limit(1)
-                .execute()
-            )
-            new_row = (new_resp.data or [None])[0]
-            new_as_of = (new_row or {}).get("as_of_date") if new_row else None
-            new_lpd = (new_row or {}).get("latest_price_date") if new_row else None
-
-            # Same-period dedup: is there ALREADY a snapshot for this
-            # strategy + open period + lpd? If yes, the new row is
-            # identical noise.
-            dup_existing_id: int | None = None
-            if new_as_of and new_lpd:
-                dup_resp = (
-                    supabase.table("current_picks_snapshot")
-                    .select("snapshot_id, created_at")
-                    .eq("scheduled_strategy_id", sid)
-                    .eq("as_of_date", new_as_of)
-                    .eq("latest_price_date", new_lpd)
-                    .neq("snapshot_id", new_snapshot_id)
-                    .order("created_at", desc=True)
-                    .limit(1)
-                    .execute()
-                )
-                if dup_resp.data:
-                    dup_existing_id = dup_resp.data[0]["snapshot_id"]
-
-            if dup_existing_id is not None:
-                # Identical snapshot for this open period already exists
-                # — delete the redundant new one and point the summary
-                # at the surviving row.
-                supabase.table("current_picks_snapshot").delete().eq(
-                    "snapshot_id", new_snapshot_id,
-                ).execute()
-                entry["snapshot_id"] = dup_existing_id
-                entry["latest_price_date"] = new_lpd
-                entry["error_message"] = (
-                    f"no change since prior snapshot for period "
-                    f"as_of={new_as_of} (lpd={new_lpd}) — skipped"
-                )
-                log.info(
-                    "[daily_mtd] run_id=%s strategy=%s dedup: as_of=%s lpd=%s "
-                    "matched existing snapshot=%s",
-                    run_id, sname, new_as_of, new_lpd, dup_existing_id,
-                )
-            else:
-                entry["snapshot_id"] = new_snapshot_id
-                entry["holdings_count"] = (
-                    len(new_row.get("holdings") or []) if new_row else 0
-                )
-                entry["latest_price_date"] = new_lpd
-                log.info(
-                    "[daily_mtd] run_id=%s strategy=%s snapshot=%s as_of=%s "
-                    "lpd=%s",
-                    run_id, sname, new_snapshot_id, new_as_of, new_lpd,
-                )
-        except Exception as e:
-            msg = f"{type(e).__name__}: {e}"
-            tb = _traceback.format_exc()
-            entry["status"] = "error"
-            entry["error_message"] = msg
-            entry["error_traceback"] = tb
-            errors.append(f"[{sname}] {msg}")
-            log.warning(
-                "[daily_mtd] run_id=%s strategy=%s failed: %s\n%s",
-                run_id, sname, msg, tb,
-            )
-
-        summaries.append(entry)
-        _update_run(
-            run_id,
-            momentum_summary=summaries,
-            current_message=f"MTD refresh: {idx}/{total} ({sname})",
-        )
-
-    if errors:
-        raise RuntimeError(
-            f"{len(errors)} of {total} strategies failed: " + " | ".join(errors[:3])
-        )
+    `plan` is a `planner.SmartPlan`."""
+    due = {sp.strategy_id: sp.is_due for sp in plan.strategies}
+    _run_momentum_phase(run_id, due_override=due, dedupe_price_updates=True)
