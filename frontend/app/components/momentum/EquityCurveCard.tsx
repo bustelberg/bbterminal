@@ -77,7 +77,7 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
   const feeConfig = useFeeConfig();
   const [addSeriesOpen, setAddSeriesOpen] = useState(false);
   const addSeriesRef = useRef<HTMLDivElement>(null);
-  const [logScale, setLogScale] = useState(false);
+  const [logScale, setLogScale] = useState(true);
   const [hoveredDrawdown, setHoveredDrawdown] = useState<number | null>(null);
   const [customFromMonth, setCustomFromMonth] = useState('');
   // Identifier of an "Add series" operation currently in flight — used to

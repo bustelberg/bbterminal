@@ -646,12 +646,11 @@ function TimelinePanel({
             className="shrink-0"
             style={{
               width: SECTOR_LABEL_WIDTH + SECTOR_LABEL_GAP,
-              backgroundColor: '#151821',
-              borderRight: '1px solid rgba(75, 85, 99, 0.6)',
-              boxShadow: '6px 0 8px -6px rgba(0, 0, 0, 0.6)',
-              // High zIndex on the column itself isn't strictly needed
-              // (it's a sibling of the scroll area, not an overlay), but
-              // it covers any future overlay that might try to creep in.
+              // Transparent so the labels sit on the card surface (no dark
+              // "frozen column" block). The column is a sibling of the
+              // scroll area — not an overlay — so cells can never render
+              // over it regardless of background.
+              backgroundColor: 'transparent',
               position: 'relative',
               zIndex: 1,
             }}

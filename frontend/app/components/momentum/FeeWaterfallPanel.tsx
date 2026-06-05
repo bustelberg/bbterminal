@@ -67,7 +67,7 @@ export default function FeeWaterfallPanel({ result }: { result: BacktestResult }
                   <tr key={b.label} className="border-b border-neutral-800/20">
                     <td className="text-left py-1.5 pr-3 font-sans text-fg-soft">
                       {b.label}
-                      {b.year_fraction < 0.99 && (
+                      {b.year_fraction < 0.95 && (
                         <span className="text-fg-faint"> ({(b.year_fraction * 100).toFixed(0)}%)</span>
                       )}
                     </td>
