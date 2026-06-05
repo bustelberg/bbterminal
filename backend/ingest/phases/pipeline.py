@@ -18,11 +18,15 @@ from datetime import datetime, timezone
 
 from .acquisition import _run_acquisition_phase
 from .momentum import _run_momentum_phase, _run_smart_momentum_phase
-from .planner import build_plan, collect_universe_companies
+from .planner import (
+    build_plan,
+    collect_template_universe_companies,
+    collect_universe_companies,
+)
 from .prices import _collect_held_companies, _run_prices_phase
-from .prune import _run_dedupe_phase, _run_prune_phase
+from .prune import _run_dedupe_phase, _run_delisting_phase, _run_prune_phase
 from .runlog import _now_utc_iso, _update_run
-from .templates import _run_templates_phase
+from .templates import _run_templates_phase, templates_needing_refresh
 
 
 def _run_pipeline_sync(run_id: int) -> None:
@@ -97,6 +101,15 @@ def _run_pipeline_sync(run_id: int) -> None:
         log.warning("[pipeline] run_id=%s %s", run_id, msg)
         accumulated_errors.append(msg)
 
+    # ── Phase 3.5: delisting sweep (stale-price → delisted) ─────
+    _update_run(run_id, current_phase="delisting", current_message="Sweeping for delisted companies…")
+    try:
+        _run_delisting_phase(run_id)
+    except Exception as e:
+        msg = f"Delisting phase failed: {type(e).__name__}: {e}"
+        log.warning("[pipeline] run_id=%s %s", run_id, msg)
+        accumulated_errors.append(msg)
+
     # ── Phase 4: momentum compute ──────────────────────────────
     _update_run(run_id, current_phase="momentum", current_message="Preparing momentum compute…")
     try:
@@ -163,22 +176,69 @@ def _run_smart_pipeline_sync(run_id: int) -> None:
 
     needed_keys = set(plan.needed_template_keys) if plan else set()
     any_due = bool(plan and plan.due_strategy_ids)
-
-    # The only universe-side work the smart pipeline does is refreshing the
-    # universe membership at a rebalance (so the strategy re-selects from a
-    # current universe). On a normal day it does JUST the held-company price
-    # refresh. No orphan prune / dedupe / acquisition — those are full-pipeline
-    # maintenance and serve nothing here (we only ever fetch prices for the
-    # held + universe companies anyway).
     rebalance_today = any_due and bool(needed_keys)
 
-    # ── Phase: templates — refresh the universe (rebalance days only) ──
-    if rebalance_today:
-        _update_run(run_id, current_phase="templates", current_message="Refreshing universe for rebalance…")
+    # Templates to refresh this tick:
+    #  * on a rebalance, the universes the DUE strategies use (so they
+    #    re-select from a current universe), AND
+    #  * EVERY tick, any template-managed universe that's unbuilt or behind the
+    #    current month — so memberships stay maintained even with ZERO enabled
+    #    strategies. `/backtest` + `/acwi` read `universe_membership` directly
+    #    and don't go through scheduled strategies, so maintenance can't be
+    #    gated on strategy demand (the gap that left prod memberships frozen).
+    # Orphan prune + acquisition stay full-pipeline-only (they serve nothing
+    # on a scoped tick). Dedupe runs below, but ONLY when a template actually
+    # refreshed — that's the only point new companies (hence cross-exchange
+    # phantoms) get introduced, so we clean them up exactly then without
+    # per-tick noise.
+    maintenance_keys = templates_needing_refresh()
+    keys_to_refresh = (needed_keys if rebalance_today else set()) | maintenance_keys
+
+    # ── Phase: templates — due-rebalance + stale/unbuilt universes ──
+    templates_refreshed = 0
+    if keys_to_refresh:
+        _update_run(
+            run_id, current_phase="templates",
+            current_message=f"Refreshing {len(keys_to_refresh)} universe(s)…",
+        )
         try:
-            _run_templates_phase(run_id, only_keys=needed_keys)
+            templates_refreshed = _run_templates_phase(run_id, only_keys=keys_to_refresh)
         except Exception as e:
             msg = f"Templates phase failed: {type(e).__name__}: {e}"
+            log.warning("[smart] run_id=%s %s", run_id, msg)
+            accumulated_errors.append(msg)
+
+    # ── Phase: dedupe — merge cross-exchange phantom duplicates ─
+    # Gated on a template actually rebuilding memberships (≈monthly at the
+    # rollover) — the moment new companies land. pick_winner keeps the viable
+    # listing and discards out-of-scope / lookup-failed phantoms.
+    if templates_refreshed:
+        _update_run(run_id, current_phase="dedupe", current_message="Merging duplicate listings…")
+        try:
+            _run_dedupe_phase(run_id)
+        except Exception as e:
+            msg = f"Dedupe phase failed: {type(e).__name__}: {e}"
+            log.warning("[smart] run_id=%s %s", run_id, msg)
+            accumulated_errors.append(msg)
+
+    # ── Phase: prices — refreshed template universes ───────────
+    # Load prices for the constituents of every template universe we just
+    # (re)built — so it's backtestable even with no scheduled strategy. The
+    # price phase is freshness-gated, so steady state is a no-op; the heavy
+    # one-time fetch of a never-loaded universe (e.g. LEONTEQ's ~1645 names)
+    # happens HERE, in the background pipeline, instead of inline in a user's
+    # backtest where it OOM-killed the backend. Gated on `templates_refreshed`
+    # so it only fires on an initial build / monthly rollover / rebalance, not
+    # every tick.
+    if templates_refreshed and keys_to_refresh:
+        _update_run(run_id, current_phase="prices", current_message="Loading template-universe prices…")
+        try:
+            tmpl_companies = collect_template_universe_companies(keys_to_refresh)
+            if tmpl_companies:
+                _update_run(run_id, current_message=f"Refreshing {len(tmpl_companies)} template-universe companies…")
+                _run_prices_phase(run_id, accumulated_errors, companies_override=tmpl_companies)
+        except Exception as e:
+            msg = f"Template-universe price phase failed: {type(e).__name__}: {e}"
             log.warning("[smart] run_id=%s %s", run_id, msg)
             accumulated_errors.append(msg)
 
@@ -214,6 +274,18 @@ def _run_smart_pipeline_sync(run_id: int) -> None:
             log.warning("[smart] run_id=%s %s", run_id, msg)
             accumulated_errors.append(msg)
 
+    # ── Phase: delisting sweep (stale-price → delisted) ────────
+    # DB-only + cheap, so it runs every tick over the WHOLE company table
+    # (not just held names) — catching delistings the held-only price
+    # refresh would otherwise never re-probe.
+    _update_run(run_id, current_phase="delisting", current_message="Sweeping for delisted companies…")
+    try:
+        _run_delisting_phase(run_id)
+    except Exception as e:
+        msg = f"Delisting phase failed: {type(e).__name__}: {e}"
+        log.warning("[smart] run_id=%s %s", run_id, msg)
+        accumulated_errors.append(msg)
+
     # ── Phase: momentum (rebalance due / price-update the rest) ─
     _update_run(run_id, current_phase="momentum", current_message="Computing current picks…")
     if plan is not None:
@@ -227,7 +299,7 @@ def _run_smart_pipeline_sync(run_id: int) -> None:
     # ── Finalize ───────────────────────────────────────────────
     # Enrich the persisted plan with what actually happened, for the UI.
     if plan is not None:
-        plan.universes_refreshed = sorted(needed_keys) if rebalance_today else []
+        plan.universes_refreshed = sorted(keys_to_refresh)
         plan.held_company_count = held_count
         plan.universe_company_count = universe_count
         _update_run(run_id, plan_summary=plan.to_summary())

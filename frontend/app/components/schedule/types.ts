@@ -14,7 +14,7 @@ export type IngestRun = {
   started_at: string;
   finished_at: string | null;
   status: 'running' | 'ok' | 'error';
-  current_phase: 'plan' | 'acquisition' | 'templates' | 'prune' | 'dedupe' | 'prices' | 'momentum' | 'done' | null;
+  current_phase: 'plan' | 'acquisition' | 'templates' | 'prune' | 'dedupe' | 'prices' | 'delisting' | 'momentum' | 'done' | null;
   /** Smart-pipeline derived plan (only on `smart_daily` runs). */
   plan_summary?: SmartPlan | null;
   // Array — one entry per template-managed universe the pipeline

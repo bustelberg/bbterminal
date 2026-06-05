@@ -63,9 +63,12 @@ def _install(
     held: list[dict] | None = None,
     universe: list[dict] | None = None,
     fail: set[str] | None = None,
+    maintenance: set[str] | None = None,
+    template_companies: list[dict] | None = None,
 ) -> _Harness:
     h = _Harness()
     fail = fail or set()
+    maintenance = maintenance or set()
 
     def _update_run(_run_id, **fields):
         h.run.update(fields)
@@ -80,6 +83,17 @@ def _install(
         h.events.append(("templates", only_keys))
         if "templates" in fail:
             raise RuntimeError("boom-templates")
+        return len(only_keys or [])  # # refreshed → gates the dedupe phase
+
+    def _dedupe(_run_id):
+        h.events.append(("dedupe",))
+
+    def _delisting(_run_id):
+        h.events.append(("delisting",))
+
+    def _collect_template(keys):
+        h.events.append(("collect_template", set(keys)))
+        return template_companies or []
 
     def _collect_held(_run_id):
         h.events.append(("collect_held",))
@@ -101,7 +115,11 @@ def _install(
 
     monkeypatch.setattr(pipeline_mod, "_update_run", _update_run)
     monkeypatch.setattr(pipeline_mod, "build_plan", _build_plan)
+    monkeypatch.setattr(pipeline_mod, "templates_needing_refresh", lambda: set(maintenance))
     monkeypatch.setattr(pipeline_mod, "_run_templates_phase", _templates)
+    monkeypatch.setattr(pipeline_mod, "_run_dedupe_phase", _dedupe)
+    monkeypatch.setattr(pipeline_mod, "_run_delisting_phase", _delisting)
+    monkeypatch.setattr(pipeline_mod, "collect_template_universe_companies", _collect_template)
     monkeypatch.setattr(pipeline_mod, "_collect_held_companies", _collect_held)
     monkeypatch.setattr(pipeline_mod, "collect_universe_companies", _collect_universe)
     monkeypatch.setattr(pipeline_mod, "_run_prices_phase", _prices)
@@ -128,8 +146,9 @@ class TestRebalanceDay:
         pipeline_mod._run_smart_pipeline_sync(1)
 
         assert _names(h) == [
-            "build_plan", "templates", "collect_held", "prices",
-            "collect_universe", "prices", "momentum",
+            "build_plan", "templates", "dedupe", "collect_template",
+            "collect_held", "prices", "collect_universe", "prices",
+            "delisting", "momentum",
         ]
 
     def test_templates_scoped_to_needed_keys(self, monkeypatch):
@@ -194,7 +213,7 @@ class TestQuietDay:
         h = _install(monkeypatch, plan=plan, held=[{"cid": 1, "ticker": "A", "exchange": "NYSE"}])
         pipeline_mod._run_smart_pipeline_sync(1)
 
-        assert _names(h) == ["build_plan", "collect_held", "prices", "momentum"]
+        assert _names(h) == ["build_plan", "collect_held", "prices", "delisting", "momentum"]
         assert "templates" not in _names(h)
         assert "collect_universe" not in _names(h)
         assert plan.universes_refreshed == []  # nothing refreshed
@@ -206,9 +225,90 @@ class TestQuietDay:
         pipeline_mod._run_smart_pipeline_sync(1)
 
         # collect_held runs but the price refresh is skipped on an empty set.
-        assert _names(h) == ["build_plan", "collect_held", "momentum"]
+        assert _names(h) == ["build_plan", "collect_held", "delisting", "momentum"]
         assert h.run["status"] == "ok"
         assert h.run["current_phase"] == "done"
+
+
+class TestTemplateMaintenance:
+    """Template-managed universes stay maintained independent of scheduled
+    strategies — the prod incident where memberships froze with zero enabled
+    strategies (/backtest + /acwi read universe_membership directly)."""
+
+    def test_stale_templates_refresh_without_a_due_strategy(self, monkeypatch):
+        # No strategy due, but ACWI + LEONTEQ are behind/unbuilt → the templates
+        # phase must still refresh them.
+        plan = _plan([_sp(10, due=False)], needed=("ACWI",))
+        h = _install(
+            monkeypatch, plan=plan,
+            held=[{"cid": 1, "ticker": "A", "exchange": "NYSE"}],
+            maintenance={"ACWI", "LEONTEQ"},
+        )
+        pipeline_mod._run_smart_pipeline_sync(1)
+
+        tmpl = next(e for e in h.events if e[0] == "templates")
+        assert tmpl[1] == {"ACWI", "LEONTEQ"}  # maintenance set, no rebalance keys
+        assert plan.universes_refreshed == ["ACWI", "LEONTEQ"]
+        assert h.run["status"] == "ok"
+
+    def test_rebalance_unions_due_and_maintenance_keys(self, monkeypatch):
+        # Due strategy needs ACWI; LEONTEQ is separately stale → refresh both.
+        plan = _plan([_sp(10, due=True)], needed=("ACWI",))
+        h = _install(
+            monkeypatch, plan=plan,
+            held=[{"cid": 1, "ticker": "A", "exchange": "NYSE"}],
+            maintenance={"LEONTEQ"},
+        )
+        pipeline_mod._run_smart_pipeline_sync(1)
+
+        tmpl = next(e for e in h.events if e[0] == "templates")
+        assert tmpl[1] == {"ACWI", "LEONTEQ"}
+
+    def test_maintenance_runs_even_when_plan_build_fails(self, monkeypatch):
+        # Plan build blows up, but stale-template maintenance is plan-independent.
+        h = _install(
+            monkeypatch, plan=None, plan_raises=True, maintenance={"ACWI"},
+            held=[{"cid": 1, "ticker": "A", "exchange": "NYSE"}],
+        )
+        pipeline_mod._run_smart_pipeline_sync(1)
+
+        tmpl = next(e for e in h.events if e[0] == "templates")
+        assert tmpl[1] == {"ACWI"}
+        assert h.run["status"] == "error"  # plan failed, but maintenance still ran
+
+    def test_nothing_to_refresh_skips_templates(self, monkeypatch):
+        # No due strategy and nothing stale → templates phase is skipped.
+        plan = _plan([_sp(10, due=False)], needed=("ACWI",))
+        h = _install(monkeypatch, plan=plan,
+                     held=[{"cid": 1, "ticker": "A", "exchange": "NYSE"}],
+                     maintenance=set())
+        pipeline_mod._run_smart_pipeline_sync(1)
+
+        assert "templates" not in _names(h)
+        assert plan.universes_refreshed == []
+        # Nothing refreshed → no template-universe price load either.
+        assert "collect_template" not in _names(h)
+
+    def test_refreshed_universe_gets_its_prices_loaded(self, monkeypatch):
+        # The durable fix: a refreshed (unbuilt/stale) template universe gets
+        # its constituents' prices loaded — even with no strategy — so it's
+        # backtestable without the inline self-heal (the LEONTEQ OOM).
+        plan = _plan([_sp(10, due=False)], needed=("ACWI",))
+        h = _install(
+            monkeypatch, plan=plan, maintenance={"LEONTEQ"},
+            template_companies=[
+                {"cid": 7, "ticker": "X", "exchange": "OHEL"},
+                {"cid": 8, "ticker": "Y", "exchange": "OHEL"},
+            ],
+        )
+        pipeline_mod._run_smart_pipeline_sync(1)
+
+        ct = next(e for e in h.events if e[0] == "collect_template")
+        assert ct[1] == {"LEONTEQ"}
+        # The template universe's companies are sent to the price phase.
+        prices = [e[1] for e in h.events if e[0] == "prices"]
+        assert [7, 8] in prices
+        assert h.run["status"] == "ok"
 
 
 class TestFailureIsolation:
@@ -223,9 +323,10 @@ class TestFailureIsolation:
         )
         pipeline_mod._run_smart_pipeline_sync(1)
 
-        # Held-price refresh is plan-independent and still runs; templates,
-        # universe-prices, and momentum are all gated on a plan and skipped.
-        assert _names(h) == ["build_plan", "collect_held", "prices"]
+        # Held-price refresh + the unconditional delisting sweep are
+        # plan-independent and still run; templates, universe-prices, and
+        # momentum are gated on a plan and skipped.
+        assert _names(h) == ["build_plan", "collect_held", "prices", "delisting"]
         assert "momentum" not in _names(h)
         assert h.run["status"] == "error"
         assert "Plan phase failed" in h.run["error_summary"]
@@ -243,8 +344,8 @@ class TestFailureIsolation:
         # held_collect blows up → no held price refresh, but the due universe
         # refresh and the momentum rebalance still run.
         assert _names(h) == [
-            "build_plan", "templates", "collect_held",
-            "collect_universe", "prices", "momentum",
+            "build_plan", "templates", "dedupe", "collect_template", "collect_held",
+            "collect_universe", "prices", "delisting", "momentum",
         ]
         assert h.run["status"] == "error"
 

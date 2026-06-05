@@ -30,6 +30,33 @@ def is_daily_data_fresh(latest: date, *, today: date | None = None) -> tuple[boo
     return False, f"latest={latest}, daily, expected through {most_recent_close}, now {today}"
 
 
+def trading_days_between(start: date, end: date) -> int:
+    """Number of trading days (Mon-Fri) in the half-open range (start, end].
+    0 when end <= start. Weekends are skipped but market holidays aren't — a
+    small over-count, immaterial against the multi-week delisting threshold."""
+    if end <= start:
+        return 0
+    days = 0
+    cursor = end
+    while cursor > start:
+        if cursor.weekday() < 5:
+            days += 1
+        cursor -= timedelta(days=1)
+    return days
+
+
+def trading_days_behind(latest: date, *, today: date | None = None) -> int:
+    """How many trading days (Mon-Fri) the `latest` close is behind the most
+    recent EXPECTED close (the latest weekday strictly before today; today's
+    own close may not have settled). 0 when current. Mirrors
+    `scheduler._trading_day_age`."""
+    today = today or date.today()
+    expected = today - timedelta(days=1)
+    while expected.weekday() >= 5:
+        expected -= timedelta(days=1)
+    return trading_days_between(latest, expected)
+
+
 def is_cache_fresh(dates: list[date], *, today: date | None = None) -> tuple[bool, str]:
     """Check if cached data is still fresh based on its own data frequency.
 

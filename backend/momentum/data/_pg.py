@@ -232,6 +232,33 @@ def load_latest_close_dates_via_copy(company_ids: list[int]) -> dict[int, str] |
     return out
 
 
+def load_all_latest_close_dates_via_copy() -> dict[int, str] | None:
+    """Latest `close_price` `target_date` for EVERY company — a single
+    `GROUP BY max(target_date)` over the whole `metric_data` table via COPY.
+    Returns `{company_id: 'YYYY-MM-DD'}` (companies with no close are absent),
+    or `None` for the fall-back. The PostgREST RPC equivalent
+    (`company_latest_close_price_dates`) times out on the full table; the
+    direct-Postgres GROUP BY is indexed + fast. Used by the delisting sweep."""
+    if not _db_url():
+        return None
+    sql = (
+        "COPY (SELECT company_id, max(target_date)::text FROM metric_data "
+        "WHERE metric_code = 'close_price' GROUP BY company_id) "
+        "TO STDOUT WITH (FORMAT csv)"
+    )
+    buf = _run_copy(sql, ())
+    if buf is None:
+        return None
+
+    import csv as _csv  # noqa: PLC0415
+    out: dict[int, str] = {}
+    for row in _csv.reader(io.TextIOWrapper(buf, encoding="utf-8")):
+        if len(row) != 2 or not row[0] or not row[1]:
+            continue
+        out[int(row[0])] = row[1]
+    return out
+
+
 def load_universe_membership_via_copy(
     universe_id: int, grouping_field: str,
 ) -> dict[str, dict[int, str | None]] | None:

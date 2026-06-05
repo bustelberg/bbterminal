@@ -318,6 +318,25 @@ function netStatsFromCurve(
   };
 }
 
+/** Net-of-fees return for a PARTIAL window — an open period, or a sub-slice
+ * of a period split at the go-live date — which doesn't span a year-end
+ * crystallization. Only the time-pro-rated ONGOING fees apply: the Leonteq
+ * annual fee + the Bustelberg management fee, pro-rated by the window length.
+ * The high-water-mark performance fee is charged only at year-end (never
+ * intra-year), and per-trade transaction costs hit at the period boundaries,
+ * so neither is attributed to a partial window. `startDate`/`endDate` are
+ * YYYY-MM or YYYY-MM-DD. */
+export function netPartialReturn(
+  grossPct: number,
+  config: FeeConfig,
+  startDate: string,
+  endDate: string,
+): number {
+  const yf = Math.max(0, (parseDate(endDate) - parseDate(startDate)) / YEAR_MS);
+  const drag = ((config.leonteq_annual_bps + config.bustelberg_mgmt_bps) / 10000) * yf;
+  return ((1 + grossPct / 100) * (1 - drag) - 1) * 100;
+}
+
 /** The headline entry point. Returns the fee waterfall + a net-to-client
  * NetStats, or null when there's no closed-period data to model. */
 export function computeFeeWaterfall(

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { computeFeeWaterfall, DEFAULT_FEE_CONFIG, type FeeConfig } from './feeModel';
+import { computeFeeWaterfall, netPartialReturn, DEFAULT_FEE_CONFIG, type FeeConfig } from './feeModel';
 import type { DailyRecord, Holding, PeriodRecord } from '../../../lib/stores/momentum';
 
 const ZERO: FeeConfig = {
@@ -187,5 +187,26 @@ describe('computeFeeWaterfall', () => {
     expect(w.after_leonteq_pct).toBeLessThan(0);
     expect(w.after_leonteq_pct).toBeGreaterThan(-0.25);
     expect(w.after_leonteq_pct).toBeLessThan(-0.10);
+  });
+});
+
+describe('netPartialReturn (open / go-live-split partial windows)', () => {
+  it('equals gross over a zero-length window (no time for ongoing fees)', () => {
+    expect(netPartialReturn(5, DEFAULT_FEE_CONFIG, '2026-06-01', '2026-06-01')).toBeCloseTo(5, 6);
+  });
+
+  it('deducts the time-pro-rated annual + management fee over a ~1y window', () => {
+    // 35 + 100 = 135 bps/yr ongoing → ~10% gross becomes ~8.5% net.
+    const net = netPartialReturn(10, DEFAULT_FEE_CONFIG, '2025-01-01', '2026-01-01');
+    expect(net).toBeGreaterThan(8.3);
+    expect(net).toBeLessThan(8.7);
+    expect(net).toBeLessThan(10);
+  });
+
+  it('deducts only a sliver over a ~1-month window', () => {
+    // ~135 bps × (1/12) ≈ 0.11 pp drag → just under 5%.
+    const net = netPartialReturn(5, DEFAULT_FEE_CONFIG, '2026-06-01', '2026-07-01');
+    expect(net).toBeGreaterThan(4.85);
+    expect(net).toBeLessThan(5);
   });
 });
