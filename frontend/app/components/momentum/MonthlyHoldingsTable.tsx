@@ -1,8 +1,9 @@
 'use client';
 
-import { Fragment, memo, useMemo, useRef, useState } from 'react';
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import type { BacktestResult } from '../../../lib/stores/momentum';
+import type { BacktestResult, Holding, PeriodRecord } from '../../../lib/stores/momentum';
+import { API_URL } from '../../../lib/apiUrl';
 import type { Column } from '../../../lib/tableExport';
 import TableDownloadButton from '../TableDownloadButton';
 import CellInfoTip from './CellInfoTip';
@@ -11,9 +12,10 @@ import CollapsibleCard from './CollapsibleCard';
 // mounts when a user clicks a row. next/dynamic puts it in a separate
 // chunk that ships only when the modal is actually opened.
 const TickerTimelineModal = dynamic(() => import('./TickerTimelineModal'), { ssr: false });
-import { computeNetStats, parenPct } from './feeStats';
+import { parenPct } from './feeStats';
+import { computeFeeWaterfall } from './feeModel';
 import { useClickOutside } from '../../../lib/hooks/useClickOutside';
-import { useExchangeFeeMap } from '../../../lib/hooks/apiData';
+import { useFeeConfig } from '../../../lib/hooks/apiData';
 import { EXCHANGE_NAMES, displayExchange, fmtPct, fmtPrice, guruFocusUrl } from './utils';
 
 type HeldCompany = { company_id: number; ticker: string; company_name: string };
@@ -33,6 +35,11 @@ type Props = {
   categories: string[];
   exchangeByCompany: Map<number, string>;
   scoringConfig: ScoringConfig;
+  /** Optional "go-live" date (YYYY-MM-DD). The one period whose window
+   * contains it is split into two rows — the part of the period before
+   * go-live and the part from go-live to the period end — with returns
+   * recomputed from the daily curve. Used by /schedule. */
+  markerDate?: string;
 };
 
 /** "Monthly Portfolios" card: one row per rebalance month, expandable to
@@ -42,10 +49,22 @@ type Props = {
  * that changes — new run, loaded saved run, etc. — the table resets its
  * expansion automatically.
  */
-function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scoringConfig }: Props) {
+function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scoringConfig, markerDate }: Props) {
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
   // company_id whose timeline modal is open, or null for closed.
   const [timelineCompanyId, setTimelineCompanyId] = useState<number | null>(null);
+  // Per-company close price (local + EUR) at the go-live date, fetched
+  // on demand so the split sub-period rows can show each holding's
+  // entry/exit prices for ITS dates rather than the full month's.
+  const [goLivePrices, setGoLivePrices] = useState<
+    Record<string, { price_local: number; price_eur?: number; target_date: string }> | null
+  >(null);
+  // Re-price of the trailing OPEN period to the latest available close, so
+  // the last row isn't frozen at the backtest's run-time as-of date when
+  // newer price data exists. { date, prices } or null.
+  const [openReprice, setOpenReprice] = useState<
+    { date: string; prices: Record<string, { price_local: number; price_eur?: number; target_date: string }> } | null
+  >(null);
 
   // Every distinct company ever held during this backtest — one entry per
   // company_id, regardless of how many months it appeared in. Drives the
@@ -66,21 +85,19 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
     return Array.from(seen.values()).sort((a, b) => a.ticker.localeCompare(b.ticker));
   }, [result]);
 
-  // Per-exchange fees (bps) for the (net) parentheticals in the Return /
-  // Cumulative columns. Fetched once on mount; null when the user hasn't
-  // configured any non-zero fees, in which case every parenPct(...) call
-  // below renders as the empty string (no parens, no visual noise).
-  const feesByExchange = useExchangeFeeMap();
+  // Global fee config for the net-to-client (net) parentheticals in the
+  // Return / Cumulative columns — the same layered model (Leonteq +
+  // Bustelberg) as the Fee waterfall panel.
+  const feeConfig = useFeeConfig();
 
   // Net per-period + cumulative returns for the active result, keyed by
-  // the same `r.date` the outer rows render. `computeNetStats` returns
-  // null when fees aren't configured OR when the parent passed an empty
-  // exchangeByCompany (e.g. ScheduleRunDetail) — both fall through to
-  // gross-only display below.
+  // the same `r.date` the outer rows render. Null when there's no closed-
+  // period data, in which case every parenPct(...) below renders empty.
   const netStats = useMemo(() => {
-    if (!feesByExchange || exchangeByCompany.size === 0) return null;
-    return computeNetStats(result.monthly_records, feesByExchange, exchangeByCompany, result.daily_records);
-  }, [feesByExchange, exchangeByCompany, result.monthly_records, result.daily_records]);
+    return computeFeeWaterfall(result.monthly_records, result.daily_records, feeConfig, {
+      grossTotalReturnPct: result.summary?.total_return_pct,
+    })?.net ?? null;
+  }, [feeConfig, result.monthly_records, result.daily_records, result.summary?.total_return_pct]);
 
   const netByDate = useMemo<Map<string, { portRet: number; cumRet: number }>>(() => {
     const m = new Map<string, { portRet: number; cumRet: number }>();
@@ -112,6 +129,240 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
     }
     return map;
   }, [result]);
+
+  // Fetch the go-live-date close prices for the holdings of the period
+  // that contains the marker, so the two split sub-rows can re-price each
+  // holding at the split boundary. Read-only; runs only when a marker is set.
+  useEffect(() => {
+    // Find the cids of the period that contains the marker (if any).
+    const records = result.monthly_records;
+    let cids: number[] = [];
+    if (markerDate) {
+      for (let i = 0; i < records.length; i++) {
+        const start = records[i].date.slice(0, 10);
+        const end = i + 1 < records.length ? records[i + 1].date.slice(0, 10) : (records[i].as_of_date ?? null);
+        if (markerDate > start && (end == null || markerDate < end)) {
+          cids = records[i].holdings.map((h) => h.company_id).filter((c): c is number => c != null);
+          break;
+        }
+      }
+    }
+    if (cids.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setGoLivePrices(null);
+      return;
+    }
+    // Stale prices from a previous marker can't be mis-applied — they're
+    // keyed by company_id, and a different period has different cids — so
+    // we just overwrite on resolve without an interim reset.
+    let cancelled = false;
+    fetch(`${API_URL}/api/momentum/prices-at?as_of=${markerDate}&company_ids=${cids.join(',')}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { prices?: Record<string, { price_local: number; price_eur?: number; target_date: string }> } | null) => {
+        if (!cancelled && d?.prices) setGoLivePrices(d.prices);
+      })
+      .catch(() => { /* split rows fall back to full-period prices */ });
+    return () => { cancelled = true; };
+  }, [markerDate, result]);
+
+  // Re-price the trailing OPEN period to its freshest *common* date — the
+  // most recent date with a close for EVERY held name (the engine's
+  // definition, shown in the row tooltip). NOT the global latest: if 23 of
+  // 24 names only have data through the 26th and one has the 28th, the
+  // honest "as of" is the 26th, since the portfolio return needs all names
+  // priced on the same day. Only fires when that common date is genuinely
+  // newer than the backtest's saved as-of.
+  type PriceMap = Record<string, { price_local: number; price_eur?: number; target_date: string }>;
+  useEffect(() => {
+    const records = result.monthly_records;
+    const last = records[records.length - 1];
+    if (!last || !last.is_open || last.holdings.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setOpenReprice(null);
+      return;
+    }
+    const cids = last.holdings.map((h) => h.company_id).filter((c): c is number => c != null);
+    if (cids.length === 0) {
+      setOpenReprice(null);
+      return;
+    }
+    const savedAsOf = last.as_of_date?.slice(0, 10);
+    let cancelled = false;
+    (async () => {
+      try {
+        const ld = await fetch(`${API_URL}/api/data/latest-price-date`).then((r) => (r.ok ? r.json() : null));
+        const globalLatest: string | undefined = ld?.date;
+        if (!globalLatest || (savedAsOf && globalLatest <= savedAsOf)) return;
+        // Each name's latest close on/before today — its own freshest mark.
+        const pr: { prices?: PriceMap } | null = await fetch(
+          `${API_URL}/api/momentum/prices-at?as_of=${globalLatest}&company_ids=${cids.join(',')}`,
+        ).then((r) => (r.ok ? r.json() : null));
+        const dates = Object.values(pr?.prices ?? {}).map((p) => p.target_date.slice(0, 10));
+        if (dates.length === 0 || !pr?.prices) return;
+        // Header date = the freshest mark present in the portfolio. Each
+        // holding is shown at ITS OWN latest below; a name with no newer
+        // trade keeps its existing (older) close. Only re-price when at
+        // least one name has data newer than the backtest's saved as-of.
+        const maxHeld = dates.reduce((mx, d) => (d > mx ? d : mx), dates[0]);
+        if (savedAsOf && maxHeld <= savedAsOf) return;
+        if (!cancelled) setOpenReprice({ date: maxHeld, prices: pr.prices });
+      } catch {
+        /* leave the open period at its backtest as-of date */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [result]);
+
+  // Records with the trailing open period re-priced to the latest close
+  // (when newer data than the backtest's as-of exists). Re-prices each
+  // open holding, then recomputes the period return (long weight-mean −
+  // short weight-mean, matching the engine) + the chained cumulative.
+  const repricedRecords = useMemo<PeriodRecord[]>(() => {
+    const recs = result.monthly_records;
+    if (!openReprice || recs.length === 0) return recs;
+    const lastIdx = recs.length - 1;
+    const last = recs[lastIdx];
+    if (!last.is_open) return recs;
+    const newHoldings = last.holdings.map((h) => {
+      const p = openReprice.prices[String(h.company_id)];
+      if (!p) return h;
+      const exitEur = p.price_eur ?? h.exit_price_eur;
+      const entryEur = h.entry_price_eur;
+      return {
+        ...h,
+        exit_price_local: p.price_local,
+        exit_price_eur: exitEur,
+        exit_date: p.target_date.slice(0, 10),
+        forward_return_pct: exitEur != null && entryEur ? (exitEur / entryEur - 1) * 100 : h.forward_return_pct,
+      };
+    });
+    const wmean = (arr: Holding[]): number | null => {
+      let w = 0, r = 0;
+      for (const h of arr) {
+        if (h.forward_return_pct == null) continue;
+        const wt = h.weight ?? 1;
+        w += wt; r += wt * h.forward_return_pct;
+      }
+      return w > 0 ? r / w : null;
+    };
+    const longRet = wmean(newHoldings.filter((h) => h.side !== 'short'));
+    const shorts = newHoldings.filter((h) => h.side === 'short');
+    const shortRet = shorts.length ? wmean(shorts) : null;
+    const portRet = longRet != null ? (shortRet != null ? longRet - shortRet : longRet) : last.portfolio_return_pct;
+    const prevCum = lastIdx >= 1 ? (recs[lastIdx - 1].cumulative_return_pct ?? 0) : 0;
+    const cum = portRet != null ? ((1 + prevCum / 100) * (1 + portRet / 100) - 1) * 100 : last.cumulative_return_pct;
+    const reLast: PeriodRecord = {
+      ...last,
+      holdings: newHoldings,
+      portfolio_return_pct: portRet,
+      cumulative_return_pct: cum,
+      as_of_date: openReprice.date,
+    };
+    return [...recs.slice(0, lastIdx), reLast];
+  }, [result, openReprice]);
+
+  // Display rows = the period records, except the ONE period whose window
+  // contains the go-live date is split into two: the slice before go-live
+  // and the slice from go-live to the period end. Per-period + cumulative
+  // returns (strategy and universe) are recomputed from the daily curve so
+  // each slice reads like a standalone period. Holdings are identical for
+  // both slices (no rebalance happens at go-live).
+  const displayRows = useMemo<{
+    row: PeriodRecord;
+    key: string;
+    label: string | null;
+    turnoverDate: string | null;
+    net: boolean;
+  }[]>(() => {
+    const records = repricedRecords;
+    const passthrough = () =>
+      records.map((r) => ({ row: r, key: r.date, label: null, turnoverDate: r.date, net: true }));
+    if (!markerDate) return passthrough();
+
+    const stratSeries = (result.daily_records ?? []).map((d) => ({ date: d.date.slice(0, 10), cum: d.cumulative_return_pct }));
+    const uniSeries = (result.universe_daily_records ?? []).map((d) => ({ date: d.date.slice(0, 10), cum: d.cumulative_return_pct }));
+    if (stratSeries.length === 0) return passthrough();
+
+    const cumAt = (series: { date: string; cum: number }[], date: string): number | null => {
+      let v: number | null = null;
+      for (const p of series) { if (p.date <= date) v = p.cum; else break; }
+      return v;
+    };
+    const rel = (a: number | null, b: number | null): number | null =>
+      a != null && b != null ? ((1 + a / 100) / (1 + b / 100) - 1) * 100 : null;
+
+    const out: { row: PeriodRecord; key: string; label: string | null; turnoverDate: string | null; net: boolean }[] = [];
+    for (let i = 0; i < records.length; i++) {
+      const r = records[i];
+      const start = r.date.slice(0, 10);
+      const end = i + 1 < records.length ? records[i + 1].date.slice(0, 10) : (r.as_of_date ?? null);
+      const inside = markerDate > start && (end == null || markerDate < end);
+      if (!inside) { out.push({ row: r, key: r.date, label: null, turnoverDate: r.date, net: true }); continue; }
+
+      const cStart = cumAt(stratSeries, start);
+      const cGo = cumAt(stratSeries, markerDate);
+      const cEnd = end ? cumAt(stratSeries, end) : stratSeries[stratSeries.length - 1].cum;
+      const uStart = cumAt(uniSeries, start);
+      const uGo = cumAt(uniSeries, markerDate);
+      const uEnd = end ? cumAt(uniSeries, end) : (uniSeries.length ? uniSeries[uniSeries.length - 1].cum : null);
+
+      // Re-price each holding at the go-live boundary so the expanded
+      // detail shows entry/exit prices for the sub-period's own dates.
+      // `pre` ends at go-live (exit = go-live price); `post` starts at
+      // go-live (entry = go-live price). Falls back to the original holding
+      // when the go-live price isn't (yet) available for a cid.
+      const repricePre = (h: Holding): Holding => {
+        const p = goLivePrices?.[String(h.company_id)];
+        if (!p) return h;
+        const exitEur = p.price_eur ?? h.exit_price_eur;
+        const entryEur = h.entry_price_eur;
+        return {
+          ...h,
+          exit_price_local: p.price_local,
+          exit_price_eur: exitEur,
+          exit_date: markerDate,
+          forward_return_pct: exitEur != null && entryEur ? (exitEur / entryEur - 1) * 100 : h.forward_return_pct,
+        };
+      };
+      const repricePost = (h: Holding): Holding => {
+        const p = goLivePrices?.[String(h.company_id)];
+        if (!p) return h;
+        const entryEur = p.price_eur ?? h.entry_price_eur;
+        const exitEur = h.exit_price_eur;
+        return {
+          ...h,
+          entry_price_local: p.price_local,
+          entry_price_eur: entryEur,
+          entry_date: markerDate,
+          forward_return_pct: entryEur != null && exitEur ? (exitEur / entryEur - 1) * 100 : h.forward_return_pct,
+        };
+      };
+
+      const pre: PeriodRecord = {
+        ...r,
+        holdings: r.holdings.map(repricePre),
+        portfolio_return_pct: rel(cGo, cStart),
+        universe_return_pct: rel(uGo, uStart),
+        cumulative_return_pct: cGo ?? r.cumulative_return_pct,
+        universe_cumulative_return_pct: uGo,
+        is_open: false,
+        as_of_date: undefined,
+      };
+      const post: PeriodRecord = {
+        ...r,
+        holdings: r.holdings.map(repricePost),
+        portfolio_return_pct: rel(cEnd, cGo),
+        universe_return_pct: rel(uEnd, uGo),
+        cumulative_return_pct: cEnd ?? r.cumulative_return_pct,
+        universe_cumulative_return_pct: uEnd,
+        is_open: r.is_open,
+        as_of_date: r.as_of_date,
+      };
+      out.push({ row: pre, key: `${r.date}__pre`, label: `${start} → ${markerDate} · pre go-live`, turnoverDate: r.date, net: false });
+      out.push({ row: post, key: `${r.date}__post`, label: `${markerDate} → ${end ?? 'now'} · go-live →`, turnoverDate: null, net: false });
+    }
+    return out;
+  }, [repricedRecords, result, markerDate, goLivePrices]);
 
   // When the active result changes (new run / loaded saved run) collapse
   // any open month so the user starts at a clean view. React 19's
@@ -234,10 +485,10 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
           of the screen instead of capping at a fixed 500px window. The
           sticky thead inside this container keeps column labels pinned
           while the user scrolls through tall portfolios. */}
-      <div className="max-h-[calc(100vh-12rem)] overflow-auto border-t border-gray-800/40">
+      <div className="max-h-[calc(100vh-12rem)] overflow-auto border-t border-neutral-800/40">
         <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-[#151821] z-20">
-            <tr className="text-gray-500 text-xs border-b border-gray-800/40">
+          <thead className="sticky top-0 bg-card z-20">
+            <tr className="text-fg-subtle text-xs border-b border-neutral-800/40">
               <th className="text-left px-5 py-2.5 font-medium">
                 Period<CellInfoTip>Rebalance period start. The strategy enters this period&apos;s portfolio at the first trading day and holds until the next rebalance. Format is YYYY-MM for monthly+ cadences and YYYY-MM-DD for daily/weekly.</CellInfoTip>
               </th>
@@ -265,21 +516,21 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
             </tr>
           </thead>
           <tbody>
-            {result.monthly_records.map((r) => (
-              <Fragment key={r.date}>
+            {displayRows.map(({ row: r, key: rowKey, label: rowLabel, turnoverDate: rowTurnover, net: showNet }) => (
+              <Fragment key={rowKey}>
                 <tr
-                  className="border-b border-gray-800/20 hover:bg-white/[0.02] cursor-pointer transition-colors"
-                  onClick={() => setExpandedMonth(expandedMonth === r.date ? null : r.date)}
+                  className={`border-b border-neutral-800/20 hover:bg-overlay/[0.02] cursor-pointer transition-colors ${rowLabel ? 'border-l-2 border-l-neg-500/60' : ''}`}
+                  onClick={() => setExpandedMonth(expandedMonth === rowKey ? null : rowKey)}
                 >
-                  <td className="px-5 py-2.5 text-gray-300 font-mono">
-                    <span className="text-gray-600 mr-2">{expandedMonth === r.date ? '▾' : '▸'}</span>
-                    {r.date}
+                  <td className="px-5 py-2.5 text-fg-soft font-mono">
+                    <span className="text-fg-faint mr-2">{expandedMonth === rowKey ? '▾' : '▸'}</span>
+                    {rowLabel ? <span className="text-neg-300/90 text-xs">{rowLabel}</span> : r.date}
                     {r.is_open && (
                       <span
-                        className="ml-2 inline-flex items-center text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30"
+                        className="ml-2 inline-flex items-center text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-warn-500/15 text-warn-300 border border-warn-500/30"
                         title={
                           r.as_of_date
-                            ? `Return is calculated through ${r.as_of_date} — the most recent date with prices for every held name`
+                            ? `Open period — valued through ${r.as_of_date}. Each held name uses its own latest available close; names with no newer trade keep their last price, so some end dates may be earlier.`
                             : 'Open period — return reflects the partial window from the last rebalance through today'
                         }
                       >
@@ -287,13 +538,13 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                       </span>
                     )}
                   </td>
-                  <td className="text-right px-3 py-2.5 text-gray-400 font-mono">{r.holdings.length}</td>
-                  <td className={`text-right px-3 py-2.5 font-mono ${r.portfolio_return_pct != null ? (r.portfolio_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
+                  <td className="text-right px-3 py-2.5 text-fg-muted font-mono">{r.holdings.length}</td>
+                  <td className={`text-right px-3 py-2.5 font-mono ${r.portfolio_return_pct != null ? (r.portfolio_return_pct >= 0 ? 'text-pos-400' : 'text-neg-400') : 'text-fg-faint'}`}>
                     {fmtPct(r.portfolio_return_pct)}
-                    <span className="text-gray-500">{parenPct(netByDate.get(r.date)?.portRet)}</span>
+                    <span className="text-fg-subtle">{parenPct(showNet ? netByDate.get(r.date)?.portRet : undefined)}</span>
                   </td>
                   <td
-                    className="text-right px-3 py-2.5 font-mono text-gray-500"
+                    className="text-right px-3 py-2.5 font-mono text-fg-subtle"
                     title={
                       r.universe_constituents != null
                         ? `Equal-weight across ${r.universe_constituents} eligible companies for this period`
@@ -315,10 +566,10 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                       <td
                         className={`text-right px-3 py-2.5 font-mono font-medium ${
                           alpha == null
-                            ? 'text-gray-600'
+                            ? 'text-fg-faint'
                             : alpha >= 0
-                            ? 'text-emerald-400'
-                            : 'text-rose-400'
+                            ? 'text-pos-400'
+                            : 'text-neg-400'
                         }`}
                         title={
                           alpha != null
@@ -330,23 +581,25 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                       </td>
                     );
                   })()}
-                  <td className="text-right px-3 py-2.5 font-mono text-gray-400">
-                    {turnoverByDate[r.date] != null ? `${turnoverByDate[r.date]!.toFixed(1)}%` : '—'}
+                  <td className="text-right px-3 py-2.5 font-mono text-fg-muted">
+                    {rowTurnover == null
+                      ? '0.0%'
+                      : turnoverByDate[rowTurnover] != null ? `${turnoverByDate[rowTurnover]!.toFixed(1)}%` : '—'}
                   </td>
-                  <td className={`text-right px-3 py-2.5 font-mono ${r.cumulative_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  <td className={`text-right px-3 py-2.5 font-mono ${r.cumulative_return_pct >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
                     {fmtPct(r.cumulative_return_pct)}
-                    <span className="text-gray-500">{parenPct(netByDate.get(r.date)?.cumRet)}</span>
+                    <span className="text-fg-subtle">{parenPct(showNet ? netByDate.get(r.date)?.cumRet : undefined)}</span>
                   </td>
-                  <td className="text-right px-5 py-2.5 font-mono text-gray-500">
+                  <td className="text-right px-5 py-2.5 font-mono text-fg-subtle">
                     {r.universe_cumulative_return_pct != null ? fmtPct(r.universe_cumulative_return_pct) : '—'}
                   </td>
                 </tr>
-                {expandedMonth === r.date && r.holdings.length > 0 && (
-                  <tr key={`${r.date}-detail`}>
-                    <td colSpan={8} className="bg-[#0f1117] px-5 py-3">
+                {expandedMonth === rowKey && r.holdings.length > 0 && (
+                  <tr key={`${rowKey}-detail`}>
+                    <td colSpan={8} className="bg-page px-5 py-3">
                       <table className="w-full text-xs">
                         <thead>
-                          <tr className="text-gray-600">
+                          <tr className="text-fg-faint">
                             <th className="text-left py-1 font-medium">
                               Side<CellInfoTip>Direction of the position. Long-only backtests are all &quot;Long&quot;. Long-short backtests group longs at the top and shorts at the bottom of each portfolio.</CellInfoTip>
                             </th>
@@ -431,13 +684,13 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                               const href = guruFocusUrl(h.ticker, exchRaw);
                               const isShort = h.side === 'short';
                               return (
-                                <tr key={`${h.side ?? 'long'}-${h.company_id}`} className={`border-t border-gray-800/20 ${isShort ? 'bg-rose-500/[0.04]' : ''}`}>
+                                <tr key={`${h.side ?? 'long'}-${h.company_id}`} className={`border-t border-neutral-800/20 ${isShort ? 'bg-neg-500/[0.04]' : ''}`}>
                                   <td className="py-1.5 pr-2 whitespace-nowrap">
                                     <span
                                       className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${
                                         isShort
-                                          ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
-                                          : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/25'
+                                          ? 'bg-neg-500/15 text-neg-300 border border-neg-500/30'
+                                          : 'bg-pos-500/10 text-pos-300 border border-pos-500/25'
                                       }`}
                                     >
                                       {isShort ? 'Short' : 'Long'}
@@ -447,7 +700,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                                     <button
                                       type="button"
                                       onClick={() => setTimelineCompanyId(h.company_id)}
-                                      className="mr-1.5 inline-flex w-3.5 h-3.5 items-center justify-center text-gray-500 hover:text-indigo-300 transition-colors align-middle"
+                                      className="mr-1.5 inline-flex w-3.5 h-3.5 items-center justify-center text-fg-subtle hover:text-accent-300 transition-colors align-middle"
                                       title={`Show ${h.ticker} holding history across the backtest`}
                                       aria-label={`Show ${h.ticker} timeline`}
                                     >
@@ -459,13 +712,13 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                                       href={href}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      className="text-indigo-400 hover:text-indigo-300 hover:underline"
+                                      className="text-accent-400 hover:text-accent-300 hover:underline"
                                     >
                                       {h.ticker}
                                     </a>
                                     {exch && (
                                       <span
-                                        className="ml-1 text-[10px] text-gray-500"
+                                        className="ml-1 text-[10px] text-fg-subtle"
                                         title={EXCHANGE_NAMES[exch.toUpperCase()] ?? exch}
                                       >
                                         ({exch})
@@ -473,7 +726,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                                     )}
                                   </td>
                                   <td
-                                    className="py-1.5 text-gray-400 font-mono whitespace-nowrap"
+                                    className="py-1.5 text-fg-muted font-mono whitespace-nowrap"
                                     title={exch ? (EXCHANGE_NAMES[exch.toUpperCase()] ?? exch) : ''}
                                   >
                                     {exch || '—'}
@@ -483,65 +736,65 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                                       href={href}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      className="text-gray-300 hover:text-indigo-300 hover:underline"
+                                      className="text-fg-soft hover:text-accent-300 hover:underline"
                                     >
                                       {h.company_name}
                                     </a>
                                   </td>
-                                  <td className="py-1.5 text-gray-500">{h.sector}</td>
+                                  <td className="py-1.5 text-fg-subtle">{h.sector}</td>
                                   <td className="text-right py-1.5 font-mono">
                                     {h.sector_rank != null ? (
-                                      <span className="text-indigo-300">{h.sector_rank}</span>
+                                      <span className="text-accent-300">{h.sector_rank}</span>
                                     ) : (
-                                      <span className="text-gray-600 text-[10px]">—</span>
+                                      <span className="text-fg-faint text-[10px]">—</span>
                                     )}
                                   </td>
                                   <td className="text-right py-1.5 font-mono">
                                     {h.company_rank != null ? (
-                                      <span className="text-gray-200">{h.company_rank}</span>
+                                      <span className="text-fg">{h.company_rank}</span>
                                     ) : (
-                                      <span className="text-gray-600 text-[10px]">—</span>
+                                      <span className="text-fg-faint text-[10px]">—</span>
                                     )}
                                   </td>
                                   {categories.map((cat) => (
-                                    <td key={cat} className="text-right py-1.5 text-gray-400 font-mono">
+                                    <td key={cat} className="text-right py-1.5 text-fg-muted font-mono">
                                       {h.category_scores?.[cat] != null ? h.category_scores[cat]!.toFixed(0) : '—'}
                                     </td>
                                   ))}
-                                  <td className="text-right py-1.5 text-white font-mono font-medium">{h.score.toFixed(1)}</td>
-                                  <td className="text-right py-1.5 text-gray-400 font-mono pl-4">
+                                  <td className="text-right py-1.5 text-fg-strong font-mono font-medium">{h.score.toFixed(1)}</td>
+                                  <td className="text-right py-1.5 text-fg-muted font-mono pl-4">
                                     {fmtPrice(h.entry_price_local)}
-                                    {h.currency && <span className="text-gray-600 text-[10px] ml-1">{h.currency}</span>}
+                                    {h.currency && <span className="text-fg-faint text-[10px] ml-1">{h.currency}</span>}
                                     {h.entry_date && (
                                       <CellInfoTip>
-                                        <div className="text-gray-400">Trading date</div>
-                                        <div className="font-mono text-gray-200">{h.entry_date}</div>
+                                        <div className="text-fg-muted">Trading date</div>
+                                        <div className="font-mono text-fg">{h.entry_date}</div>
                                       </CellInfoTip>
                                     )}
                                   </td>
-                                  <td className="text-right py-1.5 text-gray-400 font-mono">
+                                  <td className="text-right py-1.5 text-fg-muted font-mono">
                                     {fmtPrice(h.exit_price_local)}
                                     {h.exit_date && (
                                       <CellInfoTip>
-                                        <div className="text-gray-400">Trading date</div>
-                                        <div className="font-mono text-gray-200">{h.exit_date}</div>
+                                        <div className="text-fg-muted">Trading date</div>
+                                        <div className="font-mono text-fg">{h.exit_date}</div>
                                       </CellInfoTip>
                                     )}
                                   </td>
-                                  <td className="text-right py-1.5 text-gray-400 font-mono pl-4">
+                                  <td className="text-right py-1.5 text-fg-muted font-mono pl-4">
                                     {fmtPrice(h.entry_price_eur)}
                                     {(h.entry_date || (h.entry_price_eur != null && h.entry_price_local)) && (
                                       <CellInfoTip>
                                         {h.entry_date && (
                                           <>
-                                            <div className="text-gray-400">Trading date</div>
-                                            <div className="font-mono text-gray-200 mb-1">{h.entry_date}</div>
+                                            <div className="text-fg-muted">Trading date</div>
+                                            <div className="font-mono text-fg mb-1">{h.entry_date}</div>
                                           </>
                                         )}
                                         {h.entry_price_eur != null && h.entry_price_local && h.entry_price_local > 0 && (
                                           <>
-                                            <div className="text-gray-400">FX rate</div>
-                                            <div className="font-mono text-gray-200">
+                                            <div className="text-fg-muted">FX rate</div>
+                                            <div className="font-mono text-fg">
                                               1 {h.currency ?? 'LCL'} = {(h.entry_price_eur / h.entry_price_local).toFixed(4)} EUR
                                             </div>
                                           </>
@@ -549,20 +802,20 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                                       </CellInfoTip>
                                     )}
                                   </td>
-                                  <td className="text-right py-1.5 text-gray-400 font-mono">
+                                  <td className="text-right py-1.5 text-fg-muted font-mono">
                                     {fmtPrice(h.exit_price_eur)}
                                     {(h.exit_date || (h.exit_price_eur != null && h.exit_price_local)) && (
                                       <CellInfoTip>
                                         {h.exit_date && (
                                           <>
-                                            <div className="text-gray-400">Trading date</div>
-                                            <div className="font-mono text-gray-200 mb-1">{h.exit_date}</div>
+                                            <div className="text-fg-muted">Trading date</div>
+                                            <div className="font-mono text-fg mb-1">{h.exit_date}</div>
                                           </>
                                         )}
                                         {h.exit_price_eur != null && h.exit_price_local && h.exit_price_local > 0 && (
                                           <>
-                                            <div className="text-gray-400">FX rate</div>
-                                            <div className="font-mono text-gray-200">
+                                            <div className="text-fg-muted">FX rate</div>
+                                            <div className="font-mono text-fg">
                                               1 {h.currency ?? 'LCL'} = {(h.exit_price_eur / h.exit_price_local).toFixed(4)} EUR
                                             </div>
                                           </>
@@ -570,7 +823,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                                       </CellInfoTip>
                                     )}
                                   </td>
-                                  <td className={`text-right py-1.5 font-mono pl-4 ${h.forward_return_pct != null ? (h.forward_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-gray-600'}`}>
+                                  <td className={`text-right py-1.5 font-mono pl-4 ${h.forward_return_pct != null ? (h.forward_return_pct >= 0 ? 'text-pos-400' : 'text-neg-400') : 'text-fg-faint'}`}>
                                     {fmtPct(h.forward_return_pct)}
                                   </td>
                                 </tr>
@@ -581,11 +834,17 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                     </td>
                   </tr>
                 )}
-                {expandedMonth === r.date && r.holdings.length === 0 && (
-                  <tr key={`${r.date}-empty`}>
-                    <td colSpan={4} className="bg-[#0f1117] px-5 py-4">
-                      <div className="text-xs text-gray-500">
-                        {r.empty_reason || 'No holdings for this period (unknown reason)'}
+                {expandedMonth === rowKey && r.holdings.length === 0 && (
+                  <tr key={`${rowKey}-empty`}>
+                    <td colSpan={4} className="bg-page px-5 py-4">
+                      <div className="text-xs text-fg-subtle">
+                        {r.empty_reason
+                          || (r.portfolio_return_pct != null
+                            // A real return but no holdings = an older saved sweep, from
+                            // before holdings were persisted for every variant. Re-running
+                            // and re-saving the sweep now stores full holdings.
+                            ? 'Holdings weren’t stored for this saved sweep (older save) — re-run and re-save the sweep to keep them, or run this variant on its own to inspect monthly holdings.'
+                            : 'No holdings for this period (unknown reason)')}
                       </div>
                     </td>
                   </tr>
@@ -711,12 +970,12 @@ function CompanySearch({
           }
         }}
         placeholder={`Search ${companies.length} stocks…`}
-        className="bg-[#0f1117] border border-gray-700 rounded-lg px-2.5 py-1 text-xs text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 focus:outline-none w-48"
+        className="bg-page border border-neutral-700 rounded-lg px-2.5 py-1 text-xs text-fg placeholder-fg-subtle focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 focus:outline-none w-48"
       />
       {open && query.trim() && (
-        <div className="absolute right-0 top-full mt-1 w-72 max-h-80 overflow-y-auto bg-[#1e2130] border border-gray-700 rounded-lg shadow-2xl z-30">
+        <div className="absolute right-0 top-full mt-1 w-72 max-h-80 overflow-y-auto bg-popover border border-neutral-700 rounded-lg shadow-2xl z-30">
           {matches.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-gray-500">No matches in this backtest</div>
+            <div className="px-3 py-2 text-xs text-fg-subtle">No matches in this backtest</div>
           ) : (
             matches.map((c, i) => (
               <button
@@ -724,12 +983,12 @@ function CompanySearch({
                 type="button"
                 onMouseEnter={() => setActiveIdx(i)}
                 onClick={() => choose(c.company_id)}
-                className={`w-full text-left px-3 py-1.5 border-b border-gray-800/30 last:border-b-0 ${
-                  i === activeIdx ? 'bg-white/[0.05]' : 'hover:bg-white/[0.03]'
+                className={`w-full text-left px-3 py-1.5 border-b border-neutral-800/30 last:border-b-0 ${
+                  i === activeIdx ? 'bg-overlay/[0.05]' : 'hover:bg-overlay/[0.03]'
                 }`}
               >
-                <div className="font-mono text-xs text-gray-200">{c.ticker || '—'}</div>
-                <div className="text-[10px] text-gray-500 truncate">{c.company_name || '—'}</div>
+                <div className="font-mono text-xs text-fg">{c.ticker || '—'}</div>
+                <div className="text-[10px] text-fg-subtle truncate">{c.company_name || '—'}</div>
               </button>
             ))
           )}

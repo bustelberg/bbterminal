@@ -12,13 +12,14 @@ import {
 } from 'recharts';
 import CollapsibleCard from '../CollapsibleCard';
 import { tooltipStyle } from '../utils';
+import { chartTheme } from '../../../../lib/chartTheme';
 import type { YearSubplot } from './seriesMath';
 
 type Mode = 'cumulative' | 'alpha';
 
-const STRATEGY_COLOR = '#818cf8'; // indigo-400 — matches active series default
-const UNIVERSE_COLOR = '#9ca3af'; // gray-400 — matches universe baseline in main chart
-const ALPHA_COLOR = '#f59e0b';    // amber-500 — distinct from strategy + universe
+const STRATEGY_COLOR = chartTheme.accent;   // matches active series default
+const UNIVERSE_COLOR = chartTheme.universe; // matches universe baseline in main chart
+const ALPHA_COLOR = chartTheme.warn;        // distinct from strategy + universe
 
 type Props = {
   subplots: YearSubplot[];
@@ -27,6 +28,10 @@ type Props = {
    * equity chart picks color[0] for the active line; piping it in here
    * keeps the subplots visually consistent if the palette ever changes. */
   strategyColor?: string;
+  /** Optional "go-live" date (YYYY-MM-DD). Drawn as a red dashed vertical
+   * line in the one per-year subplot whose year contains the date, to
+   * match the marker on the main equity chart. */
+  markerDate?: string;
 };
 
 /** Grid of small per-year sub-charts. `mode='cumulative'` shows two
@@ -41,6 +46,7 @@ export default function YearlySubplotsGrid({
   subplots,
   mode,
   strategyColor = STRATEGY_COLOR,
+  markerDate,
 }: Props) {
   if (subplots.length === 0) return null;
 
@@ -54,7 +60,7 @@ export default function YearlySubplotsGrid({
       title={title}
       rightSlot={
         mode === 'cumulative' ? (
-          <span className="flex items-center gap-3 text-[11px] text-gray-500">
+          <span className="flex items-center gap-3 text-[11px] text-fg-subtle">
             <span className="inline-flex items-center gap-1.5">
               <span className="inline-block w-2.5 h-0.5 rounded" style={{ background: strategyColor }} />
               Strategy
@@ -65,7 +71,7 @@ export default function YearlySubplotsGrid({
             </span>
           </span>
         ) : (
-          <span className="flex items-center gap-1.5 text-[11px] text-gray-500">
+          <span className="flex items-center gap-1.5 text-[11px] text-fg-subtle">
             <span className="inline-block w-2.5 h-0.5 rounded" style={{ background: ALPHA_COLOR }} />
             Strategy − Universe (% points)
           </span>
@@ -80,6 +86,7 @@ export default function YearlySubplotsGrid({
             subplot={sp}
             mode={mode}
             strategyColor={strategyColor}
+            markerDate={markerDate}
           />
         ))}
       </div>
@@ -91,10 +98,12 @@ function YearMiniChart({
   subplot,
   mode,
   strategyColor,
+  markerDate,
 }: {
   subplot: YearSubplot;
   mode: Mode;
   strategyColor: string;
+  markerDate?: string;
 }) {
   // Compose flat rows for Recharts. Tooltip + dataKey resolution wants
   // primitive keys on each row, not nested {strategy, universe} objects.
@@ -105,17 +114,59 @@ function YearMiniChart({
     alpha: p.alpha,
   }));
 
+  // Go-live marker: only the subplot whose year contains the date draws
+  // it. Snap to the first point at/after the date (the x-axis is
+  // categorical, so the ReferenceLine's `x` must equal a data point).
+  // Slice to each point's own length so a YYYY-MM-DD marker matches both
+  // daily (YYYY-MM-DD) and monthly (YYYY-MM) points.
+  let markerX: string | null = null;
+  if (markerDate && String(subplot.year) === markerDate.slice(0, 4)) {
+    const hit = subplot.points.find((p) => p.date >= markerDate.slice(0, p.date.length));
+    markerX = hit ? hit.date : (subplot.points[subplot.points.length - 1]?.date ?? null);
+  }
+
+  // Year-end headline: the last point that has data drives a ✓ + the figure.
+  // Cumulative mode shows the strategy's return for the year (rebased to 0%
+  // at year-start) with a ✓ when it finished above the universe; alpha mode
+  // shows the final outperformance with a ✓ when it's positive.
+  const lastValid = [...subplot.points].reverse().find((p) =>
+    mode === 'cumulative'
+      ? p.strategyCum != null && p.universeCum != null
+      : p.alpha != null,
+  );
+  const headline =
+    mode === 'cumulative' ? lastValid?.strategyCum ?? null : lastValid?.alpha ?? null;
+  const beat =
+    mode === 'cumulative'
+      ? (lastValid?.strategyCum ?? 0) > (lastValid?.universeCum ?? 0)
+      : (lastValid?.alpha ?? 0) > 0;
+
   return (
-    <div className="bg-[#0f1117]/60 border border-gray-800/40 rounded-lg p-2">
-      <div className="text-[11px] text-gray-400 font-mono mb-1 pl-1">
-        {subplot.year}
+    <div className="bg-page/60 border border-neutral-800/40 rounded-lg p-2">
+      <div className="flex items-center justify-between mb-1 px-1">
+        <span className="text-[11px] text-fg-muted font-mono">{subplot.year}</span>
+        {headline != null && (
+          <span className="flex items-center gap-1 text-[11px] font-mono">
+            {beat && (
+              <span
+                className="text-pos-400"
+                title={mode === 'cumulative' ? 'Strategy beat the universe this year' : 'Positive alpha this year'}
+              >
+                ✓
+              </span>
+            )}
+            <span className={headline >= 0 ? 'text-pos-400' : 'text-neg-400'}>
+              {`${headline >= 0 ? '+' : ''}${headline.toFixed(1)}%`}
+            </span>
+          </span>
+        )}
       </div>
       <ResponsiveContainer width="100%" height={110}>
         <LineChart data={rows} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+          <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
           <XAxis dataKey="date" hide />
           <YAxis
-            tick={{ fill: '#6b7280', fontSize: 9 }}
+            tick={{ fill: chartTheme.axisTick, fontSize: 9 }}
             tickLine={false}
             axisLine={false}
             width={28}
@@ -134,7 +185,7 @@ function YearMiniChart({
               return [`${v >= 0 ? '+' : ''}${v.toFixed(2)}%`, label];
             }}
           />
-          <ReferenceLine y={0} stroke="#374151" strokeDasharray="2 2" />
+          <ReferenceLine y={0} stroke={chartTheme.zeroLine} strokeDasharray="2 2" />
           {mode === 'cumulative' ? (
             <>
               <Line
@@ -166,6 +217,15 @@ function YearMiniChart({
               dot={false}
               isAnimationActive={false}
               connectNulls
+            />
+          )}
+          {markerX != null && (
+            <ReferenceLine
+              x={markerX}
+              stroke={chartTheme.goLiveLine}
+              strokeDasharray="4 3"
+              strokeWidth={1}
+              ifOverflow="extendDomain"
             />
           )}
         </LineChart>

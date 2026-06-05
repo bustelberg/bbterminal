@@ -8,7 +8,7 @@
  * Usage:
  *   <LoadingDots />                    →  · · ·   (bare dots, default)
  *   <LoadingDots label="Loading" />    →  Loading · · ·
- *   <LoadingDots label="Refreshing" className="text-gray-400" />
+ *   <LoadingDots label="Refreshing" className="text-fg-muted" />
  *
  * Animation: each dot fades from 20% → 100% → 20% on a 1.4 s cycle,
  * staggered by 0.16 s. The keyframes live in this file's inline

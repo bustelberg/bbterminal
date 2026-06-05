@@ -62,16 +62,21 @@ export function useVariantSelection({
 
   // ── Axis selection state ─────────────────────────────────────────
   const [selectedFreqs, setSelectedFreqs] = useState<Set<RebalanceFrequency>>(
-    () => new Set<RebalanceFrequency>(['monthly', 'every_2_months', 'every_3_months']),
+    () => new Set<RebalanceFrequency>(['monthly']),
   );
   const [selectedStrategies, setSelectedStrategies] = useState<Set<StrategyType>>(
     () => new Set<StrategyType>(['long_only']),
   );
   const [selectedUniverses, setSelectedUniverses] = useState<Set<string>>(
-    () => new Set<string>(['ACWI_LEONTEQ']),
+    () => new Set<string>(['LEONTEQ']),
   );
   const [selectedGroupings, setSelectedGroupings] = useState<Set<'sector' | 'industry'>>(
     () => new Set<'sector' | 'industry'>(['sector']),
+  );
+  // Rebalance weekdays to sweep (0=Mon..6=Sun). Empty = don't sweep the
+  // dimension (every variant inherits the base config's rebalance weekday).
+  const [selectedWeekdays, setSelectedWeekdays] = useState<Set<number>>(
+    () => new Set<number>(),
   );
   // Comma-separated numeric overrides; empty means "inherit base, don't
   // sweep this dimension." Parsing lives in `./variantHelpers.ts`.
@@ -111,11 +116,12 @@ export function useVariantSelection({
       selectedStrategies,
       selectedUniverses,
       selectedGroupings,
+      selectedWeekdays,
       topSectorsSweep,
       perSectorSweep,
       minScoreSweep,
     }),
-    [selectedFreqs, selectedStrategies, selectedUniverses, selectedGroupings, topSectorsSweep, perSectorSweep, minScoreSweep],
+    [selectedFreqs, selectedStrategies, selectedUniverses, selectedGroupings, selectedWeekdays, topSectorsSweep, perSectorSweep, minScoreSweep],
   );
 
   // ── Effective size + min/max filters ─────────────────────────────
@@ -162,6 +168,7 @@ export function useVariantSelection({
     selectedStrategies, setSelectedStrategies,
     selectedUniverses, setSelectedUniverses,
     selectedGroupings, setSelectedGroupings,
+    selectedWeekdays, setSelectedWeekdays,
     topSectorsSweep, setTopSectorsSweep,
     perSectorSweep, setPerSectorSweep,
     minScoreSweep, setMinScoreSweep,

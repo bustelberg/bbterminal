@@ -13,7 +13,7 @@ panel compute). Subsequent clicks for any stock in the same
 from __future__ import annotations
 
 import asyncio
-import json
+from routers._sse import sse_event as _emit
 import queue as _queue
 import threading
 from collections import OrderedDict
@@ -320,9 +320,6 @@ async def _signal_breakdown_stream(req: SignalBreakdownRequest):
     from momentum.explain import _date_str, explain_all_signals
     from momentum.scoring import _get_category_keys, compute_category_scores
     from momentum.signals import compute_signals_panel
-
-    def _emit(payload: dict) -> str:
-        return f"data: {json.dumps(payload)}\n\n"
 
     try:
         cutoff = date.fromisoformat(req.as_of_date)

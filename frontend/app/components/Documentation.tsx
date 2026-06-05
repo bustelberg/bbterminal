@@ -48,16 +48,16 @@ function CodeBlock({ code, lang }: { code: string; lang?: string }) {
       <button
         type="button"
         onClick={onCopy}
-        className="absolute top-2 right-2 text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-gray-700 bg-[#151821] text-gray-400 hover:text-gray-200 hover:border-gray-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+        className="absolute top-2 right-2 text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-neutral-700 bg-card text-fg-muted hover:text-fg hover:border-neutral-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
       >
         {copied ? '✓ Copied' : 'Copy'}
       </button>
       {lang && (
-        <span className="absolute top-2 left-2 text-[9px] uppercase tracking-wider text-gray-600 font-mono pointer-events-none">
+        <span className="absolute top-2 left-2 text-[9px] uppercase tracking-wider text-fg-faint font-mono pointer-events-none">
           {lang}
         </span>
       )}
-      <pre className="bg-[#0f1117] border border-gray-800/60 rounded-lg px-4 py-3 pt-7 text-[11.5px] font-mono text-gray-200 overflow-auto leading-relaxed">
+      <pre className="bg-page border border-neutral-800/60 rounded-lg px-4 py-3 pt-7 text-[11.5px] font-mono text-fg overflow-auto leading-relaxed">
 {code}
       </pre>
     </div>
@@ -75,12 +75,12 @@ function Section({
 }) {
   return (
     <section id={id} className="scroll-mt-8 space-y-3">
-      <h2 className="text-lg font-semibold text-white border-b border-gray-800/40 pb-2">
-        <a href={`#${id}`} className="hover:text-indigo-300 transition-colors">
+      <h2 className="text-lg font-semibold text-fg-strong border-b border-neutral-800/40 pb-2">
+        <a href={`#${id}`} className="hover:text-accent-300 transition-colors">
           {title}
         </a>
       </h2>
-      <div className="space-y-3 text-sm text-gray-300 leading-relaxed">{children}</div>
+      <div className="space-y-3 text-sm text-fg-soft leading-relaxed">{children}</div>
     </section>
   );
 }
@@ -367,29 +367,29 @@ export default function Documentation() {
   })();
 
   return (
-    <div className="min-h-screen bg-[#0f1117] text-gray-200">
-      <div className="px-8 py-5 border-b border-gray-800/40">
-        <h1 className="text-xl font-semibold text-white">Documentation</h1>
-        <p className="text-sm text-gray-500 mt-1">
+    <div className="min-h-screen bg-page text-fg">
+      <div className="px-8 py-5 border-b border-neutral-800/40">
+        <h1 className="text-xl font-semibold text-fg-strong">Documentation</h1>
+        <p className="text-sm text-fg-subtle mt-1">
           How to call the BBTerminal admin API from your own scripts. Same auth your IBKR rebalancer would use.
         </p>
-        <div className="mt-3 inline-flex items-center gap-2 text-xs bg-[#151821] border border-gray-800/40 rounded-lg px-3 py-1.5">
-          <span className="text-gray-500">URLs in code blocks are filled in from</span>
-          <span className="font-mono text-indigo-300">{envLabel}</span>
-          <span className="text-gray-600">·</span>
-          <span className="font-mono text-gray-400 truncate max-w-[400px]">{RUNTIME.apiUrl}</span>
+        <div className="mt-3 inline-flex items-center gap-2 text-xs bg-card border border-neutral-800/40 rounded-lg px-3 py-1.5">
+          <span className="text-fg-subtle">URLs in code blocks are filled in from</span>
+          <span className="font-mono text-accent-300">{envLabel}</span>
+          <span className="text-fg-faint">·</span>
+          <span className="font-mono text-fg-muted truncate max-w-[400px]">{RUNTIME.apiUrl}</span>
         </div>
       </div>
 
       <div className="px-8 py-6 grid gap-8 lg:grid-cols-[200px_1fr] max-w-6xl">
         {/* Sticky TOC */}
         <nav className="lg:sticky lg:top-6 self-start text-xs space-y-1">
-          <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">Contents</div>
+          <div className="text-[10px] uppercase tracking-wider text-fg-subtle mb-2">Contents</div>
           {TOC.map((t) => (
             <a
               key={t.id}
               href={`#${t.id}`}
-              className="block text-gray-400 hover:text-indigo-300 transition-colors py-0.5"
+              className="block text-fg-muted hover:text-accent-300 transition-colors py-0.5"
             >
               {t.label}
             </a>
@@ -400,18 +400,18 @@ export default function Documentation() {
 
           <Section id="overview" title="Overview">
             <p>
-              The <code className="text-amber-300">/api/admin/*</code> endpoints exist so external scripts (an IBKR rebalancer,
+              The <code className="text-warn-300">/api/admin/*</code> endpoints exist so external scripts (an IBKR rebalancer,
               a monitoring cron, a CI smoke test) can pull data from BBTerminal without opening the web UI.
-              All admin endpoints require a Supabase JWT whose <code className="text-amber-300">app_metadata.role == &apos;admin&apos;</code>.
+              All admin endpoints require a Supabase JWT whose <code className="text-warn-300">app_metadata.role == &apos;admin&apos;</code>.
             </p>
             <p>
-              You authenticate by exchanging your <strong>email + password</strong> for an <code className="text-amber-300">access_token</code> at
-              {' '}<code className="text-amber-300">$SUPABASE_URL/auth/v1/token?grant_type=password</code>, then pass it as
-              {' '}<code className="text-amber-300">Authorization: Bearer …</code> on each API call. Tokens last about 1&nbsp;hour;
-              after that you either re-authenticate or use the returned <code className="text-amber-300">refresh_token</code>.
+              You authenticate by exchanging your <strong>email + password</strong> for an <code className="text-warn-300">access_token</code> at
+              {' '}<code className="text-warn-300">$SUPABASE_URL/auth/v1/token?grant_type=password</code>, then pass it as
+              {' '}<code className="text-warn-300">Authorization: Bearer …</code> on each API call. Tokens last about 1&nbsp;hour;
+              after that you either re-authenticate or use the returned <code className="text-warn-300">refresh_token</code>.
             </p>
             <p>
-              For one-off probing, the <a href="/api" className="text-indigo-400 hover:underline">/api page</a> in this app does
+              For one-off probing, the <a href="/api" className="text-accent-400 hover:underline">/api page</a> in this app does
               all of that for you with Try buttons and copy-as-curl. For an automated script, use the Python client below.
             </p>
           </Section>
@@ -421,34 +421,34 @@ export default function Documentation() {
               The minimal end-to-end shell flow — exchange password for token, call an endpoint.
             </p>
             <CodeBlock lang="bash" code={CURL_LOGIN} />
-            <p className="text-xs text-gray-500">
-              Replace <code className="text-amber-300">SUPABASE_URL</code> and <code className="text-amber-300">SUPABASE_ANON_KEY</code> with values from{' '}
-              <code className="text-amber-300">npx supabase status</code> (local) or your prod env vars.
-              Tokens expire after ~1&nbsp;hour; re-run the login command or use <code className="text-amber-300">grant_type=refresh_token</code>.
+            <p className="text-xs text-fg-subtle">
+              Replace <code className="text-warn-300">SUPABASE_URL</code> and <code className="text-warn-300">SUPABASE_ANON_KEY</code> with values from{' '}
+              <code className="text-warn-300">npx supabase status</code> (local) or your prod env vars.
+              Tokens expire after ~1&nbsp;hour; re-run the login command or use <code className="text-warn-300">grant_type=refresh_token</code>.
             </p>
           </Section>
 
           <Section id="python-client" title="Python client">
             <p>
-              Drop <code className="text-amber-300">bbterminal_client.py</code> into your Python repo. One class, sync API,
-              handles login + token refresh transparently. Only depends on <code className="text-amber-300">requests</code>.
+              Drop <code className="text-warn-300">bbterminal_client.py</code> into your Python repo. One class, sync API,
+              handles login + token refresh transparently. Only depends on <code className="text-warn-300">requests</code>.
             </p>
             <CodeBlock lang="python" code={PYTHON_CLIENT_SOURCE} />
           </Section>
 
           <Section id="env-vars" title="Environment variables">
             <p>
-              <code className="text-amber-300">BBTerminalClient.from_env()</code> reads five variables. Keep them in a
-              {' '}<code className="text-amber-300">.env</code> file (gitignored) or your secrets manager — never commit the password.
+              <code className="text-warn-300">BBTerminalClient.from_env()</code> reads five variables. Keep them in a
+              {' '}<code className="text-warn-300">.env</code> file (gitignored) or your secrets manager — never commit the password.
             </p>
-            <p className="text-xs text-amber-300/80">
+            <p className="text-xs text-warn-300/80">
               The URL + anon key below are auto-filled from this deployment — paste straight into a sibling repo&apos;s
-              {' '}<code className="text-amber-300">.env</code>.
+              {' '}<code className="text-warn-300">.env</code>.
             </p>
             <CodeBlock lang="env" code={ENV_EXAMPLE} />
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-fg-subtle">
               On the script side, load these with{' '}
-              <code className="text-amber-300">python-dotenv</code> (<code className="text-amber-300">from dotenv import load_dotenv; load_dotenv()</code>)
+              <code className="text-warn-300">python-dotenv</code> (<code className="text-warn-300">from dotenv import load_dotenv; load_dotenv()</code>)
               before constructing the client. The anon key is safe to commit on its own — it&apos;s the same value already shipped in the
               browser JS bundle — but committing the password obviously is not.
             </p>
@@ -476,13 +476,13 @@ export default function Documentation() {
                 between the freshness check and the actual call).
               </li>
               <li>
-                <strong>No Supabase SDK dependency.</strong> Just <code className="text-amber-300">requests</code>.
-                Adding <code className="text-amber-300">supabase-py</code> would pull in{' '}
-                <code className="text-amber-300">gotrue</code>, <code className="text-amber-300">postgrest</code>,{' '}
-                <code className="text-amber-300">realtime</code>, etc. that you don&apos;t need for this single-purpose client.
+                <strong>No Supabase SDK dependency.</strong> Just <code className="text-warn-300">requests</code>.
+                Adding <code className="text-warn-300">supabase-py</code> would pull in{' '}
+                <code className="text-warn-300">gotrue</code>, <code className="text-warn-300">postgrest</code>,{' '}
+                <code className="text-warn-300">realtime</code>, etc. that you don&apos;t need for this single-purpose client.
               </li>
               <li>
-                <strong><code className="text-amber-300">from_env()</code> factory</strong> keeps the password out of source.
+                <strong><code className="text-warn-300">from_env()</code> factory</strong> keeps the password out of source.
                 The constructor still accepts explicit args if you&apos;d rather inject from a secrets manager.
               </li>
             </ul>
@@ -492,14 +492,14 @@ export default function Documentation() {
             <ul className="list-disc list-outside space-y-1.5 pl-5 text-sm">
               <li>
                 <strong>Disk-cached token</strong> — so a short-running script doesn&apos;t re-login on every cold start.
-                Serialize <code className="text-amber-300">{`{access_token, refresh_token, expires_at}`}</code> to{' '}
-                <code className="text-amber-300">~/.cache/bbterminal-token.json</code> after{' '}
-                <code className="text-amber-300">_apply_token_response</code> and read it in{' '}
-                <code className="text-amber-300">__init__</code>. Use file mode <code className="text-amber-300">0o600</code>.
+                Serialize <code className="text-warn-300">{`{access_token, refresh_token, expires_at}`}</code> to{' '}
+                <code className="text-warn-300">~/.cache/bbterminal-token.json</code> after{' '}
+                <code className="text-warn-300">_apply_token_response</code> and read it in{' '}
+                <code className="text-warn-300">__init__</code>. Use file mode <code className="text-warn-300">0o600</code>.
               </li>
               <li>
                 <strong>Retry on 5xx with backoff</strong> — if Railway has a transient blip. Add{' '}
-                <code className="text-amber-300">tenacity</code> and decorate <code className="text-amber-300">_request</code>.
+                <code className="text-warn-300">tenacity</code> and decorate <code className="text-warn-300">_request</code>.
               </li>
               <li>
                 <strong>Typed responses</strong> — generate Pydantic models from the response shapes if you want
@@ -518,13 +518,13 @@ export default function Documentation() {
           <Section id="reference" title="Endpoint reference">
             <p>
               Every admin endpoint at a glance. The{' '}
-              <a href="/api" className="text-indigo-400 hover:underline">/api page</a> lets you call each one
-              interactively; the <code className="text-amber-300">BBTerminalClient</code> above exposes one method per row.
+              <a href="/api" className="text-accent-400 hover:underline">/api page</a> lets you call each one
+              interactively; the <code className="text-warn-300">BBTerminalClient</code> above exposes one method per row.
             </p>
-            <div className="overflow-auto border border-gray-800/40 rounded-lg">
+            <div className="overflow-auto border border-neutral-800/40 rounded-lg">
               <table className="w-full text-xs">
-                <thead className="text-gray-500 text-[10px] uppercase">
-                  <tr className="border-b border-gray-800/40 bg-[#151821]">
+                <thead className="text-fg-subtle text-[10px] uppercase">
+                  <tr className="border-b border-neutral-800/40 bg-card">
                     <th className="text-left px-3 py-2 font-medium">Method</th>
                     <th className="text-left px-3 py-2 font-medium">Path</th>
                     <th className="text-left px-3 py-2 font-medium">Python</th>
@@ -542,19 +542,19 @@ export default function Documentation() {
                     ['GET', '/api/admin/sanity-check', 'bb.sanity_check()', 'Coarse table counts + recent status distribution.'],
                     ['GET', '/api/auth/me', 'bb.whoami()', 'Caller identity + role. Bail fast if role != "admin".'],
                   ].map(([method, path, py, desc]) => (
-                    <tr key={path} className="border-b border-gray-800/20">
-                      <td className="px-3 py-2"><span className="text-emerald-300 font-mono">{method}</span></td>
-                      <td className="px-3 py-2 font-mono text-gray-200">{path}</td>
-                      <td className="px-3 py-2 font-mono text-gray-400">{py}</td>
-                      <td className="px-3 py-2 text-gray-400">{desc}</td>
+                    <tr key={path} className="border-b border-neutral-800/20">
+                      <td className="px-3 py-2"><span className="text-pos-300 font-mono">{method}</span></td>
+                      <td className="px-3 py-2 font-mono text-fg">{path}</td>
+                      <td className="px-3 py-2 font-mono text-fg-muted">{py}</td>
+                      <td className="px-3 py-2 text-fg-muted">{desc}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-fg-subtle">
               Full response shapes are documented in the backend source and visible on the{' '}
-              <a href="/api" className="text-indigo-400 hover:underline">/api page</a> — click Try it on any
+              <a href="/api" className="text-accent-400 hover:underline">/api page</a> — click Try it on any
               endpoint to see the live JSON.
             </p>
           </Section>

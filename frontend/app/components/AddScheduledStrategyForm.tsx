@@ -298,10 +298,10 @@ export default function AddScheduledStrategyForm({
   };
 
   return (
-    <div className="px-5 py-4 border-b border-gray-800/40 bg-[#0f1117] space-y-5">
-      <div className="text-[10px] uppercase tracking-wider text-gray-500">
+    <div className="px-5 py-4 border-b border-neutral-800/40 bg-page space-y-5">
+      <div className="text-[10px] uppercase tracking-wider text-fg-subtle">
         New scheduled strategy
-        <span className="ml-2 normal-case tracking-normal text-gray-600">
+        <span className="ml-2 normal-case tracking-normal text-fg-faint">
           (multi-select to create one entry per universe × strategy × frequency permutation)
         </span>
       </div>
@@ -309,15 +309,15 @@ export default function AddScheduledStrategyForm({
       {/* Identity + scheduling */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div>
-          <label className="text-gray-500 text-xs block mb-1">
+          <label className="text-fg-subtle text-xs block mb-1">
             Universe{selectedUniverses.length === 1 ? '' : 's'}
-            <span className="text-gray-600 ml-1">({selectedUniverses.length})</span>
+            <span className="text-fg-faint ml-1">({selectedUniverses.length})</span>
           </label>
-          <div className="bg-[#151821] border border-gray-700 rounded-lg px-3 py-2 space-y-1 max-h-40 overflow-y-auto">
+          <div className="bg-card border border-neutral-700 rounded-lg px-3 py-2 space-y-1 max-h-40 overflow-y-auto">
             {universesLoading ? (
-              <div className="text-xs text-gray-500"><LoadingDots label="Loading" /></div>
+              <div className="text-xs text-fg-subtle"><LoadingDots label="Loading" /></div>
             ) : universes.length === 0 ? (
-              <div className="text-xs text-gray-400">
+              <div className="text-xs text-fg-muted">
                 No template universes refreshed yet.
               </div>
             ) : universes.map((u) => {
@@ -328,10 +328,10 @@ export default function AddScheduledStrategyForm({
                     type="checkbox"
                     checked={checked}
                     onChange={(e) => toggle(selectedUniverses, setSelectedUniverses, u.template_key, e.target.checked)}
-                    className="accent-indigo-500"
+                    className="accent-accent-500"
                   />
-                  <span className={checked ? 'text-gray-200' : 'text-gray-400'}>{u.label}</span>
-                  <span className="text-gray-600 font-mono text-[10px]">
+                  <span className={checked ? 'text-fg' : 'text-fg-muted'}>{u.label}</span>
+                  <span className="text-fg-faint font-mono text-[10px]">
                     {u.earliest_date.slice(0, 7)} – {u.latest_captured_month?.slice(0, 7)}
                   </span>
                 </label>
@@ -340,11 +340,11 @@ export default function AddScheduledStrategyForm({
           </div>
         </div>
         <div>
-          <label className="text-gray-500 text-xs block mb-1">
+          <label className="text-fg-subtle text-xs block mb-1">
             Strateg{selectedModes.length === 1 ? 'y' : 'ies'}
-            <span className="text-gray-600 ml-1">({selectedModes.length})</span>
+            <span className="text-fg-faint ml-1">({selectedModes.length})</span>
           </label>
-          <div className="bg-[#151821] border border-gray-700 rounded-lg px-3 py-2 space-y-1">
+          <div className="bg-card border border-neutral-700 rounded-lg px-3 py-2 space-y-1">
             {SELECTION_MODES.map((m) => {
               const checked = selectedModes.includes(m.value);
               return (
@@ -353,20 +353,20 @@ export default function AddScheduledStrategyForm({
                     type="checkbox"
                     checked={checked}
                     onChange={(e) => toggle(selectedModes, setSelectedModes as (xs: string[]) => void, m.value, e.target.checked)}
-                    className="accent-indigo-500"
+                    className="accent-accent-500"
                   />
-                  <span className={checked ? 'text-gray-200' : 'text-gray-400'}>{m.label}</span>
+                  <span className={checked ? 'text-fg' : 'text-fg-muted'}>{m.label}</span>
                 </label>
               );
             })}
           </div>
         </div>
         <div>
-          <label className="text-gray-500 text-xs block mb-1">
+          <label className="text-fg-subtle text-xs block mb-1">
             Frequenc{selectedFrequencies.length === 1 ? 'y' : 'ies'}
-            <span className="text-gray-600 ml-1">({selectedFrequencies.length})</span>
+            <span className="text-fg-faint ml-1">({selectedFrequencies.length})</span>
           </label>
-          <div className="bg-[#151821] border border-gray-700 rounded-lg px-3 py-2 space-y-1">
+          <div className="bg-card border border-neutral-700 rounded-lg px-3 py-2 space-y-1">
             {FREQUENCIES.map((f) => {
               const checked = selectedFrequencies.includes(f.value);
               return (
@@ -375,19 +375,19 @@ export default function AddScheduledStrategyForm({
                     type="checkbox"
                     checked={checked}
                     onChange={(e) => toggle(selectedFrequencies, setSelectedFrequencies, f.value, e.target.checked)}
-                    className="accent-indigo-500"
+                    className="accent-accent-500"
                   />
-                  <span className={checked ? 'text-gray-200' : 'text-gray-400'}>{f.label}</span>
+                  <span className={checked ? 'text-fg' : 'text-fg-muted'}>{f.label}</span>
                 </label>
               );
             })}
           </div>
         </div>
         <div>
-          <label className="text-gray-500 text-xs block mb-1">
+          <label className="text-fg-subtle text-xs block mb-1">
             Name
             {!isSinglePermutation && (
-              <span className="text-gray-600 ml-1">(auto-named per entry)</span>
+              <span className="text-fg-faint ml-1">(auto-named per entry)</span>
             )}
           </label>
           <input
@@ -400,13 +400,13 @@ export default function AddScheduledStrategyForm({
             }}
             placeholder={isSinglePermutation ? (suggestedName || 'e.g. ACWI weekly momentum') : 'auto-generated per permutation'}
             disabled={!isSinglePermutation}
-            className="w-full bg-[#151821] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full bg-card border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none disabled:opacity-50 disabled:cursor-not-allowed"
           />
           {isSinglePermutation && nameTouched && suggestedName && (
             <button
               type="button"
               onClick={() => { setNameTouched(false); setName(suggestedName); }}
-              className="mt-1 text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors"
+              className="mt-1 text-[10px] text-accent-400 hover:text-accent-300 transition-colors"
               title="Reset to the auto-generated name"
             >
               ↻ reset to suggestion
@@ -416,10 +416,10 @@ export default function AddScheduledStrategyForm({
       </div>
 
       {/* Strategy parameters — conditional per the union of selected modes. */}
-      <div className="pt-3 border-t border-gray-800/40">
-        <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-3">
+      <div className="pt-3 border-t border-neutral-800/40">
+        <div className="text-[10px] uppercase tracking-wider text-fg-subtle mb-3">
           Strategy parameters
-          <span className="text-gray-600 normal-case tracking-normal ml-2">
+          <span className="text-fg-faint normal-case tracking-normal ml-2">
             (shared across every permutation)
           </span>
         </div>
@@ -427,43 +427,43 @@ export default function AddScheduledStrategyForm({
         {needsTopNPair && (
           <div className="flex flex-wrap items-end gap-6 mb-5">
             <div>
-              <label className="text-gray-500 text-xs block mb-1">Top Sectors</label>
+              <label className="text-fg-subtle text-xs block mb-1">Top Sectors</label>
               <input
                 type="number"
                 min={1}
                 max={20}
                 value={topNSectors}
                 onChange={(e) => setTopNSectors(Number(e.target.value))}
-                className="w-16 bg-[#151821] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                className="w-16 bg-card border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono text-center focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
               />
             </div>
             <div>
-              <label className="text-gray-500 text-xs block mb-1">Per Sector</label>
+              <label className="text-fg-subtle text-xs block mb-1">Per Sector</label>
               <input
                 type="number"
                 min={1}
                 max={20}
                 value={topNPerSector}
                 onChange={(e) => setTopNPerSector(Number(e.target.value))}
-                className="w-16 bg-[#151821] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                className="w-16 bg-card border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono text-center focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
               />
             </div>
             <div>
-              <label className="text-gray-500 text-xs block mb-1">Max Companies</label>
+              <label className="text-fg-subtle text-xs block mb-1">Max Companies</label>
               <input
                 type="number"
                 min={0}
                 max={500}
                 value={maxCompanies}
                 onChange={(e) => setMaxCompanies(Number(e.target.value))}
-                className="w-20 bg-[#151821] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                className="w-20 bg-card border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono text-center focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
                 title="0 = no cap"
               />
-              <span className="text-gray-600 text-xs ml-1">0 = all</span>
+              <span className="text-fg-faint text-xs ml-1">0 = all</span>
             </div>
             {needsMinPriceScore && (
               <div>
-                <label className="text-gray-500 text-xs block mb-1">Min Price Score</label>
+                <label className="text-fg-subtle text-xs block mb-1">Min Price Score</label>
                 <input
                   type="number"
                   min={0}
@@ -472,10 +472,10 @@ export default function AddScheduledStrategyForm({
                   placeholder="off"
                   value={minPriceScore}
                   onChange={(e) => setMinPriceScore(e.target.value)}
-                  className="w-20 bg-[#151821] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                  className="w-20 bg-card border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono text-center focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
                   title="Optional 0-100 floor on each candidate's price-category score. Empty = no filter. (Applies only to momentum permutations.)"
                 />
-                <span className="text-gray-600 text-xs ml-1">{minPriceScore.trim() === '' ? 'off' : '>'}</span>
+                <span className="text-fg-faint text-xs ml-1">{minPriceScore.trim() === '' ? 'off' : '>'}</span>
               </div>
             )}
           </div>
@@ -488,13 +488,13 @@ export default function AddScheduledStrategyForm({
               if (groupSignals.length === 0) return null;
               return (
                 <div key={group}>
-                  <h3 className="text-gray-400 text-xs font-medium mb-2.5 uppercase tracking-wider">
+                  <h3 className="text-fg-muted text-xs font-medium mb-2.5 uppercase tracking-wider">
                     {group === 'price' ? 'Price Momentum' : 'Volume Confirmation'}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2.5">
                     {groupSignals.map((s) => (
                       <div key={s.key} className="flex items-center gap-3">
-                        <span className="text-gray-300 text-xs font-medium w-36 shrink-0 truncate" title={s.description}>
+                        <span className="text-fg-soft text-xs font-medium w-36 shrink-0 truncate" title={s.description}>
                           {s.label}
                         </span>
                         <input
@@ -504,9 +504,9 @@ export default function AddScheduledStrategyForm({
                           step={1}
                           value={weights[s.key] ?? 0}
                           onChange={(e) => setWeights((prev) => ({ ...prev, [s.key]: Number(e.target.value) }))}
-                          className="flex-1 h-1 accent-indigo-500 cursor-pointer"
+                          className="flex-1 h-1 accent-accent-500 cursor-pointer"
                         />
-                        <span className="text-gray-500 text-xs w-5 text-right font-mono shrink-0">{weights[s.key] ?? 0}</span>
+                        <span className="text-fg-subtle text-xs w-5 text-right font-mono shrink-0">{weights[s.key] ?? 0}</span>
                       </div>
                     ))}
                   </div>
@@ -515,11 +515,11 @@ export default function AddScheduledStrategyForm({
             })}
             {categories.length > 1 && (
               <div>
-                <h3 className="text-gray-400 text-xs font-medium mb-2.5 uppercase tracking-wider">Category Weights</h3>
+                <h3 className="text-fg-muted text-xs font-medium mb-2.5 uppercase tracking-wider">Category Weights</h3>
                 <div className="flex items-center gap-6 flex-wrap">
                   {categories.map((cat) => (
                     <div key={cat} className="flex items-center gap-2">
-                      <span className="text-gray-300 text-xs font-medium w-28">
+                      <span className="text-fg-soft text-xs font-medium w-28">
                         {cat === 'price' ? 'Price Momentum' : cat === 'volume' ? 'Volume Confirmation' : cat}
                       </span>
                       <input
@@ -529,9 +529,9 @@ export default function AddScheduledStrategyForm({
                         step={5}
                         value={categoryWeights[cat] ?? 50}
                         onChange={(e) => setCategoryWeights((prev) => ({ ...prev, [cat]: Number(e.target.value) }))}
-                        className="w-32 h-1 accent-indigo-500 cursor-pointer"
+                        className="w-32 h-1 accent-accent-500 cursor-pointer"
                       />
-                      <span className="text-gray-500 text-xs w-8 text-right font-mono">{categoryWeights[cat] ?? 50}%</span>
+                      <span className="text-fg-subtle text-xs w-8 text-right font-mono">{categoryWeights[cat] ?? 50}%</span>
                     </div>
                   ))}
                 </div>
@@ -543,13 +543,13 @@ export default function AddScheduledStrategyForm({
 
       {/* Permutation preview */}
       {permutationCount > 1 && (
-        <div className="pt-3 border-t border-gray-800/40">
-          <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">
+        <div className="pt-3 border-t border-neutral-800/40">
+          <div className="text-[10px] uppercase tracking-wider text-fg-subtle mb-2">
             Will create {permutationCount} entries
           </div>
-          <div className="bg-[#151821] border border-gray-800/40 rounded-lg px-3 py-2 max-h-40 overflow-y-auto space-y-0.5">
+          <div className="bg-card border border-neutral-800/40 rounded-lg px-3 py-2 max-h-40 overflow-y-auto space-y-0.5">
             {permutations.map((p, i) => (
-              <div key={i} className="text-[11px] text-gray-300 font-mono">
+              <div key={i} className="text-[11px] text-fg-soft font-mono">
                 {nameForPermutation(p)}
               </div>
             ))}
@@ -557,14 +557,14 @@ export default function AddScheduledStrategyForm({
         </div>
       )}
 
-      {error && <div className="text-xs text-rose-300">{error}</div>}
+      {error && <div className="text-xs text-neg-300">{error}</div>}
 
       <div className="flex items-center gap-3 pt-2">
         <button
           type="button"
           onClick={() => void handleSubmit()}
           disabled={saving || permutationCount === 0}
-          className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors"
+          className="text-xs px-3 py-1.5 rounded-lg bg-accent-600 hover:bg-accent-500 disabled:opacity-50 disabled:cursor-not-allowed text-fg-strong transition-colors"
         >
           {saving
             ? (savingProgress
@@ -578,7 +578,7 @@ export default function AddScheduledStrategyForm({
           type="button"
           onClick={onCancel}
           disabled={saving}
-          className="text-xs px-3 py-1.5 rounded-lg text-gray-400 hover:bg-white/5 transition-colors"
+          className="text-xs px-3 py-1.5 rounded-lg text-fg-muted hover:bg-overlay/5 transition-colors"
         >
           Cancel
         </button>

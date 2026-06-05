@@ -114,6 +114,11 @@
             "title": "Rebalance Frequency",
             "type": "string"
           },
+          "rebalance_weekday": {
+            "default": 0,
+            "title": "Rebalance Weekday",
+            "type": "integer"
+          },
           "sector_etfs": {
             "anyOf": [
               {
@@ -389,6 +394,42 @@
         "title": "ExchangeFeeIn",
         "type": "object"
       },
+      "FeeConfigIn": {
+        "properties": {
+          "bustelberg_mgmt_bps": {
+            "maximum": 10000.0,
+            "minimum": 0.0,
+            "title": "Bustelberg Mgmt Bps",
+            "type": "number"
+          },
+          "bustelberg_perf_pct": {
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Bustelberg Perf Pct",
+            "type": "number"
+          },
+          "leonteq_annual_bps": {
+            "maximum": 10000.0,
+            "minimum": 0.0,
+            "title": "Leonteq Annual Bps",
+            "type": "number"
+          },
+          "transaction_bps": {
+            "maximum": 10000.0,
+            "minimum": 0.0,
+            "title": "Transaction Bps",
+            "type": "number"
+          }
+        },
+        "required": [
+          "leonteq_annual_bps",
+          "transaction_bps",
+          "bustelberg_mgmt_bps",
+          "bustelberg_perf_pct"
+        ],
+        "title": "FeeConfigIn",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -572,6 +613,18 @@
             "title": "Config",
             "type": "object"
           },
+          "daily_records": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Records"
+          },
           "monthly_records": {
             "anyOf": [
               {
@@ -604,6 +657,18 @@
             "items": {},
             "title": "Universe",
             "type": "array"
+          },
+          "universe_daily_records": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Universe Daily Records"
           },
           "variants": {
             "anyOf": [
@@ -645,6 +710,18 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Date"
           }
         },
         "required": [
@@ -658,6 +735,17 @@
       },
       "ScheduledStrategyPatch": {
         "properties": {
+          "clear_start_date": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clear Start Date"
+          },
           "enabled": {
             "anyOf": [
               {
@@ -668,6 +756,40 @@
               }
             ],
             "title": "Enabled"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "rebalance_weekday": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rebalance Weekday"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Date"
           }
         },
         "title": "ScheduledStrategyPatch",
@@ -946,6 +1068,17 @@
               }
             ],
             "title": "Min Price Score"
+          },
+          "rebalance_weekday": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rebalance Weekday"
           },
           "strategy_type": {
             "enum": [
@@ -3243,6 +3376,64 @@
         ]
       }
     },
+    "/api/fee-config": {
+      "get": {
+        "description": "The single global fee config. Self-heals a missing row to defaults.",
+        "operationId": "get_fee_config_api_fee_config_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Fee Config",
+        "tags": [
+          "fees"
+        ]
+      },
+      "put": {
+        "description": "Upsert all four fee parameters on the single config row.",
+        "operationId": "put_fee_config_api_fee_config_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeeConfigIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Fee Config",
+        "tags": [
+          "fees"
+        ]
+      }
+    },
     "/api/fx/coverage": {
       "get": {
         "description": "Compare ACWI currencies against ECB FX rate availability.",
@@ -4840,6 +5031,70 @@
         ]
       }
     },
+    "/api/momentum/prices-at": {
+      "get": {
+        "description": "Close price (local + EUR) for each company at the nearest trading day\non/before `as_of`. Read-only DB lookup \u2014 the Portfolio table uses it to\nre-price holdings at a go-live split boundary so each sub-period shows\nthe entry/exit prices for its own dates. `company_ids` is comma-separated.\n\nBoth params are optional so a no-arg probe (e.g. CI's GET smoke) gets a\nvalid empty `{prices: {}}` rather than a 422 \u2014 the frontend always sends\nboth.",
+        "operationId": "prices_at_api_momentum_prices_at_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "as_of",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As Of"
+            }
+          },
+          {
+            "in": "query",
+            "name": "company_ids",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Ids"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Prices At",
+        "tags": [
+          "momentum"
+        ]
+      }
+    },
     "/api/momentum/signal-breakdown": {
       "post": {
         "description": "SSE stream of step-by-step signal-breakdown computation. Emits\n`progress` events with pct + message during the heavy universe load,\nthen a final `result` event with the full breakdown payload (or an\n`error` event on failure). On cache hit the slow steps are skipped.",
@@ -4936,6 +5191,26 @@
         "summary": "Parse Portfolio",
         "tags": [
           "airs"
+        ]
+      }
+    },
+    "/api/schedule/upcoming": {
+      "get": {
+        "description": "Backs the /schedule \"Pipeline activity\" strip.\n\nReturns the live scheduler job list (with next-fire times, straight\nfrom the in-process APScheduler so it's the single source of truth \u2014\nincluding one-shot catch-up jobs the bootstrap path schedules on app\nstart) plus every `ingest_run` currently in `status='running'`. The\nfrontend renders the running set as a \"Running now\" group and the\nrest as a chronological \"Upcoming\" list, marking a job busy when a\nrun that fires it is in flight.",
+        "operationId": "schedule_upcoming_api_schedule_upcoming_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Schedule Upcoming",
+        "tags": [
+          "ingest"
         ]
       }
     },
@@ -5076,7 +5351,7 @@
         ]
       },
       "patch": {
-        "description": "Toggle `enabled`. Re-pointing at a different config isn't\nallowed in place \u2014 delete + re-add to keep per-snapshot\nattribution unambiguous.",
+        "description": "Toggle `enabled` and/or set the configurable `start_date` (the\ngo-live marker + live cutoff). Re-pointing at a different config isn't\nallowed in place \u2014 delete + re-add to keep per-snapshot attribution\nunambiguous.",
         "operationId": "patch_scheduled_strategy_api_scheduled_strategies__strategy_id__patch",
         "parameters": [
           {
@@ -5191,6 +5466,26 @@
           }
         },
         "summary": "List Universe Templates",
+        "tags": [
+          "universe-templates"
+        ]
+      }
+    },
+    "/api/universe-templates/refresh-status": {
+      "get": {
+        "description": "Live per-template refresh status from the in-process registry.\n\nCheap (no DB) so the frontend can poll it every couple seconds to drive\nthe busy spinner + progress bar. Returns only templates touched since\nprocess start; absent keys mean \"idle\". Shape: `{template_key:\n{status, message, pct, started_at, finished_at, error}}`.\n\nNOTE: declared BEFORE `/{template_key}` so this static path isn't\nswallowed by the path-param route.",
+        "operationId": "universe_template_refresh_status_api_universe_templates_refresh_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Universe Template Refresh Status",
         "tags": [
           "universe-templates"
         ]

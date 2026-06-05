@@ -12,11 +12,11 @@ from urllib.parse import quote
 from supabase import Client
 
 from ingest.api_usage import track_api_call
+from ingest.constants import DATA_CUTOFF
 from ingest.staleness import is_cache_fresh
 
 from ._api_client import _api_request, _build_api_url, _mask_url
 from ._common import (
-    _CUTOFF,
     EarningsResult,
     _build_symbol,
     _coerce_float,
@@ -36,7 +36,7 @@ def _extract_analyst_dates(data: dict) -> list[date]:
         block = data.get(freq) or {}
         for d in (block.get("date") or []):
             td = _yyyy_mm_to_month_end(d)
-            if td and td >= _CUTOFF:
+            if td and td >= DATA_CUTOFF:
                 dates.add(td)
     return sorted(dates)
 
@@ -49,7 +49,7 @@ def _parse_analyst_estimates(data: dict, company_id: int) -> list[dict]:
         target_dates: dict[str, date] = {}
         for d in dates_raw:
             td = _yyyy_mm_to_month_end(d)
-            if td and td >= _CUTOFF:
+            if td and td >= DATA_CUTOFF:
                 target_dates[d] = td
 
         for key, value in block.items():

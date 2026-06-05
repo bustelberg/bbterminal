@@ -32,10 +32,10 @@ function ApiInfoTip() {
 
   return (
     <span className="relative cursor-help" onMouseEnter={handleEnter} onMouseLeave={() => setShow(false)}>
-      <span ref={iconRef} className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-gray-600 text-gray-500 text-[10px] leading-none hover:border-indigo-400 hover:text-indigo-400 transition-colors">i</span>
+      <span ref={iconRef} className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-neutral-600 text-fg-subtle text-[10px] leading-none hover:border-accent-400 hover:text-accent-400 transition-colors">i</span>
       {show && (
         <span
-          className="fixed w-72 px-3 py-2 bg-[#1e2130] border border-gray-700 rounded-lg text-xs text-gray-300 leading-relaxed z-[9999] shadow-xl pointer-events-none"
+          className="fixed w-72 px-3 py-2 bg-popover border border-neutral-700 rounded-lg text-xs text-fg-soft leading-relaxed z-[9999] shadow-xl pointer-events-none"
           style={{ top: pos.top, left: pos.left, transform: 'translate(-50%, 0)' }}
         >
           Estimated monthly GuruFocus API usage (20k requests per region). May not be fully accurate — check actual usage at the Bustelberg GuruFocus account (API Token tab). Resets each month at midnight EST.
@@ -79,35 +79,35 @@ const ApiUsageBadge = forwardRef<ApiUsageBadgeHandle>(function ApiUsageBadge(_pr
   const asiaPct = ((usage.asia ?? 0) / LIMIT) * 100;
 
   const barColor = (pct: number) =>
-    pct >= 90 ? 'bg-rose-500' : pct >= 70 ? 'bg-amber-500' : 'bg-indigo-500';
+    pct >= 90 ? 'bg-neg-500' : pct >= 70 ? 'bg-warn-500' : 'bg-accent-500';
 
   return (
-    <div className="flex items-center gap-4 px-3 py-2 bg-[#151821] rounded-lg border border-gray-800/40 text-xs">
-      <span className="text-gray-500 font-medium">API</span>
+    <div className="flex items-center gap-4 px-3 py-2 bg-card rounded-lg border border-neutral-800/40 text-xs">
+      <span className="text-fg-subtle font-medium">API</span>
       <ApiInfoTip />
       <div className="flex items-center gap-1.5">
-        <span className="text-gray-400">USA</span>
-        <div className="w-20 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+        <span className="text-fg-muted">USA</span>
+        <div className="w-20 h-1.5 bg-neutral-800 rounded-full overflow-hidden">
           <div className={`h-full rounded-full transition-all ${barColor(usaPct)}`} style={{ width: `${Math.min(usaPct, 100)}%` }} />
         </div>
-        <span className="text-gray-400 font-mono">{usage.usa.toLocaleString()}/{(LIMIT / 1000)}k</span>
-        {session.usa > 0 && <span className="text-indigo-400 font-mono">+{session.usa}</span>}
+        <span className="text-fg-muted font-mono">{usage.usa.toLocaleString()}/{(LIMIT / 1000)}k</span>
+        {session.usa > 0 && <span className="text-accent-400 font-mono">+{session.usa}</span>}
       </div>
       <div className="flex items-center gap-1.5">
-        <span className="text-gray-400">EU</span>
-        <div className="w-20 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+        <span className="text-fg-muted">EU</span>
+        <div className="w-20 h-1.5 bg-neutral-800 rounded-full overflow-hidden">
           <div className={`h-full rounded-full transition-all ${barColor(eurPct)}`} style={{ width: `${Math.min(eurPct, 100)}%` }} />
         </div>
-        <span className="text-gray-400 font-mono">{usage.europe.toLocaleString()}/{(LIMIT / 1000)}k</span>
-        {session.europe > 0 && <span className="text-indigo-400 font-mono">+{session.europe}</span>}
+        <span className="text-fg-muted font-mono">{usage.europe.toLocaleString()}/{(LIMIT / 1000)}k</span>
+        {session.europe > 0 && <span className="text-accent-400 font-mono">+{session.europe}</span>}
       </div>
       <div className="flex items-center gap-1.5">
-        <span className="text-gray-400">Asia</span>
-        <div className="w-20 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+        <span className="text-fg-muted">Asia</span>
+        <div className="w-20 h-1.5 bg-neutral-800 rounded-full overflow-hidden">
           <div className={`h-full rounded-full transition-all ${barColor(asiaPct)}`} style={{ width: `${Math.min(asiaPct, 100)}%` }} />
         </div>
-        <span className="text-gray-400 font-mono">{(usage.asia ?? 0).toLocaleString()}/{(LIMIT / 1000)}k</span>
-        {session.asia > 0 && <span className="text-indigo-400 font-mono">+{session.asia}</span>}
+        <span className="text-fg-muted font-mono">{(usage.asia ?? 0).toLocaleString()}/{(LIMIT / 1000)}k</span>
+        {session.asia > 0 && <span className="text-accent-400 font-mono">+{session.asia}</span>}
       </div>
     </div>
   );

@@ -38,12 +38,9 @@ from dataclasses import dataclass, field
 
 from supabase import Client
 
-_log = logging.getLogger(__name__)
+from deps import IN_CHUNK_SIZE
 
-# Supabase `.in_()` queries above ~100 IDs hit Cloudflare 502s in
-# practice; chunk to be safe. Same constant as the momentum data
-# loaders use.
-_IN_CHUNK = 50
+_log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -70,7 +67,7 @@ class PruneResult:
     out_of_scope_kept: int = 0
 
 
-def _chunked(items: list[int], size: int = _IN_CHUNK) -> list[list[int]]:
+def _chunked(items: list[int], size: int = IN_CHUNK_SIZE) -> list[list[int]]:
     return [items[i:i + size] for i in range(0, len(items), size)]
 
 
@@ -310,7 +307,7 @@ def prune_orphan_companies(
     md_deleted = 0
     pw_deleted = 0
     co_deleted = 0
-    for chunk in _chunked(orphan_ids, _IN_CHUNK):
+    for chunk in _chunked(orphan_ids, IN_CHUNK_SIZE):
         try:
             r = supabase.table("metric_data").delete().in_("company_id", chunk).execute()
             md_deleted += len(r.data or [])

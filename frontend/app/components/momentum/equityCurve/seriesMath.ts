@@ -31,7 +31,9 @@ import type {
 } from '../../../../lib/stores/momentum';
 import type { BenchmarkPrice, ComparisonItem } from '../types';
 import { computeTopDrawdowns } from '../utils';
+import { chartTheme } from '../../../../lib/chartTheme';
 import type { NetStats } from '../feeStats';
+import type { FeeBreakdownRow } from '../feeModel';
 
 // ─── Types ─────────────────────────────────────────────────────────
 
@@ -318,9 +320,7 @@ export type YearlyBreakdown = {
  * by `id` alongside the gross `bySeries`. */
 export function computeYearlyBreakdown(
   aligned: AlignedResult,
-  activeNetStats: NetStats | null,
-  comparisons: ComparisonItem[],
-  comparisonNetStats: Map<string, NetStats | null>,
+  feeBreakdownsBySeries: Record<string, FeeBreakdownRow[] | null>,
 ): YearlyBreakdown {
   const { series } = aligned;
   if (series.length === 0) return { years: [], bySeries: {}, netYearlyBySeries: {} };
@@ -385,32 +385,26 @@ export function computeYearlyBreakdown(
     for (const y of years) if (!(y in bySeries[s.id])) bySeries[s.id][y] = null;
   }
 
-  // Calendar-aligned net yearly per series with holdings (active +
-  // every saved comparison). Anchoring on each row's gross yearly
-  // value guarantees `net ≤ gross` per row: each closed period
-  // contributes a `fee_factor ≤ 1`, and we multiply gross_yearly_Y by
-  // the product of fee_factors for periods whose exit_date lands in
-  // calendar year Y. Using period-start-bucketed `yearly` straight
-  // from NetStats could drift above gross when rebalances don't
-  // align to Jan 1 (e.g., monthly cadence rebalancing on day 5).
+  // Per-year net (and the matching gross) for holdings-bearing series
+  // comes straight from the fee model's per-year breakdown, which
+  // attributes each year's fees to that year — the annual / management /
+  // performance fees all crystallize at year-end, so they belong wholly
+  // to the year that just closed. We OVERRIDE the displayed gross with
+  // the breakdown's per-year gross too, so each row reconciles
+  // (gross − fees = net) and is identical to the Fee waterfall detail.
+  //
+  // The previous approach bucketed per-period drag factors by exit_date,
+  // which mis-assigned the year-end crystallization to whichever rebalance
+  // period straddled Dec 31 — leaving the closing year showing only the
+  // transaction drag and dumping annual+mgmt+perf onto the next year.
   const netYearlyBySeries: Record<string, Record<string, number | null>> = {};
-  const seriesNetMap: Record<string, NetStats | null> = { active: activeNetStats };
-  for (const c of comparisons) {
-    if (c.kind === 'saved') seriesNetMap[c.id] = comparisonNetStats.get(c.id) ?? null;
-  }
-  for (const [seriesId, ns] of Object.entries(seriesNetMap)) {
-    const row = bySeries[seriesId];
-    if (!row || !ns?.period_drag_factors?.length) continue;
-    const dragByYear = new Map<string, number>();
-    for (const pdf of ns.period_drag_factors) {
-      const y = pdf.exit_date.slice(0, 4);
-      dragByYear.set(y, (dragByYear.get(y) ?? 1) * pdf.fee_factor);
-    }
+  for (const [seriesId, bd] of Object.entries(feeBreakdownsBySeries)) {
+    if (!bd || !bySeries[seriesId]) continue;
     const netRow: Record<string, number | null> = {};
-    for (const y of years) {
-      const grossY = row[y];
-      const drag = dragByYear.get(y) ?? 1;
-      netRow[y] = grossY == null ? null : ((1 + grossY / 100) * drag - 1) * 100;
+    for (const r of bd) {
+      const y = r.label.slice(0, 4);
+      bySeries[seriesId][y] = r.gross_return_pct;
+      netRow[y] = r.net_return_pct;
     }
     netYearlyBySeries[seriesId] = netRow;
   }
@@ -652,7 +646,7 @@ export function resolveSeries(
     out.push({
       id: 'universe',
       label: 'Universe (equal-weight)',
-      color: '#9ca3af', // gray-400
+      color: chartTheme.universe,
       kind: 'benchmark',
       removable: false,
       factorByMonth: universe.map,

@@ -1,12 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import MonthlyHoldingsTable from './momentum/MonthlyHoldingsTable';
 import LoadingDots from './LoadingDots';
 import type { BacktestResult, Holding, PeriodRecord, Summary } from '../../lib/stores/momentum';
+import { useApiData } from '../../lib/hooks/useApiData';
 import { useCompanyExchangeMap } from '../../lib/hooks/apiData';
-
-import { API_URL } from '../../lib/apiUrl';
 
 type SnapshotResponse = {
   snapshot_id: number;
@@ -21,9 +20,9 @@ type SnapshotResponse = {
  * MonthlyHoldingsTable. Used by both /schedule's per-run holdings
  * section and the per-strategy run-history detail. */
 export default function SnapshotHoldings({ snapshotId }: { snapshotId: number }) {
-  const [snapshot, setSnapshot] = useState<SnapshotResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { data: snapshot, loading, error } = useApiData<SnapshotResponse>(
+    `/api/momentum/current-picks/${snapshotId}`,
+  );
 
   // Snapshot holdings JSON doesn't include `gurufocus_exchange` per
   // company, so MonthlyHoldingsTable would render "—" in the Exchange
@@ -31,19 +30,6 @@ export default function SnapshotHoldings({ snapshotId }: { snapshotId: number })
   // Company → exchange map shared via the cached `useCompanies` hook
   // so this page reuses MomentumBacktester's fetch when both render.
   const exchangeByCompany = useCompanyExchangeMap();
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoading(true);
-    fetch(`${API_URL}/api/momentum/current-picks/${snapshotId}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((data: SnapshotResponse) => {
-        setSnapshot(data);
-        setError(null);
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false));
-  }, [snapshotId]);
 
   const { result, categories, scoringConfig } = useMemo(() => {
     if (!snapshot) {
@@ -107,9 +93,9 @@ export default function SnapshotHoldings({ snapshotId }: { snapshotId: number })
     };
   }, [snapshot]);
 
-  if (loading) return <div className="text-xs text-gray-500"><LoadingDots label="Loading snapshot" /></div>;
-  if (error) return <div className="text-xs text-rose-300">Failed to load snapshot: {error}</div>;
-  if (!result || !scoringConfig) return <div className="text-xs text-gray-500">No data.</div>;
+  if (loading) return <div className="text-xs text-fg-subtle"><LoadingDots label="Loading snapshot" /></div>;
+  if (error) return <div className="text-xs text-neg-300">Failed to load snapshot: {error}</div>;
+  if (!result || !scoringConfig) return <div className="text-xs text-fg-subtle">No data.</div>;
 
   return (
     <MonthlyHoldingsTable

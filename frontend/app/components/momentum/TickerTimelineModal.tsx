@@ -318,43 +318,43 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
 
   return (
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-scrim/60 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="bg-[#151821] border border-gray-800/60 rounded-xl shadow-2xl w-[92%] max-w-5xl max-h-[90vh] overflow-auto"
+        className="bg-card border border-neutral-800/60 rounded-xl shadow-2xl w-[92%] max-w-5xl max-h-[90vh] overflow-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-6 py-4 border-b border-gray-800/40 flex items-start justify-between gap-4">
+        <div className="px-6 py-4 border-b border-neutral-800/40 flex items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-3">
-              <h2 className="text-white text-base font-semibold font-mono">{ticker || '—'}</h2>
+              <h2 className="text-fg-strong text-base font-semibold font-mono">{ticker || '—'}</h2>
               {exchange && (
                 <span
-                  className="text-[10px] text-gray-500"
+                  className="text-[10px] text-fg-subtle"
                   title={EXCHANGE_NAMES[exchange.toUpperCase()] ?? exchange}
                 >
                   {exchange}
                 </span>
               )}
-              {sector && <span className="text-xs text-gray-500">{sector}</span>}
+              {sector && <span className="text-xs text-fg-subtle">{sector}</span>}
               {href && (
                 <a
                   href={href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-xs text-indigo-400 hover:text-indigo-300 hover:underline"
+                  className="text-xs text-accent-400 hover:text-accent-300 hover:underline"
                 >
                   GuruFocus ↗
                 </a>
               )}
             </div>
-            <div className="text-sm text-gray-300 mt-1">{companyName}</div>
+            <div className="text-sm text-fg-soft mt-1">{companyName}</div>
           </div>
           <button
             onClick={onClose}
-            className="text-gray-500 hover:text-white transition-colors p-1"
+            className="text-fg-subtle hover:text-fg-strong transition-colors p-1"
             aria-label="Close"
           >
             <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
@@ -368,30 +368,30 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
         </div>
 
         {/* Summary stats */}
-        <div className="px-6 py-3 border-b border-gray-800/40 grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
-          <div className="bg-[#0f1117] rounded-lg px-3 py-2">
-            <div className="text-gray-500 flex items-center gap-1">
+        <div className="px-6 py-3 border-b border-neutral-800/40 grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+          <div className="bg-page rounded-lg px-3 py-2">
+            <div className="text-fg-subtle flex items-center gap-1">
               Months held
               <CellInfoTip>
                 Number of months the strategy held this stock during the backtest, out of the total months in the backtest. The percentage shows what fraction of the backtest this stock was active.
               </CellInfoTip>
             </div>
-            <div className="font-mono text-gray-200">
+            <div className="font-mono text-fg">
               {summary.monthsHeld} / {summary.totalMonths}
-              <span className="text-gray-500"> ({summary.pct.toFixed(1)}%)</span>
+              <span className="text-fg-subtle"> ({summary.pct.toFixed(1)}%)</span>
             </div>
           </div>
-          <div className="bg-[#0f1117] rounded-lg px-3 py-2">
-            <div className="text-gray-500 flex items-center gap-1">
+          <div className="bg-page rounded-lg px-3 py-2">
+            <div className="text-fg-subtle flex items-center gap-1">
               Distinct visits
               <CellInfoTip>
                 Number of separate buy → sell cycles. A &quot;visit&quot; is a continuous run of months where the stock was held; if the strategy dropped it for a month and re-bought later, that&apos;s two visits.
               </CellInfoTip>
             </div>
-            <div className="font-mono text-gray-200">{runs.length}</div>
+            <div className="font-mono text-fg">{runs.length}</div>
           </div>
-          <div className="bg-[#0f1117] rounded-lg px-3 py-2">
-            <div className="text-gray-500 flex items-center gap-1">
+          <div className="bg-page rounded-lg px-3 py-2">
+            <div className="text-fg-subtle flex items-center gap-1">
               Compound return (held)
               <CellInfoTip>
                 Cumulative return across all months the stock was held: chain-link the monthly forward returns —
@@ -399,11 +399,11 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
                 Months when not held don&apos;t contribute, so this answers &quot;what was the strategy&apos;s realized return on this stock during its visits?&quot;.
               </CellInfoTip>
             </div>
-            <div className={`font-mono ${summary.compoundReturnPct != null && summary.compoundReturnPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            <div className={`font-mono ${summary.compoundReturnPct != null && summary.compoundReturnPct >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
               {fmtPct(summary.compoundReturnPct)}
             </div>
-            <div className={`text-[10px] font-mono mt-0.5 flex items-center gap-1 ${summary.cagrPct != null && summary.cagrPct >= 0 ? 'text-emerald-500/80' : 'text-rose-500/80'}`}>
-              <span className="text-gray-500">CAGR</span>
+            <div className={`text-[10px] font-mono mt-0.5 flex items-center gap-1 ${summary.cagrPct != null && summary.cagrPct >= 0 ? 'text-pos-500/80' : 'text-neg-500/80'}`}>
+              <span className="text-fg-subtle">CAGR</span>
               <span>{fmtPct(summary.cagrPct)}</span>
               <CellInfoTip>
                 Annualized version of the compound return:
@@ -412,31 +412,31 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
               </CellInfoTip>
             </div>
           </div>
-          <div className="bg-[#0f1117] rounded-lg px-3 py-2">
-            <div className="text-gray-500 flex items-center gap-1">
+          <div className="bg-page rounded-lg px-3 py-2">
+            <div className="text-fg-subtle flex items-center gap-1">
               Best month
               <CellInfoTip>
                 The single month with the highest forward return while held, plus when it occurred. Forward return = (next-month entry price ÷ this-month entry price) − 1, in EUR.
               </CellInfoTip>
             </div>
-            <div className="font-mono text-emerald-400">
+            <div className="font-mono text-pos-400">
               {fmtPct(summary.bestRet)}
               {summary.bestRetMonth && (
-                <span className="text-gray-500 text-[10px] ml-1">{summary.bestRetMonth}</span>
+                <span className="text-fg-subtle text-[10px] ml-1">{summary.bestRetMonth}</span>
               )}
             </div>
           </div>
-          <div className="bg-[#0f1117] rounded-lg px-3 py-2">
-            <div className="text-gray-500 flex items-center gap-1">
+          <div className="bg-page rounded-lg px-3 py-2">
+            <div className="text-fg-subtle flex items-center gap-1">
               Worst month
               <CellInfoTip>
                 The single month with the lowest forward return while held, plus when it occurred. Same definition as Best month, just the floor.
               </CellInfoTip>
             </div>
-            <div className="font-mono text-rose-400">
+            <div className="font-mono text-neg-400">
               {fmtPct(summary.worstRet)}
               {summary.worstRetMonth && (
-                <span className="text-gray-500 text-[10px] ml-1">{summary.worstRetMonth}</span>
+                <span className="text-fg-subtle text-[10px] ml-1">{summary.worstRetMonth}</span>
               )}
             </div>
           </div>
@@ -444,7 +444,7 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
 
         {/* Timeline strip — one cell per month across the whole backtest. */}
         <div className="px-6 py-4">
-          <div className="text-xs text-gray-400 mb-2">Holding timeline (each cell is one month — green/red intensity = that month&apos;s forward return; gray = not held)</div>
+          <div className="text-xs text-fg-muted mb-2">Holding timeline (each cell is one month — green/red intensity = that month&apos;s forward return; gray = not held)</div>
           <div className="flex gap-[2px] overflow-x-auto py-1">
             {cells.map((c) => (
               <div
@@ -458,22 +458,22 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
                 />
                 {/* Hover tooltip */}
                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-10 pointer-events-none">
-                  <div className="bg-[#1e2130] border border-gray-700 rounded-md px-2 py-1.5 text-[11px] whitespace-nowrap shadow-xl">
-                    <div className="font-mono text-gray-300">{c.date}</div>
+                  <div className="bg-popover border border-neutral-700 rounded-md px-2 py-1.5 text-[11px] whitespace-nowrap shadow-xl">
+                    <div className="font-mono text-fg-soft">{c.date}</div>
                     {c.held ? (
                       <>
-                        <div className="text-gray-400">
-                          Return: <span className={c.forwardReturnPct != null && c.forwardReturnPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                        <div className="text-fg-muted">
+                          Return: <span className={c.forwardReturnPct != null && c.forwardReturnPct >= 0 ? 'text-pos-400' : 'text-neg-400'}>
                             {fmtPct(c.forwardReturnPct)}
                           </span>
                         </div>
                         {c.score != null && (
-                          <div className="text-gray-400">Score: <span className="font-mono text-gray-200">{c.score.toFixed(1)}</span></div>
+                          <div className="text-fg-muted">Score: <span className="font-mono text-fg">{c.score.toFixed(1)}</span></div>
                         )}
-                        {c.sector && <div className="text-gray-500">{c.sector}</div>}
+                        {c.sector && <div className="text-fg-subtle">{c.sector}</div>}
                       </>
                     ) : (
-                      <div className="text-gray-500">Not held</div>
+                      <div className="text-fg-subtle">Not held</div>
                     )}
                   </div>
                 </div>
@@ -492,7 +492,7 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
               return (
                 <div
                   key={`ax-${c.date}`}
-                  className="text-[9px] text-gray-600 font-mono shrink-0 text-left"
+                  className="text-[9px] text-fg-faint font-mono shrink-0 text-left"
                   style={{ width: 8 }}
                 >
                   {showYear ? thisYear : ''}
@@ -505,10 +505,10 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
         {/* Per-visit table */}
         {runs.length > 0 && (
           <div className="px-6 pb-5">
-            <div className="text-xs text-gray-400 mb-2">Visits</div>
+            <div className="text-xs text-fg-muted mb-2">Visits</div>
             <table className="w-full text-xs">
               <thead>
-                <tr className="text-gray-500 border-b border-gray-800/40">
+                <tr className="text-fg-subtle border-b border-neutral-800/40">
                   <th className="text-left py-1.5 font-medium">
                     <span className="inline-flex items-center gap-1">
                       #
@@ -590,40 +590,40 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
                   return (
                     <Fragment key={i}>
                     <tr
-                      className="border-b border-gray-800/20 cursor-pointer hover:bg-white/[0.02]"
+                      className="border-b border-neutral-800/20 cursor-pointer hover:bg-overlay/[0.02]"
                       onClick={() => toggleVisit(i, asOfDate)}
                     >
-                      <td className="py-1.5 text-gray-400 font-mono">
-                        <span className="text-gray-600 mr-1">{isOpen ? '▾' : '▸'}</span>
+                      <td className="py-1.5 text-fg-muted font-mono">
+                        <span className="text-fg-faint mr-1">{isOpen ? '▾' : '▸'}</span>
                         {i + 1}
                       </td>
-                      <td className="py-1.5 text-gray-200 font-mono">{start.date}</td>
-                      <td className="py-1.5 text-gray-200 font-mono">
+                      <td className="py-1.5 text-fg font-mono">{start.date}</td>
+                      <td className="py-1.5 text-fg font-mono">
                         {stillHeld ? (
-                          <span className="text-indigo-400">— still held</span>
+                          <span className="text-accent-400">— still held</span>
                         ) : sellCell ? (
                           sellCell.date
                         ) : '—'}
                       </td>
-                      <td className="py-1.5 text-right text-gray-300 font-mono">
+                      <td className="py-1.5 text-right text-fg-soft font-mono">
                         {monthsInVisit}
                       </td>
-                      <td className={`py-1.5 text-right font-mono ${ret != null && ret >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      <td className={`py-1.5 text-right font-mono ${ret != null && ret >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
                         {fmtPct(ret)}
                       </td>
-                      <td className={`py-1.5 text-right font-mono ${cagr != null && cagr >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      <td className={`py-1.5 text-right font-mono ${cagr != null && cagr >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
                         {fmtPct(cagr)}
                       </td>
                     </tr>
                     {isOpen && (
                       <tr key={`${i}-breakdown`}>
-                        <td colSpan={6} className="bg-[#0f1117] px-4 py-3 border-b border-gray-800/30">
-                          {!breakdown && <div className="text-xs text-gray-500">Click again to load breakdown.</div>}
+                        <td colSpan={6} className="bg-page px-4 py-3 border-b border-neutral-800/30">
+                          {!breakdown && <div className="text-xs text-fg-subtle">Click again to load breakdown.</div>}
                           {breakdown?.status === 'loading' && (
                             <div className="space-y-1.5">
-                              <div className="flex items-center justify-between text-[11px] text-gray-400">
+                              <div className="flex items-center justify-between text-[11px] text-fg-muted">
                                 <span className="flex items-center gap-2">
-                                  <svg className="animate-spin w-3 h-3 text-indigo-400" viewBox="0 0 24 24" fill="none">
+                                  <svg className="animate-spin w-3 h-3 text-accent-400" viewBox="0 0 24 24" fill="none">
                                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                                   </svg>
@@ -631,19 +631,19 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
                                 </span>
                                 <span className="font-mono">{breakdown.pct}%</span>
                               </div>
-                              <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                              <div className="h-1.5 bg-neutral-800 rounded-full overflow-hidden">
                                 <div
-                                  className="h-full bg-indigo-500 transition-all duration-200"
+                                  className="h-full bg-accent-500 transition-all duration-200"
                                   style={{ width: `${breakdown.pct}%` }}
                                 />
                               </div>
                               {breakdown.message && (
-                                <div className="text-[11px] text-gray-500 font-mono">{breakdown.message}</div>
+                                <div className="text-[11px] text-fg-subtle font-mono">{breakdown.message}</div>
                               )}
                             </div>
                           )}
                           {breakdown?.status === 'error' && (
-                            <div className="text-xs text-rose-400">
+                            <div className="text-xs text-neg-400">
                               Could not load breakdown: {breakdown.message}
                             </div>
                           )}
@@ -664,17 +664,17 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
                   bottom-right of the modal so the per-visit numbers above
                   always have a running total to compare against. */}
               <tfoot>
-                <tr className="border-t border-gray-700/60 bg-white/[0.02]">
-                  <td colSpan={3} className="py-2 text-gray-300 text-xs font-medium">
+                <tr className="border-t border-neutral-700/60 bg-overlay/[0.02]">
+                  <td colSpan={3} className="py-2 text-fg-soft text-xs font-medium">
                     Total
                   </td>
-                  <td className="py-2 text-right text-gray-300 font-mono">
+                  <td className="py-2 text-right text-fg-soft font-mono">
                     {summary.monthsHeld}
                   </td>
-                  <td className={`py-2 text-right font-mono font-medium ${summary.compoundReturnPct != null && summary.compoundReturnPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  <td className={`py-2 text-right font-mono font-medium ${summary.compoundReturnPct != null && summary.compoundReturnPct >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
                     {fmtPct(summary.compoundReturnPct)}
                   </td>
-                  <td className={`py-2 text-right font-mono font-medium ${summary.cagrPct != null && summary.cagrPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  <td className={`py-2 text-right font-mono font-medium ${summary.cagrPct != null && summary.cagrPct >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
                     {fmtPct(summary.cagrPct)}
                   </td>
                 </tr>
@@ -695,17 +695,17 @@ function BreakdownView({ data }: { data: BreakdownData }) {
   const fmtRaw = (v: number | null) => (v == null ? '—' : Number.isInteger(v) ? `${v}` : `${v.toFixed(4)}`);
   return (
     <div className="space-y-3">
-      <div className="text-[11px] text-gray-500">
+      <div className="text-[11px] text-fg-subtle">
         Anchor: latest close strictly before {data.as_of_date} ={' '}
-        <span className="text-gray-300 font-mono">{data.anchor_price.toFixed(4)}</span> on{' '}
-        <span className="text-gray-300 font-mono">{data.anchor_date}</span>{' '}
+        <span className="text-fg-soft font-mono">{data.anchor_price.toFixed(4)}</span> on{' '}
+        <span className="text-fg-soft font-mono">{data.anchor_date}</span>{' '}
         · universe size at this cutoff:{' '}
-        <span className="text-gray-300 font-mono">{data.universe_size}</span>
+        <span className="text-fg-soft font-mono">{data.universe_size}</span>
         {data.universe_label_used && (
-          <span> · scoped to <span className="text-gray-300 font-mono">{data.universe_label_used}</span></span>
+          <span> · scoped to <span className="text-fg-soft font-mono">{data.universe_label_used}</span></span>
         )}
         {!data.in_universe_at_cutoff && (
-          <span className="text-amber-400">
+          <span className="text-warn-400">
             {' '}· note: this company was not in the universe at this cutoff, so the displayed normalized scores may differ from the live selection
           </span>
         )}
@@ -718,37 +718,37 @@ function BreakdownView({ data }: { data: BreakdownData }) {
             ? `[${fmtRaw(s.universe_min)}, ${fmtRaw(s.universe_max)}]`
             : '—';
           return (
-            <div key={s.key} className="rounded-md border border-gray-800/60 px-3 py-2">
+            <div key={s.key} className="rounded-md border border-neutral-800/60 px-3 py-2">
               <div className="flex items-baseline justify-between gap-3 flex-wrap">
                 <div className="flex items-baseline gap-2">
-                  <span className="text-gray-200 text-xs font-medium">{s.label}</span>
-                  <span className="text-[10px] text-gray-600">·</span>
-                  <span className="text-[10px] text-gray-500 capitalize">{s.category}</span>
-                  <span className="text-[10px] text-gray-600">· weight</span>
-                  <span className="text-[10px] text-gray-300 font-mono">{s.weight}</span>
+                  <span className="text-fg text-xs font-medium">{s.label}</span>
+                  <span className="text-[10px] text-fg-faint">·</span>
+                  <span className="text-[10px] text-fg-subtle capitalize">{s.category}</span>
+                  <span className="text-[10px] text-fg-faint">· weight</span>
+                  <span className="text-[10px] text-fg-soft font-mono">{s.weight}</span>
                 </div>
                 <div className="text-[11px] flex items-center gap-3 font-mono">
                   <span>
-                    <span className="text-gray-500">raw </span>
-                    <span className="text-gray-100">{fmtRaw(s.raw_value)}</span>
+                    <span className="text-fg-subtle">raw </span>
+                    <span className="text-fg-bright">{fmtRaw(s.raw_value)}</span>
                   </span>
                   <span>
-                    <span className="text-gray-500">norm </span>
-                    <span className="text-indigo-300">{s.normalized_score != null ? `${s.normalized_score.toFixed(1)}` : '—'}</span>
-                    <span className="text-gray-600"> /100</span>
+                    <span className="text-fg-subtle">norm </span>
+                    <span className="text-accent-300">{s.normalized_score != null ? `${s.normalized_score.toFixed(1)}` : '—'}</span>
+                    <span className="text-fg-faint"> /100</span>
                   </span>
                 </div>
               </div>
-              <div className="text-[11px] text-gray-500 mt-0.5">
+              <div className="text-[11px] text-fg-subtle mt-0.5">
                 Universe range: <span className="font-mono">{rangeStr}</span>
               </div>
               <NormStep s={s} />
               <ul className="mt-1.5 space-y-0.5">
                 {s.components.map((c, idx) => (
-                  <li key={idx} className="text-[11px] text-gray-400 flex gap-2">
-                    <span className="text-gray-600 shrink-0">↳</span>
+                  <li key={idx} className="text-[11px] text-fg-muted flex gap-2">
+                    <span className="text-fg-faint shrink-0">↳</span>
                     <span className="shrink-0">{c.label}</span>
-                    {c.value_str && <span className="text-gray-200 font-mono ml-auto">{c.value_str}</span>}
+                    {c.value_str && <span className="text-fg font-mono ml-auto">{c.value_str}</span>}
                   </li>
                 ))}
               </ul>
@@ -765,14 +765,14 @@ function BreakdownView({ data }: { data: BreakdownData }) {
       <CategoryMathBreakdown data={data} />
 
       {/* Final roll-up: per-category scores combined via the category weights. */}
-      <div className="rounded-md border border-indigo-500/20 bg-indigo-500/[0.04] px-3 py-2">
-        <div className="text-[11px] text-gray-400 mb-1.5">
+      <div className="rounded-md border border-accent-500/20 bg-accent-500/[0.04] px-3 py-2">
+        <div className="text-[11px] text-fg-muted mb-1.5">
           Final score · combine per-category scores via the category weights:
           <span className="font-mono"> Σ (category_score × category_weight) = momentum_score</span>.
         </div>
         <table className="w-full text-[11px]">
           <thead>
-            <tr className="text-gray-600">
+            <tr className="text-fg-faint">
               <th className="text-left font-medium">Category</th>
               <th className="text-right font-medium">Score (0–100)</th>
               <th className="text-right font-medium">Weight</th>
@@ -781,17 +781,17 @@ function BreakdownView({ data }: { data: BreakdownData }) {
           </thead>
           <tbody>
             {data.category_scores.map((c) => (
-              <tr key={c.category} className="border-t border-gray-800/30">
-                <td className="py-1 capitalize text-gray-300">{c.category}</td>
-                <td className="py-1 text-right font-mono text-gray-100">{c.score != null ? c.score.toFixed(2) : '—'}</td>
-                <td className="py-1 text-right font-mono text-gray-300">{(c.weight * 100).toFixed(0)}%</td>
-                <td className="py-1 text-right font-mono text-gray-100">{c.contribution != null ? c.contribution.toFixed(2) : '—'}</td>
+              <tr key={c.category} className="border-t border-neutral-800/30">
+                <td className="py-1 capitalize text-fg-soft">{c.category}</td>
+                <td className="py-1 text-right font-mono text-fg-bright">{c.score != null ? c.score.toFixed(2) : '—'}</td>
+                <td className="py-1 text-right font-mono text-fg-soft">{(c.weight * 100).toFixed(0)}%</td>
+                <td className="py-1 text-right font-mono text-fg-bright">{c.contribution != null ? c.contribution.toFixed(2) : '—'}</td>
               </tr>
             ))}
-            <tr className="border-t border-indigo-500/30">
-              <td className="py-1.5 text-gray-200 font-medium">Final momentum_score</td>
+            <tr className="border-t border-accent-500/30">
+              <td className="py-1.5 text-fg font-medium">Final momentum_score</td>
               <td colSpan={2} />
-              <td className="py-1.5 text-right font-mono text-indigo-300 font-medium">
+              <td className="py-1.5 text-right font-mono text-accent-300 font-medium">
                 {data.momentum_score != null ? data.momentum_score.toFixed(2) : '—'}
               </td>
             </tr>
@@ -823,33 +823,33 @@ function NormStep({ s }: { s: SignalBreakdown }) {
 
   if (s.raw_value == null) {
     return (
-      <div className="text-[11px] text-gray-500 mt-0.5">
-        Norm: raw value missing → defaults to <span className="text-gray-300 font-mono">50</span> in scoring
+      <div className="text-[11px] text-fg-subtle mt-0.5">
+        Norm: raw value missing → defaults to <span className="text-fg-soft font-mono">50</span> in scoring
       </div>
     );
   }
   if (s.universe_min == null || s.universe_max == null) {
     return (
-      <div className="text-[11px] text-gray-500 mt-0.5">
-        Norm: universe range unavailable → <span className="text-gray-300 font-mono">50</span>
+      <div className="text-[11px] text-fg-subtle mt-0.5">
+        Norm: universe range unavailable → <span className="text-fg-soft font-mono">50</span>
       </div>
     );
   }
   if (s.universe_min === s.universe_max) {
     return (
-      <div className="text-[11px] text-gray-500 mt-0.5">
+      <div className="text-[11px] text-fg-subtle mt-0.5">
         Norm: range collapsed (every company has{' '}
-        <span className="font-mono">{fmt(s.universe_min)}</span>) → <span className="text-gray-300 font-mono">50</span>
+        <span className="font-mono">{fmt(s.universe_min)}</span>) → <span className="text-fg-soft font-mono">50</span>
       </div>
     );
   }
   return (
-    <div className="text-[11px] text-gray-500 mt-0.5 font-mono break-words">
+    <div className="text-[11px] text-fg-subtle mt-0.5 font-mono break-words">
       Norm = (raw − min) / (max − min) × 100 ={' '}
-      <span className="text-gray-300">
+      <span className="text-fg-soft">
         ({term(s.raw_value)} − {term(s.universe_min)}) / ({term(s.universe_max)} − {term(s.universe_min)}) × 100
       </span>{' '}
-      = <span className="text-indigo-300">{s.normalized_score != null ? s.normalized_score.toFixed(1) : '—'}</span>
+      = <span className="text-accent-300">{s.normalized_score != null ? s.normalized_score.toFixed(1) : '—'}</span>
     </div>
   );
 }
@@ -875,7 +875,7 @@ function CategoryMathBreakdown({ data }: { data: BreakdownData }) {
 
   return (
     <div className="space-y-2">
-      <div className="text-[11px] text-gray-400">
+      <div className="text-[11px] text-fg-muted">
         Category math · each signal&apos;s weight share within its category × its 0–100 normalized score = contribution; the sum is the category score the scoring engine produced.
       </div>
       {Array.from(byCategory.entries()).map(([cat, sigs]) => {
@@ -887,23 +887,23 @@ function CategoryMathBreakdown({ data }: { data: BreakdownData }) {
           return acc + (s.normalized_score * s.weight) / totalWeight;
         }, 0);
         return (
-          <div key={cat} className="rounded-md border border-gray-800/60 px-3 py-2">
+          <div key={cat} className="rounded-md border border-neutral-800/60 px-3 py-2">
             <div className="flex items-baseline justify-between mb-1.5">
               <div>
-                <span className="text-gray-200 text-xs font-medium capitalize">{cat}</span>
-                <span className="text-[10px] text-gray-500 ml-2">category</span>
+                <span className="text-fg text-xs font-medium capitalize">{cat}</span>
+                <span className="text-[10px] text-fg-subtle ml-2">category</span>
               </div>
               <div className="text-[11px]">
-                <span className="text-gray-500">score </span>
-                <span className="text-indigo-300 font-mono">
+                <span className="text-fg-subtle">score </span>
+                <span className="text-accent-300 font-mono">
                   {cs?.score != null ? cs.score.toFixed(2) : '—'}
                 </span>
-                <span className="text-gray-600"> /100</span>
+                <span className="text-fg-faint"> /100</span>
               </div>
             </div>
             <table className="w-full text-[11px]">
               <thead>
-                <tr className="text-gray-600">
+                <tr className="text-fg-faint">
                   <th className="text-left font-medium">Signal</th>
                   <th className="text-right font-medium">Normalized</th>
                   <th className="text-right font-medium">Weight</th>
@@ -916,23 +916,23 @@ function CategoryMathBreakdown({ data }: { data: BreakdownData }) {
                   const share = totalWeight > 0 ? s.weight / totalWeight : 0;
                   const contribution = s.normalized_score != null ? s.normalized_score * share : null;
                   return (
-                    <tr key={s.key} className="border-t border-gray-800/30">
-                      <td className="py-1 text-gray-300">{s.label}</td>
-                      <td className="py-1 text-right font-mono text-gray-100">
+                    <tr key={s.key} className="border-t border-neutral-800/30">
+                      <td className="py-1 text-fg-soft">{s.label}</td>
+                      <td className="py-1 text-right font-mono text-fg-bright">
                         {s.normalized_score != null ? s.normalized_score.toFixed(2) : '—'}
                       </td>
-                      <td className="py-1 text-right font-mono text-gray-300">{s.weight}</td>
-                      <td className="py-1 text-right font-mono text-gray-300">{(share * 100).toFixed(1)}%</td>
-                      <td className="py-1 text-right font-mono text-gray-100">
+                      <td className="py-1 text-right font-mono text-fg-soft">{s.weight}</td>
+                      <td className="py-1 text-right font-mono text-fg-soft">{(share * 100).toFixed(1)}%</td>
+                      <td className="py-1 text-right font-mono text-fg-bright">
                         {contribution != null ? contribution.toFixed(2) : '—'}
                       </td>
                     </tr>
                   );
                 })}
-                <tr className="border-t border-gray-700/50">
-                  <td className="py-1 text-gray-500 italic">Σ (share × normalized)</td>
+                <tr className="border-t border-neutral-700/50">
+                  <td className="py-1 text-fg-subtle italic">Σ (share × normalized)</td>
                   <td colSpan={3} />
-                  <td className="py-1 text-right font-mono text-indigo-300">
+                  <td className="py-1 text-right font-mono text-accent-300">
                     {Number.isFinite(checkSum) ? checkSum.toFixed(2) : '—'}
                   </td>
                 </tr>

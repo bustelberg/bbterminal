@@ -1,11 +1,13 @@
 'use client';
 
+import { useMemo } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  CartesianGrid, Legend, ReferenceArea,
+  CartesianGrid, Legend, ReferenceArea, ReferenceLine,
 } from 'recharts';
 import CollapsibleCard from '../CollapsibleCard';
 import { tooltipStyle } from '../utils';
+import { chartTheme } from '../../../../lib/chartTheme';
 import type { AlignedResult } from './seriesMath';
 
 /** Cumulative-return line chart with log-scale toggle + drawdown
@@ -20,6 +22,7 @@ export default function EquityChart({
   setLogScale,
   hoveredDrawdown,
   setHoveredDrawdown,
+  markerDate,
 }: {
   displayChartData: Record<string, string | number | null>[];
   alignedSeries: AlignedResult;
@@ -28,7 +31,28 @@ export default function EquityChart({
   setLogScale: (v: boolean) => void;
   hoveredDrawdown: number | null;
   setHoveredDrawdown: (v: number | null) => void;
+  /** Optional "go-live" date (YYYY-MM-DD) drawn as a red dashed vertical
+   * line. Snapped to the nearest chart x-value at/after the date so it
+   * renders on this category axis even when the exact day isn't a point. */
+  markerDate?: string;
 }) {
+  // The x-axis is categorical (date strings), so a ReferenceLine's `x`
+  // must equal an existing data point's date. Snap the marker to the first
+  // chart date at/after it (or the last point when it's past the curve's
+  // end). Dates are ISO so lexical comparison is chronological; slicing to
+  // the data point's own length lets a YYYY-MM-DD marker match YYYY-MM
+  // monthly points too.
+  const markerX = useMemo<string | null>(() => {
+    if (!markerDate || displayChartData.length === 0) return null;
+    for (const row of displayChartData) {
+      const d = row.date;
+      if (typeof d !== 'string') continue;
+      if (d >= markerDate.slice(0, d.length)) return d;
+    }
+    const last = displayChartData[displayChartData.length - 1]?.date;
+    return typeof last === 'string' ? last : null;
+  }, [markerDate, displayChartData]);
+
   return (
     <CollapsibleCard
       title={`Equity Curve (${logScale ? 'Log' : 'Cumulative'} Return %)`}
@@ -41,7 +65,7 @@ export default function EquityChart({
             type="checkbox"
             checked={logScale}
             onChange={(e) => setLogScale(e.target.checked)}
-            className="accent-indigo-500 w-3.5 h-3.5"
+            className="accent-accent-500 w-3.5 h-3.5"
           />
           Log scale
         </label>
@@ -50,15 +74,15 @@ export default function EquityChart({
     >
       <ResponsiveContainer width="100%" height={350}>
         <LineChart data={displayChartData}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+          <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
           <XAxis
             dataKey="date"
-            tick={{ fill: '#6b7280', fontSize: 11 }}
+            tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
             tickLine={false}
             interval={Math.max(0, Math.floor(displayChartData.length / 12) - 1)}
           />
           <YAxis
-            tick={{ fill: '#6b7280', fontSize: 11 }}
+            tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
             tickLine={false}
             tickFormatter={(v: number) => `${v}%`}
             domain={chartYDomain}
@@ -73,7 +97,7 @@ export default function EquityChart({
           />
           {alignedSeries.series.length > 1 && (
             <Legend
-              wrapperStyle={{ fontSize: 12, color: '#9ca3af' }}
+              wrapperStyle={{ fontSize: 12, color: chartTheme.axisLabel }}
               formatter={(value) => {
                 const s = alignedSeries.series.find((x) => x.id === value);
                 return s?.label ?? String(value);
@@ -92,7 +116,7 @@ export default function EquityChart({
                 x2={dd.recovery_date ?? (displayChartData[displayChartData.length - 1]?.date as string | undefined)}
                 y1={chartYDomain[0]}
                 y2={chartYDomain[1]}
-                fill={`rgba(244,63,94,${opacity})`}
+                fill={chartTheme.drawdown(opacity)}
                 strokeOpacity={0}
                 style={{ cursor: 'pointer' }}
                 onMouseEnter={() => setHoveredDrawdown(i)}
@@ -113,6 +137,16 @@ export default function EquityChart({
               connectNulls
             />
           ))}
+          {markerX != null && (
+            <ReferenceLine
+              x={markerX}
+              stroke={chartTheme.goLiveLine}
+              strokeDasharray="5 5"
+              strokeWidth={1.5}
+              ifOverflow="extendDomain"
+              label={{ value: 'Go-live', position: 'insideTopRight', fill: chartTheme.goLiveLabel, fontSize: 10 }}
+            />
+          )}
         </LineChart>
       </ResponsiveContainer>
     </CollapsibleCard>

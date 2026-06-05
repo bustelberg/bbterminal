@@ -13,7 +13,7 @@ this module thin; if a helper has a clear home in one of the
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from dotenv import load_dotenv
 from supabase import create_client
@@ -80,3 +80,35 @@ supabase = _LazySupabase()
 # speeds up the momentum backtest universe load. If 502s reappear, drop to 100
 # or revert to 50.
 IN_CHUNK_SIZE = 200
+
+
+def fetch_in_chunks(
+    ids: list,
+    query: Callable[[list], Any],
+    *,
+    chunk_size: int = IN_CHUNK_SIZE,
+) -> list:
+    """Run `query(chunk)` for each `IN_CHUNK_SIZE`-sized slice of `ids` and
+    concatenate the resulting rows.
+
+    Single home for the `.in_()` chunking that the PostgREST/Cloudflare
+    URL-length limit forces on every bulk id lookup (see `IN_CHUNK_SIZE`).
+    `query` receives one id slice and returns either an executed supabase
+    response (with a `.data` list) or a plain list of rows; the rows are
+    flattened in slice order. Returns `[]` for empty `ids` (no query issued).
+
+    Example:
+        rows = fetch_in_chunks(cids, lambda chunk:
+            supabase.table("company").select("company_id, company_name")
+            .in_("company_id", chunk).execute())
+
+    For paginated / parallel / retrying loads (e.g. price+volume history),
+    use the purpose-built loaders in `momentum/data/` instead.
+    """
+    rows: list = []
+    for start in range(0, len(ids), chunk_size):
+        result = query(ids[start:start + chunk_size])
+        data = getattr(result, "data", result)
+        if data:
+            rows.extend(data)
+    return rows

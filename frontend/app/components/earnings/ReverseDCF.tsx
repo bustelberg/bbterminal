@@ -101,41 +101,41 @@ export default function ReverseDCF({ metrics }: { metrics: MetricRow[] }) {
     ? solveImpliedGrowth(fcfNum, operatingValue, discountNum, termGrowthNum, yearsNum)
     : null;
 
-  const inputClass = "w-24 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-1.5 text-white font-mono text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none";
-  const dataLabel = <span className="text-emerald-600 text-xs ml-1">DATA</span>;
-  const assumptionLabel = <span className="text-amber-600 text-xs ml-1">ASSUMPTION</span>;
+  const inputClass = "w-24 bg-page border border-neutral-700 rounded-lg px-3 py-1.5 text-fg-strong font-mono text-sm focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none";
+  const dataLabel = <span className="text-pos-600 text-xs ml-1">DATA</span>;
+  const assumptionLabel = <span className="text-warn-600 text-xs ml-1">ASSUMPTION</span>;
 
   return (
     <div className="space-y-5">
       {/* Inputs row */}
       <div className="flex flex-wrap items-end gap-5">
         <div>
-          <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">Share Price{dataLabel} <InfoTip text="Current market price per share. The DCF model solves for what FCF growth rate justifies this price." /></div>
+          <div className="text-fg-subtle text-xs mb-1 flex items-center gap-1">Share Price{dataLabel} <InfoTip text="Current market price per share. The DCF model solves for what FCF growth rate justifies this price." /></div>
           <input type="number" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} className={inputClass} />
         </div>
         <div>
-          <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">FCF/share{dataLabel} <InfoTip text="Free Cash Flow per share for the most recent fiscal year. Starting point for projecting future cash flows in the DCF model." /></div>
+          <div className="text-fg-subtle text-xs mb-1 flex items-center gap-1">FCF/share{dataLabel} <InfoTip text="Free Cash Flow per share for the most recent fiscal year. Starting point for projecting future cash flows in the DCF model." /></div>
           <input type="number" step="0.01" value={fcf} onChange={(e) => setFcf(e.target.value)} className={inputClass} />
         </div>
         <div>
-          <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">Net Cash/sh{dataLabel} <InfoTip text="Cash minus debt per share. Subtracted from share price to isolate the operating value that FCF must justify." /></div>
+          <div className="text-fg-subtle text-xs mb-1 flex items-center gap-1">Net Cash/sh{dataLabel} <InfoTip text="Cash minus debt per share. Subtracted from share price to isolate the operating value that FCF must justify." /></div>
           <input type="number" step="0.01" value={netCash} onChange={(e) => setNetCash(e.target.value)} className={inputClass} />
         </div>
         <div>
-          <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">WACC %{waccRaw ? dataLabel : assumptionLabel} <InfoTip text="Weighted Average Cost of Capital — the discount rate. Blends cost of equity and cost of debt weighted by capital structure. Pre-filled from GuruFocus when available." /></div>
+          <div className="text-fg-subtle text-xs mb-1 flex items-center gap-1">WACC %{waccRaw ? dataLabel : assumptionLabel} <InfoTip text="Weighted Average Cost of Capital — the discount rate. Blends cost of equity and cost of debt weighted by capital structure. Pre-filled from GuruFocus when available." /></div>
           <input type="number" step="0.5" value={discount} onChange={(e) => setDiscount(e.target.value)} className={inputClass} />
         </div>
         <div>
-          <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">Terminal Growth %{assumptionLabel} <InfoTip text="Perpetual growth rate after the projection period (Gordon Growth Model). Typically 2-3%, roughly matching long-term GDP/inflation. Higher values dramatically increase valuation." /></div>
+          <div className="text-fg-subtle text-xs mb-1 flex items-center gap-1">Terminal Growth %{assumptionLabel} <InfoTip text="Perpetual growth rate after the projection period (Gordon Growth Model). Typically 2-3%, roughly matching long-term GDP/inflation. Higher values dramatically increase valuation." /></div>
           <input type="number" step="0.5" value={termGrowth} onChange={(e) => setTermGrowth(e.target.value)} className={inputClass} />
         </div>
         <div>
-          <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">Years{assumptionLabel} <InfoTip text="Number of years in the explicit projection period before terminal value kicks in. Standard is 10 years. Shorter periods put more weight on terminal value." /></div>
+          <div className="text-fg-subtle text-xs mb-1 flex items-center gap-1">Years{assumptionLabel} <InfoTip text="Number of years in the explicit projection period before terminal value kicks in. Standard is 10 years. Shorter periods put more weight on terminal value." /></div>
           <input type="number" step="1" value={years} onChange={(e) => setYears(e.target.value)} className={inputClass} />
         </div>
         <div>
-          <div className="text-gray-500 text-xs mb-1">&nbsp;</div>
-          <button onClick={resetDefaults} className="px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5 border border-gray-700 transition-colors">
+          <div className="text-fg-subtle text-xs mb-1">&nbsp;</div>
+          <button onClick={resetDefaults} className="px-3 py-1.5 rounded-lg text-sm text-fg-muted hover:text-fg-strong hover:bg-overlay/5 border border-neutral-700 transition-colors">
             Reset
           </button>
         </div>
@@ -144,58 +144,58 @@ export default function ReverseDCF({ metrics }: { metrics: MetricRow[] }) {
       {/* Result */}
       <div className="flex items-end gap-8">
         <div>
-          <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">Implied FCF Growth <InfoTip text="The annual FCF growth rate the market is pricing in. Solved via binary search: what growth rate makes the DCF value equal the current share price? Green if at or below historic FCF growth (reasonable), red if above (optimistic)." /></div>
-          <div className={`font-mono text-2xl font-semibold ${impliedGrowth != null && historicFcfGrowth ? (impliedGrowth <= historicFcfGrowth.value ? 'text-emerald-400' : 'text-rose-400') : 'text-white'}`}>
+          <div className="text-fg-subtle text-xs mb-1 flex items-center gap-1">Implied FCF Growth <InfoTip text="The annual FCF growth rate the market is pricing in. Solved via binary search: what growth rate makes the DCF value equal the current share price? Green if at or below historic FCF growth (reasonable), red if above (optimistic)." /></div>
+          <div className={`font-mono text-2xl font-semibold ${impliedGrowth != null && historicFcfGrowth ? (impliedGrowth <= historicFcfGrowth.value ? 'text-pos-400' : 'text-neg-400') : 'text-fg-strong'}`}>
             {impliedGrowth != null ? fmtPct(impliedGrowth) : '—'}
           </div>
         </div>
         <div>
-          <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">Historic FCF 5Y <InfoTip text="5-year historic FCF growth rate from LongEquity. Used as the benchmark to judge whether the implied growth rate is reasonable." /></div>
-          <div className="font-mono text-2xl font-semibold text-gray-400">
+          <div className="text-fg-subtle text-xs mb-1 flex items-center gap-1">Historic FCF 5Y <InfoTip text="5-year historic FCF growth rate from LongEquity. Used as the benchmark to judge whether the implied growth rate is reasonable." /></div>
+          <div className="font-mono text-2xl font-semibold text-fg-muted">
             {historicFcfGrowth ? fmtPct(historicFcfGrowth.value) : '—'}
           </div>
         </div>
         <div>
-          <div className="text-gray-500 text-xs mb-1 flex items-center gap-1">GF Intrinsic Value <InfoTip text="GuruFocus intrinsic value based on projected FCF. An independent reference point — compare to the current share price to gauge over/undervaluation." /></div>
-          <div className="font-mono text-lg text-gray-400">
+          <div className="text-fg-subtle text-xs mb-1 flex items-center gap-1">GF Intrinsic Value <InfoTip text="GuruFocus intrinsic value based on projected FCF. An independent reference point — compare to the current share price to gauge over/undervaluation." /></div>
+          <div className="font-mono text-lg text-fg-muted">
             {gfIntrinsic ? `$${fmtNum(gfIntrinsic.value, 2)}` : '—'}
           </div>
         </div>
       </div>
 
       {/* Context metrics */}
-      <div className="grid grid-cols-4 sm:grid-cols-8 gap-4 pt-2 border-t border-gray-800/40">
+      <div className="grid grid-cols-4 sm:grid-cols-8 gap-4 pt-2 border-t border-neutral-800/40">
         <div>
-          <div className="text-gray-500 text-xs flex items-center gap-1">ROIC <InfoTip text="Return on Invested Capital. Measures how efficiently the company generates returns on all capital (debt + equity). Higher = better capital allocation." /></div>
-          <div className="text-gray-300 font-mono text-sm">{roic ? `${fmtNum(roic.value)}%` : '—'}</div>
+          <div className="text-fg-subtle text-xs flex items-center gap-1">ROIC <InfoTip text="Return on Invested Capital. Measures how efficiently the company generates returns on all capital (debt + equity). Higher = better capital allocation." /></div>
+          <div className="text-fg-soft font-mono text-sm">{roic ? `${fmtNum(roic.value)}%` : '—'}</div>
         </div>
         <div>
-          <div className="text-gray-500 text-xs flex items-center gap-1">EBITDA 5Y Gr. <InfoTip text="5-year EBITDA growth rate per share. Indicates underlying business earnings power growth before interest, taxes, depreciation, and amortization." /></div>
-          <div className="text-gray-300 font-mono text-sm">{ebitda5y ? fmtPct(ebitda5y.value / 100) : '—'}</div>
+          <div className="text-fg-subtle text-xs flex items-center gap-1">EBITDA 5Y Gr. <InfoTip text="5-year EBITDA growth rate per share. Indicates underlying business earnings power growth before interest, taxes, depreciation, and amortization." /></div>
+          <div className="text-fg-soft font-mono text-sm">{ebitda5y ? fmtPct(ebitda5y.value / 100) : '—'}</div>
         </div>
         <div>
-          <div className="text-gray-500 text-xs flex items-center gap-1">YoY Rev/sh Gr. <InfoTip text="Year-over-year revenue per share growth. Per-share basis adjusts for dilution from share issuance." /></div>
-          <div className="text-gray-300 font-mono text-sm">{yoyRevGrowth ? fmtPct(yoyRevGrowth.value / 100) : '—'}</div>
+          <div className="text-fg-subtle text-xs flex items-center gap-1">YoY Rev/sh Gr. <InfoTip text="Year-over-year revenue per share growth. Per-share basis adjusts for dilution from share issuance." /></div>
+          <div className="text-fg-soft font-mono text-sm">{yoyRevGrowth ? fmtPct(yoyRevGrowth.value / 100) : '—'}</div>
         </div>
         <div>
-          <div className="text-gray-500 text-xs flex items-center gap-1">Buyback <InfoTip text="Shares buyback ratio — percentage of shares repurchased. Positive = company is buying back shares (reduces share count, boosts per-share metrics)." /></div>
-          <div className="text-gray-300 font-mono text-sm">{buybackRatio ? `${fmtNum(buybackRatio.value)}%` : '—'}</div>
+          <div className="text-fg-subtle text-xs flex items-center gap-1">Buyback <InfoTip text="Shares buyback ratio — percentage of shares repurchased. Positive = company is buying back shares (reduces share count, boosts per-share metrics)." /></div>
+          <div className="text-fg-soft font-mono text-sm">{buybackRatio ? `${fmtNum(buybackRatio.value)}%` : '—'}</div>
         </div>
         <div>
-          <div className="text-gray-500 text-xs flex items-center gap-1">Div Yield <InfoTip text="Annual dividend as a percentage of share price. Part of total shareholder return alongside price appreciation and buybacks." /></div>
-          <div className="text-gray-300 font-mono text-sm">{divYield ? `${fmtNum(divYield.value)}%` : '—'}</div>
+          <div className="text-fg-subtle text-xs flex items-center gap-1">Div Yield <InfoTip text="Annual dividend as a percentage of share price. Part of total shareholder return alongside price appreciation and buybacks." /></div>
+          <div className="text-fg-soft font-mono text-sm">{divYield ? `${fmtNum(divYield.value)}%` : '—'}</div>
         </div>
         <div>
-          <div className="text-gray-500 text-xs flex items-center gap-1">Piotroski <InfoTip text="Piotroski F-Score (0-9). Scores financial strength based on profitability, leverage, and operating efficiency. 8-9 is strong, 0-2 is weak." /></div>
-          <div className="text-gray-300 font-mono text-sm">{piotroski ? fmtNum(piotroski.value, 0) : '—'}</div>
+          <div className="text-fg-subtle text-xs flex items-center gap-1">Piotroski <InfoTip text="Piotroski F-Score (0-9). Scores financial strength based on profitability, leverage, and operating efficiency. 8-9 is strong, 0-2 is weak." /></div>
+          <div className="text-fg-soft font-mono text-sm">{piotroski ? fmtNum(piotroski.value, 0) : '—'}</div>
         </div>
         <div>
-          <div className="text-gray-500 text-xs flex items-center gap-1">Altman Z <InfoTip text="Altman Z-Score predicts bankruptcy risk. Above 3.0 = safe zone, 1.8-3.0 = grey zone, below 1.8 = distress zone." /></div>
-          <div className="text-gray-300 font-mono text-sm">{altmanZ ? fmtNum(altmanZ.value) : '—'}</div>
+          <div className="text-fg-subtle text-xs flex items-center gap-1">Altman Z <InfoTip text="Altman Z-Score predicts bankruptcy risk. Above 3.0 = safe zone, 1.8-3.0 = grey zone, below 1.8 = distress zone." /></div>
+          <div className="text-fg-soft font-mono text-sm">{altmanZ ? fmtNum(altmanZ.value) : '—'}</div>
         </div>
         <div>
-          <div className="text-gray-500 text-xs flex items-center gap-1">Beta <InfoTip text="Stock's volatility relative to the market. Beta = 1 means same as market, >1 = more volatile, <1 = less volatile. Used in CAPM to estimate cost of equity." /></div>
-          <div className="text-gray-300 font-mono text-sm">{latestValue(metrics, MC.BETA) ? fmtNum(latestValue(metrics, MC.BETA)!.value) : '—'}</div>
+          <div className="text-fg-subtle text-xs flex items-center gap-1">Beta <InfoTip text="Stock's volatility relative to the market. Beta = 1 means same as market, >1 = more volatile, <1 = less volatile. Used in CAPM to estimate cost of equity." /></div>
+          <div className="text-fg-soft font-mono text-sm">{latestValue(metrics, MC.BETA) ? fmtNum(latestValue(metrics, MC.BETA)!.value) : '—'}</div>
         </div>
       </div>
     </div>

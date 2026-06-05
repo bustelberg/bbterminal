@@ -99,6 +99,7 @@ def strategy_hash(req: "BacktestRequest") -> str:
         "index_universe": req.index_universe,
         "selection_mode": req.selection_mode,
         "rebalance_frequency": req.rebalance_frequency,
+        "rebalance_weekday": req.rebalance_weekday,
         "strategy_type": req.strategy_type,
     }
     s = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
@@ -124,6 +125,7 @@ def backtest_strategy_hash(req: "BacktestRequest") -> str:
         "random_seed": req.random_seed,
         "n_trials": req.n_trials,
         "rebalance_frequency": req.rebalance_frequency,
+        "rebalance_weekday": req.rebalance_weekday,
         "strategy_type": req.strategy_type,
     }
     s = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)

@@ -44,7 +44,7 @@ export default async function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
     >
-      <body className="h-full flex bg-[#0f1117] text-gray-200">
+      <body className="h-full flex bg-page text-fg">
         <Sidebar initialUser={initialUser} />
         <div className="flex-1 overflow-auto">{children}</div>
         <DialogHost />

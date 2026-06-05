@@ -37,7 +37,7 @@ export default function DatePartsPicker({
   for (let y = maxYear; y >= minYear; y--) years.push(y);
 
   const selectCls =
-    'bg-[#0f1117] border border-gray-700 rounded-lg px-2 py-1.5 text-sm text-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none';
+    'bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-sm text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none';
 
   return (
     <div className="flex items-center gap-1.5">

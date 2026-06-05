@@ -27,4 +27,6 @@ npm run dev        # Dev server (Turbopack)
 npm run build      # Production build
 npm run lint       # ESLint
 npx tsc --noEmit   # Type check
+npm test           # Unit tests (vitest)
+npm run e2e        # E2E tests (Playwright — runs a production build)
 ```

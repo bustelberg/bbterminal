@@ -9,14 +9,10 @@ import InfoTip from '../InfoTip';
 import Spinner from '../Spinner';
 import { MC, type MetricRow } from './types';
 import { annualSeries, computeCAGR, fmtPct, timeSeries } from './utils';
+import { chartTheme } from '../../../lib/chartTheme';
 
-// Tooltip style — small local copy so the tooltip can opt out of the
-// strokeWidth bump that the imported tooltipStyle was bundling.
-const TOOLTIP_STYLE = {
-  backgroundColor: '#151821',
-  border: '1px solid #374151',
-  borderRadius: '8px',
-};
+// Tooltip style — the shared card-surface tooltip (centralized in chartTheme).
+const TOOLTIP_STYLE = chartTheme.tooltipCard.contentStyle;
 
 type Indexed = {
   date: string;
@@ -196,7 +192,7 @@ export default function RelativeGrowthChart({ metrics, metricsB, labelA, labelB,
   }, [metrics, metricsB, hasB]);
 
   if (combined.merged.length === 0) {
-    return <div className="text-gray-500 text-sm py-8 text-center">Not enough data for Relative Growth chart. Refresh to load.</div>;
+    return <div className="text-fg-subtle text-sm py-8 text-center">Not enough data for Relative Growth chart. Refresh to load.</div>;
   }
 
   const aLab = labelA ?? 'A';
@@ -204,40 +200,40 @@ export default function RelativeGrowthChart({ metrics, metricsB, labelA, labelB,
 
   return (
     <>
-      <div className="text-gray-500 text-xs mb-2 flex items-center gap-1 flex-wrap">
+      <div className="text-fg-subtle text-xs mb-2 flex items-center gap-1 flex-wrap">
         Price vs OE, indexed to 100
         {hasB && combined.commonStart && (
-          <span className="text-gray-600 font-mono">(common start {combined.commonStart})</span>
+          <span className="text-fg-faint font-mono">(common start {combined.commonStart})</span>
         )}
         <InfoTip text="Compares share price growth to Owner Earnings (EPS + Dividends) growth on a log scale. If price grows faster than OE, the stock is getting more expensive (multiple expansion). If OE outpaces price, it's getting cheaper. In comparison mode, both companies are rebased to 100 at the same start date so their indexed slopes are directly comparable." />
       </div>
       <div className="flex flex-wrap gap-x-5 gap-y-1 mb-2">
         <div className="flex items-center gap-1.5">
-          <div className="text-indigo-400 text-xs">{aLab} Price</div>
-          <div className="text-indigo-400 font-mono text-sm font-semibold">{fmtPct(combined.cagrsA.price ?? null)}</div>
+          <div className="text-accent-400 text-xs">{aLab} Price</div>
+          <div className="text-accent-400 font-mono text-sm font-semibold">{fmtPct(combined.cagrsA.price ?? null)}</div>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="text-emerald-400 text-xs">{aLab} OE Act</div>
-          <div className="text-emerald-400 font-mono text-sm font-semibold">{fmtPct(combined.cagrsA.oe_act ?? null)}</div>
+          <div className="text-pos-400 text-xs">{aLab} OE Act</div>
+          <div className="text-pos-400 font-mono text-sm font-semibold">{fmtPct(combined.cagrsA.oe_act ?? null)}</div>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="text-rose-400 text-xs">{aLab} OE Est</div>
-          <div className="text-rose-400 font-mono text-sm font-semibold">{fmtPct(combined.cagrsA.oe_est ?? null)}</div>
+          <div className="text-neg-400 text-xs">{aLab} OE Est</div>
+          <div className="text-neg-400 font-mono text-sm font-semibold">{fmtPct(combined.cagrsA.oe_est ?? null)}</div>
         </div>
         {hasB && combined.cagrsB && (
           <>
             <div className="w-full" />
             <div className="flex items-center gap-1.5">
-              <div className="text-indigo-400 text-xs">{bLab} Price</div>
-              <div className="text-indigo-400 font-mono text-sm font-semibold">{fmtPct(combined.cagrsB.price ?? null)}</div>
+              <div className="text-accent-400 text-xs">{bLab} Price</div>
+              <div className="text-accent-400 font-mono text-sm font-semibold">{fmtPct(combined.cagrsB.price ?? null)}</div>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="text-emerald-400 text-xs">{bLab} OE Act</div>
-              <div className="text-emerald-400 font-mono text-sm font-semibold">{fmtPct(combined.cagrsB.oe_act ?? null)}</div>
+              <div className="text-pos-400 text-xs">{bLab} OE Act</div>
+              <div className="text-pos-400 font-mono text-sm font-semibold">{fmtPct(combined.cagrsB.oe_act ?? null)}</div>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="text-rose-400 text-xs">{bLab} OE Est</div>
-              <div className="text-rose-400 font-mono text-sm font-semibold">{fmtPct(combined.cagrsB.oe_est ?? null)}</div>
+              <div className="text-neg-400 text-xs">{bLab} OE Est</div>
+              <div className="text-neg-400 font-mono text-sm font-semibold">{fmtPct(combined.cagrsB.oe_est ?? null)}</div>
             </div>
           </>
         )}
@@ -245,7 +241,7 @@ export default function RelativeGrowthChart({ metrics, metricsB, labelA, labelB,
           <>
             <div className="w-full" />
             <div className="flex items-center gap-1.5">
-              <div className="text-gray-500 text-xs">Loading {bLab}</div>
+              <div className="text-fg-subtle text-xs">Loading {bLab}</div>
               <Spinner size={10} />
             </div>
           </>
@@ -253,24 +249,24 @@ export default function RelativeGrowthChart({ metrics, metricsB, labelA, labelB,
       </div>
       <ResponsiveContainer width="100%" height={280}>
         <LineChart data={combined.merged} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1e2330" />
+          <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
           <XAxis
             dataKey="ts"
             type="number"
             scale="time"
             domain={['dataMin', 'dataMax']}
-            tick={{ fontSize: 11, fill: '#6b7280' }}
+            tick={{ fontSize: 11, fill: chartTheme.axisTick }}
             tickFormatter={(v: number) => new Date(v).getFullYear().toString()}
           />
           <YAxis
             scale="log"
             domain={['auto', 'auto']}
-            tick={{ fontSize: 11, fill: '#6b7280' }}
+            tick={{ fontSize: 11, fill: chartTheme.axisTick }}
             tickFormatter={(v: number) => v.toFixed(0)}
           />
           <Tooltip
             contentStyle={TOOLTIP_STYLE}
-            labelStyle={{ color: '#9ca3af' }}
+            labelStyle={{ color: chartTheme.axisLabel }}
             labelFormatter={(v) => new Date(Number(v)).toISOString().slice(0, 10)}
             formatter={(v, name) => {
               const isB = String(name).endsWith('_b');
@@ -283,24 +279,24 @@ export default function RelativeGrowthChart({ metrics, metricsB, labelA, labelB,
               return [Number(v).toFixed(1), lab];
             }}
           />
-          <Line type="monotone" dataKey="price_a" stroke="#6366f1" strokeWidth={2} dot={false} connectNulls />
-          <Line type="monotone" dataKey="oe_actual_a" stroke="#34d399" strokeWidth={2} dot={false} connectNulls />
-          <Line type="monotone" dataKey="oe_est_a" stroke="#f87171" strokeWidth={2} dot={false} connectNulls />
+          <Line type="monotone" dataKey="price_a" stroke={chartTheme.accentStrong} strokeWidth={2} dot={false} connectNulls />
+          <Line type="monotone" dataKey="oe_actual_a" stroke={chartTheme.pos} strokeWidth={2} dot={false} connectNulls />
+          <Line type="monotone" dataKey="oe_est_a" stroke={chartTheme.neg} strokeWidth={2} dot={false} connectNulls />
           {hasB && (
             <>
-              <Line type="monotone" dataKey="price_b" stroke="#6366f1" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
-              <Line type="monotone" dataKey="oe_actual_b" stroke="#34d399" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
-              <Line type="monotone" dataKey="oe_est_b" stroke="#f87171" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
+              <Line type="monotone" dataKey="price_b" stroke={chartTheme.accentStrong} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
+              <Line type="monotone" dataKey="oe_actual_b" stroke={chartTheme.pos} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
+              <Line type="monotone" dataKey="oe_est_b" stroke={chartTheme.neg} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
             </>
           )}
         </LineChart>
       </ResponsiveContainer>
       <div className="flex flex-wrap justify-center gap-x-5 gap-y-1 text-xs mt-1">
-        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-indigo-400 inline-block rounded" />Price</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-emerald-400 inline-block rounded" />OE Actual</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-rose-400 inline-block rounded" />OE Estimate</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-accent-400 inline-block rounded" />Price</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-pos-400 inline-block rounded" />OE Actual</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-neg-400 inline-block rounded" />OE Estimate</span>
         {hasB && (
-          <span className="text-gray-500 ml-3">— solid = {aLab} · dashed = {bLab}</span>
+          <span className="text-fg-subtle ml-3">— solid = {aLab} · dashed = {bLab}</span>
         )}
       </div>
     </>

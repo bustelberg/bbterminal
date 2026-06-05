@@ -7,6 +7,13 @@ import AxisColumn from './AxisColumn';
 import type { SelectionMode } from './useBacktestConfig';
 import type { UseVariantSelectionResult } from './useVariantSelection';
 import { toggleInSet } from './variantHelpers';
+import { WEEKDAY_LABELS } from './utils';
+
+// Rebalance weekdays offered in the sweep picker: Mon–Fri (0–4). Weekend
+// rebalances aren't meaningful (markets are closed), so they're omitted
+// even though the backend accepts 0–6. Empty selection = inherit the base
+// config's rebalance weekday (don't sweep the dimension).
+const REBAL_WEEKDAYS = [0, 1, 2, 3, 4] as const;
 
 // Amber-chip threshold on the permutations count — purely a UI wall-time
 // warning; the backend has no hard cap.
@@ -54,6 +61,7 @@ export default function VariantsPanel({
     selectedStrategies, setSelectedStrategies,
     selectedUniverses, setSelectedUniverses,
     selectedGroupings, setSelectedGroupings,
+    selectedWeekdays, setSelectedWeekdays,
     topSectorsSweep, setTopSectorsSweep,
     perSectorSweep, setPerSectorSweep,
     minScoreSweep, setMinScoreSweep,
@@ -67,18 +75,18 @@ export default function VariantsPanel({
   } = variantSel;
 
   return (
-    <div className="border-t border-gray-800/60 pt-4 mb-4">
+    <div className="border-t border-neutral-800/60 pt-4 mb-4">
       <div className="flex items-baseline gap-3 mb-3">
-        <h2 className="text-gray-300 text-xs font-semibold uppercase tracking-wider">
+        <h2 className="text-fg-soft text-xs font-semibold uppercase tracking-wider">
           Variants
         </h2>
-        <span className="text-[10px] text-gray-500">
+        <span className="text-[10px] text-fg-subtle">
           Cross-product of the axes below — each permutation runs once and shows up in the variants table
         </span>
       </div>
 
       {variantsBlockReason && (
-        <div className="mb-3 px-3 py-2 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg">
+        <div className="mb-3 px-3 py-2 text-xs text-neg-300 bg-neg-500/10 border border-neg-500/30 rounded-lg">
           {variantsBlockReason}
         </div>
       )}
@@ -88,51 +96,51 @@ export default function VariantsPanel({
           `none` / `off` becomes a null token. */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
         <div>
-          <label className="text-gray-500 text-xs block mb-1">
+          <label className="text-fg-subtle text-xs block mb-1">
             Top {Array.from(selectedGroupings)[0] === 'industry' ? 'industries' : 'sectors'}{' '}
-            <span className="text-gray-600 text-[10px]">(comma list, blank = inherit)</span>
+            <span className="text-fg-faint text-[10px]">(comma list, blank = inherit)</span>
           </label>
           <input
             type="text"
             value={topSectorsSweep}
             onChange={(e) => setTopSectorsSweep(e.target.value)}
             placeholder={`e.g. 3,4,5  (blank = ${topSectors})`}
-            className="w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+            className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
           />
         </div>
         <div>
-          <label className="text-gray-500 text-xs block mb-1">
+          <label className="text-fg-subtle text-xs block mb-1">
             Per {Array.from(selectedGroupings)[0] === 'industry' ? 'industry' : 'sector'}{' '}
-            <span className="text-gray-600 text-[10px]">(comma list, blank = inherit)</span>
+            <span className="text-fg-faint text-[10px]">(comma list, blank = inherit)</span>
           </label>
           <input
             type="text"
             value={perSectorSweep}
             onChange={(e) => setPerSectorSweep(e.target.value)}
             placeholder={`e.g. 4,6,8  (blank = ${topPerSector})`}
-            className="w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+            className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
           />
         </div>
         <div>
-          <label className="text-gray-500 text-xs block mb-1">
+          <label className="text-fg-subtle text-xs block mb-1">
             Min price score{' '}
-            <span className="text-gray-600 text-[10px]">(comma list; &quot;none&quot;/&quot;off&quot; = disabled)</span>
+            <span className="text-fg-faint text-[10px]">(comma list; &quot;none&quot;/&quot;off&quot; = disabled)</span>
           </label>
           <input
             type="text"
             value={minScoreSweep}
             onChange={(e) => setMinScoreSweep(e.target.value)}
             placeholder={`e.g. 20,30,off  (blank = ${minPriceScore.trim() || 'off'})`}
-            className="w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+            className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
           />
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
         <div>
-          <label className="text-gray-500 text-xs block mb-1">
+          <label className="text-fg-subtle text-xs block mb-1">
             Skip variants smaller than{' '}
-            <span className="text-gray-600 text-[10px]">(blank = 12, 0 disables)</span>
+            <span className="text-fg-faint text-[10px]">(blank = 12, 0 disables)</span>
           </label>
           <input
             type="number"
@@ -140,18 +148,18 @@ export default function VariantsPanel({
             value={minPortfolioSizeRaw}
             onChange={(e) => setMinPortfolioSizeRaw(e.target.value)}
             placeholder="blank = 12"
-            className="w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+            className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
           />
           {minPortfolioSize > 0 && belowMinSize.size > 0 && (
-            <p className="text-[10px] text-amber-400/70 mt-1.5">
+            <p className="text-[10px] text-warn-400/70 mt-1.5">
               Skipping {belowMinSize.size} of {allPermutations.length} (portfolio &lt; {minPortfolioSize}).
             </p>
           )}
         </div>
         <div>
-          <label className="text-gray-500 text-xs block mb-1">
+          <label className="text-fg-subtle text-xs block mb-1">
             Skip variants larger than{' '}
-            <span className="text-gray-600 text-[10px]">(blank = 50, 0 disables)</span>
+            <span className="text-fg-faint text-[10px]">(blank = 50, 0 disables)</span>
           </label>
           <input
             type="number"
@@ -159,10 +167,10 @@ export default function VariantsPanel({
             value={maxPortfolioSizeRaw}
             onChange={(e) => setMaxPortfolioSizeRaw(e.target.value)}
             placeholder="blank = 50"
-            className="w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+            className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
           />
           {maxPortfolioSize > 0 && aboveMaxSize.size > 0 && (
-            <p className="text-[10px] text-amber-400/70 mt-1.5">
+            <p className="text-[10px] text-warn-400/70 mt-1.5">
               Skipping {aboveMaxSize.size} of {allPermutations.length} (portfolio &gt; {maxPortfolioSize}).
             </p>
           )}
@@ -170,7 +178,7 @@ export default function VariantsPanel({
       </div>
 
       {longShortBlocked && (
-        <div className="mb-3 px-3 py-2 text-[11px] text-amber-300/80 bg-amber-500/5 border border-amber-500/20 rounded-lg">
+        <div className="mb-3 px-3 py-2 text-[11px] text-warn-300/80 bg-warn-500/5 border border-warn-500/20 rounded-lg">
           Long-short is disabled in {selectionMode === 'all' ? 'all-universe' : selectionMode === 'sector_etf' ? 'sector-ETF' : 'random'} mode (no top/bottom split to short on). Long-short rows below are greyed out.
         </div>
       )}
@@ -185,12 +193,12 @@ export default function VariantsPanel({
           renderItem={(freq) => {
             const checked = selectedFreqs.has(freq);
             return (
-              <label key={freq} className="flex items-center gap-2 px-2 py-1 rounded text-xs text-gray-300 hover:bg-white/5 cursor-pointer">
+              <label key={freq} className="flex items-center gap-2 px-2 py-1 rounded text-xs text-fg-soft hover:bg-overlay/5 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={checked}
                   onChange={() => toggleInSet(setSelectedFreqs, freq)}
-                  className="accent-indigo-500 w-3.5 h-3.5 cursor-pointer"
+                  className="accent-accent-500 w-3.5 h-3.5 cursor-pointer"
                 />
                 <span>{freq}</span>
               </label>
@@ -211,7 +219,7 @@ export default function VariantsPanel({
               <label
                 key={strat}
                 className={`flex items-center gap-2 px-2 py-1 rounded text-xs ${
-                  blocked ? 'text-gray-600 cursor-not-allowed' : 'text-gray-300 hover:bg-white/5 cursor-pointer'
+                  blocked ? 'text-fg-faint cursor-not-allowed' : 'text-fg-soft hover:bg-overlay/5 cursor-pointer'
                 }`}
               >
                 <input
@@ -219,7 +227,7 @@ export default function VariantsPanel({
                   checked={checked && !blocked}
                   disabled={blocked}
                   onChange={() => toggleInSet(setSelectedStrategies, strat)}
-                  className="accent-indigo-500 w-3.5 h-3.5 cursor-pointer disabled:cursor-not-allowed"
+                  className="accent-accent-500 w-3.5 h-3.5 cursor-pointer disabled:cursor-not-allowed"
                 />
                 <span>{strat}</span>
               </label>
@@ -240,17 +248,17 @@ export default function VariantsPanel({
             const checked = selectedUniverses.has(uni);
             const entry = indexUniverses.find((i) => i.index_name === uni);
             return (
-              <label key={uni} className="flex items-center gap-2 px-2 py-1 rounded text-xs text-gray-300 hover:bg-white/5 cursor-pointer">
+              <label key={uni} className="flex items-center gap-2 px-2 py-1 rounded text-xs text-fg-soft hover:bg-overlay/5 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={checked}
                   onChange={() => toggleInSet(setSelectedUniverses, uni)}
-                  className="accent-indigo-500 w-3.5 h-3.5 cursor-pointer"
+                  className="accent-accent-500 w-3.5 h-3.5 cursor-pointer"
                 />
                 <span className="truncate">
                   {entry?.display_label ?? uni}
                   {entry?.total_unique_tickers != null && (
-                    <span className="text-gray-600 ml-1">({entry.total_unique_tickers})</span>
+                    <span className="text-fg-faint ml-1">({entry.total_unique_tickers})</span>
                   )}
                 </span>
               </label>
@@ -273,12 +281,12 @@ export default function VariantsPanel({
               ? 'Only LEONTEQ / ACWI_LEONTEQ carry industry data — pairing with another universe will produce a backend error.'
               : 'Group picks by universe sector tag (every universe has this).';
             return (
-              <label key={grp} className="flex items-center gap-2 px-2 py-1 rounded text-xs text-gray-300 hover:bg-white/5 cursor-pointer" title={hint}>
+              <label key={grp} className="flex items-center gap-2 px-2 py-1 rounded text-xs text-fg-soft hover:bg-overlay/5 cursor-pointer" title={hint}>
                 <input
                   type="checkbox"
                   checked={checked}
                   onChange={() => toggleInSet(setSelectedGroupings, grp)}
-                  className="accent-indigo-500 w-3.5 h-3.5 cursor-pointer"
+                  className="accent-accent-500 w-3.5 h-3.5 cursor-pointer"
                 />
                 <span>{grp}</span>
               </label>
@@ -288,19 +296,51 @@ export default function VariantsPanel({
         />
       </div>
 
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+        <AxisColumn
+          label="Rebalance day"
+          options={REBAL_WEEKDAYS}
+          selected={selectedWeekdays}
+          onAll={() => setSelectedWeekdays(new Set<number>(REBAL_WEEKDAYS))}
+          onNone={() => setSelectedWeekdays(new Set<number>())}
+          renderItem={(wd) => {
+            const checked = selectedWeekdays.has(wd);
+            return (
+              <label key={wd} className="flex items-center gap-2 px-2 py-1 rounded text-xs text-fg-soft hover:bg-overlay/5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggleInSet(setSelectedWeekdays, wd)}
+                  className="accent-accent-500 w-3.5 h-3.5 cursor-pointer"
+                />
+                <span>First {WEEKDAY_LABELS[wd]}</span>
+              </label>
+            );
+          }}
+          maxHClass="max-h-40"
+        />
+        <div className="text-[11px] text-fg-subtle self-center leading-relaxed">
+          Blank = every variant inherits the base rebalance day. Pick one or
+          more to sweep them — a <span className="text-fg-soft">first-Wednesday</span> variant
+          rebalances on the first Wednesday of each period, deciding on the
+          <span className="text-fg-soft"> prior trading day&apos;s (Tuesday&apos;s) close</span> and
+          entering at Wednesday&apos;s close. Weekends are omitted (markets closed).
+        </div>
+      </div>
+
       {/* Permutations preview — every cross-product permutation with a
           per-row enable checkbox. The count chip turns amber once
           `eligibleCount` crosses LARGE_VARIANTS_THRESHOLD so wall-time
           costs are visible before the user hits run. */}
-      <div className="border border-gray-800/60 rounded-lg overflow-hidden">
-        <div className="flex items-center justify-between px-3 py-2 bg-[#0f1117] border-b border-gray-800/40">
+      <div className="border border-neutral-800/60 rounded-lg overflow-hidden">
+        <div className="flex items-center justify-between px-3 py-2 bg-page border-b border-neutral-800/40">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-400">Permutations</span>
+            <span className="text-xs text-fg-muted">Permutations</span>
             <span
               className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
                 eligibleCount > LARGE_VARIANTS_THRESHOLD
-                  ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
-                  : 'bg-gray-700/40 text-gray-300 border border-gray-700/40'
+                  ? 'bg-warn-500/15 text-warn-300 border border-warn-500/30'
+                  : 'bg-neutral-700/40 text-fg-soft border border-neutral-700/40'
               }`}
               title={
                 eligibleCount > LARGE_VARIANTS_THRESHOLD
@@ -315,7 +355,7 @@ export default function VariantsPanel({
             <button
               type="button"
               onClick={() => setDisabledPerms(new Set())}
-              className="text-[11px] text-indigo-400 hover:text-indigo-300"
+              className="text-[11px] text-accent-400 hover:text-accent-300"
             >
               Enable all
             </button>
@@ -323,7 +363,7 @@ export default function VariantsPanel({
         </div>
         <ul className="max-h-72 overflow-auto p-1">
           {allPermutations.length === 0 ? (
-            <li className="px-3 py-2 text-xs text-gray-600">
+            <li className="px-3 py-2 text-xs text-fg-faint">
               Pick at least one frequency, strategy, universe, and grouping above to generate permutations.
             </li>
           ) : (
@@ -339,7 +379,7 @@ export default function VariantsPanel({
                 <li key={key}>
                   <label
                     className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs ${
-                      autoDisabled ? 'text-gray-600 cursor-not-allowed' : 'text-gray-300 hover:bg-white/5 cursor-pointer'
+                      autoDisabled ? 'text-fg-faint cursor-not-allowed' : 'text-fg-soft hover:bg-overlay/5 cursor-pointer'
                     }`}
                   >
                     <input
@@ -347,17 +387,17 @@ export default function VariantsPanel({
                       checked={enabled}
                       disabled={autoDisabled}
                       onChange={() => togglePermDisabled(key)}
-                      className="accent-indigo-500 w-3.5 h-3.5 cursor-pointer disabled:cursor-not-allowed"
+                      className="accent-accent-500 w-3.5 h-3.5 cursor-pointer disabled:cursor-not-allowed"
                     />
                     <span className="truncate">
                       {variantLabel(p)}
                       {sizeBelowMin && (
-                        <span className="ml-1.5 text-[9px] uppercase tracking-wider text-amber-400/70">
+                        <span className="ml-1.5 text-[9px] uppercase tracking-wider text-warn-400/70">
                           skipped · {variantSize(p)} &lt; {minPortfolioSize}
                         </span>
                       )}
                       {sizeAboveMax && (
-                        <span className="ml-1.5 text-[9px] uppercase tracking-wider text-amber-400/70">
+                        <span className="ml-1.5 text-[9px] uppercase tracking-wider text-warn-400/70">
                           skipped · {variantSize(p)} &gt; {maxPortfolioSize}
                         </span>
                       )}

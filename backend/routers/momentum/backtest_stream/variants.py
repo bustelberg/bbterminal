@@ -17,7 +17,7 @@ loop calls `prepare_variant_from_shared` to slice it per variant."""
 from __future__ import annotations
 
 import asyncio
-import json
+from routers._sse import sse_event as _emit, sse_keepalive as _keepalive
 import logging
 import os
 import queue as _queue
@@ -40,12 +40,37 @@ from ..signals import warm_breakdown_panel_cache
 from .benchmarks import fetch_benchmark_price_index
 
 
-def _emit(data: dict) -> str:
-    return f"data: {json.dumps(data)}\n\n"
+def _variant_key(vspec) -> str:
+    """Canonical sweep key for a `VariantSpec`.
 
-
-def _keepalive() -> str:
-    return ": keepalive\n\n"
+    MUST mirror the frontend's `makeVariantKey` (`lib/stores/momentum.ts`)
+    byte-for-byte: the UI pre-seeds each table row under this key and maps
+    incoming `variant_result` SSE events back to it. Any drift (a new axis
+    added on one side only, or a stale backend missing a field) drops the
+    result into a "ghost" row the user never selected while the pre-seeded
+    row stays empty. Tag order: frequency, strategy, s/p/m/u/g/w.
+    """
+    parts = [vspec.frequency, vspec.strategy_type]
+    if vspec.top_n_sectors is not None:
+        parts.append(f"s{vspec.top_n_sectors}")
+    if vspec.top_n_per_sector is not None:
+        parts.append(f"p{vspec.top_n_per_sector}")
+    if vspec.min_price_score is not None:
+        score_str = (
+            f"{vspec.min_price_score:g}"
+            if isinstance(vspec.min_price_score, float)
+            else str(vspec.min_price_score)
+        )
+        parts.append(f"m{score_str}")
+    if vspec.index_universe is not None:
+        parts.append(f"u{vspec.index_universe}")
+    elif vspec.universe_label is not None:
+        parts.append(f"u{vspec.universe_label}")
+    if vspec.grouping is not None:
+        parts.append(f"g{vspec.grouping}")
+    if vspec.rebalance_weekday is not None:
+        parts.append(f"w{vspec.rebalance_weekday}")
+    return "__".join(parts)
 
 
 async def run_variants_sweep(
@@ -86,26 +111,59 @@ async def run_variants_sweep(
         _start_d = date.fromisoformat(req.start_date)
         _end_d = date.fromisoformat(req.end_date)
         _union_cutoffs: set[date] = set()
+        # Per-variant breakdown surfaced to the progress log so the user can
+        # verify each variant resolved the EXPECTED rebalance weekday + cutoff
+        # count — if the union total looks too small (e.g. two weekday
+        # variants collapsing to one Monday grid), this line shows why
+        # (weekday=N(inherit) on every row = the per-variant weekday never
+        # reached the backend).
+        _variant_diag: list[str] = []
+        _expected_sum = 0  # sum of per-variant cutoff counts, before dedup
         for _v in req.variants:
+            _v_weekday = _v.rebalance_weekday if _v.rebalance_weekday is not None else req.rebalance_weekday
+            _wd_src = "set" if _v.rebalance_weekday is not None else "inherit"
             try:
                 _periods = _generate_rebalance_dates(
                     _start_d, _end_d, _v.frequency, prices_df,
+                    weekday=_v_weekday,
                 )
-            except Exception:
+            except Exception as _gen_err:
                 # If a variant can't even produce dates, skip it
                 # here — the per-variant loop below will surface
                 # the error properly.
+                _variant_diag.append(
+                    f"{_variant_key(_v)} · weekday={_v_weekday}({_wd_src}) · date-gen failed: {type(_gen_err).__name__}"
+                )
                 continue
             if len(_periods) >= 2:
                 # Include every rebalance date (not just periods[:-1])
                 # — the last entry becomes the open-period entry in
                 # run_backtest and needs signals at that cutoff too.
                 _union_cutoffs.update(_periods)
+            _expected_sum += len(_periods)
+            _span = f" [{_periods[0].isoformat()}…{_periods[-1].isoformat()}]" if _periods else ""
+            _variant_diag.append(
+                f"{_variant_key(_v)} · weekday={_v_weekday}({_wd_src}) · {len(_periods)} cutoffs{_span}"
+            )
+        # Emit the per-variant breakdown (capped so a huge sweep doesn't flood
+        # the log), then the union total.
+        _DIAG_CAP = 24
+        for _line in _variant_diag[:_DIAG_CAP]:
+            yield _emit({"type": "progress", "pct": 67, "message": f"variant · {_line}"})
+        if len(_variant_diag) > _DIAG_CAP:
+            yield _emit({
+                "type": "progress",
+                "pct": 67,
+                "message": f"variant · …(+{len(_variant_diag) - _DIAG_CAP} more)",
+            })
         if _union_cutoffs:
             yield _emit({
                 "type": "progress",
                 "pct": 68,
-                "message": f"Precomputing signal panel over {len(_union_cutoffs)} union cutoffs (shared by all {len(req.variants)} variants)...",
+                "message": (
+                    f"Precomputing signal panel over {len(_union_cutoffs)} union cutoffs "
+                    f"(sum across {len(req.variants)} variants before dedup: {_expected_sum})..."
+                ),
             })
             yield _keepalive()
             # The shared signal panel covers the UNION of every variant's
@@ -217,8 +275,12 @@ async def run_variants_sweep(
             _v_universe_label = _v.universe_label if _v.universe_label is not None else req.universe_label
             _v_index_universe = _v.index_universe if _v.index_universe is not None else req.index_universe
             _v_grouping = _v.grouping if _v.grouping is not None else base_grouping
+            _v_weekday = _v.rebalance_weekday if _v.rebalance_weekday is not None else req.rebalance_weekday
             _v_combo = (_v_universe_label, _v_index_universe, _v_grouping)
-            cf_key = (_v_combo, _v.frequency)
+            # Weekday is part of the cache key: two variants on the same
+            # (combo, freq) but different rebalance weekdays land on
+            # different dates → different per-period baselines.
+            cf_key = (_v_combo, _v.frequency, _v_weekday)
             if cf_key in seen_combo_freq:
                 continue
             seen_combo_freq.add(cf_key)
@@ -231,6 +293,7 @@ async def run_variants_sweep(
                     date.fromisoformat(req.end_date),
                     _v.frequency,
                     prices_df,
+                    weekday=_v_weekday,
                 )
             except Exception as _gen_err:
                 logging.getLogger(__name__).warning(
@@ -472,6 +535,7 @@ async def run_variants_sweep(
             v_universe_label = vspec_inner.universe_label if vspec_inner.universe_label is not None else req.universe_label
             v_index_universe = vspec_inner.index_universe if vspec_inner.index_universe is not None else req.index_universe
             v_grouping_field = vspec_inner.grouping if vspec_inner.grouping is not None else base_grouping
+            v_weekday = vspec_inner.rebalance_weekday if vspec_inner.rebalance_weekday is not None else req.rebalance_weekday
 
             # Per-combo cache lookups (Wins 1-3).
             v_monthly_eligible = monthly_eligible
@@ -482,27 +546,14 @@ async def run_variants_sweep(
                 v_combo = (v_universe_label, v_index_universe, v_grouping_field)
                 v_monthly_eligible = monthly_eligible_by_combo.get(v_combo, monthly_eligible)
                 v_monthly_baseline = monthly_baseline_cache.get(v_combo)
-                v_period_baselines = period_baseline_cache.get((v_combo, vspec_inner.frequency))
+                v_period_baselines = period_baseline_cache.get((v_combo, vspec_inner.frequency, v_weekday))
                 v_score_cache = score_cache_by_combo.get(v_combo)
             elif req.selection_mode not in ("random", "all"):
                 v_score_cache = score_cache_single
 
-            # Variant key.
-            key_parts = [vspec_inner.frequency, vspec_inner.strategy_type]
-            if vspec_inner.top_n_sectors is not None:
-                key_parts.append(f"s{vspec_inner.top_n_sectors}")
-            if vspec_inner.top_n_per_sector is not None:
-                key_parts.append(f"p{vspec_inner.top_n_per_sector}")
-            if vspec_inner.min_price_score is not None:
-                score_str = f"{vspec_inner.min_price_score:g}" if isinstance(vspec_inner.min_price_score, float) else str(vspec_inner.min_price_score)
-                key_parts.append(f"m{score_str}")
-            if vspec_inner.index_universe is not None:
-                key_parts.append(f"u{vspec_inner.index_universe}")
-            elif vspec_inner.universe_label is not None:
-                key_parts.append(f"u{vspec_inner.universe_label}")
-            if vspec_inner.grouping is not None:
-                key_parts.append(f"g{vspec_inner.grouping}")
-            variant_key = "__".join(key_parts)
+            # Variant key — mirrors the frontend's makeVariantKey exactly
+            # (see `_variant_key` for why drift is dangerous).
+            variant_key = _variant_key(vspec_inner)
 
             sweep_queue.put({"type": "variant_start", "variant_key": variant_key})
 
@@ -527,6 +578,7 @@ async def run_variants_sweep(
                 "selection_mode": req.selection_mode,
                 "random_seed": req.random_seed,
                 "rebalance_frequency": vspec_inner.frequency,
+                "rebalance_weekday": v_weekday,
                 "strategy_type": vspec_inner.strategy_type,
                 "sector_etfs": req.sector_etfs,
                 "min_price_score": v_min_score,
@@ -543,6 +595,7 @@ async def run_variants_sweep(
                         end_date=date.fromisoformat(req.end_date),
                         frequency=vspec_inner.frequency,
                         prices_df=prices_df,
+                        rebalance_weekday=v_weekday,
                     )
                 except Exception as _prep_err:
                     v_prepared = None
@@ -624,7 +677,7 @@ async def run_variants_sweep(
     yield _emit({
         "type": "progress",
         "pct": 70,
-        "message": f"Running {n_variants} variants sequentially (parallel removed; numpy-bound is faster serial than thread-contended)...",
+        "message": f"Running {n_variants} variants…",
     })
     yield _keepalive()
 

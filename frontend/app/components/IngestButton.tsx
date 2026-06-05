@@ -20,13 +20,13 @@ export default function IngestButton() {
       <button
         onClick={() => startIngest()}
         disabled={running}
-        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className="px-4 py-2 bg-blue-600 text-fg-strong rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
         {running ? 'Running...' : finished ? 'Run Again' : 'Run Long Equity Ingest'}
       </button>
 
       {logs.length > 0 && (
-        <div className="mt-4 p-4 bg-gray-950 text-gray-100 rounded font-mono text-sm max-h-96 overflow-y-auto border border-gray-700">
+        <div className="mt-4 p-4 bg-neutral-950 text-fg-bright rounded font-mono text-sm max-h-96 overflow-y-auto border border-neutral-700">
           {logs.map((entry, i) => (
             <div
               key={i}
@@ -35,7 +35,7 @@ export default function IngestButton() {
                   ? 'text-red-400'
                   : entry.type === 'done'
                   ? 'text-green-400 font-semibold'
-                  : 'text-gray-200'
+                  : 'text-fg'
               }
             >
               {entry.message || '\u00a0'}

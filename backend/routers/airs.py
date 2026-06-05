@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import io
-import json
+from routers._sse import sse_event, sse_message
 import queue as thread_queue
 import threading
 from datetime import date as dt_date
@@ -98,13 +98,13 @@ async def _airs_scan_stream():
 
     def send_event(msg_type: str, **kwargs):
         payload = {"type": msg_type, **kwargs}
-        q.put(f"data: {json.dumps(payload)}\n\n")
+        q.put(sse_event(payload))
 
     def run_scanner():
         try:
             scan_portfolios_sync(send_event)
         except Exception as e:
-            q.put(f"data: {json.dumps({'type': 'error', 'message': f'{type(e).__name__}: {e}'})}\n\n")
+            q.put(sse_message("error", f"{type(e).__name__}: {e}"))
         finally:
             q.put(None)
 

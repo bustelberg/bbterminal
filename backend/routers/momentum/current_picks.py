@@ -213,6 +213,56 @@ def _refresh_mtd_for_holdings(holdings: list[dict]) -> tuple[list[dict], str | N
     return updated, latest_iso
 
 
+@router.get("/api/momentum/prices-at")
+async def prices_at(as_of: str | None = None, company_ids: str | None = None):
+    """Close price (local + EUR) for each company at the nearest trading day
+    on/before `as_of`. Read-only DB lookup — the Portfolio table uses it to
+    re-price holdings at a go-live split boundary so each sub-period shows
+    the entry/exit prices for its own dates. `company_ids` is comma-separated.
+
+    Both params are optional so a no-arg probe (e.g. CI's GET smoke) gets a
+    valid empty `{prices: {}}` rather than a 422 — the frontend always sends
+    both.
+    """
+    def _q() -> dict:
+        if not as_of or not company_ids:
+            return {"prices": {}}
+        try:
+            target = date.fromisoformat(as_of[:10])
+        except ValueError:
+            raise HTTPException(400, "as_of must be YYYY-MM-DD")
+        cids = [int(x) for x in company_ids.split(",") if x.strip().isdigit()]
+        if not cids:
+            return {"prices": {}}
+        # 14-day lookback comfortably spans weekends/holidays to find the
+        # most recent close on/before the target date.
+        start = target - timedelta(days=14)
+        prices_local_df = load_all_prices(supabase, cids, start, target)
+        if prices_local_df.empty:
+            return {"prices": {}}
+        company_currency = load_company_currency(supabase, cids)
+        currencies = sorted({c for c in company_currency.values() if c})
+        fx_rates = load_fx_rates(supabase, currencies, start, target) if currencies else {}
+        prices_eur_df, _ = convert_prices_to_eur(prices_local_df, company_currency, fx_rates)
+
+        out: dict[str, dict] = {}
+        for cid, group in prices_local_df.groupby("company_id"):
+            row = group.sort_values("target_date").iloc[-1]
+            td = row["target_date"]
+            out[str(int(cid))] = {
+                "price_local": round(float(row["price"]), 4),
+                "target_date": td.isoformat() if hasattr(td, "isoformat") else str(td),
+            }
+        if not prices_eur_df.empty:
+            for cid, group in prices_eur_df.groupby("company_id"):
+                row = group.sort_values("target_date").iloc[-1]
+                key = str(int(cid))
+                if key in out:
+                    out[key]["price_eur"] = round(float(row["price"]), 4)
+        return {"prices": out}
+    return await asyncio.to_thread(_q)
+
+
 @router.post("/api/momentum/current-picks/{snapshot_id}/refresh-mtd")
 async def refresh_current_picks_mtd(snapshot_id: int):
     """Recompute MTD on a STORED snapshot using the latest available prices.

@@ -38,28 +38,28 @@ export default function SetPasswordPage() {
   }
 
   return (
-    <div className="min-h-screen bg-black flex items-center justify-center">
-      <div className="w-full max-w-sm border border-gray-800 rounded p-8">
-        <h1 className="font-mono text-base font-bold text-white mb-1">BBTerminal</h1>
-        <p className="font-mono text-xs text-gray-500 mb-6">
+    <div className="min-h-screen bg-scrim flex items-center justify-center">
+      <div className="w-full max-w-sm border border-neutral-800 rounded p-8">
+        <h1 className="font-mono text-base font-bold text-fg-strong mb-1">BBTerminal</h1>
+        <p className="font-mono text-xs text-fg-subtle mb-6">
           Choose a password for your account
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block font-mono text-xs text-gray-400 mb-1">Password</label>
+            <label className="block font-mono text-xs text-fg-muted mb-1">Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
               autoComplete="new-password"
-              className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm font-mono text-white placeholder-gray-600 focus:outline-none focus:border-gray-500"
+              className="w-full bg-neutral-900 border border-neutral-700 rounded px-3 py-2 text-sm font-mono text-fg-strong placeholder-fg-faint focus:outline-none focus:border-neutral-500"
               placeholder="Min. 8 characters"
             />
           </div>
           <div>
-            <label className="block font-mono text-xs text-gray-400 mb-1">
+            <label className="block font-mono text-xs text-fg-muted mb-1">
               Confirm password
             </label>
             <input
@@ -68,7 +68,7 @@ export default function SetPasswordPage() {
               onChange={(e) => setConfirm(e.target.value)}
               required
               autoComplete="new-password"
-              className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm font-mono text-white placeholder-gray-600 focus:outline-none focus:border-gray-500"
+              className="w-full bg-neutral-900 border border-neutral-700 rounded px-3 py-2 text-sm font-mono text-fg-strong placeholder-fg-faint focus:outline-none focus:border-neutral-500"
               placeholder="••••••••"
             />
           </div>
@@ -78,7 +78,7 @@ export default function SetPasswordPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white font-mono text-sm rounded px-4 py-2 transition-colors"
+            className="w-full bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 text-fg-strong font-mono text-sm rounded px-4 py-2 transition-colors"
           >
             {loading ? 'Saving...' : 'Set password & continue'}
           </button>

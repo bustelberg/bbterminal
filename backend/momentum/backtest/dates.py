@@ -35,9 +35,18 @@ _ANCHOR_YEAR = 2000
 _ANCHOR_MONTH = 1
 
 
+def _first_weekday_on_or_after(d: date, weekday: int = 0) -> date:
+    """First date on-or-after `d` that falls on `weekday`
+    (Mon=0..Sun=6). With weekday=0 this is the first Monday — the
+    historical default."""
+    return d + timedelta(days=(weekday - d.weekday()) % 7)
+
+
 def _first_monday_on_or_after(d: date) -> date:
-    """Mon=0..Sun=6 → days to add to land on Monday."""
-    return d + timedelta(days=(0 - d.weekday()) % 7)
+    """First Monday on-or-after `d`. Thin wrapper over
+    `_first_weekday_on_or_after` kept for callers/tests that still
+    reference the Monday-specific name."""
+    return _first_weekday_on_or_after(d, 0)
 
 
 def _months_since_anchor(d: date) -> int:
@@ -48,28 +57,23 @@ def _next_month_1st(d: date) -> date:
     return date(d.year + 1, 1, 1) if d.month == 12 else date(d.year, d.month + 1, 1)
 
 
-def _generate_anchored_first_mondays(
-    start: date, end: date, stride_months: int,
+def _generate_anchored_first_weekdays(
+    start: date, end: date, stride_months: int, weekday: int = 0,
 ) -> list[date]:
-    """First-Monday-of-month for every month touching [start, end]
-    whose offset from `_ANCHOR_YEAR-_ANCHOR_MONTH` is a multiple of
-    `stride_months`. With stride=1 this yields every month; with
-    stride=3 it yields calendar quarters (Jan/Apr/Jul/Oct); etc."""
+    """First-`weekday`-of-month (Mon=0..Sun=6) for every month touching
+    [start, end] whose offset from `_ANCHOR_YEAR-_ANCHOR_MONTH` is a
+    multiple of `stride_months`. With stride=1 this yields every month;
+    with stride=3 it yields calendar quarters (Jan/Apr/Jul/Oct); etc.
+    `weekday=0` (the default) reproduces the original first-Monday grid;
+    `weekday=2` gives the first Wednesday of each period, and so on."""
     out: list[date] = []
     cursor = date(start.year, start.month, 1)
     end_limit = date(end.year, end.month, 1)
     while cursor <= end_limit:
         if _months_since_anchor(cursor) % stride_months == 0:
-            out.append(_first_monday_on_or_after(cursor))
+            out.append(_first_weekday_on_or_after(cursor, weekday))
         cursor = _next_month_1st(cursor)
     return out
-
-
-def _generate_first_mondays_of_each_month(start: date, end: date) -> list[date]:
-    """For each calendar month touched by [start, end], the first Monday
-    on or after the 1st of that month. Equivalent to
-    `_generate_anchored_first_mondays(start, end, 1)`."""
-    return _generate_anchored_first_mondays(start, end, 1)
 
 
 def _generate_rebalance_dates(
@@ -77,18 +81,27 @@ def _generate_rebalance_dates(
     end: date,
     freq: RebalanceFrequency,
     prices_df: pd.DataFrame | None = None,
+    *,
+    weekday: int = 0,
 ) -> list[date]:
     """Generate rebalance dates for `freq` between [start, end]. All
-    output dates are Mondays (except `daily`, which uses the trading
-    calendar).
+    output dates fall on `weekday` (Mon=0..Sun=6; default 0 = Monday),
+    except `daily`, which uses the trading calendar and ignores `weekday`.
+
+    `weekday` lets a strategy rebalance on, e.g., the first Wednesday of
+    each period instead of the first Monday. The signal cutoff stays
+    strict-`<` on the rebalance date, so a first-Wednesday rebalance
+    computes signals from data through the prior trading day's close
+    (the Tuesday) and enters at the rebalance day's close — see
+    `runner.py` / `signals.py`.
 
     For calendar-stride variants (monthly / 2m / 3m / …), produces the
-    first Monday of every Nth calendar month anchored to Jan 2000 so
+    first `weekday` of every Nth calendar month anchored to Jan 2000 so
     the grid is independent of `start`. Independent of `prices_df` —
     `_price_on_or_after` walks the company's series to the next
     available trading day at entry.
 
-    For weekly, produces every Monday in range.
+    For weekly, produces every `weekday` in range.
 
     For daily, requires `prices_df` to identify the actual set of
     trading days in range (the union across all companies). Without
@@ -96,7 +109,7 @@ def _generate_rebalance_dates(
     sequences that include market holidays.
     """
     if freq == "monthly":
-        return _generate_anchored_first_mondays(start, end, 1)
+        return _generate_anchored_first_weekdays(start, end, 1, weekday)
     # every_N_months → anchored grid. Adding new strides only needs an
     # entry in the map below + the Literal at the top.
     _MONTH_STRIDES = {
@@ -113,13 +126,13 @@ def _generate_rebalance_dates(
         "every_12_months": 12,
     }
     if freq in _MONTH_STRIDES:
-        return _generate_anchored_first_mondays(start, end, _MONTH_STRIDES[freq])
+        return _generate_anchored_first_weekdays(start, end, _MONTH_STRIDES[freq], weekday)
     if freq == "weekly":
-        # Every Monday in range. weekday(): Mon=0..Sun=6.
-        days_until_mon = (-start.weekday()) % 7
-        first_mon = start + timedelta(days=days_until_mon)
+        # Every `weekday` in range. weekday(): Mon=0..Sun=6.
+        days_until = (weekday - start.weekday()) % 7
+        first = start + timedelta(days=days_until)
         out: list[date] = []
-        d = first_mon
+        d = first
         while d <= end:
             out.append(d)
             d += timedelta(days=7)

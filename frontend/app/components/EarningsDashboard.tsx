@@ -289,7 +289,7 @@ export default function EarningsDashboard() {
   return (
     <div className="px-8 py-5 space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-white">Earnings Dashboard</h1>
+        <h1 className="text-xl font-semibold text-fg-strong">Earnings Dashboard</h1>
         <ApiUsageBadge ref={usageBadgeRef} />
       </div>
 
@@ -303,18 +303,18 @@ export default function EarningsDashboard() {
         {selected && (
           <>
             <RefreshButton label="Refresh All" running={sse.running} onClick={() => refresh('all', noCache)} />
-            <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer select-none" title="Bypass GuruFocus storage cache and re-fetch every source from the API.">
+            <label className="flex items-center gap-2 text-sm text-fg-muted cursor-pointer select-none" title="Bypass GuruFocus storage cache and re-fetch every source from the API.">
               <input
                 type="checkbox"
                 checked={noCache}
                 onChange={(e) => setNoCache(e.target.checked)}
                 disabled={sse.running}
-                className="h-4 w-4 rounded border-gray-700 bg-[#0f1117] text-indigo-600 focus:ring-1 focus:ring-indigo-500/30"
+                className="h-4 w-4 rounded border-neutral-700 bg-page text-accent-600 focus:ring-1 focus:ring-accent-500/30"
               />
               Don&apos;t use cache
             </label>
             <div className="flex items-center gap-2">
-              <span className="text-gray-500 text-sm">vs</span>
+              <span className="text-fg-subtle text-sm">vs</span>
               {/* Filter A out of the secondary picker's options so the user
                   can't pick the same company on both sides. */}
               <CompanyPicker
@@ -326,7 +326,7 @@ export default function EarningsDashboard() {
                 <button
                   type="button"
                   onClick={() => setCompareCompany(null)}
-                  className="text-gray-500 hover:text-rose-400 transition-colors px-2 py-1 text-sm"
+                  className="text-fg-subtle hover:text-neg-400 transition-colors px-2 py-1 text-sm"
                   title="Clear comparison"
                 >×</button>
               )}
@@ -337,17 +337,17 @@ export default function EarningsDashboard() {
       </div>
 
       {!selected && (
-        <div className="text-gray-500 py-12 text-center">Select a company to view earnings data</div>
+        <div className="text-fg-subtle py-12 text-center">Select a company to view earnings data</div>
       )}
 
       {selected && (
         <>
-          <div className="text-gray-400 text-sm flex items-center gap-2 flex-wrap">
-            <span><span className="text-indigo-400 font-mono mr-1">A:</span>{selected.company_name || selected.gurufocus_ticker} — {selected.gurufocus_ticker}.{selected.gurufocus_exchange}</span>
+          <div className="text-fg-muted text-sm flex items-center gap-2 flex-wrap">
+            <span><span className="text-accent-400 font-mono mr-1">A:</span>{selected.company_name || selected.gurufocus_ticker} — {selected.gurufocus_ticker}.{selected.gurufocus_exchange}</span>
             {compareCompany && (
               <>
-                <span className="text-gray-600">·</span>
-                <span><span className="text-amber-400 font-mono mr-1">B:</span>{compareCompany.company_name || compareCompany.gurufocus_ticker} — {compareCompany.gurufocus_ticker}.{compareCompany.gurufocus_exchange}</span>
+                <span className="text-fg-faint">·</span>
+                <span><span className="text-warn-400 font-mono mr-1">B:</span>{compareCompany.company_name || compareCompany.gurufocus_ticker} — {compareCompany.gurufocus_ticker}.{compareCompany.gurufocus_exchange}</span>
               </>
             )}
           </div>
@@ -372,9 +372,9 @@ export default function EarningsDashboard() {
           </div>
 
           {/* Snapshot Stats */}
-          <section className="bg-[#151821] rounded-xl border border-indigo-500/20 p-5 space-y-4">
+          <section className="bg-card rounded-xl border border-accent-500/20 p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-white font-medium">Snapshot Stats</h2>
+              <h2 className="text-fg-strong font-medium">Snapshot Stats</h2>
               <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('indicators')} />
             </div>
             {loadingMetrics ? <SectionLoader label="snapshot stats" /> : (
@@ -391,15 +391,15 @@ export default function EarningsDashboard() {
           </section>
 
           {/* Charts container */}
-          <section className="bg-[#151821] rounded-xl border border-indigo-500/20 p-5 space-y-5">
+          <section className="bg-card rounded-xl border border-accent-500/20 p-5 space-y-5">
             <div className="flex items-center gap-3">
-              <h2 className="text-white font-medium">Charts</h2>
+              <h2 className="text-fg-strong font-medium">Charts</h2>
               <div className="flex items-center gap-1.5">
-                <span className="text-gray-500 text-sm">From</span>
+                <span className="text-fg-subtle text-sm">From</span>
                 <button
                   onClick={() => nudgeStartYear(-1)}
                   disabled={startYear <= 2015}
-                  className="w-6 h-6 flex items-center justify-center rounded text-gray-400 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed text-sm"
+                  className="w-6 h-6 flex items-center justify-center rounded text-fg-muted hover:text-fg-strong hover:bg-overlay/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed text-sm"
                 >&#9666;</button>
                 <div className="relative">
                   <input
@@ -408,24 +408,24 @@ export default function EarningsDashboard() {
                     onChange={(e) => setStartYearInput(e.target.value)}
                     onBlur={() => applyStartYear(startYearInput)}
                     onKeyDown={(e) => { if (e.key === 'Enter') applyStartYear(startYearInput); }}
-                    className={`w-16 bg-[#0f1117] border rounded-lg px-2 py-1 text-white text-sm font-mono text-center outline-none transition-colors ${startYearError ? 'border-rose-500 focus:border-rose-500 focus:ring-1 focus:ring-rose-500/30' : 'border-gray-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30'}`}
+                    className={`w-16 bg-page border rounded-lg px-2 py-1 text-fg-strong text-sm font-mono text-center outline-none transition-colors ${startYearError ? 'border-neg-500 focus:border-neg-500 focus:ring-1 focus:ring-neg-500/30' : 'border-neutral-700 focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30'}`}
                   />
                   {startYearError && (
-                    <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 text-rose-400 text-[10px] whitespace-nowrap">{startYearError}</div>
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 text-neg-400 text-[10px] whitespace-nowrap">{startYearError}</div>
                   )}
                 </div>
                 <button
                   onClick={() => nudgeStartYear(1)}
                   disabled={startYear >= currentYear}
-                  className="w-6 h-6 flex items-center justify-center rounded text-gray-400 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed text-sm"
+                  className="w-6 h-6 flex items-center justify-center rounded text-fg-muted hover:text-fg-strong hover:bg-overlay/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed text-sm"
                 >&#9656;</button>
               </div>
             </div>
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
               {/* FCF Yield */}
-              <div className="bg-[#0f1117] rounded-lg border border-indigo-500/20 p-4 space-y-2 overflow-hidden min-w-0">
+              <div className="bg-page rounded-lg border border-accent-500/20 p-4 space-y-2 overflow-hidden min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-white text-sm font-medium flex items-center gap-1.5"><span className="truncate">Forward P/E</span> <InfoTip text="Forward Price-to-Earnings ratio over time. Shows how much investors pay per dollar of expected earnings. Compare to the period average (red dashed) to spot relative cheapness or richness." />{(refreshingSources.has('indicators') || refreshingSourcesB.has('indicators')) && <Spinner size={10} />}</h3>
+                  <h3 className="text-fg-strong text-sm font-medium flex items-center gap-1.5"><span className="truncate">Forward P/E</span> <InfoTip text="Forward Price-to-Earnings ratio over time. Shows how much investors pay per dollar of expected earnings. Compare to the period average (red dashed) to spot relative cheapness or richness." />{(refreshingSources.has('indicators') || refreshingSourcesB.has('indicators')) && <Spinner size={10} />}</h3>
                   <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('indicators')} />
                 </div>
                 {loadingMetrics ? <SectionLoader label="Forward P/E" /> : (
@@ -440,9 +440,9 @@ export default function EarningsDashboard() {
               </div>
 
               {/* Relative Growth */}
-              <div className="bg-[#0f1117] rounded-lg border border-indigo-500/20 p-4 space-y-2 overflow-hidden min-w-0">
+              <div className="bg-page rounded-lg border border-accent-500/20 p-4 space-y-2 overflow-hidden min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-white text-sm font-medium flex items-center gap-1.5"><span className="truncate">Relative Growth (log)</span> <InfoTip text="Tracks whether the share price is growing in line with Owner Earnings (EPS + Dividends). On a log scale, parallel lines mean the valuation multiple is stable. Divergence signals re-rating." />{(refreshingSources.has('prices') || refreshingSourcesB.has('prices')) && <Spinner size={10} />}</h3>
+                  <h3 className="text-fg-strong text-sm font-medium flex items-center gap-1.5"><span className="truncate">Relative Growth (log)</span> <InfoTip text="Tracks whether the share price is growing in line with Owner Earnings (EPS + Dividends). On a log scale, parallel lines mean the valuation multiple is stable. Divergence signals re-rating." />{(refreshingSources.has('prices') || refreshingSourcesB.has('prices')) && <Spinner size={10} />}</h3>
                   <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('prices')} />
                 </div>
                 {loadingMetrics ? <SectionLoader label="Relative Growth" /> : (
@@ -457,9 +457,9 @@ export default function EarningsDashboard() {
               </div>
 
               {/* FCF/share Growth */}
-              <div className="bg-[#0f1117] rounded-lg border border-indigo-500/20 p-4 space-y-2 overflow-hidden min-w-0">
+              <div className="bg-page rounded-lg border border-accent-500/20 p-4 space-y-2 overflow-hidden min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-white text-sm font-medium flex items-center gap-1.5"><span className="truncate">FCF/share Growth</span> <InfoTip text="Free Cash Flow per share over time. Shows the trajectory of cash generation. Negative values are highlighted with red dots." />{(refreshingSources.has('financials') || refreshingSourcesB.has('financials')) && <Spinner size={10} />}</h3>
+                  <h3 className="text-fg-strong text-sm font-medium flex items-center gap-1.5"><span className="truncate">FCF/share Growth</span> <InfoTip text="Free Cash Flow per share over time. Shows the trajectory of cash generation. Negative values are highlighted with red dots." />{(refreshingSources.has('financials') || refreshingSourcesB.has('financials')) && <Spinner size={10} />}</h3>
                   <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('financials')} />
                 </div>
                 {loadingMetrics ? <SectionLoader label="FCF/share" /> : (

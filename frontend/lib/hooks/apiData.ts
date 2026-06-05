@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { API_URL } from '../apiUrl';
 import { getCachedOrFetch, peekCache } from './fetchCache';
+import { DEFAULT_FEE_CONFIG, type FeeConfig } from '../../app/components/momentum/feeModel';
 
 // Shape returned by `GET /api/universe-templates`.
 export type UniverseTemplate = {
@@ -73,6 +74,7 @@ const KEYS = {
   companies: 'GET /api/companies',
   momentumSignals: 'GET /api/momentum/signals',
   exchangeFees: 'GET /api/exchange-fees',
+  feeConfig: 'GET /api/fee-config',
 } as const;
 
 async function _fetchUniverseTemplates(): Promise<UniverseTemplate[]> {
@@ -110,6 +112,18 @@ async function _fetchExchangeFees(): Promise<ExchangeFeeRow[]> {
   const r = await fetch(`${API_URL}/api/exchange-fees`);
   if (!r.ok) return [];
   return (await r.json()) as ExchangeFeeRow[];
+}
+
+async function _fetchFeeConfig(): Promise<FeeConfig> {
+  const r = await fetch(`${API_URL}/api/fee-config`);
+  if (!r.ok) return DEFAULT_FEE_CONFIG;
+  const d = await r.json();
+  return {
+    leonteq_annual_bps: Number(d.leonteq_annual_bps ?? DEFAULT_FEE_CONFIG.leonteq_annual_bps),
+    transaction_bps: Number(d.transaction_bps ?? DEFAULT_FEE_CONFIG.transaction_bps),
+    bustelberg_mgmt_bps: Number(d.bustelberg_mgmt_bps ?? DEFAULT_FEE_CONFIG.bustelberg_mgmt_bps),
+    bustelberg_perf_pct: Number(d.bustelberg_perf_pct ?? DEFAULT_FEE_CONFIG.bustelberg_perf_pct),
+  };
 }
 
 // ─── Generic hook builder ───────────────────────────────────────────
@@ -158,6 +172,18 @@ export const useBenchmarks = _buildHook(KEYS.benchmarks, _fetchBenchmarks);
 export const useCompanies = _buildHook(KEYS.companies, _fetchCompanies);
 export const useMomentumSignals = _buildHook(KEYS.momentumSignals, _fetchMomentumSignals);
 export const useExchangeFees = _buildHook(KEYS.exchangeFees, _fetchExchangeFees);
+const _useFeeConfigRaw = _buildHook(KEYS.feeConfig, _fetchFeeConfig);
+
+/**
+ * The global fee config (Leonteq + Bustelberg parameters) backing the
+ * backtest fee waterfall. Always returns a usable config — defaults until
+ * the shared `/api/fee-config` fetch resolves — so callers never have to
+ * null-check before computing the waterfall.
+ */
+export function useFeeConfig(): FeeConfig {
+  const { data } = _useFeeConfigRaw();
+  return data ?? DEFAULT_FEE_CONFIG;
+}
 
 /**
  * Derived hook: `Map<exchange_code, fee_bps>` built once from the shared

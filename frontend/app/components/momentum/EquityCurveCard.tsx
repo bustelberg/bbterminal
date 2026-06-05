@@ -11,9 +11,10 @@ import type {
 import type { Column } from '../../../lib/tableExport';
 import { SERIES_COLORS } from './utils';
 import type { BenchmarkOption, BenchmarkPrice, ComparisonItem, SavedRun, SavedVariant } from './types';
-import { computeNetStats, type NetStats } from './feeStats';
+import { type NetStats } from './feeStats';
+import { computeFeeWaterfall, type FeeBreakdownRow, type FeeWaterfall } from './feeModel';
 import { useClickOutside } from '../../../lib/hooks/useClickOutside';
-import { useBenchmarks, useExchangeFeeMap } from '../../../lib/hooks/apiData';
+import { useBenchmarks, useFeeConfig } from '../../../lib/hooks/apiData';
 import { API_URL } from '../../../lib/apiUrl';
 import {
   alignSeries,
@@ -46,18 +47,16 @@ type Props = {
   loadedRunId: number | null;
   /** Saved backtests available for comparison. */
   savedRuns: SavedRun[];
-  /** Per-company exchange lookup. When provided alongside non-zero
-   * `/api/exchange-fees`, every stat surfaced on the active strategy
-   * gets a `gross (net)` parenthetical computed from the fee model in
-   * `feeStats.ts`. Optional so the card stays usable when the parent
-   * doesn't pipe it through (e.g. saved-bundle reload flows). */
-  exchangeByCompany?: Map<number, string>;
   /** Full label for the active strategy row — same format as a saved
    * comparison's label (e.g. "ACWI-mei · Momentum · 2002-2026 · Every
    * 12 months · Long-only"). Parent computes this from the actual
    * strategy params + active variant key so the row reads like a saved
    * backtest rather than a generic "Strategy" placeholder. */
   activeStrategyLabel?: string;
+  /** Optional "go-live" date (YYYY-MM-DD) drawn as a red dashed vertical
+   * marker on the equity chart. Used by /schedule to mark where a
+   * scheduled strategy went live. */
+  markerDate?: string;
 };
 
 /** "Equity Curve" card cluster: comparison pill row, summary stats,
@@ -65,20 +64,20 @@ type Props = {
  * own benchmark/saved comparison state and all the chart-derived memos
  * — the parent only feeds it the active strategy plus the saved-run
  * list. */
-function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompany, activeStrategyLabel }: Props) {
+function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLabel, markerDate }: Props) {
   // Benchmark options for the "add series" dropdown — fetched via the
   // shared cached hook so a sibling component (e.g. MomentumBacktester's
   // sector-ETF lookup) reuses the same fetch instead of re-requesting.
   const { data: _benchmarks } = useBenchmarks();
   const benchmarkOptions = (_benchmarks ?? []) as BenchmarkOption[];
   const [comparisons, setComparisons] = useState<ComparisonItem[]>([]);
-  // Per-exchange fees (bps) for the (net) parenthetical — shared cached
-  // hook, returns null when no non-zero fees are configured so the
-  // `parenPct(...)` calls below render as empty strings.
-  const feesByExchange = useExchangeFeeMap();
+  // Global fee config for the net-to-client `(net)` parenthetical. The
+  // parenthetical now means "after Leonteq + Bustelberg fees" (see the
+  // Fee waterfall panel), computed via the layered model in feeModel.ts.
+  const feeConfig = useFeeConfig();
   const [addSeriesOpen, setAddSeriesOpen] = useState(false);
   const addSeriesRef = useRef<HTMLDivElement>(null);
-  const [logScale, setLogScale] = useState(false);
+  const [logScale, setLogScale] = useState(true);
   const [hoveredDrawdown, setHoveredDrawdown] = useState<number | null>(null);
   const [customFromMonth, setCustomFromMonth] = useState('');
   // Identifier of an "Add series" operation currently in flight — used to
@@ -92,23 +91,41 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
   // entire directory, so a saved run on a different universe still
   // resolves its holdings' exchanges. Benchmarks have no holdings to
   // trade so they always sit out (net == gross by definition).
-  const activeNetStats = useMemo<NetStats | null>(() => {
-    if (!feesByExchange || !exchangeByCompany) return null;
-    return computeNetStats(result.monthly_records, feesByExchange, exchangeByCompany, result.daily_records);
-  }, [feesByExchange, exchangeByCompany, result.monthly_records, result.daily_records]);
+  // Full fee waterfall for the active strategy — its `.net` feeds the
+  // per-stat `(net)` parentheticals + custom-range walker, and its
+  // `.breakdown` (per-year, reconciled) drives the yearly table so the
+  // two views agree exactly.
+  const activeWaterfall = useMemo<FeeWaterfall | null>(
+    () =>
+      computeFeeWaterfall(result.monthly_records, result.daily_records, feeConfig, {
+        grossTotalReturnPct: result.summary?.total_return_pct,
+      }),
+    [feeConfig, result.monthly_records, result.daily_records, result.summary?.total_return_pct],
+  );
+  const activeNetStats = activeWaterfall?.net ?? null;
 
-  /** Map of comparison series id â†’ NetStats. Computed per-comparison so
-   * saved runs added via "Add series" get the same `gross (net)` treatment
-   * the active row does. Benchmarks aren't keyed here at all. */
-  const comparisonNetStats = useMemo<Map<string, NetStats | null>>(() => {
-    const m = new Map<string, NetStats | null>();
-    if (!feesByExchange || !exchangeByCompany) return m;
+  /** Per-comparison fee waterfall (saved runs only — benchmarks have no
+   * holdings to fee). Keyed by series id. */
+  const comparisonWaterfalls = useMemo<Map<string, FeeWaterfall | null>>(() => {
+    const m = new Map<string, FeeWaterfall | null>();
     for (const c of comparisons) {
       if (c.kind !== 'saved') continue;
-      m.set(c.id, computeNetStats(c.monthly, feesByExchange, exchangeByCompany, c.daily));
+      m.set(c.id, computeFeeWaterfall(c.monthly, c.daily, feeConfig));
     }
     return m;
-  }, [comparisons, feesByExchange, exchangeByCompany]);
+  }, [comparisons, feeConfig]);
+  const comparisonNetStats = useMemo<Map<string, NetStats | null>>(() => {
+    const m = new Map<string, NetStats | null>();
+    for (const [id, wf] of comparisonWaterfalls) m.set(id, wf?.net ?? null);
+    return m;
+  }, [comparisonWaterfalls]);
+
+  /** Per-year fee breakdowns keyed by series id, for the yearly table. */
+  const feeBreakdownsBySeries = useMemo<Record<string, FeeBreakdownRow[] | null>>(() => {
+    const m: Record<string, FeeBreakdownRow[] | null> = { active: activeWaterfall?.breakdown ?? null };
+    for (const [id, wf] of comparisonWaterfalls) m[id] = wf?.breakdown ?? null;
+    return m;
+  }, [activeWaterfall, comparisonWaterfalls]);
 
   useClickOutside(addSeriesRef, () => setAddSeriesOpen(false), addSeriesOpen);
 
@@ -218,7 +235,7 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
   const variantPickerRef = useRef<HTMLDivElement>(null);
   useClickOutside(variantPickerRef, () => setVariantPickerOpen(null), !!variantPickerOpen);
 
-  // Resolve every series into a (date â†’ growth factor) map. Date keys are
+  // Resolve every series into a (date → growth factor) map. Date keys are
   // normalized to YYYY-MM-DD so that string comparison correctly orders dates
   // across mixed cadences — a saved variant with monthly_records ("2002-01")
   // sits at the *end of January* on the timeline, lining up with a daily
@@ -244,8 +261,8 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
 
   // Yearly performance breakdown — moved to seriesMath:computeYearlyBreakdown.
   const yearlyBreakdown = useMemo(
-    () => computeYearlyBreakdown(alignedSeries, activeNetStats, comparisons, comparisonNetStats),
-    [alignedSeries, activeNetStats, comparisons, comparisonNetStats],
+    () => computeYearlyBreakdown(alignedSeries, feeBreakdownsBySeries),
+    [alignedSeries, feeBreakdownsBySeries],
   );
 
   // Export columns for the Summary stats table. One row per aligned
@@ -326,9 +343,9 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
   return (
     <>
       {/* Comparison panel — active strategy + any added backtests/benchmarks */}
-      <div className="bg-[#151821] rounded-xl border border-gray-800/40 px-4 py-3">
+      <div className="bg-card rounded-xl border border-neutral-800/40 px-4 py-3">
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-gray-400 text-sm mr-1">Comparison</span>
+          <span className="text-fg-muted text-sm mr-1">Comparison</span>
           {alignedSeries.series.map((s) => {
             // Look up the underlying ComparisonItem so the badge can offer a
             // variant picker when the saved run is a variant bundle.
@@ -339,7 +356,7 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
             return (
               <span
                 key={s.id}
-                className="relative inline-flex items-center gap-2 bg-[#0f1117] border border-gray-800 rounded-full pl-2 pr-1 py-1 text-xs"
+                className="relative inline-flex items-center gap-2 bg-page border border-neutral-800 rounded-full pl-2 pr-1 py-1 text-xs"
                 ref={pickerOpen ? variantPickerRef : undefined}
               >
                 <span className="inline-block w-2 h-2 rounded-full" style={{ background: s.color }} />
@@ -347,22 +364,22 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
                   <button
                     type="button"
                     onClick={() => setVariantPickerOpen(pickerOpen ? null : s.id)}
-                    className="text-gray-200 hover:text-white inline-flex items-center gap-1"
+                    className="text-fg hover:text-fg-strong inline-flex items-center gap-1"
                     title="Switch variant"
                   >
                     <span>{s.label}</span>
-                    <svg className={`w-3 h-3 text-gray-500 transition-transform ${pickerOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+                    <svg className={`w-3 h-3 text-fg-subtle transition-transform ${pickerOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
                       <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
                     </svg>
                   </button>
                 ) : (
-                  <span className="text-gray-200">{s.label}</span>
+                  <span className="text-fg">{s.label}</span>
                 )}
                 {s.removable && (
                   <button
                     type="button"
                     onClick={() => removeSeries(s.id)}
-                    className="ml-0.5 w-4 h-4 rounded-full text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors flex items-center justify-center"
+                    className="ml-0.5 w-4 h-4 rounded-full text-fg-subtle hover:text-neg-400 hover:bg-neg-500/10 transition-colors flex items-center justify-center"
                     title="Remove from comparison"
                   >
                     <svg className="w-2.5 h-2.5" viewBox="0 0 20 20" fill="currentColor">
@@ -371,8 +388,8 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
                   </button>
                 )}
                 {hasVariantPicker && pickerOpen && cmp.kind === 'saved' && cmp.allVariants && (
-                  <div className="absolute left-0 top-full mt-1 w-64 bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-80 overflow-auto">
-                    <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-500 border-b border-gray-800/60">
+                  <div className="absolute left-0 top-full mt-1 w-64 bg-card border border-neutral-700 rounded-lg shadow-xl z-50 max-h-80 overflow-auto">
+                    <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-fg-subtle border-b border-neutral-800/60">
                       Variants ({cmp.allVariants.length})
                     </div>
                     {cmp.allVariants.map((v, idx) => {
@@ -383,10 +400,10 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
                           type="button"
                           disabled={isCurrent}
                           onClick={() => { switchVariant(s.id, idx); setVariantPickerOpen(null); }}
-                          className={`w-full text-left px-3 py-2 text-xs hover:bg-white/[0.03] disabled:opacity-100 disabled:cursor-default flex items-center justify-between gap-2 ${isCurrent ? 'bg-indigo-500/10 text-indigo-300' : 'text-gray-200'}`}
+                          className={`w-full text-left px-3 py-2 text-xs hover:bg-overlay/[0.03] disabled:opacity-100 disabled:cursor-default flex items-center justify-between gap-2 ${isCurrent ? 'bg-accent-500/10 text-accent-300' : 'text-fg'}`}
                         >
                           <span className="truncate">{v.label}</span>
-                          {isCurrent && <span className="text-[10px] text-indigo-400">current</span>}
+                          {isCurrent && <span className="text-[10px] text-accent-400">current</span>}
                         </button>
                       );
                     })}
@@ -400,11 +417,11 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
               type="button"
               onClick={() => setAddSeriesOpen((o) => !o)}
               disabled={addingSeriesId != null}
-              className="inline-flex items-center gap-1.5 text-xs text-indigo-300 hover:text-indigo-200 border border-indigo-500/40 hover:border-indigo-400/60 bg-indigo-500/10 hover:bg-indigo-500/20 rounded-full px-3 py-1 transition-colors disabled:opacity-70 disabled:cursor-wait"
+              className="inline-flex items-center gap-1.5 text-xs text-accent-300 hover:text-accent-200 border border-accent-500/40 hover:border-accent-400/60 bg-accent-500/10 hover:bg-accent-500/20 rounded-full px-3 py-1 transition-colors disabled:opacity-70 disabled:cursor-wait"
             >
               {addingSeriesId != null ? (
                 <>
-                  <svg className="animate-spin w-3 h-3 text-indigo-300" viewBox="0 0 24 24" fill="none">
+                  <svg className="animate-spin w-3 h-3 text-accent-300" viewBox="0 0 24 24" fill="none">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
@@ -415,10 +432,10 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
               )}
             </button>
             {addSeriesOpen && (
-              <div className="absolute left-0 mt-1 w-72 bg-[#151821] border border-gray-700 rounded-lg shadow-xl z-50 max-h-80 overflow-auto">
+              <div className="absolute left-0 mt-1 w-72 bg-card border border-neutral-700 rounded-lg shadow-xl z-50 max-h-80 overflow-auto">
                 {benchmarkOptions.length > 0 && (
                   <div>
-                    <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-500 border-b border-gray-800/60">Benchmarks</div>
+                    <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-fg-subtle border-b border-neutral-800/60">Benchmarks</div>
                     {benchmarkOptions.map((b) => {
                       const already = comparisons.some((c) => c.kind === 'benchmark' && c.benchmarkId === b.benchmark_id);
                       return (
@@ -427,11 +444,11 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
                           type="button"
                           disabled={already}
                           onClick={() => { addBenchmarkSeries(b.benchmark_id); setAddSeriesOpen(false); }}
-                          className="w-full text-left px-3 py-2 text-xs hover:bg-white/[0.03] disabled:opacity-40 disabled:cursor-not-allowed text-gray-200 flex items-center gap-2"
+                          className="w-full text-left px-3 py-2 text-xs hover:bg-overlay/[0.03] disabled:opacity-40 disabled:cursor-not-allowed text-fg flex items-center gap-2"
                         >
-                          <span className="font-mono text-amber-300">{b.ticker}</span>
-                          <span className="text-gray-500 truncate">{b.name}</span>
-                          {already && <span className="ml-auto text-[10px] text-gray-600">added</span>}
+                          <span className="font-mono text-warn-300">{b.ticker}</span>
+                          <span className="text-fg-subtle truncate">{b.name}</span>
+                          {already && <span className="ml-auto text-[10px] text-fg-faint">added</span>}
                         </button>
                       );
                     })}
@@ -439,7 +456,7 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
                 )}
                 {savedRuns.length > 0 && (
                   <div>
-                    <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-500 border-t border-b border-gray-800/60">Saved Backtests</div>
+                    <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-fg-subtle border-t border-b border-neutral-800/60">Saved Backtests</div>
                     {savedRuns.map((r) => {
                       const already = comparisons.some((c) => c.kind === 'saved' && c.runId === r.run_id);
                       const isLoaded = r.run_id === loadedRunId;
@@ -449,26 +466,26 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
                           type="button"
                           disabled={already || isLoaded}
                           onClick={() => { addSavedSeries(r.run_id); setAddSeriesOpen(false); }}
-                          className="w-full text-left px-3 py-2 text-xs hover:bg-white/[0.03] disabled:opacity-40 disabled:cursor-not-allowed text-gray-200 flex items-center gap-2"
+                          className="w-full text-left px-3 py-2 text-xs hover:bg-overlay/[0.03] disabled:opacity-40 disabled:cursor-not-allowed text-fg flex items-center gap-2"
                           title={isLoaded ? 'Currently loaded as the active strategy' : undefined}
                         >
                           <span className="truncate">{r.name}</span>
-                          {isLoaded && <span className="ml-auto text-[10px] text-gray-600">active</span>}
-                          {!isLoaded && already && <span className="ml-auto text-[10px] text-gray-600">added</span>}
+                          {isLoaded && <span className="ml-auto text-[10px] text-fg-faint">active</span>}
+                          {!isLoaded && already && <span className="ml-auto text-[10px] text-fg-faint">added</span>}
                         </button>
                       );
                     })}
                   </div>
                 )}
                 {benchmarkOptions.length === 0 && savedRuns.length === 0 && (
-                  <div className="px-3 py-4 text-xs text-gray-500">No benchmarks or saved backtests available.</div>
+                  <div className="px-3 py-4 text-xs text-fg-subtle">No benchmarks or saved backtests available.</div>
                 )}
               </div>
             )}
           </div>
           {alignedSeries.windowStart && alignedSeries.windowEnd && alignedSeries.series.length > 1 && (
-            <span className="text-[11px] text-gray-500 font-mono ml-auto">
-              aligned {alignedSeries.windowStart} â†’ {alignedSeries.windowEnd}
+            <span className="text-[11px] text-fg-subtle font-mono ml-auto">
+              aligned {alignedSeries.windowStart} → {alignedSeries.windowEnd}
             </span>
           )}
         </div>
@@ -492,6 +509,7 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
         setCustomFromMonth={setCustomFromMonth}
         yearlyExportRows={yearlyExportRows}
         yearlyExportColumns={yearlyExportColumns}
+        markerDate={markerDate}
       />
 
       {/* Equity Curve */}
@@ -503,14 +521,15 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, exchangeByCompan
         setLogScale={setLogScale}
         hoveredDrawdown={hoveredDrawdown}
         setHoveredDrawdown={setHoveredDrawdown}
+        markerDate={markerDate}
       />
 
       {/* Per-year small multiples — cumulative + alpha. Both reuse the
           same `computeYearlySubplots` result; the grid component branches
           on `mode`. Renders nothing on saved runs without a universe
           baseline. */}
-      <YearlySubplotsGrid subplots={yearlySubplots} mode="cumulative" strategyColor={strategyColor} />
-      <YearlySubplotsGrid subplots={yearlySubplots} mode="alpha" strategyColor={strategyColor} />
+      <YearlySubplotsGrid subplots={yearlySubplots} mode="cumulative" strategyColor={strategyColor} markerDate={markerDate} />
+      <YearlySubplotsGrid subplots={yearlySubplots} mode="alpha" strategyColor={strategyColor} markerDate={markerDate} />
     </>
   );
 }

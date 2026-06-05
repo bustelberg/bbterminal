@@ -29,24 +29,24 @@ export default function NotificationsPanel({
   if (warnings.length === 0 && infos.length === 0) return null;
 
   return (
-    <div className="bg-[#151821] border border-gray-800/40 rounded-lg overflow-hidden divide-y divide-gray-800/40">
+    <div className="bg-card border border-neutral-800/40 rounded-lg overflow-hidden divide-y divide-neutral-800/40">
       {warnings.length > 0 && (
-        <div className="bg-amber-500/10">
+        <div className="bg-warn-500/10">
           <button
             type="button"
             onClick={onToggleWarnings}
-            className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-amber-500/5 transition-colors"
+            className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-warn-500/5 transition-colors"
           >
-            <span className="text-amber-300 text-sm font-medium">
+            <span className="text-warn-300 text-sm font-medium">
               {warnings.length} warning{warnings.length === 1 ? '' : 's'}
             </span>
-            <span className="text-amber-400/70 text-xs font-mono">{showWarnings ? '▾' : '▸'}</span>
+            <span className="text-warn-400/70 text-xs font-mono">{showWarnings ? '▾' : '▸'}</span>
           </button>
           {showWarnings && (
-            <ul className="max-h-64 overflow-auto border-t border-amber-500/20 divide-y divide-amber-500/10">
+            <ul className="max-h-64 overflow-auto border-t border-warn-500/20 divide-y divide-warn-500/10">
               {warnings.map((w, i) => (
-                <li key={i} className="px-4 py-2 text-xs text-amber-200 flex gap-2">
-                  <span className="uppercase text-[10px] tracking-wider font-mono text-amber-400/70 shrink-0 w-16">
+                <li key={i} className="px-4 py-2 text-xs text-warn-200 flex gap-2">
+                  <span className="uppercase text-[10px] tracking-wider font-mono text-warn-400/70 shrink-0 w-16">
                     {w.scope}
                   </span>
                   <span className="break-words">{w.message}</span>

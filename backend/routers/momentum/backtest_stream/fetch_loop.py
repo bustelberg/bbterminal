@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import json
+from routers._sse import sse_event as _emit, sse_keepalive as _keepalive
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -25,14 +25,6 @@ from ingest.prices import (
     ensure_prices_for_company,
     ensure_volume_for_company,
 )
-
-
-def _emit(data: dict) -> str:
-    return f"data: {json.dumps(data)}\n\n"
-
-
-def _keepalive() -> str:
-    return ": keepalive\n\n"
 
 
 async def run_fetch_loop(

@@ -14,11 +14,11 @@ from urllib.parse import quote
 from supabase import Client
 
 from ingest.api_usage import track_api_call
+from ingest.constants import DATA_CUTOFF
 from ingest.staleness import is_cache_fresh
 
 from ._api_client import _api_request, _build_api_url, _mask_url
 from ._common import (
-    _CUTOFF,
     EarningsResult,
     _build_symbol,
     _coerce_float,
@@ -45,7 +45,7 @@ def _extract_financials_dates(data: dict) -> list[date]:
             if c in block and isinstance(block[c], list):
                 for ps in block[c]:
                     td = _yyyy_mm_to_month_end(str(ps).strip())
-                    if td and td >= _CUTOFF:
+                    if td and td >= DATA_CUTOFF:
                         dates.add(td)
                 break
     return sorted(dates)
@@ -80,7 +80,7 @@ def _parse_financials(data: dict, company_id: int) -> list[dict]:
             if ps.upper() == "TTM":
                 continue
             td = _yyyy_mm_to_month_end(ps)
-            if td and td >= _CUTOFF:
+            if td and td >= DATA_CUTOFF:
                 target_dates[ps] = td
 
         # Flatten nested structure

@@ -14,9 +14,7 @@ from typing import Any
 
 from supabase import Client
 
-
 _BUCKET = "gurufocus-raw"
-_CUTOFF = date(1998, 1, 1)
 
 US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX", "CBOE"}
 

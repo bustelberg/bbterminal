@@ -14,7 +14,7 @@ set the frontend renders — additions need a matching ingest fetcher in
 from __future__ import annotations
 
 import asyncio
-import json
+from routers._sse import sse_message as event
 import queue as _queue
 
 from fastapi import APIRouter, HTTPException
@@ -48,10 +48,6 @@ async def _earnings_refresh_stream(company_id: int, sources: list[str], force: b
     """SSE stream wrapping `ingest.earnings.*` for a company. Each ingest
     fetcher accepts an `on_log` callback; we drain the resulting queue
     in-flight so the UI sees logs as they happen rather than at the end."""
-    def event(msg_type: str, message: str, **extra) -> str:
-        payload = {"type": msg_type, "message": message, **extra}
-        return f"data: {json.dumps(payload)}\n\n"
-
     company = _get_company_or_404(company_id)
     ticker = company["gurufocus_ticker"]
     exchange = company["gurufocus_exchange"] or "UNKNOWN"

@@ -7,6 +7,7 @@ import type { Column } from '../../lib/tableExport';
 import TableDownloadButton from './TableDownloadButton';
 import LoadingDots from './LoadingDots';
 import { API_URL } from '../../lib/apiUrl';
+import { useApiData } from '../../lib/hooks/useApiData';
 const TEMPLATE_KEY = 'ACWI';
 
 type Summary = {
@@ -168,14 +169,14 @@ export default function AcwiCanonicalView() {
 
   if (summaryLoading && !summary) {
     return (
-      <div className="bg-[#151821] rounded-xl border border-gray-800/40 px-5 py-4 text-sm text-gray-500">
+      <div className="bg-card rounded-xl border border-neutral-800/40 px-5 py-4 text-sm text-fg-subtle">
         <LoadingDots label="Loading canonical ACWI universe" />
       </div>
     );
   }
   if (!summary) {
     return (
-      <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg px-4 py-3 text-sm text-rose-300">
+      <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-4 py-3 text-sm text-neg-300">
         {error ?? 'Failed to load.'}
       </div>
     );
@@ -184,18 +185,18 @@ export default function AcwiCanonicalView() {
   const hasData = summary.months_captured > 0;
 
   return (
-    <div className="bg-[#151821] rounded-xl border border-gray-800/40">
-      <div className="px-5 py-4 border-b border-gray-800/40 flex items-start justify-between gap-4 flex-wrap">
+    <div className="bg-card rounded-xl border border-neutral-800/40">
+      <div className="px-5 py-4 border-b border-neutral-800/40 flex items-start justify-between gap-4 flex-wrap">
         <div className="min-w-0">
-          <h2 className="text-sm font-medium text-white">
+          <h2 className="text-sm font-medium text-fg-strong">
             ACWI Universe
-            <span className="ml-2 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-indigo-500/15 text-indigo-300 border-indigo-500/30">
+            <span className="ml-2 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-accent-500/15 text-accent-300 border-accent-500/30">
               template-managed
             </span>
           </h2>
-          <p className="text-xs text-gray-500 mt-1 leading-relaxed max-w-3xl">
+          <p className="text-xs text-fg-subtle mt-1 leading-relaxed max-w-3xl">
             {summary.description}{' '}
-            Data starts <span className="font-mono text-gray-400">{summary.earliest_date}</span>.
+            Data starts <span className="font-mono text-fg-muted">{summary.earliest_date}</span>.
             Refreshed automatically on every pipeline tick (weekly + monthly) — no manual creation needed.
           </p>
           <XlsAgeBadge />
@@ -207,7 +208,7 @@ export default function AcwiCanonicalView() {
             // navigate. The server already sets Content-Disposition with
             // a sensible filename, so we leave the attribute valueless.
             download
-            className={`text-xs px-3 py-1.5 rounded-lg border border-gray-700 text-gray-200 hover:bg-white/5 transition-colors ${hasData ? '' : 'opacity-50 pointer-events-none'}`}
+            className={`text-xs px-3 py-1.5 rounded-lg border border-neutral-700 text-fg hover:bg-overlay/5 transition-colors ${hasData ? '' : 'opacity-50 pointer-events-none'}`}
             title={hasData ? 'Download every company ever in the index as CSV' : 'No data yet — refresh first'}
           >
             Download CSV
@@ -216,7 +217,7 @@ export default function AcwiCanonicalView() {
             type="button"
             onClick={() => void triggerRefresh()}
             disabled={refreshing}
-            className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors"
+            className="text-xs px-3 py-1.5 rounded-lg bg-accent-600 hover:bg-accent-500 disabled:opacity-50 disabled:cursor-not-allowed text-fg-strong transition-colors"
           >
             {refreshing ? 'Refreshing…' : 'Refresh now'}
           </button>
@@ -224,7 +225,7 @@ export default function AcwiCanonicalView() {
       </div>
 
       {(refreshLog.length > 0 || refreshResult) && (
-        <div className="px-5 py-3 border-b border-gray-800/40">
+        <div className="px-5 py-3 border-b border-neutral-800/40">
           <ProgressTimeline
             steps={[]}
             log={refreshLog}
@@ -246,17 +247,17 @@ export default function AcwiCanonicalView() {
       </div>
 
       {!hasData ? (
-        <div className="px-5 py-6 text-sm text-gray-400 border-t border-gray-800/40">
-          No memberships captured yet. Click <span className="text-gray-200">Refresh now</span> to do an initial build (it&apos;ll reconstruct ~290 monthly snapshots from {summary.earliest_date} to today — takes ~30-60s).
+        <div className="px-5 py-6 text-sm text-fg-muted border-t border-neutral-800/40">
+          No memberships captured yet. Click <span className="text-fg">Refresh now</span> to do an initial build (it&apos;ll reconstruct ~290 monthly snapshots from {summary.earliest_date} to today — takes ~30-60s).
         </div>
       ) : (
-        <div className="border-t border-gray-800/40">
+        <div className="border-t border-neutral-800/40">
           <div className="px-5 py-3 flex items-center gap-3 flex-wrap">
-            <label className="text-xs text-gray-400">Month</label>
+            <label className="text-xs text-fg-muted">Month</label>
             <select
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
-              className="bg-[#0f1117] border border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-200 font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 focus:outline-none"
+              className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-xs text-fg font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 focus:outline-none"
             >
               {summary.months.map((m) => (
                 <option key={m} value={m}>{m}</option>
@@ -267,9 +268,9 @@ export default function AcwiCanonicalView() {
               placeholder="Search by ticker, name, exchange, sector…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 focus:outline-none flex-1 min-w-[200px]"
+              className="bg-page border border-neutral-700 rounded-lg px-3 py-1.5 text-xs text-fg placeholder-fg-subtle focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 focus:outline-none flex-1 min-w-[200px]"
             />
-            <span className="text-xs text-gray-500 font-mono">
+            <span className="text-xs text-fg-subtle font-mono">
               {membershipLoading ? <LoadingDots label="loading" /> : `${filtered.length} / ${membership.length}`}
             </span>
             <TableDownloadButton
@@ -281,8 +282,8 @@ export default function AcwiCanonicalView() {
           </div>
           <div className="max-h-[600px] overflow-auto">
             <table className="w-full text-xs">
-              <thead className="text-gray-500 text-[10px] uppercase sticky top-0 bg-[#151821]">
-                <tr className="border-b border-gray-800/40">
+              <thead className="text-fg-subtle text-[10px] uppercase sticky top-0 bg-card">
+                <tr className="border-b border-neutral-800/40">
                   <th className="text-left px-3 py-1.5 font-medium">Ticker</th>
                   <th className="text-left px-3 py-1.5 font-medium">Name</th>
                   <th className="text-left px-3 py-1.5 font-medium">Exchange</th>
@@ -292,22 +293,22 @@ export default function AcwiCanonicalView() {
               </thead>
               <tbody>
                 {filtered.map((r) => (
-                  <tr key={r.company_id} className="border-b border-gray-800/20 hover:bg-white/[0.02]">
-                    <td className="px-3 py-1.5 font-mono text-gray-200">{r.ticker || '—'}</td>
-                    <td className="px-3 py-1.5 text-gray-300 truncate max-w-[280px]">{r.company_name || '—'}</td>
-                    <td className="px-3 py-1.5 font-mono text-gray-500">{r.exchange || '—'}</td>
-                    <td className="px-3 py-1.5 text-gray-400">{r.sector || '—'}</td>
+                  <tr key={r.company_id} className="border-b border-neutral-800/20 hover:bg-overlay/[0.02]">
+                    <td className="px-3 py-1.5 font-mono text-fg">{r.ticker || '—'}</td>
+                    <td className="px-3 py-1.5 text-fg-soft truncate max-w-[280px]">{r.company_name || '—'}</td>
+                    <td className="px-3 py-1.5 font-mono text-fg-subtle">{r.exchange || '—'}</td>
+                    <td className="px-3 py-1.5 text-fg-muted">{r.sector || '—'}</td>
                     <td className="px-3 py-1.5">
                       {r.gurufocus_url ? (
                         <a
                           href={r.gurufocus_url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-indigo-400 hover:underline font-mono"
+                          className="text-accent-400 hover:underline font-mono"
                         >
                           link
                         </a>
-                      ) : <span className="text-gray-600">—</span>}
+                      ) : <span className="text-fg-faint">—</span>}
                     </td>
                   </tr>
                 ))}
@@ -322,9 +323,9 @@ export default function AcwiCanonicalView() {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-[#0f1117] border border-gray-800/40 rounded-lg px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-gray-500">{label}</div>
-      <div className="font-mono text-sm text-gray-200 mt-0.5">{value}</div>
+    <div className="bg-page border border-neutral-800/40 rounded-lg px-3 py-2">
+      <div className="text-[10px] uppercase tracking-wider text-fg-subtle">{label}</div>
+      <div className="font-mono text-sm text-fg mt-0.5">{value}</div>
     </div>
   );
 }
@@ -336,21 +337,16 @@ function Stat({ label, value }: { label: string; value: string }) {
  * yesterday's holdings. Shown only when actually stale (>= 14 days)
  * to avoid cluttering the page on a healthy install. */
 function XlsAgeBadge() {
-  const [age, setAge] = useState<number | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`${API_URL}/api/acwi/xls-age`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { available?: boolean; age_days?: number } | null) => {
-        if (cancelled || !d?.available || d.age_days == null) return;
-        setAge(d.age_days);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
+  const { data: age } = useApiData<number | null, { available?: boolean; age_days?: number } | null>(
+    '/api/acwi/xls-age',
+    {
+      transform: (d) => (d?.available && d.age_days != null ? d.age_days : null),
+      fallbackData: null,
+    },
+  );
   if (age == null || age < 14) return null;
   return (
-    <p className="text-xs text-amber-300 mt-2 max-w-3xl">
+    <p className="text-xs text-warn-300 mt-2 max-w-3xl">
       ⚠ Bundled iShares XLS is <span className="font-mono">{age}</span> day{age === 1 ? '' : 's'} old.
       iShares blocks automated downloads, so the reconstruction runs against this stale file until
       someone manually commits a fresh <span className="font-mono">iShares-MSCI-ACWI-ETF_fund.xls</span>.

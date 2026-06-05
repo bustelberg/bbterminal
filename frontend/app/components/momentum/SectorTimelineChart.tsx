@@ -2,6 +2,7 @@
 
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { colorForSector } from '../../../lib/sectorColors';
+import { chartTheme } from '../../../lib/chartTheme';
 import type { BacktestResult, Holding, PeriodRecord } from '../../../lib/stores/momentum';
 import CollapsibleCard from './CollapsibleCard';
 import { annualize, fmtPct } from './utils';
@@ -22,6 +23,9 @@ const SECTOR_LABEL_GAP = 12; // matches `pr-3` on the label div
 
 type Props = {
   result: BacktestResult;
+  /** Optional "go-live" date (YYYY-MM-DD). Drawn as a red dashed vertical
+   * line at the month cell containing it, matching the other charts. */
+  markerDate?: string;
 };
 
 // Sector color palette lives in `lib/sectorColors.ts` so /schedule's
@@ -281,7 +285,7 @@ function buildTimelineData(
   return { sectors, runs, runByMonth, weightByMonth, months, cadenceDays: detectCadenceDays(months) };
 }
 
-function SectorTimelineChartInner({ result }: Props) {
+function SectorTimelineChartInner({ result, markerDate }: Props) {
   // A long-short backtest has at least one holding with side === 'short'.
   // Long-only results omit `side` entirely (or always have 'long'), so the
   // single-panel branch covers the original behavior unchanged.
@@ -345,6 +349,7 @@ function SectorTimelineChartInner({ result }: Props) {
           title="Sector Timeline"
           data={longData}
           defaultCollapsed={false}
+          markerDate={markerDate}
         />
       </div>
     );
@@ -357,11 +362,13 @@ function SectorTimelineChartInner({ result }: Props) {
         title="Sector Timeline · Long"
         data={longData}
         defaultCollapsed={false}
+        markerDate={markerDate}
       />
       <TimelinePanel
         title="Sector Timeline · Short"
         data={shortData!}
         defaultCollapsed={false}
+        markerDate={markerDate}
       />
     </div>
   );
@@ -392,9 +399,9 @@ function SliceControls({
 }) {
   const isSliced = !!fromDate || !!toDate;
   return (
-    <div className="bg-[#151821] rounded-xl border border-gray-800/40 px-4 py-2.5 flex items-center gap-3 flex-wrap">
-      <span className="text-[11px] text-gray-500">Zoom:</span>
-      <label className="flex items-center gap-1.5 text-[11px] text-gray-400">
+    <div className="bg-card rounded-xl border border-neutral-800/40 px-4 py-2.5 flex items-center gap-3 flex-wrap">
+      <span className="text-[11px] text-fg-subtle">Zoom:</span>
+      <label className="flex items-center gap-1.5 text-[11px] text-fg-muted">
         <span>From</span>
         <input
           type="date"
@@ -402,10 +409,10 @@ function SliceControls({
           min={dataFirst.length === 10 ? dataFirst : undefined}
           max={dataLast.length === 10 ? dataLast : undefined}
           onChange={(e) => onFromChange(e.target.value)}
-          className="bg-[#0f1117] border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+          className="bg-page border border-neutral-700 rounded px-2 py-1 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
         />
       </label>
-      <label className="flex items-center gap-1.5 text-[11px] text-gray-400">
+      <label className="flex items-center gap-1.5 text-[11px] text-fg-muted">
         <span>To</span>
         <input
           type="date"
@@ -413,20 +420,20 @@ function SliceControls({
           min={dataFirst.length === 10 ? dataFirst : undefined}
           max={dataLast.length === 10 ? dataLast : undefined}
           onChange={(e) => onToChange(e.target.value)}
-          className="bg-[#0f1117] border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+          className="bg-page border border-neutral-700 rounded px-2 py-1 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
         />
       </label>
       {isSliced && (
         <button
           type="button"
           onClick={onReset}
-          className="text-[11px] text-gray-500 hover:text-gray-300 underline-offset-2 hover:underline"
+          className="text-[11px] text-fg-subtle hover:text-fg-soft underline-offset-2 hover:underline"
         >
           reset
         </button>
       )}
       {!isSliced && (
-        <span className="text-[10px] text-gray-600 ml-auto">
+        <span className="text-[10px] text-fg-faint ml-auto">
           showing full range {dataFirst} → {dataLast}
         </span>
       )}
@@ -438,10 +445,12 @@ function TimelinePanel({
   title,
   data,
   defaultCollapsed,
+  markerDate,
 }: {
   title: string;
   data: TimelineData;
   defaultCollapsed: boolean;
+  markerDate?: string;
 }) {
   const { sectors, runs, runByMonth, weightByMonth, months, cadenceDays } = data;
   const [hoveredRun, setHoveredRun] = useState<{ sector: string; runIdx: number } | null>(null);
@@ -487,6 +496,26 @@ function TimelinePanel({
   // scrollLeft = scrollWidth pins us to the right (most recent periods).
   const innerWidth = cellsTotalWidth;
   const hasOverflow = cellsTotalWidth > cellAreaWidth + 0.5;
+
+  // Go-live marker: px offset from the left of the cell strip, placed
+  // proportionally (by calendar day) within the month cell that contains
+  // the date. Null when there's no marker or it falls before the visible
+  // range. Cheap plain const — recomputes each render with cellWidth.
+  let markerLeft: number | null = null;
+  if (markerDate && cellWidth > 0 && months.length > 0) {
+    const norm = (s: string) => (s.length === 7 ? `${s}-01` : s.slice(0, 10));
+    let mi = -1;
+    for (let i = 0; i < months.length; i++) {
+      if (norm(months[i]) <= markerDate) mi = i;
+      else break;
+    }
+    if (mi >= 0) {
+      const cellStart = new Date(norm(months[mi])).getTime();
+      const go = new Date(markerDate).getTime();
+      const frac = Math.max(0, Math.min(1, (go - cellStart) / (cadenceDays * 86400000)));
+      markerLeft = (mi + frac) * cellWidth;
+    }
+  }
 
   // On mount + when content/cell-width changes, jump to the right edge so
   // the most recent ~5 years are visible. The user pans backward in time
@@ -617,12 +646,11 @@ function TimelinePanel({
             className="shrink-0"
             style={{
               width: SECTOR_LABEL_WIDTH + SECTOR_LABEL_GAP,
-              backgroundColor: '#151821',
-              borderRight: '1px solid rgba(75, 85, 99, 0.6)',
-              boxShadow: '6px 0 8px -6px rgba(0, 0, 0, 0.6)',
-              // High zIndex on the column itself isn't strictly needed
-              // (it's a sibling of the scroll area, not an overlay), but
-              // it covers any future overlay that might try to creep in.
+              // Transparent so the labels sit on the card surface (no dark
+              // "frozen column" block). The column is a sibling of the
+              // scroll area — not an overlay — so cells can never render
+              // over it regardless of background.
+              backgroundColor: 'transparent',
               position: 'relative',
               zIndex: 1,
             }}
@@ -636,7 +664,7 @@ function TimelinePanel({
               return (
                 <div
                   key={`label-${sec}`}
-                  className="flex items-center mt-1.5 h-5 pr-3 text-[11px] text-gray-300 truncate gap-1.5"
+                  className="flex items-center mt-1.5 h-5 pr-3 text-[11px] text-fg-soft truncate gap-1.5"
                 >
                   <span className="inline-block w-2 h-2 rounded-sm shrink-0" style={{ background: color }} />
                   <span className="truncate">{sec}</span>
@@ -658,7 +686,7 @@ function TimelinePanel({
                   return (
                     <div
                       key={`yax-${m}`}
-                      className="text-[9px] text-gray-600 font-mono shrink-0"
+                      className="text-[9px] text-fg-faint font-mono shrink-0"
                       style={{
                         width: cellWidth,
                         borderLeft: isYear ? '1px solid rgba(75,85,99,0.35)' : undefined,
@@ -730,6 +758,17 @@ function TimelinePanel({
                   </div>
                 );
               })}
+
+              {/* Go-live marker — a red dashed vertical line spanning the
+                  cell rows at the month containing the date. pointer-events
+                  off so it never blocks a cell hover. */}
+              {markerLeft != null && (
+                <div
+                  className="absolute top-0 bottom-0 pointer-events-none"
+                  style={{ left: markerLeft, borderLeft: `1.5px dashed ${chartTheme.goLiveLine}`, zIndex: 6 }}
+                  title={`Go-live ${markerDate}`}
+                />
+              )}
             </div>
           </div>
         </div>
@@ -737,7 +776,7 @@ function TimelinePanel({
 
       {runForTooltip && tooltipPos && (
         <div
-          className="fixed z-[300] pointer-events-none bg-[#1a1d27] border border-gray-700 rounded-lg px-3 py-2 shadow-xl text-xs"
+          className="fixed z-[300] pointer-events-none bg-elevated border border-neutral-700 rounded-lg px-3 py-2 shadow-xl text-xs"
           style={{
             top: tooltipPos.y + 14,
             left: Math.min(window.innerWidth - 280, tooltipPos.x + 14),
@@ -749,11 +788,11 @@ function TimelinePanel({
               className="inline-block w-2.5 h-2.5 rounded-sm"
               style={{ background: colorForSector(runForTooltip.sector, sectors.indexOf(runForTooltip.sector)) }}
             />
-            <span className="text-gray-100 font-medium">{runForTooltip.sector}</span>
+            <span className="text-fg-bright font-medium">{runForTooltip.sector}</span>
           </div>
-          <div className="text-gray-400 font-mono">
+          <div className="text-fg-muted font-mono">
             {runForTooltip.startMonth} → {runForTooltip.endMonth}
-            <span className="text-gray-500"> ({formatRunDuration(runForTooltip.monthsHeld, cadenceDays)})</span>
+            <span className="text-fg-subtle"> ({formatRunDuration(runForTooltip.monthsHeld, cadenceDays)})</span>
           </div>
           {(() => {
             // CAGR needs duration in months. monthsHeld is the cell count;
@@ -764,22 +803,22 @@ function TimelinePanel({
             const monthsEquiv = (runForTooltip.monthsHeld * cadenceDays) / 30;
             const cagr = annualize(runForTooltip.cumulativeReturnPct, monthsEquiv);
             const runColor = (v: number | null | undefined) =>
-              v == null ? 'text-gray-500' : v >= 0 ? 'text-emerald-400 font-mono' : 'text-rose-400 font-mono';
+              v == null ? 'text-fg-subtle' : v >= 0 ? 'text-pos-400 font-mono' : 'text-neg-400 font-mono';
             return (
               <>
-                <div className="mt-1 text-gray-400">
+                <div className="mt-1 text-fg-muted">
                   Run return:{' '}
                   <span className={runColor(runForTooltip.cumulativeReturnPct)}>
                     {fmtPct(runForTooltip.cumulativeReturnPct)}
                   </span>
                 </div>
-                <div className="text-gray-400">
+                <div className="text-fg-muted">
                   CAGR:{' '}
                   <span className={runColor(cagr)}>
                     {fmtPct(cagr)}
                   </span>
                 </div>
-                <div className="text-gray-600 text-[10px] mt-1">
+                <div className="text-fg-faint text-[10px] mt-1">
                   equal-weighted across this sector&apos;s holdings
                 </div>
               </>

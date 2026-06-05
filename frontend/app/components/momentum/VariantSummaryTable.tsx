@@ -19,8 +19,9 @@ import TableDownloadButton from '../TableDownloadButton';
 import CellInfoTip from './CellInfoTip';
 import CollapsibleCard from './CollapsibleCard';
 import { fmtPct } from './utils';
-import { computeNetStats, parenPct } from './feeStats';
-import { useExchangeFeeMap } from '../../../lib/hooks/apiData';
+import { parenPct } from './feeStats';
+import { computeFeeWaterfall, type FeeConfig } from './feeModel';
+import { useFeeConfig } from '../../../lib/hooks/apiData';
 
 // One row per VARIANT_DEFS entry. Click to make that variant the active one
 // (the detail views below — equity curve, holdings table, sector timeline —
@@ -34,10 +35,6 @@ import { useExchangeFeeMap } from '../../../lib/hooks/apiData';
 // observable.
 
 type Props = {
-  /** Per-company exchange lookup, needed to compute the (net) parenthetical
-   * for each variant's stats. Optional — when omitted the table just shows
-   * gross figures. */
-  exchangeByCompany?: Map<number, string>;
   /** Called when the user clicks the "+ Schedule" button on an OK-status
    * row. Parent has the base BacktestRequest state and builds the schedule
    * `config` by merging base + variant overrides. */
@@ -106,20 +103,20 @@ function rowValueFor(
  * Combines a colored left border with a faint background tint so the
  * medal reads at a glance against the dark-theme table background. */
 function rankBorderClass(rank: number | undefined): string {
-  if (rank === 1) return 'border-l-2 border-amber-400/90 bg-amber-500/[0.06]';
+  if (rank === 1) return 'border-l-2 border-warn-400/90 bg-warn-500/[0.06]';
   if (rank === 2) return 'border-l-2 border-slate-300/80 bg-slate-300/[0.05]';
   if (rank === 3) return 'border-l-2 border-orange-700/90 bg-orange-700/[0.06]';
   return '';
 }
 
-function VariantSummaryTableInner({ exchangeByCompany, onAddToSchedule }: Props) {
+function VariantSummaryTableInner({ onAddToSchedule }: Props) {
   const variants = momentumStore.use((s) => s.variants);
   const active = momentumStore.use((s) => s.activeVariantKey);
   const run = momentumStore.use((s) => s.variantsRun);
 
-  // Per-exchange fees — shared cached hook, null when no non-zero fees
-  // are configured so each variant row just shows gross figures.
-  const feesByExchange = useExchangeFeeMap();
+  // Global fee config — the (net) column means "net to client, after
+  // Leonteq + Bustelberg fees" (same layered model as the Fee waterfall).
+  const feeConfig = useFeeConfig();
 
   // Hide entirely when no sweep has ever run. The wrapper component decides
   // when to render us based on whether `variants` has any entries.
@@ -285,9 +282,9 @@ function VariantSummaryTableInner({ exchangeByCompany, onAddToSchedule }: Props)
         </div>
       }
     >
-      <table className="w-full text-sm border-t border-gray-800/40">
+      <table className="w-full text-sm border-t border-neutral-800/40">
         <thead>
-          <tr className="text-gray-500 text-xs border-b border-gray-800/40">
+          <tr className="text-fg-subtle text-xs border-b border-neutral-800/40">
             <SortableTh col="variant" align="left" label="Variant"
               tooltip="The strategy + per-variant axis overrides this row represents. Click the row to make this variant the active one in the equity curve, holdings, and sector timeline below."
               sortColumn={sortColumn} sortDir={sortDir} onSort={onSortClick} />
@@ -331,8 +328,7 @@ function VariantSummaryTableInner({ exchangeByCompany, onAddToSchedule }: Props)
               label={v.label}
               outcome={variants[v.key]}
               isActive={active === v.key}
-              feesByExchange={feesByExchange}
-              exchangeByCompany={exchangeByCompany}
+              feeConfig={feeConfig}
               ranksByColumn={ranksByColumn}
               onAddToSchedule={onAddToSchedule}
             />
@@ -345,8 +341,8 @@ function VariantSummaryTableInner({ exchangeByCompany, onAddToSchedule }: Props)
 
 /** React.memo barrier — see MonthlyHoldingsTable for the rationale.
  * This component subscribes to the `momentumStore` for the variants
- * map + active key directly, so its only prop is `exchangeByCompany`
- * which the parent already memoizes. */
+ * map + active key directly; its only prop is the `onAddToSchedule`
+ * callback (the fee config comes from the shared cached hook). */
 const VariantSummaryTable = memo(VariantSummaryTableInner);
 export default VariantSummaryTable;
 
@@ -373,16 +369,16 @@ function SweepStatus({ run }: { run: VariantsRunState }) {
   const done = run.completed;
   const total = run.total;
   return (
-    <div className="text-xs text-gray-400 flex items-center gap-2">
+    <div className="text-xs text-fg-muted flex items-center gap-2">
       {isRunning && (
-        <svg className="animate-spin w-3 h-3 text-indigo-400" viewBox="0 0 24 24" fill="none">
+        <svg className="animate-spin w-3 h-3 text-accent-400" viewBox="0 0 24 24" fill="none">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>
       )}
       <span className="font-mono">
         {done}/{total}
-        {isRunning && <span className="text-gray-600"> · {elapsed}s</span>}
+        {isRunning && <span className="text-fg-faint"> · {elapsed}s</span>}
       </span>
     </div>
   );
@@ -416,11 +412,11 @@ function SortableTh({
     <th className={`${alignClass} font-medium px-3 py-2 whitespace-nowrap`}>
       <span
         onClick={() => onSort(col)}
-        className={`cursor-pointer select-none hover:text-gray-200 ${active ? 'text-indigo-300' : ''}`}
+        className={`cursor-pointer select-none hover:text-fg ${active ? 'text-accent-300' : ''}`}
         title={`Sort by ${label}`}
       >
         {label}
-        {arrow && <span className="ml-1 text-indigo-400">{arrow}</span>}
+        {arrow && <span className="ml-1 text-accent-400">{arrow}</span>}
       </span>
       <CellInfoTip>{tooltip}</CellInfoTip>
     </th>
@@ -432,8 +428,7 @@ function VariantRow({
   label,
   outcome,
   isActive,
-  feesByExchange,
-  exchangeByCompany,
+  feeConfig,
   ranksByColumn,
   onAddToSchedule,
 }: {
@@ -441,8 +436,7 @@ function VariantRow({
   label: string;
   outcome: VariantOutcome | undefined;
   isActive: boolean;
-  feesByExchange: Map<string, number> | null;
-  exchangeByCompany: Map<number, string> | undefined;
+  feeConfig: FeeConfig;
   ranksByColumn: Map<ColumnKey, Map<number, number>>;
   onAddToSchedule?: (variantKey: VariantKey, label: string) => void;
 }) {
@@ -457,20 +451,20 @@ function VariantRow({
   // Clickable but not active: subtle hover bg.
   // Pending/running/errored: no hover.
   const rowClass = clickable && !isActive
-    ? 'cursor-pointer hover:bg-white/[0.02]'
+    ? 'cursor-pointer hover:bg-overlay/[0.02]'
     : '';
 
   return (
-    <tr className={`border-b border-gray-800/20 group ${rowClass}`} onClick={handleClick}>
-      <td className="px-3 py-2 text-gray-200">
+    <tr className={`border-b border-neutral-800/20 group ${rowClass}`} onClick={handleClick}>
+      <td className="px-3 py-2 text-fg">
         <div className="flex items-center gap-2">
-          <span className={`inline-block w-3 text-indigo-400 ${isActive ? '' : 'opacity-0'}`}>
+          <span className={`inline-block w-3 text-accent-400 ${isActive ? '' : 'opacity-0'}`}>
             ›
           </span>
           <StatusBadge status={status} />
-          <span className={isActive ? 'text-white font-medium' : ''}>{label}</span>
+          <span className={isActive ? 'text-fg-strong font-medium' : ''}>{label}</span>
           {status === 'cancelled' && (
-            <span className="text-[10px] text-gray-500 italic">cancelled</span>
+            <span className="text-[10px] text-fg-subtle italic">cancelled</span>
           )}
           {clickable && onAddToSchedule && (
             <button
@@ -480,20 +474,19 @@ function VariantRow({
                 onAddToSchedule(variantKey, label);
               }}
               title="Save this variant as a scheduled strategy. The pipeline will keep its current-picks snapshot up to date on every tick."
-              className="ml-2 text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded border border-indigo-500/30 text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 opacity-0 group-hover:opacity-100 transition-opacity"
+              className="ml-2 text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded border border-accent-500/30 text-accent-300 bg-accent-500/10 hover:bg-accent-500/20 opacity-0 group-hover:opacity-100 transition-opacity"
             >
               + Schedule
             </button>
           )}
         </div>
         {status === 'error' && outcome?.status === 'error' && (
-          <div className="text-[10px] text-rose-400 mt-0.5 font-mono">{outcome.message}</div>
+          <div className="text-[10px] text-neg-400 mt-0.5 font-mono">{outcome.message}</div>
         )}
       </td>
       <SummaryCells
         outcome={outcome}
-        feesByExchange={feesByExchange}
-        exchangeByCompany={exchangeByCompany}
+        feeConfig={feeConfig}
         ranksByColumn={ranksByColumn}
       />
     </tr>
@@ -502,13 +495,11 @@ function VariantRow({
 
 function SummaryCells({
   outcome,
-  feesByExchange,
-  exchangeByCompany,
+  feeConfig,
   ranksByColumn,
 }: {
   outcome: VariantOutcome | undefined;
-  feesByExchange: Map<string, number> | null;
-  exchangeByCompany: Map<number, string> | undefined;
+  feeConfig: FeeConfig;
   ranksByColumn: Map<ColumnKey, Map<number, number>>;
 }) {
   // 6 placeholder cells (Start, End, Annualized, Sharpe, Total, DD) so the
@@ -516,9 +507,14 @@ function SummaryCells({
   // Note: hooks must be called unconditionally — `net` is computed before
   // any early return.
   const net = useMemo(() => {
-    if (outcome?.status !== 'ok' || !feesByExchange || !exchangeByCompany) return null;
-    return computeNetStats(outcome.result.monthly_records, feesByExchange, exchangeByCompany, outcome.result.daily_records);
-  }, [outcome, feesByExchange, exchangeByCompany]);
+    if (outcome?.status !== 'ok') return null;
+    return computeFeeWaterfall(
+      outcome.result.monthly_records,
+      outcome.result.daily_records,
+      feeConfig,
+      { grossTotalReturnPct: outcome.result.summary?.total_return_pct },
+    )?.net ?? null;
+  }, [outcome, feeConfig]);
 
   if (outcome?.status !== 'ok') {
     // 10 placeholders: Start, End, Annualized, Universe annualized,
@@ -527,7 +523,7 @@ function SummaryCells({
     return (
       <>
         {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => (
-          <td key={i} className="px-3 py-2 text-right text-gray-700 font-mono">—</td>
+          <td key={i} className="px-3 py-2 text-right text-fg-dim font-mono">—</td>
         ))}
       </>
     );
@@ -539,9 +535,9 @@ function SummaryCells({
   const firstDate = records.length > 0 ? records[0].date.slice(0, 7) : '—';
   const lastDate = records.length > 0 ? records[records.length - 1].date.slice(0, 7) : '—';
   const colorize = (v: number | null | undefined) =>
-    v == null ? 'text-gray-500'
-      : v >= 0 ? 'text-emerald-400'
-      : 'text-rose-400';
+    v == null ? 'text-fg-subtle'
+      : v >= 0 ? 'text-pos-400'
+      : 'text-neg-400';
   // Per-cell rank decoration. Looks up the column's medal map (built
   // once at the parent level) and returns the gold/silver/bronze
   // border + tint when this row's value lands in the top three.
@@ -551,23 +547,23 @@ function SummaryCells({
   };
   return (
     <>
-      <td className="px-3 py-2 text-right font-mono text-gray-400">{firstDate}</td>
-      <td className="px-3 py-2 text-right font-mono text-gray-400">{lastDate}</td>
+      <td className="px-3 py-2 text-right font-mono text-fg-muted">{firstDate}</td>
+      <td className="px-3 py-2 text-right font-mono text-fg-muted">{lastDate}</td>
       <td className={`px-3 py-2 text-right font-mono ${colorize(s.annualized_return_pct)} ${medal('annualized', s.annualized_return_pct)}`}>
         {fmtPct(s.annualized_return_pct)}
-        <span className="text-gray-500">{parenPct(net?.annualized_return_pct)}</span>
+        <span className="text-fg-subtle">{parenPct(net?.annualized_return_pct)}</span>
       </td>
       <td className={`px-3 py-2 text-right font-mono ${colorize(s.universe_annualized_return_pct)} ${medal('universe_annualized', s.universe_annualized_return_pct)}`}>
         {s.universe_annualized_return_pct != null ? fmtPct(s.universe_annualized_return_pct) : '—'}
       </td>
-      <td className={`px-3 py-2 text-right font-mono text-gray-200 ${medal('sharpe', s.sharpe_ratio)}`}>
+      <td className={`px-3 py-2 text-right font-mono text-fg ${medal('sharpe', s.sharpe_ratio)}`}>
         {s.sharpe_ratio != null ? s.sharpe_ratio.toFixed(2) : '—'}
-        <span className="text-gray-500">{net?.sharpe_ratio != null ? ` (${net.sharpe_ratio.toFixed(2)})` : ''}</span>
+        <span className="text-fg-subtle">{net?.sharpe_ratio != null ? ` (${net.sharpe_ratio.toFixed(2)})` : ''}</span>
       </td>
-      <td className={`px-3 py-2 text-right font-mono text-gray-200 ${medal('sortino', s.sortino_ratio)}`}>
+      <td className={`px-3 py-2 text-right font-mono text-fg ${medal('sortino', s.sortino_ratio)}`}>
         {s.sortino_ratio != null ? s.sortino_ratio.toFixed(2) : '—'}
       </td>
-      <td className={`px-3 py-2 text-right font-mono text-gray-300 ${medal('win_rate', s.win_rate_pct)}`}>
+      <td className={`px-3 py-2 text-right font-mono text-fg-soft ${medal('win_rate', s.win_rate_pct)}`}>
         {s.win_rate_pct != null ? `${s.win_rate_pct.toFixed(0)}%` : '—'}
       </td>
       <td className={`px-3 py-2 text-right font-mono ${colorize(s.median_period_return_pct)} ${medal('median', s.median_period_return_pct)}`}>
@@ -575,11 +571,11 @@ function SummaryCells({
       </td>
       <td className={`px-3 py-2 text-right font-mono ${colorize(s.total_return_pct)} ${medal('total', s.total_return_pct)}`}>
         {fmtPct(s.total_return_pct)}
-        <span className="text-gray-500">{parenPct(net?.total_return_pct)}</span>
+        <span className="text-fg-subtle">{parenPct(net?.total_return_pct)}</span>
       </td>
-      <td className={`px-3 py-2 text-right font-mono text-rose-400 ${medal('max_dd', s.max_drawdown_pct)}`}>
+      <td className={`px-3 py-2 text-right font-mono text-neg-400 ${medal('max_dd', s.max_drawdown_pct)}`}>
         {fmtPct(s.max_drawdown_pct)}
-        <span className="text-gray-500">{parenPct(net?.max_drawdown_pct)}</span>
+        <span className="text-fg-subtle">{parenPct(net?.max_drawdown_pct)}</span>
       </td>
     </>
   );
@@ -587,21 +583,21 @@ function SummaryCells({
 
 function StatusBadge({ status }: { status: VariantOutcome['status'] }) {
   if (status === 'pending') {
-    return <span className="inline-block w-2 h-2 rounded-full bg-gray-700" title="Pending" />;
+    return <span className="inline-block w-2 h-2 rounded-full bg-neutral-700" title="Pending" />;
   }
   if (status === 'running') {
     return (
-      <svg className="animate-spin w-3 h-3 text-indigo-400" viewBox="0 0 24 24" fill="none" aria-label="Running">
+      <svg className="animate-spin w-3 h-3 text-accent-400" viewBox="0 0 24 24" fill="none" aria-label="Running">
         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
       </svg>
     );
   }
   if (status === 'ok') {
-    return <span className="inline-block w-2 h-2 rounded-full bg-emerald-400" title="Done" />;
+    return <span className="inline-block w-2 h-2 rounded-full bg-pos-400" title="Done" />;
   }
   if (status === 'cancelled') {
-    return <span className="inline-block w-2 h-2 rounded-full bg-gray-500" title="Cancelled" />;
+    return <span className="inline-block w-2 h-2 rounded-full bg-neutral-500" title="Cancelled" />;
   }
-  return <span className="inline-block w-2 h-2 rounded-full bg-rose-500" title="Error" />;
+  return <span className="inline-block w-2 h-2 rounded-full bg-neg-500" title="Error" />;
 }

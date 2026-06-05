@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Callable
 
 import pandas as pd
 
 from ..scoring import _get_category_keys, score_and_select
 from ..signals import compute_signals_panel
+from .dates import _first_weekday_on_or_after
 from .indices import (
     _build_price_index,
     _build_volume_index,
@@ -56,11 +57,47 @@ def run_current_portfolio(
 
     t_total_start = time.perf_counter()
     today_d = today or date.today()
-    month_start = date(today_d.year, today_d.month, 1)
-    month_key = month_start.isoformat()[:7]
+    weekday = getattr(config, "rebalance_weekday", 0) or 0
+
+    # Latest available close in the loaded data. A rebalance dated after
+    # this hasn't happened yet — there's no price to enter at — so we're
+    # still holding the prior period. Bound by `today` so a stray future
+    # row can't move the anchor. e.g. on the first Wednesday before that
+    # day's close has settled, the anchor is the prior (Tuesday) close.
+    latest_data_date: date | None = None
+    try:
+        raw_max = prices_df["target_date"].max()
+        if isinstance(raw_max, str):
+            latest_data_date = date.fromisoformat(raw_max[:10])
+        elif isinstance(raw_max, date) and not isinstance(raw_max, pd.Timestamp):
+            latest_data_date = raw_max
+        else:
+            latest_data_date = pd.Timestamp(raw_max).date()
+    except Exception:
+        latest_data_date = None
+    anchor = today_d if latest_data_date is None else min(today_d, latest_data_date)
+
+    # Effective rebalance date = the chosen weekday's first occurrence in
+    # the current month (e.g. first Wednesday). If that rebalance hasn't
+    # happened yet relative to available data (`anchor`), the strategy is
+    # still holding the *previous* period's picks — so step back to the
+    # prior month's first-<weekday> rebalance. This makes "current picks"
+    # mean "what we actually hold right now", matching run_backtest's
+    # first-<weekday> grid rather than the literal 1st-of-month it used
+    # before — and avoids an empty portfolio when the rebalance day's
+    # close isn't in the DB yet.
+    this_month_start = date(today_d.year, today_d.month, 1)
+    rebalance_date = _first_weekday_on_or_after(this_month_start, weekday)
+    if rebalance_date > anchor:
+        prev_month_last = this_month_start - timedelta(days=1)
+        prev_month_start = date(prev_month_last.year, prev_month_last.month, 1)
+        rebalance_date = _first_weekday_on_or_after(prev_month_start, weekday)
+    # The signal-cutoff + entry anchor for the locked-at-start holdings.
+    month_start = rebalance_date
+    month_key = rebalance_date.isoformat()[:7]
 
     if send_event:
-        send_event("progress", month=month_key, pct=10, message=f"Computing signals as of {month_start.isoformat()}...")
+        send_event("progress", month=month_key, pct=10, message=f"Computing signals as of {rebalance_date.isoformat()}...")
 
     # Filter universe for this month if snapshot-based — same logic as the
     # backtest loop, just for one month.

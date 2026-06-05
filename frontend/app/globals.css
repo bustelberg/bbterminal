@@ -1,36 +1,148 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0f1117;
-    --foreground: #e5e7eb;
+/* ── Design tokens — "Glass Institutional (tempered)" ───────────────────────
+   The app's single, fixed theme. The whole palette + treatment lives here;
+   every component routes through these tokens (no inline hex / raw Tailwind
+   colour names anywhere). To re-skin, edit values here — nothing else.
+
+   "Tempered" = frosted glass on the *chrome* (sidebar + floating menus) over a
+   gradient-mesh background, but *solid* data surfaces (cards, tables, inputs)
+   so dense numbers stay crisp and fast. The glass *treatment* (blur, mesh,
+   glow, card depth) is the small set of rules below the token block.
+
+   Tailwind v4 auto-generates bg-/text-/border-/ring-/divide- utilities (and
+   `/opacity` modifiers, runtime-safe via color-mix) for every `--color-*`. */
+@theme {
+  /* ── Surfaces ──
+     Chrome (sidebar, popover) is translucent → frosted by the backdrop-blur
+     rule below. Data surfaces (card/card-alt/elevated/inset) are solid. */
+  --color-page: #0a0f1f;                      /* deep navy base (mesh painted on body) */
+  --color-sidebar: rgba(13, 19, 36, 0.72);    /* frosted chrome — left nav rail */
+  --color-popover: rgba(18, 26, 48, 0.9);     /* frosted chrome — tooltips / menus */
+  --color-card: #141c30;                      /* solid data panel / card */
+  --color-card-alt: #1a1e3c;                  /* solid, accent-tinted (derived universes) */
+  --color-elevated: #1b2440;                  /* solid, raised */
+  --color-inset: #0e1426;                     /* solid, recessed (inputs) */
+
+  /* ── Accent (electric blue→cyan brand) — buttons, active nav, links, rings ── */
+  --color-accent-200: #bfe0ff;
+  --color-accent-300: #7cc4ff;
+  --color-accent-400: #46a6ff;
+  --color-accent-500: #2f86ff;
+  --color-accent-600: #2566e6;
+  --color-accent-900: #1e3a8a;
+
+  /* ── Returns / status — vivid on navy (aliased to Tailwind ramps) ── */
+  --color-pos-300: var(--color-emerald-300);  /* positive returns / success */
+  --color-pos-400: var(--color-emerald-400);
+  --color-pos-500: var(--color-emerald-500);
+  --color-pos-600: var(--color-emerald-600);
+  --color-pos-800: var(--color-emerald-800);
+  --color-neg-100: var(--color-rose-100);      /* negative returns / errors */
+  --color-neg-200: var(--color-rose-200);
+  --color-neg-300: var(--color-rose-300);
+  --color-neg-400: var(--color-rose-400);
+  --color-neg-500: var(--color-rose-500);
+  --color-neg-600: var(--color-rose-600);
+  --color-warn-100: var(--color-amber-100);    /* warnings / out-of-scope */
+  --color-warn-200: var(--color-amber-200);
+  --color-warn-300: var(--color-amber-300);
+  --color-warn-400: var(--color-amber-400);
+  --color-warn-500: var(--color-amber-500);
+  --color-warn-600: var(--color-amber-600);
+  --color-warn-800: var(--color-amber-800);
+
+  /* ── Foreground (text / icon) ramp — cool bright on navy, brightest→faintest.
+     Use `text-fg`, `text-fg-muted`, `text-fg-subtle`, … */
+  --color-fg-strong: #f4f8ff;   /* emphasized headings / active values */
+  --color-fg-bright: #e6edfa;   /* brightest body */
+  --color-fg:        #d4dcec;   /* primary body text */
+  --color-fg-soft:   #aebbd4;   /* dimmed body / sub-headings */
+  --color-fg-muted:  #8b9abb;   /* labels / secondary */
+  --color-fg-subtle: #6b7a9c;   /* captions / placeholders */
+  --color-fg-faint:  #51607f;   /* hints */
+  --color-fg-dim:    #3c4a66;   /* faintest text */
+
+  /* ── Neutral ramp — borders / dividers / controls (cool, mostly translucent
+     so card edges stay whisper-light; depth comes from the shadow below). */
+  --color-neutral-500: #6b7a9c;
+  --color-neutral-600: #51607f;
+  --color-neutral-700: rgba(150, 170, 210, 0.30);
+  --color-neutral-800: rgba(150, 170, 210, 0.18);
+  --color-neutral-900: rgba(150, 170, 210, 0.12);
+  --color-neutral-950: rgba(150, 170, 210, 0.07);
+
+  /* Hover/active wash (white at low alpha) + modal scrim. */
+  --color-overlay: #ffffff;
+  --color-scrim:   #000000;
+}
+
+/* ── Glass treatment ────────────────────────────────────────────────────────
+   The small set of rules that make it "glass". They target the stable surface
+   utility classes so no component markup changes. */
+
+/* Frost the chrome surfaces (skipped when the OS asks to reduce transparency,
+   handled by the fallback below). */
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :is(.bg-sidebar, .bg-popover) {
+    backdrop-filter: blur(14px) saturate(150%);
+    -webkit-backdrop-filter: blur(14px) saturate(150%);
   }
 }
 
+/* Data cards: top hairline highlight + soft drop shadow = glassy depth on a
+   solid surface (crisp, no blur cost). */
+:is(.bg-card, .bg-card-alt, .bg-elevated) {
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.05), 0 10px 30px -16px rgba(0, 0, 0, 0.55);
+}
+
+/* Accent buttons get a subtle blue glow. */
+:is(.bg-accent-600, .bg-accent-500) {
+  box-shadow: 0 6px 20px -6px rgba(47, 134, 255, 0.5);
+}
+
+/* Gradient mesh painted behind everything (fixed so it doesn't scroll). */
+body {
+  background-image:
+    radial-gradient(55rem 55rem at 12% -8%, rgba(47, 134, 255, 0.18), transparent 60%),
+    radial-gradient(48rem 48rem at 100% 0%, rgba(6, 182, 212, 0.14), transparent 55%),
+    radial-gradient(42rem 42rem at 55% 120%, rgba(124, 92, 255, 0.12), transparent 60%);
+  background-attachment: fixed;
+}
+
+/* Accessibility: solid chrome when the OS asks to reduce transparency. */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --color-sidebar: #0d1324;
+    --color-popover: #121a30;
+  }
+}
+
+/* ── Style presets (optional, orthogonal to the colour theme) ────────────────
+   Set `data-radius` / `data-density` on <html> (in app/layout.tsx) to reshape
+   corner roundness + overall scale without touching any component. These are
+   build-time knobs, not a user-facing switch. `rounded-full` stays full. */
+:root[data-radius="sharp"] { --radius-sm: 1px; --radius-md: 2px; --radius-lg: 3px; --radius-xl: 4px; --radius-2xl: 6px; }
+:root[data-radius="round"] { --radius-sm: .375rem; --radius-md: .5rem; --radius-lg: .75rem; --radius-xl: 1rem; --radius-2xl: 1.25rem; }
+:root[data-density="compact"]     { font-size: 20px; }
+:root[data-density="comfortable"] { font-size: 24px; }
+
 html {
   font-size: 22px;
-  background: var(--background);
+  background: var(--color-page);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  color: var(--color-fg);
   font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
 }
 
-/* Smooth scrollbars */
+/* Smooth scrollbars (track transparent; thumb on the neutral ramp). */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -39,9 +151,9 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #374151;
+  background: var(--color-neutral-700);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #4b5563;
+  background: var(--color-neutral-600);
 }

@@ -145,6 +145,7 @@ def run_backtest(
             prices_local_df=prices_local_df,
             monthly_eligible=monthly_eligible,
             frequency=config.rebalance_frequency,
+            rebalance_weekday=config.rebalance_weekday,
         )
     periods = prepared.periods
     price_index = prepared.price_index
@@ -164,15 +165,32 @@ def run_backtest(
     # an extra "exit" date. The main loop then naturally processes
     # periods[-2] → periods[-1] as the open period; we mark that record
     # is_open=True and skip its return when accumulating headline stats.
+    # Latest available close across all companies — used both to drop
+    # future rebalance dates and to anchor the open period.
+    last_avail_ts: pd.Timestamp | None = None
+    for s in price_index.values():
+        if s.empty:
+            continue
+        m = s.index.max()
+        if last_avail_ts is None or m > last_avail_ts:
+            last_avail_ts = m
+
+    # Drop trailing rebalance dates that fall AFTER the latest available
+    # close. Such a rebalance hasn't happened yet — there's no price to
+    # enter at — so keeping it would (a) leave an un-enterable trailing
+    # period and (b) null out the PRIOR period's forward return, whose
+    # exit is anchored to that date with no data. Dropping it lets the
+    # prior period become the open period valued at the latest close.
+    # e.g. a first-Wednesday grid evaluated before that Wednesday's close
+    # has settled: the June-3 rebalance is dropped so the May-6 holding
+    # shows its return through the latest available date instead of "—".
+    # The `> 2` floor keeps at least one entry + one exit for the loop.
+    if last_avail_ts is not None:
+        while len(periods) > 2 and pd.Timestamp(periods[-1]) > last_avail_ts:
+            periods = periods[:-1]
+
     open_iter_idx = -1
     if config.include_open_period:
-        last_avail_ts: pd.Timestamp | None = None
-        for s in price_index.values():
-            if s.empty:
-                continue
-            m = s.index.max()
-            if last_avail_ts is None or m > last_avail_ts:
-                last_avail_ts = m
         if last_avail_ts is not None and pd.Timestamp(periods[-1]) < last_avail_ts:
             periods = list(periods) + [last_avail_ts.date()]
             open_iter_idx = len(periods) - 2  # index in periods[:-1] for the open entry
@@ -189,6 +207,25 @@ def run_backtest(
         # cadences round to month-name for progress lines like
         # "Computing signals for May 2024…".
         return d.isoformat() if sub_monthly else d.strftime("%b %Y")
+
+    # Global trading calendar (union of every company's price dates). Used
+    # to price each rebalance at the PRIOR trading day's close — the same
+    # bar the signals are computed from (strict-`<` the rebalance date). So
+    # a first-Wednesday rebalance enters at Tuesday's close, first-Monday at
+    # the prior Friday's close, etc. — decision and execution on the same
+    # observable close, no look-ahead. The signal cutoff still uses the
+    # unshifted `period_date`; only the price lookups shift.
+    _all_trading_days = (
+        pd.DatetimeIndex(np.unique(np.concatenate([s.index.values for s in price_index.values()])))
+        if price_index else pd.DatetimeIndex([])
+    )
+
+    def _prev_trading_ts(d: date) -> pd.Timestamp:
+        """The last trading day strictly before `d`. Falls back to `d`
+        itself when there's no earlier bar (start of data)."""
+        ts = pd.Timestamp(d)
+        pos = _all_trading_days.searchsorted(ts, side="left")
+        return _all_trading_days[pos - 1] if pos > 0 else ts
 
     period_records: list[PeriodRecord] = []
     # Roll up empty-selection events into a single warning emitted at
@@ -306,8 +343,14 @@ def run_backtest(
         # the effective `open_as_of`. Branches 1 and 2 above already
         # `continue`d on empty `signals_df`, so we always have a non-
         # empty candidate set here.
-        entry_ts = pd.Timestamp(period_date)
-        closed_exit_ts = pd.Timestamp(next_period)
+        # Price entries/exits at the prior trading day's close (see
+        # `_prev_trading_ts`). The open period's exit is a valuation at the
+        # latest available close — a "value as of today" point, not a
+        # rebalance boundary — so it is NOT shifted back.
+        entry_ts = _prev_trading_ts(period_date)
+        closed_exit_ts = (
+            pd.Timestamp(next_period) if is_open_iter else _prev_trading_ts(next_period)
+        )
         # Variant-sweep cache short-circuit: when the orchestrator
         # precomputed per-period baselines for this (universe, freq),
         # reuse the cached `(return_pct, n_constituents)` instead of
@@ -358,6 +401,8 @@ def run_backtest(
                 benchmark_price_index=benchmark_price_index,
                 benchmark_meta=benchmark_meta,
                 record_label=_record_label(period_date),
+                price_entry_ts=entry_ts,
+                price_exit_ts=closed_exit_ts,
             )
         else:
             outcome = compute_selection_period(
@@ -372,6 +417,8 @@ def run_backtest(
                 scored_df=scored_df,
                 price_cache=price_cache,
                 selection_cache=selection_cache,
+                price_entry_ts=entry_ts,
+                price_exit_ts=closed_exit_ts,
             )
 
         # Forward any warnings the branch raised. Done before the
@@ -645,6 +692,7 @@ def run_multi_trial_backtest(
         prices_local_df=prices_local_df,
         monthly_eligible=monthly_eligible,
         frequency=config.rebalance_frequency,
+        rebalance_weekday=config.rebalance_weekday,
     )
 
     trial_results: list[BacktestResult] = []

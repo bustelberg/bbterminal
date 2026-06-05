@@ -39,10 +39,10 @@ export default function CompanyPicker({
         onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         placeholder={selected ? `${selected.company_name || selected.gurufocus_ticker}` : 'Search company or ticker...'}
-        className="w-full bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2.5 text-white placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+        className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2.5 text-fg-strong placeholder-fg-subtle focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
       />
       {open && filtered.length > 0 && (
-        <div className="absolute z-50 mt-1 w-full max-h-64 overflow-y-auto bg-[#151821] border border-gray-700 rounded-lg shadow-xl">
+        <div className="absolute z-50 mt-1 w-full max-h-64 overflow-y-auto bg-card border border-neutral-700 rounded-lg shadow-xl">
           {filtered.map((c) => (
             <button
               key={c.company_id}
@@ -51,11 +51,11 @@ export default function CompanyPicker({
                 setQuery('');
                 setOpen(false);
               }}
-              className="w-full px-3 py-2 text-left hover:bg-white/[0.04] transition-colors flex items-center gap-3"
+              className="w-full px-3 py-2 text-left hover:bg-overlay/[0.04] transition-colors flex items-center gap-3"
             >
-              <span className="font-mono text-indigo-400 text-sm">{c.gurufocus_ticker}</span>
-              <span className="text-gray-300 text-sm truncate">{c.company_name || '—'}</span>
-              <span className="text-gray-600 text-xs ml-auto">{c.gurufocus_exchange}</span>
+              <span className="font-mono text-accent-400 text-sm">{c.gurufocus_ticker}</span>
+              <span className="text-fg-soft text-sm truncate">{c.company_name || '—'}</span>
+              <span className="text-fg-faint text-xs ml-auto">{c.gurufocus_exchange}</span>
             </button>
           ))}
         </div>

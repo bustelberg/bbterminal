@@ -8,7 +8,7 @@ so the SSE stream stays byte-identical."""
 from __future__ import annotations
 
 import asyncio
-import json
+from routers._sse import sse_event as _emit
 
 from deps import supabase
 
@@ -181,10 +181,6 @@ def _load_index_universe(
     # contract: `(last_refreshed_at, dict)`.
     full_universe_cache.put(cache_key, (last_refreshed, result))
     return result
-
-
-def _emit(data: dict) -> str:
-    return f"data: {json.dumps(data)}\n\n"
 
 
 _LEONTEQ_GROUPED_UNIVERSES = ("LEONTEQ", "ACWI_LEONTEQ")

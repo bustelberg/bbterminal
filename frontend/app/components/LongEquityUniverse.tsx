@@ -80,18 +80,18 @@ const REGION_ORDER: Region[] = ['USA', 'EU', 'Non-EU'];
 
 function CompanyRow({ c }: { c: Company }) {
   return (
-    <div className="grid grid-cols-[6rem_5rem_7rem_1fr] gap-x-3 py-1.5 pl-4 text-sm hover:bg-white/[0.02] rounded-lg transition-colors">
-      <span className="text-white font-medium truncate">{c.gurufocus_ticker}</span>
-      <span className="text-gray-500 truncate text-xs">{c.gurufocus_exchange}</span>
-      <span className="text-gray-500 truncate text-xs">{c.country?.trim() ?? '—'}</span>
-      <span className="text-gray-400 truncate">{c.company_name ?? '—'}</span>
+    <div className="grid grid-cols-[6rem_5rem_7rem_1fr] gap-x-3 py-1.5 pl-4 text-sm hover:bg-overlay/[0.02] rounded-lg transition-colors">
+      <span className="text-fg-strong font-medium truncate">{c.gurufocus_ticker}</span>
+      <span className="text-fg-subtle truncate text-xs">{c.gurufocus_exchange}</span>
+      <span className="text-fg-subtle truncate text-xs">{c.country?.trim() ?? '—'}</span>
+      <span className="text-fg-muted truncate">{c.company_name ?? '—'}</span>
     </div>
   );
 }
 
 function CompanyTableHeader() {
   return (
-    <div className="grid grid-cols-[6rem_5rem_7rem_1fr] gap-x-3 py-1.5 pl-4 text-xs font-medium text-gray-500 border-b border-gray-800/40 mb-0.5">
+    <div className="grid grid-cols-[6rem_5rem_7rem_1fr] gap-x-3 py-1.5 pl-4 text-xs font-medium text-fg-subtle border-b border-neutral-800/40 mb-0.5">
       <span>Ticker</span>
       <span>Exchange</span>
       <span>Country</span>
@@ -106,11 +106,11 @@ function CountryGroup({ country, companies }: { country: string; companies: Comp
     <div>
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-300 hover:text-white hover:bg-white/[0.03] rounded-lg transition-colors"
+        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-fg-soft hover:text-fg-strong hover:bg-overlay/[0.03] rounded-lg transition-colors"
       >
-        <span className="text-gray-500 text-xs">{open ? '\u25BE' : '\u25B8'}</span>
+        <span className="text-fg-subtle text-xs">{open ? '\u25BE' : '\u25B8'}</span>
         <span>{country}</span>
-        <span className="ml-auto text-gray-500 text-xs">{companies.length}</span>
+        <span className="ml-auto text-fg-subtle text-xs">{companies.length}</span>
       </button>
       {open && (
         <div className="mb-1">
@@ -127,17 +127,17 @@ function RegionSection({ region, countryMap, total }: { region: Region; countryM
   const countries = Object.keys(countryMap).sort();
 
   return (
-    <div className="bg-[#151821] border border-gray-800/40 rounded-xl mb-3 overflow-hidden">
+    <div className="bg-card border border-neutral-800/40 rounded-xl mb-3 overflow-hidden">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-3 px-5 py-3 text-left hover:bg-white/[0.02] transition-colors"
+        className="w-full flex items-center gap-3 px-5 py-3 text-left hover:bg-overlay/[0.02] transition-colors"
       >
-        <span className="text-gray-400 text-xs">{open ? '\u25BE' : '\u25B8'}</span>
-        <span className="text-sm font-semibold text-white">{region}</span>
-        <span className="text-xs text-gray-500 ml-auto">{total} companies</span>
+        <span className="text-fg-muted text-xs">{open ? '\u25BE' : '\u25B8'}</span>
+        <span className="text-sm font-semibold text-fg-strong">{region}</span>
+        <span className="text-xs text-fg-subtle ml-auto">{total} companies</span>
       </button>
       {open && (
-        <div className="border-t border-gray-800/40 px-3 py-2">
+        <div className="border-t border-neutral-800/40 px-3 py-2">
           {countries.map((country) => (
             <CountryGroup key={country} country={country} companies={countryMap[country]} />
           ))}
@@ -154,13 +154,13 @@ function ChangesBadge({ companies, label, color }: { companies: Company[]; label
     <div className="mb-2">
       <button
         onClick={() => setOpen((o) => !o)}
-        className={`flex items-center gap-2 text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-white/[0.03] transition-colors ${color}`}
+        className={`flex items-center gap-2 text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-overlay/[0.03] transition-colors ${color}`}
       >
         <span className="text-xs">{open ? '\u25BE' : '\u25B8'}</span>
         <span>{label} ({companies.length})</span>
       </button>
       {open && (
-        <div className="mt-1 bg-[#151821] border border-gray-800/40 rounded-xl px-3 py-2 overflow-hidden">
+        <div className="mt-1 bg-card border border-neutral-800/40 rounded-xl px-3 py-2 overflow-hidden">
           <CompanyTableHeader />
           {companies.map((c) => <CompanyRow key={c.company_id} c={c} />)}
         </div>
@@ -311,24 +311,24 @@ export default function LongEquityUniverse() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-8 py-5 border-b border-gray-800/60 flex items-center justify-between gap-6">
+      <div className="px-8 py-5 border-b border-neutral-800/60 flex items-center justify-between gap-6">
         <div>
-          <h1 className="text-lg font-semibold text-white">LongEquity Universe</h1>
-          <p className="text-xs text-gray-500 mt-0.5">
+          <h1 className="text-lg font-semibold text-fg-strong">LongEquity Universe</h1>
+          <p className="text-xs text-fg-subtle mt-0.5">
             Per-month snapshots of LongEquity reports. The cumulative <span className="font-mono">LongEquity</span> universe (every company ever seen) is rebuilt automatically at the end of each ingest.
           </p>
         </div>
         <div className="flex items-center gap-4 shrink-0">
           {hasLoaded && (
             <div className="text-right text-sm">
-              <div className="text-gray-400">
+              <div className="text-fg-muted">
                 Latest available:{' '}
-                <span className="text-white font-medium">
+                <span className="text-fg-strong font-medium">
                   {loadingAvailable ? 'Checking...' : latestAvailable ?? '—'}
                 </span>
               </div>
               {!loadingAvailable && latestAvailable && (
-                <div className="text-xs text-gray-600">
+                <div className="text-xs text-fg-faint">
                   as of {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
                 </div>
               )}
@@ -337,14 +337,14 @@ export default function LongEquityUniverse() {
           <button
             onClick={loadAll}
             disabled={snapshotsLoading || loadingAvailable}
-            className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-700/60 text-gray-300 hover:text-white hover:border-gray-600 disabled:opacity-50 transition-colors whitespace-nowrap"
+            className="px-4 py-2 rounded-lg text-sm font-medium border border-neutral-700/60 text-fg-soft hover:text-fg-strong hover:border-neutral-600 disabled:opacity-50 transition-colors whitespace-nowrap"
           >
             {snapshotsLoading || loadingAvailable ? <LoadingDots label="Loading" /> : hasLoaded ? 'Refresh' : 'Load'}
           </button>
           <button
             onClick={runIngest}
             disabled={ingesting}
-            className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors whitespace-nowrap"
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-accent-600 hover:bg-accent-500 disabled:opacity-50 text-fg-strong transition-colors whitespace-nowrap"
           >
             {ingesting ? 'Running...' : 'Run ingest'}
           </button>
@@ -374,20 +374,20 @@ export default function LongEquityUniverse() {
         })()}
 
         {!hasLoaded ? (
-          <p className="text-sm text-gray-500">
-            Click <span className="text-gray-300">Load</span> to fetch saved snapshots, or <span className="text-gray-300">Run ingest</span> to pull the latest LongEquity data.
+          <p className="text-sm text-fg-subtle">
+            Click <span className="text-fg-soft">Load</span> to fetch saved snapshots, or <span className="text-fg-soft">Run ingest</span> to pull the latest LongEquity data.
           </p>
         ) : snapshotsLoading ? (
           <div>
-            <div className="h-4 w-32 rounded bg-gray-800/60 animate-pulse mb-3" />
+            <div className="h-4 w-32 rounded bg-neutral-800/60 animate-pulse mb-3" />
             <div className="flex gap-1.5 pb-3 overflow-hidden">
               {Array.from({ length: 8 }).map((_, i) => (
-                <div key={i} className="h-7 w-14 rounded-lg bg-gray-800/40 animate-pulse shrink-0" />
+                <div key={i} className="h-7 w-14 rounded-lg bg-neutral-800/40 animate-pulse shrink-0" />
               ))}
             </div>
           </div>
         ) : snapshots.length === 0 ? (
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-fg-subtle">
             {ingesting ? 'Starting ingest pipeline...' : 'No snapshots found. Run ingest to populate LongEquity data.'}
           </p>
         ) : (
@@ -395,10 +395,10 @@ export default function LongEquityUniverse() {
             {/* Snapshot stats section */}
             <div>
               <div className="flex items-baseline justify-between mb-3">
-                <h2 className="text-sm font-semibold text-white">
+                <h2 className="text-sm font-semibold text-fg-strong">
                   Snapshot stats
                   {selectedSnapshot && (
-                    <span className="ml-2 text-xs font-normal text-gray-500">
+                    <span className="ml-2 text-xs font-normal text-fg-subtle">
                       {snapshotLabel(selectedSnapshot.target_date)}
                     </span>
                   )}
@@ -413,8 +413,8 @@ export default function LongEquityUniverse() {
                     onClick={() => setSelectedDate(s.target_date)}
                     className={`shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                       s.target_date === selectedDate
-                        ? 'bg-indigo-600/15 text-indigo-400'
-                        : 'text-gray-500 hover:text-white hover:bg-white/5'
+                        ? 'bg-accent-600/15 text-accent-400'
+                        : 'text-fg-subtle hover:text-fg-strong hover:bg-overlay/5'
                     }`}
                   >
                     {snapshotShortLabel(s.target_date)}
@@ -422,24 +422,24 @@ export default function LongEquityUniverse() {
                 ))}
               </div>
 
-              {loading && <p className="text-sm text-gray-500"><LoadingDots label="Loading" /></p>}
+              {loading && <p className="text-sm text-fg-subtle"><LoadingDots label="Loading" /></p>}
 
               {!loading && data && (
                 <>
                   <div className="mb-5 flex justify-end">
                     <button
                       onClick={() => downloadCsv(data.companies, selectedSnapshot?.target_date ?? 'export')}
-                      className="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 border border-gray-700/60 hover:text-white hover:border-gray-600 transition-colors"
+                      className="px-4 py-2 rounded-lg text-sm font-medium text-fg-muted border border-neutral-700/60 hover:text-fg-strong hover:border-neutral-600 transition-colors"
                     >
                       Download CSV
                     </button>
                   </div>
 
                   {(data.added.length > 0 || data.removed.length > 0) && (
-                    <div className="mb-5 bg-[#151821] border border-gray-800/40 rounded-xl px-5 py-3">
-                      <p className="text-xs font-medium text-gray-500 mb-2">Changes vs previous month</p>
-                      <ChangesBadge companies={data.added} label="Added" color="text-emerald-400" />
-                      <ChangesBadge companies={data.removed} label="Removed" color="text-rose-400" />
+                    <div className="mb-5 bg-card border border-neutral-800/40 rounded-xl px-5 py-3">
+                      <p className="text-xs font-medium text-fg-subtle mb-2">Changes vs previous month</p>
+                      <ChangesBadge companies={data.added} label="Added" color="text-pos-400" />
+                      <ChangesBadge companies={data.removed} label="Removed" color="text-neg-400" />
                     </div>
                   )}
 

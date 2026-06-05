@@ -2,11 +2,12 @@ import type { Dispatch, SetStateAction } from 'react';
 
 /**
  * `DateRangeRow` — the Start / End / Max-Companies fields at the top of
- * `/backtest`'s config panel. (The universe picker that used to live here
- * moved into the Variants panel, so this row is purely date + sizing.)
- * Presentational; state is owned by `useBacktestConfig`. Returns a
- * Fragment so the three fields stay direct children of the parent's flex
- * row and keep their `gap-5` spacing.
+ * `/backtest`'s config panel. (The universe picker moved into the Variants
+ * panel; the rebalance-day knob moved there too — it's now a per-variant
+ * sweep axis, so the base config no longer carries it.) Presentational;
+ * state is owned by `useBacktestConfig`. Returns a Fragment so the fields
+ * stay direct children of the parent's flex row and keep their `gap-5`
+ * spacing.
  */
 export default function DateRangeRow({
   startDate,
@@ -32,39 +33,39 @@ export default function DateRangeRow({
   return (
     <>
       <div>
-        <label className="text-gray-500 text-xs block mb-1">Start</label>
+        <label className="text-fg-subtle text-xs block mb-1">Start</label>
         <input
           type="month"
           value={startDate}
           onChange={(e) => setStartDate(e.target.value)}
           min="1998-01"
           max={`${currentYear + 1}-12`}
-          className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+          className="bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
         />
       </div>
       <div>
-        <label className="text-gray-500 text-xs block mb-1">End</label>
+        <label className="text-fg-subtle text-xs block mb-1">End</label>
         <input
           type="month"
           value={endDate}
           onChange={(e) => setEndDate(e.target.value)}
           min="1998-01"
           max={`${currentYear + 1}-12`}
-          className="bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+          className="bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
         />
       </div>
       <div>
-        <label className="text-gray-500 text-xs block mb-1">Max Companies</label>
+        <label className="text-fg-subtle text-xs block mb-1">Max Companies</label>
         <input
           type="number"
           min={0}
           max={500}
           value={maxCompanies}
           onChange={(e) => setMaxCompanies(Number(e.target.value))}
-          className="w-20 bg-[#0f1117] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+          className="w-20 bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono text-center focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
           title="0 = all companies, otherwise limit alphabetically"
         />
-        <span className="text-gray-600 text-xs ml-1">0 = all</span>
+        <span className="text-fg-faint text-xs ml-1">0 = all</span>
       </div>
     </>
   );

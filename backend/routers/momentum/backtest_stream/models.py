@@ -32,6 +32,12 @@ class VariantSpec(BaseModel):
     universe_label: str | None = None
     index_universe: str | None = None
     grouping: Literal["sector", "industry"] | None = None
+    # Weekday each rebalance lands on (Mon=0..Sun=6). None inherits the
+    # base request's `rebalance_weekday`. Lets a sweep compare e.g. first-
+    # Monday vs first-Wednesday rebalances — signals are computed strict-`<`
+    # the rebalance date, so a Wednesday variant decides on the prior
+    # trading day's (Tuesday's) close and enters at Wednesday's close.
+    rebalance_weekday: int | None = None
 
 
 class BacktestRequest(BaseModel):
@@ -85,6 +91,11 @@ class BacktestRequest(BaseModel):
         "every_6_months", "every_7_months", "every_8_months", "every_9_months",
         "every_10_months", "every_11_months", "every_12_months",
     ] = "monthly"
+    # Weekday each rebalance lands on within its period: Mon=0..Sun=6.
+    # 0 (Monday) is the historical default. 2 (Wednesday) rebalances on
+    # the first Wednesday of each period, computing signals from data
+    # through the prior trading day's close. Ignored for daily frequency.
+    rebalance_weekday: int = 0
     strategy_type: Literal["long_only", "long_short"] = "long_only"
     # When set (non-empty), the request becomes a variants sweep: the data
     # pipeline (universe load → ensure → bulk-load prices/volumes → FX) runs

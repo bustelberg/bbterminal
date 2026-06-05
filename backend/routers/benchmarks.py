@@ -24,14 +24,10 @@ from pydantic import BaseModel
 
 from deps import supabase
 from ingest.api_usage import track_api_call
+from ingest.constants import DATA_CUTOFF
 from ingest.prices import _fetch_price_from_api, _parse_price_series
 
 router = APIRouter(tags=["benchmarks"])
-
-# Benchmark prices respect the same cutoff as company prices — keeps the
-# benchmark_price table from carrying dot-com-bubble history that the
-# strategy never references (start_date defaults to 2002 in the UI).
-_BM_CUTOFF = date(1998, 1, 1)
 
 
 class CreateBenchmarkRequest(BaseModel):
@@ -48,11 +44,13 @@ class UpdateBenchmarkSectorRequest(BaseModel):
 
 async def _bulk_upsert_prices(benchmark_id: int, parsed: list[tuple[date, float]]) -> int:
     """Upsert a parsed price series into benchmark_price in batches of 500.
-    Returns the number of rows loaded (after applying the _BM_CUTOFF)."""
+    Returns the number of rows loaded (after applying DATA_CUTOFF — the same
+    cutoff as company prices, keeping dot-com-bubble history the strategy
+    never references out of benchmark_price)."""
     rows = [
         {"benchmark_id": benchmark_id, "target_date": d.isoformat(), "price": p}
         for d, p in parsed
-        if d >= _BM_CUTOFF
+        if d >= DATA_CUTOFF
     ]
     batch_size = 500
     total_loaded = 0
