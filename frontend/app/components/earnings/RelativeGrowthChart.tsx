@@ -39,27 +39,15 @@ function buildIndexed(metrics: MetricRow[], anchorDate: string | null = null): I
   const annualPrice = annualSeries(metrics, MC.PRICE);
   const priceSeries = dailyPrice.length > 0 ? dailyPrice : annualPrice;
 
-  const epsActual = annualSeries(metrics, MC.EPS_WO_NRI);
-  const divActual = annualSeries(metrics, MC.DIV_PS);
-  const epsEst = annualSeries(metrics, MC.EPS_EST);
-  const divEst = annualSeries(metrics, MC.DIV_EST);
-
-  // OE actual = EPS_WO_NRI + DIV_PS per year
-  const divMap: Record<string, number> = {};
-  for (const d of divActual) divMap[d.date.slice(0, 4)] = d.value;
-  const oeActual = epsActual.map((e) => {
-    const yr = e.date.slice(0, 4);
-    const div = divMap[yr] ?? 0;
-    return { date: e.date, value: e.value + div };
-  });
-  // OE estimate = EPS_EST + DIV_EST per year
-  const divEstMap: Record<string, number> = {};
-  for (const d of divEst) divEstMap[d.date.slice(0, 4)] = d.value;
-  const oeEst = epsEst.map((e) => {
-    const yr = e.date.slice(0, 4);
-    const div = divEstMap[yr] ?? 0;
-    return { date: e.date, value: e.value + div };
-  });
+  // Owner earnings per share ≈ EPS (ex-NRI). Dividends are deliberately NOT
+  // added: a dividend is a distribution OF earnings, not earnings on top of
+  // them (EPS = retained EPS + dividend per share). Adding DPS would
+  // double-count the paid-out slice — and would distort the growth slope
+  // whenever the payout ratio changes (a company initiating/raising a
+  // dividend would show fake "owner-earnings growth" on flat EPS). The chart
+  // compares price growth to this earnings-power growth — a P/E-multiple read.
+  const oeActual = annualSeries(metrics, MC.EPS_WO_NRI);
+  const oeEst = annualSeries(metrics, MC.EPS_EST);
 
   if (priceSeries.length === 0 || oeActual.length === 0) {
     return { data: [], cagrs: { price: null, oe_act: null, oe_est: null }, startDate: null };
@@ -146,8 +134,8 @@ type Props = {
   loadingB?: boolean;
 };
 
-/** Log-scale chart comparing share price growth to Owner Earnings (EPS +
- * Dividends), both indexed to 100 at the first overlapping year. Three
+/** Log-scale chart comparing share price growth to Owner Earnings (EPS,
+ * ex-NRI), both indexed to 100 at the first overlapping year. Three
  * series: price (indigo), OE actual (emerald), OE estimate (rose). With
  * `metricsB` supplied, three additional dashed lines render in the same
  * colors so the user can pair "solid A vs dashed B" by hue. Both
@@ -205,7 +193,7 @@ export default function RelativeGrowthChart({ metrics, metricsB, labelA, labelB,
         {hasB && combined.commonStart && (
           <span className="text-fg-faint font-mono">(common start {combined.commonStart})</span>
         )}
-        <InfoTip text="Compares share price growth to Owner Earnings (EPS + Dividends) growth on a log scale. If price grows faster than OE, the stock is getting more expensive (multiple expansion). If OE outpaces price, it's getting cheaper. In comparison mode, both companies are rebased to 100 at the same start date so their indexed slopes are directly comparable." />
+        <InfoTip text="Compares share price growth to Owner Earnings — EPS excluding non-recurring items — growth on a log scale. (Dividends aren't added: a dividend is a distribution of EPS, not earnings on top of it, so EPS + dividends would double-count the paid-out portion.) If price grows faster than OE, the stock is getting more expensive (multiple expansion). If OE outpaces price, it's getting cheaper. In comparison mode, both companies are rebased to 100 at the same start date so their indexed slopes are directly comparable." />
       </div>
       <div className="flex flex-wrap gap-x-5 gap-y-1 mb-2">
         <div className="flex items-center gap-1.5">
