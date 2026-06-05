@@ -64,6 +64,18 @@ def _get_category_keys() -> dict[str, list[str]]:
     return cats
 
 
+def extract_category_scores(row: pd.Series) -> dict[str, float | None]:
+    """Per-category 0-100 scores off a scored row, rounded to 1dp. None for
+    any category whose `score_<cat>` column is absent or NaN. Shared by the
+    period + current-portfolio holding builders (the `score_<cat>` columns are
+    produced by `compute_category_scores`)."""
+    out: dict[str, float | None] = {}
+    for cat in _get_category_keys():
+        col = f"score_{cat}"
+        out[cat] = round(float(row[col]), 1) if col in row.index and pd.notna(row[col]) else None
+    return out
+
+
 def compute_category_scores(
     df: pd.DataFrame,
     signal_weights: dict[str, float],

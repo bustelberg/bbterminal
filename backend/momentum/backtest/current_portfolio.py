@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 import pandas as pd
 
-from ..scoring import _get_category_keys, score_and_select
+from ..scoring import extract_category_scores, score_and_select
 from ..signals import compute_signals_panel
 from .dates import _first_weekday_on_or_after
 from .indices import (
@@ -231,13 +231,7 @@ def run_current_portfolio(
             else None
         )
 
-        cat_scores: dict[str, float | None] = {}
-        for cat in _get_category_keys():
-            col = f"score_{cat}"
-            if col in row.index and pd.notna(row[col]):
-                cat_scores[cat] = round(float(row[col]), 1)
-            else:
-                cat_scores[cat] = None
+        cat_scores = extract_category_scores(row)
 
         score_val = row.get("momentum_score")
         sec_rank = row.get("sector_rank")
@@ -368,13 +362,7 @@ def run_current_portfolio(
             entry_dt_pair = _price_on_or_before(date_series, day_ts) if date_series is not None else None
             entry_dt = entry_dt_pair[1].strftime("%Y-%m-%d") if entry_dt_pair is not None else None
 
-            cat_scores: dict[str, float | None] = {}
-            for cat in _get_category_keys():
-                col = f"score_{cat}"
-                if col in drow.index and pd.notna(drow[col]):
-                    cat_scores[cat] = round(float(drow[col]), 1)
-                else:
-                    cat_scores[cat] = None
+            cat_scores = extract_category_scores(drow)
 
             sec_rank = drow.get("sector_rank")
             co_rank = drow.get("company_rank")
