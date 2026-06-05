@@ -16,7 +16,7 @@ import os
 from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from dotenv import load_dotenv
-from supabase import create_client
+from supabase import ClientOptions, create_client  # ClientOptions == SyncClientOptions
 
 if TYPE_CHECKING:
     from supabase import Client
@@ -52,9 +52,22 @@ class _LazySupabase:
     def _build(self) -> "Client":
         real = object.__getattribute__(self, "_real")
         if real is None:
+            # Bound every PostgREST/Storage call. The default postgrest
+            # timeout is 120s — far too long for a worker thread to hold when
+            # Supabase slows (e.g. the ingest pipeline contends with many
+            # polling read endpoints), which lets the default `to_thread`
+            # pool starve and read endpoints (/api/usage, …) hang until the
+            # client gives up (~300s). 30s fails fast instead; the pipeline's
+            # `_retry_transient` re-tries timed-out metric_data upserts, and
+            # read endpoints catch + return empty, so a slow dependency
+            # degrades gracefully rather than wedging the UI.
             real = create_client(
                 os.environ["SUPABASE_URL"],
                 os.environ["SUPABASE_SERVICE_KEY"],
+                options=ClientOptions(
+                    postgrest_client_timeout=30,
+                    storage_client_timeout=30,
+                ),
             )
             object.__setattr__(self, "_real", real)
         return real

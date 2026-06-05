@@ -23,6 +23,12 @@ export type DisplayRow = {
   label: string | null;
   turnoverDate: string | null;
   net: boolean;
+  /** Window this row's return spans (YYYY-MM[-DD]). Drives the partial
+   * net-of-fees calc for open periods + go-live sub-slices. `windowEnd` is
+   * null for a normal closed period (its net comes from the closed-period
+   * fee curve, not the partial calc). */
+  windowStart: string;
+  windowEnd: string | null;
 };
 
 /** Minimal daily-equity-curve point (strategy or universe). */
@@ -148,7 +154,11 @@ export function splitAtGoLive(args: {
 }): DisplayRow[] {
   const { records, markerDate, goLivePrices } = args;
   const passthrough = (): DisplayRow[] =>
-    records.map((r) => ({ row: r, key: r.date, label: null, turnoverDate: r.date, net: true }));
+    records.map((r) => ({
+      row: r, key: r.date, label: null, turnoverDate: r.date, net: true,
+      windowStart: r.date.slice(0, 10),
+      windowEnd: r.as_of_date ? r.as_of_date.slice(0, 10) : null,
+    }));
   if (!markerDate) return passthrough();
 
   const stratSeries = (args.dailyRecords ?? []).map((d) => ({ date: d.date.slice(0, 10), cumulative_return_pct: d.cumulative_return_pct }));
@@ -161,7 +171,13 @@ export function splitAtGoLive(args: {
     const start = r.date.slice(0, 10);
     const end = i + 1 < records.length ? records[i + 1].date.slice(0, 10) : (r.as_of_date ?? null);
     const inside = markerDate > start && (end == null || markerDate < end);
-    if (!inside) { out.push({ row: r, key: r.date, label: null, turnoverDate: r.date, net: true }); continue; }
+    if (!inside) {
+      out.push({
+        row: r, key: r.date, label: null, turnoverDate: r.date, net: true,
+        windowStart: start, windowEnd: r.as_of_date ? r.as_of_date.slice(0, 10) : null,
+      });
+      continue;
+    }
 
     const cStart = cumAt(stratSeries, start);
     const cGo = cumAt(stratSeries, markerDate);
@@ -222,8 +238,15 @@ export function splitAtGoLive(args: {
       is_open: r.is_open,
       as_of_date: r.as_of_date,
     };
-    out.push({ row: pre, key: `${r.date}__pre`, label: `${start} → ${markerDate} · pre go-live`, turnoverDate: r.date, net: false });
-    out.push({ row: post, key: `${r.date}__post`, label: `${markerDate} → ${end ?? 'now'} · go-live →`, turnoverDate: null, net: false });
+    out.push({
+      row: pre, key: `${r.date}__pre`, label: `${start} → ${markerDate} · pre go-live`,
+      turnoverDate: r.date, net: false, windowStart: start, windowEnd: markerDate,
+    });
+    out.push({
+      row: post, key: `${r.date}__post`, label: `${markerDate} → ${end ?? 'now'} · go-live →`,
+      turnoverDate: null, net: false, windowStart: markerDate,
+      windowEnd: end ?? (r.as_of_date ? r.as_of_date.slice(0, 10) : null),
+    });
   }
   return out;
 }

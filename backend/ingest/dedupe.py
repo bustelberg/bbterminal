@@ -131,24 +131,60 @@ class CompanyRow:
     gurufocus_ticker: str | None
     exchange_code: str | None
     exchange_id: int | None
+    # "Known-bad listing" markers — a row carrying either, or one on an
+    # exchange outside GuruFocus coverage, loses the dedupe tiebreak to a
+    # clean sibling (see pick_winner). Default None so existing constructions
+    # that don't need them keep working.
+    gurufocus_lookup_failed_at: str | None = None
+    out_of_scope_at: str | None = None
+
+
+# US listings are GuruFocus-feasible, but their DB exchange_code is the real
+# code (NYSE/NASDAQ/…) whereas FEASIBLE_GF_EXCHANGES encodes US as '' (the
+# GuruFocus URL convention), so map them explicitly.
+_US_DB_EXCHANGE_CODES = {'NYSE', 'NASDAQ', 'AMEX', 'CBOE'}
+
+
+def _is_gf_feasible(exchange_code: str | None) -> bool:
+    """True if a listing on this exchange can carry GuruFocus data (the
+    subscription's coverage). Out-of-scope exchanges (LatAm/AU/NZ/Africa/…)
+    can only ever produce a phantom row."""
+    from index_universe.acwi.exchange_map import FEASIBLE_GF_EXCHANGES  # noqa: PLC0415
+    code = (exchange_code or '').strip().upper()
+    return code in _US_DB_EXCHANGE_CODES or code in FEASIBLE_GF_EXCHANGES
+
+
+def _is_viable(c: CompanyRow) -> bool:
+    """A listing that can hold real GuruFocus data — not a known phantom.
+    Non-viable when GuruFocus lookup failed, the row is marked out-of-scope,
+    or it sits on an exchange outside GuruFocus coverage."""
+    if c.gurufocus_lookup_failed_at or c.out_of_scope_at:
+        return False
+    return _is_gf_feasible(c.exchange_code)
 
 
 def pick_winner(candidates: list[CompanyRow]) -> CompanyRow:
     """Pick the survivor when multiple rows describe the same issuer.
 
     Order, lowest first:
-      1. EXCHANGE_PRIORITY (HKSE wins, US ADRs lose).
-      2. For HKSE-only ties: prefer the zero-padded 5-digit form over
+      1. VIABILITY — a viable listing (real GuruFocus data possible) always
+         beats a phantom (lookup-failed / out-of-scope / off-coverage
+         exchange). Without this a misrouted out-of-scope listing (e.g. a
+         BMV phantom) could outrank the real US/Europe listing purely on
+         EXCHANGE_PRIORITY, deleting the row that actually has prices.
+      2. EXCHANGE_PRIORITY (HKSE wins, US ADRs lose).
+      3. For HKSE-only ties: prefer the zero-padded 5-digit form over
          shorter strings (the canonical GuruFocus form).
-      3. Lowest `company_id` — the oldest row wins on full ties so the
+      4. Lowest `company_id` — the oldest row wins on full ties so the
          outcome is deterministic across runs."""
     def key(c: CompanyRow):
+        viable_tier = 0 if _is_viable(c) else 1  # viable rows win outright
         prio = exchange_priority(c.exchange_code)
         exch = (c.exchange_code or '').upper()
         tkr = c.gurufocus_ticker or ''
         # Bonus for the canonical HKSE 5-digit form. 0 = prefer.
         padded_bonus = 0 if (exch == 'HKSE' and len(tkr) == 5 and tkr.isdigit()) else 1
-        return (prio, padded_bonus, c.company_id)
+        return (viable_tier, prio, padded_bonus, c.company_id)
     return sorted(candidates, key=key)[0]
 
 
@@ -444,6 +480,7 @@ def merge_existing_duplicates(
         lambda lo, hi: supabase.table('company')
         .select(
             'company_id, company_name, gurufocus_ticker, '
+            'gurufocus_lookup_failed_at, out_of_scope_at, '
             'gurufocus_exchange:gurufocus_exchange(exchange_code, exchange_id)'
         )
         .range(lo, hi)
@@ -456,6 +493,8 @@ def merge_existing_duplicates(
             gurufocus_ticker=r.get('gurufocus_ticker'),
             exchange_code=exch_obj.get('exchange_code'),
             exchange_id=exch_obj.get('exchange_id'),
+            gurufocus_lookup_failed_at=r.get('gurufocus_lookup_failed_at'),
+            out_of_scope_at=r.get('out_of_scope_at'),
         ))
 
     # Group by canonical_name. Empty names get skipped — no way to

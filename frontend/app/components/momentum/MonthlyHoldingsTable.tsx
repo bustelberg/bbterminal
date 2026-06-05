@@ -13,7 +13,7 @@ import CollapsibleCard from './CollapsibleCard';
 // chunk that ships only when the modal is actually opened.
 const TickerTimelineModal = dynamic(() => import('./TickerTimelineModal'), { ssr: false });
 import { parenPct } from './feeStats';
-import { computeFeeWaterfall } from './feeModel';
+import { computeFeeWaterfall, netPartialReturn } from './feeModel';
 import { useClickOutside } from '../../../lib/hooks/useClickOutside';
 import { useFeeConfig } from '../../../lib/hooks/apiData';
 import { EXCHANGE_NAMES, displayExchange, fmtPct, fmtPrice, guruFocusUrl } from './utils';
@@ -219,6 +219,35 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
     [repricedRecords, result, markerDate, goLivePrices],
   );
 
+  // Net-of-fees (period return + cumulative) per DISPLAY row, keyed by rowKey.
+  // A whole closed period reads its authoritative value off the closed-period
+  // fee curve (`netByDate`). An OPEN period or a go-live sub-slice — neither
+  // of which is in that curve — gets the partial net (time-pro-rated ongoing
+  // fees, no perf/transaction); its cumulative chains off the running net
+  // equity, which the next closed period snaps back to the authoritative
+  // value. Walked in render order so the chaining is correct.
+  const netByRow = useMemo<Map<string, { portRet: number | null; cumRet: number | null }>>(() => {
+    const m = new Map<string, { portRet: number | null; cumRet: number | null }>();
+    let runningCum = 1.0; // net equity factor through the prior row
+    for (const dr of displayRows) {
+      const closed = dr.key === dr.row.date ? netByDate.get(dr.row.date) : undefined;
+      if (closed) {
+        m.set(dr.key, { portRet: closed.portRet, cumRet: closed.cumRet });
+        runningCum = 1 + closed.cumRet / 100;
+        continue;
+      }
+      const gross = dr.row.portfolio_return_pct;
+      if (gross == null || dr.windowEnd == null) {
+        m.set(dr.key, { portRet: null, cumRet: null });
+        continue;
+      }
+      const portRet = netPartialReturn(gross, feeConfig, dr.windowStart, dr.windowEnd);
+      runningCum *= 1 + portRet / 100;
+      m.set(dr.key, { portRet, cumRet: (runningCum - 1) * 100 });
+    }
+    return m;
+  }, [displayRows, netByDate, feeConfig]);
+
   // When the active result changes (new run / loaded saved run) collapse
   // any open month so the user starts at a clean view. React 19's
   // recommended pattern for "reset state when a prop changes" is to
@@ -371,7 +400,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
             </tr>
           </thead>
           <tbody>
-            {displayRows.map(({ row: r, key: rowKey, label: rowLabel, turnoverDate: rowTurnover, net: showNet }) => (
+            {displayRows.map(({ row: r, key: rowKey, label: rowLabel, turnoverDate: rowTurnover }) => (
               <Fragment key={rowKey}>
                 <tr
                   className={`border-b border-neutral-800/20 hover:bg-overlay/[0.02] cursor-pointer transition-colors ${rowLabel ? 'border-l-2 border-l-neg-500/60' : ''}`}
@@ -396,7 +425,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                   <td className="text-right px-3 py-2.5 text-fg-muted font-mono">{r.holdings.length}</td>
                   <td className={`text-right px-3 py-2.5 font-mono ${r.portfolio_return_pct != null ? (r.portfolio_return_pct >= 0 ? 'text-pos-400' : 'text-neg-400') : 'text-fg-faint'}`}>
                     {fmtPct(r.portfolio_return_pct)}
-                    <span className="text-fg-subtle">{parenPct(showNet ? netByDate.get(r.date)?.portRet : undefined)}</span>
+                    <span className="text-fg-subtle">{parenPct(netByRow.get(rowKey)?.portRet ?? undefined)}</span>
                   </td>
                   <td
                     className="text-right px-3 py-2.5 font-mono text-fg-subtle"
@@ -443,7 +472,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                   </td>
                   <td className={`text-right px-3 py-2.5 font-mono ${r.cumulative_return_pct >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
                     {fmtPct(r.cumulative_return_pct)}
-                    <span className="text-fg-subtle">{parenPct(showNet ? netByDate.get(r.date)?.cumRet : undefined)}</span>
+                    <span className="text-fg-subtle">{parenPct(netByRow.get(rowKey)?.cumRet ?? undefined)}</span>
                   </td>
                   <td className="text-right px-5 py-2.5 font-mono text-fg-subtle">
                     {r.universe_cumulative_return_pct != null ? fmtPct(r.universe_cumulative_return_pct) : '—'}

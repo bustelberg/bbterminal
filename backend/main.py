@@ -117,6 +117,20 @@ _register_momentum_hooks(app)
 def _reset_stale_backfills() -> None:
     _scheduled_strategies_router.reset_stale_backfills()
 
+# Every blocking Supabase call runs via `asyncio.to_thread`, which uses the
+# default executor — only `min(32, cpu+4)` workers, as low as ~6 on a small
+# Railway container. When Supabase slows (ingest pipeline + many polling
+# clients) those workers stay stuck on in-flight DB calls and new read
+# requests QUEUE behind them, hanging until the client times out (~300s).
+# Give blocking I/O ample headroom so a slow dependency degrades gracefully.
+@app.on_event("startup")
+async def _size_io_thread_pool() -> None:
+    import asyncio  # noqa: PLC0415
+    import concurrent.futures  # noqa: PLC0415
+    asyncio.get_running_loop().set_default_executor(
+        concurrent.futures.ThreadPoolExecutor(max_workers=48, thread_name_prefix="bb-io")
+    )
+
 # In-process APScheduler for the scheduled price/volume ingest jobs
 # (weekly Tue 02:00 UTC + monthly 2nd 02:00 UTC). See scheduler.py for
 # the trade-offs vs Railway-native cron. Set DISABLE_SCHEDULER=1 in the

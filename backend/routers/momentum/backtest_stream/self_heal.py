@@ -32,6 +32,15 @@ from momentum.data import (
 
 from .audit import AuditResult
 
+# Hard cap on how many missing-data companies the backtest will refetch from
+# GuruFocus INLINE. Self-heal is meant for a handful of stragglers (empty
+# Storage JSONs, a new ticker, a failed prior load). When the gap is in the
+# hundreds it means the universe simply hasn't been loaded by the data pipeline
+# yet — refetching all of it inline (e.g. ~1645 LEONTEQ names) would pull the
+# whole universe's price history in one request and OOM-kill the backend. We
+# heal up to this many and tell the user to run the pipeline for the rest.
+_MAX_INLINE_HEAL = 200
+
 
 def compute_gap_cids(
     req,
@@ -39,9 +48,9 @@ def compute_gap_cids(
     pass1_transient: set[int],
     company_ids: list[int],
 ) -> tuple[list[int], list[str]]:
-    """Compute the union of gap company IDs to self-heal, plus an
-    optional `info` event string for the force-recompute retry case
-    (returned as a list so the caller can `yield from` it)."""
+    """Compute the (capped) union of gap company IDs to self-heal, plus
+    optional `info`/`warning` event strings (returned as a list so the caller
+    can `yield from` them)."""
     info_events: list[str] = []
     _stale_cids: set[int] = set()
     if req.mode == "current_portfolio" and req.force_recompute:
@@ -59,6 +68,28 @@ def compute_gap_cids(
             }))
 
     gap_cids = sorted(set(audit.no_price_gap_cids) | set(audit.no_vol_gap_cids) | _stale_cids)
+
+    # Cap the inline heal. A gap in the hundreds means the universe hasn't been
+    # loaded by the pipeline (e.g. a template universe with no scheduled
+    # strategy keeping its prices fresh) — refetching all of it from GuruFocus
+    # inline would OOM-kill the backend. Heal up to the cap; the pipeline loads
+    # the rest. Steady state has 0 gaps, so this never fires on a loaded
+    # universe.
+    if len(gap_cids) > _MAX_INLINE_HEAL:
+        total = len(gap_cids)
+        gap_cids = gap_cids[:_MAX_INLINE_HEAL]
+        info_events.append(_emit({
+            "type": "warning",
+            "scope": "self-heal",
+            "message": (
+                f"{total} companies have no price data yet — this universe "
+                f"hasn't been loaded by the data pipeline. Refetching only "
+                f"{_MAX_INLINE_HEAL} inline to protect the backend; run the "
+                f"pipeline (/schedule → Run now) to load the rest, then re-run "
+                f"the backtest."
+            ),
+        }))
+
     return gap_cids, info_events
 
 

@@ -85,13 +85,15 @@ class TestExchangePriority:
         assert exchange_priority("hkse") == 0
 
 
-def _row(cid: int, ticker: str, exch: str) -> CompanyRow:
+def _row(cid: int, ticker: str, exch: str, *, lookup_failed=None, oos=None) -> CompanyRow:
     return CompanyRow(
         company_id=cid,
         company_name="Same Issuer",
         gurufocus_ticker=ticker,
         exchange_code=exch,
         exchange_id=None,
+        gurufocus_lookup_failed_at=lookup_failed,
+        out_of_scope_at=oos,
     )
 
 
@@ -116,3 +118,32 @@ class TestPickWinner:
     def test_single_candidate(self):
         winner = pick_winner([_row(1, "AAPL", "NASDAQ")])
         assert winner.company_id == 1
+
+
+class TestPickWinnerViability:
+    """Viability beats EXCHANGE_PRIORITY: a phantom listing (lookup-failed /
+    out-of-scope / off-coverage exchange) never wins over a real one."""
+
+    def test_real_us_listing_beats_lookup_failed_out_of_scope_phantom(self):
+        # The ALTM incident: a BMV (Mexican, off-GF-coverage) phantom that
+        # failed GuruFocus lookup must NOT outrank the real NASDAQ listing —
+        # even though BMV (EXCHANGE_PRIORITY 2) ranks above NASDAQ (10).
+        nasdaq = _row(6016, "ALTM", "NASDAQ")
+        bmv = _row(5611, "ALTM", "BMV", lookup_failed="2026-06-01T00:00:00Z")
+        assert pick_winner([bmv, nasdaq]).company_id == 6016
+
+    def test_off_coverage_exchange_loses_even_without_flags(self):
+        # BMV is outside FEASIBLE_GF_EXCHANGES → non-viable on feasibility
+        # alone, so the US row wins despite BMV's higher EXCHANGE_PRIORITY.
+        assert pick_winner([_row(2, "ALTM", "BMV"), _row(9, "ALTM", "NASDAQ")]).company_id == 9
+
+    def test_out_of_scope_flag_down_ranks(self):
+        viable = _row(3, "NESN", "XSWX")
+        oos = _row(1, "NESN", "XSWX", oos="2026-01-01T00:00:00Z")
+        assert pick_winner([oos, viable]).company_id == 3  # viable wins despite higher id
+
+    def test_two_phantoms_fall_back_to_priority_then_id(self):
+        # Both non-viable → tiebreak by EXCHANGE_PRIORITY (BMV 2 < unmapped 99).
+        a = _row(5, "X", "BMV", lookup_failed="t")
+        b = _row(2, "X", "ZZZ", lookup_failed="t")
+        assert pick_winner([a, b]).company_id == 5

@@ -223,18 +223,10 @@ def _latest_membership_company_ids(universe_id: int) -> set[int]:
     return cids
 
 
-def collect_universe_companies(due: list[StrategyPlan]) -> list[dict]:
-    """Pool the latest-month membership of every DUE strategy's universe
-    into the `[{cid,ticker,exchange}]` list `_run_prices_phase` expects.
-
-    Universes are deduped (strategies sharing one universe collect it
-    once). Strategies with no resolvable universe are skipped silently —
-    they'll error in the momentum phase as before."""
-    universe_ids: set[int] = set()
-    for sp in due:
-        if sp.resolved_universe_id is not None:
-            universe_ids.add(sp.resolved_universe_id)
-
+def _collect_companies_for_universe_ids(universe_ids: set[int]) -> list[dict]:
+    """Pool the latest-month membership of the given universes into the
+    `[{cid,ticker,exchange}]` list `_run_prices_phase` expects. Universes are
+    deduped; companies missing a ticker or exchange are skipped (un-fetchable)."""
     if not universe_ids:
         return []
 
@@ -265,3 +257,38 @@ def collect_universe_companies(due: list[StrategyPlan]) -> list[dict]:
             "exchange": exch,
         })
     return out
+
+
+def collect_universe_companies(due: list[StrategyPlan]) -> list[dict]:
+    """Pool the latest-month membership of every DUE strategy's universe
+    into the `[{cid,ticker,exchange}]` list `_run_prices_phase` expects.
+
+    Strategies with no resolvable universe are skipped silently — they'll
+    error in the momentum phase as before."""
+    return _collect_companies_for_universe_ids(
+        {sp.resolved_universe_id for sp in due if sp.resolved_universe_id is not None}
+    )
+
+
+def collect_template_universe_companies(template_keys: set[str]) -> list[dict]:
+    """Pool the latest-month membership of the given template-managed universes
+    (resolved via the template registry) into the price-phase company list.
+
+    Lets the smart pipeline load prices for a template universe even with NO
+    scheduled strategy keeping it warm — otherwise a backtest finds the
+    universe's companies have no price data and its inline self-heal tries to
+    refetch the whole universe at once (the LEONTEQ OOM)."""
+    from index_universe.templates import TEMPLATES  # noqa: PLC0415
+
+    universe_ids: set[int] = set()
+    for key in template_keys:
+        if key not in TEMPLATES:
+            continue
+        try:
+            uid = TEMPLATES[key]().universe_id(supabase)
+        except Exception as e:
+            _log.warning("[planner] universe_id(%s) failed: %s: %s", key, type(e).__name__, e)
+            uid = None
+        if uid is not None:
+            universe_ids.add(uid)
+    return _collect_companies_for_universe_ids(universe_ids)

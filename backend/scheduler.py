@@ -144,29 +144,6 @@ def _reap_orphan_runs() -> None:
         )
 
 
-def _unrefreshed_templates() -> list[str]:
-    """Return `template_key`s for every registered template that's never
-    been refreshed in THIS env (universe row missing, or last_refreshed_at
-    IS NULL on the existing row). Result drives the bootstrap decision."""
-    from deps import supabase  # noqa: PLC0415
-    from index_universe.templates import all_templates  # noqa: PLC0415
-    unrefreshed: list[str] = []
-    for template in all_templates():
-        try:
-            uid = template.universe_id(supabase)
-            if uid is None:
-                unrefreshed.append(template.template_key)
-                continue
-            if template.last_refreshed_at(supabase) is None:
-                unrefreshed.append(template.template_key)
-        except Exception as e:
-            _log.warning(
-                "[scheduler] bootstrap check failed for %s: %s: %s",
-                template.template_key, type(e).__name__, e,
-            )
-    return unrefreshed
-
-
 def _pipeline_already_running() -> bool:
     """True if an `ingest_run` row in `running` state was started in the
     last hour. The bootstrap probe checks this so an in-flight manual run
@@ -191,50 +168,46 @@ def _pipeline_already_running() -> bool:
         return True  # fail-safe: if we can't query, don't double-fire
 
 
-def _needed_templates_behind(needed_keys: set[str]) -> bool:
-    """True when any NEEDED template (one an enabled strategy uses) has
-    never been refreshed in this env or has fallen behind the current
-    month. Unused templates are intentionally ignored — under the
-    dependency-driven model they go stale until a strategy needs them."""
-    if not needed_keys:
-        return False
-    try:
-        behind = set(_unrefreshed_templates()) | set(_stale_templates())
-    except Exception as e:
-        _log.warning("[scheduler] needed-template-behind probe failed: %s: %s", type(e).__name__, e)
-        return False
-    return bool(behind & needed_keys)
-
-
 def _maybe_kickstart_smart(sched: BackgroundScheduler) -> None:
-    """On startup, schedule a one-shot `smart_daily` when anything the
-    enabled strategies need is behind — so an env that was down across the
-    02:00 UTC tick catches up immediately rather than waiting a day. The
-    smart tick is itself dependency-scoped + idempotent, so firing it is
-    always safe. No enabled strategies → no-op (nothing auto-runs, by
-    design). Idempotent via the fixed job id + `replace_existing=True`."""
-    from ingest.phases.planner import build_plan  # noqa: PLC0415 — avoid import cycle
+    """On startup, schedule a one-shot `smart_daily` when there's catch-up work
+    — so an env that was down across the 02:00 UTC tick (or freshly deployed)
+    converges immediately rather than waiting a day. The smart tick is itself
+    dependency-scoped + idempotent, so firing it is always safe. Idempotent via
+    the fixed job id + `replace_existing=True`.
 
+    Catch-up reasons:
+      * a template-managed universe is unbuilt or behind the month — this is
+        INDEPENDENT of scheduled strategies (/backtest + /acwi read
+        universe_membership directly), so it fires even with zero strategies;
+      * an enabled strategy is due to rebalance;
+      * an enabled strategy's held prices are stale (missed the daily MTD)."""
+    from ingest.phases.planner import build_plan  # noqa: PLC0415 — avoid import cycle
+    from ingest.phases.templates import templates_needing_refresh  # noqa: PLC0415
+
+    reasons: list[str] = []
+
+    # Template maintenance — independent of scheduled strategies.
+    try:
+        maint = templates_needing_refresh()
+        if maint:
+            reasons.append(f"{len(maint)} template(s) unbuilt/behind")
+    except Exception as e:
+        _log.warning("[scheduler] smart kickstart: template-staleness probe failed: %s: %s", type(e).__name__, e)
+
+    # Strategy-driven reasons (only meaningful when strategies exist).
     try:
         plan = build_plan(datetime.now(timezone.utc))
     except Exception as e:
         _log.warning("[scheduler] smart kickstart: plan build failed: %s: %s", type(e).__name__, e)
-        return
-    if not plan.strategies:
-        _log.info("[scheduler] smart kickstart: no enabled strategies — no-op")
-        return
-
-    needed = set(plan.needed_template_keys)
-    reasons: list[str] = []
-    if plan.due_strategy_ids:
-        reasons.append(f"{len(plan.due_strategy_ids)} strategy(ies) due")
-    if _needed_templates_behind(needed):
-        reasons.append("needed template unrefreshed/behind")
-    try:
-        if _held_prices_stale():
-            reasons.append("held prices stale")
-    except Exception as e:
-        _log.warning("[scheduler] smart kickstart: price-staleness probe failed: %s: %s", type(e).__name__, e)
+        plan = None
+    if plan is not None and plan.strategies:
+        if plan.due_strategy_ids:
+            reasons.append(f"{len(plan.due_strategy_ids)} strategy(ies) due")
+        try:
+            if _held_prices_stale():
+                reasons.append("held prices stale")
+        except Exception as e:
+            _log.warning("[scheduler] smart kickstart: price-staleness probe failed: %s: %s", type(e).__name__, e)
 
     if not reasons:
         _log.info("[scheduler] smart kickstart: everything current — no-op")
@@ -256,32 +229,6 @@ def _maybe_kickstart_smart(sched: BackgroundScheduler) -> None:
         coalesce=True,
         misfire_grace_time=600,
     )
-
-
-def _stale_templates() -> list[str]:
-    """`template_key`s that HAVE data but whose latest captured month is
-    behind the current calendar month — i.e. they missed the month rollover
-    and need a catch-up refresh. (Never-refreshed templates are excluded
-    here; `_unrefreshed_templates` / the bootstrap handle those.)"""
-    from deps import supabase  # noqa: PLC0415
-    from index_universe.templates import all_templates  # noqa: PLC0415
-    current_month = datetime.now(timezone.utc).strftime("%Y-%m")
-    stale: list[str] = []
-    for template in all_templates():
-        try:
-            uid = template.universe_id(supabase)
-            if uid is None:
-                continue  # never refreshed → bootstrap's job, not ours
-            months = template.available_months(supabase)
-            latest = months[-1] if months else None
-            if latest is None or latest < current_month:
-                stale.append(template.template_key)
-        except Exception as e:
-            _log.warning(
-                "[scheduler] staleness check failed for %s: %s: %s",
-                template.template_key, type(e).__name__, e,
-            )
-    return stale
 
 
 def _trading_day_age(latest: "date | None") -> "int | None":

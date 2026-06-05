@@ -10,9 +10,47 @@ pipeline marks the run `error`.
 """
 from __future__ import annotations
 
+import logging
+
 from deps import supabase
 
 from .runlog import _Throttle, _update_run
+
+_log = logging.getLogger(__name__)
+
+
+def templates_needing_refresh() -> set[str]:
+    """`template_key`s whose memberships need (re)building independent of any
+    scheduled-strategy demand: never refreshed in this env (no `universe` row,
+    or `last_refreshed_at IS NULL`) OR behind the current calendar month.
+
+    `/backtest` + `/acwi` + the universe dropdown read `universe_membership`
+    directly, so template-managed universes must stay maintained even with
+    ZERO enabled scheduled strategies. The smart daily tick refreshes this set
+    every run; it's a no-op once every template is current, and fires ~monthly
+    at the rollover (or once on a fresh DB). On a probe failure we refresh
+    defensively (err toward fresh data)."""
+    from datetime import datetime, timezone  # noqa: PLC0415
+    from index_universe.templates import all_templates  # noqa: PLC0415
+
+    current_month = datetime.now(timezone.utc).strftime("%Y-%m")
+    out: set[str] = set()
+    for t in all_templates():
+        try:
+            if t.universe_id(supabase) is None or t.last_refreshed_at(supabase) is None:
+                out.add(t.template_key)  # never refreshed in this env
+                continue
+            months = t.available_months(supabase)
+            latest = months[-1] if months else None
+            if latest is None or latest < current_month:
+                out.add(t.template_key)  # row exists but behind the rollover
+        except Exception as e:
+            _log.warning(
+                "[templates] staleness probe for %s failed: %s: %s — will refresh",
+                t.template_key, type(e).__name__, e,
+            )
+            out.add(t.template_key)
+    return out
 
 
 def _run_templates_phase(run_id: int, only_keys: set[str] | None = None) -> int:

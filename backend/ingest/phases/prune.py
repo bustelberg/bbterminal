@@ -87,3 +87,24 @@ def _run_dedupe_phase(run_id: int) -> None:
     )
     _update_run(run_id, current_message=msg)
     log.info("[pipeline.dedupe] run_id=%s %s", run_id, msg)
+
+
+def _run_delisting_phase(run_id: int) -> None:
+    """Stale-price delisting sweep — mark companies whose latest close is many
+    trading days behind the market as `delisted_at`. DB-only (no GuruFocus
+    calls), so it's cheap enough to run on every tick, including the held-only
+    daily pipeline. See `ingest.delisting`."""
+    from ingest.delisting import sweep_delisted_companies  # noqa: PLC0415
+
+    log = logging.getLogger(__name__)
+    _update_run(run_id, current_message="Sweeping for delisted (stale-price) companies…")
+    res = sweep_delisted_companies(supabase)
+    msg = (
+        f"Delisting sweep: {res.newly_delisted} newly delisted "
+        f"({res.with_data} of {res.checked} active companies have price data)."
+        + (" Skipped — no direct Postgres (SUPABASE_DB_URL)." if res.skipped_no_pg else "")
+    )
+    if res.examples:
+        msg += " e.g. " + ", ".join(res.examples[:5])
+    _update_run(run_id, current_message=msg)
+    log.info("[pipeline.delisting] run_id=%s %s", run_id, msg)
