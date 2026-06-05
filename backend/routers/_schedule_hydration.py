@@ -141,6 +141,75 @@ def _compute_period_returns(snapshots: list[dict], today: date) -> dict:
     }
 
 
+def _returns_from_backtest(backtest_run_id: int, inception_iso: str, today: date) -> dict | None:
+    """MTD / YTD / since-inception returns from the strategy's BACKTEST equity
+    curve, anchored at the go-live (inception) date.
+
+    The live current-picks snapshots only span the current open period, so an
+    MTD/YTD walked from them collapses to that one period's return. The real
+    performance lives in the saved backtest's daily equity curve (the same one
+    the detail view's equity chart draws). We read the cumulative-return level
+    at the anchor dates and take the relative move to the curve's latest point.
+
+    - MTD  = from the start of the current calendar month
+    - YTD  = from the start of the current calendar year
+    - since-inception = from the go-live date (`inception_iso`)
+
+    MTD/YTD are calendar-anchored and independent of the go-live date; only
+    since-inception moves when the go-live date changes. Returns None when the
+    run has no curve."""
+    from routers.momentum.backtest_crud import load_backtest_result_sync  # noqa: PLC0415
+
+    res = load_backtest_result_sync(backtest_run_id)
+    pts: list[tuple[str, float]] = []
+    for d in (res or {}).get("daily_records") or []:
+        dt = str(d.get("date") or "")[:10]
+        cum = d.get("cumulative_return_pct")
+        if dt and cum is not None:
+            pts.append((dt, float(cum)))
+    if not pts:
+        return None
+    pts.sort(key=lambda p: p[0])
+    latest_date, latest_cum = pts[-1]
+
+    def cum_at(date_iso: str) -> float | None:
+        """Cumulative-return level at the last curve point on-or-before `date_iso`."""
+        v: float | None = None
+        for dt, cum in pts:
+            if dt <= date_iso:
+                v = cum
+            else:
+                break
+        return v
+
+    def rel(a: float | None, b: float | None) -> float | None:
+        if a is None or b is None:
+            return None
+        return round(((1 + a / 100.0) / (1 + b / 100.0) - 1) * 100.0, 2)
+
+    # Anchor cumulative levels; when an anchor predates the curve, fall back
+    # to the curve's start (earliest data we have).
+    curve_start_cum = pts[0][1]
+    inc_cum = cum_at(inception_iso)
+    if inc_cum is None:
+        inc_cum = curve_start_cum
+    year_start = today.replace(month=1, day=1).isoformat()
+    month_start = today.replace(day=1).isoformat()
+    ytd_cum = cum_at(year_start)
+    if ytd_cum is None:
+        ytd_cum = curve_start_cum
+    mtd_cum = cum_at(month_start)
+    if mtd_cum is None:
+        mtd_cum = curve_start_cum
+    return {
+        "mtd_return_pct": rel(latest_cum, mtd_cum),
+        "ytd_return_pct": rel(latest_cum, ytd_cum),
+        "since_inception_pct": rel(latest_cum, inc_cum),
+        "inception_date": inception_iso,
+        "as_of_date": latest_date,
+    }
+
+
 def _hydrate(rows: list[dict]) -> list[dict]:
     """Attach the most recent snapshot summary + period-return rollups to
     each row, joined via the `current_picks_snapshot.scheduled_strategy_id`
@@ -204,6 +273,24 @@ def _hydrate(rows: list[dict]) -> list[dict]:
         last_snapshot: dict | None = None
         if latest:
             returns = _compute_period_returns(hist, today)
+            since_inception_pct: float | None = None
+            inception_date = str(r["start_date"])[:10] if r.get("start_date") else None
+            # Prefer returns from the backtest equity curve (anchored at
+            # go-live) — the live snapshots are too thin for a meaningful
+            # MTD/YTD. Falls back to the live-snapshot walk when there's no
+            # backtest run or curve.
+            if r.get("backtest_run_id") and inception_date:
+                try:
+                    bt = _returns_from_backtest(int(r["backtest_run_id"]), inception_date, today)
+                except Exception:
+                    bt = None
+                if bt:
+                    returns = {
+                        "mtd_return_pct": bt["mtd_return_pct"],
+                        "ytd_return_pct": bt["ytd_return_pct"],
+                        "as_of_date": bt["as_of_date"],
+                    }
+                    since_inception_pct = bt["since_inception_pct"]
             last_snapshot = {
                 "snapshot_id": latest["snapshot_id"],
                 "ingest_run_id": latest.get("ingest_run_id"),
@@ -213,6 +300,8 @@ def _hydrate(rows: list[dict]) -> list[dict]:
                 "sectors": _extract_sectors(holdings),
                 "mtd_return_pct": returns["mtd_return_pct"],
                 "ytd_return_pct": returns["ytd_return_pct"],
+                "since_inception_pct": since_inception_pct,
+                "inception_date": inception_date,
                 "as_of_date": returns["as_of_date"] or latest.get("latest_price_date"),
             }
         out.append({

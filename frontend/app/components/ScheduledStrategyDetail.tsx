@@ -54,6 +54,7 @@ export default function ScheduledStrategyDetail({
   strategyId,
   initialData,
   onLoaded,
+  onMutated,
 }: {
   strategyId: number;
   /** Parent-supplied cache hit. When non-null we render immediately and
@@ -106,7 +107,8 @@ export default function ScheduledStrategyDetail({
 
   // Persist the configurable go-live date. Empty string clears it (falls
   // back to created_at). PATCHes then reloads so the marker re-derives
-  // from the authoritative server value.
+  // from the authoritative server value, and notifies the parent so the
+  // collapsed-row since-inception return (anchored at this date) refreshes.
   const saveStartDate = async (value: string) => {
     setSavingStartDate(true);
     try {
@@ -118,7 +120,10 @@ export default function ScheduledStrategyDetail({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (r.ok) await load();
+      if (r.ok) {
+        await load();
+        onMutated?.();
+      }
     } finally {
       setSavingStartDate(false);
     }

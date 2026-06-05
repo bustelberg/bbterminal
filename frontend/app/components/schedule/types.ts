@@ -110,13 +110,16 @@ export type ScheduledStrategy = {
      * (ties broken alphabetically). Empty list when no sectors are populated
      * on the holdings (e.g. very early backfill rows). */
     sectors: { sector: string; count: number }[];
-    /** Month-to-date / year-to-date return for the strategy as of `as_of_date`,
-     * computed server-side from the snapshot equity curve. Null when there
-     * isn't enough history (e.g. brand-new strategy with no closed period). */
+    /** Month-to-date / year-to-date / since-inception returns, computed
+     * server-side from the strategy's backtest equity curve anchored at the
+     * go-live (inception) date. Null when there's no backtest curve. For a
+     * same-year launch YTD equals since-inception (no pre-launch claim). */
     mtd_return_pct: number | null;
     ytd_return_pct: number | null;
-    /** The latest_price_date of the newest snapshot — i.e. the date these
-     * returns are "as of". Hoisted out for easy display. */
+    since_inception_pct: number | null;
+    /** Go-live date the since-inception return is measured from (YYYY-MM-DD). */
+    inception_date: string | null;
+    /** The date these returns are "as of". */
     as_of_date: string | null;
   } | null;
 };

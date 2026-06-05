@@ -99,7 +99,8 @@ export default function ScheduledStrategiesCard({ sched }: { sched: UseScheduled
                             </span>
                           )}
                           {(s.last_snapshot.mtd_return_pct != null
-                            || s.last_snapshot.ytd_return_pct != null) && (
+                            || s.last_snapshot.ytd_return_pct != null
+                            || s.last_snapshot.since_inception_pct != null) && (
                             <span className="text-fg-faint">|</span>
                           )}
                           {s.last_snapshot.mtd_return_pct != null && (
@@ -118,6 +119,18 @@ export default function ScheduledStrategiesCard({ sched }: { sched: UseScheduled
                                 {s.last_snapshot.ytd_return_pct >= 0 ? '+' : ''}
                                 {s.last_snapshot.ytd_return_pct.toFixed(2)}%
                               </span>
+                            </span>
+                          )}
+                          {s.last_snapshot.since_inception_pct != null && (
+                            <span>
+                              <span className="text-fg-subtle">Since inception </span>
+                              <span className={s.last_snapshot.since_inception_pct >= 0 ? 'text-pos-400' : 'text-neg-400'}>
+                                {s.last_snapshot.since_inception_pct >= 0 ? '+' : ''}
+                                {s.last_snapshot.since_inception_pct.toFixed(2)}%
+                              </span>
+                              {s.last_snapshot.inception_date && (
+                                <span className="text-fg-faint"> (since {s.last_snapshot.inception_date})</span>
+                              )}
                             </span>
                           )}
                           {s.last_snapshot.as_of_date && (

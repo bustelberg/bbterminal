@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Spinner from '../Spinner';
 import LoadingDots from '../LoadingDots';
 import { API_URL } from '../../../lib/apiUrl';
@@ -12,10 +13,21 @@ import type { ScheduleUpcoming, HeldCompaniesResponse, HeldCompany } from './typ
  * it's doing right now, or when it next runs) + the held companies it keeps
  * priced, with each company's latest close so you can watch them refresh. */
 export default function SmartPipelineActivity() {
-  const { data: upcoming, error: upErr } = usePollingFetch<ScheduleUpcoming>(`${API_URL}/api/schedule/upcoming`, 3000);
-  const { data: held, error: heldErr } = usePollingFetch<HeldCompaniesResponse>(`${API_URL}/api/scheduled-strategies/held-companies`, 3000);
+  // Poll fast (3s) only while a run is in flight so the progress bar +
+  // freshness update live; back off to 15s when idle so we're not hammering
+  // the endpoints when nothing is happening. Start active so the first load
+  // is immediate, then it settles to idle if nothing's running.
+  const [active, setActive] = useState(true);
+  const interval = active ? 3000 : 15000;
+  const { data: upcoming, error: upErr } = usePollingFetch<ScheduleUpcoming>(`${API_URL}/api/schedule/upcoming`, interval);
+  const { data: held, error: heldErr } = usePollingFetch<HeldCompaniesResponse>(`${API_URL}/api/scheduled-strategies/held-companies`, interval);
   const loadError = upErr ?? heldErr;
   const nowMs = useNow(15000);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setActive((upcoming?.running?.length ?? 0) > 0);
+  }, [upcoming]);
 
   const running = upcoming?.running?.[0] ?? null;
   const smartJob = upcoming?.jobs?.find((j) => j.id === 'smart_daily') ?? null;
