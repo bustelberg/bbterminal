@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import ProgressTimeline from './ProgressTimeline';
 import { apiFetch } from '../../lib/apiFetch';
+import { invalidateCache } from '../../lib/hooks/fetchCache';
 import { colorForSector } from '../../lib/sectorColors';
 import { fmtTimestamp } from '../../lib/format';
 import type { Column } from '../../lib/tableExport';
@@ -54,6 +55,9 @@ export default function LeonteqUniverse() {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshLog, setRefreshLog] = useState<string[]>([]);
   const [refreshResult, setRefreshResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const [freezing, setFreezing] = useState(false);
+  const [freezeResult, setFreezeResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -208,6 +212,38 @@ export default function LeonteqUniverse() {
     }
   }, [refreshing, load]);
 
+  // Freeze the CURRENT Leonteq universe into a dated, immutable snapshot —
+  // "LEONTEQ (as of YYYY-MM-DD)" with template_key NULL, which the pipeline
+  // never refreshes. It then shows up in the /backtest universe picker as a
+  // reproducible alternative to the live (self-updating) LEONTEQ.
+  const freezeSnapshot = useCallback(async () => {
+    if (freezing) return;
+    setFreezing(true);
+    setFreezeResult(null);
+    try {
+      const resp = await apiFetch(`${API_URL}/api/universe-templates/${TEMPLATE_KEY}/freeze`, {
+        method: 'POST',
+      });
+      if (!resp.ok) {
+        setFreezeResult({ ok: false, message: `Freeze failed (${resp.status})` });
+        return;
+      }
+      const j = await resp.json();
+      // So /backtest's cached static-universe list re-fetches and shows it.
+      invalidateCache('GET /api/static-universes');
+      setFreezeResult({
+        ok: true,
+        message: j.created
+          ? `Created “${j.label}” — ${j.members_copied ?? 0} membership rows (${j.latest_membership_count ?? 0} names in the latest month). Now selectable in /backtest.`
+          : `“${j.label}” already exists for today — pick it in /backtest.`,
+      });
+    } catch (e) {
+      setFreezeResult({ ok: false, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setFreezing(false);
+    }
+  }, [freezing]);
+
   const toggleSector = (name: string) => {
     setExpandedSectors((prev) => {
       const next = new Set(prev);
@@ -250,15 +286,46 @@ export default function LeonteqUniverse() {
             <Stat label="Industries" value={data ? String(data.unique_industries) : '—'} />
             <Stat label="Last scraped" value={data ? fmtTimestamp(data.scraped_at) : '—'} />
           </div>
-          <button
-            type="button"
-            onClick={() => void triggerRefresh()}
-            disabled={refreshing}
-            className="text-xs px-3 py-1.5 rounded-lg bg-accent-600 hover:bg-accent-500 disabled:opacity-50 disabled:cursor-not-allowed text-fg-strong transition-colors shrink-0"
-          >
-            {refreshing ? 'Scraping…' : 'Refresh now'}
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => void freezeSnapshot()}
+              disabled={freezing || refreshing}
+              title="Create a dated, immutable snapshot of the CURRENT Leonteq universe — “LEONTEQ (as of <today>)”. The pipeline never changes it, so backtests against it are reproducible. It appears in the /backtest universe picker."
+              className="text-xs px-3 py-1.5 rounded-lg border border-neutral-700 text-fg-muted hover:bg-overlay/5 hover:text-fg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {freezing ? 'Freezing…' : 'Freeze snapshot'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void triggerRefresh()}
+              disabled={refreshing}
+              className="text-xs px-3 py-1.5 rounded-lg bg-accent-600 hover:bg-accent-500 disabled:opacity-50 disabled:cursor-not-allowed text-fg-strong transition-colors"
+            >
+              {refreshing ? 'Scraping…' : 'Refresh now'}
+            </button>
+          </div>
         </div>
+
+        {freezeResult && (
+          <div
+            className={`rounded-lg px-4 py-2.5 text-sm flex items-start justify-between gap-3 ${
+              freezeResult.ok
+                ? 'bg-pos-500/10 border border-pos-500/20 text-pos-300'
+                : 'bg-neg-500/10 border border-neg-500/20 text-neg-300'
+            }`}
+          >
+            <span>{freezeResult.message}</span>
+            <button
+              type="button"
+              onClick={() => setFreezeResult(null)}
+              className="text-fg-faint hover:text-fg shrink-0"
+              aria-label="Dismiss"
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         {(refreshLog.length > 0 || refreshResult) && (
           <ProgressTimeline

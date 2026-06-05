@@ -176,9 +176,9 @@ def test_bare_ticker_unique_match_returns_cid() -> None:
 
 
 def test_bare_ticker_ambiguous_warns_and_picks_first(caplog) -> None:
-    """When the bare-ticker tier finds 2+ candidates, it must log a
-    WARNING (so the operator notices) and return the first candidate.
-    This is the safety net for cases the higher tiers can't disambiguate."""
+    """When the bare-ticker tier finds 2+ candidates AND the scraped row has
+    no usable name to disambiguate, it must log a WARNING and return the
+    first candidate — the safety net for cases the higher tiers can't split."""
     by_te, by_bare, by_id = _build_indexes([
         _co(50, "AMBIG", "TSE", "First"),
         _co(51, "AMBIG", "LSE", "Second"),
@@ -186,11 +186,43 @@ def test_bare_ticker_ambiguous_warns_and_picks_first(caplog) -> None:
     tpl = LeonteqTemplate()
     with caplog.at_level(logging.WARNING, logger="index_universe.templates.leonteq"):
         cid = tpl._match_company(
-            {"ticker": "AMBIG"},  # no RIC/country/ISIN
+            {"ticker": "AMBIG"},  # no RIC/country/ISIN/name
             by_te, by_bare, by_id, prior_isin_map={},
         )
     assert cid == 50
-    assert any("AMBIGUOUS bare-ticker match" in r.message for r in caplog.records)
+    assert any("AMBIGUOUS bare-ticker" in r.message for r in caplog.records)
+
+
+def test_bare_ticker_picks_name_overlapping_candidate() -> None:
+    """With a scraped name, a bare-ticker collision resolves to the candidate
+    whose NAME overlaps — not just the first listed."""
+    by_te, by_bare, by_id = _build_indexes([
+        _co(60, "ALV", "XTER", "ALLIANZ"),
+        _co(61, "ALV", "NYSE", "Autoliv Inc"),
+    ])
+    tpl = LeonteqTemplate()
+    cid = tpl._match_company(
+        {"ticker": "ALV", "name": "Autoliv Inc"},  # no RIC/country/ISIN
+        by_te, by_bare, by_id, prior_isin_map={},
+    )
+    assert cid == 61  # Autoliv, not the first-listed Allianz
+
+
+def test_bare_ticker_wrong_issuer_rejected(caplog) -> None:
+    """The Autoliv→Allianz class of bug: a lone bare-ticker candidate whose
+    name doesn't overlap the scraped name is rejected (→ None) so the OpenFIGI
+    ISIN resolver can find the right company, instead of silently mismapping."""
+    by_te, by_bare, by_id = _build_indexes([
+        _co(70, "ALV", "XTER", "ALLIANZ"),
+    ])
+    tpl = LeonteqTemplate()
+    with caplog.at_level(logging.WARNING, logger="index_universe.templates.leonteq"):
+        cid = tpl._match_company(
+            {"ticker": "ALV", "name": "Autoliv Inc", "isin": "US0528001094"},
+            by_te, by_bare, by_id, prior_isin_map={},
+        )
+    assert cid is None
+    assert any("rejected" in r.message for r in caplog.records)
 
 
 def test_returns_none_when_nothing_matches() -> None:

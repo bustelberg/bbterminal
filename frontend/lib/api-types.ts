@@ -2325,6 +2325,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/static-universes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Static Universes
+         * @description Frozen universe snapshots (`frozen_at` set, `template_key` NULL) — the
+         *     reproducible, pipeline-immune universes the /backtest dropdown lists
+         *     alongside the live templates. Newest snapshot first.
+         */
+        get: operations["list_static_universes_api_static_universes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/universe-templates": {
         parameters: {
             query?: never;
@@ -2380,6 +2402,30 @@ export interface paths {
         get: operations["universe_template_refresh_status_api_universe_templates_refresh_status_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/universe-templates/{key}/freeze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Freeze Template
+         * @description Snapshot a live template universe into a static, dated, NON-template
+         *     universe — `label = "<KEY> (as of YYYY-MM-DD)"`, `template_key = NULL` — so
+         *     the pipeline never re-reconstructs it and backtests against it are
+         *     reproducible. Idempotent per calendar day: a second call on the same date
+         *     returns the existing snapshot instead of duplicating it.
+         */
+        post: operations["freeze_template_api_universe_templates__key__freeze_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6450,6 +6496,26 @@ export interface operations {
             };
         };
     };
+    list_static_universes_api_static_universes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     list_universe_templates_api_universe_templates_get: {
         parameters: {
             query?: never;
@@ -6486,6 +6552,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    freeze_template_api_universe_templates__key__freeze_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

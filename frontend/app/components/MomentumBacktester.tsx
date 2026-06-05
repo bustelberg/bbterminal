@@ -10,6 +10,8 @@ import NotificationsPanel from './momentum/NotificationsPanel';
 import {
   useCompanyExchangeMap,
   useUniverseTemplates,
+  useStaticUniverses,
+  type UniverseTemplate,
 } from '../../lib/hooks/apiData';
 import {
   momentumStore,
@@ -255,26 +257,30 @@ export default function MomentumBacktester() {
     category_weights: categoryWeights,
   }), [selectedIndexUniverse, weights, categoryWeights]);
 
-  // Universe templates — shared cached hook. The Variants AxisColumn
-  // wants the locally-shaped `IndexUniverseEntry` so we map after load.
+  // Universe options = live templates + frozen static snapshots. Snapshots
+  // are pipeline-immune (reproducible) and resolve by label; their
+  // `template_key` field carries that label (the value sent as
+  // `index_universe`). Both map into the locally-shaped `IndexUniverseEntry`
+  // the Variants AxisColumn wants. (Snapshots are CREATED on the Leonteq
+  // page; here they just appear as another pickable universe.)
   const { data: _utRaw } = useUniverseTemplates();
+  const { data: _staticHook } = useStaticUniverses();
   useEffect(() => {
-    if (!_utRaw) return;
-    setIndexUniverses(
-      _utRaw.map((t) => ({
-        index_name: t.template_key,
-        display_label: t.label || t.template_key,
-        hard_backstop: t.earliest_date,
-        start_month: t.earliest_captured_month!,
-        end_month: t.latest_captured_month!,
-        month_count: t.months_captured,
-        // No cheap COUNT DISTINCT yet for "ever in this universe", so
-        // the dropdown shows the latest month's count as a representative
-        // number. Good enough for "is this the right universe?".
-        total_unique_tickers: t.latest_membership_count,
-      })),
-    );
-  }, [_utRaw]);
+    const mapUni = (t: UniverseTemplate) => ({
+      index_name: t.template_key,
+      display_label: t.label || t.template_key,
+      hard_backstop: t.earliest_date,
+      start_month: t.earliest_captured_month!,
+      end_month: t.latest_captured_month!,
+      month_count: t.months_captured,
+      // No cheap COUNT DISTINCT yet for "ever in this universe", so the
+      // dropdown shows the latest month's count as a representative number.
+      total_unique_tickers: t.latest_membership_count,
+    });
+    const all = [...(_utRaw ?? []), ...(_staticHook ?? [])];
+    if (all.length === 0) return;
+    setIndexUniverses(all.map(mapUni));
+  }, [_utRaw, _staticHook]);
 
   // One-time bookkeeping at mount: saved runs and the latest-price-date
   // fetch. The endpoint hooks above own all the recurring fetches.

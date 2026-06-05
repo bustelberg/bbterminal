@@ -69,6 +69,39 @@ def _run_copy(sql: str, params: tuple) -> io.BytesIO | None:
         return None
 
 
+def copy_universe_memberships_via_pg(src_universe_id: int, dst_universe_id: int) -> int | None:
+    """Copy every `universe_membership` row from one universe to another in a
+    single direct-Postgres `INSERT ... SELECT` (used to freeze a template into
+    a static snapshot). Returns the number of rows copied, or `None` to signal
+    fall-back (unconfigured / psycopg missing / error)."""
+    url = _db_url()
+    if not url:
+        return None
+    try:
+        import psycopg  # noqa: PLC0415
+    except ImportError:
+        return None
+    try:
+        with psycopg.connect(url, connect_timeout=30) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO universe_membership "
+                    "(universe_id, company_id, target_month, universe_ticker, sector, industry) "
+                    "SELECT %s, company_id, target_month, universe_ticker, sector, industry "
+                    "FROM universe_membership WHERE universe_id = %s",
+                    (dst_universe_id, src_universe_id),
+                )
+                n = cur.rowcount
+            conn.commit()
+        return n
+    except Exception as e:  # noqa: BLE001 — fall back, never raise
+        log.warning(
+            "[data._pg] membership copy failed (%s: %s); falling back.",
+            type(e).__name__, e,
+        )
+        return None
+
+
 def load_metric_df_via_copy(
     company_ids: list[int],
     metric_code: str,

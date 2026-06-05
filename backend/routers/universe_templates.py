@@ -23,7 +23,7 @@ import json
 import queue as _queue
 import threading
 import traceback
-from datetime import date
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -82,6 +82,154 @@ def _summary(template) -> dict:
         "latest_membership_count": latest_count,
         "last_refreshed_at": last_refreshed_at,
     }
+
+
+# ─── Static (frozen) universe snapshots ─────────────────────────────
+
+
+def _frozen_summary(u: dict) -> dict:
+    """`_summary`-shaped payload for a frozen (static) universe row so the
+    /backtest dropdown can render it next to the live templates.
+
+    `template_key` deliberately carries the universe's LABEL (not a real
+    template_key — a frozen universe's is NULL): the dropdown sends
+    `index_name = template_key` as the backtest's `index_universe`, and
+    `_load_index_universe` resolves a frozen universe via its label
+    fallback. So the label IS the selector."""
+    uid = u["universe_id"]
+    try:
+        m_resp = supabase.rpc("universe_available_months", {"p_universe_id": uid}).execute()
+        months = [r["target_month"] for r in (m_resp.data or []) if r.get("target_month")]
+    except Exception:
+        months = []
+    earliest_month = months[0] if months else None
+    latest_month = months[-1] if months else None
+    latest_count = 0
+    if latest_month:
+        c_resp = (
+            supabase.table("universe_membership")
+            .select("company_id", count="exact")
+            .eq("universe_id", uid)
+            .eq("target_month", latest_month)
+            .limit(0)
+            .execute()
+        )
+        latest_count = getattr(c_resp, "count", 0) or 0
+    return {
+        "template_key": u["label"],
+        "label": u["label"],
+        "description": u.get("description"),
+        "earliest_date": f"{earliest_month}-01" if earliest_month else None,
+        "universe_id": uid,
+        "months_captured": len(months),
+        "earliest_captured_month": earliest_month,
+        "latest_captured_month": latest_month,
+        "latest_membership_count": latest_count,
+        "last_refreshed_at": u.get("frozen_at"),
+        "frozen_at": u.get("frozen_at"),
+        "frozen_from": u.get("frozen_from"),
+    }
+
+
+def _copy_memberships_via_supabase(src_id: int, dst_id: int) -> int:
+    """PostgREST fall-back for the membership copy when direct Postgres
+    (SUPABASE_DB_URL) isn't available: page through the source rows and bulk
+    insert them under the new universe_id."""
+    from deps import chunked, paginate  # noqa: PLC0415
+
+    cols = ("company_id", "target_month", "universe_ticker", "sector", "industry")
+    rows = list(paginate(
+        lambda lo, hi: supabase.table("universe_membership")
+        .select(",".join(cols))
+        .eq("universe_id", src_id)
+        .order("company_id")
+        .order("target_month")
+        .range(lo, hi)
+        .execute()
+    ))
+    payload = [{"universe_id": dst_id, **{c: r.get(c) for c in cols}} for r in rows]
+    for chunk in chunked(payload, 500):
+        supabase.table("universe_membership").insert(chunk).execute()
+    return len(payload)
+
+
+@router.get("/api/static-universes")
+async def list_static_universes(response: Response):
+    """Frozen universe snapshots (`frozen_at` set, `template_key` NULL) — the
+    reproducible, pipeline-immune universes the /backtest dropdown lists
+    alongside the live templates. Newest snapshot first."""
+    response.headers["Cache-Control"] = CACHE_PIPELINE
+
+    def _q():
+        resp = (
+            supabase.table("universe")
+            .select("universe_id, label, description, frozen_at, frozen_from")
+            .not_.is_("frozen_at", "null")
+            .order("frozen_at", desc=True)
+            .execute()
+        )
+        return [_frozen_summary(u) for u in (resp.data or [])]
+
+    return await asyncio.to_thread(_q)
+
+
+@router.post("/api/universe-templates/{key}/freeze")
+async def freeze_template(key: str):
+    """Snapshot a live template universe into a static, dated, NON-template
+    universe — `label = "<KEY> (as of YYYY-MM-DD)"`, `template_key = NULL` — so
+    the pipeline never re-reconstructs it and backtests against it are
+    reproducible. Idempotent per calendar day: a second call on the same date
+    returns the existing snapshot instead of duplicating it."""
+
+    def _do():
+        try:
+            template = get_template(key)
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail=f"Unknown template '{key}'") from e
+        src_id = template.universe_id(supabase)
+        if src_id is None:
+            raise HTTPException(status_code=409, detail=f"Template '{key}' has no universe yet — refresh it first.")
+
+        today = date.today().isoformat()
+        label = f"{key} (as of {today})"
+        existing = (
+            supabase.table("universe")
+            .select("universe_id, label, description, frozen_at, frozen_from")
+            .eq("label", label)
+            .limit(1)
+            .execute()
+        )
+        if existing.data:
+            return {"created": False, **_frozen_summary(existing.data[0])}
+
+        ins = (
+            supabase.table("universe")
+            .insert({
+                "label": label,
+                "template_key": None,
+                "frozen_at": datetime.now(timezone.utc).isoformat(),
+                "frozen_from": key,
+                "description": f"Static snapshot of {key} frozen {today}. Membership is fixed — the pipeline never refreshes it.",
+            })
+            .execute()
+        )
+        dst_id = ins.data[0]["universe_id"]
+
+        from momentum.data._pg import copy_universe_memberships_via_pg  # noqa: PLC0415
+        copied = copy_universe_memberships_via_pg(src_id, dst_id)
+        if copied is None:
+            copied = _copy_memberships_via_supabase(src_id, dst_id)
+
+        u = (
+            supabase.table("universe")
+            .select("universe_id, label, description, frozen_at, frozen_from")
+            .eq("universe_id", dst_id)
+            .limit(1)
+            .execute()
+        ).data[0]
+        return {"created": True, "members_copied": copied, **_frozen_summary(u)}
+
+    return await asyncio.to_thread(_do)
 
 
 @router.get("/api/universe-templates")

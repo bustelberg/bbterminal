@@ -256,12 +256,14 @@ class LeonteqTemplate(UniverseTemplate):
                 row, company_by_te, company_by_bare, company_by_id, prior_isin_map,
             )
 
-        # Audit: flag matches whose scraped name has zero token overlap
-        # with the matched company's name. That's almost always a
-        # cross-exchange ticker collision (Kikkoman/Chang Hwa) that
-        # slipped through the tiers — the warning makes it visible
-        # without auto-rejecting it (the next refresh can review).
-        name_mismatches = 0
+        # Audit: flag matches whose scraped name has zero token overlap with
+        # the matched company's name. That's almost always a cross-exchange
+        # ticker collision (Kikkoman/Chang Hwa) that slipped through the
+        # tiers. We collect a one-line "lq → gf" diff for each so they're
+        # surfaced in full in the user-visible progress log below (not just
+        # the server log) — visible, not auto-rejected; the next refresh can
+        # review.
+        mismatch_details: list[str] = []
         for row in scraped:
             cid = row.get("company_id")
             if cid is None:
@@ -272,22 +274,19 @@ class LeonteqTemplate(UniverseTemplate):
             if not self._name_token_overlap(
                 row.get("name", ""), matched_company.get("company_name", ""),
             ):
-                name_mismatches += 1
-                if name_mismatches <= 10:
-                    log.warning(
-                        "[leonteq] NAME MISMATCH: scraped=%r isin=%s ticker=%s "
-                        "ric=%s country=%s → matched company_id=%s name=%r "
-                        "exchange=%s. Likely a wrong ticker-collision mapping.",
-                        row.get("name"), row.get("isin"), row.get("ticker"),
-                        row.get("ric"), row.get("country"), cid,
-                        matched_company.get("company_name"),
-                        (matched_company.get("gurufocus_exchange") or {}).get("exchange_code"),
-                    )
-        if name_mismatches > 10:
+                gf_exch = (matched_company.get("gurufocus_exchange") or {}).get("exchange_code") or ""
+                gf_tkr = matched_company.get("gurufocus_ticker") or "?"
+                mismatch_details.append(
+                    f"lq:{row.get('ticker') or '?'} \"{row.get('name') or '?'}\" "
+                    f"→ gf:{(gf_exch + ':') if gf_exch else ''}{gf_tkr} "
+                    f"\"{matched_company.get('company_name') or '?'}\" "
+                    f"(isin {row.get('isin') or '?'}, {row.get('country') or '?'}, cid {cid})"
+                )
+        name_mismatches = len(mismatch_details)
+        if name_mismatches:
             log.warning(
-                "[leonteq] NAME MISMATCH: %d additional rows suppressed "
-                "(only first 10 logged in detail).",
-                name_mismatches - 10,
+                "[leonteq] %d name-mismatch mapping(s) — likely ticker collisions: %s",
+                name_mismatches, " | ".join(mismatch_details[:10]),
             )
 
         auto_created = self._auto_create_via_openfigi(supabase, scraped, on_progress)
@@ -308,10 +307,14 @@ class LeonteqTemplate(UniverseTemplate):
         )
         if name_mismatches > 0:
             emit(
-                f"⚠ {name_mismatches} match(es) where scraped name doesn't overlap "
-                f"matched company name — review log for AMBIGUOUS / NAME MISMATCH lines.",
+                f"⚠ {name_mismatches} match(es) where the scraped name doesn't overlap the "
+                f"matched company name — likely ticker-collision mismaps, review each:",
                 None,
             )
+            for detail in mismatch_details[:50]:
+                emit(f"   • {detail}", None)
+            if name_mismatches > 50:
+                emit(f"   … and {name_mismatches - 50} more (full list in the server log).", None)
 
         # Replace the leonteq_equity table contents wholesale — the
         # scrape IS the snapshot, no merging.
@@ -616,42 +619,99 @@ class LeonteqTemplate(UniverseTemplate):
             if cid is not None and int(cid) in by_id:
                 return int(cid)
 
-        # Tier 4: bare ticker, with ambiguity warning. Single-candidate
-        # lookups are safe; multi-candidate ones leak the kind of bug
-        # the higher tiers are designed to prevent, so log loudly.
+        # Tier 4: bare ticker (last resort). A bare-ticker hit only counts
+        # when its NAME plausibly matches the scraped name — that both
+        # disambiguates cross-exchange collisions (TSE:2801 Kikkoman vs
+        # TPE:2801 Chang Hwa: pick the one whose name overlaps) AND rejects a
+        # lone wrong-issuer collision (US Autoliv's ALV grabbing German
+        # Allianz), the dominant source of bad mappings. No name overlap →
+        # return None so the OpenFIGI auto-resolver finds the right company
+        # from the (authoritative) ISIN instead.
         candidates = by_bare.get(tkr) or []
         if not candidates and tkr.isdigit() and len(tkr) < 5:
             candidates = by_bare.get(tkr.zfill(5)) or []
         if not candidates:
             return None
-        if len(candidates) > 1:
-            preview = ", ".join(
+
+        def _preview(cands: list[dict]) -> str:
+            return ", ".join(
                 f"{c.get('company_name')!s} on "
                 f"{(c.get('gurufocus_exchange') or {}).get('exchange_code', '?')}"
-                for c in candidates[:4]
+                for c in cands[:4]
             )
+
+        named = [
+            c for c in candidates
+            if self._name_token_overlap(row.get("name", ""), c.get("company_name", ""))
+        ]
+        if not named:
             log.warning(
-                "[leonteq] AMBIGUOUS bare-ticker match for %s "
-                "(country=%s ric=%s isin=%s) — %d candidates: %s. "
-                "Picking the first; supply RIC/country/ISIN to disambiguate.",
+                "[leonteq] bare-ticker %s (country=%s ric=%s isin=%s) rejected — "
+                "no name overlap with %d candidate(s): %s. Deferring to OpenFIGI/ISIN.",
                 tkr, country or "?", row.get("ric") or "?", isin or "?",
-                len(candidates), preview,
+                len(candidates), _preview(candidates),
             )
-        return int(candidates[0]["company_id"])
+            return None
+        if len(named) > 1:
+            log.warning(
+                "[leonteq] AMBIGUOUS bare-ticker %s (country=%s ric=%s isin=%s) — "
+                "%d name-overlapping candidates: %s. Picking the first.",
+                tkr, country or "?", row.get("ric") or "?", isin or "?",
+                len(named), _preview(named),
+            )
+        return int(named[0]["company_id"])
 
     @staticmethod
     def _name_token_overlap(a: str, b: str) -> bool:
-        """True when the scraped name and the matched company name
-        share at least one non-trivial token (length >= 3, alnum). Used
-        to flag matches like 'Kikkoman Corp' → 'CHANG HWA COMMERCIAL
-        BANK LTD' (zero overlap, almost certainly wrong)."""
+        """True when the scraped name and the matched company name plausibly
+        name the same issuer. Used BOTH to flag suspicious matches and to
+        accept/reject Tier-4 bare-ticker matches (so it must be lenient on
+        cosmetic differences but strict on genuinely different issuers).
+
+        Matches when they share a non-trivial token (>= 3 chars) OR one is the
+        token-initial acronym of the other ('BMW' ↔ 'Bayerische Motoren
+        Werke', 'LSEG' ↔ 'London Stock Exchange Group'). Names are normalized
+        first: diacritics stripped, apostrophes/hyphens/dots removed (so
+        "L'Oreal" ≡ "LOreal", "Argen-X" ≡ "argenx"), '&' → 'and', corporate
+        suffixes / filler dropped. Genuinely different issuers (Autoliv vs
+        Allianz, C3.ai vs Air Liquide) still don't match → still rejected."""
         import re  # noqa: PLC0415
-        def toks(s: str) -> set[str]:
-            return {t for t in re.findall(r"[A-Za-z0-9]+", (s or "").lower()) if len(t) >= 3}
-        ta, tb = toks(a), toks(b)
+        import unicodedata  # noqa: PLC0415
+
+        # Legal suffixes are dropped everywhere; filler words are dropped for
+        # token matching but KEPT for the acronym (LSEG = London Stock
+        # Exchange Group includes the "G" from Group).
+        _LEGAL = {
+            "ag", "sa", "plc", "inc", "ltd", "co", "corp", "nv", "se", "spa",
+            "ab", "oyj", "asa", "as", "adr",
+        }
+        _FILLER = {"the", "and", "de", "of", "holding", "holdings", "group", "grp", "company"}
+
+        def words(s: str, *, drop_filler: bool = True) -> list[str]:
+            s = unicodedata.normalize("NFKD", s or "")
+            s = "".join(c for c in s if not unicodedata.combining(c)).lower()
+            s = s.replace("&", " and ")
+            for ch in ("'", "’", "-", "."):
+                s = s.replace(ch, "")
+            stop = _LEGAL | (_FILLER if drop_filler else set())
+            return [w for w in re.findall(r"[a-z0-9]+", s) if w not in stop]
+
+        wa, wb = words(a), words(b)
+        ta = {w for w in wa if len(w) >= 3}
+        tb = {w for w in wb if len(w) >= 3}
         if not ta or not tb:
-            return True  # can't tell — don't false-positive
-        return bool(ta & tb)
+            return True  # no comparable token on a side — can't tell, don't flag
+        if ta & tb:
+            return True
+        # Acronym: one side is a single short token equal to the other's
+        # token initials (>= 2 letters), e.g. BMW / Bayerische Motoren Werke.
+        wa2, wb2 = words(a, drop_filler=False), words(b, drop_filler=False)
+        for short_ws, long_ws in ((wa2, wb2), (wb2, wa2)):
+            if len(short_ws) == 1 and len(long_ws) >= 2:
+                token = short_ws[0]
+                if 2 <= len(token) <= 6 and token == "".join(w[0] for w in long_ws):
+                    return True
+        return False
 
     def _gurufocus_url(
         self,

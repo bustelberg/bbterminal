@@ -5460,6 +5460,26 @@
         ]
       }
     },
+    "/api/static-universes": {
+      "get": {
+        "description": "Frozen universe snapshots (`frozen_at` set, `template_key` NULL) \u2014 the\nreproducible, pipeline-immune universes the /backtest dropdown lists\nalongside the live templates. Newest snapshot first.",
+        "operationId": "list_static_universes_api_static_universes_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Static Universes",
+        "tags": [
+          "universe-templates"
+        ]
+      }
+    },
     "/api/universe-templates": {
       "get": {
         "description": "Every registered template with its current state.\n\nThree performance moves vs the naive `[_summary(t) for t in all_templates()]`:\n\n1. Result is cached in-process for 5 min via `list_summary_get/set`. The\n   only thing that changes the payload is a template refresh, which\n   explicitly invalidates the cache via `invalidate_template`.\n2. On a cache miss, the per-template summaries run in parallel through\n   a small thread pool. Each `_summary` is ~4 sequential Supabase round\n   trips and templates are independent, so parallelism turns N*latency\n   into ~1*latency. Matters most on the /backtest page where the dropdown\n   blocks on this endpoint.\n3. Cache-Control on the response so the browser caches per-tab too;\n   repeat opens of the dropdown within 60s don't even round-trip.",
@@ -5495,6 +5515,47 @@
           }
         },
         "summary": "Universe Template Refresh Status",
+        "tags": [
+          "universe-templates"
+        ]
+      }
+    },
+    "/api/universe-templates/{key}/freeze": {
+      "post": {
+        "description": "Snapshot a live template universe into a static, dated, NON-template\nuniverse \u2014 `label = \"<KEY> (as of YYYY-MM-DD)\"`, `template_key = NULL` \u2014 so\nthe pipeline never re-reconstructs it and backtests against it are\nreproducible. Idempotent per calendar day: a second call on the same date\nreturns the existing snapshot instead of duplicating it.",
+        "operationId": "freeze_template_api_universe_templates__key__freeze_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Freeze Template",
         "tags": [
           "universe-templates"
         ]

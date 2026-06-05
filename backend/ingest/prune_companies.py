@@ -65,6 +65,10 @@ class PruneResult:
     # /companies as an explicit "we know this exists, deliberately not
     # covered" record.
     out_of_scope_kept: int = 0
+    # Companies kept because they're members of a FROZEN (static-snapshot)
+    # universe — pinned for reproducible backtests, so protected even after
+    # they leave the live template they were copied from.
+    frozen_kept: int = 0
 
 
 def _load_all_company_ids(supabase: Client) -> set[int]:
@@ -148,6 +152,24 @@ def _load_out_of_scope_company_ids(supabase: Client) -> set[int]:
     return out
 
 
+def _load_frozen_universe_company_ids(supabase: Client) -> set[int]:
+    """Distinct company_ids across all FROZEN (static-snapshot) universes —
+    `universe.frozen_at IS NOT NULL`. These snapshots are pinned for
+    reproducible backtests, so their members must survive prune even after
+    they've left the live template they were copied from (otherwise prune
+    would cascade-delete the snapshot's prices and rot it)."""
+    out: set[int] = set()
+    fu = (
+        supabase.table("universe")
+        .select("universe_id")
+        .not_.is_("frozen_at", "null")
+        .execute()
+    )
+    for row in (fu.data or []):
+        out |= _load_membership_company_ids(supabase, row["universe_id"])
+    return out
+
+
 def _load_longequity_metric_company_ids(supabase: Client) -> set[int]:
     """Legacy safety net: companies that have any `metric_data` row
     with `source_code='longequity'`. Catches the months that were
@@ -216,8 +238,9 @@ def compute_orphans(supabase: Client) -> PruneResult:
         leonteq_kept = _load_membership_company_ids(supabase, universe_ids["LEONTEQ"])
 
     out_of_scope_kept = _load_out_of_scope_company_ids(supabase)
+    frozen_kept = _load_frozen_universe_company_ids(supabase)
 
-    kept = longequity_kept | acwi_kept | leonteq_kept | out_of_scope_kept
+    kept = longequity_kept | acwi_kept | leonteq_kept | out_of_scope_kept | frozen_kept
     orphans = sorted(all_ids - kept)
 
     result = PruneResult(
@@ -228,6 +251,7 @@ def compute_orphans(supabase: Client) -> PruneResult:
         acwi_kept=len(acwi_kept),
         leonteq_kept=len(leonteq_kept),
         out_of_scope_kept=len(out_of_scope_kept),
+        frozen_kept=len(frozen_kept),
         orphan_sample=_load_orphan_sample(supabase, orphans, n=20),
     )
     return result
@@ -301,6 +325,7 @@ def _kept_union(supabase: Client) -> set[int]:
     if "LEONTEQ" in universe_ids:
         kept |= _load_membership_company_ids(supabase, universe_ids["LEONTEQ"])
     kept |= _load_out_of_scope_company_ids(supabase)
+    kept |= _load_frozen_universe_company_ids(supabase)
     return kept
 
 
@@ -313,6 +338,7 @@ def format_audit(result: PruneResult) -> str:
         f"    ACWI:         {result.acwi_kept}",
         f"    Leonteq:      {result.leonteq_kept}",
         f"    Out-of-scope: {result.out_of_scope_kept}",
+        f"    Frozen snaps: {result.frozen_kept}",
         f"  Orphans: {result.orphan_count}",
     ]
     if result.orphan_sample:

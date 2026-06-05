@@ -29,6 +29,16 @@ class _Result:
         self.data = data
 
 
+class _NotQuery:
+    """Negation shim so `.not_.is_(col, "null")` works on `_Query`."""
+    def __init__(self, q: "_Query"):
+        self._q = q
+
+    def is_(self, col: str, val: str) -> "_Query":
+        self._q._filters.append(lambda r: r.get(col) is not None)
+        return self._q
+
+
 class _Query:
     def __init__(self, store: "FakeSupabase", table: str, rows: list[dict] | None = None):
         self._store = store
@@ -80,6 +90,11 @@ class _Query:
         # Only the "null" form is used by the code under test.
         self._filters.append(lambda r: r.get(col) is None)
         return self
+
+    @property
+    def not_(self) -> "_NotQuery":
+        # PostgREST `.not_.is_(col, "null")` → keep rows where col IS NOT NULL.
+        return _NotQuery(self)
 
     def in_(self, col: str, vals: list) -> "_Query":
         allowed = set(vals)
