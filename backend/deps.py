@@ -13,7 +13,7 @@ this module thin; if a helper has a clear home in one of the
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from dotenv import load_dotenv
 from supabase import create_client
@@ -82,6 +82,16 @@ supabase = _LazySupabase()
 IN_CHUNK_SIZE = 200
 
 
+def chunked(items: list, size: int = IN_CHUNK_SIZE) -> Iterator[list]:
+    """Yield successive `size`-length slices of `items`. The canonical
+    list-splitter for the `.in_()` / batched-write chunking the PostgREST +
+    Cloudflare URL/row limits force (see `IN_CHUNK_SIZE`). `fetch_in_chunks`
+    builds on this for the select-and-collect case; callers doing batched
+    DELETE/UPDATE iterate it directly."""
+    for start in range(0, len(items), size):
+        yield items[start:start + size]
+
+
 def fetch_in_chunks(
     ids: list,
     query: Callable[[list], Any],
@@ -106,8 +116,8 @@ def fetch_in_chunks(
     use the purpose-built loaders in `momentum/data/` instead.
     """
     rows: list = []
-    for start in range(0, len(ids), chunk_size):
-        result = query(ids[start:start + chunk_size])
+    for chunk in chunked(ids, chunk_size):
+        result = query(chunk)
         data = getattr(result, "data", result)
         if data:
             rows.extend(data)

@@ -17,6 +17,7 @@ from urllib.request import Request, urlopen
 from supabase import Client
 
 from common.retry import retry
+from ingest.metric_upsert import upsert_metric_rows
 from ingest._gurufocus_http import (
     cf_get,
     current_preferred_target,
@@ -442,18 +443,10 @@ def _upsert_metric_rows(
     if not rows:
         return 0
 
-    batch_size = 500
-    total = 0
-    for i in range(0, len(rows), batch_size):
-        batch = rows[i : i + batch_size]
-        resp = _retry_transient(
-            lambda b=batch: supabase.table("metric_data").upsert(
-                b, on_conflict="company_id,metric_code,source_code,target_date", ignore_duplicates=False
-            ).execute(),
-            description=f"metric_data.upsert(company={company_id}, {metric_code}, {len(batch)} rows)",
-        )
-        total += len(resp.data)
-    return total
+    return upsert_metric_rows(
+        supabase, rows, with_retry=True,
+        description=f"metric_data.upsert(company={company_id}, {metric_code})",
+    )
 
 
 def load_prices_into_db(

@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 
 from supabase import Client
 
-from deps import IN_CHUNK_SIZE
+from deps import chunked
 
 _log = logging.getLogger(__name__)
 
@@ -65,10 +65,6 @@ class PruneResult:
     # /companies as an explicit "we know this exists, deliberately not
     # covered" record.
     out_of_scope_kept: int = 0
-
-
-def _chunked(items: list[int], size: int = IN_CHUNK_SIZE) -> list[list[int]]:
-    return [items[i:i + size] for i in range(0, len(items), size)]
 
 
 def _load_all_company_ids(supabase: Client) -> set[int]:
@@ -307,7 +303,7 @@ def prune_orphan_companies(
     md_deleted = 0
     pw_deleted = 0
     co_deleted = 0
-    for chunk in _chunked(orphan_ids, IN_CHUNK_SIZE):
+    for chunk in chunked(orphan_ids):
         try:
             r = supabase.table("metric_data").delete().in_("company_id", chunk).execute()
             md_deleted += len(r.data or [])

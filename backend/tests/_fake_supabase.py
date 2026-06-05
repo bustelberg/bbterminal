@@ -51,6 +51,14 @@ class _Query:
         self._mode, self._payload = "insert", payload
         return self
 
+    def upsert(self, payload: Any, **_kwargs: Any) -> "_Query":
+        # Conflict resolution isn't modelled — for the code under test only
+        # the returned row count matters, so an upsert behaves like an insert
+        # (rows are appended, the batch is echoed back as `.data`). The
+        # on_conflict / ignore_duplicates kwargs are accepted and ignored.
+        self._mode, self._payload = "insert", payload
+        return self
+
     def update(self, payload: dict) -> "_Query":
         self._mode, self._payload = "update", payload
         return self
