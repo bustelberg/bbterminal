@@ -44,7 +44,7 @@ def _run_momentum_phase(
     successful compute the row's `last_run_at` is set to now and
     `next_due_at` is advanced per `frequency` + the baked
     `rebalance_weekday` (see
-    `routers.scheduled_strategies.compute_next_due_at`).
+    `momentum.schedule.compute_next_due_at`).
 
     `due_override` (smart pipeline) supplies the per-strategy due decision
     from the derived plan instead of re-reading `next_due_at` — keeping the
@@ -95,9 +95,11 @@ def _run_momentum_phase(
     from routers.momentum.backtest_stream.stream import (  # noqa: PLC0415
         _momentum_backtest_stream,
     )
-    from routers.scheduled_strategies import (  # noqa: PLC0415
-        compute_and_save_price_update as _compute_and_save_price_update,
+    from momentum.schedule import (  # noqa: PLC0415
         compute_next_due_at as _compute_next_due_at,
+    )
+    from routers._schedule_snapshots import (  # noqa: PLC0415
+        compute_and_save_price_update as _compute_and_save_price_update,
     )
 
     summaries: list[dict] = []

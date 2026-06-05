@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from routers.scheduled_strategies import (
+from momentum.schedule import (
     _initial_next_due_at,
     compute_next_due_at,
 )
