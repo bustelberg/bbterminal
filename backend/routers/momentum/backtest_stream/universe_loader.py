@@ -30,6 +30,19 @@ def _load_universe_membership(
     if not u_resp.data:
         return {}
     universe_id = u_resp.data[0]["universe_id"]
+
+    # Fast path: stream the whole membership panel in one direct-Postgres
+    # COPY when SUPABASE_DB_URL is set (same as _load_index_universe).
+    # Without it, the deep-offset PostgREST pager below makes the offset
+    # grow page by page and TIMES OUT (statement_timeout, 57014) on large
+    # universes — e.g. a frozen LEONTEQ snapshot (~1,700 companies). This
+    # loader (the `universe_label` path) was the only membership read still
+    # missing the COPY path its index_universe sibling already had.
+    from momentum.data._pg import load_universe_membership_via_copy  # noqa: PLC0415
+    via_copy = load_universe_membership_via_copy(universe_id, grouping_field)
+    if via_copy is not None:
+        return via_copy
+
     rows = []
     offset = 0
     page_size = 1000

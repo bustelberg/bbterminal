@@ -29,6 +29,11 @@ function sborder(fill: string, radius: string = C.radius): CSSProperties {
   };
 }
 
+/** A major surface: gradient edge + the theme's elevation shadow. */
+function panel(fill: string, radius: string = C.radius): CSSProperties {
+  return { ...sborder(fill, radius), boxShadow: 'var(--t-card-shadow)' };
+}
+
 const GRAIN =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
 
@@ -49,7 +54,7 @@ const CSS = `
 }
 .pcard::after {
   content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+  box-shadow: inset 0 1px 0 var(--t-hi, rgba(255,255,255,0.06));
 }
 .psheen { position: relative; overflow: hidden; }
 .psheen > .sheen {
@@ -87,7 +92,7 @@ export default function ShowcasePrestige({ theme }: { theme: PrestigeTheme }) {
       <style>{CSS}</style>
       {/* drifting glow blobs */}
       <div className="pointer-events-none fixed -left-32 top-10 h-96 w-96 rounded-full pglow" style={{ background: 'radial-gradient(circle, var(--t-glow1), transparent 65%)', filter: 'blur(20px)' }} />
-      <div className="pointer-events-none fixed right-0 bottom-0 h-[28rem] w-[28rem] rounded-full pglow" style={{ background: 'radial-gradient(circle, var(--t-glow1), transparent 65%)', filter: 'blur(24px)', animationDelay: '-6s' }} />
+      <div className="pointer-events-none fixed right-0 bottom-0 h-[28rem] w-[28rem] rounded-full pglow" style={{ background: 'radial-gradient(circle, var(--t-glow2), transparent 65%)', filter: 'blur(24px)', animationDelay: '-6s' }} />
       {/* film grain */}
       <div className="pointer-events-none fixed inset-0" style={{ backgroundImage: GRAIN, opacity: 0.05, mixBlendMode: 'soft-light' }} />
 
@@ -118,7 +123,7 @@ export default function ShowcasePrestige({ theme }: { theme: PrestigeTheme }) {
 
           <div className="px-6 py-7 space-y-6 max-w-[1100px]">
             {/* Hero card — animated conic edge + gradient display type */}
-            <div className="pcard p-7" style={{ background: C.card, borderRadius: C.radius }}>
+            <div className="pcard p-7" style={{ background: C.card, borderRadius: C.radius, boxShadow: 'var(--t-card-shadow)' }}>
               <div className="text-[11px] uppercase tracking-[0.32em] mb-3" style={{ color: C.gold }}>Private wealth · momentum</div>
               <h1 className="text-4xl font-semibold tracking-tight leading-[1.05]" style={gradText}>Momentum Portfolio</h1>
               <p className="text-sm mt-3 max-w-2xl leading-relaxed" style={{ color: C.fgMuted }}>{theme.tagline}</p>
@@ -136,7 +141,7 @@ export default function ShowcasePrestige({ theme }: { theme: PrestigeTheme }) {
                 { label: 'YTD return', val: '+49.6%', sub: 'vs ACWI +11.3%', tone: 'pos' },
                 { label: 'Sharpe', val: '1.42', sub: '3y rolling' },
               ].map((k) => (
-                <div key={k.label} className="pcard p-4" style={{ background: C.card, borderRadius: C.radius }}>
+                <div key={k.label} className="pcard p-4" style={{ background: C.card, borderRadius: C.radius, boxShadow: 'var(--t-card-shadow)' }}>
                   <div className="text-xs mb-1.5" style={{ color: C.fgSubtle }}>{k.label}</div>
                   <div className="text-2xl font-semibold tabular-nums" style={k.grad ? gradText : { color: k.tone === 'pos' ? C.pos : k.tone === 'neg' ? C.neg : C.fg }}>{k.val}</div>
                   <div className="text-xs mt-1.5" style={{ color: C.fgSubtle }}>{k.sub}</div>
@@ -146,7 +151,7 @@ export default function ShowcasePrestige({ theme }: { theme: PrestigeTheme }) {
 
             {/* Table + side panel — static gradient edges */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <div className="lg:col-span-2 overflow-hidden" style={sborder(C.card)}>
+              <div className="lg:col-span-2 overflow-hidden" style={panel(C.card)}>
                 <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: `1px solid ${C.divider}` }}>
                   <h2 className="text-sm font-semibold">Current holdings</h2>
                   <span className="text-xs" style={{ color: C.fgSubtle }}>6 of 24 · sector-weighted</span>
@@ -175,13 +180,13 @@ export default function ShowcasePrestige({ theme }: { theme: PrestigeTheme }) {
               </div>
 
               <div className="space-y-4">
-                <div className="p-4" style={sborder(C.card)}>
+                <div className="p-4" style={panel(C.card)}>
                   <div className="text-xs mb-2" style={{ color: C.fgSubtle }}>Filters</div>
                   <div className="flex flex-wrap gap-2">
                     <Chip label="Long-only" active /><Chip label="By sector" active /><Chip label="Min $30" /><Chip label="ACWI" />
                   </div>
                 </div>
-                <div className="p-4" style={sborder(C.card)}>
+                <div className="p-4" style={panel(C.card)}>
                   <div className="flex items-center justify-between mb-3">
                     <div className="text-xs" style={{ color: C.fgSubtle }}>Monthly returns</div>
                     <div className="text-xs tabular-nums" style={{ color: C.pos }}>+18.2% yr</div>
@@ -194,7 +199,7 @@ export default function ShowcasePrestige({ theme }: { theme: PrestigeTheme }) {
                     ))}
                   </div>
                 </div>
-                <div className="p-4" style={sborder(C.card)}>
+                <div className="p-4" style={panel(C.card)}>
                   <div className="text-xs mb-2" style={{ color: C.fgSubtle }}>Equity curve</div>
                   <svg viewBox="0 0 200 64" className="w-full h-16" preserveAspectRatio="none">
                     <defs>
@@ -209,7 +214,7 @@ export default function ShowcasePrestige({ theme }: { theme: PrestigeTheme }) {
             </div>
 
             {/* Gallery */}
-            <div className="p-5 space-y-5" style={sborder(C.card)}>
+            <div className="p-5 space-y-5" style={panel(C.card)}>
               <h2 className="text-sm font-semibold">Components</h2>
               <Row label="Buttons">
                 <button className="psheen text-sm font-semibold px-4 py-1.5" style={{ backgroundImage: C.grad, color: C.accentFg, borderRadius: C.radius }}><span className="sheen" />Primary</button>
@@ -246,12 +251,17 @@ export default function ShowcasePrestige({ theme }: { theme: PrestigeTheme }) {
           </div>
         </main>
 
-        <div className="pcard hidden xl:block fixed bottom-6 right-6 w-64 p-4" style={{ background: C.elevated, borderRadius: C.radius }}>
-          <div className="text-sm font-semibold mb-1" style={gradText}>Popover surface</div>
-          <p className="text-xs mb-3" style={{ color: C.fgMuted }}>Menus and modals carry the same rotating gradient edge, grain and inner highlight.</p>
-          <div className="flex gap-2">
-            <button className="psheen flex-1 text-xs font-semibold py-1.5" style={{ backgroundImage: C.grad, color: C.accentFg, borderRadius: C.radius }}><span className="sheen" />Confirm</button>
-            <button className="flex-1 text-xs font-medium py-1.5" style={{ ...sborder(C.elevated), color: C.fgMuted }}>Cancel</button>
+        {/* Fixed positioning lives on a plain wrapper — `.pcard` sets
+            `position: relative` (to anchor its rotating-border pseudo-element)
+            and would otherwise clobber the `fixed` here. */}
+        <div className="hidden xl:block fixed bottom-6 right-6 w-64">
+          <div className="pcard p-4" style={{ background: C.elevated, borderRadius: C.radius, boxShadow: 'var(--t-card-shadow)' }}>
+            <div className="text-sm font-semibold mb-1" style={gradText}>Popover surface</div>
+            <p className="text-xs mb-3" style={{ color: C.fgMuted }}>Menus and modals carry the same rotating gradient edge, grain and inner highlight.</p>
+            <div className="flex gap-2">
+              <button className="psheen flex-1 text-xs font-semibold py-1.5" style={{ backgroundImage: C.grad, color: C.accentFg, borderRadius: C.radius }}><span className="sheen" />Confirm</button>
+              <button className="flex-1 text-xs font-medium py-1.5" style={{ ...sborder(C.elevated), color: C.fgMuted }}>Cancel</button>
+            </div>
           </div>
         </div>
       </div>
