@@ -31,13 +31,23 @@ const rollLabel = (d: number) =>
 const UNI_COLOR = 'var(--color-fg-muted)';
 const BENCH_COLOR = 'var(--color-warn-500)';
 
-/** Daily % returns from a cumulative-return curve. */
+/** Daily % returns from a cumulative-return curve. Dedupes repeated dates
+ * (the curve repeats period-boundary dates — exit of one period == entry of
+ * the next — which would otherwise inject spurious ~0% boundary returns). */
 function fromCumulative(recs: { date: string; cumulative_return_pct: number }[]): DailyRet[] {
+  const seen = new Map<string, number>();
+  const clean: { date: string; cum: number }[] = [];
+  for (const r of recs) {
+    const d = r.date.slice(0, 10);
+    const idx = seen.get(d);
+    if (idx === undefined) { seen.set(d, clean.length); clean.push({ date: d, cum: r.cumulative_return_pct }); }
+    else { clean[idx].cum = r.cumulative_return_pct; }
+  }
   const out: DailyRet[] = [];
-  for (let i = 1; i < recs.length; i++) {
-    const f0 = 1 + recs[i - 1].cumulative_return_pct / 100;
-    const f1 = 1 + recs[i].cumulative_return_pct / 100;
-    if (f0 > 0) out.push({ date: recs[i].date.slice(0, 10), ret: (f1 / f0 - 1) * 100 });
+  for (let i = 1; i < clean.length; i++) {
+    const f0 = 1 + clean[i - 1].cum / 100;
+    const f1 = 1 + clean[i].cum / 100;
+    if (f0 > 0) out.push({ date: clean[i].date, ret: (f1 / f0 - 1) * 100 });
   }
   return out;
 }

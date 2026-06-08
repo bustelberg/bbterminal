@@ -133,41 +133,71 @@ export default function SummaryStats({
             if (!strat || !uni) return null;
             const alpha = strat.stats.totalReturn - uni.stats.totalReturn;
             return (
-              <Stat label="Alpha" title="Strategy total return minus the equal-weight universe's, over the same window.">
-                <span className={alpha >= 0 ? 'text-pos-400' : 'text-neg-400'}>{alpha >= 0 ? '+' : ''}{alpha.toFixed(2)}%</span>
+              <Stat
+                label="Alpha"
+                tone={alpha >= 0 ? 'text-pos-400' : 'text-neg-400'}
+                info="Strategy total return minus the equal-weight universe's, over the same window. Positive (green) = the picks beat simply holding the whole eligible universe."
+              >
+                {alpha >= 0 ? '+' : ''}{alpha.toFixed(2)}%
               </Stat>
             );
           })()}
           {active != null && (
-            <Stat label="Info ratio" title={`Information ratio = annualised active return (strategy − universe) ÷ tracking error. Tracking error ${active.te.toFixed(1)}%/yr. Higher = more consistent value-add per unit of active risk.`}>
-              <span className={active.ir >= 0 ? 'text-pos-400' : 'text-neg-400'}>{active.ir.toFixed(2)}</span>
+            <Stat
+              label="Info ratio"
+              tone={toneClass(active.ir, 0.5, 0)}
+              info={`Annualised active return (strategy − universe) ÷ tracking error — risk-adjusted skill vs the universe. Rough scale: ≈0.5 good, >1 excellent, <0 means the active bets hurt. (Tracking error ${active.te.toFixed(1)}%/yr.)`}
+            >
+              {active.ir.toFixed(2)}
             </Stat>
           )}
           {active != null && (
-            <Stat label="Tracking err" title="Annualised standard deviation of the daily active return (strategy − universe) — how far the strategy wanders from the universe.">
+            <Stat
+              label="Tracking err"
+              info="Annualised standard deviation of the daily active return (strategy − universe) — how far the strategy wanders from the universe. Not good or bad on its own; it's the denominator of the information ratio."
+            >
               {active.te.toFixed(1)}%
             </Stat>
           )}
           {calmar != null && (
-            <Stat label="Calmar" title="Annualised return ÷ |max drawdown| — return earned per unit of worst-case pain.">
+            <Stat
+              label="Calmar"
+              tone={toneClass(calmar, 1, 0)}
+              info="Annualised return ÷ |max drawdown| — reward earned per unit of worst-case pain. >1 is solid; higher is better; <0 means the strategy lost money over the window."
+            >
               {calmar.toFixed(2)}
             </Stat>
           )}
           {result.summary.win_rate_pct != null && (
-            <Stat label="Win rate" title="% of calendar months with strictly positive return (daily curve resampled to month-end).">
+            <Stat
+              label="Win rate"
+              tone={toneClass(result.summary.win_rate_pct, 55, 45)}
+              info="Share of calendar months with a strictly positive return (daily curve resampled to month-end). >50% = more up months than down. Note: a high win rate can still pair with poor returns if the losing months are large."
+            >
               {result.summary.win_rate_pct.toFixed(0)}%
             </Stat>
           )}
           {result.summary.sortino_ratio != null && (
-            <Stat label="Sortino" title="Like Sharpe but penalizes only downside volatility (std of negative daily returns × √252).">
+            <Stat
+              label="Sortino"
+              tone={toneClass(result.summary.sortino_ratio, 1.5, 0)}
+              info="Like Sharpe but penalises only downside volatility (std of negative daily returns × √252). Higher = better risk-adjusted return; upside swings aren't punished. Rough scale: >1 good, >2 excellent."
+            >
               {result.summary.sortino_ratio.toFixed(2)}
             </Stat>
           )}
-          <Stat label="Turnover" title="Average month-over-month change in holdings.">
+          <Stat
+            label="Turnover"
+            info="Average month-over-month change in holdings (100% = the whole book is replaced each rebalance). Higher means more trading and more fee drag — see the net figures in the table above."
+          >
             {fmtPct(result.summary.avg_monthly_turnover_pct)}
           </Stat>
-          <Stat label="Avg holdings">{result.summary.avg_holdings.toFixed(1)}</Stat>
-          <Stat label="Months">{result.summary.total_months}</Stat>
+          <Stat label="Avg holdings" info="Average number of positions held per rebalance period.">
+            {result.summary.avg_holdings.toFixed(1)}
+          </Stat>
+          <Stat label="Months" info="Number of months in the backtest window — the sample size behind these statistics. More months = more reliable.">
+            {result.summary.total_months}
+          </Stat>
         </div>
       </div>
       {/* Multi-trial cross-trial statistics — backend means ± std. These
@@ -258,13 +288,24 @@ export default function SummaryStats({
   );
 }
 
-/** One labelled metric in the strategy stat grid — small muted caption over a
- * mono value. */
-function Stat({ label, title, children }: { label: string; title?: string; children: ReactNode }) {
+/** Colour a value by a quality heuristic (higher = better): green at/above
+ * `good`, red at/below `bad`, neutral in between. */
+function toneClass(v: number, good: number, bad: number): string {
+  if (v >= good) return 'text-pos-400';
+  if (v <= bad) return 'text-neg-400';
+  return 'text-fg-soft';
+}
+
+/** One labelled metric in the strategy stat grid — small caption with an info
+ * tooltip over a mono value. `tone` colours the value by quality; omit it for
+ * purely informational metrics (tracking error, holdings, months). */
+function Stat({ label, info, tone, children }: { label: string; info: ReactNode; tone?: string; children: ReactNode }) {
   return (
-    <div title={title}>
-      <div className="text-[10px] uppercase tracking-wide text-fg-faint">{label}</div>
-      <div className="font-mono text-sm text-fg-soft">{children}</div>
+    <div>
+      <div className="text-[10px] uppercase tracking-wide text-fg-faint flex items-center">
+        {label}<CellInfoTip>{info}</CellInfoTip>
+      </div>
+      <div className={`font-mono text-sm ${tone ?? 'text-fg-soft'}`}>{children}</div>
     </div>
   );
 }
