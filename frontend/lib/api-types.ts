@@ -253,6 +253,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/copy-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Copy Status
+         * @description Diagnose the direct-Postgres COPY fast path the heavy loaders use
+         *     (backtests, /companies, FX, freshness). When SUPABASE_DB_URL is unset
+         *     OR the connection fails, those loaders SILENTLY fall back to PostgREST,
+         *     which then times out (57014) on large universes like LEONTEQ.
+         *
+         *     Returns whether the path is enabled, the connection target (password
+         *     masked, so you can see the host/port — e.g. pooler :5432 vs :6543 vs
+         *     the IPv6-only direct host), and the result of an ACTUAL test COPY with
+         *     the EXACT exception when it fails. Hit this to stop guessing why a
+         *     backtest times out in prod.
+         */
+        get: operations["copy_status_api_admin_copy_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/egress-ip": {
         parameters: {
             query?: never;
@@ -879,8 +908,12 @@ export interface paths {
          * Latest Price Date
          * @description Most recent close-price observation across all companies. The
          *     /backtest page uses this as the default end-date — "test up to
-         *     however current our data is." Cheap: an index-backed
-         *     `ORDER BY target_date DESC LIMIT 1` on `metric_data`.
+         *     however current our data is." The `source_code = 'gurufocus'` filter is
+         *     load-bearing: it lets Postgres serve this via the
+         *     `idx_metric_data_source_date` (source_code, target_date) index as a
+         *     backward scan. Without it there's no usable index for
+         *     `metric_code = … ORDER BY target_date DESC`, so prod seq-scans the whole
+         *     `metric_data` table and trips the statement timeout (57014).
          */
         get: operations["latest_price_date_api_data_latest_price_date_get"];
         put?: never;
@@ -3441,6 +3474,37 @@ export interface operations {
             };
             header?: {
                 authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    copy_status_api_admin_copy_status_get: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization: string;
             };
             path?: never;
             cookie?: never;

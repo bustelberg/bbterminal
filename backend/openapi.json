@@ -1529,10 +1529,10 @@
         ]
       }
     },
-    "/api/admin/data-freshness": {
+    "/api/admin/copy-status": {
       "get": {
-        "description": "How current each data source is. The IBKR script can use the\n`close_price_age_trading_days` field as a gate: bail out before\nplacing orders if it's > some threshold.",
-        "operationId": "get_data_freshness_api_admin_data_freshness_get",
+        "description": "Diagnose the direct-Postgres COPY fast path the heavy loaders use\n(backtests, /companies, FX, freshness). When SUPABASE_DB_URL is unset\nOR the connection fails, those loaders SILENTLY fall back to PostgREST,\nwhich then times out (57014) on large universes like LEONTEQ.\n\nReturns whether the path is enabled, the connection target (password\nmasked, so you can see the host/port \u2014 e.g. pooler :5432 vs :6543 vs\nthe IPv6-only direct host), and the result of an ACTUAL test COPY with\nthe EXACT exception when it fails. Hit this to stop guessing why a\nbacktest times out in prod.",
+        "operationId": "copy_status_api_admin_copy_status_get",
         "parameters": [
           {
             "in": "header",
@@ -1564,7 +1564,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Get Data Freshness",
+        "summary": "Copy Status",
         "tags": [
           "admin"
         ]
@@ -1764,233 +1764,9 @@
         ]
       }
     },
-    "/api/admin/pipeline-runs": {
-      "get": {
-        "description": "Recent pipeline runs (newest first), compact summary per row.\nCaps `limit` at 100.",
-        "operationId": "list_pipeline_runs_api_admin_pipeline_runs_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 20,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": true,
-            "schema": {
-              "title": "Authorization",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Pipeline Runs",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
-    "/api/admin/portfolio/latest": {
-      "get": {
-        "description": "Return the most recent current-picks snapshot in IBKR-friendly\nshape. 404 when no snapshot has been produced yet.",
-        "operationId": "get_latest_portfolio_api_admin_portfolio_latest_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": true,
-            "schema": {
-              "title": "Authorization",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Latest Portfolio",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
-    "/api/admin/portfolio/{snapshot_id}": {
-      "get": {
-        "description": "Return a specific snapshot by id, same shape as /latest.",
-        "operationId": "get_portfolio_by_id_api_admin_portfolio__snapshot_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "snapshot_id",
-            "required": true,
-            "schema": {
-              "title": "Snapshot Id",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": true,
-            "schema": {
-              "title": "Authorization",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Portfolio By Id",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
-    "/api/admin/runs/latest": {
-      "get": {
-        "description": "Return a compact summary of the most recent pipeline run plus\nthe most recent SUCCESSFUL run (when different). Use this as the\none-line \"is anything working?\" probe \u2014 if `latest.status` is `ok`\nand `latest.finished_at` is within the last week, the system is\nhealthy.",
-        "operationId": "get_latest_run_api_admin_runs_latest_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": true,
-            "schema": {
-              "title": "Authorization",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Latest Run",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
-    "/api/admin/sanity-check": {
-      "get": {
-        "description": "Sanity diagnostics for verifying everything still hangs together.\nIndependent from `health` \u2014 these are coarse counts and shapes the\nuser (or a CI smoke test) can eyeball to confirm the system isn't\nquietly broken.",
-        "operationId": "sanity_check_api_admin_sanity_check_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": true,
-            "schema": {
-              "title": "Authorization",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Sanity Check",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
     "/api/admin/schedules": {
       "get": {
-        "description": "Every scheduled strategy on the system with its latest portfolio\nattached. Returns a list (newest-created last) so an external buyer\nscript can iterate strategies, see when each is due to rebalance\n(`next_due_at`), and pull the holdings they should currently be\nholding (`latest_portfolio.holdings`).\n\nQuery: `enabled_only=true` (default) hides paused strategies; pass\n`false` to see everything.",
+        "description": "List every scheduled strategy with its next rebalance date. Admin\nonly. Lightweight (no holdings) \u2014 the discovery call: find the\n`strategy_id` to drill into, see when each next rebalances, and how\nfresh its holdings are.\n\n`next_rebalance_at` is the UTC tick at which the strategy will next\nre-select its holdings (NULL = a never-run strategy, rebalances on the\nnext tick). `as_of_date` / `latest_price_date` / `holdings_count` come\nfrom its most recent snapshot (absent until the strategy first runs).\n\nQuery: `enabled_only=true` (default) hides paused strategies; pass\n`false` to see everything.\n\nResponse: `[{strategy_id, name, enabled, frequency, next_rebalance_at,\nlast_run_at, as_of_date, latest_price_date, holdings_count}]`.",
         "operationId": "list_schedules_api_admin_schedules_get",
         "parameters": [
           {
@@ -2041,7 +1817,7 @@
     },
     "/api/admin/schedules/{strategy_id}": {
       "get": {
-        "description": "One scheduled strategy + its full latest portfolio. Same shape as\none entry of `/api/admin/schedules`. 404 when the strategy doesn't\nexist.",
+        "description": "One scheduled strategy's CURRENT holdings \u2014 the order-ready call your\nIBKR buyer makes. Admin only.\n\nHoldings come from the strategy's most recent `current_picks_snapshot`;\n`as_of_date` is the date they were selected and `latest_price_date` the\nmost recent close priced into them \u2014 gate on these (or `/api/admin/health`)\nso you never trade on stale data. A strategy with no snapshot yet returns\nan empty `holdings` list. 404 when the strategy doesn't exist.\n\nEach holding carries everything needed to place an order:\n    company_id, ticker, exchange, country, currency, company_name,\n    side, target_weight, score, entry_price_local, entry_price_eur\n\nResponse: `{strategy_id, name, enabled, frequency, next_rebalance_at,\nlast_run_at, as_of_date, latest_price_date, holdings_count, holdings:[\u2026]}`.",
         "operationId": "get_schedule_api_admin_schedules__strategy_id__get",
         "parameters": [
           {
@@ -3044,7 +2820,7 @@
     },
     "/api/data/latest-price-date": {
       "get": {
-        "description": "Most recent close-price observation across all companies. The\n/backtest page uses this as the default end-date \u2014 \"test up to\nhowever current our data is.\" Cheap: an index-backed\n`ORDER BY target_date DESC LIMIT 1` on `metric_data`.",
+        "description": "Most recent close-price observation across all companies. The\n/backtest page uses this as the default end-date \u2014 \"test up to\nhowever current our data is.\" The `source_code = 'gurufocus'` filter is\nload-bearing: it lets Postgres serve this via the\n`idx_metric_data_source_date` (source_code, target_date) index as a\nbackward scan. Without it there's no usable index for\n`metric_code = \u2026 ORDER BY target_date DESC`, so prod seq-scans the whole\n`metric_data` table and trips the statement timeout (57014).",
         "operationId": "latest_price_date_api_data_latest_price_date_get",
         "responses": {
           "200": {
@@ -5301,7 +5077,7 @@
     },
     "/api/scheduled-strategies/held-companies": {
       "get": {
-        "description": "Pooled set of companies currently held across every enabled\nscheduled strategy. Drives the /schedule \"Misc jobs \u2192 Currently held\ncompanies\" panel \u2014 gives the user full transparency over which\ncompany is in which strategy's portfolio, when each position was\nopened, and where the next daily price refresh will be writing data.\n\nAggregation: for each enabled strategy, take the most-recent\n`current_picks_snapshot` (any kind \u2014 rebalance or price_update;\nthey share the same holdings shape). Pool the holdings, dedup by\n`company_id`, and attach one `held_by` entry per strategy that holds\nthat company. Companies with no snapshot yet are skipped silently.\n\nReturns:\n    {\n      \"total_companies\": int,           # distinct companies pooled\n      \"total_strategies\": int,          # strategies contributing\n      \"freshness_summary\": {            # what date prices we actually have\n        \"latest_close_date\": str|None,  # max(target_date) across held companies\n        \"fresh_count\": int,             # companies at the latest_close_date\n        \"stale_count\": int,             # companies with an older latest target_date\n        \"missing_count\": int,           # companies with NO close_price data at all\n      },\n      \"companies\": [{\n        \"company_id\", \"ticker\", \"exchange\",\n        \"company_name\", \"sector\",\n        \"latest_close_price_date\": str|None,  # max(target_date) in metric_data for this company\n        \"held_by\": [{\n          \"strategy_id\", \"strategy_name\",\n          \"snapshot_id\", \"snapshot_kind\",  # \"rebalance\"|\"price_update\"\n          \"as_of_date\",                    # when this position was opened\n          \"latest_price_date\",             # most recent close seen for it\n          \"target_weight\",                 # fractional, 0..1\n          \"score\", \"entry_price_local\", \"entry_date\",\n        }]\n      }]\n    }",
+        "description": "Pooled set of companies currently held across every enabled\nscheduled strategy. Drives the /schedule \"Misc jobs \u2192 Currently held\ncompanies\" panel \u2014 gives the user full transparency over which\ncompany is in which strategy's portfolio, when each position was\nopened, and where the next daily price refresh will be writing data.\n\nAggregation: for each enabled strategy, take the most-recent\n`current_picks_snapshot` (any kind \u2014 rebalance or price_update;\nthey share the same holdings shape). Pool the holdings, dedup by\n`company_id`, and attach one `held_by` entry per strategy that holds\nthat company. Companies with no snapshot yet are skipped silently.\n\nReturns:\n    {\n      \"total_companies\": int,           # distinct companies pooled\n      \"total_strategies\": int,          # strategies contributing\n      \"freshness_summary\": {            # what date prices we actually have\n        \"latest_close_date\": str|None,  # max(target_date) across held companies\n        \"fresh_count\": int,             # companies at the latest_close_date\n        \"stale_count\": int,             # companies with an older latest target_date\n        \"missing_count\": int,           # companies with NO close_price data at all\n      },\n      \"companies\": [{\n        \"company_id\", \"ticker\", \"exchange\",\n        \"company_name\", \"sector\",\n        \"currency\": str|None,                 # native trading currency (from the listing exchange)\n        \"gurufocus_url\": str|None,            # canonical GuruFocus summary link\n        \"latest_close_price_date\": str|None,  # max(target_date) in metric_data for this company\n        \"latest_close_price\": float|None,     # close at that date, in `currency` (unconverted)\n        \"held_by\": [{\n          \"strategy_id\", \"strategy_name\",\n          \"snapshot_id\", \"snapshot_kind\",  # \"rebalance\"|\"price_update\"\n          \"as_of_date\",                    # when this position was opened\n          \"latest_price_date\",             # most recent close seen for it\n          \"target_weight\",                 # fractional, 0..1\n          \"score\", \"entry_price_local\", \"entry_date\",\n        }]\n      }]\n    }",
         "operationId": "list_held_companies_api_scheduled_strategies_held_companies_get",
         "responses": {
           "200": {
