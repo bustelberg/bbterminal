@@ -42,7 +42,7 @@ export function useScheduledStrategies() {
 
   const loadStrategies = useCallback(async () => {
     try {
-      const r = await fetch(`${API_URL}/api/scheduled-strategies`);
+      const r = await apiFetch(`${API_URL}/api/scheduled-strategies`);
       if (!r.ok) return;
       const data = (await r.json()) as ScheduledStrategy[];
       setStrategies(Array.isArray(data) ? data : []);
@@ -60,7 +60,7 @@ export function useScheduledStrategies() {
   // Fetch the latest available close-price date once on mount.
   useEffect(() => {
     let cancelled = false;
-    fetch(`${API_URL}/api/data/latest-price-date`)
+    apiFetch(`${API_URL}/api/data/latest-price-date`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { date?: string | null } | null) => {
         if (!cancelled && d?.date) setLatestPriceDate(d.date);

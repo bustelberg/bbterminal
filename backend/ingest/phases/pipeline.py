@@ -14,11 +14,14 @@ is captured in `accumulated_errors` (first ~5 surface in
 from __future__ import annotations
 
 import logging
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from .acquisition import _run_acquisition_phase
 from .momentum import _run_momentum_phase, _run_smart_momentum_phase
 from .planner import (
+    _TEMPLATE_PARENTS,
     build_plan,
     collect_template_universe_companies,
     collect_universe_companies,
@@ -27,6 +30,32 @@ from .prices import _collect_held_companies, _run_prices_phase
 from .prune import _run_dedupe_phase, _run_delisting_phase, _run_prune_phase
 from .runlog import _now_utc_iso, _update_run
 from .templates import _run_templates_phase, templates_needing_refresh
+
+# Global serializer for the split pipeline. The price-update and rebalance
+# operations are independently triggerable (scheduler tick + per-section
+# Run-now buttons), but must never run concurrently — they both touch the
+# same `current_picks_snapshot` rows and would race on GuruFocus + the DB.
+# Whichever acquires first runs to completion; the other blocks on the lock
+# and runs immediately after. Single-instance assumption (same as the
+# scheduler — see CLAUDE.md "Single-instance assumption").
+_PIPELINE_LOCK = threading.Lock()
+
+
+@contextmanager
+def _serialized(run_id: int):
+    """Acquire the global pipeline lock, surfacing a 'waiting' message on the
+    run row when another operation is already in flight so the /schedule UI
+    shows the queued state instead of a frozen spinner."""
+    if not _PIPELINE_LOCK.acquire(blocking=False):
+        _update_run(
+            run_id,
+            current_message="Waiting for another pipeline operation to finish…",
+        )
+        _PIPELINE_LOCK.acquire()
+    try:
+        yield
+    finally:
+        _PIPELINE_LOCK.release()
 
 
 def _run_pipeline_sync(run_id: int) -> None:
@@ -314,3 +343,168 @@ def _run_smart_pipeline_sync(run_id: int) -> None:
         finished_at=_now_utc_iso(),
     )
     log.info("[smart] run_id=%s finished status=%s", run_id, final_status)
+
+
+def _run_price_update_pipeline_sync(run_id: int) -> None:
+    """Operation 1 of the split pipeline — keep the enabled strategies' HELD
+    companies priced and re-price each strategy's open positions (MTD).
+
+    Scope is deliberately tiny: the ~24 companies currently held across every
+    enabled scheduled strategy, nothing else. No template maintenance, no
+    universe refresh, no rebalance. This is the daily (and Run-now) heartbeat
+    that keeps the /schedule MTD numbers current between rebalances.
+
+    Serialized against the rebalance op via `_PIPELINE_LOCK` — if a rebalance
+    is in flight this blocks until it finishes, then runs."""
+    log = logging.getLogger(__name__)
+    accumulated_errors: list[str] = []
+
+    with _serialized(run_id):
+        # ── Phase: prices — held companies only ────────────────────
+        held_count = 0
+        _update_run(run_id, current_phase="prices", current_message="Collecting held companies…")
+        try:
+            held = _collect_held_companies(run_id)
+            held_count = len(held)
+            if held:
+                _update_run(run_id, current_message=f"Refreshing {held_count} held companies…")
+                _run_prices_phase(run_id, accumulated_errors, companies_override=held)
+            else:
+                _update_run(run_id, current_message="No held companies yet — nothing to price.")
+        except Exception as e:
+            msg = f"Held-price phase failed: {type(e).__name__}: {e}"
+            log.warning("[price_update] run_id=%s %s", run_id, msg)
+            accumulated_errors.append(msg)
+
+        # ── Phase: momentum — price-update only (no rebalances) ────
+        _update_run(run_id, current_phase="momentum", current_message="Re-pricing open positions…")
+        try:
+            _run_momentum_phase(
+                run_id,
+                include_rebalances=False,
+                dedupe_price_updates=True,
+            )
+        except Exception as e:
+            msg = f"Momentum price-update phase failed: {type(e).__name__}: {e}"
+            log.warning("[price_update] run_id=%s %s", run_id, msg)
+            accumulated_errors.append(msg)
+
+    _finalize_run(run_id, accumulated_errors, log, tag="price_update")
+
+
+def _run_rebalance_pipeline_sync(run_id: int) -> None:
+    """Operation 2 of the split pipeline — rebalance the DUE scheduled
+    strategies (re-select holdings from a freshly-refreshed universe).
+
+    For each strategy whose `next_due_at` has arrived: refresh its
+    template-managed universe (so it re-selects from current membership),
+    load that universe's prices (so newly-eligible names have history before
+    scoring), then run the momentum rebalance. Strategies that aren't due are
+    left untouched — the price-update op owns their MTD refresh.
+
+    No-op (status ok) when nothing is due. Serialized against the
+    price-update op via `_PIPELINE_LOCK`."""
+    log = logging.getLogger(__name__)
+    accumulated_errors: list[str] = []
+
+    with _serialized(run_id):
+        # ── Phase: plan — which strategies are due ─────────────────
+        _update_run(run_id, current_phase="plan", current_message="Checking which strategies are due…")
+        plan = None
+        try:
+            plan = build_plan(datetime.now(timezone.utc))
+            _update_run(run_id, plan_summary=plan.to_summary())
+        except Exception as e:
+            msg = f"Plan phase failed: {type(e).__name__}: {e}"
+            log.warning("[rebalance] run_id=%s %s", run_id, msg)
+            accumulated_errors.append(msg)
+
+        due_plans = [sp for sp in plan.strategies if sp.is_due] if plan else []
+        if not due_plans:
+            _update_run(run_id, current_message="No strategies due to rebalance.")
+            _finalize_run(run_id, accumulated_errors, log, tag="rebalance")
+            return
+
+        # Template universes the due strategies select from (+ parents for
+        # derived templates), so each re-selects from current membership.
+        needed_keys: set[str] = set()
+        for sp in due_plans:
+            if sp.resolved_template_key:
+                needed_keys.add(sp.resolved_template_key)
+                for parent in _TEMPLATE_PARENTS.get(sp.resolved_template_key, ()):
+                    needed_keys.add(parent)
+
+        # ── Phase: templates — due strategies' universes ───────────
+        templates_refreshed = 0
+        if needed_keys:
+            _update_run(
+                run_id, current_phase="templates",
+                current_message=f"Refreshing {len(needed_keys)} universe(s) for rebalance…",
+            )
+            try:
+                templates_refreshed = _run_templates_phase(run_id, only_keys=needed_keys)
+            except Exception as e:
+                msg = f"Templates phase failed: {type(e).__name__}: {e}"
+                log.warning("[rebalance] run_id=%s %s", run_id, msg)
+                accumulated_errors.append(msg)
+
+        # ── Phase: dedupe — only when a template actually rebuilt ──
+        if templates_refreshed:
+            _update_run(run_id, current_phase="dedupe", current_message="Merging duplicate listings…")
+            try:
+                _run_dedupe_phase(run_id)
+            except Exception as e:
+                msg = f"Dedupe phase failed: {type(e).__name__}: {e}"
+                log.warning("[rebalance] run_id=%s %s", run_id, msg)
+                accumulated_errors.append(msg)
+
+        # ── Phase: prices — due strategies' full universe ──────────
+        universe_count = 0
+        _update_run(run_id, current_phase="prices", current_message="Collecting rebalance universe…")
+        try:
+            universe_companies = collect_universe_companies(due_plans)
+            universe_count = len(universe_companies)
+            if universe_companies:
+                _update_run(run_id, current_message=f"Refreshing {universe_count} universe companies…")
+                _run_prices_phase(run_id, accumulated_errors, companies_override=universe_companies)
+        except Exception as e:
+            msg = f"Universe-price phase failed: {type(e).__name__}: {e}"
+            log.warning("[rebalance] run_id=%s %s", run_id, msg)
+            accumulated_errors.append(msg)
+
+        # ── Phase: momentum — rebalance the due strategies only ────
+        _update_run(run_id, current_phase="momentum", current_message="Rebalancing due strategies…")
+        try:
+            _run_momentum_phase(
+                run_id,
+                due_override={sp.strategy_id: sp.is_due for sp in plan.strategies},
+                include_price_updates=False,
+            )
+        except Exception as e:
+            msg = f"Momentum rebalance phase failed: {type(e).__name__}: {e}"
+            log.warning("[rebalance] run_id=%s %s", run_id, msg)
+            accumulated_errors.append(msg)
+
+        # Enrich the persisted plan with what actually happened, for the UI.
+        if plan is not None:
+            plan.universes_refreshed = sorted(needed_keys)
+            plan.universe_company_count = universe_count
+            _update_run(run_id, plan_summary=plan.to_summary())
+
+    _finalize_run(run_id, accumulated_errors, log, tag="rebalance")
+
+
+def _finalize_run(run_id: int, accumulated_errors: list[str], log, *, tag: str) -> None:
+    """Shared run-finalizer for the split orchestrators: marks `done`, sets
+    `status` from whether any phase errored, and rolls the first few errors
+    into `error_summary`."""
+    final_status = "error" if accumulated_errors else "ok"
+    summary = ("First errors:\n" + "\n".join(accumulated_errors[:5]))[:1000] if accumulated_errors else None
+    _update_run(
+        run_id,
+        current_phase="done",
+        status=final_status,
+        error_summary=summary,
+        finished_at=_now_utc_iso(),
+    )
+    log.info("[%s] run_id=%s finished status=%s", tag, run_id, final_status)

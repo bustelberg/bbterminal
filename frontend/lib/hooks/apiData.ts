@@ -12,6 +12,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { API_URL } from '../apiUrl';
+import { apiFetch } from '../apiFetch';
 import { getCachedOrFetch, peekCache } from './fetchCache';
 import { DEFAULT_FEE_CONFIG, type FeeConfig } from '../../app/components/momentum/feeModel';
 
@@ -79,7 +80,7 @@ const KEYS = {
 } as const;
 
 async function _fetchUniverseTemplates(): Promise<UniverseTemplate[]> {
-  const r = await fetch(`${API_URL}/api/universe-templates`);
+  const r = await apiFetch(`${API_URL}/api/universe-templates`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const data = (await r.json()) as UniverseTemplate[];
   // Templates that have never been refreshed (no captured months) are
@@ -91,26 +92,26 @@ async function _fetchStaticUniverses(): Promise<UniverseTemplate[]> {
   // Frozen snapshots (`/api/static-universes`). Same `_summary` shape as the
   // templates, with `template_key` carrying the snapshot's label (the value
   // the backtest sends as `index_universe`, resolved via the label fallback).
-  const r = await fetch(`${API_URL}/api/static-universes`);
+  const r = await apiFetch(`${API_URL}/api/static-universes`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const data = (await r.json()) as UniverseTemplate[];
   return data.filter((u) => u.earliest_captured_month && u.latest_captured_month);
 }
 
 async function _fetchBenchmarks(): Promise<Benchmark[]> {
-  const r = await fetch(`${API_URL}/api/benchmarks`);
+  const r = await apiFetch(`${API_URL}/api/benchmarks`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return (await r.json()) as Benchmark[];
 }
 
 async function _fetchCompanies(): Promise<CompanyRow[]> {
-  const r = await fetch(`${API_URL}/api/companies`);
+  const r = await apiFetch(`${API_URL}/api/companies`);
   if (!r.ok) return [];
   return (await r.json()) as CompanyRow[];
 }
 
 async function _fetchMomentumSignals(): Promise<{ signals: SignalDef[]; categories: string[] }> {
-  const r = await fetch(`${API_URL}/api/momentum/signals`);
+  const r = await apiFetch(`${API_URL}/api/momentum/signals`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const d = await r.json();
   return {
@@ -120,13 +121,13 @@ async function _fetchMomentumSignals(): Promise<{ signals: SignalDef[]; categori
 }
 
 async function _fetchExchangeFees(): Promise<ExchangeFeeRow[]> {
-  const r = await fetch(`${API_URL}/api/exchange-fees`);
+  const r = await apiFetch(`${API_URL}/api/exchange-fees`);
   if (!r.ok) return [];
   return (await r.json()) as ExchangeFeeRow[];
 }
 
 async function _fetchFeeConfig(): Promise<FeeConfig> {
-  const r = await fetch(`${API_URL}/api/fee-config`);
+  const r = await apiFetch(`${API_URL}/api/fee-config`);
   if (!r.ok) return DEFAULT_FEE_CONFIG;
   const d = await r.json();
   return {

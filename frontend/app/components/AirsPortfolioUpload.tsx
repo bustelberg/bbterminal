@@ -15,6 +15,7 @@ import TableDownloadButton from './TableDownloadButton';
 import Spinner from './Spinner';
 import LoadingDots from './LoadingDots';
 import { API_URL } from '../../lib/apiUrl';
+import { apiFetch } from '../../lib/apiFetch';
 
 const AIRS_STEPS: StepDef[] = [
   { key: 'login', label: 'Log in to AirSPMS' },
@@ -223,7 +224,7 @@ export default function AirsPortfolioUpload() {
       }
 
       try {
-        const res = await fetch(`${API_URL}/api/airs/portfolio/${encodeURIComponent(name)}`);
+        const res = await apiFetch(`${API_URL}/api/airs/portfolio/${encodeURIComponent(name)}`);
         if (!res.ok) throw new Error();
         const data: PortfolioDetail = await res.json();
         const last = data.rows[data.rows.length - 1];
@@ -249,7 +250,7 @@ export default function AirsPortfolioUpload() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${API_URL}/api/airs/portfolios`);
+        const res = await apiFetch(`${API_URL}/api/airs/portfolios`);
         if (!res.ok) return;
         const data: CachedPortfolio[] = await res.json();
         if (data.length > 0) {
@@ -296,7 +297,7 @@ export default function AirsPortfolioUpload() {
     setLoading(name);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/airs/portfolio/${encodeURIComponent(name)}`);
+      const res = await apiFetch(`${API_URL}/api/airs/portfolio/${encodeURIComponent(name)}`);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail ?? `HTTP ${res.status}`);

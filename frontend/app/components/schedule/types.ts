@@ -161,7 +161,13 @@ export type HeldCompany = {
   exchange: string;
   company_name: string | null;
   sector: string | null;
+  /** Native trading currency of the listing exchange (e.g. 'CHF', 'USD'). */
+  currency: string | null;
+  /** Canonical GuruFocus summary link, or null when no ticker. */
+  gurufocus_url: string | null;
   latest_close_price_date: string | null;
+  /** Latest close in `currency`, unconverted. Null when no price data. */
+  latest_close_price: number | null;
   held_by: Array<{
     strategy_id: number;
     strategy_name: string;

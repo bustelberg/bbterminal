@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from datetime import date, datetime, timedelta, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -169,36 +170,25 @@ def _pipeline_already_running() -> bool:
 
 
 def _maybe_kickstart_smart(sched: BackgroundScheduler) -> None:
-    """On startup, schedule a one-shot `smart_daily` when there's catch-up work
-    — so an env that was down across the 02:00 UTC tick (or freshly deployed)
-    converges immediately rather than waiting a day. The smart tick is itself
-    dependency-scoped + idempotent, so firing it is always safe. Idempotent via
-    the fixed job id + `replace_existing=True`.
+    """On startup, schedule a one-shot daily-sequence run when there's catch-up
+    work — so an env that was down across the 02:00 UTC tick (or freshly
+    deployed) converges immediately rather than waiting a day. The sequence
+    (price-update → rebalance) is itself scoped + idempotent, so firing it is
+    always safe. Idempotent via the fixed job id + `replace_existing=True`.
 
-    Catch-up reasons:
-      * a template-managed universe is unbuilt or behind the month — this is
-        INDEPENDENT of scheduled strategies (/backtest + /acwi read
-        universe_membership directly), so it fires even with zero strategies;
+    Catch-up reasons (both strategy-driven — template-universe maintenance was
+    dropped with the split pipeline; the rebalance op refreshes the due
+    strategy's own universe on demand):
       * an enabled strategy is due to rebalance;
       * an enabled strategy's held prices are stale (missed the daily MTD)."""
     from ingest.phases.planner import build_plan  # noqa: PLC0415 — avoid import cycle
-    from ingest.phases.templates import templates_needing_refresh  # noqa: PLC0415
 
     reasons: list[str] = []
 
-    # Template maintenance — independent of scheduled strategies.
-    try:
-        maint = templates_needing_refresh()
-        if maint:
-            reasons.append(f"{len(maint)} template(s) unbuilt/behind")
-    except Exception as e:
-        _log.warning("[scheduler] smart kickstart: template-staleness probe failed: %s: %s", type(e).__name__, e)
-
-    # Strategy-driven reasons (only meaningful when strategies exist).
     try:
         plan = build_plan(datetime.now(timezone.utc))
     except Exception as e:
-        _log.warning("[scheduler] smart kickstart: plan build failed: %s: %s", type(e).__name__, e)
+        _log.warning("[scheduler] kickstart: plan build failed: %s: %s", type(e).__name__, e)
         plan = None
     if plan is not None and plan.strategies:
         if plan.due_strategy_ids:
@@ -207,23 +197,22 @@ def _maybe_kickstart_smart(sched: BackgroundScheduler) -> None:
             if _held_prices_stale():
                 reasons.append("held prices stale")
         except Exception as e:
-            _log.warning("[scheduler] smart kickstart: price-staleness probe failed: %s: %s", type(e).__name__, e)
+            _log.warning("[scheduler] kickstart: price-staleness probe failed: %s: %s", type(e).__name__, e)
 
     if not reasons:
-        _log.info("[scheduler] smart kickstart: everything current — no-op")
+        _log.info("[scheduler] kickstart: everything current — no-op")
         return
     if _pipeline_already_running():
-        _log.info("[scheduler] smart kickstart: needed (%s) but a pipeline is already running — skipping", reasons)
+        _log.info("[scheduler] kickstart: needed (%s) but a pipeline is already running — skipping", reasons)
         return
     run_at = datetime.now(timezone.utc) + timedelta(seconds=_BOOTSTRAP_DELAY_SECONDS)
     _log.warning(
-        "[scheduler] smart kickstart: firing smart_daily at %s — reasons: %s",
+        "[scheduler] kickstart: firing daily sequence at %s — reasons: %s",
         run_at.isoformat(), reasons,
     )
     sched.add_job(
-        _fire_job,
+        _fire_daily_sequence,
         DateTrigger(run_date=run_at),
-        args=["smart_daily"],
         id="startup_smart_kickstart",
         replace_existing=True,
         coalesce=True,
@@ -331,6 +320,36 @@ def _fire_job(job_name: str) -> None:
         )
 
 
+def _fire_daily_sequence() -> None:
+    """Run the split pipeline's two operations IN ORDER — price-update, then
+    rebalance (a no-op unless a strategy is due) — each as its own
+    `ingest_run` row. Both run in a single daemon thread so they execute
+    sequentially rather than racing; the global pipeline lock additionally
+    guards against any concurrent manual Run-now. Passed to APScheduler (daily
+    tick + startup catch-up); never raises into the scheduler thread."""
+    def _seq() -> None:
+        from ingest.phases import (  # local import to avoid an import cycle
+            _create_run,
+            _run_price_update_pipeline_sync,
+            _run_rebalance_pipeline_sync,
+        )
+        for job_name, fn in (
+            ("price_update", _run_price_update_pipeline_sync),
+            ("rebalance", _run_rebalance_pipeline_sync),
+        ):
+            try:
+                run_id = _create_run(job_name, "auto")
+                _log.info("[scheduler] daily sequence: %s → run_id=%s", job_name, run_id)
+                fn(run_id)
+            except Exception as e:
+                _log.exception(
+                    "[scheduler] daily sequence: %s failed: %s: %s",
+                    job_name, type(e).__name__, e,
+                )
+
+    threading.Thread(target=_seq, daemon=True, name="daily-pipeline").start()
+
+
 def register_scheduler(app) -> None:
     """Attach the scheduler to the FastAPI lifecycle. Called once from
     `main.py` after the FastAPI() instance is created."""
@@ -349,21 +368,21 @@ def register_scheduler(app) -> None:
             return
 
         sched = BackgroundScheduler(timezone="UTC")
-        # Single daily "smart" tick: every day 02:00 UTC. It derives, from
-        # the enabled scheduled strategies, exactly what's needed and runs
-        # only that (see `ingest.phases.pipeline._run_smart_pipeline_sync`):
-        # refresh only the universes those strategies use, keep every
-        # strategy's held companies priced daily, and rebalance each
-        # strategy on the first occurrence of its baked `rebalance_weekday`
-        # in its period. Monday 02:00 UTC already has Friday's settled close
-        # (US close Fri 21:00 UTC + ~5h), so a first-Monday rebalance decides
-        # on Friday's close. Weekend ticks are cheap no-ops via the
-        # per-company freshness short-circuit.
+        # Single daily tick at 02:00 UTC that runs the split pipeline's two
+        # operations IN ORDER (see `ingest.phases.pipeline`):
+        #   1. price-update — re-price the held companies + refresh MTD;
+        #   2. rebalance    — rebalance any strategy whose rebalance day has
+        #      arrived (a no-op otherwise).
+        # They run sequentially in one daemon thread and never overlap (the
+        # rebalance also serializes against manual Run-now via the pipeline
+        # lock). Monday 02:00 UTC already has Friday's settled close (US close
+        # Fri 21:00 UTC + ~5h), so a first-Monday rebalance decides on
+        # Friday's close. Weekend ticks are cheap no-ops via the per-company
+        # freshness short-circuit.
         sched.add_job(
-            _fire_job,
+            _fire_daily_sequence,
             CronTrigger(day_of_week="mon-sun", hour=2, minute=0, timezone="UTC"),
-            args=["smart_daily"],
-            id="smart_daily",
+            id="daily_pipeline",
             replace_existing=True,
             # If a startup coincides with the tick (e.g. a deploy right at
             # 02:00 UTC), `coalesce=True` collapses any backlog into a single

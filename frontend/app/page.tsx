@@ -59,7 +59,7 @@ const tiles: Tile[] = [
     href: '/airs-portfolio',
     label: 'AIRS Portfolio',
     description: 'Broker scanner and AIRS Excel upload — parses holdings and computes YTD returns in EUR and local currency.',
-    badge: 'Under construction',
+    userVisible: true,
   },
   {
     href: '/request_gurufocus',

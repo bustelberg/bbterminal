@@ -43,7 +43,7 @@ const LEONTEQ_FIELDS: FeeField[] = [
   { key: 'transaction_bps', label: 'Transaction cost', suffix: 'bps / trade', hint: 'Charged on every buy and every sell, all exchanges.' },
 ];
 const BUSTELBERG_FIELDS: FeeField[] = [
-  { key: 'bustelberg_mgmt_bps', label: 'Management fee', suffix: 'bps / yr', hint: 'Deducted at each year-end (final year pro-rated).' },
+  { key: 'bustelberg_mgmt_bps', label: 'Management fee', suffix: 'bps / mo', hint: 'Accrues monthly (e.g. 10 bps/month ≈ 1.2%/yr); settled at each crystallization point.' },
   { key: 'bustelberg_perf_pct', label: 'Performance fee', suffix: '% HWM', hint: 'Charged yearly on gains above the running high-water mark.' },
 ];
 
@@ -62,7 +62,7 @@ function FeeStructureCard() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch(`${API_URL}/api/fee-config`);
+      const r = await apiFetch(`${API_URL}/api/fee-config`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
       const next: FeeConfig = {
@@ -204,7 +204,7 @@ export default function Fees() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch(`${API_URL}/api/exchange-fees`);
+      const r = await apiFetch(`${API_URL}/api/exchange-fees`);
       if (!r.ok) {
         setLoadError(`Failed to load (${r.status})`);
         return;

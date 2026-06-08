@@ -106,6 +106,21 @@
   box-shadow: 0 6px 20px -6px rgba(47, 134, 255, 0.5);
 }
 
+/* ── Snappy hover, site-wide ─────────────────────────────────────────────────
+   Tailwind's transition-* utilities default to a 150ms duration, so a hover
+   highlight FADES in. On a quick cursor sweep a tile only gets ~30-50ms of
+   hover — the fade barely starts before the pointer leaves, reading as "didn't
+   light up". Zeroing the duration *only while hovered* makes the highlight
+   appear instantly; the rule stops matching the moment the pointer leaves, so
+   the element reverts at its normal (smooth) duration — instant in, smooth out.
+   `.group:hover *` extends this to group-hover highlights (e.g. a card title
+   that brightens when its card is hovered). Unlayered, so it overrides the
+   layered `duration-*` utilities. */
+*:hover,
+.group:hover * {
+  transition-duration: 0s;
+}
+
 /* Gradient mesh painted behind everything (fixed so it doesn't scroll). */
 body {
   background-image:

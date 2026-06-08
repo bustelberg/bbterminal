@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { API_URL } from '../../lib/apiUrl';
+import { apiFetch } from '../../lib/apiFetch';
 import type { BacktestResult, UniverseEntry } from '../../lib/stores/momentum';
 import BacktestResultView from './momentum/BacktestResultView';
 import type { ScoringConfig } from './momentum/MonthlyHoldingsTable';
@@ -77,7 +78,7 @@ export default function SourceBacktestCard({
     setLoading(true);
     setError(null);
     setData(null);
-    fetch(`${API_URL}/api/momentum/backtests/${runId}`)
+    apiFetch(`${API_URL}/api/momentum/backtests/${runId}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
@@ -202,6 +203,7 @@ export default function SourceBacktestCard({
         activeStrategyLabel={data.name ?? undefined}
         scoringConfig={scoringConfig}
         markerDate={markerDate}
+        defaultCollapsed
       />
     </div>
   );

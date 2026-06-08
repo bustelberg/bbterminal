@@ -8,7 +8,9 @@
  *         · transaction_bps per buy/sell (flat, every exchange)
  *         · leonteq_annual_bps per year, deducted at year-end
  *     ── Bustelberg fees ──▶  after-Bustelberg  (net to the client)
- *         · bustelberg_mgmt_bps per year (management)
+ *         · bustelberg_mgmt_bps per MONTH (management) — accrues at the
+ *           monthly rate × months elapsed, settled at each crystallization
+ *           point (e.g. 10 bps/month ≈ 1.2%/yr)
  *         · bustelberg_perf_pct high-water-mark performance fee, charged
  *           each year-end on gains above the running peak
  *
@@ -18,11 +20,13 @@
  * waterfall on the next render without re-running the backtest. Mirrors
  * how the old per-exchange net stats worked.
  *
- * Crystallization is annual: the annual fees + the performance fee are
- * applied at each Dec 31 inside the backtest window, with the final
- * partial year pro-rated by days. The high-water mark resets to the
- * post-management NAV at each crystallization peak so the client never
- * pays a performance fee twice on the same gains.
+ * Crystallization is annual: the Leonteq annual fee + the performance fee
+ * are applied at each Dec 31 inside the backtest window, with the final
+ * partial year pro-rated by days. The management fee accrues at its monthly
+ * rate and is settled at those same points (months-in-window × monthly bps).
+ * The high-water mark resets to the post-management NAV at each
+ * crystallization peak so the client never pays a performance fee twice on
+ * the same gains.
  *
  * Transaction cost is a turnover-drag model: at each rebalance the
  * fraction of the portfolio bought (new entrants) pays the buy fee and
@@ -43,7 +47,7 @@ export type FeeConfig = {
 export const DEFAULT_FEE_CONFIG: FeeConfig = {
   leonteq_annual_bps: 35,
   transaction_bps: 10,
-  bustelberg_mgmt_bps: 100,
+  bustelberg_mgmt_bps: 10, // per MONTH (≈1.2%/yr)
   bustelberg_perf_pct: 10,
 };
 
@@ -100,6 +104,9 @@ function parseDate(d: string): number {
 }
 
 const YEAR_MS = 365.25 * 86400 * 1000;
+// The management fee is quoted per month; a crystallization window of `yf`
+// years spans `yf * MONTHS_PER_YEAR` months of accrual.
+const MONTHS_PER_YEAR = 12;
 const round2 = (v: number) => Math.round(v * 100) / 100;
 
 /** Last point in `curve` whose date is ≤ targetMs (step sample). */
@@ -333,7 +340,10 @@ export function netPartialReturn(
   endDate: string,
 ): number {
   const yf = Math.max(0, (parseDate(endDate) - parseDate(startDate)) / YEAR_MS);
-  const drag = ((config.leonteq_annual_bps + config.bustelberg_mgmt_bps) / 10000) * yf;
+  // Leonteq fee is annual (× years); the management fee is monthly (× months).
+  const leonteqDrag = (config.leonteq_annual_bps / 10000) * yf;
+  const mgmtDrag = (config.bustelberg_mgmt_bps / 10000) * yf * MONTHS_PER_YEAR;
+  const drag = leonteqDrag + mgmtDrag;
   return ((1 + grossPct / 100) * (1 - drag) - 1) * 100;
 }
 
@@ -396,7 +406,7 @@ export function computeFeeWaterfall(
   // each point's stored factor must be the *step*, not the running total.
   // (Pushing the running ratio R_i directly double-counts: a year-end +
   // final point would apply R_1·R_2 instead of R_2.)
-  const mgmtRate = config.bustelberg_mgmt_bps / 10000;
+  const mgmtRate = config.bustelberg_mgmt_bps / 10000; // per month
   const perfRate = config.bustelberg_perf_pct / 100;
   let bPrev = 1; // client NAV (post all Bustelberg fees)
   let hwm = 1;
@@ -434,7 +444,9 @@ export function computeFeeWaterfall(
     // value (grows at exactly lYear), so net_year = lYear − mgmt − perf.
     const ratio = lPrev > 0 ? lNow / lPrev : 1;
     const bPre = bPrev * ratio;
-    const mgmtFee = bPre * mgmtRate * yf;
+    // Management fee is quoted per month: accrue it over the months in this
+    // crystallization window (yf years × 12), settled here.
+    const mgmtFee = bPre * mgmtRate * yf * MONTHS_PER_YEAR;
     const bAfterMgmt = bPre - mgmtFee;
     let perfFee = 0;
     if (bAfterMgmt > hwm) {

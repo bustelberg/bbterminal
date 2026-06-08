@@ -61,7 +61,7 @@ export default function LeonteqUniverse() {
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch(`${API_URL}/api/leonteq/overview`);
+      const r = await apiFetch(`${API_URL}/api/leonteq/overview`);
       if (!r.ok) {
         setError(`Failed to load (${r.status})`);
         return;

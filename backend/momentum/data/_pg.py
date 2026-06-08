@@ -265,6 +265,42 @@ def load_latest_close_dates_via_copy(company_ids: list[int]) -> dict[int, str] |
     return out
 
 
+def load_latest_close_prices_via_copy(
+    company_ids: list[int],
+) -> dict[int, dict] | None:
+    """Latest `close_price` row (date + native-currency value) per company,
+    for a SMALL set of company ids (e.g. a strategy's ~24 held names) — a
+    single indexed `DISTINCT ON` via COPY. Returns
+    `{company_id: {"date": 'YYYY-MM-DD', "price": float}}` (companies with no
+    close_price are absent), or `None` for the PostgREST fall-back. The value
+    is the raw GuruFocus close in the security's native trading currency (no
+    FX conversion). Sibling of `load_latest_close_dates_via_copy`, returning
+    the value alongside the date for the held-companies panel."""
+    if not _db_url() or not company_ids:
+        return None
+    sql = (
+        "COPY (SELECT DISTINCT ON (company_id) company_id, target_date::text, "
+        "numeric_value FROM metric_data "
+        "WHERE metric_code = 'close_price' AND company_id = ANY(%s) "
+        "ORDER BY company_id, target_date DESC) TO STDOUT WITH (FORMAT csv)"
+    )
+    buf = _run_copy(sql, (list(company_ids),))
+    if buf is None:
+        return None
+
+    import csv as _csv  # noqa: PLC0415
+    out: dict[int, dict] = {}
+    for row in _csv.reader(io.TextIOWrapper(buf, encoding="utf-8")):
+        if len(row) != 3 or not row[0] or not row[1]:
+            continue
+        try:
+            price = float(row[2]) if row[2] else None
+        except ValueError:
+            price = None
+        out[int(row[0])] = {"date": row[1], "price": price}
+    return out
+
+
 def load_all_latest_close_dates_via_copy() -> dict[int, str] | None:
     """Latest `close_price` `target_date` for EVERY company — a single
     `GROUP BY max(target_date)` over the whole `metric_data` table via COPY.

@@ -1,5 +1,6 @@
 import { createStore } from '../store';
 import { API_URL } from '../apiUrl';
+import { runSSE } from '../stream';
 
 export type StepStatus = 'idle' | 'in_progress' | 'done' | 'error';
 
@@ -48,12 +49,15 @@ export const airsScanStore = createStore<AirsScanState>({
   errorDetail: null,
 });
 
-let eventSource: EventSource | null = null;
+// fetch-based SSE (via `runSSE`) rather than EventSource so the session
+// JWT rides along in the Authorization header — the API auth gate requires
+// it. An AbortController replaces EventSource.close() for cancellation.
+let abort: AbortController | null = null;
 
 export function startAirsScan(callbacks: {
   onPortfolios?: (portfolios: Portfolio[]) => void;
 }): void {
-  eventSource?.close();
+  abort?.abort();
 
   airsScanStore.set({
     scanning: true,
@@ -63,11 +67,11 @@ export function startAirsScan(callbacks: {
     errorDetail: null,
   });
 
-  const es = new EventSource(`${API_URL}/api/airs/scan`);
-  eventSource = es;
+  const controller = new AbortController();
+  abort = controller;
 
-  es.onmessage = (event) => {
-    const data = JSON.parse(event.data) as {
+  const onEvent = (raw: unknown) => {
+    const data = raw as {
       type: string;
       step?: keyof ScanSteps;
       status?: StepStatus;
@@ -87,8 +91,7 @@ export function startAirsScan(callbacks: {
       callbacks.onPortfolios?.(data.data ?? []);
     } else if (data.type === 'done') {
       airsScanStore.set({ scanning: false });
-      es.close();
-      if (eventSource === es) eventSource = null;
+      controller.abort();
     } else if (data.type === 'error') {
       airsScanStore.set({
         error: data.message ?? 'Unknown error',
@@ -96,20 +99,21 @@ export function startAirsScan(callbacks: {
         errorDetail: data.detail ?? null,
         scanning: false,
       });
-      es.close();
-      if (eventSource === es) eventSource = null;
+      controller.abort();
     }
   };
 
-  es.onerror = () => {
-    airsScanStore.set({ error: 'Connection lost', errorKind: null, errorDetail: null, scanning: false });
-    es.close();
-    if (eventSource === es) eventSource = null;
-  };
+  runSSE(`${API_URL}/api/airs/scan`, {}, onEvent, controller.signal)
+    .catch(() => {
+      // Aborted (done/error/cancel) is expected; surface only real failures.
+      if (controller.signal.aborted) return;
+      airsScanStore.set({ error: 'Connection lost', errorKind: null, errorDetail: null, scanning: false });
+    })
+    .finally(() => { if (abort === controller) abort = null; });
 }
 
 export function cancelAirsScan(): void {
-  eventSource?.close();
-  eventSource = null;
+  abort?.abort();
+  abort = null;
   airsScanStore.set({ scanning: false });
 }

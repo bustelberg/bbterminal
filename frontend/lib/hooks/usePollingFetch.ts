@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { apiFetch } from '../apiFetch';
 
 /**
  * Fetch a JSON endpoint on mount and re-fetch on an interval, with the
@@ -25,7 +26,7 @@ export function usePollingFetch<T>(
     let cancelled = false;
     const poll = async () => {
       try {
-        const r = await fetch(url);
+        const r = await apiFetch(url);
         if (cancelled || !r.ok) return;
         const json = (await r.json()) as T;
         if (!cancelled) { setData(json); setError(null); }

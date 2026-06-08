@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import time
 
 from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
@@ -40,6 +41,42 @@ def _is_hardcoded_admin_email(email: str | None) -> bool:
         return False
     h = hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()
     return h in _ADMIN_EMAIL_HASHES
+
+
+# In-process verification cache: token → (expiry_monotonic, {id,email,role}).
+# The API auth gate runs on every request (including high-frequency polling
+# reads), so without this every poll would round-trip to GoTrue. A short TTL
+# keeps revocation reasonably fresh while making the common case a dict hit.
+_TOKEN_CACHE: dict[str, tuple[float, dict]] = {}
+_TOKEN_CACHE_TTL = 60.0
+
+
+def verify_token(authorization: str) -> dict | None:
+    """Verify a Bearer token and return {id, email, role} (role defaults to
+    'user'), or None when the token is missing/invalid. Cached for
+    `_TOKEN_CACHE_TTL`s. Used by the API auth-gate middleware; raising
+    helpers (`_require_admin`) stay for per-endpoint defense-in-depth."""
+    token = (authorization or "").replace("Bearer ", "").strip()
+    if not token:
+        return None
+    now = time.monotonic()
+    hit = _TOKEN_CACHE.get(token)
+    if hit and hit[0] > now:
+        return hit[1]
+    try:
+        user_resp = supabase.auth.get_user(token)
+    except Exception:
+        return None
+    user = getattr(user_resp, "user", None) if user_resp else None
+    if not user:
+        return None
+    role = (getattr(user, "app_metadata", None) or {}).get("role")
+    email = getattr(user, "email", None)
+    if role != "admin" and _is_hardcoded_admin_email(email):
+        role = "admin"
+    info = {"id": user.id, "email": email, "role": role or "user"}
+    _TOKEN_CACHE[token] = (now + _TOKEN_CACHE_TTL, info)
+    return info
 
 
 def _require_admin(authorization: str) -> dict:

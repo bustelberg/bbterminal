@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { colorForSector } from '../../../lib/sectorColors';
 import { chartTheme } from '../../../lib/chartTheme';
 import type { BacktestResult } from '../../../lib/stores/momentum';
@@ -31,6 +31,9 @@ type Props = {
   /** Optional "go-live" date (YYYY-MM-DD). Drawn as a red dashed vertical
    * line at the month cell containing it, matching the other charts. */
   markerDate?: string;
+  /** Start collapsed (e.g. the /schedule strategy detail renders every
+   * card collapsed). Defaults to expanded. */
+  defaultCollapsed?: boolean;
 };
 
 // Sector color palette lives in `lib/sectorColors.ts` so /schedule's
@@ -38,7 +41,7 @@ type Props = {
 // The pure data layer (run-building + monthly bucketing) lives in
 // `./sectorTimeline.ts`; this file is the rendering/interaction shell.
 
-function SectorTimelineChartInner({ result, markerDate }: Props) {
+function SectorTimelineChartInner({ result, markerDate, defaultCollapsed = false }: Props) {
   // A long-short backtest has at least one holding with side === 'short'.
   // Long-only results omit `side` entirely (or always have 'long'), so the
   // single-panel branch covers the original behavior unchanged.
@@ -47,80 +50,40 @@ function SectorTimelineChartInner({ result, markerDate }: Props) {
     [result],
   );
 
-  // Date-range slicing — empty strings = no filter (default: full range).
-  // The chart re-builds against a sliced subset of monthly_records; the
-  // input controls' min/max attributes pin them to the data extent so a
-  // user can't accidentally reach into nothing. Monthly cadence records
-  // are stored as "YYYY-MM"; we treat those as the first-of-month for
-  // range comparison so a "From 2024-01-15" pick doesn't drop the whole
-  // January row that the user can still see in their calendar.
-  const normalize = (d: string): string => (d.length === 7 ? `${d}-01` : d.slice(0, 10));
-  const allDates = result.monthly_records.map((r) => normalize(r.date));
-  const dataFirst = allDates[0] ?? '';
-  const dataLast = allDates[allDates.length - 1] ?? '';
-  const [fromDate, setFromDate] = useState<string>('');
-  const [toDate, setToDate] = useState<string>('');
-
-  const filteredRecords = useMemo(() => {
-    if (!fromDate && !toDate) return result.monthly_records;
-    return result.monthly_records.filter((r) => {
-      const d = normalize(r.date);
-      if (fromDate && d < fromDate) return false;
-      if (toDate && d > toDate) return false;
-      return true;
-    });
-  }, [result, fromDate, toDate]);
-
   const longData = useMemo(
-    () => buildTimelineData(filteredRecords, (h) => h.side !== 'short'),
-    [filteredRecords],
+    () => buildTimelineData(result.monthly_records, (h) => h.side !== 'short'),
+    [result],
   );
   const shortData = useMemo(
     () => isLongShort
-      ? buildTimelineData(filteredRecords, (h) => h.side === 'short')
+      ? buildTimelineData(result.monthly_records, (h) => h.side === 'short')
       : null,
-    [filteredRecords, isLongShort],
-  );
-
-  const sliceControls = (
-    <SliceControls
-      fromDate={fromDate}
-      toDate={toDate}
-      dataFirst={dataFirst}
-      dataLast={dataLast}
-      onFromChange={setFromDate}
-      onToChange={setToDate}
-      onReset={() => { setFromDate(''); setToDate(''); }}
-    />
+    [result, isLongShort],
   );
 
   if (!isLongShort) {
     return (
-      <div className="flex flex-col gap-2">
-        {sliceControls}
-        <TimelinePanel
-          title="Sector Timeline"
-          data={longData}
-          defaultCollapsed={false}
-          markerDate={markerDate}
-        />
-      </div>
+      <TimelinePanel
+        title="Sector Timeline"
+        data={longData}
+        defaultCollapsed={defaultCollapsed}
+        markerDate={markerDate}
+      />
     );
   }
 
   return (
     <div className="flex flex-col gap-4">
-      {sliceControls}
       <TimelinePanel
         title="Sector Timeline · Long"
         data={longData}
-        defaultCollapsed={false}
+        defaultCollapsed={defaultCollapsed}
         markerDate={markerDate}
       />
       <TimelinePanel
         title="Sector Timeline · Short"
         data={shortData!}
-        defaultCollapsed={false}
+        defaultCollapsed={defaultCollapsed}
         markerDate={markerDate}
       />
     </div>
@@ -132,67 +95,6 @@ function SectorTimelineChartInner({ result, markerDate }: Props) {
  * object reference is exactly what we want. */
 const SectorTimelineChart = memo(SectorTimelineChartInner);
 export default SectorTimelineChart;
-
-function SliceControls({
-  fromDate,
-  toDate,
-  dataFirst,
-  dataLast,
-  onFromChange,
-  onToChange,
-  onReset,
-}: {
-  fromDate: string;
-  toDate: string;
-  dataFirst: string;
-  dataLast: string;
-  onFromChange: (v: string) => void;
-  onToChange: (v: string) => void;
-  onReset: () => void;
-}) {
-  const isSliced = !!fromDate || !!toDate;
-  return (
-    <div className="bg-card rounded-xl border border-neutral-800/40 px-4 py-2.5 flex items-center gap-3 flex-wrap">
-      <span className="text-[11px] text-fg-subtle">Zoom:</span>
-      <label className="flex items-center gap-1.5 text-[11px] text-fg-muted">
-        <span>From</span>
-        <input
-          type="date"
-          value={fromDate}
-          min={dataFirst.length === 10 ? dataFirst : undefined}
-          max={dataLast.length === 10 ? dataLast : undefined}
-          onChange={(e) => onFromChange(e.target.value)}
-          className="bg-page border border-neutral-700 rounded px-2 py-1 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
-        />
-      </label>
-      <label className="flex items-center gap-1.5 text-[11px] text-fg-muted">
-        <span>To</span>
-        <input
-          type="date"
-          value={toDate}
-          min={dataFirst.length === 10 ? dataFirst : undefined}
-          max={dataLast.length === 10 ? dataLast : undefined}
-          onChange={(e) => onToChange(e.target.value)}
-          className="bg-page border border-neutral-700 rounded px-2 py-1 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
-        />
-      </label>
-      {isSliced && (
-        <button
-          type="button"
-          onClick={onReset}
-          className="text-[11px] text-fg-subtle hover:text-fg-soft underline-offset-2 hover:underline"
-        >
-          reset
-        </button>
-      )}
-      {!isSliced && (
-        <span className="text-[10px] text-fg-faint ml-auto">
-          showing full range {dataFirst} → {dataLast}
-        </span>
-      )}
-    </div>
-  );
-}
 
 function TimelinePanel({
   title,
@@ -210,30 +112,63 @@ function TimelinePanel({
   const [hoveredCell, setHoveredCell] = useState<{ sector: string; monthIdx: number } | null>(null);
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const scrollAreaRef = useRef<HTMLDivElement>(null);
-  // Wraps the two-column panel (labels + scroll area). Wheel and drag
-  // handlers attach here so panning works no matter where in the panel
-  // the cursor sits — including over the label column on the left.
-  const panelRef = useRef<HTMLDivElement>(null);
+  // Scroll area + panel wrapper are attached via CALLBACK refs (setScrollArea
+  // / setPanel below) rather than plain useRefs. CollapsibleCard UNMOUNTS its
+  // body on collapse and remounts it on expand, so a one-shot effect bound to
+  // the original node would be left stranded on a detached node after a
+  // collapse→expand cycle (ResizeObserver stuck reporting 0 → zero-width
+  // cells → blank timeline; wheel listener dead). Callback refs re-attach the
+  // observer + wheel listener to the fresh node on every (re)mount.
+  const scrollAreaRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const roRef = useRef<ResizeObserver | null>(null);
   // The label column is rendered as a sibling of the scroll area (not
   // inside it via `position: sticky`), so cells physically can't render
   // over the label background no matter what the stacking context does.
   // The scroll area's clientWidth is therefore the cell-area width
   // directly — no need to subtract a label-column width.
   const [cellAreaWidth, setCellAreaWidth] = useState(0);
+  // Bumped each time the scroll area (re)mounts, so the scroll-to-right
+  // effect re-pins to the right edge after a collapse→expand even when
+  // cellWidth happens to be unchanged.
+  const [scrollAreaTick, setScrollAreaTick] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const dragState = useRef<{ startX: number; startScroll: number; moved: boolean } | null>(null);
 
-  // Resize observer keeps cell width in sync with the panel width.
-  useLayoutEffect(() => {
-    const el = scrollAreaRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => {
-      setCellAreaWidth(el.clientWidth);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
+  // Wheel → horizontal scroll. Stable handler so the panel callback ref can
+  // add/remove it across remounts. Non-passive (calls preventDefault), so it
+  // can't be a React onWheel prop. Only pans when the panel overflows.
+  const handleWheel = useCallback((e: WheelEvent) => {
+    const scroller = scrollAreaRef.current;
+    if (!scroller) return;
+    if (scroller.scrollWidth <= scroller.clientWidth) return;
+    e.preventDefault();
+    scroller.scrollLeft += e.deltaY + e.deltaX;
   }, []);
+
+  // Callback ref — (re)attach a ResizeObserver every time the scroll area
+  // mounts; disconnect when it unmounts. Sets the initial width immediately
+  // so cells size correctly on the first frame after an expand.
+  const setScrollArea = useCallback((node: HTMLDivElement | null) => {
+    if (roRef.current) { roRef.current.disconnect(); roRef.current = null; }
+    scrollAreaRef.current = node;
+    if (node) {
+      const ro = new ResizeObserver(() => setCellAreaWidth(node.clientWidth));
+      ro.observe(node);
+      roRef.current = ro;
+      setCellAreaWidth(node.clientWidth);
+      setScrollAreaTick((t) => t + 1);
+    }
+  }, []);
+
+  // Callback ref — bind/unbind the non-passive wheel listener on the panel
+  // wrapper as it mounts/unmounts (panning works from anywhere on the panel,
+  // including the label column).
+  const setPanel = useCallback((node: HTMLDivElement | null) => {
+    if (panelRef.current) panelRef.current.removeEventListener('wheel', handleWheel);
+    panelRef.current = node;
+    if (node) node.addEventListener('wheel', handleWheel, { passive: false });
+  }, [handleWheel]);
 
   // cellWidth = max(MIN_CELL_WIDTH, area/N). When records fit at the
   // minimum cell width, they expand to fill the available space (no
@@ -277,28 +212,7 @@ function TimelinePanel({
     const el = scrollAreaRef.current;
     if (!el || cellWidth === 0) return;
     el.scrollLeft = el.scrollWidth;
-  }, [cellWidth, months.length]);
-
-  // Mouse-wheel converts vertical wheel input into horizontal scroll, but
-  // only when the panel actually overflows — otherwise normal page scroll
-  // behavior is preserved. Trackpad horizontal gestures (deltaX != 0) are
-  // added on top so two-finger swipes feel native. Listener lives on the
-  // whole panel (panelRef) so wheeling over the label column on the
-  // left also pans the cells — otherwise scrolling there would fall
-  // through to the page.
-  useEffect(() => {
-    const panel = panelRef.current;
-    if (!panel) return;
-    const onWheel = (e: WheelEvent) => {
-      const scroller = scrollAreaRef.current;
-      if (!scroller) return;
-      if (scroller.scrollWidth <= scroller.clientWidth) return;
-      e.preventDefault();
-      scroller.scrollLeft += e.deltaY + e.deltaX;
-    };
-    panel.addEventListener('wheel', onWheel, { passive: false });
-    return () => panel.removeEventListener('wheel', onWheel);
-  }, []);
+  }, [cellWidth, months.length, scrollAreaTick]);
 
   // Drag-to-pan. Mouse-down captures the start; document-level mousemove +
   // mouseup keep the drag active even if the cursor leaves the panel.
@@ -389,7 +303,7 @@ function TimelinePanel({
             handlers attach to this outer flex container so panning works
             from anywhere on the panel — including the label column. */}
         <div
-          ref={panelRef}
+          ref={setPanel}
           className="flex"
           style={{ cursor: isDragging ? 'grabbing' : hasOverflow ? 'grab' : 'default' }}
           onMouseDown={handleMouseDown}
@@ -426,7 +340,7 @@ function TimelinePanel({
             })}
           </div>
           <div
-            ref={scrollAreaRef}
+            ref={setScrollArea}
             className="overflow-x-auto flex-1 min-w-0 select-none"
           >
             <div style={{ width: innerWidth, position: 'relative' }}>

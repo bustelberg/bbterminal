@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Spinner from '../Spinner';
 import { API_URL } from '../../../lib/apiUrl';
+import { apiFetch } from '../../../lib/apiFetch';
 import { inputAddCls } from './styles';
 import type { DupeMatch } from './types';
 
@@ -46,7 +47,7 @@ export default function AddRow({
       setDupesLoading(true);
       try {
         const params = new URLSearchParams({ name: n, ticker: t, exchange: e });
-        const res = await fetch(`${API_URL}/api/companies/check-duplicates?${params}`);
+        const res = await apiFetch(`${API_URL}/api/companies/check-duplicates?${params}`);
         if (!res.ok) return;
         const body = await res.json();
         setDupeMatches(body.matches ?? []);

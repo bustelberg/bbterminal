@@ -34,25 +34,31 @@ full refresh-all pipeline.
 from __future__ import annotations
 
 import asyncio
-import os
 import threading
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Header, HTTPException
 
+from common.cron import verify_cron_secret
 from deps import supabase
 from ingest.phases import (
     _create_run,
     _run_pipeline_sync,
+    _run_price_update_pipeline_sync,
+    _run_rebalance_pipeline_sync,
     _run_smart_pipeline_sync,
 )
 
 router = APIRouter(tags=["ingest"])
 
 _VALID_JOB_NAMES = {
-    # The single dependency-driven daily tick — derives what the enabled
-    # scheduled strategies need and runs only that. See
-    # `ingest.phases.pipeline._run_smart_pipeline_sync` + `scheduler.py`.
+    # The split pipeline — two independently-triggerable operations
+    # (scheduler tick + per-section Run-now), serialized so they never run
+    # concurrently. See `ingest.phases.pipeline` + `scheduler.py`.
+    "price_update",  # re-price the ~24 held companies + MTD snapshot
+    "rebalance",     # rebalance the due strategies from a fresh universe
+    # The dependency-driven daily tick — retained for the cron-revert path /
+    # existing run history; no longer fired by the in-process scheduler.
     "smart_daily",
     # `manual` + `bootstrap_template_refresh` run the full (refresh-all)
     # pipeline — used by the UI Run-now button and the rare fresh-env
@@ -63,9 +69,14 @@ _VALID_JOB_NAMES = {
 
 
 def _spawn_ingest(run_id: int, job_name: str) -> None:
-    """Dispatch by `job_name`. `smart_daily` runs the dependency-driven
+    """Dispatch by `job_name`. `price_update`/`rebalance` run the split
+    pipeline's two operations; `smart_daily` runs the legacy dependency-driven
     pipeline; `manual`/`bootstrap` run the full refresh-all pipeline."""
-    if job_name == "smart_daily":
+    if job_name == "price_update":
+        target = _run_price_update_pipeline_sync
+    elif job_name == "rebalance":
+        target = _run_rebalance_pipeline_sync
+    elif job_name == "smart_daily":
         target = _run_smart_pipeline_sync
     else:
         target = _run_pipeline_sync
@@ -101,11 +112,7 @@ async def cron_scheduled_refresh(
     row tagged `triggered_by='auto'`, spawns the work in a daemon thread,
     and returns the run_id immediately so the cron's curl exits fast.
     The Railway cron just needs the 200 — it doesn't wait for completion."""
-    expected = os.environ.get("CRON_SECRET", "")
-    if not expected:
-        raise HTTPException(500, "CRON_SECRET env var is not set on the server")
-    if x_cron_secret != expected:
-        raise HTTPException(401, "Invalid cron secret")
+    verify_cron_secret(x_cron_secret)
     if job_name not in _VALID_JOB_NAMES:
         raise HTTPException(
             400,
@@ -160,6 +167,21 @@ async def list_ingest_runs(limit: int = 25, job_name: str | None = None):
 # that's still pending (or just fired) reads sensibly instead of as a raw
 # id. Unknown ids fall back to a humanized id + the run's own job_name.
 _JOB_META: dict[str, dict[str, str]] = {
+    "price_update": {
+        "label": "Price update",
+        "description": "re-prices the held companies + refreshes MTD",
+        "cadence": "Daily 02:00 UTC",
+    },
+    "rebalance": {
+        "label": "Rebalance",
+        "description": "rebalances strategies that are due from a fresh universe",
+        "cadence": "Daily 02:00 UTC (runs only when a strategy is due)",
+    },
+    "daily_pipeline": {
+        "label": "Daily pipeline",
+        "description": "price update, then rebalance any due strategies",
+        "cadence": "Daily 02:00 UTC",
+    },
     "smart_daily": {
         "label": "Smart daily pipeline",
         "description": "refreshes only what the scheduled strategies need, then rebalances those that are due",

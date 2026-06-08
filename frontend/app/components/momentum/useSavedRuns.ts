@@ -60,7 +60,7 @@ export function useSavedRuns({
 
   const loadSavedRuns = () => {
     setSavedRunsLoading(true);
-    fetch(`${API_URL}/api/momentum/backtests`)
+    apiFetch(`${API_URL}/api/momentum/backtests`)
       .then((r) => r.json())
       .then((data) => setSavedRuns(Array.isArray(data) ? data : []))
       .catch(() => {})
@@ -70,7 +70,7 @@ export function useSavedRuns({
   const loadBacktest = async (runId: number) => {
     setLoadingRunId(runId);
     try {
-      const resp = await fetch(`${API_URL}/api/momentum/backtests/${runId}`);
+      const resp = await apiFetch(`${API_URL}/api/momentum/backtests/${runId}`);
       if (!resp.ok) return;
       const data = await resp.json();
 

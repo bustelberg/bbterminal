@@ -16,6 +16,7 @@ import { computeFeeWaterfall, type FeeBreakdownRow, type FeeWaterfall } from './
 import { useClickOutside } from '../../../lib/hooks/useClickOutside';
 import { useBenchmarks, useFeeConfig } from '../../../lib/hooks/apiData';
 import { API_URL } from '../../../lib/apiUrl';
+import { apiFetch } from '../../../lib/apiFetch';
 import {
   alignSeries,
   buildChartData,
@@ -31,6 +32,7 @@ import {
 const EquityChart = dynamic(() => import('./equityCurve/EquityChart'), { ssr: false });
 import YearlyBreakdown from './equityCurve/YearlyBreakdown';
 import SummaryStats from './equityCurve/SummaryStats';
+import CollapsibleCard from './CollapsibleCard';
 // Recharts is split off into the EquityChart chunk above; the yearly
 // subplots grid uses the same library, so dynamic-loading it keeps the
 // initial /backtest bundle untouched even though the grid renders
@@ -57,6 +59,9 @@ type Props = {
    * marker on the equity chart. Used by /schedule to mark where a
    * scheduled strategy went live. */
   markerDate?: string;
+  /** Start collapsed (the /schedule strategy detail collapses every card).
+   * Defaults to expanded so /backtest is unchanged. */
+  defaultCollapsed?: boolean;
 };
 
 /** "Equity Curve" card cluster: comparison pill row, summary stats,
@@ -64,7 +69,7 @@ type Props = {
  * own benchmark/saved comparison state and all the chart-derived memos
  * — the parent only feeds it the active strategy plus the saved-run
  * list. */
-function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLabel, markerDate }: Props) {
+function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLabel, markerDate, defaultCollapsed = false }: Props) {
   // Benchmark options for the "add series" dropdown — fetched via the
   // shared cached hook so a sibling component (e.g. MomentumBacktester's
   // sector-ETF lookup) reuses the same fetch instead of re-requesting.
@@ -134,7 +139,7 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
     if (comparisons.some((c) => c.kind === 'saved' && c.runId === runId)) return;
     setAddingSeriesId(`saved:${runId}`);
     try {
-      const resp = await fetch(`${API_URL}/api/momentum/backtests/${runId}`);
+      const resp = await apiFetch(`${API_URL}/api/momentum/backtests/${runId}`);
       if (!resp.ok) return;
       const data = await resp.json();
       const saved = data.result ?? data;
@@ -189,7 +194,7 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
     setAddingSeriesId(`bench:${benchmarkId}`);
     // Widen fetch window so any later series can still overlap.
     try {
-      const resp = await fetch(
+      const resp = await apiFetch(
         `${API_URL}/api/benchmarks/${benchmarkId}/prices?start_date=1990-01-01&end_date=2099-12-31`,
       );
       if (!resp.ok) return;
@@ -341,7 +346,11 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
   const strategyColor = alignedSeries.series[0]?.color;
 
   return (
-    <>
+    <CollapsibleCard
+      title="Equity curve"
+      defaultCollapsed={defaultCollapsed}
+      bodyClassName="px-4 pb-4 space-y-4"
+    >
       {/* Comparison panel — active strategy + any added backtests/benchmarks */}
       <div className="bg-card rounded-xl border border-neutral-800/40 px-4 py-3">
         <div className="flex items-center gap-3 flex-wrap">
@@ -530,7 +539,7 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
           baseline. */}
       <YearlySubplotsGrid subplots={yearlySubplots} mode="cumulative" strategyColor={strategyColor} markerDate={markerDate} />
       <YearlySubplotsGrid subplots={yearlySubplots} mode="alpha" strategyColor={strategyColor} markerDate={markerDate} />
-    </>
+    </CollapsibleCard>
   );
 }
 

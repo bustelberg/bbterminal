@@ -31,6 +31,8 @@ def _run_momentum_phase(
     *,
     due_override: dict[int, bool] | None = None,
     dedupe_price_updates: bool = False,
+    include_rebalances: bool = True,
+    include_price_updates: bool = True,
 ) -> None:
     """Phase 3 — compute current-portfolio holdings for every enabled row
     in `scheduled_strategy`. Each strategy gets its own
@@ -119,12 +121,22 @@ def _run_momentum_phase(
             is_due_to_rebalance = due_override[strategy_id]
         else:
             is_due_to_rebalance = (next_due_iso is None) or (next_due_iso <= now_iso)
-        kind = "rebalance" if is_due_to_rebalance else "price_update"
+        # Apply the op gates. The split pipeline runs each concern alone:
+        #   price-update op  (include_rebalances=False): a due strategy still
+        #       just gets re-priced here — the separate rebalance op does its
+        #       actual rebalance — so MTD stays fresh regardless of due-ness.
+        #   rebalance op     (include_price_updates=False): non-due strategies
+        #       are skipped entirely rather than re-priced (price-update op
+        #       owns that), so this op only ever rebalances the due set.
+        do_rebalance = is_due_to_rebalance and include_rebalances
+        if not do_rebalance and not include_price_updates:
+            continue
+        kind = "rebalance" if do_rebalance else "price_update"
         _update_run(
             run_id,
             current_message=(
                 f"Strategy {idx} of {total} · "
-                f"{'rebalancing' if is_due_to_rebalance else 'price-updating'}: {strategy_name}…"
+                f"{'rebalancing' if do_rebalance else 'price-updating'}: {strategy_name}…"
             ),
         )
 
@@ -143,7 +155,7 @@ def _run_momentum_phase(
         }
 
         # ── Branch A: not due → price update on last rebalance ────
-        if not is_due_to_rebalance:
+        if not do_rebalance:
             try:
                 snapshot_id = _compute_and_save_price_update(
                     strategy_id=strategy_id,

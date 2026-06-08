@@ -141,7 +141,12 @@ def _compute_period_returns(snapshots: list[dict], today: date) -> dict:
     }
 
 
-def _returns_from_backtest(backtest_run_id: int, inception_iso: str, today: date) -> dict | None:
+def _returns_from_backtest(
+    backtest_run_id: int,
+    inception_iso: str,
+    today: date,
+    live_tail: dict | None = None,
+) -> dict | None:
     """MTD / YTD / since-inception returns from the strategy's BACKTEST equity
     curve, anchored at the go-live (inception) date.
 
@@ -157,7 +162,15 @@ def _returns_from_backtest(backtest_run_id: int, inception_iso: str, today: date
 
     MTD/YTD are calendar-anchored and independent of the go-live date; only
     since-inception moves when the go-live date changes. Returns None when the
-    run has no curve."""
+    run has no curve.
+
+    `live_tail` (the latest current-picks snapshot) keeps the numbers fresh
+    past the frozen backtest curve: a saved backtest's curve ends on whatever
+    day it was run, but the price-update pipeline marks the held portfolio to
+    market daily. When the snapshot's `latest_price_date` is newer than the
+    curve's last day, we splice the open period's live return onto the curve
+    end so MTD/YTD/since-inception + `as_of_date` track the latest priced day
+    instead of going stale."""
     from routers.momentum.backtest_crud import load_backtest_result_sync  # noqa: PLC0415
 
     res = load_backtest_result_sync(backtest_run_id)
@@ -186,6 +199,23 @@ def _returns_from_backtest(backtest_run_id: int, inception_iso: str, today: date
         if a is None or b is None:
             return None
         return round(((1 + a / 100.0) / (1 + b / 100.0) - 1) * 100.0, 2)
+
+    # Splice the live open-period return onto the curve end when the latest
+    # snapshot is priced past the frozen backtest curve. `as_of_date` is the
+    # open period's start (the last rebalance), which is the curve point the
+    # period return compounds onto: cum(latest) = cum(period_start) × (1+ret).
+    # Anchors below still read from the backtest curve, so MTD/YTD telescope
+    # correctly (e.g. MTD = curve[month_start→period_start] × live[period]).
+    if live_tail:
+        lpd = str(live_tail.get("latest_price_date") or "")[:10]
+        per = live_tail.get("period_return_pct")
+        per_start = str(live_tail.get("as_of_date") or "")[:10]
+        if lpd and per is not None and per_start and lpd > latest_date:
+            base = cum_at(per_start)
+            if base is None:
+                base = latest_cum
+            latest_cum = ((1 + base / 100.0) * (1 + float(per) / 100.0) - 1) * 100.0
+            latest_date = lpd
 
     # Anchor cumulative levels; when an anchor predates the curve, fall back
     # to the curve's start (earliest data we have).
@@ -281,7 +311,10 @@ def _hydrate(rows: list[dict]) -> list[dict]:
             # backtest run or curve.
             if r.get("backtest_run_id") and inception_date:
                 try:
-                    bt = _returns_from_backtest(int(r["backtest_run_id"]), inception_date, today)
+                    bt = _returns_from_backtest(
+                        int(r["backtest_run_id"]), inception_date, today,
+                        live_tail=latest,
+                    )
                 except Exception:
                     bt = None
                 if bt:

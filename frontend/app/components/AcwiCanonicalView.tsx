@@ -56,7 +56,7 @@ export default function AcwiCanonicalView() {
   const loadSummary = useCallback(async () => {
     setSummaryLoading(true);
     try {
-      const r = await fetch(`${API_URL}/api/universe-templates/${TEMPLATE_KEY}`);
+      const r = await apiFetch(`${API_URL}/api/universe-templates/${TEMPLATE_KEY}`);
       if (!r.ok) {
         setError(`Failed to load (${r.status})`);
         return;
@@ -84,7 +84,7 @@ export default function AcwiCanonicalView() {
     if (!selectedMonth) return;
     let cancelled = false;
     setMembershipLoading(true);
-    fetch(`${API_URL}/api/universe-templates/${TEMPLATE_KEY}/membership?date=${selectedMonth}`)
+    apiFetch(`${API_URL}/api/universe-templates/${TEMPLATE_KEY}/membership?date=${selectedMonth}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data: { membership: MembershipRow[] }) => {
         if (cancelled) return;

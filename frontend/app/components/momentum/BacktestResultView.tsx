@@ -32,6 +32,10 @@ type Props = {
   /** Optional "go-live" date (YYYY-MM-DD) drawn as a red dashed marker on
    * the equity curve. /schedule passes the strategy's start_date here. */
   markerDate?: string;
+  /** Render every card collapsed by default. /schedule's strategy detail
+   * sets this so an expanded strategy stays compact; /backtest leaves it
+   * false (cards expanded). */
+  defaultCollapsed?: boolean;
 };
 
 /** The complete /backtest result view: the equity-curve card (log-scale
@@ -48,6 +52,7 @@ export default function BacktestResultView({
   scoringConfig,
   savedRuns = [],
   markerDate,
+  defaultCollapsed = false,
 }: Props) {
   // Live company directory — the fallback exchange source. Saved backtests
   // often bundle an EMPTY `universe` payload (e.g. run 32), so without this
@@ -105,15 +110,17 @@ export default function BacktestResultView({
         savedRuns={savedRuns}
         activeStrategyLabel={activeStrategyLabel}
         markerDate={markerDate}
+        defaultCollapsed={defaultCollapsed}
       />
-      <FeeWaterfallPanel result={result} />
-      <SectorTimelineChart result={result} markerDate={markerDate} />
+      <FeeWaterfallPanel result={result} defaultCollapsed={defaultCollapsed} />
+      <SectorTimelineChart result={result} markerDate={markerDate} defaultCollapsed={defaultCollapsed} />
       <MonthlyHoldingsTable
         result={result}
         categories={categories}
         exchangeByCompany={exchangeByCompany}
         scoringConfig={resolvedScoring}
         markerDate={markerDate}
+        defaultCollapsed={defaultCollapsed}
       />
     </>
   );

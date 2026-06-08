@@ -5,6 +5,7 @@ import { Fragment, useState, useEffect, useMemo, useRef } from 'react';
 import ApiUsageBadge from './ApiUsageBadge';
 import Spinner from './Spinner';
 import { API_URL } from '../../lib/apiUrl';
+import { apiFetch } from '../../lib/apiFetch';
 import ProgressTimeline from './ProgressTimeline';
 import NotificationsPanel from './momentum/NotificationsPanel';
 import {
@@ -286,7 +287,7 @@ export default function MomentumBacktester() {
   // fetch. The endpoint hooks above own all the recurring fetches.
   useEffect(() => {
     loadSavedRuns();
-    fetch(`${API_URL}/api/data/latest-price-date`)
+    apiFetch(`${API_URL}/api/data/latest-price-date`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${r.status}`))))
       .then((d: { date: string | null }) => setLatestPriceDate(d.date))
       .catch(() => { /* silent — the user can still pick a date manually */ });

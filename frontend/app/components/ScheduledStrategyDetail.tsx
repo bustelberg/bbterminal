@@ -80,7 +80,7 @@ export default function ScheduledStrategyDetail({
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch(`${API_URL}/api/scheduled-strategies/${strategyId}/runs?limit=100`);
+      const r = await apiFetch(`${API_URL}/api/scheduled-strategies/${strategyId}/runs?limit=100`);
       if (!r.ok) {
         setError(`Failed to load strategy detail (${r.status})`);
         // Clear data so the polling effect below sees a non-running

@@ -59,6 +59,30 @@ def _load_universe_membership(
     return result
 
 
+def _find_universe_row(label: str) -> dict | None:
+    """Resolve a universe by `template_key`, falling back to `label`.
+    Returns the row (`{universe_id, last_refreshed_at}`) or None.
+
+    Two parameterized `.eq()` lookups — NOT one interpolated
+    `.or_(f"template_key.eq.{label},label.eq.{label}")` filter. That
+    interpolation let a user-supplied `index_universe` inject PostgREST
+    filter grammar (security finding M2); `.eq()` binds the value, so a
+    crafted label is treated as a literal universe key (matches nothing)
+    instead of altering the filter tree. Pinned by
+    tests/test_universe_loader_lookup.py."""
+    for column in ("template_key", "label"):
+        resp = (
+            supabase.table("universe")
+            .select("universe_id, last_refreshed_at")
+            .eq(column, label)
+            .limit(1)
+            .execute()
+        )
+        if resp.data:
+            return resp.data[0]
+    return None
+
+
 def _load_index_universe(
     label: str, grouping_field: str = "sector",
 ) -> dict[str, dict[int, str | None]]:
@@ -98,38 +122,18 @@ def _load_index_universe(
         # current timestamp to catch a refresh from another process.
         cached_ts, cached_dict = cached
         try:
-            check = (
-                supabase.table("universe")
-                .select("last_refreshed_at, universe_id")
-                .or_(f"template_key.eq.{label},label.eq.{label}")
-                .limit(1)
-                .execute()
-            )
-            current_ts = (check.data or [{}])[0].get("last_refreshed_at")
+            row = _find_universe_row(label)
+            current_ts = row.get("last_refreshed_at") if row else None
         except Exception:
             current_ts = cached_ts  # On error, prefer stale to a hard fail.
         if current_ts == cached_ts:
             return cached_dict
 
-    u_resp = (
-        supabase.table("universe")
-        .select("universe_id, last_refreshed_at")
-        .eq("template_key", label)
-        .limit(1)
-        .execute()
-    )
-    if not u_resp.data:
-        u_resp = (
-            supabase.table("universe")
-            .select("universe_id, last_refreshed_at")
-            .eq("label", label)
-            .limit(1)
-            .execute()
-        )
-    if not u_resp.data:
+    row = _find_universe_row(label)
+    if not row:
         return {}
-    universe_id = u_resp.data[0]["universe_id"]
-    last_refreshed = u_resp.data[0].get("last_refreshed_at")
+    universe_id = row["universe_id"]
+    last_refreshed = row.get("last_refreshed_at")
 
     # Fast path: one direct-Postgres COPY when SUPABASE_DB_URL is set. This
     # panel spans every month × company for the universe (ACWI ≈ hundreds of

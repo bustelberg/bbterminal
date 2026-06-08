@@ -52,7 +52,7 @@ export default function Indicators() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${API_URL}/api/gurufocus/exchanges`);
+        const res = await apiFetch(`${API_URL}/api/gurufocus/exchanges`);
         const data = await res.json();
         setExchanges(data.exchanges);
         setExchangesSource(data.source);
@@ -64,7 +64,7 @@ export default function Indicators() {
   const loadCurrencyMap = async (force = false) => {
     setCurrencyMapLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/gurufocus/exchange-currencies?force_refresh=${force}`);
+      const res = await apiFetch(`${API_URL}/api/gurufocus/exchange-currencies?force_refresh=${force}`);
       const data = await res.json();
       const map: Record<string, { country: string; currency: string }> = {};
       for (const m of data.mapping) {

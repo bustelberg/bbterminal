@@ -45,7 +45,7 @@ from routers import (
     universe as _universe_router,
     universe_templates as _universe_templates_router,
 )
-from routers._auth_middleware import admin_only_mutations as _admin_only_mutations
+from routers._auth_middleware import enforce_api_auth as _enforce_api_auth
 from routers.momentum._helpers import register_startup_hooks as _register_momentum_hooks
 from scheduler import register_scheduler as _register_scheduler
 
@@ -69,11 +69,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Admin-only-mutations gate. Read-only methods skip this; POST/PUT/PATCH/
-# DELETE on non-exempt paths must carry an admin Bearer token. The
-# frontend's `apiFetch` helper auto-attaches the session JWT for every
-# /api/ call, so this is invisible to admin users.
-app.middleware("http")(_admin_only_mutations)
+# API auth gate. EVERY /api/* request needs a valid Supabase JWT (except a
+# small public health/cron tier); non-admins are limited to the API behind
+# the pages they can view (/companies, /earnings, /airs-portfolio). The
+# frontend's `apiFetch` helper auto-attaches the session JWT for every /api/
+# call, so this is invisible to logged-in users. See routers/_auth_middleware.
+app.middleware("http")(_enforce_api_auth)
 
 # Domain routers. Order doesn't affect runtime behavior; kept grouped by
 # concern for readability when scanning the mount list.

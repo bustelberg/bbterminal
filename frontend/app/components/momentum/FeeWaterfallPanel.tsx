@@ -5,6 +5,7 @@ import { useMemo } from 'react';
 import type { BacktestResult } from '../../../lib/stores/momentum';
 import { useFeeConfig } from '../../../lib/hooks/apiData';
 import { computeFeeWaterfall } from './feeModel';
+import CollapsibleCard from './CollapsibleCard';
 
 /**
  * Per-year fee waterfall for a backtest. Each row is one calendar year in
@@ -14,7 +15,14 @@ import { computeFeeWaterfall } from './feeModel';
  * always subtracted first, then Bustelberg. Reads the global fee config
  * (/fees) and applies the layered model client-side via `computeFeeWaterfall`.
  */
-export default function FeeWaterfallPanel({ result }: { result: BacktestResult }) {
+export default function FeeWaterfallPanel({
+  result,
+  defaultCollapsed = false,
+}: {
+  result: BacktestResult;
+  /** Start collapsed (the /schedule strategy detail collapses every card). */
+  defaultCollapsed?: boolean;
+}) {
   const cfg = useFeeConfig();
   const w = useMemo(
     () =>
@@ -29,20 +37,26 @@ export default function FeeWaterfallPanel({ result }: { result: BacktestResult }
   const signed = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
 
   return (
-    <div className="bg-card rounded-xl border border-neutral-800/40">
-      <div className="px-5 py-3 border-b border-neutral-800/40 flex items-baseline justify-between">
-        <h3 className="text-sm font-medium text-fg-strong">Fee waterfall</h3>
-        <a href="/fees" className="text-xs text-accent-300 hover:text-accent-200">
+    <CollapsibleCard
+      title="Fee waterfall"
+      defaultCollapsed={defaultCollapsed}
+      rightSlot={
+        <a
+          href="/fees"
+          onClick={(e) => e.stopPropagation()}
+          className="text-xs text-accent-300 hover:text-accent-200"
+        >
           configure on /fees →
         </a>
-      </div>
-      <div className="px-5 py-4 space-y-3">
+      }
+      bodyClassName="px-5 py-4 space-y-3"
+    >
         <p className="text-[11px] text-fg-subtle leading-relaxed">
           Each row is one year <span className="text-fg-soft">in isolation</span>. Off that year&apos;s
           gross return, <span className="text-fg-soft">Leonteq&apos;s fees</span> come off first
           (transaction {cfg.transaction_bps}bps/trade + annual {cfg.leonteq_annual_bps}bps, final year
           pro-rated), then <span className="text-fg-soft">Bustelberg&apos;s</span> (management{' '}
-          {cfg.bustelberg_mgmt_bps}bps + {cfg.bustelberg_perf_pct}% of gains above the running high-water
+          {cfg.bustelberg_mgmt_bps}bps/mo + {cfg.bustelberg_perf_pct}% of gains above the running high-water
           mark). Reconciles exactly: gross − Leonteq − Bustelberg = net.
         </p>
 
@@ -104,7 +118,6 @@ export default function FeeWaterfallPanel({ result }: { result: BacktestResult }
           year&apos;s &quot;Net to client&quot; is after all fees; the cumulative gross (net) is the
           parenthetical on each stat above.
         </p>
-      </div>
-    </div>
+    </CollapsibleCard>
   );
 }

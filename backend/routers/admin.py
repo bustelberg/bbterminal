@@ -15,19 +15,18 @@ gate the UI's admin pages use. Sign-in:
 Then call admin endpoints with:
 
     curl -H "Authorization: Bearer $ACCESS_TOKEN" \
-         "https://<backend>/api/admin/portfolio/latest"
+         "https://<backend>/api/admin/schedules"
 
-Endpoints:
-    GET /api/admin/portfolio/latest      — target portfolio with IBKR-relevant fields
-    GET /api/admin/portfolio/{id}        — same shape, specific snapshot_id
-    GET /api/admin/schedules             — every scheduled strategy + full latest portfolio
-                                            (one-shot for external buyer scripts)
-    GET /api/admin/schedules/{id}        — one scheduled strategy + its latest portfolio
-    GET /api/admin/runs/latest           — most recent pipeline run
-    GET /api/admin/pipeline-runs         — recent runs list (monitoring)
-    GET /api/admin/health                — composite freshness check
-    GET /api/admin/data-freshness        — per-source freshness breakdown
-    GET /api/admin/sanity-check          — pass/fail bundle of common checks
+Endpoints — the IBKR buy flow is just three:
+    GET /api/admin/schedules         — list strategies + each one's next rebalance date
+                                        (lightweight; no holdings)
+    GET /api/admin/schedules/{id}    — one strategy's CURRENT holdings (order-ready:
+                                        ticker/exchange/country/currency/company_name/
+                                        weight/side/prices) + as_of_date
+    GET /api/admin/health            — composite go/no-go; gate trades on is_healthy_strict
+
+The remaining endpoints are data-maintenance tools (GuruFocus exchange resolution,
+companies missing/flagged), separate from the buy flow.
 """
 from __future__ import annotations
 
@@ -43,8 +42,6 @@ from routers._admin_health import _max_target_date, _now_utc, _trading_day_age
 from routers._admin_payloads import (
     _build_portfolio_payload,
     _fetch_latest_snapshots_for,
-    _summarize_run,
-    _summarize_schedule,
 )
 from routers.auth import _require_admin
 
@@ -291,50 +288,6 @@ async def get_egress_ip(authorization: str = Header(...)):
     return await asyncio.to_thread(_q)
 
 
-@router.get("/api/admin/portfolio/latest")
-async def get_latest_portfolio(authorization: str = Header(...)):
-    """Return the most recent current-picks snapshot in IBKR-friendly
-    shape. 404 when no snapshot has been produced yet."""
-    _require_admin(authorization)
-
-    def _query() -> dict:
-        try:
-            resp = (
-                supabase.table("current_picks_snapshot")
-                .select("*")
-                .order("created_at", desc=True)
-                .limit(1)
-                .execute()
-            )
-        except APIError as e:
-            raise HTTPException(500, f"DB read failed: {e}")
-        if not resp.data:
-            raise HTTPException(404, "No current_picks_snapshot rows exist yet")
-        return _build_portfolio_payload(resp.data[0])
-
-    return await asyncio.to_thread(_query)
-
-
-@router.get("/api/admin/portfolio/{snapshot_id}")
-async def get_portfolio_by_id(snapshot_id: int, authorization: str = Header(...)):
-    """Return a specific snapshot by id, same shape as /latest."""
-    _require_admin(authorization)
-
-    def _query() -> dict:
-        resp = (
-            supabase.table("current_picks_snapshot")
-            .select("*")
-            .eq("snapshot_id", snapshot_id)
-            .limit(1)
-            .execute()
-        )
-        if not resp.data:
-            raise HTTPException(404, f"Snapshot #{snapshot_id} not found")
-        return _build_portfolio_payload(resp.data[0])
-
-    return await asyncio.to_thread(_query)
-
-
 # ─── Schedules ─────────────────────────────────────────────────────
 
 
@@ -343,14 +296,21 @@ async def list_schedules(
     enabled_only: bool = True,
     authorization: str = Header(...),
 ):
-    """Every scheduled strategy on the system with its latest portfolio
-    attached. Returns a list (newest-created last) so an external buyer
-    script can iterate strategies, see when each is due to rebalance
-    (`next_due_at`), and pull the holdings they should currently be
-    holding (`latest_portfolio.holdings`).
+    """List every scheduled strategy with its next rebalance date. Admin
+    only. Lightweight (no holdings) — the discovery call: find the
+    `strategy_id` to drill into, see when each next rebalances, and how
+    fresh its holdings are.
+
+    `next_rebalance_at` is the UTC tick at which the strategy will next
+    re-select its holdings (NULL = a never-run strategy, rebalances on the
+    next tick). `as_of_date` / `latest_price_date` / `holdings_count` come
+    from its most recent snapshot (absent until the strategy first runs).
 
     Query: `enabled_only=true` (default) hides paused strategies; pass
-    `false` to see everything."""
+    `false` to see everything.
+
+    Response: `[{strategy_id, name, enabled, frequency, next_rebalance_at,
+    last_run_at, as_of_date, latest_price_date, holdings_count}]`."""
     _require_admin(authorization)
 
     def _query() -> list[dict]:
@@ -358,21 +318,46 @@ async def list_schedules(
         if enabled_only:
             q = q.eq("enabled", True)
         try:
-            resp = q.execute()
+            rows = q.execute().data or []
         except APIError as e:
             raise HTTPException(500, f"DB read failed: {e}")
-        rows = resp.data or []
         latest = _fetch_latest_snapshots_for([r["id"] for r in rows])
-        return [_summarize_schedule(r, latest.get(r["id"])) for r in rows]
+        out: list[dict] = []
+        for r in rows:
+            snap = latest.get(r["id"])
+            out.append({
+                "strategy_id": r["id"],
+                "name": r.get("name") or f"Strategy #{r['id']}",
+                "enabled": r.get("enabled", True),
+                "frequency": r.get("frequency"),
+                "next_rebalance_at": r.get("next_due_at"),
+                "last_run_at": r.get("last_run_at"),
+                "as_of_date": snap.get("as_of_date") if snap else None,
+                "latest_price_date": snap.get("latest_price_date") if snap else None,
+                "holdings_count": len(snap.get("holdings") or []) if snap else 0,
+            })
+        return out
 
     return await asyncio.to_thread(_query)
 
 
 @router.get("/api/admin/schedules/{strategy_id}")
 async def get_schedule(strategy_id: int, authorization: str = Header(...)):
-    """One scheduled strategy + its full latest portfolio. Same shape as
-    one entry of `/api/admin/schedules`. 404 when the strategy doesn't
-    exist."""
+    """One scheduled strategy's CURRENT holdings — the order-ready call your
+    IBKR buyer makes. Admin only.
+
+    Holdings come from the strategy's most recent `current_picks_snapshot`;
+    `as_of_date` is the date they were selected and `latest_price_date` the
+    most recent close priced into them — gate on these (or `/api/admin/health`)
+    so you never trade on stale data. A strategy with no snapshot yet returns
+    an empty `holdings` list. 404 when the strategy doesn't exist.
+
+    Each holding carries everything needed to place an order:
+        company_id, ticker, exchange, country, currency, company_name,
+        side, target_weight, score, entry_price_local, entry_price_eur
+
+    Response: `{strategy_id, name, enabled, frequency, next_rebalance_at,
+    last_run_at, as_of_date, latest_price_date, holdings_count, holdings:[…]}`."""
     _require_admin(authorization)
 
     def _query() -> dict:
@@ -386,120 +371,25 @@ async def get_schedule(strategy_id: int, authorization: str = Header(...)):
         if not resp.data:
             raise HTTPException(404, f"Scheduled strategy #{strategy_id} not found")
         strat = resp.data[0]
-        latest = _fetch_latest_snapshots_for([strategy_id]).get(strategy_id)
-        return _summarize_schedule(strat, latest)
-
-    return await asyncio.to_thread(_query)
-
-
-# ─── Pipeline runs ─────────────────────────────────────────────────
-
-
-@router.get("/api/admin/runs/latest")
-async def get_latest_run(authorization: str = Header(...)):
-    """Return a compact summary of the most recent pipeline run plus
-    the most recent SUCCESSFUL run (when different). Use this as the
-    one-line "is anything working?" probe — if `latest.status` is `ok`
-    and `latest.finished_at` is within the last week, the system is
-    healthy."""
-    _require_admin(authorization)
-
-    def _query() -> dict:
-        latest_resp = (
-            supabase.table("ingest_run")
-            .select("*")
-            .order("started_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        latest = latest_resp.data[0] if latest_resp.data else None
-        last_ok_resp = (
-            supabase.table("ingest_run")
-            .select("*")
-            .eq("status", "ok")
-            .order("started_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        last_ok = last_ok_resp.data[0] if last_ok_resp.data else None
+        snap = _fetch_latest_snapshots_for([strategy_id]).get(strategy_id)
+        payload = _build_portfolio_payload(snap) if snap else None
         return {
-            "latest": _summarize_run(latest) if latest else None,
-            "latest_successful":
-                _summarize_run(last_ok)
-                if last_ok and (not latest or last_ok["run_id"] != latest["run_id"])
-                else None,
+            "strategy_id": strat["id"],
+            "name": strat.get("name") or f"Strategy #{strat['id']}",
+            "enabled": strat.get("enabled", True),
+            "frequency": strat.get("frequency"),
+            "next_rebalance_at": strat.get("next_due_at"),
+            "last_run_at": strat.get("last_run_at"),
+            "as_of_date": payload.get("as_of_date") if payload else None,
+            "latest_price_date": payload.get("latest_price_date") if payload else None,
+            "holdings_count": len(payload.get("holdings")) if payload else 0,
+            "holdings": payload.get("holdings") if payload else [],
         }
 
     return await asyncio.to_thread(_query)
 
 
-@router.get("/api/admin/pipeline-runs")
-async def list_pipeline_runs(
-    limit: int = 20,
-    authorization: str = Header(...),
-):
-    """Recent pipeline runs (newest first), compact summary per row.
-    Caps `limit` at 100."""
-    _require_admin(authorization)
-    limit = max(1, min(100, limit))
-
-    def _query() -> list[dict]:
-        resp = (
-            supabase.table("ingest_run")
-            .select("*")
-            .order("started_at", desc=True)
-            .limit(limit)
-            .execute()
-        )
-        return [_summarize_run(r) for r in (resp.data or [])]
-
-    return await asyncio.to_thread(_query)
-
-
-# ─── Health + freshness ────────────────────────────────────────────
-
-
-@router.get("/api/admin/data-freshness")
-async def get_data_freshness(authorization: str = Header(...)):
-    """How current each data source is. The IBKR script can use the
-    `close_price_age_trading_days` field as a gate: bail out before
-    placing orders if it's > some threshold."""
-    _require_admin(authorization)
-
-    def _query() -> dict:
-        latest_close = _max_target_date("close_price")
-        latest_volume = _max_target_date("volume")
-        latest_snap = (
-            supabase.table("current_picks_snapshot")
-            .select("snapshot_id, as_of_date, latest_price_date, created_at")
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        latest_run = (
-            supabase.table("ingest_run")
-            .select("run_id, started_at, finished_at, status")
-            .order("started_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        return {
-            "now": _now_utc().isoformat(),
-            "close_price": {
-                "latest_target_date": latest_close.isoformat() if latest_close else None,
-                "age_trading_days": _trading_day_age(latest_close),
-            },
-            "volume": {
-                "latest_target_date": latest_volume.isoformat() if latest_volume else None,
-                "age_trading_days": _trading_day_age(latest_volume),
-            },
-            "latest_snapshot":
-                latest_snap.data[0] if latest_snap.data else None,
-            "latest_pipeline_run":
-                latest_run.data[0] if latest_run.data else None,
-        }
-
-    return await asyncio.to_thread(_query)
+# ─── Health ────────────────────────────────────────────────────────
 
 
 @router.get("/api/admin/health")
@@ -614,95 +504,6 @@ async def get_health(authorization: str = Header(...)):
             "checks": checks,
             "problems": problems,
         }
-
-    return await asyncio.to_thread(_query)
-
-
-@router.get("/api/admin/sanity-check")
-async def sanity_check(authorization: str = Header(...)):
-    """Sanity diagnostics for verifying everything still hangs together.
-    Independent from `health` — these are coarse counts and shapes the
-    user (or a CI smoke test) can eyeball to confirm the system isn't
-    quietly broken."""
-    _require_admin(authorization)
-
-    def _query() -> dict:
-        out: dict = {"now": _now_utc().isoformat()}
-        # Counts per major table — quick "is anything totally missing?"
-        for table in [
-            "company",
-            "gurufocus_exchange",
-            "exchange_fee",
-            "backtest_run",
-            "ingest_run",
-            "current_picks_snapshot",
-            "scheduled_strategy",
-        ]:
-            try:
-                r = supabase.table(table).select("*", count="exact").limit(0).execute()
-                out[f"{table}_count"] = getattr(r, "count", None)
-            except Exception as e:
-                out[f"{table}_count"] = f"ERR: {type(e).__name__}: {e}"
-
-        # Schedule strategies — how many enabled / total?
-        sc = (
-            supabase.table("scheduled_strategy")
-            .select("id, enabled, backtest_run_id")
-            .execute()
-        )
-        rows = sc.data or []
-        out["scheduled_strategies"] = {
-            "total": len(rows),
-            "enabled": sum(1 for r in rows if r.get("enabled")),
-            "backtest_run_ids": [r["backtest_run_id"] for r in rows if r.get("enabled")],
-        }
-
-        # Template-managed universes presence: every registered
-        # template's canonical row (or None if not yet refreshed).
-        tmpl = (
-            supabase.table("universe")
-            .select("universe_id, template_key, label")
-            .not_.is_("template_key", "null")
-            .execute()
-        )
-        out["template_universes"] = {
-            r["template_key"]: r["universe_id"] for r in (tmpl.data or [])
-        }
-
-        # Recent run status distribution (last 20)
-        runs = (
-            supabase.table("ingest_run")
-            .select("status")
-            .order("started_at", desc=True)
-            .limit(20)
-            .execute()
-        )
-        status_counts: dict[str, int] = {}
-        for r in (runs.data or []):
-            s = r.get("status") or "unknown"
-            status_counts[s] = status_counts.get(s, 0) + 1
-        out["recent_runs_status"] = status_counts
-
-        # Latest snapshot summary
-        snap = (
-            supabase.table("current_picks_snapshot")
-            .select("snapshot_id, as_of_date, latest_price_date, holdings, created_at")
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        if snap.data:
-            row = snap.data[0]
-            out["latest_snapshot"] = {
-                "snapshot_id": row.get("snapshot_id"),
-                "as_of_date": row.get("as_of_date"),
-                "latest_price_date": row.get("latest_price_date"),
-                "created_at": row.get("created_at"),
-                "holdings_count": len(row.get("holdings") or []),
-            }
-        else:
-            out["latest_snapshot"] = None
-        return out
 
     return await asyncio.to_thread(_query)
 

@@ -3,9 +3,8 @@
 
 These were inline closures/helpers in the 1,250-line `routers.admin` and
 couldn't be exercised without standing up FastAPI + the admin auth gate. Now
-that they're plain functions, pin the transforms that the external IBKR /
-monitoring script depends on: the run + schedule summaries, the portfolio
-payload shape, and the trading-day age math.
+that they're plain functions, pin what the external IBKR script depends on:
+the portfolio payload shape and the trading-day age math.
 """
 from __future__ import annotations
 
@@ -13,57 +12,9 @@ from datetime import date, timedelta
 
 import routers._admin_payloads as payloads_mod
 from routers._admin_health import _trading_day_age
-from routers._admin_payloads import (
-    _build_portfolio_payload,
-    _summarize_run,
-    _summarize_schedule,
-)
+from routers._admin_payloads import _build_portfolio_payload
 
 from tests._fake_supabase import FakeSupabase
-
-
-class TestSummarizeRun:
-    def test_momentum_dict_is_wrapped_to_list(self):
-        out = _summarize_run({"run_id": 1, "momentum_summary": {"strategy_id": 7}})
-        assert [m["strategy_id"] for m in out["momentum"]] == [7]
-
-    def test_momentum_list_passes_through(self):
-        out = _summarize_run({"momentum_summary": [{"strategy_id": 1}, {"strategy_id": 2}]})
-        assert [m["strategy_id"] for m in out["momentum"]] == [1, 2]
-
-    def test_non_list_templates_summary_coerced_to_empty(self):
-        out = _summarize_run({"templates_summary": None, "momentum_summary": None})
-        assert out["templates"] == []
-        assert out["momentum"] == []
-
-    def test_template_field_renames(self):
-        out = _summarize_run({
-            "templates_summary": [{
-                "template_key": "ACWI", "universe_id": 5, "this_month": "2026-06",
-                "additions_count": 3, "removals_count": 1, "renames_count": 0,
-            }],
-        })
-        t = out["templates"][0]
-        assert t["target_month"] == "2026-06"  # this_month → target_month
-        assert (t["additions"], t["removals"], t["renames"]) == (3, 1, 0)
-
-    def test_price_counters_default_to_zero(self):
-        out = _summarize_run({})
-        assert out["prices"] == {
-            "companies_processed": 0, "prices_refreshed": 0, "volumes_refreshed": 0,
-            "forbidden": 0, "delisted": 0, "errors": 0,
-        }
-
-
-class TestSummarizeSchedule:
-    def test_none_snapshot_yields_null_portfolio(self):
-        out = _summarize_schedule({"id": 4, "name": "Mine", "frequency": "monthly"}, None)
-        assert out["latest_portfolio"] is None
-        assert out["name"] == "Mine"
-
-    def test_name_falls_back_to_id(self):
-        out = _summarize_schedule({"id": 9}, None)
-        assert out["name"] == "Strategy #9"
 
 
 class TestBuildPortfolioPayload:

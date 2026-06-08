@@ -7,6 +7,7 @@ import { createClient } from '../../lib/supabase/client';
 import { dialog } from '../../lib/dialog';
 import { useClickOutside } from '../../lib/hooks/useClickOutside';
 import { API_URL } from '../../lib/apiUrl';
+import { apiFetch } from '../../lib/apiFetch';
 
 type NavItem = { href: string; label: string; userVisible?: true };
 
@@ -219,7 +220,7 @@ export default function Sidebar({ initialUser }: Props) {
       const supabase = createClient();
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-      const r = await fetch(`${API_URL}/api/auth/users`, {
+      const r = await apiFetch(`${API_URL}/api/auth/users`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       if (!r.ok) return;
@@ -257,7 +258,7 @@ export default function Sidebar({ initialUser }: Props) {
         await dialog.alert('Not signed in.');
         return;
       }
-      const r = await fetch(`${API_URL}/api/auth/impersonate`, {
+      const r = await apiFetch(`${API_URL}/api/auth/impersonate`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ target_user_id: target.id }),
@@ -360,7 +361,7 @@ export default function Sidebar({ initialUser }: Props) {
       const supabase = createClient();
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('No session');
-      const res = await fetch(`${API_URL}/api/auth/delete-account`, {
+      const res = await apiFetch(`${API_URL}/api/auth/delete-account`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${session.access_token}` },
       });

@@ -32,7 +32,7 @@ router = APIRouter(tags=["fees"])
 _DEFAULTS = {
     "leonteq_annual_bps": 35.0,
     "transaction_bps": 10.0,
-    "bustelberg_mgmt_bps": 100.0,
+    "bustelberg_mgmt_bps": 10.0,  # per MONTH (≈1.2%/yr); was 100 bps/yr
     "bustelberg_perf_pct": 10.0,
 }
 

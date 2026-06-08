@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { isAuthBypassEnabled } from '@/lib/authBypass'
 
 // Paths a regular (non-admin) user is allowed to view. Everything else
 // requires admin. Path matches against either an exact equality OR a
@@ -26,12 +27,13 @@ function isPublicPath(pathname: string): boolean {
 }
 
 export async function proxy(request: NextRequest) {
-  // Playwright e2e short-circuit. Only fires when the server was started
-  // with `E2E_BYPASS_AUTH=1` (set by `playwright.config.ts` for tests
-  // and never present in dev / Vercel). Skips the Supabase server-side
-  // session call so tests can hit any route without a real login; the
-  // tests themselves mock /api/* responses via `page.route()`.
-  if (process.env.E2E_BYPASS_AUTH === '1') {
+  // Playwright e2e short-circuit. Fires only with `E2E_BYPASS_AUTH=1`
+  // (set by `playwright.config.ts` / CI, never in dev or on Vercel) AND
+  // when NOT running on Vercel (the `VERCEL` env var is the kill-switch),
+  // so a stray prod env var can never disable auth on a real deployment.
+  // Skips the Supabase server-side session call so tests can hit any
+  // route without a real login; tests mock /api/* via `page.route()`.
+  if (isAuthBypassEnabled(process.env.E2E_BYPASS_AUTH, process.env.VERCEL)) {
     return NextResponse.next({ request })
   }
 

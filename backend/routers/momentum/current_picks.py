@@ -20,13 +20,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
+from common.cron import verify_cron_secret
 from deps import supabase
 from ingest.prices import ensure_prices_for_company
 from momentum.data import (
@@ -294,11 +294,7 @@ async def cron_current_picks(req: BacktestRequest, x_cron_secret: str = Header(d
 
     Auth: X-Cron-Secret header must match the CRON_SECRET env var.
     """
-    expected = os.environ.get("CRON_SECRET", "")
-    if not expected:
-        raise HTTPException(500, "CRON_SECRET env var is not set on the server")
-    if x_cron_secret != expected:
-        raise HTTPException(401, "Invalid cron secret")
+    verify_cron_secret(x_cron_secret)
 
     # Force the right mode regardless of body content. Cron always
     # recomputes against fresh API data — its purpose is to land a fresh

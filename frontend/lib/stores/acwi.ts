@@ -1,7 +1,8 @@
 import { createStore } from '../store';
 import { API_URL } from '../apiUrl';
+import { runSSE } from '../stream';
 
-// ─── fetch-all-details (EventSource) ────────────────────────────────────────
+// ─── fetch-all-details (fetch-based SSE) ────────────────────────────────────
 
 export type AcwiFetchProgress = {
   message: string;
@@ -31,11 +32,14 @@ export const acwiFetchStore = createStore<AcwiFetchState>({
   summary: null,
 });
 
-let fetchES: EventSource | null = null;
+// fetch-based SSE (via `runSSE`) so the session JWT is sent in the
+// Authorization header (the API auth gate requires it). An AbortController
+// replaces EventSource.close() for cancellation/teardown.
+let fetchAbort: AbortController | null = null;
 
 export function startAcwiFetchDetails(onDone?: () => void): void {
   if (acwiFetchStore.get().fetching) return;
-  fetchES?.close();
+  fetchAbort?.abort();
 
   acwiFetchStore.set({
     fetching: true,
@@ -43,11 +47,11 @@ export function startAcwiFetchDetails(onDone?: () => void): void {
     progress: { message: 'Starting...', fetched: 0, total: 0, pct: 0, errors: 0 },
   });
 
-  const es = new EventSource(`${API_URL}/api/acwi/fetch-all-details`);
-  fetchES = es;
+  const controller = new AbortController();
+  fetchAbort = controller;
 
-  es.onmessage = (event) => {
-    const data = JSON.parse(event.data) as {
+  const onEvent = (raw: unknown) => {
+    const data = raw as {
       type: string;
       message?: string;
       fetched?: number;
@@ -76,8 +80,7 @@ export function startAcwiFetchDetails(onDone?: () => void): void {
           errorList: data.error_list ?? [],
         },
       });
-      es.close();
-      if (fetchES === es) fetchES = null;
+      controller.abort();
       onDone?.();
     } else if (data.type === 'error') {
       acwiFetchStore.set({
@@ -85,24 +88,25 @@ export function startAcwiFetchDetails(onDone?: () => void): void {
         progress: null,
         summary: { message: `Error: ${data.message ?? 'unknown'}`, errors: 1, errorList: [] },
       });
-      es.close();
-      if (fetchES === es) fetchES = null;
+      controller.abort();
     }
   };
-  es.onerror = () => {
-    acwiFetchStore.set({
-      fetching: false,
-      progress: null,
-      summary: {
-        message: 'Connection lost — partial results may have been cached',
-        errors: -1,
-        errorList: [],
-      },
-    });
-    es.close();
-    if (fetchES === es) fetchES = null;
-    onDone?.();
-  };
+
+  runSSE(`${API_URL}/api/acwi/fetch-all-details`, {}, onEvent, controller.signal)
+    .catch(() => {
+      if (controller.signal.aborted) return;  // done/error/cancel — expected
+      acwiFetchStore.set({
+        fetching: false,
+        progress: null,
+        summary: {
+          message: 'Connection lost — partial results may have been cached',
+          errors: -1,
+          errorList: [],
+        },
+      });
+      onDone?.();
+    })
+    .finally(() => { if (fetchAbort === controller) fetchAbort = null; });
 }
 
 // (save-universe removed: the `/api/acwi/save-universe` endpoint is

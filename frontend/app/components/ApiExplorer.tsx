@@ -71,6 +71,18 @@ const MANUAL_OVERRIDES: Record<string, Partial<Endpoint> & { hide?: boolean }> =
   'POST /api/momentum/current-picks/cron': { hide: true },
 };
 
+/** Display allow-list — scopes this explorer to the EXTERNAL admin API
+ * (the IBKR buy flow), the only endpoints meant to be called from outside
+ * the web app. The other ~129 endpoints are the app's own internal API
+ * (every page calls them); they stay fully functional but are hidden here
+ * so /api reads as the external-API console. To surface another endpoint,
+ * add its `METHOD path`. An EMPTY set falls back to showing everything. */
+const VISIBLE_ENDPOINTS = new Set<string>([
+  'GET /api/admin/schedules',
+  'GET /api/admin/schedules/{strategy_id}',
+  'GET /api/admin/health',
+]);
+
 /** Title-case a tag for the group header (e.g. "admin" → "Admin",
  * "index-universe" → "Index Universe"). Falls back to the raw tag. */
 function _formatGroup(tag: string): string {
@@ -132,6 +144,8 @@ function endpointsFromOpenApi(spec: OpenApiSpec): Endpoint[] {
       if (!op) continue;
       const ep = _endpointFromOperation(path, method, op);
       const overrideKey = `${ep.method} ${ep.path}`;
+      // Scope to the external-API allow-list (when non-empty).
+      if (VISIBLE_ENDPOINTS.size > 0 && !VISIBLE_ENDPOINTS.has(overrideKey)) continue;
       const override = MANUAL_OVERRIDES[overrideKey];
       if (override?.hide) continue;
       out.push({ ...ep, ...override });
@@ -230,7 +244,9 @@ function EndpointCard({ ep, token }: { ep: Endpoint; token: string | null }) {
       const init: RequestInit = {
         method: ep.method,
         headers: {
-          ...(needsAuth && token ? { Authorization: `Bearer ${token}` } : {}),
+          // Every /api/* endpoint now requires a valid JWT, so always attach
+          // the session token when we have one (not just admin endpoints).
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
           ...(body && ['POST', 'PUT', 'PATCH'].includes(ep.method)
             ? { 'Content-Type': 'application/json' }
             : {}),

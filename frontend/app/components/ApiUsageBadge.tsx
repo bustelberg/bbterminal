@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useImperativeHandle, useRef, forwardRef } from 'react';
 
 import { API_URL } from '../../lib/apiUrl';
+import { apiFetch } from '../../lib/apiFetch';
 const LIMIT = 20000;
 
 type Usage = { usa: number; europe: number; asia: number; month: string };
@@ -50,7 +51,7 @@ const ApiUsageBadge = forwardRef<ApiUsageBadgeHandle>(function ApiUsageBadge(_pr
   const [session, setSession] = useState({ usa: 0, europe: 0, asia: 0 });
 
   const fetchUsage = useCallback(() => {
-    fetch(`${API_URL}/api/usage`)
+    apiFetch(`${API_URL}/api/usage`)
       .then((r) => r.json())
       .then((data) => setUsage(data))
       .catch(() => {});

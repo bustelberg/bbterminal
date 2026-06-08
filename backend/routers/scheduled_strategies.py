@@ -111,7 +111,10 @@ async def list_held_companies():
           "companies": [{
             "company_id", "ticker", "exchange",
             "company_name", "sector",
+            "currency": str|None,                 # native trading currency (from the listing exchange)
+            "gurufocus_url": str|None,            # canonical GuruFocus summary link
             "latest_close_price_date": str|None,  # max(target_date) in metric_data for this company
+            "latest_close_price": float|None,     # close at that date, in `currency` (unconverted)
             "held_by": [{
               "strategy_id", "strategy_name",
               "snapshot_id", "snapshot_kind",  # "rebalance"|"price_update"
@@ -208,16 +211,16 @@ async def list_held_companies():
             }
 
         # Step 4 — exchange lookup. Holdings JSONB doesn't include the
-        # GuruFocus exchange code; fetch it from `company` joined to
-        # `gurufocus_exchange`. Batched by IN_CHUNK_SIZE to stay under
-        # the PostgREST URL-length window.
+        # GuruFocus exchange code or trading currency; fetch them from
+        # `company` joined to `gurufocus_exchange`. Batched by IN_CHUNK_SIZE
+        # to stay under the PostgREST URL-length window.
         cids = list(pooled.keys())
         for r in fetch_in_chunks(
             cids,
             lambda chunk: supabase.table("company")
             .select(
                 "company_id, company_name, gurufocus_ticker, "
-                "gurufocus_exchange:gurufocus_exchange(exchange_code)"
+                "gurufocus_exchange:gurufocus_exchange(exchange_code, currency_code)"
             )
             .in_("company_id", chunk)
             .execute(),
@@ -225,8 +228,12 @@ async def list_held_companies():
             cid = int(r["company_id"])
             if cid not in pooled:
                 continue
-            exch = (r.get("gurufocus_exchange") or {}).get("exchange_code") or ""
+            gfx = r.get("gurufocus_exchange") or {}
+            exch = gfx.get("exchange_code") or ""
             pooled[cid]["exchange"] = exch
+            # Native trading currency (from the listing exchange) — the
+            # latest close below is in this currency, unconverted.
+            pooled[cid]["currency"] = gfx.get("currency_code")
             # Prefer the authoritative ticker/name from `company`
             # — the snapshot's holdings can carry slightly stale
             # values after a renamed-ticker override.
@@ -235,24 +242,37 @@ async def list_held_companies():
             if r.get("company_name"):
                 pooled[cid]["company_name"] = r["company_name"]
 
-        # Step 5 — freshness lookup. Latest `close_price` target_date per
-        # held company. The held set is tiny (~24 names), so query just those
-        # ids via a fast indexed GROUP BY (direct-Postgres COPY) instead of
-        # the full-table `company_latest_close_price_dates` RPC, which
-        # aggregates ALL of metric_data and times out.
+        # Canonical GuruFocus summary link per company, from the resolved
+        # ticker + exchange (single-sourced via the shared helper so it
+        # matches every other GF link in the app).
+        from ingest.gurufocus_url import gurufocus_url  # noqa: PLC0415
+        for cid, bucket in pooled.items():
+            bucket["gurufocus_url"] = gurufocus_url(
+                bucket.get("ticker"), bucket.get("exchange")
+            )
+
+        # Step 5 — freshness + latest price lookup. Latest `close_price`
+        # target_date AND native-currency value per held company. The held
+        # set is tiny (~24 names), so query just those ids via a fast indexed
+        # DISTINCT ON (direct-Postgres COPY) instead of the full-table
+        # `company_latest_close_price_dates` RPC, which aggregates ALL of
+        # metric_data and times out.
         latest_close_by_cid: dict[int, str | None] = {}
+        latest_price_by_cid: dict[int, float | None] = {}
         try:
-            from momentum.data._pg import load_latest_close_dates_via_copy  # noqa: PLC0415
-            fast = load_latest_close_dates_via_copy(cids)
+            from momentum.data._pg import load_latest_close_prices_via_copy  # noqa: PLC0415
+            fast = load_latest_close_prices_via_copy(cids)
             if fast is not None:
-                latest_close_by_cid = dict(fast)
+                for cid, row in fast.items():
+                    latest_close_by_cid[cid] = row.get("date")
+                    latest_price_by_cid[cid] = row.get("price")
             else:
                 # Fallback (no SUPABASE_DB_URL): per-company latest close,
                 # one cheap indexed query each (held set is small).
                 for cid in cids:
                     r = (
                         supabase.table("metric_data")
-                        .select("target_date")
+                        .select("target_date, numeric_value")
                         .eq("metric_code", "close_price")
                         .eq("company_id", cid)
                         .order("target_date", desc=True)
@@ -261,13 +281,17 @@ async def list_held_companies():
                     )
                     if r.data:
                         latest_close_by_cid[cid] = r.data[0]["target_date"]
+                        val = r.data[0].get("numeric_value")
+                        latest_price_by_cid[cid] = float(val) if val is not None else None
         except Exception:
             # On any error the endpoint still returns the holdings — freshness
-            # just renders as "unknown" in the UI.
+            # + price just render as "unknown" in the UI.
             latest_close_by_cid = {}
+            latest_price_by_cid = {}
 
         for cid, bucket in pooled.items():
             bucket["latest_close_price_date"] = latest_close_by_cid.get(cid)
+            bucket["latest_close_price"] = latest_price_by_cid.get(cid)
 
         # Compute the freshness summary against the EXPECTED latest trading
         # day — NOT the held set's own max (which would call everything

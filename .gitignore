@@ -234,3 +234,13 @@ frontend/node_modules/
 
 # Postgres binary dumps (e.g. bbterminal_dump.pgdump)
 *.pgdump
+
+# Plaintext credential files for the loyalty4g login helper — never commit.
+*.creds
+loyalty4g.creds
+loyalty4g_session.json
+loyalty4g_created.json
+
+# Scraped company logos (~1,700 PNGs + manifest) — regenerable via
+# backend/scripts/scrape_leonteq_logos.py; don't bloat the repo.
+backend/leonteq_logos/

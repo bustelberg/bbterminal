@@ -253,28 +253,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/admin/data-freshness": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Data Freshness
-         * @description How current each data source is. The IBKR script can use the
-         *     `close_price_age_trading_days` field as a gate: bail out before
-         *     placing orders if it's > some threshold.
-         */
-        get: operations["get_data_freshness_api_admin_data_freshness_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/admin/egress-ip": {
         parameters: {
             query?: never;
@@ -409,115 +387,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/admin/pipeline-runs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Pipeline Runs
-         * @description Recent pipeline runs (newest first), compact summary per row.
-         *     Caps `limit` at 100.
-         */
-        get: operations["list_pipeline_runs_api_admin_pipeline_runs_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/admin/portfolio/latest": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Latest Portfolio
-         * @description Return the most recent current-picks snapshot in IBKR-friendly
-         *     shape. 404 when no snapshot has been produced yet.
-         */
-        get: operations["get_latest_portfolio_api_admin_portfolio_latest_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/admin/portfolio/{snapshot_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Portfolio By Id
-         * @description Return a specific snapshot by id, same shape as /latest.
-         */
-        get: operations["get_portfolio_by_id_api_admin_portfolio__snapshot_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/admin/runs/latest": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Latest Run
-         * @description Return a compact summary of the most recent pipeline run plus
-         *     the most recent SUCCESSFUL run (when different). Use this as the
-         *     one-line "is anything working?" probe — if `latest.status` is `ok`
-         *     and `latest.finished_at` is within the last week, the system is
-         *     healthy.
-         */
-        get: operations["get_latest_run_api_admin_runs_latest_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/admin/sanity-check": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Sanity Check
-         * @description Sanity diagnostics for verifying everything still hangs together.
-         *     Independent from `health` — these are coarse counts and shapes the
-         *     user (or a CI smoke test) can eyeball to confirm the system isn't
-         *     quietly broken.
-         */
-        get: operations["sanity_check_api_admin_sanity_check_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/admin/schedules": {
         parameters: {
             query?: never;
@@ -527,14 +396,21 @@ export interface paths {
         };
         /**
          * List Schedules
-         * @description Every scheduled strategy on the system with its latest portfolio
-         *     attached. Returns a list (newest-created last) so an external buyer
-         *     script can iterate strategies, see when each is due to rebalance
-         *     (`next_due_at`), and pull the holdings they should currently be
-         *     holding (`latest_portfolio.holdings`).
+         * @description List every scheduled strategy with its next rebalance date. Admin
+         *     only. Lightweight (no holdings) — the discovery call: find the
+         *     `strategy_id` to drill into, see when each next rebalances, and how
+         *     fresh its holdings are.
+         *
+         *     `next_rebalance_at` is the UTC tick at which the strategy will next
+         *     re-select its holdings (NULL = a never-run strategy, rebalances on the
+         *     next tick). `as_of_date` / `latest_price_date` / `holdings_count` come
+         *     from its most recent snapshot (absent until the strategy first runs).
          *
          *     Query: `enabled_only=true` (default) hides paused strategies; pass
          *     `false` to see everything.
+         *
+         *     Response: `[{strategy_id, name, enabled, frequency, next_rebalance_at,
+         *     last_run_at, as_of_date, latest_price_date, holdings_count}]`.
          */
         get: operations["list_schedules_api_admin_schedules_get"];
         put?: never;
@@ -554,9 +430,21 @@ export interface paths {
         };
         /**
          * Get Schedule
-         * @description One scheduled strategy + its full latest portfolio. Same shape as
-         *     one entry of `/api/admin/schedules`. 404 when the strategy doesn't
-         *     exist.
+         * @description One scheduled strategy's CURRENT holdings — the order-ready call your
+         *     IBKR buyer makes. Admin only.
+         *
+         *     Holdings come from the strategy's most recent `current_picks_snapshot`;
+         *     `as_of_date` is the date they were selected and `latest_price_date` the
+         *     most recent close priced into them — gate on these (or `/api/admin/health`)
+         *     so you never trade on stale data. A strategy with no snapshot yet returns
+         *     an empty `holdings` list. 404 when the strategy doesn't exist.
+         *
+         *     Each holding carries everything needed to place an order:
+         *         company_id, ticker, exchange, country, currency, company_name,
+         *         side, target_weight, score, entry_price_local, entry_price_eur
+         *
+         *     Response: `{strategy_id, name, enabled, frequency, next_rebalance_at,
+         *     last_run_at, as_of_date, latest_price_date, holdings_count, holdings:[…]}`.
          */
         get: operations["get_schedule_api_admin_schedules__strategy_id__get"];
         put?: never;
@@ -2252,7 +2140,10 @@ export interface paths {
          *           "companies": [{
          *             "company_id", "ticker", "exchange",
          *             "company_name", "sector",
+         *             "currency": str|None,                 # native trading currency (from the listing exchange)
+         *             "gurufocus_url": str|None,            # canonical GuruFocus summary link
          *             "latest_close_price_date": str|None,  # max(target_date) in metric_data for this company
+         *             "latest_close_price": float|None,     # close at that date, in `currency` (unconverted)
          *             "held_by": [{
          *               "strategy_id", "strategy_name",
          *               "snapshot_id", "snapshot_kind",  # "rebalance"|"price_update"
@@ -3576,37 +3467,6 @@ export interface operations {
             };
         };
     };
-    get_data_freshness_api_admin_data_freshness_get: {
-        parameters: {
-            query?: never;
-            header: {
-                authorization: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_egress_ip_api_admin_egress_ip_get: {
         parameters: {
             query?: never;
@@ -3708,165 +3568,6 @@ export interface operations {
         };
     };
     get_health_api_admin_health_get: {
-        parameters: {
-            query?: never;
-            header: {
-                authorization: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_pipeline_runs_api_admin_pipeline_runs_get: {
-        parameters: {
-            query?: {
-                limit?: number;
-            };
-            header: {
-                authorization: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_latest_portfolio_api_admin_portfolio_latest_get: {
-        parameters: {
-            query?: never;
-            header: {
-                authorization: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_portfolio_by_id_api_admin_portfolio__snapshot_id__get: {
-        parameters: {
-            query?: never;
-            header: {
-                authorization: string;
-            };
-            path: {
-                snapshot_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_latest_run_api_admin_runs_latest_get: {
-        parameters: {
-            query?: never;
-            header: {
-                authorization: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    sanity_check_api_admin_sanity_check_get: {
         parameters: {
             query?: never;
             header: {

@@ -4,6 +4,7 @@ import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import type { BacktestResult, PeriodRecord } from '../../../lib/stores/momentum';
 import { API_URL } from '../../../lib/apiUrl';
+import { apiFetch } from '../../../lib/apiFetch';
 import type { Column } from '../../../lib/tableExport';
 import TableDownloadButton from '../TableDownloadButton';
 import CellInfoTip from './CellInfoTip';
@@ -47,6 +48,8 @@ type Props = {
    * go-live and the part from go-live to the period end — with returns
    * recomputed from the daily curve. Used by /schedule. */
   markerDate?: string;
+  /** Start collapsed (the /schedule strategy detail collapses every card). */
+  defaultCollapsed?: boolean;
 };
 
 /** "Monthly Portfolios" card: one row per rebalance month, expandable to
@@ -56,7 +59,7 @@ type Props = {
  * that changes — new run, loaded saved run, etc. — the table resets its
  * expansion automatically.
  */
-function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scoringConfig, markerDate }: Props) {
+function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scoringConfig, markerDate, defaultCollapsed = false }: Props) {
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
   // company_id whose timeline modal is open, or null for closed.
   const [timelineCompanyId, setTimelineCompanyId] = useState<number | null>(null);
@@ -138,7 +141,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
     // keyed by company_id, and a different period has different cids — so
     // we just overwrite on resolve without an interim reset.
     let cancelled = false;
-    fetch(`${API_URL}/api/momentum/prices-at?as_of=${markerDate}&company_ids=${cids.join(',')}`)
+    apiFetch(`${API_URL}/api/momentum/prices-at?as_of=${markerDate}&company_ids=${cids.join(',')}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { prices?: Record<string, { price_local: number; price_eur?: number; target_date: string }> } | null) => {
         if (!cancelled && d?.prices) setGoLivePrices(d.prices);
@@ -171,11 +174,11 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
     let cancelled = false;
     (async () => {
       try {
-        const ld = await fetch(`${API_URL}/api/data/latest-price-date`).then((r) => (r.ok ? r.json() : null));
+        const ld = await apiFetch(`${API_URL}/api/data/latest-price-date`).then((r) => (r.ok ? r.json() : null));
         const globalLatest: string | undefined = ld?.date;
         if (!globalLatest || (savedAsOf && globalLatest <= savedAsOf)) return;
         // Each name's latest close on/before today — its own freshest mark.
-        const pr: { prices?: PriceMap } | null = await fetch(
+        const pr: { prices?: PriceMap } | null = await apiFetch(
           `${API_URL}/api/momentum/prices-at?as_of=${globalLatest}&company_ids=${cids.join(',')}`,
         ).then((r) => (r.ok ? r.json() : null));
         const dates = Object.values(pr?.prices ?? {}).map((p) => p.target_date.slice(0, 10));
@@ -348,6 +351,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
     <>
     <CollapsibleCard
       title="Portfolios"
+      defaultCollapsed={defaultCollapsed}
       rightSlot={
         <div className="flex items-center gap-2">
           <CompanySearch

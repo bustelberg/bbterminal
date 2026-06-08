@@ -217,34 +217,24 @@ class BBTerminalClient:
         Bail fast if role != 'admin'."""
         return self._request("GET", "/api/auth/me")
 
-    def portfolio(self, snapshot_id: int | None = None) -> dict:
-        """Latest scheduled-strategy portfolio, or a specific snapshot.
-        Holdings carry ticker, exchange, currency, side, target_weight,
-        entry_price_local, entry_price_eur, score, sector — everything
-        an IBKR rebalancer needs."""
-        path = (
-            "/api/admin/portfolio/latest"
-            if snapshot_id is None
-            else f"/api/admin/portfolio/{snapshot_id}"
-        )
-        return self._request("GET", path)
+    def schedules(self, enabled_only: bool = True) -> list[dict]:
+        """List every scheduled strategy + its next rebalance date
+        (lightweight; no holdings). Use it to find the strategy_id to
+        pass to schedule()."""
+        return self._request("GET", "/api/admin/schedules",
+                             params={"enabled_only": str(enabled_only).lower()})
+
+    def schedule(self, strategy_id: int) -> dict:
+        """One strategy's CURRENT holdings — order-ready. Each holding
+        carries ticker, exchange, country, currency, company_name, side,
+        target_weight, score, entry_price_local, entry_price_eur. Also
+        returns as_of_date / latest_price_date — gate on those (or
+        health()) so you never trade on stale data."""
+        return self._request("GET", f"/api/admin/schedules/{strategy_id}")
 
     def health(self) -> dict:
-        """Composite health check. Gate trades on is_healthy_strict."""
+        """Composite go/no-go. Gate trades on is_healthy_strict."""
         return self._request("GET", "/api/admin/health")
-
-    def latest_run(self) -> dict:
-        return self._request("GET", "/api/admin/runs/latest")
-
-    def pipeline_runs(self, limit: int = 20) -> list[dict]:
-        return self._request("GET", "/api/admin/pipeline-runs",
-                             params={"limit": limit})
-
-    def data_freshness(self) -> dict:
-        return self._request("GET", "/api/admin/data-freshness")
-
-    def sanity_check(self) -> dict:
-        return self._request("GET", "/api/admin/sanity-check")
 
     # ─── Factory ─────────────────────────────────────────────────
 
@@ -325,16 +315,20 @@ health = bb.health()
 if not health["is_healthy_strict"]:
     raise SystemExit(f"Refusing to trade: {health['problems']}")
 
-# Pull the target portfolio
-portfolio = bb.portfolio()
-print(f"Snapshot #{portfolio['snapshot_id']} as of {portfolio['as_of_date']}")
-print(f"Latest price date: {portfolio['latest_price_date']}")
-print(f"Strategy: {portfolio['strategy']['name']}")
+# 1. List strategies + their next rebalance dates, pick one.
+for s in bb.schedules():
+    print(f"  #{s['strategy_id']}  {s['name']}  next rebalance {s['next_rebalance_at']}")
 
-for h in portfolio["holdings"]:
+strategy_id = bb.schedules()[0]["strategy_id"]
+
+# 2. Pull that strategy's current holdings — order-ready.
+strat = bb.schedule(strategy_id)
+print(f"{strat['name']} — {strat['holdings_count']} holdings as of {strat['as_of_date']}")
+
+for h in strat["holdings"]:
     print(
         f"  {h['side'].upper():5}  {h['exchange']:6} {h['ticker']:10}  "
-        f"{h['currency']}  weight={h['target_weight']:.4f}  "
+        f"{h['country']}  {h['currency']}  weight={h['target_weight']:.4f}  "
         f"@ {h['entry_price_local']}"
     )
 `;
@@ -533,13 +527,9 @@ export default function Documentation() {
                 </thead>
                 <tbody>
                   {[
+                    ['GET', '/api/admin/schedules', 'bb.schedules()', 'List strategies + each one’s next rebalance date (lightweight).'],
+                    ['GET', '/api/admin/schedules/{id}', 'bb.schedule(id)', 'One strategy’s current holdings — order-ready (ticker, exchange, country, currency, weight, side) + as_of_date.'],
                     ['GET', '/api/admin/health', 'bb.health()', 'Composite go/no-go. Gate trades on is_healthy_strict.'],
-                    ['GET', '/api/admin/portfolio/latest', 'bb.portfolio()', 'Latest scheduled-strategy snapshot — IBKR-ready holdings.'],
-                    ['GET', '/api/admin/portfolio/{id}', 'bb.portfolio(snapshot_id=…)', 'Specific snapshot.'],
-                    ['GET', '/api/admin/runs/latest', 'bb.latest_run()', 'Most recent pipeline run + last successful one.'],
-                    ['GET', '/api/admin/pipeline-runs', 'bb.pipeline_runs(limit=N)', 'Recent runs list for monitoring.'],
-                    ['GET', '/api/admin/data-freshness', 'bb.data_freshness()', 'Per-source data freshness (close_price age, etc).'],
-                    ['GET', '/api/admin/sanity-check', 'bb.sanity_check()', 'Coarse table counts + recent status distribution.'],
                     ['GET', '/api/auth/me', 'bb.whoami()', 'Caller identity + role. Bail fast if role != "admin".'],
                   ].map(([method, path, py, desc]) => (
                     <tr key={path} className="border-b border-neutral-800/20">

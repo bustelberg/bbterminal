@@ -96,9 +96,9 @@ describe('computeFeeWaterfall', () => {
       w.bustelberg_mgmt_pct + w.bustelberg_perf_pct,
       6,
     );
-    // ~2 years of 100bps mgmt on a book around 1.0–1.4 → roughly 2%.
+    // ~2 years of 10bps/month (≈120bps/yr) mgmt on a book around 1.0–1.4.
     expect(w.bustelberg_mgmt_pct).toBeGreaterThan(1.5);
-    expect(w.bustelberg_mgmt_pct).toBeLessThan(3.5);
+    expect(w.bustelberg_mgmt_pct).toBeLessThan(4.0);
   });
 
   it('transaction-only: buy + sell of the whole book ≈ 2× txn bps', () => {
@@ -196,15 +196,16 @@ describe('netPartialReturn (open / go-live-split partial windows)', () => {
   });
 
   it('deducts the time-pro-rated annual + management fee over a ~1y window', () => {
-    // 35 + 100 = 135 bps/yr ongoing → ~10% gross becomes ~8.5% net.
+    // 35 bps/yr annual + 10 bps/mo (=120 bps/yr) mgmt = 155 bps/yr ongoing
+    // → ~10% gross becomes ~8.3% net.
     const net = netPartialReturn(10, DEFAULT_FEE_CONFIG, '2025-01-01', '2026-01-01');
-    expect(net).toBeGreaterThan(8.3);
-    expect(net).toBeLessThan(8.7);
+    expect(net).toBeGreaterThan(8.1);
+    expect(net).toBeLessThan(8.5);
     expect(net).toBeLessThan(10);
   });
 
   it('deducts only a sliver over a ~1-month window', () => {
-    // ~135 bps × (1/12) ≈ 0.11 pp drag → just under 5%.
+    // ~155 bps × (1/12) ≈ 0.13 pp drag → just under 5%.
     const net = netPartialReturn(5, DEFAULT_FEE_CONFIG, '2026-06-01', '2026-07-01');
     expect(net).toBeGreaterThan(4.85);
     expect(net).toBeLessThan(5);
