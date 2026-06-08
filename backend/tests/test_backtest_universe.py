@@ -74,11 +74,12 @@ class TestMonthlyEligibleFilter:
 
 
 class TestEmptyMonthHandling:
-    """A month whose universe has zero companies passing screening must
-    record `empty_reason` rather than crash, and the equity curve must
-    pick up where it left off when later months recover."""
+    """Empty months (zero companies passing screening) must not crash. A
+    LEADING empty month — before the strategy can hold anything — is trimmed
+    so the table/curve doesn't open with a spurious 0% row; a MID-backtest
+    empty month is kept (with `empty_reason`) as a genuine flat period."""
 
-    def test_zero_eligible_month_records_empty_reason(self):
+    def test_leading_empty_month_is_trimmed(self):
         dates = calendar_daily(PRICE_HISTORY_START, PRICES_END)
         companies = {10: 1.0010, 11: 1.0010}
         prices = build_prices_df(companies, dates)
@@ -86,7 +87,7 @@ class TestEmptyMonthHandling:
             (10, "T10", None, "C10"),
             (11, "T11", None, "C11"),
         ])
-        # Dec is empty, Jan + Feb have eligible companies.
+        # Dec is empty (leading), Jan + Feb have eligible companies.
         monthly_eligible = {
             "2024-12": {},
             "2025-01": {10: "X", 11: "Y"},
@@ -104,18 +105,49 @@ class TestEmptyMonthHandling:
             config, prices, universe, monthly_eligible=monthly_eligible,
         )
 
-        # Record dates are now exact rebalance Mondays — bucket by
-        # YYYY-MM so the test stays aligned to the eligibility map keys.
         by_month = {r.date[:7]: r for r in result.monthly_records}
-        # Dec: zero eligible → empty_reason populated, no holdings, no return.
-        dec = by_month["2024-12"]
-        assert dec.holdings == []
-        assert dec.empty_reason is not None
-        assert dec.portfolio_return_pct is None
-        assert dec.cumulative_return_pct == 0.0
-
-        # Jan + Feb run normally and start compounding from 0.
+        # The leading empty Dec is trimmed — no spurious "2024-12 · 0%" row.
+        assert "2024-12" not in by_month
+        # Jan is now the first record, holds, and compounds from 0.
+        assert result.monthly_records[0].date[:7] == "2025-01"
         assert {h.company_id for h in by_month["2025-01"].holdings} == {10, 11}
         assert by_month["2025-01"].portfolio_return_pct is not None
-        # Cumulative monotonically increases (positive growth → positive returns).
         assert by_month["2025-02"].cumulative_return_pct >= by_month["2025-01"].cumulative_return_pct
+
+    def test_mid_backtest_empty_month_is_kept(self):
+        dates = calendar_daily(PRICE_HISTORY_START, PRICES_END)
+        companies = {10: 1.0010, 11: 1.0010}
+        prices = build_prices_df(companies, dates)
+        universe = build_universe_df([
+            (10, "T10", None, "C10"),
+            (11, "T11", None, "C11"),
+        ])
+        # Dec holds, Jan is empty (mid-backtest), Feb holds again.
+        monthly_eligible = {
+            "2024-12": {10: "X", 11: "Y"},
+            "2025-01": {},
+            "2025-02": {10: "X", 11: "Y"},
+        }
+
+        config = BacktestConfig(
+            start_date=BACKTEST_START,
+            end_date=BACKTEST_END,
+            signal_weights=equal_signal_weights(),
+            top_n_sectors=2,
+            top_n_per_sector=2,
+        )
+        result = run_backtest(
+            config, prices, universe, monthly_eligible=monthly_eligible,
+        )
+
+        by_month = {r.date[:7]: r for r in result.monthly_records}
+        # Dec is the first held period (kept — not leading-empty).
+        assert {h.company_id for h in by_month["2024-12"].holdings} == {10, 11}
+        # Jan: mid-backtest empty → kept, with a reason, flat cumulative.
+        jan = by_month["2025-01"]
+        assert jan.holdings == []
+        assert jan.empty_reason is not None
+        assert jan.portfolio_return_pct is None
+        assert jan.cumulative_return_pct == by_month["2024-12"].cumulative_return_pct
+        # Feb recovers and holds again.
+        assert {h.company_id for h in by_month["2025-02"].holdings} == {10, 11}

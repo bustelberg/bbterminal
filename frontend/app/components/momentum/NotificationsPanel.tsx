@@ -63,16 +63,16 @@ export default function NotificationsPanel({
             onClick={onToggleInfos}
             className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-sky-500/5 transition-colors"
           >
-            <span className="text-sky-300 text-sm font-medium">
+            <span className="text-sky-700 text-sm font-medium">
               {infos.length} note{infos.length === 1 ? '' : 's'}
             </span>
-            <span className="text-sky-400/70 text-xs font-mono">{showInfos ? '▾' : '▸'}</span>
+            <span className="text-sky-600/80 text-xs font-mono">{showInfos ? '▾' : '▸'}</span>
           </button>
           {showInfos && (
             <ul className="max-h-64 overflow-auto border-t border-sky-500/20 divide-y divide-sky-500/10">
               {infos.map((n, i) => (
-                <li key={i} className="px-4 py-2 text-xs text-sky-200 flex gap-2">
-                  <span className="uppercase text-[10px] tracking-wider font-mono text-sky-400/70 shrink-0 w-16">
+                <li key={i} className="px-4 py-2 text-xs text-sky-800 flex gap-2">
+                  <span className="uppercase text-[10px] tracking-wider font-mono text-sky-600/80 shrink-0 w-16">
                     {n.scope}
                   </span>
                   <span className="break-words">{n.message}</span>

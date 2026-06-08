@@ -641,6 +641,19 @@ def run_backtest(
             end_date=config.end_date,
         )
 
+    # Drop LEADING empty periods — months before the strategy can take a
+    # position (insufficient price history for signals, or the month precedes
+    # the universe snapshot). They carry no holdings and a flat 0% running
+    # cumulative, so they'd otherwise render as spurious "0%" rows at the head
+    # of the Portfolios table / equity curve (e.g. a "2022-12 · 0%" row when
+    # data really starts in 2023). Mid-backtest empty months (after the first
+    # holding) are kept — those are genuine flat periods. If NO period ever
+    # holds, the records are left as-is so the all-empty result still surfaces
+    # its reasons. Stats come from the accumulators (unaffected by this trim).
+    first_held = next((idx for idx, r in enumerate(period_records) if r.holdings), None)
+    if first_held:
+        period_records = period_records[first_held:]
+
     return build_backtest_result(
         period_records, accum,
         price_index=price_index,

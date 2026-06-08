@@ -5,15 +5,23 @@
   --font-mono: var(--font-geist-mono);
 }
 
-/* ── Design tokens — "Glass Institutional (tempered)" ───────────────────────
+/* ── Design tokens — "Azure Blanc" (light) ──────────────────────────────────
    The app's single, fixed theme. The whole palette + treatment lives here;
    every component routes through these tokens (no inline hex / raw Tailwind
    colour names anywhere). To re-skin, edit values here — nothing else.
 
-   "Tempered" = frosted glass on the *chrome* (sidebar + floating menus) over a
-   gradient-mesh background, but *solid* data surfaces (cards, tables, inputs)
-   so dense numbers stay crisp and fast. The glass *treatment* (blur, mesh,
-   glow, card depth) is the small set of rules below the token block.
+   Azure Blanc = porcelain-white surfaces, deep-navy ink, a sky-blue accent,
+   over a faint azure gradient-mesh background. Chrome (sidebar + floating
+   menus) is frosted white; data surfaces (cards, tables, inputs) are solid
+   white so dense numbers stay crisp. The treatment (frost, mesh, glow, card
+   depth) is the small set of rules below the token block.
+
+   NOTE on polarity: this is a LIGHT theme. Foreground tokens run dark→light
+   (strong = darkest ink). Neutral tokens are mid-slate RGBs — components use
+   them at low alpha (`border-neutral-800/40`, `divide-…/20`), so the RGB needs
+   to be dark enough that a soft border still reads on white. The accent stops
+   used as TEXT (accent-400) are darker than the brand (accent-500) for
+   on-white legibility; accent-600 is the button fill (white text).
 
    Tailwind v4 auto-generates bg-/text-/border-/ring-/divide- utilities (and
    `/opacity` modifiers, runtime-safe via color-mix) for every `--color-*`. */
@@ -21,65 +29,67 @@
   /* ── Surfaces ──
      Chrome (sidebar, popover) is translucent → frosted by the backdrop-blur
      rule below. Data surfaces (card/card-alt/elevated/inset) are solid. */
-  --color-page: #0a0f1f;                      /* deep navy base (mesh painted on body) */
-  --color-sidebar: rgba(13, 19, 36, 0.72);    /* frosted chrome — left nav rail */
-  --color-popover: rgba(18, 26, 48, 0.9);     /* frosted chrome — tooltips / menus */
-  --color-card: #141c30;                      /* solid data panel / card */
-  --color-card-alt: #1a1e3c;                  /* solid, accent-tinted (derived universes) */
-  --color-elevated: #1b2440;                  /* solid, raised */
-  --color-inset: #0e1426;                     /* solid, recessed (inputs) */
+  --color-page: #eef4fc;                       /* porcelain base, faint blue (azure mesh on body) */
+  --color-sidebar: rgba(255, 255, 255, 0.72);  /* frosted chrome — left nav rail */
+  --color-popover: rgba(255, 255, 255, 0.92);  /* frosted chrome — tooltips / menus */
+  --color-card: #ffffff;                       /* solid data panel / card */
+  --color-card-alt: #ecf3ff;                   /* solid, accent-tinted (derived universes) */
+  --color-elevated: #ffffff;                   /* solid, raised */
+  --color-inset: #eaf3fd;                       /* solid, recessed (inputs) */
 
-  /* ── Accent (electric blue→cyan brand) — buttons, active nav, links, rings ── */
-  --color-accent-200: #bfe0ff;
-  --color-accent-300: #7cc4ff;
-  --color-accent-400: #46a6ff;
-  --color-accent-500: #2f86ff;
-  --color-accent-600: #2566e6;
-  --color-accent-900: #1e3a8a;
+  /* ── Accent (sky-blue brand) — buttons, active nav, links, rings.
+     400 = on-white TEXT/links (darker); 500 = brand; 600 = button fill. */
+  --color-accent-200: #c7e4fd;
+  --color-accent-300: #7ccbfa;
+  --color-accent-400: #0a6fb2;   /* on-white text / links — deeper for contrast */
+  --color-accent-500: #0e9fe0;   /* brand sky */
+  --color-accent-600: #0a64ad;   /* button fill (white text) */
+  --color-accent-900: #0a4377;
 
-  /* ── Returns / status — vivid on navy (aliased to Tailwind ramps) ── */
-  --color-pos-300: var(--color-emerald-300);  /* positive returns / success */
-  --color-pos-400: var(--color-emerald-400);
-  --color-pos-500: var(--color-emerald-500);
-  --color-pos-600: var(--color-emerald-600);
-  --color-pos-800: var(--color-emerald-800);
-  --color-neg-100: var(--color-rose-100);      /* negative returns / errors */
-  --color-neg-200: var(--color-rose-200);
-  --color-neg-300: var(--color-rose-300);
-  --color-neg-400: var(--color-rose-400);
-  --color-neg-500: var(--color-rose-500);
-  --color-neg-600: var(--color-rose-600);
-  --color-warn-100: var(--color-amber-100);    /* warnings / out-of-scope */
-  --color-warn-200: var(--color-amber-200);
-  --color-warn-300: var(--color-amber-300);
-  --color-warn-400: var(--color-amber-400);
-  --color-warn-500: var(--color-amber-500);
-  --color-warn-600: var(--color-amber-600);
-  --color-warn-800: var(--color-amber-800);
+  /* ── Returns / status — tuned for legibility on white (text stops darker). ── */
+  --color-pos-300: #2eb673;     /* positive returns / success */
+  --color-pos-400: #128a4f;
+  --color-pos-500: #0f9d58;
+  --color-pos-600: #0c7d46;
+  --color-pos-800: #0a5e35;
+  --color-neg-100: #fdeceb;     /* negative returns / errors */
+  --color-neg-200: #f7cdcb;
+  --color-neg-300: #d9534d;
+  --color-neg-400: #d23f3f;
+  --color-neg-500: #cf3a35;
+  --color-neg-600: #b22f2a;
+  --color-warn-100: #fbf2d6;    /* light tint (warning backgrounds) */
+  --color-warn-200: #946510;    /* warning body text — dark amber for on-white contrast */
+  --color-warn-300: #855310;    /* warning headings / badges */
+  --color-warn-400: #6e440c;    /* warning labels / icons */
+  --color-warn-500: #b07a0c;    /* tint + border base */
+  --color-warn-600: #946410;
+  --color-warn-800: #6b490c;
 
-  /* ── Foreground (text / icon) ramp — cool bright on navy, brightest→faintest.
+  /* ── Foreground (text / icon) ramp — deep-navy ink, darkest→faintest.
      Use `text-fg`, `text-fg-muted`, `text-fg-subtle`, … */
-  --color-fg-strong: #f4f8ff;   /* emphasized headings / active values */
-  --color-fg-bright: #e6edfa;   /* brightest body */
-  --color-fg:        #d4dcec;   /* primary body text */
-  --color-fg-soft:   #aebbd4;   /* dimmed body / sub-headings */
-  --color-fg-muted:  #8b9abb;   /* labels / secondary */
-  --color-fg-subtle: #6b7a9c;   /* captions / placeholders */
-  --color-fg-faint:  #51607f;   /* hints */
-  --color-fg-dim:    #3c4a66;   /* faintest text */
+  --color-fg-strong: #081325;   /* emphasized headings / active values */
+  --color-fg-bright: #0c1830;   /* near-strong */
+  --color-fg:        #18253e;   /* primary body text */
+  --color-fg-soft:   #344160;   /* dimmed body / sub-headings */
+  --color-fg-muted:  #46546c;   /* labels / secondary */
+  --color-fg-subtle: #5e6a84;   /* captions / placeholders */
+  --color-fg-faint:  #7c8aa1;   /* hints */
+  --color-fg-dim:    #9aa6bd;   /* faintest text */
 
-  /* ── Neutral ramp — borders / dividers / controls (cool, mostly translucent
-     so card edges stay whisper-light; depth comes from the shadow below). */
-  --color-neutral-500: #6b7a9c;
-  --color-neutral-600: #51607f;
-  --color-neutral-700: rgba(150, 170, 210, 0.30);
-  --color-neutral-800: rgba(150, 170, 210, 0.18);
-  --color-neutral-900: rgba(150, 170, 210, 0.12);
-  --color-neutral-950: rgba(150, 170, 210, 0.07);
+  /* ── Neutral ramp — borders / dividers / controls (mid-slate-blue RGBs; used
+     at low alpha so card edges stay soft on white). 700 is used solid (inputs)
+     so it's lighter; 800 is used at ~/40 so it's a touch darker to still read. */
+  --color-neutral-500: #475569;
+  --color-neutral-600: #64748b;
+  --color-neutral-700: #93a3bd;
+  --color-neutral-800: #7888a4;
+  --color-neutral-900: #98a7c0;
+  --color-neutral-950: #bcc6d8;
 
-  /* Hover/active wash (white at low alpha) + modal scrim. */
-  --color-overlay: #ffffff;
-  --color-scrim:   #000000;
+  /* Hover/active wash (navy ink at low alpha → darkens on white) + modal scrim. */
+  --color-overlay: #0b1730;
+  --color-scrim:   #0a1424;
 }
 
 /* ── Glass treatment ────────────────────────────────────────────────────────
@@ -95,15 +105,88 @@
   }
 }
 
-/* Data cards: top hairline highlight + soft drop shadow = glassy depth on a
-   solid surface (crisp, no blur cost). */
-:is(.bg-card, .bg-card-alt, .bg-elevated) {
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.05), 0 10px 30px -16px rgba(0, 0, 0, 0.55);
+/* Signature azure gradient border on every data surface + a layered soft
+   shadow. The gradient rides the 1px border via the padding-box (solid fill)
+   / border-box (gradient) double-background trick, applied to the stable
+   surface utility classes so no component markup changes. The transparent
+   border overrides any per-component `border-neutral-*` colour. */
+:root {
+  --gradient-border: linear-gradient(135deg, #5cc6fb 0%, #2f7df0 50%, #0e9fe0 100%);
+  --card-shadow: 0 1px 2px rgba(20, 32, 80, 0.05), 0 14px 34px -18px rgba(20, 44, 120, 0.20);
 }
 
-/* Accent buttons get a subtle blue glow. */
+/* `:not(table parts)` so the treatment doesn't hit sticky `<thead class=bg-card>`
+   etc. — a transparent 1px border there lets scrolling rows leak through. */
+:is(.bg-card, .bg-elevated):not(thead, tbody, tr, th, td) {
+  border: 1px solid transparent;
+  background-image: linear-gradient(var(--color-card), var(--color-card)), var(--gradient-border);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  -webkit-background-clip: padding-box, border-box;
+  box-shadow: var(--card-shadow);
+}
+.bg-card-alt:not(thead, tbody, tr, th, td) {
+  border: 1px solid transparent;
+  background-image: linear-gradient(var(--color-card-alt), var(--color-card-alt)), var(--gradient-border);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  -webkit-background-clip: padding-box, border-box;
+  box-shadow: var(--card-shadow);
+}
+/* Floating menus / tooltips get the same gradient edge (translucent fill keeps
+   the frost from the backdrop-blur rule above). */
+.bg-popover:not(thead, tbody, tr, th, td) {
+  border: 1px solid transparent;
+  background-image: linear-gradient(var(--color-popover), var(--color-popover)), var(--gradient-border);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  -webkit-background-clip: padding-box, border-box;
+}
+
+/* Inputs / controls / small boxes: the app fills these with `bg-page` + a full
+   slate border rather than a surface class, so give them the same gradient
+   edge (background-trick respects their border-radius, incl. rounded-full).
+   The `.border` (all-sides) in the selector keeps this off `border-b`/`border-y`
+   dividers — those are handled as straight lines below. */
+:is(.bg-page).border:is(
+  .border-neutral-700, .border-neutral-700\/60, .border-neutral-700\/50,
+  .border-neutral-800, .border-neutral-800\/40, .border-neutral-800\/60
+) {
+  border: 1px solid transparent;
+  background-image: linear-gradient(var(--color-page), var(--color-page)), var(--gradient-border);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  -webkit-background-clip: padding-box, border-box;
+}
+
+/* Straight 1px lines — section / header / sidebar dividers + `divide-y` row
+   separators — become gradient via `border-image` (respects per-side widths;
+   no rounded-corner issue since they're straight). Scoped to NEUTRAL colours
+   so semantic stripes (e.g. `border-l` warn) keep their meaning. */
+:is(.border-t, .border-b, .border-l, .border-r, .border-x, .border-y):is(
+  .border-neutral-800\/40, .border-neutral-800\/60, .border-neutral-800\/30,
+  .border-neutral-800\/20, .border-neutral-800\/10, .border-neutral-700,
+  .border-neutral-700\/60, .border-neutral-700\/50
+) {
+  border-image-source: var(--gradient-border);
+  border-image-slice: 1;
+}
+:is(.divide-neutral-800\/40, .divide-neutral-800\/30, .divide-neutral-800\/20) > * {
+  border-image-source: var(--gradient-border);
+  border-image-slice: 1;
+}
+
+/* Accent buttons: a blue gradient fill + azure glow for more presence, and
+   white text (on a light theme they'd otherwise inherit the dark body ink). */
 :is(.bg-accent-600, .bg-accent-500) {
-  box-shadow: 0 6px 20px -6px rgba(47, 134, 255, 0.5);
+  background-image: linear-gradient(135deg, var(--color-accent-500), var(--color-accent-600));
+  box-shadow: 0 6px 18px -7px rgba(14, 159, 224, 0.55);
+  color: #ffffff;
+}
+/* The gradient fill masks the `hover:bg-accent-500` lighten, so restore hover
+   feedback with a brightness bump. */
+:is(.bg-accent-600, .bg-accent-500):hover {
+  filter: brightness(1.07);
 }
 
 /* ── Snappy hover, site-wide ─────────────────────────────────────────────────
@@ -121,20 +204,21 @@
   transition-duration: 0s;
 }
 
-/* Gradient mesh painted behind everything (fixed so it doesn't scroll). */
+/* Faint azure gradient mesh painted behind everything (fixed so it doesn't
+   scroll) — soft sky-blue glows on the porcelain base. */
 body {
   background-image:
-    radial-gradient(55rem 55rem at 12% -8%, rgba(47, 134, 255, 0.18), transparent 60%),
-    radial-gradient(48rem 48rem at 100% 0%, rgba(6, 182, 212, 0.14), transparent 55%),
-    radial-gradient(42rem 42rem at 55% 120%, rgba(124, 92, 255, 0.12), transparent 60%);
+    radial-gradient(55rem 55rem at 12% -8%, rgba(14, 165, 233, 0.16), transparent 60%),
+    radial-gradient(48rem 48rem at 100% 0%, rgba(37, 99, 235, 0.12), transparent 55%),
+    radial-gradient(42rem 42rem at 55% 120%, rgba(99, 140, 230, 0.14), transparent 60%);
   background-attachment: fixed;
 }
 
-/* Accessibility: solid chrome when the OS asks to reduce transparency. */
+/* Accessibility: solid white chrome when the OS asks to reduce transparency. */
 @media (prefers-reduced-transparency: reduce) {
   :root {
-    --color-sidebar: #0d1324;
-    --color-popover: #121a30;
+    --color-sidebar: #ffffff;
+    --color-popover: #ffffff;
   }
 }
 
@@ -157,18 +241,23 @@ body {
   font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
 }
 
-/* Smooth scrollbars (track transparent; thumb on the neutral ramp). */
+/* Gradient scrollbars (track transparent; thumb carries the brand gradient). */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-neutral-700);
-  border-radius: 3px;
+  background: var(--gradient-border);
+  border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-neutral-600);
+  filter: brightness(1.12);
+}
+/* Firefox can't gradient a scrollbar — fall back to a solid brand blue. */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: #2f7df0 transparent;
 }

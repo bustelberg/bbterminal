@@ -356,7 +356,7 @@ function TimelinePanel({
                       className="text-[9px] text-fg-faint font-mono shrink-0"
                       style={{
                         width: cellWidth,
-                        borderLeft: isYear ? '1px solid rgba(75,85,99,0.35)' : undefined,
+                        borderLeft: isYear ? '1px solid rgba(20,40,90,0.14)' : undefined,
                       }}
                     >
                       {isYear ? <span className="pl-0.5">{thisYear}</span> : ''}
@@ -399,7 +399,9 @@ function TimelinePanel({
                             // box-sizing keeps each cell exactly cellWidth
                             // so the layout math (innerWidth, scroll-to-
                             // right) doesn't drift.
-                            borderRight: '1px solid #151821',
+                            // Separator = the panel surface colour, so it
+                            // reads as a 1px gap (not a dark gridline) on any theme.
+                            borderRight: '1px solid var(--color-card)',
                             boxSizing: 'border-box',
                             // Hover highlight is borders-only — no
                             // brightness/opacity changes on the cell
@@ -409,7 +411,7 @@ function TimelinePanel({
                             // get a 1-px outline in the sector color so
                             // the run extent stays readable.
                             outline: isThisHovered
-                              ? '2px solid rgba(255,255,255,0.95)'
+                              ? '2px solid var(--color-fg-strong)'
                               : inHoveredRun
                                 ? `1px solid ${color}`
                                 : undefined,

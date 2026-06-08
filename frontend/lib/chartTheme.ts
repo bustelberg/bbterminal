@@ -14,46 +14,48 @@
  * later if you want them unified site-wide.
  */
 export const chartTheme = {
-  // ── Chrome ───────────────────────────────────────────────────────────────
-  grid: '#1f2937',          // CartesianGrid stroke (momentum, fx, indicators, sparkline)
-  gridEarnings: '#1e2330',  // CartesianGrid stroke on /earnings (a touch warmer)
-  axisTick: '#6b7280',      // axis tick labels — gray-500
-  axisLabel: '#9ca3af',     // tooltip / legend label text — gray-400
-  zeroLine: '#374151',      // y=0 / reference line — gray-700
+  // ── Chrome (light theme — Azure Blanc) ───────────────────────────────────
+  grid: '#e2e8f0',          // CartesianGrid stroke — slate-200
+  gridEarnings: '#e8edf4',  // CartesianGrid stroke on /earnings (a touch cooler)
+  axisTick: '#64748b',      // axis tick labels — slate-500
+  axisLabel: '#475569',     // tooltip / legend label text — slate-600
+  zeroLine: '#cbd5e1',      // y=0 / reference line — slate-300
 
-  // ── Semantic series colours (mirror the accent/pos/neg/warn ramps) ───────
-  accent: '#818cf8',        // indigo-400 — primary strategy / series A / area fills
-  accentStrong: '#6366f1',  // indigo-600 — price line (relative-growth)
-  warn: '#f59e0b',          // amber-500 — comparison series B / alpha line
-  pos: '#34d399',           // emerald-400 — OE actual
-  neg: '#f87171',           // red-400 — OE estimate / negative-value dot
-  negStrong: '#ef4444',     // red-500 — go-live line, period-avg / forward-PE mean
-  negDeep: '#dc2626',       // red-600 — negative-value dot (series B)
-  universe: '#9ca3af',      // gray-400 — universe baseline line
+  // ── Semantic series colours (mirror the accent/pos/neg/warn ramps), tuned
+  //    to read on white. ─────────────────────────────────────────────────
+  accent: '#0ea5e9',        // sky-500 — primary strategy / series A / area fills
+  accentStrong: '#0284c7',  // sky-600 — price line (relative-growth)
+  warn: '#d97706',          // amber-600 — comparison series B / alpha line
+  pos: '#0f9d58',           // green — OE actual
+  neg: '#dc2626',           // red-600 — OE estimate / negative-value dot
+  negStrong: '#b91c1c',     // red-700 — go-live line, period-avg / forward-PE mean
+  negDeep: '#991b1b',       // red-800 — negative-value dot (series B)
+  universe: '#64748b',      // slate-500 — universe baseline line
 
   // ── Go-live marker (vertical dashed line + its label) ────────────────────
-  goLiveLine: '#ef4444',
-  goLiveLabel: '#f87171',
+  goLiveLine: '#dc2626',
+  goLiveLabel: '#b91c1c',
 
   // ── Drawdown overlay (variable opacity per band) ─────────────────────────
-  drawdown: (opacity: number) => `rgba(244,63,94,${opacity})`,
+  drawdown: (opacity: number) => `rgba(220,38,38,${opacity})`,
 
-  // ── Tooltip surfaces (recharts contentStyle / labelStyle / itemStyle) ────
+  // ── Tooltip surfaces (recharts contentStyle / labelStyle / itemStyle).
+  //    White surfaces with a soft navy hairline + drop shadow on light. ────
   tooltip: {                // momentum / backtest — elevated surface
-    contentStyle: { background: '#1a1d27', border: '1px solid rgba(75,85,99,0.4)', borderRadius: 8, fontSize: 13 },
-    labelStyle: { color: '#9ca3af' },
-    itemStyle: { color: '#e5e7eb' },
+    contentStyle: { background: '#ffffff', border: '1px solid rgba(20,32,80,0.12)', borderRadius: 8, fontSize: 13, boxShadow: '0 8px 24px -10px rgba(20,32,80,0.2)' },
+    labelStyle: { color: '#64748b' },
+    itemStyle: { color: '#1d2a44' },
   },
   tooltipPopover: {         // sparkline / fx / indicators — popover surface
-    contentStyle: { backgroundColor: '#1e2230', border: '1px solid rgba(107,114,128,0.3)', borderRadius: '8px', fontSize: 12 },
-    labelStyle: { color: '#9ca3af' },
+    contentStyle: { backgroundColor: '#ffffff', border: '1px solid rgba(20,32,80,0.10)', borderRadius: '8px', fontSize: 12, boxShadow: '0 8px 24px -10px rgba(20,32,80,0.18)' },
+    labelStyle: { color: '#64748b' },
   },
   tooltipCard: {            // /earnings — card surface
-    contentStyle: { backgroundColor: '#151821', border: '1px solid #374151', borderRadius: '8px' },
-    labelStyle: { color: '#9ca3af' },
+    contentStyle: { backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', boxShadow: '0 8px 24px -10px rgba(20,32,80,0.18)' },
+    labelStyle: { color: '#64748b' },
   },
 
-  // ── Qualitative multi-series palette (variant comparison lines) ──────────
-  // index 0 = active strategy; the rest cycle for comparison series.
-  series: ['#818cf8', '#f59e0b', '#34d399', '#f472b6', '#60a5fa', '#a78bfa', '#fb7185', '#22d3ee'],
+  // ── Qualitative multi-series palette (variant comparison lines), all
+  //    readable on white. index 0 = active strategy; rest cycle. ──────────
+  series: ['#0ea5e9', '#d97706', '#0f9d58', '#db2777', '#2563eb', '#7c3aed', '#e11d48', '#0891b2'],
 } as const;
