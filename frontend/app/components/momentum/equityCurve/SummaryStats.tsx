@@ -177,6 +177,15 @@ export default function SummaryStats({
               {result.summary.win_rate_pct.toFixed(0)}%
             </Stat>
           )}
+          {result.summary.sharpe_ratio != null && (
+            <Stat
+              label="Sharpe"
+              tone={toneClass(result.summary.sharpe_ratio, 1, 0)}
+              info="Annualised Sharpe ratio (risk-free = 0): mean daily return ÷ std × √252. Risk-adjusted return counting both up- and down-volatility. Rough scale: >1 good, >2 excellent, <0 means returns didn't beat their own volatility."
+            >
+              {result.summary.sharpe_ratio.toFixed(2)}
+            </Stat>
+          )}
           {result.summary.sortino_ratio != null && (
             <Stat
               label="Sortino"
