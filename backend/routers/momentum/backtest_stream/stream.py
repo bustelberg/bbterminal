@@ -642,6 +642,10 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         _log.info("[backtest_stream] client cancelled; signalling workers to stop")
         raise
     except Exception as e:
+        # Log server-side with a traceback — otherwise the only trace of a
+        # mid-stream failure (e.g. a Postgres statement timeout, 57014) is the
+        # SSE error event sent to the browser, leaving Deploy Logs silent.
+        _log.exception("[backtest_stream] backtest failed: %s: %s", type(e).__name__, e)
         yield _emit({"type": "error", "message": str(e)})
 
 

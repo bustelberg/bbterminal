@@ -67,12 +67,14 @@ def _run_copy(sql: str, params: tuple) -> io.BytesIO | None:
         return None
     try:
         buf = io.BytesIO()
-        # `statement_timeout=0` disables the server/role statement timeout for
-        # THIS session only — a bulk metric COPY over thousands of companies is
-        # expected to run for many seconds and must not be cancelled (57014).
-        # The whole point of the COPY path is to stream a big result in one go.
-        with psycopg.connect(url, connect_timeout=15, options="-c statement_timeout=0") as conn:
+        with psycopg.connect(url, connect_timeout=15) as conn:
             with conn.cursor() as cur:
+                # Disable the server/role statement timeout for THIS session — a
+                # bulk metric COPY over thousands of companies runs for many
+                # seconds and must not be cancelled (57014). Set via an explicit
+                # query (not a libpq `options=` startup param) because Supavisor
+                # — the Supabase pooler — can reject startup options.
+                cur.execute("SET statement_timeout = 0")
                 with cur.copy(sql, params) as copy:
                     while (block := copy.read()):
                         buf.write(block)
@@ -99,8 +101,9 @@ def copy_universe_memberships_via_pg(src_universe_id: int, dst_universe_id: int)
     except ImportError:
         return None
     try:
-        with psycopg.connect(url, connect_timeout=30, options="-c statement_timeout=0") as conn:
+        with psycopg.connect(url, connect_timeout=30) as conn:
             with conn.cursor() as cur:
+                cur.execute("SET statement_timeout = 0")
                 cur.execute(
                     "INSERT INTO universe_membership "
                     "(universe_id, company_id, target_month, universe_ticker, sector, industry) "
