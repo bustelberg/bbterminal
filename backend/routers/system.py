@@ -68,14 +68,19 @@ async def api_usage():
 async def latest_price_date(response: Response):
     """Most recent close-price observation across all companies. The
     /backtest page uses this as the default end-date — "test up to
-    however current our data is." Cheap: an index-backed
-    `ORDER BY target_date DESC LIMIT 1` on `metric_data`."""
+    however current our data is." The `source_code = 'gurufocus'` filter is
+    load-bearing: it lets Postgres serve this via the
+    `idx_metric_data_source_date` (source_code, target_date) index as a
+    backward scan. Without it there's no usable index for
+    `metric_code = … ORDER BY target_date DESC`, so prod seq-scans the whole
+    `metric_data` table and trips the statement timeout (57014)."""
     response.headers["Cache-Control"] = CACHE_PIPELINE
     def _q() -> dict:
         try:
             resp = (
                 supabase.table("metric_data")
                 .select("target_date")
+                .eq("source_code", "gurufocus")
                 .eq("metric_code", "close_price")
                 .order("target_date", desc=True)
                 .limit(1)

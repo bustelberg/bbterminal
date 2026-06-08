@@ -66,10 +66,18 @@ def register_startup_hooks(app) -> None:
 def latest_db_price_date() -> date | None:
     """Latest target_date for `close_price` across the whole metric_data
     table. Used as a fast pre-flight gate so we don't run a heavy compute
-    against stale DB data. Returns None if the table is empty."""
+    against stale DB data. Returns None if the table is empty.
+
+    The `source_code = 'gurufocus'` filter is load-bearing for performance:
+    it lets Postgres serve this via the `idx_metric_data_source_date`
+    (source_code, target_date) index as a backward index scan (stop at the
+    first close_price row). Without it there's no usable index for
+    `metric_code = … ORDER BY target_date DESC`, so prod seq-scans the whole
+    `metric_data` table and hits the statement timeout (57014)."""
     resp = (
         supabase.table("metric_data")
         .select("target_date")
+        .eq("source_code", "gurufocus")
         .eq("metric_code", "close_price")
         .order("target_date", desc=True)
         .limit(1)
