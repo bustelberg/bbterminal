@@ -36,11 +36,54 @@ jobs:
         if: github.event_name == 'push'
         run: sleep 120
 
-      - name: Probe endpoints
+      # Every /api/* read endpoint is behind the Supabase-JWT auth gate, so the
+      # data probes need a real admin token (several endpoints are admin-tier).
+      # We mint one with a Supabase password grant against prod GoTrue using a
+      # dedicated smoke account. If the SMOKE_* secrets aren't configured the
+      # step leaves the token empty and the probe falls back to public-only
+      # (health) with a warning — so the workflow never hard-fails purely for
+      # lack of a credential.
+      #
+      # Required repo secrets to enable full coverage:
+      #   SMOKE_SUPABASE_URL       prod Supabase URL (https://<ref>.supabase.co)
+      #   SMOKE_SUPABASE_ANON_KEY  prod anon / publishable key
+      #   SMOKE_EMAIL              an ADMIN smoke user's email (app_metadata.role == 'admin')
+      #   SMOKE_PASSWORD           that user's password
+      - name: Mint Supabase access token (optional)
+        id: auth
+        env:
+          SB_URL: ${{ secrets.SMOKE_SUPABASE_URL }}
+          SB_ANON: ${{ secrets.SMOKE_SUPABASE_ANON_KEY }}
+          SB_EMAIL: ${{ secrets.SMOKE_EMAIL }}
+          SB_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
         run: |
           set -u
-          ENDPOINTS=(
-            "/api/health"
+          if [ -z "$SB_URL" ] || [ -z "$SB_ANON" ] || [ -z "$SB_EMAIL" ] || [ -z "$SB_PASSWORD" ]; then
+            echo "token=" >> "$GITHUB_OUTPUT"
+            echo "SMOKE_* secrets not set — will probe public endpoints only."
+            exit 0
+          fi
+          token=$(curl -sS -X POST "${SB_URL}/auth/v1/token?grant_type=password" \
+            -H "apikey: ${SB_ANON}" -H "Content-Type: application/json" \
+            -d "{\"email\":\"${SB_EMAIL}\",\"password\":\"${SB_PASSWORD}\"}" \
+            | jq -r '.access_token // empty')
+          if [ -z "$token" ]; then
+            echo "::error::SMOKE_* secrets are set but minting a token failed (bad creds or GoTrue down)."
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+          echo "Minted smoke access token."
+
+      - name: Probe endpoints
+        env:
+          TOKEN: ${{ steps.auth.outputs.token }}
+        run: |
+          set -u
+          # Public tier — no auth needed.
+          PUBLIC=( "/api/health" )
+          # Auth-gated read endpoints — only probed when we have a token.
+          GATED=(
             "/api/companies"
             "/api/companies/field-options"
             "/api/companies/memberships"
@@ -50,6 +93,15 @@ jobs:
             "/api/fx/coverage"
           )
 
+          AUTH=()
+          ENDPOINTS=( "${PUBLIC[@]}" )
+          if [ -n "$TOKEN" ]; then
+            AUTH=( -H "Authorization: Bearer ${TOKEN}" )
+            ENDPOINTS+=( "${GATED[@]}" )
+          else
+            echo "::warning::No smoke JWT (set SMOKE_* secrets) — probing public endpoints only; auth-gated data endpoints skipped this run."
+          fi
+
           fail=0
           for path in "${ENDPOINTS[@]}"; do
             url="${BACKEND}${path}"
@@ -58,6 +110,7 @@ jobs:
             # body; -w pulls the status code out.
             status=$(curl -sS -o /dev/null -w "%{http_code}" -m 60 \
               -H "Origin: https://bbterminal.vercel.app" \
+              "${AUTH[@]}" \
               "$url" || echo "000")
             if [[ "$status" =~ ^2[0-9][0-9]$ ]]; then
               echo "OK   $status  $path"
