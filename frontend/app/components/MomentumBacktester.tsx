@@ -266,8 +266,9 @@ export default function MomentumBacktester() {
   // `index_universe`). Both map into the locally-shaped `IndexUniverseEntry`
   // the Variants AxisColumn wants. (Snapshots are CREATED on the Leonteq
   // page; here they just appear as another pickable universe.)
-  const { data: _utRaw } = useUniverseTemplates();
-  const { data: _staticHook } = useStaticUniverses();
+  const { data: _utRaw, loading: _utLoading } = useUniverseTemplates();
+  const { data: _staticHook, loading: _staticLoading } = useStaticUniverses();
+  const universesLoading = _utLoading || _staticLoading;
   useEffect(() => {
     const mapUni = (t: UniverseTemplate) => ({
       index_name: t.template_key,
@@ -527,6 +528,7 @@ export default function MomentumBacktester() {
             topPerSector={topPerSector}
             minPriceScore={minPriceScore}
             indexUniverses={indexUniverses}
+            universesLoading={universesLoading}
             eligibleCount={eligibleCount}
             totalPerms={totalPerms}
           />

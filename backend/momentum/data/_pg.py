@@ -25,6 +25,10 @@ import pandas as pd
 
 log = logging.getLogger(__name__)
 
+# One-shot guard so the "COPY path disabled" warning is logged once per process
+# rather than on every chunked load.
+_warned_no_db_url = False
+
 
 def _db_url() -> str | None:
     """Direct-Postgres connection string, if configured. `SUPABASE_DB_URL`
@@ -43,6 +47,15 @@ def _run_copy(sql: str, params: tuple) -> io.BytesIO | None:
     psycopg missing, or any connection/query error)."""
     url = _db_url()
     if not url:
+        global _warned_no_db_url
+        if not _warned_no_db_url:
+            log.warning(
+                "[data._pg] SUPABASE_DB_URL/DATABASE_URL is not set — using the slower "
+                "PostgREST loader. Large-universe backtests can hit Postgres statement "
+                "timeouts (57014) on this path. Set SUPABASE_DB_URL (the Supabase direct / "
+                "session-pooler connection string) to enable the fast single-COPY loader."
+            )
+            _warned_no_db_url = True
         return None
     try:
         import psycopg  # local import so the dependency stays optional
@@ -54,7 +67,11 @@ def _run_copy(sql: str, params: tuple) -> io.BytesIO | None:
         return None
     try:
         buf = io.BytesIO()
-        with psycopg.connect(url, connect_timeout=15) as conn:
+        # `statement_timeout=0` disables the server/role statement timeout for
+        # THIS session only — a bulk metric COPY over thousands of companies is
+        # expected to run for many seconds and must not be cancelled (57014).
+        # The whole point of the COPY path is to stream a big result in one go.
+        with psycopg.connect(url, connect_timeout=15, options="-c statement_timeout=0") as conn:
             with conn.cursor() as cur:
                 with cur.copy(sql, params) as copy:
                     while (block := copy.read()):
@@ -82,7 +99,7 @@ def copy_universe_memberships_via_pg(src_universe_id: int, dst_universe_id: int)
     except ImportError:
         return None
     try:
-        with psycopg.connect(url, connect_timeout=30) as conn:
+        with psycopg.connect(url, connect_timeout=30, options="-c statement_timeout=0") as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "INSERT INTO universe_membership "

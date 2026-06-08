@@ -42,6 +42,7 @@ export default function VariantsPanel({
   topPerSector,
   minPriceScore,
   indexUniverses,
+  universesLoading = false,
   eligibleCount,
   totalPerms,
 }: {
@@ -53,6 +54,7 @@ export default function VariantsPanel({
   topPerSector: number;
   minPriceScore: string;
   indexUniverses: { index_name: string; display_label: string; total_unique_tickers: number }[];
+  universesLoading?: boolean;
   eligibleCount: number;
   totalPerms: number;
 }) {
@@ -264,6 +266,7 @@ export default function VariantsPanel({
               </label>
             );
           }}
+          loading={universesLoading}
           maxHClass="max-h-56"
         />
         <AxisColumn

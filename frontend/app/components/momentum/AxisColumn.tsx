@@ -15,6 +15,7 @@ export default function AxisColumn<T>({
   onNone,
   renderItem,
   maxHClass,
+  loading = false,
 }: {
   label: string;
   options: readonly T[];
@@ -26,6 +27,9 @@ export default function AxisColumn<T>({
    * the four axes since they have very different option counts
    * (frequency: 14, strategy: 2, universe: a few, grouping: 2). */
   maxHClass: string;
+  /** Show a spinner instead of "No options" while options are still
+   * being fetched (used by the async Universe axis). */
+  loading?: boolean;
 }) {
   return (
     <div>
@@ -48,7 +52,14 @@ export default function AxisColumn<T>({
       </div>
       <ul className={`border border-neutral-800/60 rounded-lg p-1 overflow-auto ${maxHClass}`}>
         {options.length === 0 ? (
-          <li className="px-3 py-2 text-xs text-fg-faint">No options</li>
+          <li className="px-3 py-2 text-xs text-fg-faint flex items-center gap-2">
+            {loading ? (
+              <>
+                <span className="inline-block w-3 h-3 rounded-full border-2 border-neutral-700 border-t-accent-500 animate-spin" />
+                Loading…
+              </>
+            ) : 'No options'}
+          </li>
         ) : (
           options.map((opt) => <li key={String(opt)}>{renderItem(opt)}</li>)
         )}
