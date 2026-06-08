@@ -46,17 +46,25 @@ def _load_universe_membership(
     rows = []
     offset = 0
     page_size = 1000
-    while True:
-        resp = supabase.table("universe_membership").select(
-            f"target_month, company_id, {grouping_field}"
-        ).eq("universe_id", universe_id).order(
-            "target_month"
-        ).order("company_id").range(offset, offset + page_size - 1).execute()
-        batch = resp.data or []
-        rows.extend(batch)
-        if len(batch) < page_size:
-            break
-        offset += page_size
+    try:
+        while True:
+            resp = supabase.table("universe_membership").select(
+                f"target_month, company_id, {grouping_field}"
+            ).eq("universe_id", universe_id).order(
+                "target_month"
+            ).order("company_id").range(offset, offset + page_size - 1).execute()
+            batch = resp.data or []
+            rows.extend(batch)
+            if len(batch) < page_size:
+                break
+            offset += page_size
+    except Exception as e:
+        from common.db_errors import explain_db_error  # noqa: PLC0415
+        from momentum.data._pg import copy_path_enabled  # noqa: PLC0415
+        raise explain_db_error(
+            e, what=f"loading universe membership for {label!r}",
+            copy_enabled=copy_path_enabled(),
+        ) from e
     result: dict[str, dict[int, str | None]] = {}
     for r in rows:
         # Normalize to "YYYY-MM" — the backtest loop keys on
@@ -159,25 +167,33 @@ def _load_index_universe(
         rows: list[dict] = []
         offset = 0
         page_size = 1000
-        while True:
-            resp = (
-                supabase.table("universe_membership")
-                .select(f"target_month, company_id, {grouping_field}")
-                .eq("universe_id", universe_id)
-                # `company_id` tiebreaker is REQUIRED: `target_month` has
-                # thousands of tied rows, and range() (LIMIT/OFFSET) over a
-                # non-unique order silently duplicates + skips rows across
-                # page boundaries — it was dropping ~23% of membership cells.
-                .order("target_month")
-                .order("company_id")
-                .range(offset, offset + page_size - 1)
-                .execute()
-            )
-            batch = resp.data or []
-            rows.extend(batch)
-            if len(batch) < page_size:
-                break
-            offset += page_size
+        try:
+            while True:
+                resp = (
+                    supabase.table("universe_membership")
+                    .select(f"target_month, company_id, {grouping_field}")
+                    .eq("universe_id", universe_id)
+                    # `company_id` tiebreaker is REQUIRED: `target_month` has
+                    # thousands of tied rows, and range() (LIMIT/OFFSET) over a
+                    # non-unique order silently duplicates + skips rows across
+                    # page boundaries — it was dropping ~23% of membership cells.
+                    .order("target_month")
+                    .order("company_id")
+                    .range(offset, offset + page_size - 1)
+                    .execute()
+                )
+                batch = resp.data or []
+                rows.extend(batch)
+                if len(batch) < page_size:
+                    break
+                offset += page_size
+        except Exception as e:
+            from common.db_errors import explain_db_error  # noqa: PLC0415
+            from momentum.data._pg import copy_path_enabled  # noqa: PLC0415
+            raise explain_db_error(
+                e, what=f"loading index-universe membership for {label!r}",
+                copy_enabled=copy_path_enabled(),
+            ) from e
         result = {}
         for r in rows:
             m = (r.get("target_month") or "")[:7]

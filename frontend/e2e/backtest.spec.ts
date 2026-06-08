@@ -24,13 +24,11 @@ test.describe('/backtest', () => {
     await page.goto('/backtest');
 
     await expect(
-      page.getByRole('heading', { name: 'Momentum Backtester' }),
+      page.getByRole('heading', { name: 'Backtester' }),
     ).toBeVisible();
-    // The subtitle is always visible from mount — its presence confirms
-    // the component tree mounted past the header div without throwing.
-    await expect(
-      page.getByText('Price momentum portfolio', { exact: false }),
-    ).toBeVisible();
+    // The date-range inputs are always visible from mount — their presence
+    // confirms the component tree mounted past the header div without throwing.
+    await expect(page.locator('input[type="month"]')).toHaveCount(2);
   });
 
   test('config panel renders its core controls', async ({ page }) => {

@@ -1,5 +1,7 @@
 'use client';
 
+import { useMemo } from 'react';
+import type { ReactNode } from 'react';
 import type { BacktestResult } from '../../../../lib/stores/momentum';
 import type { Column } from '../../../../lib/tableExport';
 import CellInfoTip from '../CellInfoTip';
@@ -25,6 +27,39 @@ export default function SummaryStats({
   comparisonNetStats: Map<string, NetStats | null>;
   summaryExportColumns: Column<AlignedSeries>[];
 }) {
+  // Active-risk stats vs the universe: tracking error (annualised std of the
+  // daily strategy − universe active return) and information ratio
+  // (annualised active return ÷ tracking error). Computed from the daily
+  // curves so they're consistent with the chart.
+  const active = useMemo(() => {
+    const dailyRet = (recs: { date: string; cumulative_return_pct: number }[]) => {
+      const out = new Map<string, number>();
+      for (let i = 1; i < recs.length; i++) {
+        const f0 = 1 + recs[i - 1].cumulative_return_pct / 100;
+        const f1 = 1 + recs[i].cumulative_return_pct / 100;
+        if (f0 > 0) out.set(recs[i].date.slice(0, 10), (f1 / f0 - 1) * 100);
+      }
+      return out;
+    };
+    const sd = dailyRet(result.daily_records ?? []);
+    const ud = dailyRet(result.universe_daily_records ?? []);
+    const diffs: number[] = [];
+    for (const [d, sr] of sd) {
+      const ur = ud.get(d);
+      if (ur !== undefined) diffs.push(sr - ur);
+    }
+    const n = diffs.length;
+    if (n < 21) return null;
+    const mean = diffs.reduce((a, b) => a + b, 0) / n;
+    const dev = Math.sqrt(diffs.reduce((a, b) => a + (b - mean) ** 2, 0) / n);
+    if (dev <= 0) return null;
+    return { te: dev * Math.sqrt(252), ir: (mean / dev) * Math.sqrt(252) };
+  }, [result]);
+
+  // Calmar — annualised return per unit of max drawdown.
+  const dd = Math.abs(result.summary.max_drawdown_pct);
+  const calmar = dd > 0 ? result.summary.annualized_return_pct / dd : null;
+
   return (
     <CollapsibleCard
       title="Summary"
@@ -87,38 +122,53 @@ export default function SummaryStats({
           stats the aligned per-series table doesn't carry (those are
           active-strategy-only — benchmarks have no per-period returns
           we can win-rate against). */}
-      <div className="px-4 py-3 border-t border-neutral-800/40 text-xs text-fg-subtle flex flex-wrap gap-x-6 gap-y-1">
-        <span>Strategy (full range): <span className="font-mono text-fg-soft">Turnover {fmtPct(result.summary.avg_monthly_turnover_pct)}</span></span>
-        <span><span className="font-mono text-fg-soft">Avg Holdings {result.summary.avg_holdings.toFixed(1)}</span></span>
-        <span><span className="font-mono text-fg-soft">Months {result.summary.total_months}</span></span>
-        {result.summary.sortino_ratio != null && (
-          <span title="Sortino: like Sharpe but only penalizes downside vol (std of negative daily returns × √252). Higher than Sharpe → upside vol dominates.">
-            <span className="font-mono text-fg-soft">Sortino {result.summary.sortino_ratio.toFixed(2)}</span>
-          </span>
-        )}
-        {result.summary.win_rate_pct != null && (
-          <span title="% of calendar months with strictly positive return — computed from the daily equity curve resampled to month-end, regardless of rebalance cadence.">
-            <span className="font-mono text-fg-soft">Win rate {result.summary.win_rate_pct.toFixed(0)}%</span>
-          </span>
-        )}
-        {/* Alpha vs. the universe — derived from the SAME aligned series the
-            table above shows (active total − universe total), so the number
-            is consistent with the visible "Universe (equal-weight)" row
-            rather than introducing a second, slightly-different baseline. */}
-        {(() => {
-          const strat = alignedSeries.series.find((s) => s.kind === 'active');
-          const uni = alignedSeries.series.find((s) => s.id === 'universe');
-          if (!strat || !uni) return null;
-          const alpha = strat.stats.totalReturn - uni.stats.totalReturn;
-          return (
-            <span title="Strategy total return minus the equal-weight universe's, over the same window — positive means the picks added value beyond simply being in the market.">
-              <span className="text-fg-faint">Alpha </span>
-              <span className={`font-mono font-medium ${alpha >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
-                {alpha >= 0 ? '+' : ''}{alpha.toFixed(2)}%
-              </span>
-            </span>
-          );
-        })()}
+      <div className="px-4 py-3 border-t border-neutral-800/40">
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-x-4 gap-y-3">
+          {/* Alpha — derived from the SAME aligned series the table shows
+              (active total − universe total), consistent with the visible
+              "Universe (equal-weight)" row. */}
+          {(() => {
+            const strat = alignedSeries.series.find((s) => s.kind === 'active');
+            const uni = alignedSeries.series.find((s) => s.id === 'universe');
+            if (!strat || !uni) return null;
+            const alpha = strat.stats.totalReturn - uni.stats.totalReturn;
+            return (
+              <Stat label="Alpha" title="Strategy total return minus the equal-weight universe's, over the same window.">
+                <span className={alpha >= 0 ? 'text-pos-400' : 'text-neg-400'}>{alpha >= 0 ? '+' : ''}{alpha.toFixed(2)}%</span>
+              </Stat>
+            );
+          })()}
+          {active != null && (
+            <Stat label="Info ratio" title={`Information ratio = annualised active return (strategy − universe) ÷ tracking error. Tracking error ${active.te.toFixed(1)}%/yr. Higher = more consistent value-add per unit of active risk.`}>
+              <span className={active.ir >= 0 ? 'text-pos-400' : 'text-neg-400'}>{active.ir.toFixed(2)}</span>
+            </Stat>
+          )}
+          {active != null && (
+            <Stat label="Tracking err" title="Annualised standard deviation of the daily active return (strategy − universe) — how far the strategy wanders from the universe.">
+              {active.te.toFixed(1)}%
+            </Stat>
+          )}
+          {calmar != null && (
+            <Stat label="Calmar" title="Annualised return ÷ |max drawdown| — return earned per unit of worst-case pain.">
+              {calmar.toFixed(2)}
+            </Stat>
+          )}
+          {result.summary.win_rate_pct != null && (
+            <Stat label="Win rate" title="% of calendar months with strictly positive return (daily curve resampled to month-end).">
+              {result.summary.win_rate_pct.toFixed(0)}%
+            </Stat>
+          )}
+          {result.summary.sortino_ratio != null && (
+            <Stat label="Sortino" title="Like Sharpe but penalizes only downside volatility (std of negative daily returns × √252).">
+              {result.summary.sortino_ratio.toFixed(2)}
+            </Stat>
+          )}
+          <Stat label="Turnover" title="Average month-over-month change in holdings.">
+            {fmtPct(result.summary.avg_monthly_turnover_pct)}
+          </Stat>
+          <Stat label="Avg holdings">{result.summary.avg_holdings.toFixed(1)}</Stat>
+          <Stat label="Months">{result.summary.total_months}</Stat>
+        </div>
       </div>
       {/* Multi-trial cross-trial statistics — backend means ± std. These
           are the numbers to compare a momentum run against, NOT the
@@ -178,9 +228,9 @@ export default function SummaryStats({
           {alignedSeries.series.filter((s) => s.kind !== 'benchmark').map((s) => (
             s.topDrawdowns.length > 0 && (
               <div key={s.id}>
-                <div className="text-xs font-medium mb-2 flex items-center gap-2">
+                <div className="text-[11px] font-medium mb-2 flex items-center gap-2">
                   <span className="inline-block w-2 h-2 rounded-full" style={{ background: s.color }} />
-                  <span className="text-fg-muted">{s.label} — Top Drawdowns</span>
+                  <span className="text-fg-muted uppercase tracking-wide">Top drawdowns</span>
                 </div>
                 <div className="grid grid-cols-3 gap-3">
                   {s.topDrawdowns.map((dd, i) => {
@@ -205,5 +255,16 @@ export default function SummaryStats({
         </div>
       )}
     </CollapsibleCard>
+  );
+}
+
+/** One labelled metric in the strategy stat grid — small muted caption over a
+ * mono value. */
+function Stat({ label, title, children }: { label: string; title?: string; children: ReactNode }) {
+  return (
+    <div title={title}>
+      <div className="text-[10px] uppercase tracking-wide text-fg-faint">{label}</div>
+      <div className="font-mono text-sm text-fg-soft">{children}</div>
+    </div>
   );
 }

@@ -120,8 +120,22 @@ def _load_metric_chunks(
                 break
             offset += page_size
 
-    with ThreadPoolExecutor(max_workers=_LOAD_PARALLELISM) as executor:
-        # `list(executor.map(...))` propagates exceptions from worker threads.
-        list(executor.map(_load_chunk, list(enumerate(chunks))))
+    try:
+        with ThreadPoolExecutor(max_workers=_LOAD_PARALLELISM) as executor:
+            # `list(executor.map(...))` propagates exceptions from worker threads.
+            list(executor.map(_load_chunk, list(enumerate(chunks))))
+    except Exception as e:
+        # Replace the opaque PostgREST error (e.g. a bare 57014 statement
+        # timeout) with one that names the operation + the actionable cause.
+        from common.db_errors import explain_db_error  # noqa: PLC0415
+        from ._pg import copy_path_enabled  # noqa: PLC0415
+        raise explain_db_error(
+            e,
+            what=(
+                f"loading {metric_code} for {len(company_ids)} companies "
+                f"({start_date}..{end_date})"
+            ),
+            copy_enabled=copy_path_enabled(),
+        ) from e
 
     return rows

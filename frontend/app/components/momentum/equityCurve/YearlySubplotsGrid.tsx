@@ -21,6 +21,20 @@ const STRATEGY_COLOR = chartTheme.accent;   // matches active series default
 const UNIVERSE_COLOR = chartTheme.universe; // matches universe baseline in main chart
 const ALPHA_COLOR = chartTheme.warn;        // distinct from strategy + universe
 
+/** The year's headline figure that drives both the per-tile border and the
+ *  card-header tally: the strategy's cumulative return for the year in
+ *  'cumulative' mode, the final alpha in 'alpha' mode. Null when the year
+ *  has no valid data point. Single source of truth so the border colour
+ *  and the green/red count can never disagree. */
+function yearHeadline(subplot: YearSubplot, mode: Mode): number | null {
+  const lastValid = [...subplot.points].reverse().find((p) =>
+    mode === 'cumulative'
+      ? p.strategyCum != null && p.universeCum != null
+      : p.alpha != null,
+  );
+  return mode === 'cumulative' ? lastValid?.strategyCum ?? null : lastValid?.alpha ?? null;
+}
+
 type Props = {
   subplots: YearSubplot[];
   mode: Mode;
@@ -55,27 +69,52 @@ export default function YearlySubplotsGrid({
       ? 'Yearly cumulative returns vs universe'
       : 'Yearly alpha vs universe';
 
+  // Header tally — how many years finished positive vs negative (same
+  // figure as the tile borders, via the shared yearHeadline helper).
+  const headlines = subplots
+    .map((sp) => yearHeadline(sp, mode))
+    .filter((h): h is number => h != null);
+  const greenYears = headlines.filter((h) => h >= 0).length;
+  const redYears = headlines.length - greenYears;
+
+  const legend =
+    mode === 'cumulative' ? (
+      <span className="flex items-center gap-3 text-[11px] text-fg-subtle">
+        <span className="inline-flex items-center gap-1.5">
+          <span className="inline-block w-2.5 h-0.5 rounded" style={{ background: strategyColor }} />
+          Strategy
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="inline-block w-2.5 h-0.5 rounded" style={{ background: UNIVERSE_COLOR }} />
+          Universe (equal-weight)
+        </span>
+      </span>
+    ) : (
+      <span className="flex items-center gap-1.5 text-[11px] text-fg-subtle">
+        <span className="inline-block w-2.5 h-0.5 rounded" style={{ background: ALPHA_COLOR }} />
+        Strategy − Universe (% points)
+      </span>
+    );
+
   return (
     <CollapsibleCard
       title={title}
       rightSlot={
-        mode === 'cumulative' ? (
-          <span className="flex items-center gap-3 text-[11px] text-fg-subtle">
-            <span className="inline-flex items-center gap-1.5">
-              <span className="inline-block w-2.5 h-0.5 rounded" style={{ background: strategyColor }} />
-              Strategy
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="inline-block w-2.5 h-0.5 rounded" style={{ background: UNIVERSE_COLOR }} />
-              Universe (equal-weight)
-            </span>
+        <span className="flex items-center gap-3">
+          <span
+            className="inline-flex items-center gap-1 text-[11px] font-mono"
+            title={
+              mode === 'cumulative'
+                ? 'Years with a positive vs negative return'
+                : 'Years with positive vs negative alpha'
+            }
+          >
+            <span className="text-pos-400">{greenYears} green</span>
+            <span className="text-fg-faint">·</span>
+            <span className="text-neg-400">{redYears} red</span>
           </span>
-        ) : (
-          <span className="flex items-center gap-1.5 text-[11px] text-fg-subtle">
-            <span className="inline-block w-2.5 h-0.5 rounded" style={{ background: ALPHA_COLOR }} />
-            Strategy − Universe (% points)
-          </span>
-        )
+          {legend}
+        </span>
       }
       bodyClassName="px-4 pb-4"
     >
@@ -134,15 +173,25 @@ function YearMiniChart({
       ? p.strategyCum != null && p.universeCum != null
       : p.alpha != null,
   );
-  const headline =
-    mode === 'cumulative' ? lastValid?.strategyCum ?? null : lastValid?.alpha ?? null;
+  const headline = yearHeadline(subplot, mode);
   const beat =
     mode === 'cumulative'
       ? (lastValid?.strategyCum ?? 0) > (lastValid?.universeCum ?? 0)
       : (lastValid?.alpha ?? 0) > 0;
 
+  // Tile border reflects the year's sign at a glance: green when the
+  // headline figure is positive (cumulative = the year's return %, alpha
+  // = the year's alpha), red when negative. Kept at border-2 across all
+  // states (incl. the no-data neutral case) so tiles don't shift size.
+  const borderClass =
+    headline == null
+      ? 'border-2 border-neutral-800/40'
+      : headline >= 0
+        ? 'border-2 border-pos-500/70'
+        : 'border-2 border-neg-500/70';
+
   return (
-    <div className="bg-page/60 border border-neutral-800/40 rounded-lg p-2">
+    <div className={`bg-page/60 ${borderClass} rounded-lg p-2`}>
       <div className="flex items-center justify-between mb-1 px-1">
         <span className="text-[11px] text-fg-muted font-mono">{subplot.year}</span>
         {headline != null && (

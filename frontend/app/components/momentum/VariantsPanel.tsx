@@ -319,13 +319,6 @@ export default function VariantsPanel({
           }}
           maxHClass="max-h-40"
         />
-        <div className="text-[11px] text-fg-subtle self-center leading-relaxed">
-          Blank = every variant inherits the base rebalance day. Pick one or
-          more to sweep them — a <span className="text-fg-soft">first-Wednesday</span> variant
-          rebalances on the first Wednesday of each period, deciding on the
-          <span className="text-fg-soft"> prior trading day&apos;s (Tuesday&apos;s) close</span> and
-          entering at Wednesday&apos;s close. Weekends are omitted (markets closed).
-        </div>
       </div>
 
       {/* Permutations preview — every cross-product permutation with a

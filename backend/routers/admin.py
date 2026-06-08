@@ -288,6 +288,72 @@ async def get_egress_ip(authorization: str = Header(...)):
     return await asyncio.to_thread(_q)
 
 
+@router.get("/api/admin/copy-status")
+async def copy_status(authorization: str = Header(...)):
+    """Diagnose the direct-Postgres COPY fast path the heavy loaders use
+    (backtests, /companies, FX, freshness). When SUPABASE_DB_URL is unset
+    OR the connection fails, those loaders SILENTLY fall back to PostgREST,
+    which then times out (57014) on large universes like LEONTEQ.
+
+    Returns whether the path is enabled, the connection target (password
+    masked, so you can see the host/port — e.g. pooler :5432 vs :6543 vs
+    the IPv6-only direct host), and the result of an ACTUAL test COPY with
+    the EXACT exception when it fails. Hit this to stop guessing why a
+    backtest times out in prod."""
+    _require_admin(authorization)
+
+    from momentum.data._pg import _db_url  # noqa: PLC0415
+
+    def _mask(url: str) -> str:
+        import re  # noqa: PLC0415
+        # postgresql://user:pass@host:port/db -> postgresql://user:***@host:port/db
+        return re.sub(r"(://[^:/@]+:)[^@]*(@)", r"\1***\2", url)
+
+    def _q() -> dict:
+        url = _db_url()
+        out: dict = {
+            "copy_path_enabled": bool(url),
+            "db_url_target": _mask(url) if url else None,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if not url:
+            out["copy_works"] = False
+            out["status"] = (
+                "DISABLED — neither SUPABASE_DB_URL nor DATABASE_URL is visible to "
+                "this process. Every heavy load falls back to PostgREST and times "
+                "out on big universes. Set SUPABASE_DB_URL on the backend service "
+                "and redeploy."
+            )
+            return out
+        try:
+            import psycopg  # noqa: PLC0415
+        except ImportError:
+            out["copy_works"] = False
+            out["status"] = "psycopg not installed — falling back to PostgREST."
+            return out
+        # Trivial COPY round-trip over a fresh connection — capture the EXACT
+        # failure reason instead of the silent None that _run_copy returns.
+        try:
+            with psycopg.connect(url, connect_timeout=10) as conn:
+                with conn.cursor() as cur:
+                    with cur.copy("COPY (SELECT 1) TO STDOUT WITH (FORMAT csv)") as cp:
+                        b"".join(cp)
+            out["copy_works"] = True
+            out["status"] = "OK — direct COPY connection works; the fast path is active."
+        except Exception as e:  # noqa: BLE001 — surface the reason, never raise
+            out["copy_works"] = False
+            out["status"] = (
+                f"FAILED — direct COPY raised {type(e).__name__}: {e}. THIS is why "
+                "heavy loads fall back to PostgREST and time out. Common causes: "
+                "SUPABASE_DB_URL points at the IPv6-only direct host "
+                "(db.<ref>.supabase.co) that Railway (IPv4) can't reach, or the "
+                "transaction pooler (:6543). Use the Session pooler host on :5432."
+            )
+        return out
+
+    return await asyncio.to_thread(_q)
+
+
 # ─── Schedules ─────────────────────────────────────────────────────
 
 

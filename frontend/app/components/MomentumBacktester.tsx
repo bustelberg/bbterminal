@@ -30,6 +30,8 @@ import RandomParamsInputs from './momentum/RandomParamsInputs';
 import RunControls from './momentum/RunControls';
 import SavedRunsDropdown from './momentum/SavedRunsDropdown';
 import SectorTimelineChart from './momentum/SectorTimelineChart';
+import DailyReturnsHistograms from './momentum/DailyReturnsHistograms';
+import MonthlyReturnsHeatmap from './momentum/MonthlyReturnsHeatmap';
 import SignalWeightSliders from './momentum/SignalWeightSliders';
 import StrategyModeSelect from './momentum/StrategyModeSelect';
 import VariantAttribution from './momentum/VariantAttribution';
@@ -430,10 +432,7 @@ export default function MomentumBacktester() {
       {/* Header */}
       <div className="px-8 py-5 border-b border-neutral-800/60 flex flex-wrap items-center justify-between gap-y-3">
         <div className="min-w-0">
-          <h1 className="text-lg font-semibold text-fg-strong">Momentum Backtester</h1>
-          <p className="text-xs text-fg-subtle mt-0.5">
-            Price momentum portfolio — equal-weight, monthly rebalancing, sector-filtered
-          </p>
+          <h1 className="text-lg font-semibold text-fg-strong">Backtester</h1>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-3 min-w-0">
           <ApiUsageBadge />
@@ -674,6 +673,10 @@ export default function MomentumBacktester() {
             <FeeWaterfallPanel result={displayResult} />
 
             <SectorTimelineChart result={displayResult} />
+
+            <DailyReturnsHistograms result={displayResult} />
+
+            <MonthlyReturnsHeatmap result={displayResult} />
 
             <MonthlyHoldingsTable
               result={displayResult}

@@ -4,6 +4,8 @@ import { useMemo } from 'react';
 
 import type { BacktestResult, UniverseEntry } from '../../../lib/stores/momentum';
 import { useCompanyExchangeMap } from '../../../lib/hooks/apiData';
+import DailyReturnsHistograms from './DailyReturnsHistograms';
+import MonthlyReturnsHeatmap from './MonthlyReturnsHeatmap';
 import EquityCurveCard from './EquityCurveCard';
 import FeeWaterfallPanel from './FeeWaterfallPanel';
 import MonthlyHoldingsTable, { type ScoringConfig } from './MonthlyHoldingsTable';
@@ -114,6 +116,8 @@ export default function BacktestResultView({
       />
       <FeeWaterfallPanel result={result} defaultCollapsed={defaultCollapsed} />
       <SectorTimelineChart result={result} markerDate={markerDate} defaultCollapsed={defaultCollapsed} />
+      <DailyReturnsHistograms result={result} defaultCollapsed={defaultCollapsed} />
+      <MonthlyReturnsHeatmap result={result} defaultCollapsed={defaultCollapsed} />
       <MonthlyHoldingsTable
         result={result}
         categories={categories}
