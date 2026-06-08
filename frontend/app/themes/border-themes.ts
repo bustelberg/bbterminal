@@ -1,0 +1,150 @@
+/**
+ * Classy gradient-border theme candidates: white / black / dark-blue
+ * surfaces, solid text + fills, and a restrained COOL gradient that appears
+ * only on borders (cards, buttons, inputs, chips, edges). Sleek, minimal,
+ * "web3 luxury" without the childish rainbow. Rendered by `ShowcaseBorder`
+ * (padding-box/border-box double-background trick).
+ *
+ * Reuses the base `Theme` shape from `themes.ts`. Throwaway /themes
+ * scaffolding — delete `app/themes/` once a direction is chosen.
+ */
+import type { Theme } from './themes';
+
+const SANS = "'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif";
+
+export const BORDER_THEMES: Theme[] = [
+  {
+    slug: 'porcelain',
+    name: 'Porcelain',
+    tagline: 'Paper-white, ink accent, a brushed silver-blue gradient edge. The quietest, most editorial option — luxury by restraint.',
+    font: SANS,
+    vars: {
+      '--t-bg': '#f5f7fa',
+      '--t-card': '#ffffff',
+      '--t-card-alt': '#fafbfd',
+      '--t-elevated': '#ffffff',
+      '--t-inset': '#eceff4',
+      '--t-divider': 'rgba(18,24,42,0.08)',
+      '--t-fg': '#11151c',
+      '--t-fg-muted': '#545c6b',
+      '--t-fg-subtle': '#98a0ae',
+      '--t-accent': '#1e2733',
+      '--t-accent-fg': '#ffffff',
+      '--t-accent-soft': 'rgba(30,39,51,0.06)',
+      '--t-pos': '#0f9d58',
+      '--t-neg': '#c8362f',
+      '--t-warn': '#9a7b1a',
+      '--t-grad': 'linear-gradient(120deg, #8ea2c9 0%, #c2cee1 50%, #88a9cf 100%)',
+      '--t-radius': '12px',
+      '--t-shadow': '0 1px 2px rgba(18,24,42,0.05), 0 10px 28px rgba(18,24,42,0.05)',
+    },
+  },
+  {
+    slug: 'onyx-platinum',
+    name: 'Onyx Platinum',
+    tagline: 'True black with a monochrome steel→platinum gradient edge. No colour at all — pure metal-on-black luxury.',
+    font: SANS,
+    vars: {
+      '--t-bg': '#0a0b0d',
+      '--t-card': '#131418',
+      '--t-card-alt': '#101116',
+      '--t-elevated': '#181a1f',
+      '--t-inset': '#0e0f13',
+      '--t-divider': 'rgba(255,255,255,0.08)',
+      '--t-fg': '#f1f2f4',
+      '--t-fg-muted': 'rgba(241,242,244,0.60)',
+      '--t-fg-subtle': 'rgba(241,242,244,0.40)',
+      '--t-accent': '#c9ced8',
+      '--t-accent-fg': '#0a0b0d',
+      '--t-accent-soft': 'rgba(201,206,216,0.10)',
+      '--t-pos': '#4ec98a',
+      '--t-neg': '#ff6b6b',
+      '--t-warn': '#e3c168',
+      '--t-grad': 'linear-gradient(120deg, #6b7280 0%, #e7e9ee 50%, #9aa1ad 100%)',
+      '--t-radius': '12px',
+      '--t-shadow': '0 0 0 1px rgba(255,255,255,0.04), 0 18px 46px rgba(0,0,0,0.6)',
+    },
+  },
+  {
+    slug: 'graphite-blue',
+    name: 'Graphite Blue',
+    tagline: 'Charcoal black with a crisp electric blue→cyan gradient edge. Modern fintech / web3 on black — sleek and confident.',
+    font: SANS,
+    vars: {
+      '--t-bg': '#0c0e12',
+      '--t-card': '#14171d',
+      '--t-card-alt': '#11141a',
+      '--t-elevated': '#181c23',
+      '--t-inset': '#0f1218',
+      '--t-divider': 'rgba(255,255,255,0.07)',
+      '--t-fg': '#eef1f6',
+      '--t-fg-muted': 'rgba(238,241,246,0.60)',
+      '--t-fg-subtle': 'rgba(238,241,246,0.40)',
+      '--t-accent': '#4f8cff',
+      '--t-accent-fg': '#07101f',
+      '--t-accent-soft': 'rgba(79,140,255,0.12)',
+      '--t-pos': '#34d399',
+      '--t-neg': '#ff6b81',
+      '--t-warn': '#ffd166',
+      '--t-grad': 'linear-gradient(120deg, #3b82f6 0%, #22d3ee 100%)',
+      '--t-radius': '14px',
+      '--t-shadow': '0 0 0 1px rgba(79,140,255,0.06), 0 18px 48px rgba(0,0,0,0.55)',
+    },
+  },
+  {
+    slug: 'sapphire-noir',
+    name: 'Sapphire Noir',
+    tagline: 'Deep navy surfaces with a cyan→blue→indigo gradient edge and azure accent. Dark-blue luxury — rich but never loud.',
+    font: SANS,
+    vars: {
+      '--t-bg': '#091221',
+      '--t-card': '#102341',
+      '--t-card-alt': '#0e1f3a',
+      '--t-elevated': '#163058',
+      '--t-inset': '#0c1c36',
+      '--t-divider': 'rgba(255,255,255,0.08)',
+      '--t-fg': '#e9f1fb',
+      '--t-fg-muted': 'rgba(233,241,251,0.62)',
+      '--t-fg-subtle': 'rgba(233,241,251,0.42)',
+      '--t-accent': '#38bdf8',
+      '--t-accent-fg': '#06131f',
+      '--t-accent-soft': 'rgba(56,189,248,0.12)',
+      '--t-pos': '#34e0a1',
+      '--t-neg': '#ff6b81',
+      '--t-warn': '#ffd166',
+      '--t-grad': 'linear-gradient(120deg, #22d3ee 0%, #3b82f6 50%, #818cf8 100%)',
+      '--t-radius': '14px',
+      '--t-shadow': '0 0 0 1px rgba(56,189,248,0.06), 0 18px 50px rgba(3,12,28,0.6)',
+    },
+  },
+  {
+    slug: 'azure-noir',
+    name: 'Azure Noir',
+    tagline: 'Midnight-blue black with a soft blue→indigo→violet gradient edge. The most "luxury web3" of the set — restrained, premium.',
+    font: SANS,
+    vars: {
+      '--t-bg': '#070d1a',
+      '--t-card': '#0e1730',
+      '--t-card-alt': '#0c1429',
+      '--t-elevated': '#131e3e',
+      '--t-inset': '#0a1124',
+      '--t-divider': 'rgba(255,255,255,0.07)',
+      '--t-fg': '#e7eaf6',
+      '--t-fg-muted': 'rgba(231,234,246,0.60)',
+      '--t-fg-subtle': 'rgba(231,234,246,0.40)',
+      '--t-accent': '#818cf8',
+      '--t-accent-fg': '#0a0f24',
+      '--t-accent-soft': 'rgba(129,140,248,0.12)',
+      '--t-pos': '#34d399',
+      '--t-neg': '#fb7185',
+      '--t-warn': '#fbbf24',
+      '--t-grad': 'linear-gradient(120deg, #60a5fa 0%, #818cf8 55%, #a78bfa 100%)',
+      '--t-radius': '16px',
+      '--t-shadow': '0 0 0 1px rgba(129,140,248,0.06), 0 20px 52px rgba(3,7,20,0.6)',
+    },
+  },
+];
+
+export function borderBySlug(slug: string): Theme | undefined {
+  return BORDER_THEMES.find((t) => t.slug === slug);
+}

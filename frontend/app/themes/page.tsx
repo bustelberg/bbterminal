@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { THEMES } from './themes';
-import { LUX_THEMES } from './lux-themes';
+import { BORDER_THEMES } from './border-themes';
+import { PRESTIGE_THEMES } from './prestige-themes';
 
 /** Theme picker index — swatch + link to each full-screen preview, grouped
  * into the solid "institutional" set and the gradient/glass "web3 / luxury"
@@ -19,23 +20,31 @@ export default function ThemesIndex() {
       </div>
 
       <Section
-        title="Solid · institutional"
-        sub="Opaque surfaces, crisp data density."
-        items={THEMES.map((t) => ({ slug: t.slug, name: t.name, tagline: t.tagline, vars: t.vars }))}
+        title="Flagship · the works"
+        sub="Animated conic-gradient borders, film grain, drifting glow, gradient display type — the full $100k treatment."
+        items={PRESTIGE_THEMES.map((t) => ({ slug: t.slug, name: t.name, tagline: t.tagline, vars: t.vars, kind: 'border' as const }))}
       />
 
       <div className="mt-10">
         <Section
-          title="Gradient · web3 / luxury"
-          sub="Frosted glass, gradient accents, hairline borders, glow."
-          items={LUX_THEMES.map((t) => ({ slug: t.slug, name: t.name, tagline: t.tagline, vars: t.vars, gradient: true }))}
+          title="Gradient borders · classy"
+          sub="White / black / dark-blue, solid everything — the gradient lives only on the edges. Sleek, minimal, luxury web3."
+          items={BORDER_THEMES.map((t) => ({ slug: t.slug, name: t.name, tagline: t.tagline, vars: t.vars, kind: 'border' as const }))}
+        />
+      </div>
+
+      <div className="mt-10">
+        <Section
+          title="Solid · institutional"
+          sub="Opaque surfaces, crisp data density — no gradients."
+          items={THEMES.map((t) => ({ slug: t.slug, name: t.name, tagline: t.tagline, vars: t.vars }))}
         />
       </div>
     </div>
   );
 }
 
-type Item = { slug: string; name: string; tagline: string; vars: Record<string, string>; gradient?: boolean };
+type Item = { slug: string; name: string; tagline: string; vars: Record<string, string>; kind?: 'border' };
 
 function Section({ title, sub, items }: { title: string; sub: string; items: Item[] }) {
   return (
@@ -51,27 +60,12 @@ function Section({ title, sub, items }: { title: string; sub: string; items: Ite
             href={`/themes/${t.slug}`}
             className="group block rounded-xl border border-neutral-800/40 overflow-hidden hover:border-accent-500/40 transition-colors"
           >
-            <div
-              className="flex h-20 items-center gap-2 px-4"
-              style={{
-                background: t.vars['--t-bg'],
-                backgroundImage: t.gradient ? t.vars['--t-mesh'] : undefined,
-              }}
-            >
-              <span
-                className="inline-block h-8 w-8 rounded-lg"
-                style={{ backgroundImage: t.gradient ? t.vars['--t-grad'] : undefined, background: t.gradient ? undefined : t.vars['--t-accent'] }}
-              />
+            <div className="flex h-20 items-center gap-2 px-4" style={{ background: t.vars['--t-bg'] }}>
+              <span className="inline-block h-8 w-8 rounded-lg" style={{ background: t.vars['--t-accent'] }} />
               <Swatch c={t.vars['--t-pos']} />
               <Swatch c={t.vars['--t-neg']} />
               <Swatch c={t.vars['--t-warn']} />
-              <div
-                className="ml-auto h-10 w-24 rounded-lg"
-                style={{
-                  background: t.gradient ? (t.vars['--t-glass'] ?? 'transparent') : t.vars['--t-card'],
-                  border: `1px solid ${t.gradient ? t.vars['--t-hairline'] : t.vars['--t-border']}`,
-                }}
-              />
+              <div className="ml-auto h-10 w-24 rounded-lg" style={previewBox(t)} />
             </div>
             <div className="p-4 bg-card">
               <div className="flex items-center justify-between mb-1">
@@ -89,4 +83,19 @@ function Section({ title, sub, items }: { title: string; sub: string; items: Ite
 
 function Swatch({ c }: { c: string }) {
   return <span className="inline-block h-7 w-7 rounded-md" style={{ background: c }} />;
+}
+
+/** Mini "card" swatch on each tile — a gradient-border card for the border
+ * set (shows the signature edge), a solid card for the institutional set. */
+function previewBox(t: Item): React.CSSProperties {
+  if (t.kind === 'border') {
+    const fill = t.vars['--t-card'];
+    return {
+      border: '1px solid transparent',
+      backgroundImage: `linear-gradient(${fill}, ${fill}), ${t.vars['--t-grad']}`,
+      backgroundOrigin: 'border-box',
+      backgroundClip: 'padding-box, border-box',
+    };
+  }
+  return { background: t.vars['--t-card'], border: `1px solid ${t.vars['--t-border']}` };
 }
