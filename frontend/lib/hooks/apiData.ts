@@ -44,6 +44,9 @@ export type CompanyRow = {
    * GuruFocus (`summary.company_data.isin`) + the Leonteq scrape. Nullable —
    * out-of-scope regions (AU/NZ/Russia/…) have no GuruFocus ISIN. */
   isin?: string | null;
+  /** Reporting/trading currency (ISO code), from the company's exchange.
+   * Used to convert native-currency values (e.g. FCF/share) to EUR. */
+  currency?: string | null;
   country?: string | null;
   delisted_at?: string | null;
   gurufocus_lookup_failed_at?: string | null;

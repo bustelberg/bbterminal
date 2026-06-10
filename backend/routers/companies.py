@@ -100,7 +100,7 @@ async def list_companies():
                     "delisted_at,gurufocus_lookup_failed_at,"
                     "out_of_scope_at,out_of_scope_reason,"
                     "gurufocus_exchange:gurufocus_exchange("
-                    "exchange_code,country:country(country_name))"
+                    "exchange_code,currency_code,country:country(country_name))"
                 )
                 # `company_id` tiebreaker so range() pagination stays stable
                 # across pages even when company_name has duplicates.
@@ -120,6 +120,7 @@ async def list_companies():
             exch_info = r.pop("gurufocus_exchange", None) or {}
             country_info = exch_info.pop("country", None) or {}
             r["gurufocus_exchange"] = exch_info.get("exchange_code")
+            r["currency"] = exch_info.get("currency_code")
             r["country"] = country_info.get("country_name")
         return rows
 

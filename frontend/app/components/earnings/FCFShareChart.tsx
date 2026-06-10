@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
   ReferenceLine, CartesianGrid,
@@ -14,29 +14,43 @@ import { chartTheme } from '../../../lib/chartTheme';
 // Series colors — must match ForwardPEChart and RelativeGrowthChart's
 // A/B treatment so the user reads them consistently across panels.
 const COLOR_A = chartTheme.accent; // primary series
-const COLOR_B = chartTheme.warn;   // comparison series
+const COLOR_B = chartTheme.compare;   // comparison series (violet — not a band colour)
 
 type Props = {
   metrics: MetricRow[];
   metricsB?: MetricRow[];
   labelA?: string;
   labelB?: string;
+  /** Real company name shown in the hover tooltip (vs the short A/B pill tag). */
+  nameA?: string;
+  nameB?: string;
+  /** Convert a native-currency value (as of its date) to EUR, so A and B
+   * compare directly. Defaults to identity (values shown as-is). */
+  toEurA?: (value: number, date: string) => number;
+  toEurB?: (value: number, date: string) => number;
   /** True during B's initial metrics fetch. Shows a spinner in the
    * "CAGR / Latest" pill area for B so the comparison column doesn't
    * just sit blank while data is loading. */
   loadingB?: boolean;
 };
 
+const IDENTITY = (v: number) => v;
+
 /** Free Cash Flow per share over time. Negative-FCF years render with a
  * red dot. CAGR is computed only from positive values to keep the
  * compound math meaningful. With a comparison company, the second
  * series renders in amber + its own CAGR / Latest pills appear in the
  * header. */
-export default function FCFShareChart({ metrics, metricsB, labelA, labelB, loadingB }: Props) {
-  const seriesA = useMemo(() => annualSeries(metrics, MC.FCF_PS), [metrics]);
+function FCFShareChartInner({ metrics, metricsB, labelA, labelB, nameA, nameB, toEurA = IDENTITY, toEurB = IDENTITY, loadingB }: Props) {
+  // FCF/share is reported in the company's native currency; convert each
+  // year's value to EUR (at that year's FX rate) so A and B compare directly.
+  const seriesA = useMemo(
+    () => annualSeries(metrics, MC.FCF_PS).map((p) => ({ date: p.date, value: toEurA(p.value, p.date) })),
+    [metrics, toEurA],
+  );
   const seriesB = useMemo(
-    () => (metricsB ? annualSeries(metricsB, MC.FCF_PS) : []),
-    [metricsB],
+    () => (metricsB ? annualSeries(metricsB, MC.FCF_PS).map((p) => ({ date: p.date, value: toEurB(p.value, p.date) })) : []),
+    [metricsB, toEurB],
   );
   const cagrA = useMemo(() => computeCAGR(seriesA.filter((s) => s.value > 0)), [seriesA]);
   const cagrB = useMemo(() => computeCAGR(seriesB.filter((s) => s.value > 0)), [seriesB]);
@@ -64,7 +78,7 @@ export default function FCFShareChart({ metrics, metricsB, labelA, labelB, loadi
   return (
     <>
       <div className="text-fg-subtle text-xs mb-2 flex items-center gap-1 flex-wrap">
-        FCF per share (raw values) <InfoTip text="Free Cash Flow per share over time. Negative values are shaded red. CAGR is computed from positive values only." />
+        FCF per share (€) <InfoTip text="Free Cash Flow per share over time, converted to EUR (at each year's FX rate) so companies compare directly. Negative values are shaded red. CAGR is computed from positive values only." />
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1 mb-2">
         <div className="flex items-center gap-1">
@@ -73,7 +87,7 @@ export default function FCFShareChart({ metrics, metricsB, labelA, labelB, loadi
         </div>
         <div className="flex items-center gap-1">
           <div className="text-fg-subtle text-[11px]">Latest{aTag}</div>
-          <div className="font-mono text-xs" style={{ color: COLOR_A }}>{fmtNum(latestA, 2)}</div>
+          <div className="font-mono text-xs" style={{ color: COLOR_A }}>{latestA == null ? '—' : `€${fmtNum(latestA, 2)}`}</div>
         </div>
         {hasB && seriesB.length > 0 && (
           <>
@@ -83,7 +97,7 @@ export default function FCFShareChart({ metrics, metricsB, labelA, labelB, loadi
             </div>
             <div className="flex items-center gap-1">
               <div className="text-fg-subtle text-[11px]">Latest {labelB ?? 'B'}</div>
-              <div className="font-mono text-xs" style={{ color: COLOR_B }}>{fmtNum(latestB, 2)}</div>
+              <div className="font-mono text-xs" style={{ color: COLOR_B }}>{latestB == null ? '—' : `€${fmtNum(latestB, 2)}`}</div>
             </div>
           </>
         )}
@@ -100,15 +114,15 @@ export default function FCFShareChart({ metrics, metricsB, labelA, labelB, loadi
           <XAxis dataKey="date" tick={{ fontSize: 10, fill: chartTheme.axisTick }} tickFormatter={(v: string) => v.slice(0, 4)} />
           <YAxis
             tick={{ fontSize: 11, fill: chartTheme.axisTick }}
-            tickFormatter={(v: number) => v.toFixed(1)}
+            tickFormatter={(v: number) => `€${v.toFixed(1)}`}
           />
           {hasNegative && <ReferenceLine y={0} stroke={chartTheme.axisTick} strokeDasharray="3 3" />}
           <Tooltip
             contentStyle={tooltipStyle}
             labelStyle={{ color: chartTheme.axisLabel }}
             formatter={(v, name) => {
-              const lab = name === 'a' ? (labelA ?? 'A') : name === 'b' ? (labelB ?? 'B') : String(name);
-              return [Number(v).toFixed(2), lab];
+              const lab = name === 'a' ? (nameA ?? labelA ?? 'A') : name === 'b' ? (nameB ?? labelB ?? 'B') : String(name);
+              return [`€${Number(v).toFixed(2)}`, lab];
             }}
           />
           <Line
@@ -148,3 +162,7 @@ export default function FCFShareChart({ metrics, metricsB, labelA, labelB, loadi
     </>
   );
 }
+
+// Memoized — see MetricBandChart: avoids re-rendering on SSE-log churn during refresh.
+const FCFShareChart = memo(FCFShareChartInner);
+export default FCFShareChart;

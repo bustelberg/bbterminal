@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
@@ -397,8 +398,18 @@ export default function Sidebar({ initialUser }: Props) {
   return (
     <aside className="w-56 shrink-0 border-r border-neutral-800/60 bg-sidebar flex flex-col">
       <div className="px-5 py-5 border-b border-neutral-800/60">
-        <Link href="/" className="text-lg font-semibold tracking-tight text-fg-strong hover:text-fg-soft transition-colors">
-          BBTerminal
+        <Link href="/" className="flex items-center gap-2.5 group">
+          <Image
+            src="/logo.jpg"
+            alt="BBTerminal"
+            width={28}
+            height={28}
+            className="rounded-md shrink-0"
+            priority
+          />
+          <span className="text-lg font-semibold tracking-tight text-fg-strong group-hover:text-fg-soft transition-colors">
+            BBTerminal
+          </span>
         </Link>
       </div>
       <nav className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1">

@@ -1,47 +1,59 @@
 'use client';
 
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  ReferenceLine, CartesianGrid,
+  CartesianGrid,
 } from 'recharts';
 import InfoTip from '../InfoTip';
 import Spinner from '../Spinner';
 import { MC, type MetricRow } from './types';
-import { timeSeries, tooltipStyle } from './utils';
+import { timeSeries, dropExtremeOutliers, tooltipStyle } from './utils';
 import { chartTheme } from '../../../lib/chartTheme';
 
 // Series colors — A matches the dashboard's primary accent, B the
 // consistent "comparison" hue across all earnings charts.
 const COLOR_A = chartTheme.accent; // primary series
-const COLOR_B = chartTheme.warn;   // comparison series
+const COLOR_B = chartTheme.compare;   // comparison series (violet — not a band colour)
 
 /** Single-series line chart of Forward P/E over time with red dashed
  * reference line at the period average. When `metricsB` is supplied, a
  * second line is overlaid in amber alongside its own period-average
  * value in the header. Hides itself when there's no Forward P/E data
  * for either company. */
-export default function ForwardPEChart({
+function ForwardPEChartInner({
   metrics,
   metricsB,
   labelA,
   labelB,
+  nameA,
+  nameB,
+  hideOutliers = false,
   loadingB,
 }: {
   metrics: MetricRow[];
   metricsB?: MetricRow[];
   labelA?: string;
   labelB?: string;
+  /** Real company name shown in the hover tooltip (vs the short A/B pill tag). */
+  nameA?: string;
+  nameB?: string;
+  /** When true, drop impossible extreme outliers (off by default). */
+  hideOutliers?: boolean;
   /** True during B's initial metrics fetch — shows a spinner where
    * B's "Current" / "Period avg" pills will appear, instead of
    * silently rendering only A's line. */
   loadingB?: boolean;
 }) {
-  const dataA = useMemo(() => timeSeries(metrics, MC.FWD_PE), [metrics]);
-  const dataB = useMemo(
-    () => (metricsB ? timeSeries(metricsB, MC.FWD_PE) : []),
-    [metricsB],
-  );
+  const dataA = useMemo(() => {
+    const d = timeSeries(metrics, MC.FWD_PE);
+    return hideOutliers ? dropExtremeOutliers(d) : d;
+  }, [metrics, hideOutliers]);
+  const dataB = useMemo(() => {
+    if (!metricsB) return [];
+    const d = timeSeries(metricsB, MC.FWD_PE);
+    return hideOutliers ? dropExtremeOutliers(d) : d;
+  }, [metricsB, hideOutliers]);
 
   const meanA = useMemo(() => {
     if (dataA.length === 0) return 0;
@@ -100,10 +112,8 @@ export default function ForwardPEChart({
         )}
         <span className="text-fg-dim">·</span>
         <span>Period avg{aTag}:</span>
-        <span className="text-neg-400 font-mono">{meanA.toFixed(1)}x</span>
-        {/* Period avg B is shown in-line only when comparison is active;
-            we deliberately skip a second reference line on the chart
-            (two dashed lines would clutter the axis). */}
+        <span className="font-mono" style={{ color: COLOR_A }}>{meanA.toFixed(1)}x</span>
+        {/* Period avg B is shown in-line only when comparison is active. */}
         {hasB && dataB.length > 0 && (
           <>
             <span className="text-fg-dim">·</span>
@@ -118,7 +128,7 @@ export default function ForwardPEChart({
             <Spinner size={10} />
           </>
         )}
-        <InfoTip text="Forward P/E = Price / Next-year EPS estimate. Lower = cheaper relative to expected earnings. The red dashed line shows the average across the visible period for the primary company — useful for spotting when the stock trades above or below its typical valuation." />
+        <InfoTip text="Forward P/E = Price / Next-year EPS estimate. Lower = cheaper relative to expected earnings. 'Period avg' is the average across the visible period for the primary company — useful for spotting when the stock trades above or below its typical valuation." />
       </div>
       <ResponsiveContainer width="100%" height={280}>
         <LineChart data={merged} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
@@ -129,11 +139,10 @@ export default function ForwardPEChart({
             contentStyle={tooltipStyle}
             labelStyle={{ color: chartTheme.axisLabel }}
             formatter={(v, name) => {
-              const lab = name === 'a' ? (labelA ?? 'A') : name === 'b' ? (labelB ?? 'B') : String(name);
+              const lab = name === 'a' ? (nameA ?? labelA ?? 'A') : name === 'b' ? (nameB ?? labelB ?? 'B') : String(name);
               return [`${Number(v).toFixed(1)}x`, lab];
             }}
           />
-          <ReferenceLine y={meanA} stroke={chartTheme.negStrong} strokeDasharray="5 5" />
           <Line type="monotone" dataKey="a" name="a" stroke={COLOR_A} strokeWidth={2} dot={false} connectNulls />
           {hasB && <Line type="monotone" dataKey="b" name="b" stroke={COLOR_B} strokeWidth={2} dot={false} connectNulls />}
         </LineChart>
@@ -141,3 +150,7 @@ export default function ForwardPEChart({
     </>
   );
 }
+
+// Memoized — see MetricBandChart: avoids re-rendering on SSE-log churn during refresh.
+const ForwardPEChart = memo(ForwardPEChartInner);
+export default ForwardPEChart;

@@ -10,10 +10,14 @@ export default function CompanyPicker({
   companies,
   selected,
   onSelect,
+  className,
 }: {
   companies: Company[];
   selected: Company | null;
   onSelect: (c: Company) => void;
+  /** Width/layout classes for the wrapper. Defaults to `w-full max-w-md`;
+   * pass a fixed width (e.g. `w-72`) to keep multiple pickers equally sized. */
+  className?: string;
 }) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
@@ -32,7 +36,7 @@ export default function CompanyPicker({
   useClickOutside(ref, () => setOpen(false));
 
   return (
-    <div ref={ref} className="relative w-full max-w-md">
+    <div ref={ref} className={`relative ${className ?? 'w-full max-w-md'}`}>
       <input
         type="text"
         value={query}

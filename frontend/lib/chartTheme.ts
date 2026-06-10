@@ -26,6 +26,10 @@ export const chartTheme = {
   //    and tuned to read on white. ─────────────────────────────────────────
   accent: '#3b82c9',        // brand blue — primary strategy / series A / area fills
   accentStrong: '#2c6bb0',  // deeper blue — price line (relative-growth)
+  // Non-status line colours. Green/amber/red are RESERVED for the scoring
+  // bands, so comparison + multi-metric LINES use these instead.
+  compare: '#7c5cc0',       // violet — comparison series B (vs blue series A)
+  magenta: '#c44f9c',       // magenta — extra qualitative line (relative-growth OE estimate)
   warn: '#c0891a',          // amber — comparison series B / alpha line
   pos: '#2ca86a',           // green — OE actual
   neg: '#d8443d',           // red — OE estimate / negative-value dot

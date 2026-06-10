@@ -11,6 +11,9 @@ export type Company = {
   gurufocus_exchange: string;
   company_name: string | null;
   country: string | null;
+  /** Reporting/trading currency (ISO code) — used to convert native-currency
+   * chart values (FCF/share) to EUR. */
+  currency?: string | null;
 };
 
 export type MetricRow = {
@@ -30,6 +33,10 @@ export type Cadence = {
   firstDate: string;
   lastDate: string;
 };
+
+/** Chart cadence toggle — whether the time-series charts read quarterly
+ * observations (default, matches Snapshot Stats) or annual (fiscal-year). */
+export type ChartCadence = 'quarterly' | 'annual';
 
 // ---------------------------------------------------------------------------
 // Metric codes

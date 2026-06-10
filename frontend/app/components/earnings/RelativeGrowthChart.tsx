@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { memo, useMemo, useState } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid,
@@ -13,6 +13,12 @@ import { chartTheme } from '../../../lib/chartTheme';
 
 // Tooltip style — the shared card-surface tooltip (centralized in chartTheme).
 const TOOLTIP_STYLE = chartTheme.tooltipCard.contentStyle;
+
+// Per-metric line colours. Price = blue; OE lines use non-status hues since
+// green/amber/red are reserved for the scoring bands.
+const C_PRICE = chartTheme.accentStrong;
+const C_OE_ACT = chartTheme.compare;   // violet (was green)
+const C_OE_EST = chartTheme.magenta;   // magenta (was red)
 
 type Indexed = {
   date: string;
@@ -128,6 +134,9 @@ type Props = {
   metricsB?: MetricRow[];
   labelA?: string;
   labelB?: string;
+  /** Real company name shown in the hover tooltip (vs the short A/B pill tag). */
+  nameA?: string;
+  nameB?: string;
   /** True during B's initial metrics fetch. Shows a spinner in the
    * CAGR-pill row for B so the comparison side reads as "loading"
    * rather than silently missing. */
@@ -141,8 +150,11 @@ type Props = {
  * colors so the user can pair "solid A vs dashed B" by hue. Both
  * companies share a common anchor (max of their natural start dates)
  * so the indexed slopes are directly comparable. */
-export default function RelativeGrowthChart({ metrics, metricsB, labelA, labelB, loadingB }: Props) {
+function RelativeGrowthChartInner({ metrics, metricsB, labelA, labelB, nameA, nameB, loadingB }: Props) {
   const hasB = !!metricsB;
+  // With two companies this chart has 6 lines (3 metrics × 2) which reads as
+  // chaos, so in comparison mode we show ONE company at a time and toggle.
+  const [activeCompany, setActiveCompany] = useState<'a' | 'b'>('a');
   const combined = useMemo(() => {
     // First pass — find each company's natural start date.
     const naturalA = buildIndexed(metrics);
@@ -185,10 +197,8 @@ export default function RelativeGrowthChart({ metrics, metricsB, labelA, labelB,
 
   const aLab = labelA ?? 'A';
   const bLab = labelB ?? 'B';
-  // Series prefix shown only in comparison mode (generic A/B, never the
-  // company ticker). In single-company mode the pills read just "Price",
-  // "OE Act", "OE Est".
-  const aPre = hasB ? `${aLab} ` : '';
+  const active: 'a' | 'b' = hasB ? activeCompany : 'a';
+  const activeCagrs = active === 'b' ? combined.cagrsB : combined.cagrsA;
 
   return (
     <>
@@ -197,47 +207,44 @@ export default function RelativeGrowthChart({ metrics, metricsB, labelA, labelB,
         {hasB && combined.commonStart && (
           <span className="text-fg-faint font-mono">(common start {combined.commonStart})</span>
         )}
-        <InfoTip text="Compares share price growth to Owner Earnings — EPS excluding non-recurring items — growth on a log scale. (Dividends aren't added: a dividend is a distribution of EPS, not earnings on top of it, so EPS + dividends would double-count the paid-out portion.) If price grows faster than OE, the stock is getting more expensive (multiple expansion). If OE outpaces price, it's getting cheaper. In comparison mode, both companies are rebased to 100 at the same start date so their indexed slopes are directly comparable." />
+        <InfoTip text="Compares share price growth to Owner Earnings — EPS excluding non-recurring items — growth on a log scale. (Dividends aren't added: a dividend is a distribution of EPS, not earnings on top of it, so EPS + dividends would double-count the paid-out portion.) If price grows faster than OE, the stock is getting more expensive (multiple expansion). If OE outpaces price, it's getting cheaper. In comparison mode, both companies are rebased to 100 at the same start date so their indexed slopes are directly comparable — toggle between them to keep the chart readable." />
+        {hasB && (
+          <div className="ml-auto flex items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5">
+            {(['a', 'b'] as const).map((side) => (
+              <button
+                key={side}
+                type="button"
+                onClick={() => setActiveCompany(side)}
+                className={`px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors ${active === side ? 'bg-accent-600 text-fg-strong' : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/5'}`}
+              >
+                {side === 'a' ? (nameA ?? aLab) : (nameB ?? bLab)}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <div className="flex flex-wrap gap-x-5 gap-y-1 mb-2">
-        <div className="flex items-center gap-1.5">
-          <div className="text-accent-400 text-xs">{aPre}Price</div>
-          <div className="text-accent-400 font-mono text-sm font-semibold">{fmtPct(combined.cagrsA.price ?? null)}</div>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="text-pos-400 text-xs">{aPre}OE Act</div>
-          <div className="text-pos-400 font-mono text-sm font-semibold">{fmtPct(combined.cagrsA.oe_act ?? null)}</div>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="text-neg-400 text-xs">{aPre}OE Est</div>
-          <div className="text-neg-400 font-mono text-sm font-semibold">{fmtPct(combined.cagrsA.oe_est ?? null)}</div>
-        </div>
-        {hasB && combined.cagrsB && (
+        {activeCagrs ? (
           <>
-            <div className="w-full" />
             <div className="flex items-center gap-1.5">
-              <div className="text-accent-400 text-xs">{bLab} Price</div>
-              <div className="text-accent-400 font-mono text-sm font-semibold">{fmtPct(combined.cagrsB.price ?? null)}</div>
+              <div className="text-accent-400 text-xs">Price</div>
+              <div className="text-accent-400 font-mono text-sm font-semibold">{fmtPct(activeCagrs.price ?? null)}</div>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="text-pos-400 text-xs">{bLab} OE Act</div>
-              <div className="text-pos-400 font-mono text-sm font-semibold">{fmtPct(combined.cagrsB.oe_act ?? null)}</div>
+              <div className="text-xs" style={{ color: C_OE_ACT }}>OE Act</div>
+              <div className="font-mono text-sm font-semibold" style={{ color: C_OE_ACT }}>{fmtPct(activeCagrs.oe_act ?? null)}</div>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="text-neg-400 text-xs">{bLab} OE Est</div>
-              <div className="text-neg-400 font-mono text-sm font-semibold">{fmtPct(combined.cagrsB.oe_est ?? null)}</div>
+              <div className="text-xs" style={{ color: C_OE_EST }}>OE Est</div>
+              <div className="font-mono text-sm font-semibold" style={{ color: C_OE_EST }}>{fmtPct(activeCagrs.oe_est ?? null)}</div>
             </div>
           </>
-        )}
-        {hasB && !combined.cagrsB && loadingB && (
-          <>
-            <div className="w-full" />
-            <div className="flex items-center gap-1.5">
-              <div className="text-fg-subtle text-xs">Loading {bLab}</div>
-              <Spinner size={10} />
-            </div>
-          </>
-        )}
+        ) : loadingB ? (
+          <div className="flex items-center gap-1.5">
+            <div className="text-fg-subtle text-xs">Loading {bLab}</div>
+            <Spinner size={10} />
+          </div>
+        ) : null}
       </div>
       <ResponsiveContainer width="100%" height={280}>
         <LineChart data={combined.merged} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
@@ -262,7 +269,8 @@ export default function RelativeGrowthChart({ metrics, metricsB, labelA, labelB,
             labelFormatter={(v) => new Date(Number(v)).toISOString().slice(0, 10)}
             formatter={(v, name) => {
               const isB = String(name).endsWith('_b');
-              const companyPre = isB ? `${bLab} ` : aPre;
+              // Tooltip shows the real company name (vs the short A/B pill tag).
+              const companyPre = isB ? `${nameB ?? bLab} ` : `${nameA ?? aLab} `;
               const which = String(name).replace(/_[ab]$/, '');
               const lab = which === 'price_a' || which === 'price' ? `${companyPre}Price`
                 : which === 'oe_actual_a' || which === 'oe_actual' ? `${companyPre}OE Actual`
@@ -271,26 +279,25 @@ export default function RelativeGrowthChart({ metrics, metricsB, labelA, labelB,
               return [Number(v).toFixed(1), lab];
             }}
           />
-          <Line type="monotone" dataKey="price_a" stroke={chartTheme.accentStrong} strokeWidth={2} dot={false} connectNulls />
-          <Line type="monotone" dataKey="oe_actual_a" stroke={chartTheme.pos} strokeWidth={2} dot={false} connectNulls />
-          <Line type="monotone" dataKey="oe_est_a" stroke={chartTheme.neg} strokeWidth={2} dot={false} connectNulls />
-          {hasB && (
-            <>
-              <Line type="monotone" dataKey="price_b" stroke={chartTheme.accentStrong} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
-              <Line type="monotone" dataKey="oe_actual_b" stroke={chartTheme.pos} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
-              <Line type="monotone" dataKey="oe_est_b" stroke={chartTheme.neg} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
-            </>
-          )}
+          {/* Only the active company's 3 lines render (toggle above) — keeps
+              the log chart readable instead of overlaying 6 lines. */}
+          <Line type="monotone" dataKey={`price_${active}`} stroke={C_PRICE} strokeWidth={2} dot={false} connectNulls />
+          <Line type="monotone" dataKey={`oe_actual_${active}`} stroke={C_OE_ACT} strokeWidth={2} dot={false} connectNulls />
+          <Line type="monotone" dataKey={`oe_est_${active}`} stroke={C_OE_EST} strokeWidth={2} dot={false} connectNulls />
         </LineChart>
       </ResponsiveContainer>
       <div className="flex flex-wrap justify-center gap-x-5 gap-y-1 text-xs mt-1">
-        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-accent-400 inline-block rounded" />Price</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-pos-400 inline-block rounded" />OE Actual</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-neg-400 inline-block rounded" />OE Estimate</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: C_PRICE }} />Price</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: C_OE_ACT }} />OE Actual</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: C_OE_EST }} />OE Estimate</span>
         {hasB && (
-          <span className="text-fg-subtle ml-3">— solid = {aLab} · dashed = {bLab}</span>
+          <span className="text-fg-subtle ml-3">showing {active === 'a' ? (nameA ?? aLab) : (nameB ?? bLab)}</span>
         )}
       </div>
     </>
   );
 }
+
+// Memoized — see MetricBandChart: avoids re-rendering on SSE-log churn during refresh.
+const RelativeGrowthChart = memo(RelativeGrowthChartInner);
+export default RelativeGrowthChart;

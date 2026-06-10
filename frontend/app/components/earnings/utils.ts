@@ -18,7 +18,7 @@
  *     so the semantics match.
  */
 
-import { MC, type Cadence, type MetricRow } from './types';
+import { MC, type Cadence, type ChartCadence, type MetricRow } from './types';
 import { chartTheme } from '../../../lib/chartTheme';
 
 // ─── Metric extractors ─────────────────────────────────────────────
@@ -188,19 +188,144 @@ export function annualSeries(metrics: MetricRow[], code: string): { date: string
  * GuruFocus's pre-computed quarterly Interest Coverage twin, then to
  * the annual series, when the raw Income-Statement components aren't
  * both populated. */
-export function interestCoverageQuarterlySeries(metrics: MetricRow[]): { date: string; value: number }[] {
-  const q = (annualCode: string) => 'quarterly__' + annualCode.slice('annuals__'.length);
-  const op = timeSeries(metrics, q(MC.OPERATING_INCOME));
-  const ieByDate = new Map(timeSeries(metrics, q(MC.INTEREST_EXPENSE)).map((p) => [p.date, p.value]));
+export function interestCoverageSeries(metrics: MetricRow[], cadence: ChartCadence = 'quarterly'): { date: string; value: number }[] {
+  // In annual mode read the `annuals__` codes directly; otherwise the
+  // `quarterly__` twins.
+  const code = (annualCode: string) =>
+    cadence === 'annual' ? annualCode : 'quarterly__' + annualCode.slice('annuals__'.length);
+  const op = timeSeries(metrics, code(MC.OPERATING_INCOME));
+  const ieByDate = new Map(timeSeries(metrics, code(MC.INTEREST_EXPENSE)).map((p) => [p.date, p.value]));
   const computed: { date: string; value: number }[] = [];
   for (const p of op) {
     const ie = ieByDate.get(p.date);
     if (ie != null && Math.abs(ie) > 0) computed.push({ date: p.date, value: p.value / Math.abs(ie) });
   }
   if (computed.length > 0) return computed; // already sorted (op is sorted ascending)
-  const gfQuarterly = timeSeries(metrics, q(MC.INTEREST_COVERAGE));
-  if (gfQuarterly.length > 0) return gfQuarterly;
+  const gf = timeSeries(metrics, code(MC.INTEREST_COVERAGE));
+  if (gf.length > 0) return gf;
   return annualSeries(metrics, MC.INTEREST_COVERAGE);
+}
+
+/** Series for a point-in-time ratio code (Debt-to-Equity, margins, etc.).
+ * Quarterly (default): prefer the `quarterly__X` twin when it exists, else the
+ * annual series — mirrors `SnapshotStats`' `lv()` quarterly-preference (NOT a
+ * TTM sum; ratios are point-in-time). Annual: always the fiscal-year series. */
+export function quarterlyPreferredSeries(
+  metrics: MetricRow[],
+  annualsCode: string,
+  cadence: ChartCadence = 'quarterly',
+): { date: string; value: number }[] {
+  if (cadence !== 'annual' && annualsCode.startsWith('annuals__')) {
+    const qCode = 'quarterly__' + annualsCode.slice('annuals__'.length);
+    const q = timeSeries(metrics, qCode);
+    if (q.length > 0) return q;
+  }
+  return annualSeries(metrics, annualsCode);
+}
+
+/** Daily PEG series. GuruFocus only stores PEG at fiscal period ends, but PEG
+ * = (Price ÷ EPS) ÷ growth moves with the *daily* price (EPS + growth are
+ * constant within a period). So we take GF's periodic PEG, derive each
+ * period's price-independent factor `PEG_period ÷ price_at_period`
+ * (= 1 ÷ (EPS·growth)), and apply it to every daily close: PEG(t) = price(t) ×
+ * factor(latest period ≤ t). GF's 0 sentinel (growth ≤ 0 → undefined) is
+ * dropped. Falls back to the periodic series when no daily price is available. */
+export function pegDailySeries(metrics: MetricRow[]): { date: string; value: number }[] {
+  const peg = quarterlyPreferredSeries(metrics, MC.PEG).filter((p) => p.value !== 0);
+  if (peg.length === 0) return [];
+  const prices = timeSeries(metrics, 'close_price');
+  if (prices.length === 0) return peg; // no daily price → periodic PEG as-is
+
+  const priceAt = (date: string): number | null => {
+    let lo = 0;
+    let hi = prices.length - 1;
+    let idx = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (prices[mid].date <= date) { idx = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    return idx >= 0 ? prices[idx].value : null;
+  };
+
+  // Per period: the price-independent factor (1 / (EPS·growth)).
+  const periods: { date: string; factor: number }[] = [];
+  for (const pe of peg) {
+    const pr = priceAt(pe.date);
+    if (pr && pr !== 0) periods.push({ date: pe.date, factor: pe.value / pr });
+  }
+  if (periods.length === 0) return peg;
+
+  const out: { date: string; value: number }[] = [];
+  let pi = 0;
+  for (const p of prices) {
+    if (p.date < periods[0].date) continue; // PEG undefined before the first period
+    while (pi + 1 < periods.length && periods[pi + 1].date <= p.date) pi++;
+    out.push({ date: p.date, value: p.value * periods[pi].factor });
+  }
+  // Downsample for performance — a daily line over many years is thousands of
+  // points (slow to render). ~400 points is visually identical at chart width;
+  // stride evenly and always keep the most recent point.
+  const MAX_POINTS = 400;
+  if (out.length > MAX_POINTS) {
+    const stride = Math.ceil(out.length / MAX_POINTS);
+    const sampled = out.filter((_, i) => i % stride === 0);
+    if (sampled[sampled.length - 1] !== out[out.length - 1]) sampled.push(out[out.length - 1]);
+    return sampled;
+  }
+  return out;
+}
+
+/** Drop impossible extreme outliers from a metric series — the data glitches
+ * GuruFocus occasionally emits when a denominator is near-zero (e.g. a gross
+ * margin of -10000% or net margin of 50000%). Robust + scale-free: a point is
+ * dropped only when its magnitude exceeds `factor`× the *median* magnitude of
+ * the series, so it adapts to each metric's natural range — a debt-free firm's
+ * interest coverage of 400 (a few × the median) survives, while a value
+ * hundreds of × the median is removed. No-ops on short series (can't tell an
+ * outlier from real data) or when the median magnitude is ~0. */
+export function dropExtremeOutliers(
+  series: { date: string; value: number }[],
+  opts?: { factor?: number; minPoints?: number },
+): { date: string; value: number }[] {
+  const factor = opts?.factor ?? 50;
+  const minPoints = opts?.minPoints ?? 4;
+  if (series.length < minPoints) return series;
+  const absSorted = series.map((p) => Math.abs(p.value)).sort((a, b) => a - b);
+  const medianAbs = absSorted[Math.floor(absSorted.length / 2)];
+  if (!(medianAbs > 1e-9)) return series; // no stable scale to compare against
+  const cap = medianAbs * factor;
+  return series.filter((p) => Math.abs(p.value) <= cap);
+}
+
+/** Quarterly ratio series numerator ÷ denominator, matched by reporting date
+ * (quarterly twins preferred, annual fallback). `absDenominator` divides by
+ * |denominator| (Interest Coverage's Operating Income ÷ |Interest Expense|);
+ * otherwise the raw value (FCF ÷ Net Income — negative NI yields a negative
+ * ratio, matching SnapshotStats). Points with a zero denominator are dropped. */
+export function quarterlyRatioSeries(
+  metrics: MetricRow[],
+  numAnnualCode: string,
+  denAnnualCode: string,
+  opts?: { absDenominator?: boolean; cadence?: ChartCadence },
+): { date: string; value: number }[] {
+  const q = (c: string) => (c.startsWith('annuals__') ? 'quarterly__' + c.slice('annuals__'.length) : c);
+  const build = (numCode: string, denCode: string) => {
+    const den = new Map(timeSeries(metrics, denCode).map((p) => [p.date, p.value]));
+    const out: { date: string; value: number }[] = [];
+    for (const p of timeSeries(metrics, numCode)) {
+      const d = den.get(p.date);
+      if (d == null) continue;
+      const denom = opts?.absDenominator ? Math.abs(d) : d;
+      if (denom === 0) continue;
+      out.push({ date: p.date, value: p.value / denom });
+    }
+    return out;
+  };
+  // Annual mode: fiscal-year codes directly. Quarterly: twins, annual fallback.
+  if (opts?.cadence === 'annual') return build(numAnnualCode, denAnnualCode);
+  const quarterly = build(q(numAnnualCode), q(denAnnualCode));
+  if (quarterly.length > 0) return quarterly;
+  return build(numAnnualCode, denAnnualCode); // annual fallback (same-date match)
 }
 
 /** Rolling trailing-twelve-months (TTM) sum over a quarterly flow series.

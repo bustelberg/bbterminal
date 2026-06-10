@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, useDeferredValue } from 'react';
 
 import ApiUsageBadge, { type ApiUsageBadgeHandle } from './ApiUsageBadge';
 import {
@@ -11,6 +11,7 @@ import {
 import { trackedFetch } from '../../lib/loading';
 
 import { API_URL } from '../../lib/apiUrl';
+import { useFxToEur } from '../../lib/hooks/useFxToEur';
 import InfoTip from './InfoTip';
 import SectionLoader from './SectionLoader';
 import Spinner from './Spinner';
@@ -21,8 +22,10 @@ import SnapshotStats from './earnings/SnapshotStats';
 import ForwardPEChart from './earnings/ForwardPEChart';
 import RelativeGrowthChart from './earnings/RelativeGrowthChart';
 import FCFShareChart from './earnings/FCFShareChart';
-import InterestCoverageChart from './earnings/InterestCoverageChart';
-import type { Company, MetricRow } from './earnings/types';
+import MetricBandChart from './earnings/MetricBandChart';
+import BandScorecard from './earnings/BandScorecard';
+import { SNAPSHOT_BAND_CHARTS } from './earnings/snapshotBandCharts';
+import type { Company, MetricRow, ChartCadence } from './earnings/types';
 import { expectedStaleSources } from './earnings/utils';
 
 // Metric codes (`MC`), types (`Company`, `MetricRow`, `Cadence`), and pure
@@ -89,6 +92,17 @@ export default function EarningsDashboard() {
   const [startYear, setStartYear] = useState(2015);
   const [startYearInput, setStartYearInput] = useState('2015');
   const [startYearError, setStartYearError] = useState('');
+  // Quarterly (default, matches Snapshot Stats) vs annual data for the charts.
+  // The toggle button keys off `chartCadence` so its highlight flips instantly;
+  // the charts read `deferredCadence` so the heavy series rebuild + recharts
+  // re-render happens as a non-blocking deferred update (snappy click, data
+  // catches up a beat later) instead of stalling the click.
+  const [chartCadence, setChartCadence] = useState<ChartCadence>('quarterly');
+  const deferredCadence = useDeferredValue(chartCadence);
+  // Snapshot Stats lives at the bottom and is collapsed by default.
+  const [snapshotOpen, setSnapshotOpen] = useState(false);
+  // Hide impossible extreme outliers — off by default (show everything).
+  const [hideOutliers, setHideOutliers] = useState(false);
 
   const applyStartYear = useCallback((raw: string) => {
     const v = parseInt(raw, 10);
@@ -120,6 +134,15 @@ export default function EarningsDashboard() {
     () => compareMetrics.filter((m) => m.target_date >= `${startYear}-01-01`),
     [compareMetrics, startYear],
   );
+
+  // Real company names for chart hover tooltips (the pills stay short A/B).
+  const chartNameA = selected ? (selected.company_name ?? selected.gurufocus_ticker) : undefined;
+  const chartNameB = compareCompany ? (compareCompany.company_name ?? compareCompany.gurufocus_ticker) : undefined;
+
+  // Native-currency → EUR converters (FX history per currency), so currency-
+  // denominated charts (FCF/share) compare directly. EUR companies → identity.
+  const fxA = useFxToEur(selected?.currency);
+  const fxB = useFxToEur(compareCompany?.currency);
 
   const usageBadgeRef = useRef<ApiUsageBadgeHandle>(null);
 
@@ -300,20 +323,9 @@ export default function EarningsDashboard() {
           read-only — refresh buttons + the staleness auto-refresh only
           touch the primary `selected`. */}
       <div className="flex items-center gap-4 flex-wrap">
-        <CompanyPicker companies={companies} selected={selected} onSelect={setSelected} />
+        <CompanyPicker companies={companies} selected={selected} onSelect={setSelected} className="w-72" />
         {selected && (
           <>
-            <RefreshButton label="Refresh All" running={sse.running} onClick={() => refresh('all', noCache)} />
-            <label className="flex items-center gap-2 text-sm text-fg-muted cursor-pointer" title="Bypass GuruFocus storage cache and re-fetch every source from the API.">
-              <input
-                type="checkbox"
-                checked={noCache}
-                onChange={(e) => setNoCache(e.target.checked)}
-                disabled={sse.running}
-                className="h-4 w-4 rounded border-neutral-700 bg-page text-accent-600 focus:ring-1 focus:ring-accent-500/30"
-              />
-              Don&apos;t use cache
-            </label>
             <div className="flex items-center gap-2">
               <span className="text-fg-subtle text-sm">vs</span>
               {/* Filter A out of the secondary picker's options so the user
@@ -322,6 +334,7 @@ export default function EarningsDashboard() {
                 companies={companies.filter((c) => c.company_id !== selected.company_id)}
                 selected={compareCompany}
                 onSelect={setCompareCompany}
+                className="w-72"
               />
               {compareCompany && (
                 <button
@@ -333,6 +346,17 @@ export default function EarningsDashboard() {
               )}
               {loadingCompareMetrics && <Spinner size={12} />}
             </div>
+            <RefreshButton label="Refresh All" running={sse.running} onClick={() => refresh('all', noCache)} />
+            <label className="flex items-center gap-2 text-sm text-fg-muted cursor-pointer" title="Bypass GuruFocus storage cache and re-fetch every source from the API.">
+              <input
+                type="checkbox"
+                checked={noCache}
+                onChange={(e) => setNoCache(e.target.checked)}
+                disabled={sse.running}
+                className="h-4 w-4 rounded border-neutral-700 bg-page text-accent-600 focus:ring-1 focus:ring-accent-500/30"
+              />
+              Don&apos;t use cache
+            </label>
           </>
         )}
       </div>
@@ -372,25 +396,6 @@ export default function EarningsDashboard() {
             )}
           </div>
 
-          {/* Snapshot Stats */}
-          <section className="bg-card rounded-xl border border-accent-500/20 p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-fg-strong font-medium">Snapshot Stats</h2>
-              <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('indicators')} />
-            </div>
-            {loadingMetrics ? <SectionLoader label="snapshot stats" /> : (
-              <SnapshotStats
-                metrics={metrics}
-                metricsB={compareCompany ? compareMetrics : undefined}
-                labelA={selected.gurufocus_ticker}
-                labelB={compareCompany?.gurufocus_ticker}
-                refreshingSources={refreshingSources}
-                refreshingSourcesB={refreshingSourcesB}
-                loadingB={loadingCompareMetrics}
-              />
-            )}
-          </section>
-
           {/* Charts container */}
           <section className="bg-card rounded-xl border border-accent-500/20 p-5 space-y-5">
             <div className="flex items-center gap-3">
@@ -421,6 +426,53 @@ export default function EarningsDashboard() {
                   className="w-6 h-6 flex items-center justify-center rounded text-fg-muted hover:text-fg-strong hover:bg-overlay/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed text-sm"
                 >&#9656;</button>
               </div>
+              {/* Quarterly / Annual cadence — switches the banded charts
+                  between per-quarter and fiscal-year data. */}
+              <div className="flex items-center gap-0.5 ml-1 rounded-lg border border-neutral-700 p-0.5" title="Quarterly matches the Snapshot Stats values; Annual uses fiscal-year figures.">
+                {(['quarterly', 'annual'] as const).map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setChartCadence(c)}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${chartCadence === c ? 'bg-accent-600 text-fg-strong' : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/5'}`}
+                  >
+                    {c === 'quarterly' ? 'Quarterly' : 'Annual'}
+                  </button>
+                ))}
+              </div>
+              {/* Hide extreme outliers — off by default; also covers Forward P/E. */}
+              <button
+                type="button"
+                onClick={() => setHideOutliers((v) => !v)}
+                aria-pressed={hideOutliers}
+                title="Drop impossible extreme outliers (e.g. a -10000% margin glitch) so the axis stays sane. Off by default."
+                className={`ml-1 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${hideOutliers ? 'bg-accent-600 text-fg-strong border-transparent' : 'text-fg-muted border-neutral-700 hover:text-fg-strong hover:bg-overlay/5'}`}
+              >
+                Hide outliers
+              </button>
+            </div>
+            {/* At-a-glance scorecards — one green/amber/red circle per banded
+                chart, coloured by each company's latest value vs its rubric.
+                A second row appears for the comparison company. */}
+            <div className="space-y-1.5">
+              <BandScorecard
+                charts={SNAPSHOT_BAND_CHARTS}
+                metrics={chartMetrics}
+                cadence={deferredCadence}
+                hideOutliers={hideOutliers}
+                label={compareCompany ? chartNameA : undefined}
+                labelMinCh={Math.max(chartNameA?.length ?? 0, chartNameB?.length ?? 0)}
+              />
+              {compareCompany && (
+                <BandScorecard
+                  charts={SNAPSHOT_BAND_CHARTS}
+                  metrics={chartCompareMetrics}
+                  cadence={deferredCadence}
+                  hideOutliers={hideOutliers}
+                  label={chartNameB}
+                  labelMinCh={Math.max(chartNameA?.length ?? 0, chartNameB?.length ?? 0)}
+                />
+              )}
             </div>
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
               {/* FCF Yield */}
@@ -433,6 +485,9 @@ export default function EarningsDashboard() {
                   <ForwardPEChart
                     metrics={chartMetrics}
                     metricsB={compareCompany ? chartCompareMetrics : undefined}
+                    nameA={chartNameA}
+                    nameB={chartNameB}
+                    hideOutliers={hideOutliers}
                     loadingB={loadingCompareMetrics}
                   />
                 )}
@@ -441,13 +496,15 @@ export default function EarningsDashboard() {
               {/* Relative Growth */}
               <div className="bg-page rounded-lg border border-accent-500/20 p-4 space-y-2 overflow-hidden min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-fg-strong text-sm font-medium flex items-center gap-1.5"><span className="truncate">Relative Growth (log)</span> <InfoTip text="Tracks whether the share price is growing in line with Owner Earnings (EPS, excluding non-recurring items). On a log scale, parallel lines mean the valuation multiple is stable. Divergence signals re-rating." />{(refreshingSources.has('prices') || refreshingSourcesB.has('prices')) && <Spinner size={10} />}</h3>
+                  <h3 className="text-fg-strong text-sm font-medium flex items-center gap-1.5"><span className="truncate">Share Price vs. Owners Earnings</span> <InfoTip text="Tracks whether the share price is growing in line with Owner Earnings (EPS, excluding non-recurring items). On a log scale, parallel lines mean the valuation multiple is stable. Divergence signals re-rating." />{(refreshingSources.has('prices') || refreshingSourcesB.has('prices')) && <Spinner size={10} />}</h3>
                   <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('prices')} />
                 </div>
                 {loadingMetrics ? <SectionLoader label="Relative Growth" /> : (
                   <RelativeGrowthChart
                     metrics={chartMetrics}
                     metricsB={compareCompany ? chartCompareMetrics : undefined}
+                    nameA={chartNameA}
+                    nameB={chartNameB}
                     loadingB={loadingCompareMetrics}
                   />
                 )}
@@ -456,33 +513,84 @@ export default function EarningsDashboard() {
               {/* FCF/share Growth */}
               <div className="bg-page rounded-lg border border-accent-500/20 p-4 space-y-2 overflow-hidden min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-fg-strong text-sm font-medium flex items-center gap-1.5"><span className="truncate">FCF/share Growth</span> <InfoTip text="Free Cash Flow per share over time. Shows the trajectory of cash generation. Negative values are highlighted with red dots." />{(refreshingSources.has('financials') || refreshingSourcesB.has('financials')) && <Spinner size={10} />}</h3>
+                  <h3 className="text-fg-strong text-sm font-medium flex items-center gap-1.5"><span className="truncate">FCF / share</span> <InfoTip text="Free Cash Flow per share over time, converted to EUR so companies compare directly. Shows the trajectory of cash generation. Negative values are highlighted with red dots." />{(refreshingSources.has('financials') || refreshingSourcesB.has('financials')) && <Spinner size={10} />}</h3>
                   <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('financials')} />
                 </div>
                 {loadingMetrics ? <SectionLoader label="FCF/share" /> : (
                   <FCFShareChart
                     metrics={chartMetrics}
                     metricsB={compareCompany ? chartCompareMetrics : undefined}
+                    nameA={chartNameA}
+                    nameB={chartNameB}
+                    toEurA={fxA.toEur}
+                    toEurB={fxB.toEur}
                     loadingB={loadingCompareMetrics}
                   />
                 )}
               </div>
 
-              {/* Interest Coverage */}
-              <div className="bg-page rounded-lg border border-accent-500/20 p-4 space-y-2 overflow-hidden min-w-0">
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-fg-strong text-sm font-medium flex items-center gap-1.5"><span className="truncate">Interest Coverage</span> <InfoTip text="Operating Income ÷ Interest Expense — how many times over operating earnings cover interest payments. Higher is safer. Background bands: red below 3×, amber 3–7×, green 7×+." />{(refreshingSources.has('financials') || refreshingSourcesB.has('financials')) && <Spinner size={10} />}</h3>
-                  <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('financials')} />
+              {/* Banded snapshot-stat charts driven by config
+                  (Capital Intensity / Allocation / Profitability / Outlook /
+                  Valuation). Value Creation + Historical Growth are excluded. */}
+              {SNAPSHOT_BAND_CHARTS.map((cfg) => (
+                <div key={cfg.key} className="bg-page rounded-lg border border-accent-500/20 p-4 space-y-2 overflow-hidden min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-fg-strong text-sm font-medium flex items-center gap-1.5"><span className="truncate">{cfg.title}</span> <InfoTip text={cfg.headerInfo} />{(refreshingSources.has(cfg.source) || refreshingSourcesB.has(cfg.source)) && <Spinner size={10} />}</h3>
+                    <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh(cfg.source)} />
+                  </div>
+                  {loadingMetrics ? <SectionLoader label={cfg.title} /> : (
+                    <MetricBandChart
+                      metrics={chartMetrics}
+                      metricsB={compareCompany ? chartCompareMetrics : undefined}
+                      nameA={chartNameA}
+                      nameB={chartNameB}
+                      cadence={deferredCadence}
+                      hideOutliers={hideOutliers}
+                      loadingB={loadingCompareMetrics}
+                      buildSeries={cfg.buildSeries}
+                      band={cfg.band}
+                      format={cfg.format}
+                      axisFormat={cfg.axisFormat}
+                      subtitle={cfg.subtitle}
+                      cadenceLabel={cfg.cadenceLabel}
+                      infoText={cfg.chartInfo}
+                      emptyText={cfg.emptyText}
+                    />
+                  )}
                 </div>
-                {loadingMetrics ? <SectionLoader label="Interest Coverage" /> : (
-                  <InterestCoverageChart
-                    metrics={chartMetrics}
-                    metricsB={compareCompany ? chartCompareMetrics : undefined}
+              ))}
+            </div>
+          </section>
+
+          {/* Snapshot Stats — collapsed by default, at the bottom. */}
+          <section className="bg-card rounded-xl border border-accent-500/20">
+            <div className="flex items-center justify-between gap-2 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => setSnapshotOpen((v) => !v)}
+                className="flex items-center gap-2 text-left"
+                aria-expanded={snapshotOpen}
+              >
+                <span className="text-fg-faint text-sm w-3">{snapshotOpen ? '▾' : '▸'}</span>
+                <h2 className="text-fg-strong font-medium">Snapshot Stats</h2>
+              </button>
+              <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('indicators')} />
+            </div>
+            {snapshotOpen && (
+              <div className="px-5 pb-5 space-y-4">
+                {loadingMetrics ? <SectionLoader label="snapshot stats" /> : (
+                  <SnapshotStats
+                    metrics={metrics}
+                    metricsB={compareCompany ? compareMetrics : undefined}
+                    labelA={selected.gurufocus_ticker}
+                    labelB={compareCompany?.gurufocus_ticker}
+                    refreshingSources={refreshingSources}
+                    refreshingSourcesB={refreshingSourcesB}
                     loadingB={loadingCompareMetrics}
                   />
                 )}
               </div>
-            </div>
+            )}
           </section>
         </>
       )}
