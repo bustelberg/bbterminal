@@ -51,8 +51,22 @@ from scheduler import register_scheduler as _register_scheduler
 
 app = FastAPI()
 
-# CORS — keep `:3001` here too so the parallel worktree dev server (when
-# active) can hit the same backend without a separate config flip.
+# API auth gate. EVERY /api/* request needs a valid Supabase JWT (except a
+# small public health/cron tier); non-admins are limited to the API behind
+# the pages they can view (/companies, /earnings, /airs-portfolio). The
+# frontend's `apiFetch` helper auto-attaches the session JWT for every /api/
+# call, so this is invisible to logged-in users. See routers/_auth_middleware.
+# Registered BEFORE CORS on purpose — see the CORS note below.
+app.middleware("http")(_enforce_api_auth)
+
+# CORS — added AFTER the auth gate so it is the OUTERMOST middleware. Starlette
+# runs the last-added middleware outermost, so this guarantees that an auth
+# rejection (401/403/500) — which short-circuits with its own JSONResponse
+# before reaching the route — STILL carries `Access-Control-Allow-Origin`.
+# With CORS inner, those rejections shipped without the header and the browser
+# reported them as a CORS error ("No 'Access-Control-Allow-Origin' header")
+# instead of the real status. `:3001` is kept for the parallel-worktree dev
+# server.
 _cors_origins = [
     "http://localhost:3000",
     "http://localhost:3001",
@@ -68,13 +82,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# API auth gate. EVERY /api/* request needs a valid Supabase JWT (except a
-# small public health/cron tier); non-admins are limited to the API behind
-# the pages they can view (/companies, /earnings, /airs-portfolio). The
-# frontend's `apiFetch` helper auto-attaches the session JWT for every /api/
-# call, so this is invisible to logged-in users. See routers/_auth_middleware.
-app.middleware("http")(_enforce_api_auth)
 
 # Domain routers. Order doesn't affect runtime behavior; kept grouped by
 # concern for readability when scanning the mount list.

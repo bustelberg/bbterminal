@@ -68,10 +68,13 @@ export function strategyChips(
  * ramps, so qualitative per-property hues use HSL inline — same pattern as
  * `company/styles.ts::universeChipStyle` + `lib/sectorColors`). */
 export function chipStyle(hue: number): CSSProperties {
+  // Light-theme pill: a bright pastel fill, a vivid border, and deep saturated
+  // text — high contrast + vibrant on the white "Paper" surfaces. (Was a dark
+  // translucent fill + light text tuned for the old dark theme.)
   return {
-    backgroundColor: `hsl(${hue} 60% 20% / 0.5)`,
-    borderColor: `hsl(${hue} 55% 50% / 0.45)`,
-    color: `hsl(${hue} 75% 80%)`,
+    backgroundColor: `hsl(${hue} 95% 93%)`,
+    borderColor: `hsl(${hue} 75% 55%)`,
+    color: `hsl(${hue} 78% 30%)`,
   };
 }
 
