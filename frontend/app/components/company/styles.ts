@@ -10,8 +10,7 @@ export const inputAddCls = 'w-full bg-page border border-pos-800/50 rounded-lg p
 export const thCls = 'px-3 py-3 text-left text-xs font-medium cursor-pointer hover:text-fg-strong transition-colors';
 
 // Deterministic hue per universe label so the same universe always gets the
-// same chip colour across renders. Cheap string hash → 0-359 hue, with fixed
-// saturation + lightness tuned for legibility on the dark theme.
+// same chip colour across renders. Cheap string hash → 0-359 hue.
 function hashHue(label: string): number {
   let h = 0;
   for (let i = 0; i < label.length; i++) h = (h * 31 + label.charCodeAt(i)) | 0;
@@ -20,9 +19,13 @@ function hashHue(label: string): number {
 
 export function universeChipStyle(label: string): CSSProperties {
   const hue = hashHue(label);
+  // Light-theme pill: bright pastel fill, vivid border, deep saturated text —
+  // high contrast + vibrant on the white surfaces (matches the /schedule
+  // strategy chips). Was a dark translucent fill + light text for the old
+  // dark theme.
   return {
-    backgroundColor: `hsl(${hue} 70% 22% / 0.55)`,
-    borderColor: `hsl(${hue} 70% 45% / 0.55)`,
-    color: `hsl(${hue} 80% 78%)`,
+    backgroundColor: `hsl(${hue} 95% 93%)`,
+    borderColor: `hsl(${hue} 75% 55%)`,
+    color: `hsl(${hue} 78% 30%)`,
   };
 }
