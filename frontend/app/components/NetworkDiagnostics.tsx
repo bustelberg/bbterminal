@@ -89,6 +89,8 @@ export default function NetworkDiagnostics() {
   }, [run]);
 
   const circuit = data?.gurufocus_circuit;
+  const guru = data?.sources.find((s) => s.name === 'GuruFocus API');
+  const guruBlocked = guru?.verdict === 'blocked';
   const grouped = (['critical', 'important', 'optional'] as const).map((cat) => ({
     cat,
     rows: (data?.sources ?? []).filter((s) => s.category === cat),
@@ -138,30 +140,36 @@ export default function NetworkDiagnostics() {
         </div>
 
         <div className="bg-card rounded-xl border border-neutral-800/40 p-5">
-          <div className="text-xs uppercase tracking-wider text-fg-subtle mb-1">GuruFocus Cloudflare status</div>
-          {circuit ? (
-            circuit.circuit_open ? (
-              <>
-                <div className="text-2xl font-semibold text-neg-300">
-                  Blocked · retry in {circuit.circuit_seconds_remaining}s
-                </div>
-                <div className="text-xs text-fg-muted mt-1">
-                  The circuit breaker is OPEN — too many Cloudflare blocks, so calls are suppressed.{' '}
-                  {circuit.proxy_configured
-                    ? 'A proxy is configured.'
-                    : 'Set GURUFOCUS_PROXY to a residential proxy to bypass.'}
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="text-2xl font-semibold text-pos-300">Clear</div>
-                <div className="text-xs text-fg-muted mt-1">
-                  No active block. Impersonating <span className="font-mono">{circuit.preferred_target ?? '—'}</span>
-                  {circuit.proxy_configured ? ' through a proxy.' : ' directly.'}
+          <div className="text-xs uppercase tracking-wider text-fg-subtle mb-1">GuruFocus reachability</div>
+          {circuit && guru ? (
+            <>
+              {/* Headline = the LIVE probe verdict (the source of truth), not
+                  just the breaker state. The breaker only trips after 5
+                  consecutive blocks, so it can read "not tripped" while every
+                  individual call is still being blocked — that mismatch is
+                  what made the old card misleading. */}
+              {guruBlocked ? (
+                <div className="text-2xl font-semibold text-neg-300">Blocked by Cloudflare</div>
+              ) : guru.verdict === 'ok' ? (
+                <div className="text-2xl font-semibold text-pos-300">Reachable</div>
+              ) : (
+                <div className="text-2xl font-semibold text-warn-300">Degraded</div>
+              )}
+              <div className="text-xs text-fg-muted mt-1 space-y-1">
+                <div>
+                  Impersonating <span className="font-mono">{circuit.preferred_target ?? '—'}</span>
+                  {circuit.proxy_configured ? ' through a proxy.' : ' directly (no proxy).'}
                   {!circuit.curl_cffi_available && ' ⚠ curl_cffi missing — prod calls will be blocked.'}
                 </div>
-              </>
-            )
+                <div>
+                  {circuit.circuit_open
+                    ? `Circuit breaker OPEN — calls suppressed for ${circuit.circuit_seconds_remaining}s.`
+                    : guruBlocked
+                      ? 'Circuit breaker not yet tripped (opens after 5 consecutive blocks), but live calls are being blocked right now.'
+                      : 'Circuit breaker closed.'}
+                </div>
+              </div>
+            </>
           ) : (
             <div className="text-2xl font-semibold text-fg-faint">{loading ? '…' : '—'}</div>
           )}
