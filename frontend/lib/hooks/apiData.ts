@@ -40,6 +40,10 @@ export type CompanyRow = {
   company_name?: string | null;
   gurufocus_ticker?: string | null;
   gurufocus_exchange?: string | null;
+  /** ISIN (International Securities Identification Number). Backfilled from
+   * GuruFocus (`summary.company_data.isin`) + the Leonteq scrape. Nullable —
+   * out-of-scope regions (AU/NZ/Russia/…) have no GuruFocus ISIN. */
+  isin?: string | null;
   country?: string | null;
   delisted_at?: string | null;
   gurufocus_lookup_failed_at?: string | null;
@@ -232,6 +236,24 @@ export function useCompanyExchangeMap(): Map<number, string> {
     for (const c of data ?? []) {
       const exch = (c.gurufocus_exchange ?? '').trim();
       if (exch) m.set(c.company_id, exch);
+    }
+    return m;
+  }, [data]);
+}
+
+/**
+ * Derived hook: returns a `Map<company_id, isin>` built from the shared
+ * `/api/companies` fetch. Used by the holdings table to show an ISIN
+ * column without each holding row having to carry the field. Companies
+ * with no ISIN (out-of-scope regions) are simply absent from the map.
+ */
+export function useCompanyIsinMap(): Map<number, string> {
+  const { data } = useCompanies();
+  return useMemo(() => {
+    const m = new Map<number, string>();
+    for (const c of data ?? []) {
+      const isin = (c.isin ?? '').trim();
+      if (isin) m.set(c.company_id, isin);
     }
     return m;
   }, [data]);

@@ -3,7 +3,7 @@
 import { useMemo } from 'react';
 
 import type { BacktestResult, UniverseEntry } from '../../../lib/stores/momentum';
-import { useCompanyExchangeMap } from '../../../lib/hooks/apiData';
+import { useCompanyExchangeMap, useCompanyIsinMap } from '../../../lib/hooks/apiData';
 import DailyReturnsHistograms from './DailyReturnsHistograms';
 import MonthlyReturnsHeatmap from './MonthlyReturnsHeatmap';
 import EquityCurveCard from './EquityCurveCard';
@@ -61,6 +61,7 @@ export default function BacktestResultView({
   // every exchange cell would be blank except HKSE-inferred tickers. Same
   // two-tier construction as MomentumBacktester.
   const companyExchangeMap = useCompanyExchangeMap();
+  const isinByCompany = useCompanyIsinMap();
 
   // Per-company exchange map — same construction as MomentumBacktester:
   // the universe payload bundled with the result (skipping junk strings),
@@ -122,6 +123,7 @@ export default function BacktestResultView({
         result={result}
         categories={categories}
         exchangeByCompany={exchangeByCompany}
+        isinByCompany={isinByCompany}
         scoringConfig={resolvedScoring}
         markerDate={markerDate}
         defaultCollapsed={defaultCollapsed}

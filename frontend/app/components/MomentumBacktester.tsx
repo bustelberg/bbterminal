@@ -10,6 +10,7 @@ import ProgressTimeline from './ProgressTimeline';
 import NotificationsPanel from './momentum/NotificationsPanel';
 import {
   useCompanyExchangeMap,
+  useCompanyIsinMap,
   useUniverseTemplates,
   useStaticUniverses,
   type UniverseTemplate,
@@ -184,6 +185,7 @@ export default function MomentumBacktester() {
   // URL helper still resolves correctly via the bare-ticker fallback).
   // Shared cached fetch (deduped with SnapshotHoldings when both render).
   const companyExchangeMap = useCompanyExchangeMap();
+  const isinByCompany = useCompanyIsinMap();
 
   const exchangeByCompany = useMemo(() => {
     const m = new Map<number, string>();
@@ -684,6 +686,7 @@ export default function MomentumBacktester() {
               result={displayResult}
               categories={categories}
               exchangeByCompany={exchangeByCompany}
+              isinByCompany={isinByCompany}
               scoringConfig={scoringConfig}
             />
 

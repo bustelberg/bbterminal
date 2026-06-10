@@ -18,7 +18,7 @@
  *     so the semantics match.
  */
 
-import type { Cadence, MetricRow } from './types';
+import { MC, type Cadence, type MetricRow } from './types';
 import { chartTheme } from '../../../lib/chartTheme';
 
 // ─── Metric extractors ─────────────────────────────────────────────
@@ -178,6 +178,29 @@ export function annualSeries(metrics: MetricRow[], code: string): { date: string
     if (!byYear[yr] || p.date > byYear[yr].date) byYear[yr] = p;
   }
   return Object.values(byYear).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** Quarterly Interest Coverage series, mirroring `SnapshotStats`'
+ * point computation (`useSnapshot.interestCoverage`): per reporting
+ * quarter, Operating Income ÷ |Interest Expense| matched by date.
+ * Always quarterly so the chart's latest point matches the snapshot
+ * stat rather than the lagging fiscal-year ratio. Falls back to
+ * GuruFocus's pre-computed quarterly Interest Coverage twin, then to
+ * the annual series, when the raw Income-Statement components aren't
+ * both populated. */
+export function interestCoverageQuarterlySeries(metrics: MetricRow[]): { date: string; value: number }[] {
+  const q = (annualCode: string) => 'quarterly__' + annualCode.slice('annuals__'.length);
+  const op = timeSeries(metrics, q(MC.OPERATING_INCOME));
+  const ieByDate = new Map(timeSeries(metrics, q(MC.INTEREST_EXPENSE)).map((p) => [p.date, p.value]));
+  const computed: { date: string; value: number }[] = [];
+  for (const p of op) {
+    const ie = ieByDate.get(p.date);
+    if (ie != null && Math.abs(ie) > 0) computed.push({ date: p.date, value: p.value / Math.abs(ie) });
+  }
+  if (computed.length > 0) return computed; // already sorted (op is sorted ascending)
+  const gfQuarterly = timeSeries(metrics, q(MC.INTEREST_COVERAGE));
+  if (gfQuarterly.length > 0) return gfQuarterly;
+  return annualSeries(metrics, MC.INTEREST_COVERAGE);
 }
 
 /** Rolling trailing-twelve-months (TTM) sum over a quarterly flow series.

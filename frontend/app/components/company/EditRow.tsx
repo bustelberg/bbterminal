@@ -38,6 +38,7 @@ export default function EditRow({
         <input list="edit-exchange" value={exchange} onChange={(e) => setExchange(e.target.value)} className={inputCls} />
         <datalist id="edit-exchange">{exchangeOptions.map((o) => <option key={o} value={o} />)}</datalist>
       </td>
+      <td className="px-3 py-2 text-fg-muted font-mono text-xs">{company.isin ?? '—'}</td>
       <td className="px-3 py-2 text-fg-muted">{company.country ?? '—'}</td>
       <td className="px-3 py-2 text-fg-faint text-xs">—</td>
       <td className="px-3 py-2">

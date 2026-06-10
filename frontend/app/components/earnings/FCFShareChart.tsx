@@ -50,6 +50,9 @@ export default function FCFShareChart({ metrics, metricsB, labelA, labelB, loadi
   }, [seriesA, seriesB]);
 
   const hasB = !!metricsB;
+  // Series tag is shown only in comparison mode (generic A/B, never the
+  // company ticker). In single-company mode the pills read just "Latest".
+  const aTag = hasB ? ` ${labelA ?? 'A'}` : '';
   const hasNegative = merged.some((d) => (d.a != null && d.a < 0) || (d.b != null && d.b < 0));
   const latestA = seriesA.length > 0 ? seriesA[seriesA.length - 1].value : null;
   const latestB = seriesB.length > 0 ? seriesB[seriesB.length - 1].value : null;
@@ -65,11 +68,11 @@ export default function FCFShareChart({ metrics, metricsB, labelA, labelB, loadi
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1 mb-2">
         <div className="flex items-center gap-1">
-          <div className="text-[11px]" style={{ color: COLOR_A }}>CAGR {labelA ?? 'A'} (positive only)</div>
+          <div className="text-[11px]" style={{ color: COLOR_A }}>CAGR{aTag} (positive only)</div>
           <div className="font-mono text-xs" style={{ color: COLOR_A }}>{fmtPct(cagrA)}</div>
         </div>
         <div className="flex items-center gap-1">
-          <div className="text-fg-subtle text-[11px]">Latest {labelA ?? 'A'}</div>
+          <div className="text-fg-subtle text-[11px]">Latest{aTag}</div>
           <div className="font-mono text-xs" style={{ color: COLOR_A }}>{fmtNum(latestA, 2)}</div>
         </div>
         {hasB && seriesB.length > 0 && (

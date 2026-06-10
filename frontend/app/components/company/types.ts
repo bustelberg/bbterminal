@@ -9,6 +9,9 @@ export type Company = {
   company_name: string | null;
   gurufocus_ticker: string;
   gurufocus_exchange: string;
+  /** ISIN — backfilled from GuruFocus + Leonteq. Null for out-of-scope
+   * regions (AU/NZ/Russia/…) that GuruFocus doesn't cover. */
+  isin?: string | null;
   country: string | null;
   universes: string[];
   /** ISO timestamp set by the price phase when GuruFocus returns "delisted"
@@ -33,7 +36,7 @@ export type Company = {
   out_of_scope_reason?: string | null;
 };
 
-export type SortField = 'company_name' | 'gurufocus_ticker' | 'gurufocus_exchange' | 'country';
+export type SortField = 'company_name' | 'gurufocus_ticker' | 'gurufocus_exchange' | 'isin' | 'country';
 export type SortDir = 'asc' | 'desc';
 
 /** A possible-duplicate match returned by `/api/companies/check-duplicates`,

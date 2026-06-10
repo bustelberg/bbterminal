@@ -77,6 +77,7 @@ export default function CompanyRow({
         </a>
       </td>
       <td className="px-3 py-2.5 text-fg-muted">{c.gurufocus_exchange}</td>
+      <td className="px-3 py-2.5 text-fg-muted font-mono text-xs">{c.isin ?? '—'}</td>
       <td className="px-3 py-2.5 text-fg-muted">{c.country ?? '—'}</td>
       <td className="px-3 py-2.5">
         {(c.universes ?? []).length === 0 ? (

@@ -42,6 +42,10 @@ type Props = {
   result: BacktestResult;
   categories: string[];
   exchangeByCompany: Map<number, string>;
+  /** company_id → ISIN, from the shared /api/companies fetch. Optional —
+   * absent for companies with no ISIN (out-of-scope regions) and for any
+   * caller that doesn't supply the map (column shows "—"). */
+  isinByCompany?: Map<number, string>;
   scoringConfig: ScoringConfig;
   /** Optional "go-live" date (YYYY-MM-DD). The one period whose window
    * contains it is split into two rows — the part of the period before
@@ -59,7 +63,7 @@ type Props = {
  * that changes — new run, loaded saved run, etc. — the table resets its
  * expansion automatically.
  */
-function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scoringConfig, markerDate, defaultCollapsed = false }: Props) {
+function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isinByCompany, scoringConfig, markerDate, defaultCollapsed = false }: Props) {
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
   // company_id whose timeline modal is open, or null for closed.
   const [timelineCompanyId, setTimelineCompanyId] = useState<number | null>(null);
@@ -272,6 +276,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
     side: string;
     ticker: string;
     exchange: string;
+    isin: string;
     company_name: string;
     sector: string;
     category_scores: Record<string, number | null>;
@@ -295,6 +300,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
           side: h.side ?? 'long',
           ticker: h.ticker ?? '',
           exchange: exchangeByCompany.get(h.company_id) ?? '',
+          isin: isinByCompany?.get(h.company_id) ?? '',
           company_name: h.company_name ?? '',
           sector: h.sector ?? '',
           category_scores: h.category_scores ?? {},
@@ -311,7 +317,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
       }
     }
     return out;
-  }, [result, exchangeByCompany]);
+  }, [result, exchangeByCompany, isinByCompany]);
 
   // Category-score columns are dynamic (price/volume usually; some
   // strategies add more). Spread them between the fixed Score and
@@ -322,6 +328,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
       { key: 'side', header: 'Side', accessor: (r) => r.side },
       { key: 'ticker', header: 'Ticker', accessor: (r) => r.ticker },
       { key: 'exchange', header: 'Exchange', accessor: (r) => r.exchange },
+      { key: 'isin', header: 'ISIN', accessor: (r) => r.isin },
       { key: 'company_name', header: 'Company', accessor: (r) => r.company_name },
       { key: 'sector', header: 'Sector', accessor: (r) => r.sector },
     ];
@@ -407,12 +414,25 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
             {displayRows.map(({ row: r, key: rowKey, label: rowLabel, turnoverDate: rowTurnover }) => (
               <Fragment key={rowKey}>
                 <tr
-                  className={`border-b border-neutral-800/20 hover:bg-overlay/[0.02] cursor-pointer transition-colors ${rowLabel ? 'border-l-2 border-l-neg-500/60' : ''}`}
+                  className={`group border-b border-neutral-800/20 hover:bg-overlay/[0.02] cursor-pointer transition-colors ${rowLabel ? 'border-l-2 border-l-neg-500/60' : ''}`}
                   onClick={() => setExpandedMonth(expandedMonth === rowKey ? null : rowKey)}
                 >
                   <td className="px-5 py-2.5 text-fg-soft font-mono">
                     <span className="text-fg-faint mr-2">{expandedMonth === rowKey ? '▾' : '▸'}</span>
                     {rowLabel ? <span className="text-neg-300/90 text-xs">{rowLabel}</span> : r.date}
+                    {r.holdings.length > 0 && (
+                      // Per-row download — fades in on hover so the user can
+                      // export a single period's holdings without expanding it.
+                      // Stops propagation internally so it won't toggle the row.
+                      <span className="ml-2 inline-block align-middle opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                        <TableDownloadButton
+                          rows={flatHoldings.filter((fh) => fh.period === r.date)}
+                          columns={exportColumns}
+                          filename={`portfolio_holdings_${r.date}`}
+                          title={`Download ${r.holdings.length} holdings for ${r.date} as CSV / XLSX`}
+                        />
+                      </span>
+                    )}
                     {r.is_open && (
                       <span
                         className="ml-2 inline-flex items-center text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-warn-500/15 text-warn-300 border border-warn-500/30"
@@ -498,6 +518,9 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                               Exchange<CellInfoTip>GuruFocus exchange code (e.g. NYSE, NASDAQ, HKSE, XTER). US-listed names use the bare ticker on GuruFocus; everything else is referenced as `EXCHANGE:TICKER`.</CellInfoTip>
                             </th>
                             <th className="text-left py-1 font-medium">
+                              ISIN<CellInfoTip>International Securities Identification Number for the issuer. Sourced from GuruFocus + Leonteq; blank for out-of-scope regions with no GuruFocus coverage.</CellInfoTip>
+                            </th>
+                            <th className="text-left py-1 font-medium">
                               Company<CellInfoTip>Issuer name. Click to open in GuruFocus.</CellInfoTip>
                             </th>
                             <th className="text-left py-1 font-medium">
@@ -569,6 +592,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                             .map((h) => {
                               const exchRaw = exchangeByCompany.get(h.company_id) ?? '';
                               const exch = displayExchange(exchRaw, h.ticker);
+                              const isin = isinByCompany?.get(h.company_id) ?? '';
                               const href = guruFocusUrl(h.ticker, exchRaw);
                               const isShort = h.side === 'short';
                               return (
@@ -618,6 +642,9 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, scor
                                     title={exch ? (EXCHANGE_NAMES[exch.toUpperCase()] ?? exch) : ''}
                                   >
                                     {exch || '—'}
+                                  </td>
+                                  <td className="py-1.5 text-fg-muted font-mono whitespace-nowrap">
+                                    {isin || '—'}
                                   </td>
                                   <td className="py-1.5 truncate max-w-[200px]">
                                     <a

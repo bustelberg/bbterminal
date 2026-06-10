@@ -185,6 +185,10 @@ export default function RelativeGrowthChart({ metrics, metricsB, labelA, labelB,
 
   const aLab = labelA ?? 'A';
   const bLab = labelB ?? 'B';
+  // Series prefix shown only in comparison mode (generic A/B, never the
+  // company ticker). In single-company mode the pills read just "Price",
+  // "OE Act", "OE Est".
+  const aPre = hasB ? `${aLab} ` : '';
 
   return (
     <>
@@ -197,15 +201,15 @@ export default function RelativeGrowthChart({ metrics, metricsB, labelA, labelB,
       </div>
       <div className="flex flex-wrap gap-x-5 gap-y-1 mb-2">
         <div className="flex items-center gap-1.5">
-          <div className="text-accent-400 text-xs">{aLab} Price</div>
+          <div className="text-accent-400 text-xs">{aPre}Price</div>
           <div className="text-accent-400 font-mono text-sm font-semibold">{fmtPct(combined.cagrsA.price ?? null)}</div>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="text-pos-400 text-xs">{aLab} OE Act</div>
+          <div className="text-pos-400 text-xs">{aPre}OE Act</div>
           <div className="text-pos-400 font-mono text-sm font-semibold">{fmtPct(combined.cagrsA.oe_act ?? null)}</div>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="text-neg-400 text-xs">{aLab} OE Est</div>
+          <div className="text-neg-400 text-xs">{aPre}OE Est</div>
           <div className="text-neg-400 font-mono text-sm font-semibold">{fmtPct(combined.cagrsA.oe_est ?? null)}</div>
         </div>
         {hasB && combined.cagrsB && (
@@ -258,12 +262,12 @@ export default function RelativeGrowthChart({ metrics, metricsB, labelA, labelB,
             labelFormatter={(v) => new Date(Number(v)).toISOString().slice(0, 10)}
             formatter={(v, name) => {
               const isB = String(name).endsWith('_b');
-              const company = isB ? bLab : aLab;
+              const companyPre = isB ? `${bLab} ` : aPre;
               const which = String(name).replace(/_[ab]$/, '');
-              const lab = which === 'price_a' || which === 'price' ? `${company} Price`
-                : which === 'oe_actual_a' || which === 'oe_actual' ? `${company} OE Actual`
-                : which === 'oe_est_a' || which === 'oe_est' ? `${company} OE Estimate`
-                : `${company} ${which}`;
+              const lab = which === 'price_a' || which === 'price' ? `${companyPre}Price`
+                : which === 'oe_actual_a' || which === 'oe_actual' ? `${companyPre}OE Actual`
+                : which === 'oe_est_a' || which === 'oe_est' ? `${companyPre}OE Estimate`
+                : `${companyPre}${which}`;
               return [Number(v).toFixed(1), lab];
             }}
           />

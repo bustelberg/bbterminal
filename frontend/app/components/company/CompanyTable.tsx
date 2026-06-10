@@ -86,6 +86,7 @@ export default function CompanyTable({
               </th>
               <th className={`${thCls} w-24`} onClick={() => onSort('gurufocus_ticker')}>Ticker{sortIcon(sortField, sortDir, 'gurufocus_ticker')}</th>
               <th className={`${thCls} w-24`} onClick={() => onSort('gurufocus_exchange')}>Exchange{sortIcon(sortField, sortDir, 'gurufocus_exchange')}</th>
+              <th className={`${thCls} w-36`} onClick={() => onSort('isin')}>ISIN{sortIcon(sortField, sortDir, 'isin')}</th>
               <th className={`${thCls} w-32`} onClick={() => onSort('country')}>Country{sortIcon(sortField, sortDir, 'country')}</th>
               <th className="px-3 py-3 text-left text-xs font-medium">Memberships</th>
               <th className="px-3 py-3 text-left text-xs font-medium w-28">Actions</th>
@@ -101,7 +102,7 @@ export default function CompanyTable({
             )}
             {loading && (
               <tr>
-                <td colSpan={7} className="py-14 text-center">
+                <td colSpan={8} className="py-14 text-center">
                   <span className="inline-flex items-center gap-2.5 text-fg-subtle text-sm">
                     <Spinner size={14} />
                     <span>Loading companies…</span>

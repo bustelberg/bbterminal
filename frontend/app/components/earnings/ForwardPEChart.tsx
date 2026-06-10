@@ -65,6 +65,9 @@ export default function ForwardPEChart({
   const latestA = dataA.length > 0 ? dataA[dataA.length - 1] : null;
   const latestB = dataB.length > 0 ? dataB[dataB.length - 1] : null;
   const hasB = !!metricsB;
+  // Series tag is shown only in comparison mode (generic A/B, never the
+  // company ticker). In single-company mode the pills read just "Current".
+  const aTag = hasB ? ` ${labelA ?? 'A'}` : '';
 
   if (dataA.length === 0 && dataB.length === 0) {
     return <div className="text-fg-subtle text-sm py-8 text-center">No Forward P/E data. Refresh to load.</div>;
@@ -75,7 +78,7 @@ export default function ForwardPEChart({
       <div className="text-fg-subtle text-xs mb-2 flex items-center gap-2 flex-wrap">
         {latestA && (
           <>
-            <span>Current {labelA ?? 'A'}:</span>
+            <span>Current{aTag}:</span>
             <span className="font-mono" style={{ color: COLOR_A }}>{latestA.value.toFixed(1)}x</span>
             <span className="text-fg-faint font-mono">({latestA.date})</span>
           </>
@@ -96,7 +99,7 @@ export default function ForwardPEChart({
           </>
         )}
         <span className="text-fg-dim">·</span>
-        <span>Period avg {hasB ? (labelA ?? 'A') : ''}:</span>
+        <span>Period avg{aTag}:</span>
         <span className="text-neg-400 font-mono">{meanA.toFixed(1)}x</span>
         {/* Period avg B is shown in-line only when comparison is active;
             we deliberately skip a second reference line on the chart

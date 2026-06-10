@@ -5,19 +5,22 @@
   --font-mono: var(--font-geist-mono);
 }
 
-/* ── Design tokens — "Azure Blanc" (light) ──────────────────────────────────
+/* ── Design tokens — "Paper" (light, calm) ──────────────────────────────────
    The app's single, fixed theme. The whole palette + treatment lives here;
    every component routes through these tokens (no inline hex / raw Tailwind
    colour names anywhere). To re-skin, edit values here — nothing else.
 
-   Azure Blanc = porcelain-white surfaces, deep-navy ink, a sky-blue accent,
-   over a faint azure gradient-mesh background. Chrome (sidebar + floating
-   menus) is frosted white; data surfaces (cards, tables, inputs) are solid
-   white so dense numbers stay crisp. The treatment (frost, mesh, glow, card
-   depth) is the small set of rules below the token block.
+   Paper = white is the dominant colour. Data surfaces are pure white; the page
+   sits on a barely-there cool off-white so white cards lift off it without
+   heavy borders. One restrained steel-blue accent carries every interactive
+   cue (buttons, links, active nav, focus rings); status colours are muted.
+   Contrast is spent where it earns its keep — dark ink for headings/values on
+   white — and kept quiet everywhere else: hairline borders, near-flat depth,
+   no gradients/glow/mesh. The treatment (frost, hairline, soft shadow) is the
+   small set of rules below the token block.
 
    NOTE on polarity: this is a LIGHT theme. Foreground tokens run dark→light
-   (strong = darkest ink). Neutral tokens are mid-slate RGBs — components use
+   (strong = darkest ink). Neutral tokens are cool-gray RGBs — components use
    them at low alpha (`border-neutral-800/40`, `divide-…/20`), so the RGB needs
    to be dark enough that a soft border still reads on white. The accent stops
    used as TEXT (accent-400) are darker than the brand (accent-500) for
@@ -29,67 +32,67 @@
   /* ── Surfaces ──
      Chrome (sidebar, popover) is translucent → frosted by the backdrop-blur
      rule below. Data surfaces (card/card-alt/elevated/inset) are solid. */
-  --color-page: #eef4fc;                       /* porcelain base, faint blue (azure mesh on body) */
-  --color-sidebar: rgba(255, 255, 255, 0.72);  /* frosted chrome — left nav rail */
-  --color-popover: rgba(255, 255, 255, 0.92);  /* frosted chrome — tooltips / menus */
-  --color-card: #ffffff;                       /* solid data panel / card */
-  --color-card-alt: #ecf3ff;                   /* solid, accent-tinted (derived universes) */
+  --color-page: #edf2fb;                       /* soft blue-tinted off-white — ambient colour; white cards pop */
+  --color-sidebar: rgba(255, 255, 255, 0.78);  /* frosted chrome — left nav rail */
+  --color-popover: rgba(255, 255, 255, 0.95);  /* frosted chrome — tooltips / menus */
+  --color-card: #ffffff;                       /* solid data panel / card (dominant white) */
+  --color-card-alt: #e7f0fc;                   /* solid, accent-tinted (derived universes) */
   --color-elevated: #ffffff;                   /* solid, raised */
-  --color-inset: #eaf3fd;                       /* solid, recessed (inputs) */
+  --color-inset: #eef3fa;                       /* solid, recessed (inputs) */
 
-  /* ── Accent (sky-blue brand) — buttons, active nav, links, rings.
-     400 = on-white TEXT/links (darker); 500 = brand; 600 = button fill. */
-  --color-accent-200: #c7e4fd;
-  --color-accent-300: #7ccbfa;
-  --color-accent-400: #0a6fb2;   /* on-white text / links — deeper for contrast */
-  --color-accent-500: #0e9fe0;   /* brand sky */
-  --color-accent-600: #0a64ad;   /* button fill (white text) */
-  --color-accent-900: #0a4377;
+  /* ── Accent (calm steel-blue) — buttons, active nav, links, rings.
+     400 = on-white TEXT/links (darker, AA); 500 = brand; 600 = button fill. */
+  --color-accent-200: #d4e6fb;
+  --color-accent-300: #98c0ee;
+  --color-accent-400: #1f5fa8;   /* on-white text / links — deeper for contrast (AA) */
+  --color-accent-500: #3b82c9;   /* brand blue — brighter, more colourful */
+  --color-accent-600: #2c6bb0;   /* button fill (white text) */
+  --color-accent-900: #1d3f6b;
 
-  /* ── Returns / status — tuned for legibility on white (text stops darker). ── */
-  --color-pos-300: #2eb673;     /* positive returns / success */
-  --color-pos-400: #128a4f;
-  --color-pos-500: #0f9d58;
-  --color-pos-600: #0c7d46;
-  --color-pos-800: #0a5e35;
-  --color-neg-100: #fdeceb;     /* negative returns / errors */
-  --color-neg-200: #f7cdcb;
-  --color-neg-300: #d9534d;
-  --color-neg-400: #d23f3f;
-  --color-neg-500: #cf3a35;
-  --color-neg-600: #b22f2a;
-  --color-warn-100: #fbf2d6;    /* light tint (warning backgrounds) */
-  --color-warn-200: #946510;    /* warning body text — dark amber for on-white contrast */
-  --color-warn-300: #855310;    /* warning headings / badges */
-  --color-warn-400: #6e440c;    /* warning labels / icons */
-  --color-warn-500: #b07a0c;    /* tint + border base */
-  --color-warn-600: #946410;
-  --color-warn-800: #6b490c;
+  /* ── Returns / status — muted, tuned for legibility on white (text stops darker). ── */
+  --color-pos-300: #56c191;     /* positive returns / success */
+  --color-pos-400: #1f7d4f;
+  --color-pos-500: #2ca86a;
+  --color-pos-600: #1f7548;
+  --color-pos-800: #155234;
+  --color-neg-100: #fdeae7;     /* negative returns / errors */
+  --color-neg-200: #f6cbc7;
+  --color-neg-300: #e5867f;
+  --color-neg-400: #b5352f;
+  --color-neg-500: #d8443d;
+  --color-neg-600: #9c302b;
+  --color-warn-100: #f7eed7;    /* light tint (warning backgrounds) */
+  --color-warn-200: #855410;    /* warning body text — dark amber for on-white contrast */
+  --color-warn-300: #774a0e;    /* warning headings / badges */
+  --color-warn-400: #5f3c0b;    /* warning labels / icons */
+  --color-warn-500: #b5841f;    /* tint + border base */
+  --color-warn-600: #8a5f15;
+  --color-warn-800: #5e3f0d;
 
-  /* ── Foreground (text / icon) ramp — deep-navy ink, darkest→faintest.
+  /* ── Foreground (text / icon) ramp — cool charcoal ink, darkest→faintest.
      Use `text-fg`, `text-fg-muted`, `text-fg-subtle`, … */
-  --color-fg-strong: #081325;   /* emphasized headings / active values */
-  --color-fg-bright: #0c1830;   /* near-strong */
-  --color-fg:        #18253e;   /* primary body text */
-  --color-fg-soft:   #344160;   /* dimmed body / sub-headings */
-  --color-fg-muted:  #46546c;   /* labels / secondary */
-  --color-fg-subtle: #5e6a84;   /* captions / placeholders */
-  --color-fg-faint:  #7c8aa1;   /* hints */
-  --color-fg-dim:    #9aa6bd;   /* faintest text */
+  --color-fg-strong: #11161d;   /* emphasized headings / active values */
+  --color-fg-bright: #1a212b;   /* near-strong */
+  --color-fg:        #283039;   /* primary body text */
+  --color-fg-soft:   #3f4954;   /* dimmed body / sub-headings */
+  --color-fg-muted:  #525c67;   /* labels / secondary */
+  --color-fg-subtle: #6c757f;   /* captions / placeholders */
+  --color-fg-faint:  #8a929b;   /* hints */
+  --color-fg-dim:    #a7adb6;   /* faintest text */
 
-  /* ── Neutral ramp — borders / dividers / controls (mid-slate-blue RGBs; used
-     at low alpha so card edges stay soft on white). 700 is used solid (inputs)
-     so it's lighter; 800 is used at ~/40 so it's a touch darker to still read. */
-  --color-neutral-500: #475569;
-  --color-neutral-600: #64748b;
-  --color-neutral-700: #93a3bd;
-  --color-neutral-800: #7888a4;
-  --color-neutral-900: #98a7c0;
-  --color-neutral-950: #bcc6d8;
+  /* ── Neutral ramp — borders / dividers / controls (cool-gray RGBs; used at
+     low alpha so edges stay soft on white). 700 is used solid (inputs) so it's
+     light; 800 is used at ~/40 so it's darker to still read. */
+  --color-neutral-500: #64748b;
+  --color-neutral-600: #828c9b;
+  --color-neutral-700: #c4ccd6;
+  --color-neutral-800: #99a3b1;
+  --color-neutral-900: #aab3bf;
+  --color-neutral-950: #ced4dc;
 
-  /* Hover/active wash (navy ink at low alpha → darkens on white) + modal scrim. */
-  --color-overlay: #0b1730;
-  --color-scrim:   #0a1424;
+  /* Hover/active wash (charcoal ink at low alpha → darkens on white) + modal scrim. */
+  --color-overlay: #131922;
+  --color-scrim:   #0c1118;
 }
 
 /* ── Glass treatment ────────────────────────────────────────────────────────
@@ -111,8 +114,12 @@
    surface utility classes so no component markup changes. The transparent
    border overrides any per-component `border-neutral-*` colour. */
 :root {
-  --gradient-border: linear-gradient(135deg, #5cc6fb 0%, #2f7df0 50%, #0e9fe0 100%);
-  --card-shadow: 0 1px 2px rgba(20, 32, 80, 0.05), 0 14px 34px -18px rgba(20, 44, 120, 0.20);
+  /* Quiet hairline (was a rainbow gradient). A near-uniform cool gray with a
+     hair of vertical shading gives card/control edges presence without colour
+     — the calm look. Every surface/divider/scrollbar that referenced this var
+     now reads as one soft hairline. */
+  --gradient-border: linear-gradient(180deg, #e9ecf1, #e0e4ea);
+  --card-shadow: 0 1px 2px rgba(17, 24, 39, 0.04), 0 10px 26px -18px rgba(17, 24, 39, 0.10);
 }
 
 /* `:not(table parts)` so the treatment doesn't hit sticky `<thead class=bg-card>`
@@ -176,17 +183,12 @@
   border-image-slice: 1;
 }
 
-/* Accent buttons: a blue gradient fill + azure glow for more presence, and
-   white text (on a light theme they'd otherwise inherit the dark body ink). */
+/* Accent buttons: flat calm fill + white text (on a light theme they'd
+   otherwise inherit the dark body ink). No glow — depth is a whisper shadow;
+   hover lightening comes from the utility's own `hover:bg-accent-500`. */
 :is(.bg-accent-600, .bg-accent-500) {
-  background-image: linear-gradient(135deg, var(--color-accent-500), var(--color-accent-600));
-  box-shadow: 0 6px 18px -7px rgba(14, 159, 224, 0.55);
   color: #ffffff;
-}
-/* The gradient fill masks the `hover:bg-accent-500` lighten, so restore hover
-   feedback with a brightness bump. */
-:is(.bg-accent-600, .bg-accent-500):hover {
-  filter: brightness(1.07);
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.08);
 }
 
 /* ── Snappy hover, site-wide ─────────────────────────────────────────────────
@@ -204,13 +206,14 @@
   transition-duration: 0s;
 }
 
-/* Faint azure gradient mesh painted behind everything (fixed so it doesn't
-   scroll) — soft sky-blue glows on the porcelain base. */
+/* A gentle two-tone ambient wash behind everything (fixed so it doesn't
+   scroll) — a soft blue glow top-right + a faint teal bottom-left at very low
+   alpha. Adds a hint of colour + depth on the blue-tinted page without the old
+   busy mesh; white cards still read as the dominant surface. */
 body {
   background-image:
-    radial-gradient(55rem 55rem at 12% -8%, rgba(14, 165, 233, 0.16), transparent 60%),
-    radial-gradient(48rem 48rem at 100% 0%, rgba(37, 99, 235, 0.12), transparent 55%),
-    radial-gradient(42rem 42rem at 55% 120%, rgba(99, 140, 230, 0.14), transparent 60%);
+    radial-gradient(60rem 60rem at 100% -10%, rgba(59, 130, 201, 0.10), transparent 62%),
+    radial-gradient(52rem 52rem at -5% 110%, rgba(45, 168, 150, 0.07), transparent 60%);
   background-attachment: fixed;
 }
 
@@ -228,11 +231,14 @@ body {
    build-time knobs, not a user-facing switch. `rounded-full` stays full. */
 :root[data-radius="sharp"] { --radius-sm: 1px; --radius-md: 2px; --radius-lg: 3px; --radius-xl: 4px; --radius-2xl: 6px; }
 :root[data-radius="round"] { --radius-sm: .375rem; --radius-md: .5rem; --radius-lg: .75rem; --radius-xl: 1rem; --radius-2xl: 1.25rem; }
-:root[data-density="compact"]     { font-size: 20px; }
-:root[data-density="comfortable"] { font-size: 24px; }
+:root[data-density="compact"]     { font-size: 13px; }
+:root[data-density="comfortable"] { font-size: 16px; }
 
 html {
-  font-size: 22px;
+  /* Base UI scale. Everything is rem/em-based off this, so this single value
+     behaves like a global browser-zoom level (17.5px ≈ the old 22px at ~80%
+     zoom). Single knob: nudge this value to rescale the whole UI. */
+  font-size: 17.5px;
   background: var(--color-page);
 }
 
@@ -254,10 +260,10 @@ body {
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  filter: brightness(1.12);
+  filter: brightness(0.92);
 }
-/* Firefox can't gradient a scrollbar — fall back to a solid brand blue. */
+/* Firefox can't gradient a scrollbar — fall back to a soft gray thumb. */
 html {
   scrollbar-width: thin;
-  scrollbar-color: #2f7df0 transparent;
+  scrollbar-color: #c4ccd6 transparent;
 }

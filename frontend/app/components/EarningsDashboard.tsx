@@ -21,6 +21,7 @@ import SnapshotStats from './earnings/SnapshotStats';
 import ForwardPEChart from './earnings/ForwardPEChart';
 import RelativeGrowthChart from './earnings/RelativeGrowthChart';
 import FCFShareChart from './earnings/FCFShareChart';
+import InterestCoverageChart from './earnings/InterestCoverageChart';
 import type { Company, MetricRow } from './earnings/types';
 import { expectedStaleSources } from './earnings/utils';
 
@@ -432,8 +433,6 @@ export default function EarningsDashboard() {
                   <ForwardPEChart
                     metrics={chartMetrics}
                     metricsB={compareCompany ? chartCompareMetrics : undefined}
-                    labelA={selected.gurufocus_ticker}
-                    labelB={compareCompany?.gurufocus_ticker}
                     loadingB={loadingCompareMetrics}
                   />
                 )}
@@ -449,8 +448,6 @@ export default function EarningsDashboard() {
                   <RelativeGrowthChart
                     metrics={chartMetrics}
                     metricsB={compareCompany ? chartCompareMetrics : undefined}
-                    labelA={selected.gurufocus_ticker}
-                    labelB={compareCompany?.gurufocus_ticker}
                     loadingB={loadingCompareMetrics}
                   />
                 )}
@@ -466,8 +463,21 @@ export default function EarningsDashboard() {
                   <FCFShareChart
                     metrics={chartMetrics}
                     metricsB={compareCompany ? chartCompareMetrics : undefined}
-                    labelA={selected.gurufocus_ticker}
-                    labelB={compareCompany?.gurufocus_ticker}
+                    loadingB={loadingCompareMetrics}
+                  />
+                )}
+              </div>
+
+              {/* Interest Coverage */}
+              <div className="bg-page rounded-lg border border-accent-500/20 p-4 space-y-2 overflow-hidden min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-fg-strong text-sm font-medium flex items-center gap-1.5"><span className="truncate">Interest Coverage</span> <InfoTip text="Operating Income ÷ Interest Expense — how many times over operating earnings cover interest payments. Higher is safer. Background bands: red below 3×, amber 3–7×, green 7×+." />{(refreshingSources.has('financials') || refreshingSourcesB.has('financials')) && <Spinner size={10} />}</h3>
+                  <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('financials')} />
+                </div>
+                {loadingMetrics ? <SectionLoader label="Interest Coverage" /> : (
+                  <InterestCoverageChart
+                    metrics={chartMetrics}
+                    metricsB={compareCompany ? chartCompareMetrics : undefined}
                     loadingB={loadingCompareMetrics}
                   />
                 )}

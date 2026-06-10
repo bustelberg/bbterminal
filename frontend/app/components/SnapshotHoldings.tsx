@@ -5,7 +5,7 @@ import MonthlyHoldingsTable from './momentum/MonthlyHoldingsTable';
 import LoadingDots from './LoadingDots';
 import type { BacktestResult, Holding, PeriodRecord, Summary } from '../../lib/stores/momentum';
 import { useApiData } from '../../lib/hooks/useApiData';
-import { useCompanyExchangeMap } from '../../lib/hooks/apiData';
+import { useCompanyExchangeMap, useCompanyIsinMap } from '../../lib/hooks/apiData';
 
 type SnapshotResponse = {
   snapshot_id: number;
@@ -30,6 +30,7 @@ export default function SnapshotHoldings({ snapshotId }: { snapshotId: number })
   // Company → exchange map shared via the cached `useCompanies` hook
   // so this page reuses MomentumBacktester's fetch when both render.
   const exchangeByCompany = useCompanyExchangeMap();
+  const isinByCompany = useCompanyIsinMap();
 
   const { result, categories, scoringConfig } = useMemo(() => {
     if (!snapshot) {
@@ -102,6 +103,7 @@ export default function SnapshotHoldings({ snapshotId }: { snapshotId: number })
       result={result}
       categories={categories}
       exchangeByCompany={exchangeByCompany}
+      isinByCompany={isinByCompany}
       scoringConfig={scoringConfig}
     />
   );

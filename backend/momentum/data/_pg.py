@@ -221,7 +221,7 @@ def load_companies_via_copy() -> list[dict] | None:
     if not _db_url():
         return None
     sql = (
-        "COPY (SELECT c.company_id, c.company_name, c.gurufocus_ticker, c.exchange_id, "
+        "COPY (SELECT c.company_id, c.company_name, c.gurufocus_ticker, c.exchange_id, c.isin, "
         f"{_TS_ISO_FMT % 'c.delisted_at'}, "
         f"{_TS_ISO_FMT % 'c.gurufocus_lookup_failed_at'}, "
         f"{_TS_ISO_FMT % 'c.out_of_scope_at'}, "
@@ -239,14 +239,15 @@ def load_companies_via_copy() -> list[dict] | None:
     out: list[dict] = []
     reader = _csv.reader(io.TextIOWrapper(buf, encoding="utf-8"))
     for row in reader:
-        if len(row) != 10:
+        if len(row) != 11:
             continue
-        cid, name, ticker, exch_id, delisted, gf_failed, oos_at, oos_reason, exch_code, country = row
+        cid, name, ticker, exch_id, isin, delisted, gf_failed, oos_at, oos_reason, exch_code, country = row
         out.append({
             "company_id": int(cid),
             "company_name": name or None,
             "gurufocus_ticker": ticker,
             "exchange_id": int(exch_id) if exch_id else None,
+            "isin": isin or None,
             "delisted_at": _match_postgrest_ts(delisted or None),
             "gurufocus_lookup_failed_at": _match_postgrest_ts(gf_failed or None),
             "out_of_scope_at": _match_postgrest_ts(oos_at or None),
