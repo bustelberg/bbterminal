@@ -15,12 +15,14 @@ export default function CompaniesToolbar({
   filters,
   exchangeOptions,
   countryOptions,
+  sectorOptions,
   universeOptions,
   rows,
 }: {
   filters: UseCompanyFiltersResult;
   exchangeOptions: string[];
   countryOptions: string[];
+  sectorOptions: string[];
   universeOptions: string[];
   rows: Company[];
 }) {
@@ -28,6 +30,7 @@ export default function CompaniesToolbar({
     search, setSearch,
     filterExchange, setFilterExchange,
     filterCountry, setFilterCountry,
+    filterSector, setFilterSector,
     filterUniverse, setFilterUniverse,
     filterDupes, setFilterDupes,
     clearFilters, hasActiveFilters,
@@ -39,6 +42,7 @@ export default function CompaniesToolbar({
     { key: 'gurufocus_ticker', header: 'Ticker', accessor: (c) => c.gurufocus_ticker },
     { key: 'gurufocus_exchange', header: 'Exchange', accessor: (c) => c.gurufocus_exchange },
     { key: 'country', header: 'Country', accessor: (c) => c.country ?? '' },
+    { key: 'sector', header: 'Sector', accessor: (c) => c.sector ?? '' },
     { key: 'universes', header: 'Memberships', accessor: (c) => (c.universes ?? []).join(' | ') },
     { key: 'gurufocus_url', header: 'GuruFocus URL', accessor: (c) => guruFocusUrl(c.gurufocus_ticker, c.gurufocus_exchange) },
   ], []);
@@ -63,6 +67,13 @@ export default function CompaniesToolbar({
         options={countryOptions}
         selected={filterCountry}
         onChange={setFilterCountry}
+        combineMode="OR"
+      />
+      <MultiSelectFilter
+        label="Sectors"
+        options={sectorOptions}
+        selected={filterSector}
+        onChange={setFilterSector}
         combineMode="OR"
       />
       <MultiSelectFilter

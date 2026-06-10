@@ -13,6 +13,14 @@ export type Company = {
    * regions (AU/NZ/Russia/…) that GuruFocus doesn't cover. */
   isin?: string | null;
   country: string | null;
+  /** Market-cap snapshot in EUR (absolute) + capture date — from the manual
+   * "Refresh market caps" button (GuruFocus, converted to EUR). */
+  market_cap_eur?: number | null;
+  market_cap_date?: string | null;
+  /** Latest known sector (from universe_membership), merged in via the slower
+   * /api/companies/sectors roundtrip — null until it lands / if the company is
+   * in no universe. */
+  sector?: string | null;
   universes: string[];
   /** ISO timestamp set by the price phase when GuruFocus returns "delisted"
    * or "stock not found" for this (ticker, exchange). Companies with a
@@ -36,7 +44,7 @@ export type Company = {
   out_of_scope_reason?: string | null;
 };
 
-export type SortField = 'company_name' | 'gurufocus_ticker' | 'gurufocus_exchange' | 'isin' | 'country';
+export type SortField = 'company_name' | 'gurufocus_ticker' | 'gurufocus_exchange' | 'isin' | 'country' | 'sector';
 export type SortDir = 'asc' | 'desc';
 
 /** A possible-duplicate match returned by `/api/companies/check-duplicates`,

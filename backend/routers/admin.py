@@ -288,6 +288,20 @@ async def get_egress_ip(authorization: str = Header(...)):
     return await asyncio.to_thread(_q)
 
 
+@router.get("/api/admin/network-diagnostics")
+async def network_diagnostics(authorization: str = Header(...)):
+    """Reachability report for every external service the terminal depends on
+    — backs the /network page. Returns this backend's egress IP, the live
+    GuruFocus Cloudflare circuit-breaker state, and per-source verdicts (DNS
+    IP, latency, status, and a plain-language reason). GuruFocus is probed
+    through the real curl_cffi impersonation ladder so the verdict matches
+    what the ingest pipeline experiences in prod. See routers/_network_diag.py."""
+    _require_admin(authorization)
+    from routers._network_diag import run_diagnostics  # noqa: PLC0415
+
+    return await run_diagnostics()
+
+
 @router.get("/api/admin/copy-status")
 async def copy_status(authorization: str = Header(...)):
     """Diagnose the direct-Postgres COPY fast path the heavy loaders use

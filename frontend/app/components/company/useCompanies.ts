@@ -47,20 +47,41 @@ export function useCompanies() {
     }
     setLoading(false);
 
-    try {
-      const res = await trackedFetch(
-        'Loading universe memberships',
-        `${API_URL}/api/companies/memberships`,
-      );
-      const { memberships } = (await res.json()) as { memberships: Record<string, string[]> };
-      setCompanies((prev) =>
-        prev.map((c) => ({ ...c, universes: memberships[String(c.company_id)] ?? [] })),
-      );
-    } catch {
-      // Non-fatal — chips just don't render.
-    } finally {
-      setMembershipsLoading(false);
-    }
+    // Memberships + sectors are both per-company aggregates fetched after the
+    // base list. Run them in parallel and merge each in when it lands.
+    const membershipsP = (async () => {
+      try {
+        const res = await trackedFetch(
+          'Loading universe memberships',
+          `${API_URL}/api/companies/memberships`,
+        );
+        const { memberships } = (await res.json()) as { memberships: Record<string, string[]> };
+        setCompanies((prev) =>
+          prev.map((c) => ({ ...c, universes: memberships[String(c.company_id)] ?? [] })),
+        );
+      } catch {
+        // Non-fatal — chips just don't render.
+      } finally {
+        setMembershipsLoading(false);
+      }
+    })();
+
+    const sectorsP = (async () => {
+      try {
+        const res = await trackedFetch(
+          'Loading sectors',
+          `${API_URL}/api/companies/sectors`,
+        );
+        const { sectors } = (await res.json()) as { sectors: Record<string, string> };
+        setCompanies((prev) =>
+          prev.map((c) => ({ ...c, sector: sectors[String(c.company_id)] ?? null })),
+        );
+      } catch {
+        // Non-fatal — sector column just shows "—".
+      }
+    })();
+
+    await Promise.all([membershipsP, sectorsP]);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -72,6 +93,11 @@ export function useCompanies() {
 
   const countryOptions = useMemo(() => {
     const s = new Set(companies.map((c) => c.country).filter((v): v is string => !!v?.trim()));
+    return [...s].sort();
+  }, [companies]);
+
+  const sectorOptions = useMemo(() => {
+    const s = new Set(companies.map((c) => c.sector).filter((v): v is string => !!v?.trim()));
     return [...s].sort();
   }, [companies]);
 
@@ -266,6 +292,7 @@ export function useCompanies() {
     // derived
     exchangeOptions,
     countryOptions,
+    sectorOptions,
     universeOptions,
     duplicateNames,
     duplicateCount,

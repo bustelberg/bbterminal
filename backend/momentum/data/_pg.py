@@ -225,7 +225,8 @@ def load_companies_via_copy() -> list[dict] | None:
         f"{_TS_ISO_FMT % 'c.delisted_at'}, "
         f"{_TS_ISO_FMT % 'c.gurufocus_lookup_failed_at'}, "
         f"{_TS_ISO_FMT % 'c.out_of_scope_at'}, "
-        "c.out_of_scope_reason, e.exchange_code, e.currency_code, co.country_name "
+        "c.out_of_scope_reason, c.market_cap_eur, c.market_cap_date::text, "
+        "e.exchange_code, e.currency_code, co.country_name "
         "FROM company c "
         "LEFT JOIN gurufocus_exchange e ON e.exchange_id = c.exchange_id "
         "LEFT JOIN country co ON co.country_code = e.country_code "
@@ -239,9 +240,10 @@ def load_companies_via_copy() -> list[dict] | None:
     out: list[dict] = []
     reader = _csv.reader(io.TextIOWrapper(buf, encoding="utf-8"))
     for row in reader:
-        if len(row) != 12:
+        if len(row) != 14:
             continue
-        cid, name, ticker, exch_id, isin, delisted, gf_failed, oos_at, oos_reason, exch_code, currency, country = row
+        (cid, name, ticker, exch_id, isin, delisted, gf_failed, oos_at, oos_reason,
+         mktcap_eur, mktcap_date, exch_code, currency, country) = row
         out.append({
             "company_id": int(cid),
             "company_name": name or None,
@@ -252,6 +254,8 @@ def load_companies_via_copy() -> list[dict] | None:
             "gurufocus_lookup_failed_at": _match_postgrest_ts(gf_failed or None),
             "out_of_scope_at": _match_postgrest_ts(oos_at or None),
             "out_of_scope_reason": oos_reason or None,
+            "market_cap_eur": float(mktcap_eur) if mktcap_eur else None,
+            "market_cap_date": mktcap_date or None,
             "gurufocus_exchange": exch_code or None,
             "currency": currency or None,
             "country": country or None,

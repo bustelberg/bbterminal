@@ -5,6 +5,7 @@ import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
 import LoadingDots from './LoadingDots';
 import CompaniesToolbar from './company/CompaniesToolbar';
 import CompanyTable from './company/CompanyTable';
+import MarketCapRefreshButton from './company/MarketCapRefreshButton';
 import VerifyAddModal from './company/VerifyAddModal';
 import { useCompanies } from './company/useCompanies';
 import { useCompanyFilters } from './company/useCompanyFilters';
@@ -54,12 +55,15 @@ export default function CompanyManager() {
           </p>
         </div>
         {isAdmin && (
-          <button
-            onClick={() => { setAdding(true); setEditingId(null); }}
-            className="px-4 py-2 rounded-lg text-sm font-medium bg-accent-600 hover:bg-accent-500 text-fg-strong transition-colors"
-          >
-            + Add company
-          </button>
+          <div className="flex items-center gap-2">
+            <MarketCapRefreshButton onRefreshed={data.load} />
+            <button
+              onClick={() => { setAdding(true); setEditingId(null); }}
+              className="px-4 py-2 rounded-lg text-sm font-medium bg-accent-600 hover:bg-accent-500 text-fg-strong transition-colors"
+            >
+              + Add company
+            </button>
+          </div>
         )}
       </div>
 
@@ -67,6 +71,7 @@ export default function CompanyManager() {
         filters={filters}
         exchangeOptions={data.exchangeOptions}
         countryOptions={data.countryOptions}
+        sectorOptions={data.sectorOptions}
         universeOptions={data.universeOptions}
         rows={filtered}
       />

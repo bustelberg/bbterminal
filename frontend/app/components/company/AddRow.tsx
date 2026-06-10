@@ -100,6 +100,7 @@ export default function AddRow({
       <td className="px-3 py-2 text-sm text-fg-faint">—</td>
       <td className="px-3 py-2 text-sm text-fg-faint">—</td>
       <td className="px-3 py-2 text-sm text-fg-faint">—</td>
+      <td className="px-3 py-2 text-sm text-fg-faint">—</td>
       <td className="px-3 py-2">
         <div className="flex gap-1.5">
           <button onClick={handleAdd} disabled={saving || !name.trim() || !ticker.trim() || !exchange.trim()} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-pos-600 hover:bg-pos-500 text-fg-strong disabled:opacity-50 transition-colors inline-flex items-center gap-1.5">
@@ -114,7 +115,7 @@ export default function AddRow({
     </tr>
     {hasMatches && (
       <tr className="border-b border-warn-800/20 bg-warn-500/5">
-        <td colSpan={8} className="px-4 py-3">
+        <td colSpan={9} className="px-4 py-3">
           <div className="text-xs text-warn-300 font-medium mb-2 flex items-center gap-2">
             <span>
               ⚠ {dupeMatches.length} possible duplicate{dupeMatches.length === 1 ? '' : 's'} already in the database

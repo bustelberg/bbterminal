@@ -20,6 +20,7 @@ export function useCompanyFilters(companies: Company[]) {
   // intersection of multiple memberships (e.g. ACWI ∩ LEONTEQ).
   const [filterExchange, setFilterExchange] = useState<string[]>([]);
   const [filterCountry, setFilterCountry] = useState<string[]>([]);
+  const [filterSector, setFilterSector] = useState<string[]>([]);
   const [filterUniverse, setFilterUniverse] = useState<string[]>([]);
   const [filterDupes, setFilterDupes] = useState(false);
   const [sortField, setSortField] = useState<SortField>('company_name');
@@ -41,6 +42,9 @@ export function useCompanyFilters(companies: Company[]) {
     }
     if (filterCountry.length > 0) {
       list = list.filter((c) => c.country != null && filterCountry.includes(c.country));
+    }
+    if (filterSector.length > 0) {
+      list = list.filter((c) => c.sector != null && filterSector.includes(c.sector));
     }
     if (filterUniverse.length > 0) {
       list = list.filter((c) => {
@@ -66,7 +70,7 @@ export function useCompanyFilters(companies: Company[]) {
       const cmp = av.localeCompare(bv, undefined, { sensitivity: 'base' });
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [companies, search, filterExchange, filterCountry, filterUniverse, filterDupes, sortField, sortDir]);
+  }, [companies, search, filterExchange, filterCountry, filterSector, filterUniverse, filterDupes, sortField, sortDir]);
 
   const handleSort = useCallback((field: SortField) => {
     if (sortField === field) {
@@ -85,17 +89,19 @@ export function useCompanyFilters(companies: Company[]) {
     setSearch('');
     setFilterExchange([]);
     setFilterCountry([]);
+    setFilterSector([]);
     setFilterUniverse([]);
     setFilterDupes(false);
   }, []);
 
   const hasActiveFilters =
-    !!search || filterExchange.length > 0 || filterCountry.length > 0 || filterUniverse.length > 0 || filterDupes;
+    !!search || filterExchange.length > 0 || filterCountry.length > 0 || filterSector.length > 0 || filterUniverse.length > 0 || filterDupes;
 
   return {
     search, setSearch,
     filterExchange, setFilterExchange,
     filterCountry, setFilterCountry,
+    filterSector, setFilterSector,
     filterUniverse, setFilterUniverse,
     filterDupes, setFilterDupes,
     sortField, sortDir,

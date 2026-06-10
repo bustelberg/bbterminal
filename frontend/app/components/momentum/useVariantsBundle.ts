@@ -82,9 +82,18 @@ export function useVariantsBundle({
     const defaultName = 'MomentumTopSelectie';
     const enteredName = await dialog.prompt(
       `Save this variant to /schedule. Pipeline cadence: ${scheduleFreq} (mapped from "${v.frequency}").`,
-      { title: 'Add variant to schedule', defaultValue: defaultName, placeholder: 'Strategy name' },
+      {
+        title: 'Add variant to schedule',
+        defaultValue: defaultName,
+        placeholder: 'Strategy name',
+        // Keep this popup open after confirming — it turns into a spinner while
+        // the save + schedule POSTs run, then the dialog.alert below swaps it to
+        // the success/failure message (one continuous popup, no flicker).
+        chainLoading: 'Saving backtest and scheduling…',
+      },
     );
-    if (!enteredName || !enteredName.trim()) return;
+    // Cancelled (null) → modal already closed. Empty confirm → close the spinner.
+    if (!enteredName || !enteredName.trim()) { dialog.close(); return; }
 
     // Build the full config. Merge order: base from this component's
     // state, then variant overrides (frequency, strategy_type, and any

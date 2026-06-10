@@ -15,6 +15,8 @@ block the table render — the frontend kicks both off in parallel.
 from __future__ import annotations
 
 import asyncio
+import threading
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
@@ -98,7 +100,7 @@ async def list_companies():
                 .select(
                     "company_id,company_name,gurufocus_ticker,exchange_id,isin,"
                     "delisted_at,gurufocus_lookup_failed_at,"
-                    "out_of_scope_at,out_of_scope_reason,"
+                    "out_of_scope_at,out_of_scope_reason,market_cap_eur,market_cap_date,"
                     "gurufocus_exchange:gurufocus_exchange("
                     "exchange_code,currency_code,country:country(country_name))"
                 )
@@ -179,6 +181,47 @@ async def list_company_memberships():
 
     memberships = await asyncio.to_thread(_query)
     return {"memberships": memberships}
+
+
+@router.get("/api/companies/sectors")
+async def list_company_sectors():
+    """Latest known sector per company (from `universe_membership`), for the
+    /companies Sector column + filter. Returns `{company_id: sector}`.
+
+    Same `.range()` pagination + try/except-→-{} resilience as
+    /memberships (so a not-yet-migrated prod returns empty rather than 500).
+    Backed by the `company_latest_sector` RPC (DISTINCT ON company_id)."""
+    def _query():
+        try:
+            page = 1000
+            offset = 0
+            collected: dict[str, str] = {}
+            for _attempt in range(20):
+                resp = (
+                    supabase.rpc("company_latest_sector")
+                    .range(offset, offset + page - 1)
+                    .execute()
+                )
+                batch = resp.data or []
+                if not batch:
+                    break
+                added = 0
+                for r in batch:
+                    cid = str(r["company_id"])
+                    if cid in collected:
+                        continue
+                    if r.get("sector"):
+                        collected[cid] = r["sector"]
+                        added += 1
+                if added == 0 or len(batch) < page:
+                    break
+                offset += page
+            return collected
+        except Exception:
+            return {}
+
+    sectors = await asyncio.to_thread(_query)
+    return {"sectors": sectors}
 
 
 @router.get("/api/companies/check-duplicates")
@@ -339,3 +382,63 @@ async def delete_company(company_id: int):
     supabase.table("universe_membership").delete().eq("company_id", company_id).execute()
     supabase.table("company").delete().eq("company_id", company_id).execute()
     return {"ok": True}
+
+
+# ── Market-cap refresh (admin button) ───────────────────────────────────────
+# Manual, on-demand: re-fetch every company's market cap from GuruFocus and
+# store the EUR snapshot. It's a ~one-call-per-company, ~hour-long job, so it
+# runs in a daemon thread and the button polls the status endpoint. Single
+# in-process status dict (single-replica assumption, like the pipeline lock).
+_MKTCAP_REFRESH: dict = {
+    "running": False,
+    "done": False,
+    "message": "",
+    "set": 0,
+    "error": None,
+    "started_at": None,
+    "finished_at": None,
+}
+_MKTCAP_LOCK = threading.Lock()
+
+
+def _run_market_cap_refresh() -> None:
+    from index_universe.backfill_market_cap import backfill_market_cap  # noqa: PLC0415
+    try:
+        def on_progress(msg: str) -> None:
+            _MKTCAP_REFRESH["message"] = msg
+        res = backfill_market_cap(supabase, only_missing=False, on_progress=on_progress)
+        _MKTCAP_REFRESH["set"] = res.set_count
+        _MKTCAP_REFRESH["message"] = f"Done — updated {res.set_count} companies."
+    except Exception as e:  # noqa: BLE001 — surface any failure to the status endpoint
+        _MKTCAP_REFRESH["error"] = f"{type(e).__name__}: {e}"
+        _MKTCAP_REFRESH["message"] = f"Failed: {_MKTCAP_REFRESH['error']}"
+    finally:
+        _MKTCAP_REFRESH["running"] = False
+        _MKTCAP_REFRESH["done"] = True
+        _MKTCAP_REFRESH["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+
+@router.post("/api/companies/market-cap/refresh")
+async def refresh_market_caps():
+    """Admin-only: (re)fetch every company's market cap from GuruFocus and store
+    the EUR snapshot. Spawns a background thread (the job takes ~an hour — one
+    GuruFocus call per company) and returns immediately; poll
+    `/api/companies/market-cap/refresh/status`. No-op if already running."""
+    with _MKTCAP_LOCK:
+        if _MKTCAP_REFRESH["running"]:
+            return {"started": False, "running": True, "message": _MKTCAP_REFRESH["message"]}
+        _MKTCAP_REFRESH.update({
+            "running": True, "done": False, "error": None, "set": 0,
+            "message": "Starting…",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": None,
+        })
+    threading.Thread(target=_run_market_cap_refresh, name="market-cap-refresh", daemon=True).start()
+    return {"started": True, "running": True}
+
+
+@router.get("/api/companies/market-cap/refresh/status")
+async def market_cap_refresh_status():
+    """Progress for the market-cap refresh (running flag + latest message +
+    final count). Polled by the /companies refresh button."""
+    return dict(_MKTCAP_REFRESH)

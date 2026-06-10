@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { dialogStore, resolveOpen } from '../../lib/dialog';
+import { dialogStore, resolveOpen, chainToLoading } from '../../lib/dialog';
+import Spinner from './Spinner';
 
 export default function DialogHost() {
   const open = dialogStore.use((s) => s.open);
@@ -22,6 +23,7 @@ export default function DialogHost() {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
+      if (open.kind === 'loading') return; // a running op can't be dismissed
       if (e.key === 'Escape') {
         e.preventDefault();
         cancel();
@@ -39,6 +41,7 @@ export default function DialogHost() {
 
   function cancel() {
     if (!open) return;
+    if (open.kind === 'loading') return; // not dismissable while work runs
     if (open.kind === 'alert') resolveOpen(undefined);
     else if (open.kind === 'confirm') resolveOpen(false);
     else resolveOpen(null);
@@ -46,6 +49,12 @@ export default function DialogHost() {
 
   function confirm() {
     if (!open) return;
+    // A chained prompt/confirm doesn't close on confirm — it swaps to a
+    // loading spinner (same modal) and the caller finishes with dialog.alert.
+    if (open.chainLoading && (open.kind === 'prompt' || open.kind === 'confirm')) {
+      chainToLoading(open.kind === 'prompt' ? value : true, open.chainLoading, open.title);
+      return;
+    }
     if (open.kind === 'alert') resolveOpen(undefined);
     else if (open.kind === 'confirm') resolveOpen(true);
     else resolveOpen(value);
@@ -67,7 +76,10 @@ export default function DialogHost() {
           {open.title && (
             <div className="text-sm font-semibold text-fg-strong mb-1">{open.title}</div>
           )}
-          <div className="text-sm text-fg-soft whitespace-pre-wrap">{open.message}</div>
+          <div className="text-sm text-fg-soft whitespace-pre-wrap flex items-start gap-2">
+            {open.kind === 'loading' && <Spinner size={14} className="mt-0.5 shrink-0" />}
+            <span>{open.message}</span>
+          </div>
           {open.kind === 'prompt' && (
             <input
               ref={inputRef}
@@ -84,22 +96,24 @@ export default function DialogHost() {
             />
           )}
         </div>
-        <div className="px-5 py-3 border-t border-neutral-800/60 flex items-center justify-end gap-2">
-          {open.kind !== 'alert' && (
+        {open.kind !== 'loading' && (
+          <div className="px-5 py-3 border-t border-neutral-800/60 flex items-center justify-end gap-2">
+            {open.kind !== 'alert' && (
+              <button
+                onClick={cancel}
+                className="px-3 py-1.5 rounded-lg text-sm text-fg-soft hover:bg-overlay/5 transition-colors"
+              >
+                {open.cancelLabel ?? 'Cancel'}
+              </button>
+            )}
             <button
-              onClick={cancel}
-              className="px-3 py-1.5 rounded-lg text-sm text-fg-soft hover:bg-overlay/5 transition-colors"
+              onClick={confirm}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${confirmClass}`}
             >
-              {open.cancelLabel ?? 'Cancel'}
+              {open.confirmLabel ?? 'OK'}
             </button>
-          )}
-          <button
-            onClick={confirm}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${confirmClass}`}
-          >
-            {open.confirmLabel ?? 'OK'}
-          </button>
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

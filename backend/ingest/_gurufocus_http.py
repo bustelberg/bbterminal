@@ -560,6 +560,20 @@ def current_preferred_target() -> str:
         return _preferred
 
 
+def circuit_seconds_remaining() -> float:
+    """0 when the GuruFocus circuit breaker is closed; otherwise the
+    seconds until it auto-resets. When > 0, every cf_get short-circuits
+    immediately (the "Auto-retry in Xs" the ingest logs show) because the
+    egress IP looks Cloudflare-blocked. Surfaced on the /network page."""
+    return _circuit.seconds_remaining()
+
+
+def proxy_configured() -> bool:
+    """True when GURUFOCUS_PROXY (or HTTPS_PROXY) is set — i.e. cf_get is
+    routing through a proxy to dodge an IP-based Cloudflare block."""
+    return bool(_PROXY_URL)
+
+
 def ladder() -> list[str]:
     """The full ordered list of profiles cf_get will try, in order."""
     return list(_TARGETS)

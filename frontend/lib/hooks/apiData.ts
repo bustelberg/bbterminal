@@ -47,6 +47,10 @@ export type CompanyRow = {
   /** Reporting/trading currency (ISO code), from the company's exchange.
    * Used to convert native-currency values (e.g. FCF/share) to EUR. */
   currency?: string | null;
+  /** Market-cap snapshot in EUR (absolute) + the date it was captured.
+   * Populated by the manual /companies refresh button (GuruFocus → EUR). */
+  market_cap_eur?: number | null;
+  market_cap_date?: string | null;
   country?: string | null;
   delisted_at?: string | null;
   gurufocus_lookup_failed_at?: string | null;

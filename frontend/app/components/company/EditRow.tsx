@@ -40,6 +40,7 @@ export default function EditRow({
       </td>
       <td className="px-3 py-2 text-fg-muted font-mono text-xs">{company.isin ?? '—'}</td>
       <td className="px-3 py-2 text-fg-muted">{company.country ?? '—'}</td>
+      <td className="px-3 py-2 text-fg-muted text-xs">{company.sector ?? '—'}</td>
       <td className="px-3 py-2 text-fg-faint text-xs">—</td>
       <td className="px-3 py-2">
         <div className="flex gap-1.5">
