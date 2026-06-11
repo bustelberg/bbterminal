@@ -84,6 +84,14 @@ export function useVariantSelection({
   const [topSectorsSweep, setTopSectorsSweep] = useState<string>('');
   const [perSectorSweep, setPerSectorSweep] = useState<string>('');
   const [minScoreSweep, setMinScoreSweep] = useState<string>('');
+  // Vol-target axis: comma list of annualized vol % targets, with `off`
+  // for the original non-targeted strategy. Blank = don't sweep (off).
+  const [volTargetSweep, setVolTargetSweep] = useState<string>('');
+  // Regime-filter axis: comma list of risk-off exposure floors in [0,1]
+  // (`off` = no filter). Blank = don't sweep (off).
+  const [regimeFloorSweep, setRegimeFloorSweep] = useState<string>('');
+  // When on, fan each variant into plain + daily tit-for-tat-timed.
+  const [sweepDailyTiming, setSweepDailyTiming] = useState<boolean>(false);
 
   // ── Auto-skip by portfolio size ─────────────────────────────────
   // Effective portfolio size is `top_n_sectors × top_n_per_sector`.
@@ -121,8 +129,11 @@ export function useVariantSelection({
       topSectorsSweep,
       perSectorSweep,
       minScoreSweep,
+      volTargetSweep,
+      regimeFloorSweep,
+      sweepDailyTiming,
     }),
-    [selectedFreqs, selectedStrategies, selectedUniverses, selectedGroupings, selectedWeekdays, topSectorsSweep, perSectorSweep, minScoreSweep],
+    [selectedFreqs, selectedStrategies, selectedUniverses, selectedGroupings, selectedWeekdays, topSectorsSweep, perSectorSweep, minScoreSweep, volTargetSweep, regimeFloorSweep, sweepDailyTiming],
   );
 
   // ── Effective size + min/max filters ─────────────────────────────
@@ -173,6 +184,9 @@ export function useVariantSelection({
     topSectorsSweep, setTopSectorsSweep,
     perSectorSweep, setPerSectorSweep,
     minScoreSweep, setMinScoreSweep,
+    volTargetSweep, setVolTargetSweep,
+    regimeFloorSweep, setRegimeFloorSweep,
+    sweepDailyTiming, setSweepDailyTiming,
     minPortfolioSizeRaw, setMinPortfolioSizeRaw,
     maxPortfolioSizeRaw, setMaxPortfolioSizeRaw,
     disabledPerms, setDisabledPerms,

@@ -104,10 +104,12 @@ def backfill_market_cap(
     limit: int | None = None,
     on_progress=None,
 ) -> MarketCapResult:
-    def emit(msg: str) -> None:
+    def emit(msg: str, **fields) -> None:
         _log.info(msg)
         if on_progress:
-            on_progress(msg)
+            # Structured payload so the caller can drive a live progress bar
+            # (processed/total/set) rather than parsing the message string.
+            on_progress({"message": msg, **fields})
 
     result = MarketCapResult()
     companies = _load_companies(supabase)
@@ -124,10 +126,20 @@ def backfill_market_cap(
     if limit is not None:
         targets = targets[:limit]
 
-    emit(f"{len(companies)} companies; resolving market cap for {len(targets)} "
-         f"(~{round(len(targets) * 1.5 / 60)} min at the 1.5s rate limit)…")
+    total = len(targets)
+    emit(f"{len(companies)} companies; resolving market cap for {total} "
+         f"(~{round(total * 1.5 / 60)} min at the 1.5s rate limit)…",
+         processed=0, total=total, set=0)
 
     for i, c in enumerate(targets, 1):
+        # Emit once per company (not every 50) so the caller sees real-time
+        # progress. Done at the top so the count advances even for companies
+        # we skip below (no symbol / no mktcap / no FX rate).
+        emit(
+            f"  …{i}/{total} ({result.set_count} set, {result.no_mktcap} no-mktcap, "
+            f"{result.no_fx_rate} no-fx)",
+            processed=i, total=total, set=result.set_count,
+        )
         cid = int(c["company_id"])
         exch = (c.get("gurufocus_exchange") or {}) or {}
         symbol = _gf_symbol(c.get("gurufocus_ticker") or "", exch.get("exchange_code"))
@@ -156,12 +168,10 @@ def backfill_market_cap(
             result.set_count += 1
         except Exception as e:
             result.errors.append(f"cid={cid} update failed: {type(e).__name__}: {e}")
-        if i % 50 == 0 or i == len(targets):
-            emit(f"  …{i}/{len(targets)} processed "
-                 f"({result.set_count} set, {result.no_mktcap} no-mktcap, {result.no_fx_rate} no-fx)")
 
     emit(f"Done. set={result.set_count} no-mktcap={result.no_mktcap} "
-         f"no-fx={result.no_fx_rate} errors={len(result.errors)}")
+         f"no-fx={result.no_fx_rate} errors={len(result.errors)}",
+         processed=total, total=total, set=result.set_count)
     return result
 
 
@@ -191,5 +201,8 @@ if __name__ == "__main__":
         idx = sys.argv.index("--limit")
         if idx + 1 < len(sys.argv):
             limit = int(sys.argv[idx + 1])
-    res = backfill_market_cap(supabase, only_missing=only_missing, limit=limit, on_progress=print)
+    res = backfill_market_cap(
+        supabase, only_missing=only_missing, limit=limit,
+        on_progress=lambda d: print(d["message"]),
+    )
     print("\n" + format_summary(res))

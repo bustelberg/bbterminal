@@ -1,18 +1,10 @@
 'use client';
 
 import Spinner from '../Spinner';
-import InfoTip from '../InfoTip';
 import { guruFocusUrl } from '../../../lib/gurufocusUrl';
 import { universeChipStyle } from './styles';
+import { fmtMktCapEur } from './format';
 import type { Company } from './types';
-
-/** Format an absolute EUR market cap compactly (€3.95T / €420.5B / €88.0M). */
-function fmtMktCapEur(v: number): string {
-  if (v >= 1e12) return `€${(v / 1e12).toFixed(2)}T`;
-  if (v >= 1e9) return `€${(v / 1e9).toFixed(2)}B`;
-  if (v >= 1e6) return `€${(v / 1e6).toFixed(1)}M`;
-  return `€${Math.round(v).toLocaleString()}`;
-}
 
 /** One non-editing company row: status badges (delisted / out-of-scope /
  * GF-lookup / dupe), the GuruFocus ticker link, clickable universe chips,
@@ -21,6 +13,7 @@ export default function CompanyRow({
   company: c,
   isAdmin,
   membershipsLoading,
+  sectorsLoading,
   duplicateNames,
   deletingId,
   onEdit,
@@ -31,6 +24,7 @@ export default function CompanyRow({
   company: Company;
   isAdmin: boolean;
   membershipsLoading: boolean;
+  sectorsLoading: boolean;
   duplicateNames: Set<string>;
   deletingId: number | null;
   onEdit: (id: number) => void;
@@ -74,11 +68,6 @@ export default function CompanyRow({
             DUPE
           </span>
         )}
-        {c.market_cap_eur != null && (
-          <span className="ml-1.5 inline-flex align-middle">
-            <InfoTip text={`Market cap: ${fmtMktCapEur(c.market_cap_eur)}${c.market_cap_date ? `\nas of ${c.market_cap_date} · converted to EUR` : ''}`} />
-          </span>
-        )}
       </td>
       <td className="px-3 py-2.5">
         <a
@@ -93,7 +82,21 @@ export default function CompanyRow({
       <td className="px-3 py-2.5 text-fg-muted">{c.gurufocus_exchange}</td>
       <td className="px-3 py-2.5 text-fg-muted font-mono text-xs">{c.isin ?? '—'}</td>
       <td className="px-3 py-2.5 text-fg-muted">{c.country ?? '—'}</td>
-      <td className="px-3 py-2.5 text-fg-muted text-xs">{c.sector ?? '—'}</td>
+      <td className="px-3 py-2.5 text-fg-muted text-xs">
+        {c.sector ? (
+          c.sector
+        ) : sectorsLoading ? (
+          <Spinner size={10} className="h-2.5 w-2.5 text-fg-faint" />
+        ) : (
+          '—'
+        )}
+      </td>
+      <td
+        className="px-3 py-2.5 text-right font-mono text-xs text-fg-muted whitespace-nowrap"
+        title={c.market_cap_eur != null && c.market_cap_date ? `as of ${c.market_cap_date} · converted to EUR` : undefined}
+      >
+        {c.market_cap_eur != null ? fmtMktCapEur(c.market_cap_eur) : '—'}
+      </td>
       <td className="px-3 py-2.5">
         {(c.universes ?? []).length === 0 ? (
           membershipsLoading ? (

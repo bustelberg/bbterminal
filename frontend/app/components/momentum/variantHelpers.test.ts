@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildAllPermutations, parseMinScoreList, parseNumList, toggleInSet } from './variantHelpers';
+import { buildAllPermutations, parseMinScoreList, parseNumList, parseRegimeFloorList, parseVolTargetList, toggleInSet } from './variantHelpers';
 import type { RebalanceFrequency, StrategyType } from '../../../lib/stores/momentum';
 
 describe('parseNumList', () => {
@@ -50,6 +50,53 @@ describe('parseMinScoreList', () => {
   it('returns [] on empty input', () => {
     expect(parseMinScoreList('')).toEqual([]);
     expect(parseMinScoreList('  ')).toEqual([]);
+  });
+});
+
+describe('parseVolTargetList', () => {
+  it('parses positive vol targets', () => {
+    expect(parseVolTargetList('10, 12, 15')).toEqual([10, 12, 15]);
+  });
+
+  it('maps off/none (any case) to undefined (the plain strategy)', () => {
+    expect(parseVolTargetList('off, 12')).toEqual([undefined, 12]);
+    expect(parseVolTargetList('NONE, 12')).toEqual([undefined, 12]);
+  });
+
+  it('dedups the off sentinel and numeric values', () => {
+    expect(parseVolTargetList('off, none, 12, 12')).toEqual([undefined, 12]);
+  });
+
+  it('drops non-positive and non-finite tokens (a target must be > 0)', () => {
+    expect(parseVolTargetList('0, -5, foo, 12')).toEqual([12]);
+  });
+
+  it('returns [] on empty input', () => {
+    expect(parseVolTargetList('')).toEqual([]);
+    expect(parseVolTargetList('  ')).toEqual([]);
+  });
+});
+
+describe('parseRegimeFloorList', () => {
+  it('parses floors in [0,1] including 0', () => {
+    expect(parseRegimeFloorList('0, 0.5, 1')).toEqual([0, 0.5, 1]);
+  });
+
+  it('maps off/none to undefined (no filter)', () => {
+    expect(parseRegimeFloorList('off, 0, 0.5')).toEqual([undefined, 0, 0.5]);
+    expect(parseRegimeFloorList('NONE, 0.5')).toEqual([undefined, 0.5]);
+  });
+
+  it('drops out-of-range and non-finite tokens', () => {
+    expect(parseRegimeFloorList('-0.1, 1.5, foo, 0.5')).toEqual([0.5]);
+  });
+
+  it('dedups the off sentinel and numeric values', () => {
+    expect(parseRegimeFloorList('off, none, 0.5, 0.5')).toEqual([undefined, 0.5]);
+  });
+
+  it('returns [] on empty input', () => {
+    expect(parseRegimeFloorList('')).toEqual([]);
   });
 });
 
@@ -132,6 +179,41 @@ describe('buildAllPermutations', () => {
       selectedWeekdays: new Set<number>([0, 2, 4]), // 3
     });
     expect(out).toHaveLength(6);
+  });
+
+  it('emits the plain strategy and a vol-targeted variant from `off, 12`', () => {
+    const out = buildAllPermutations({ ...base, volTargetSweep: 'off, 12' });
+    expect(out).toHaveLength(2);
+    // `off` → field omitted (original strategy); 12 → vol_target: 12
+    expect(out.some((p) => !('vol_target' in p))).toBe(true);
+    expect(out.some((p) => p.vol_target === 12)).toBe(true);
+  });
+
+  it('omits vol_target entirely when the axis is blank', () => {
+    const out = buildAllPermutations({ ...base, volTargetSweep: '' });
+    expect(out).toHaveLength(1);
+    expect('vol_target' in out[0]).toBe(false);
+  });
+
+  it('emits plain + regime-filtered variants from `off, 0, 0.5`', () => {
+    const out = buildAllPermutations({ ...base, regimeFloorSweep: 'off, 0, 0.5' });
+    expect(out).toHaveLength(3);
+    expect(out.some((p) => !('regime_floor' in p))).toBe(true); // off → plain
+    expect(out.some((p) => p.regime_floor === 0)).toBe(true);
+    expect(out.some((p) => p.regime_floor === 0.5)).toBe(true);
+  });
+
+  it('fans each variant into plain + tit-for-tat when sweepDailyTiming is on', () => {
+    const out = buildAllPermutations({ ...base, sweepDailyTiming: true });
+    expect(out).toHaveLength(2);
+    expect(out.some((p) => !('daily_timing' in p))).toBe(true); // plain
+    expect(out.some((p) => p.daily_timing === true)).toBe(true); // timed
+  });
+
+  it('omits daily_timing when the toggle is off', () => {
+    const out = buildAllPermutations({ ...base, sweepDailyTiming: false });
+    expect(out).toHaveLength(1);
+    expect('daily_timing' in out[0]).toBe(false);
   });
 
   it('threads min_price_score `null` through as an explicit value', () => {

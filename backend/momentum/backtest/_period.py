@@ -176,6 +176,262 @@ def compute_universe_period_return(
     return round(float(np.mean(returns)), 4), len(returns)
 
 
+def compute_exposure_scale(
+    cids: list[int],
+    price_index: dict[int, pd.Series],
+    *,
+    entry_ts: pd.Timestamp,
+    target_vol_pct: float | None,
+    lookback: int,
+    max_leverage: float,
+    series_for=None,
+) -> float:
+    """Volatility-target exposure multiplier for ONE rebalance period.
+
+    Builds the trailing daily-return series of the equal-weighted basket
+    of `cids`, estimates its annualized volatility over the `lookback`
+    trading days ending at `entry_ts` (the prior-close cutoff — strictly
+    before the rebalance bar, so the estimate never peeks at the bar we
+    trade), and returns
+
+        k = clamp(target / realized, 0, max_leverage)
+
+    `target_vol_pct` is an ANNUALIZED percent (12.0 → 0.12). The basket
+    return series is the cross-sectional mean of the per-name daily
+    returns each day, so it captures the holdings' realized correlations
+    (a diversified basket reads lower vol than the average single name).
+
+    Falls back to 1.0 (no scaling) when there isn't enough history to
+    estimate vol — early periods, sparse names — so vol targeting never
+    silently zeroes the book on a data gap. `series_for` lets the caller
+    route negative (sector-ETF) cids through a benchmark price index;
+    defaults to a plain `price_index` lookup.
+    """
+    if not cids or target_vol_pct is None or target_vol_pct <= 0:
+        return 1.0
+    resolve = series_for or (lambda c: price_index.get(c))
+
+    per_name_returns: dict[int, pd.Series] = {}
+    for cid in cids:
+        s = resolve(int(cid))
+        if s is None or s.empty:
+            continue
+        # Window: the last `lookback`+1 closes on or before the cutoff
+        # (need lookback+1 prices to form lookback returns).
+        sub = s[s.index <= entry_ts]
+        if len(sub) < 2:
+            continue
+        sub = sub.iloc[-(lookback + 1):]
+        r = sub.pct_change().dropna()
+        if not r.empty:
+            per_name_returns[int(cid)] = r
+    if not per_name_returns:
+        return 1.0
+
+    # Align per-name return series by date; the equal-weight basket return
+    # each day is the cross-sectional mean (skipna so a name that wasn't
+    # trading that day just doesn't contribute).
+    basket = pd.DataFrame(per_name_returns).mean(axis=1, skipna=True).dropna()
+    if len(basket) < max(10, lookback // 4):
+        return 1.0
+
+    daily_std = float(basket.std())
+    if daily_std <= 0:
+        # No observed movement — scale to the ceiling (calm regime).
+        return max_leverage
+    realized_ann = daily_std * (252 ** 0.5)
+    scale = (target_vol_pct / 100.0) / realized_ann
+    if scale < 0:
+        scale = 0.0
+    if scale > max_leverage:
+        scale = max_leverage
+    return round(scale, 4)
+
+
+def compute_market_health(signals_df: pd.DataFrame) -> float | None:
+    """Composite 0..1 market-health score for the eligible universe.
+
+    Averages up to three ABSOLUTE breadth components (each in [0, 1]),
+    using whichever are computable in the panel:
+
+      - trend:    fraction of names above their own 200-day MA
+                  (`above_200ma`).
+      - momentum: fraction with a positive 6-month return (`mom_6m`).
+      - drawdown: average closeness to the 52-week high, `1 + dd%/100`
+                  clipped to [0, 1] (`drawdown_from_recent_high_pct`,
+                  which is ≤ 0 — 0% = at the high, −40% = 40% below).
+
+    "Absolute" is the point: a regime gauge needs "is the market itself
+    weak?", not a relative cross-sectional ranking — so each component
+    compares a stock to its OWN history. Three indicators agreeing is far
+    more robust than a single binary breadth read. Returns None when no
+    component is computable (data gap) so the caller can no-op safely.
+    All inputs come from the strict-`<`-cutoff panel → causal."""
+    components: list[float] = []
+    if "above_200ma" in signals_df.columns:
+        col = pd.to_numeric(signals_df["above_200ma"], errors="coerce").dropna()
+        if not col.empty:
+            components.append(float((col > 0).mean()))
+    if "mom_6m" in signals_df.columns:
+        col = pd.to_numeric(signals_df["mom_6m"], errors="coerce").dropna()
+        if not col.empty:
+            components.append(float((col > 0).mean()))
+    if "drawdown_from_recent_high_pct" in signals_df.columns:
+        col = pd.to_numeric(signals_df["drawdown_from_recent_high_pct"], errors="coerce").dropna()
+        if not col.empty:
+            health = (1.0 + col / 100.0).clip(lower=0.0, upper=1.0)
+            components.append(float(health.mean()))
+    if not components:
+        return None
+    return sum(components) / len(components)
+
+
+def regime_exposure_from_health(
+    health: float | None, *, floor: float | None, lo: float, hi: float,
+) -> float:
+    """Map a composite 0..1 market-health score to the exposure multiplier
+    on a LINEAR RAMP between `lo` (health → `floor`) and `hi` (health →
+    fully invested):
+
+        exposure = clamp(floor + (1 - floor) · (health - lo)/(hi - lo), floor, 1.0)
+
+    So exposure scales smoothly with market health — the cash allocation
+    is inversely proportional to how healthy the broad tape is, instead of
+    flipping at a single hard threshold. `health ≥ hi` → fully invested;
+    `health ≤ lo` → at the floor; in between → proportional.
+
+    `floor=None` (filter off) or `health=None` (no health computable) →
+    1.0 (fully invested), so the book is never silently zeroed."""
+    if floor is None or health is None:
+        return 1.0
+    # Linear ramp lo→hi. A degenerate lo>=hi collapses to a binary step
+    # at `lo` (risk-on iff health >= lo) rather than dividing by zero.
+    if hi <= lo:
+        frac = 1.0 if health >= lo else 0.0
+    else:
+        frac = (health - lo) / (hi - lo)
+        frac = 0.0 if frac < 0.0 else (1.0 if frac > 1.0 else frac)
+    exposure = floor + (1.0 - floor) * frac
+    exposure = floor if exposure < floor else (1.0 if exposure > 1.0 else exposure)
+    return round(float(exposure), 4)
+
+
+def _rsi_from_value(avg_gain: float, avg_loss: float) -> float:
+    """RSI from an average gain / average loss pair. No losses → 100."""
+    if avg_loss == 0.0:
+        return 100.0
+    return 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+
+
+def compute_average_rsi(
+    cids,
+    price_index: dict[int, pd.Series],
+    *,
+    entry_ts: pd.Timestamp,
+    period: int = 14,
+) -> dict[str, float] | None:
+    """Average RSI(`period`) across the eligible universe at one cutoff,
+    computed two ways → `{"simple": …, "wilder": …}` (both 0..100).
+
+    Both read the daily price changes on or before `entry_ts` (strictly
+    before the rebalance bar — causal):
+      - **simple**: average gain / average loss over the LAST `period`
+        changes (SMA-style).
+      - **wilder**: Wilder's exponential smoothing (α = 1/`period`) over a
+        trailing window, seeded with the SMA of the first `period` values —
+        the canonical RSI most charting platforms draw. It reacts slower /
+        smoother than the simple form.
+    Each is averaged across every company into a single universe gauge.
+
+    Returns None when no company has enough history (< `period`+1 closes).
+    Surfaced as a separate time series on /regime-detector."""
+    # Wilder smoothing converges within a few `period`s; an 8×`period`
+    # trailing window is plenty and keeps the per-company cost bounded.
+    win = max(period * 8, period + 1)
+    simples: list[float] = []
+    wilders: list[float] = []
+    for cid in cids:
+        s = price_index.get(int(cid))
+        if s is None or s.empty:
+            continue
+        sub = s[s.index <= entry_ts]
+        if len(sub) < period + 1:
+            continue
+        arr = sub.iloc[-win:].to_numpy(dtype=float)
+        deltas = np.diff(arr)
+        gains = np.where(deltas > 0, deltas, 0.0)
+        losses = np.where(deltas < 0, -deltas, 0.0)
+
+        # Simple: last `period` changes.
+        simples.append(_rsi_from_value(
+            float(gains[-period:].mean()), float(losses[-period:].mean()),
+        ))
+
+        # Wilder: SMA seed over the first `period`, then recursive smoothing.
+        ag = float(gains[:period].mean())
+        al = float(losses[:period].mean())
+        for i in range(period, len(deltas)):
+            ag = (ag * (period - 1) + gains[i]) / period
+            al = (al * (period - 1) + losses[i]) / period
+        wilders.append(_rsi_from_value(ag, al))
+
+    if not simples:
+        return None
+    return {
+        "simple": round(float(np.mean(simples)), 2),
+        "wilder": round(float(np.mean(wilders)), 2),
+    }
+
+
+def compute_market_health_components(signals_df: pd.DataFrame) -> dict[str, float] | None:
+    """Per-component breakdown of the composite market-health score —
+    `{trend, momentum, drawdown, composite}` (only the components that are
+    computable). Display-only sibling of `compute_market_health`: it
+    surfaces WHICH sub-signal is driving the regime read so the
+    /regime-detector page can chart each one and you can see which leads a
+    crisis. `composite` is the mean of the present components (the same
+    quantity `compute_market_health` returns, modulo display rounding).
+    Returns None when no component is computable."""
+    comps: dict[str, float] = {}
+    if "above_200ma" in signals_df.columns:
+        col = pd.to_numeric(signals_df["above_200ma"], errors="coerce").dropna()
+        if not col.empty:
+            comps["trend"] = round(float((col > 0).mean()), 4)
+    if "mom_6m" in signals_df.columns:
+        col = pd.to_numeric(signals_df["mom_6m"], errors="coerce").dropna()
+        if not col.empty:
+            comps["momentum"] = round(float((col > 0).mean()), 4)
+    if "drawdown_from_recent_high_pct" in signals_df.columns:
+        col = pd.to_numeric(signals_df["drawdown_from_recent_high_pct"], errors="coerce").dropna()
+        if not col.empty:
+            health = (1.0 + col / 100.0).clip(lower=0.0, upper=1.0)
+            comps["drawdown"] = round(float(health.mean()), 4)
+    if not comps:
+        return None
+    comps["composite"] = round(sum(comps.values()) / len(comps), 4)
+    return comps
+
+
+def compute_regime_scale(
+    signals_df: pd.DataFrame,
+    *,
+    floor: float | None,
+    lo: float,
+    hi: float,
+) -> float:
+    """Continuous market-regime exposure multiplier for ONE period —
+    convenience wrapper that reads the composite health off `signals_df`
+    (see `compute_market_health`) then maps it via
+    `regime_exposure_from_health`. The runner computes health separately
+    (to also surface it on the period record), so this is mainly the
+    single-call entry point for tests / direct callers."""
+    if floor is None:
+        return 1.0
+    return regime_exposure_from_health(
+        compute_market_health(signals_df), floor=floor, lo=lo, hi=hi,
+    )
+
+
 @dataclass
 class _PeriodOutcome:
     """What one period contributes back to the main loop."""

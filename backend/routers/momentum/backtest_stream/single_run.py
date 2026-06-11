@@ -61,6 +61,11 @@ async def run_single(
         "rebalance_weekday": req.rebalance_weekday,
         "strategy_type": req.strategy_type,
         "sector_etfs": req.sector_etfs,
+        "vol_target": req.vol_target,
+        "regime_floor": req.regime_floor,
+        "regime_ramp_lo": req.regime_ramp_lo,
+        "regime_ramp_hi": req.regime_ramp_hi,
+        "daily_timing": req.daily_timing,
     })
 
     # Sector-ETF mode: prefetch benchmark prices once before launching

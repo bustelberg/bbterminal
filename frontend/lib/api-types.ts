@@ -416,6 +416,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/network-diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Network Diagnostics
+         * @description Reachability report for every external service the terminal depends on
+         *     — backs the /network page. Returns this backend's egress IP, the live
+         *     GuruFocus Cloudflare circuit-breaker state, and per-source verdicts (DNS
+         *     IP, latency, status, and a plain-language reason). GuruFocus is probed
+         *     through the real curl_cffi impersonation ladder so the verdict matches
+         *     what the ingest pipeline experiences in prod. See routers/_network_diag.py.
+         */
+        get: operations["network_diagnostics_api_admin_network_diagnostics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/schedules": {
         parameters: {
             query?: never;
@@ -844,6 +869,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/market-cap/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Market Caps
+         * @description Admin-only: (re)fetch every company's market cap from GuruFocus and store
+         *     the EUR snapshot. Spawns a background thread (the job takes ~an hour — one
+         *     GuruFocus call per company) and returns immediately; poll
+         *     `/api/companies/market-cap/refresh/status`. No-op if already running.
+         */
+        post: operations["refresh_market_caps_api_companies_market_cap_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/market-cap/refresh/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Market Cap Refresh Status
+         * @description Progress for the market-cap refresh (running flag + latest message +
+         *     final count). Polled by the /companies refresh button.
+         */
+        get: operations["market_cap_refresh_status_api_companies_market_cap_refresh_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/memberships": {
         parameters: {
             query?: never;
@@ -868,6 +937,31 @@ export interface paths {
          *     via `.range()` until a partial page comes back.
          */
         get: operations["list_company_memberships_api_companies_memberships_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/sectors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Company Sectors
+         * @description Latest known sector per company (from `universe_membership`), for the
+         *     /companies Sector column + filter. Returns `{company_id: sector}`.
+         *
+         *     Same `.range()` pagination + try/except-→-{} resilience as
+         *     /memberships (so a not-yet-migrated prod returns empty rather than 500).
+         *     Backed by the `company_latest_sector` RPC (DISTINCT ON company_id).
+         */
+        get: operations["list_company_sectors_api_companies_sectors_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -924,6 +1018,99 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/earnings/portfolios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Portfolios
+         * @description All portfolios with their members + display labels.
+         */
+        get: operations["list_portfolios_api_earnings_portfolios_get"];
+        put?: never;
+        /**
+         * Create Portfolio
+         * @description Create a portfolio. Weights default to equal when none are supplied.
+         */
+        post: operations["create_portfolio_api_earnings_portfolios_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/portfolios/{portfolio_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Portfolio
+         * @description Rename and/or replace the members of a portfolio.
+         */
+        put: operations["update_portfolio_api_earnings_portfolios__portfolio_id__put"];
+        post?: never;
+        /**
+         * Delete Portfolio
+         * @description Delete a portfolio (members cascade).
+         */
+        delete: operations["delete_portfolio_api_earnings_portfolios__portfolio_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/portfolios/{portfolio_id}/member-metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Portfolio Member Metrics
+         * @description Per-member metrics (EUR-converted, same as the aggregate) so the charts
+         *     can show each holding's own value for a metric and rank them by impact in
+         *     the tooltip. Returns `[{company_id, ticker, name, weight, metrics: [...]}]`.
+         */
+        get: operations["portfolio_member_metrics_api_earnings_portfolios__portfolio_id__member_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/portfolios/{portfolio_id}/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Portfolio Metrics
+         * @description Aggregated MetricRow[] for the portfolio — weighted mean per (metric,
+         *     date) over members holding data there (weights renormalized to those
+         *     present), currency-denominated metrics converted to EUR first. Same shape
+         *     as /api/earnings/{company_id}/metrics, so every chart consumes it directly.
+         */
+        get: operations["portfolio_metrics_api_earnings_portfolios__portfolio_id__metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/earnings/{company_id}/metric-codes": {
         parameters: {
             query?: never;
@@ -954,11 +1141,6 @@ export interface paths {
         /**
          * Get Earnings Metrics
          * @description Dashboard metrics for a company (source=gurufocus, dates >= 1998).
-         *
-         *     PostgREST caps a single response at ~1000 rows regardless of `.limit(N)`,
-         *     and our `.order("target_date")` is ascending — so a flat `.limit(5000)`
-         *     silently returns the OLDEST 1000 rows and hides everything recent.
-         *     Every multi-row read here paginates instead.
          */
         get: operations["get_earnings_metrics_api_earnings__company_id__metrics_get"];
         put?: never;
@@ -2806,6 +2988,11 @@ export interface components {
                 [key: string]: number;
             } | null;
             /**
+             * Daily Timing
+             * @default false
+             */
+            daily_timing?: boolean;
+            /**
              * Db Only
              * @default true
              */
@@ -2859,6 +3046,18 @@ export interface components {
              * @default 0
              */
             rebalance_weekday?: number;
+            /** Regime Floor */
+            regime_floor?: number | null;
+            /**
+             * Regime Ramp Hi
+             * @default 0.7
+             */
+            regime_ramp_hi?: number;
+            /**
+             * Regime Ramp Lo
+             * @default 0.3
+             */
+            regime_ramp_lo?: number;
             /** Sector Etfs */
             sector_etfs?: {
                 [key: string]: number;
@@ -2898,6 +3097,8 @@ export interface components {
             universe_label?: string | null;
             /** Variants */
             variants?: components["schemas"]["VariantSpec"][] | null;
+            /** Vol Target */
+            vol_target?: number | null;
         };
         /** Body_parse_portfolio_api_portfolios_parse_post */
         Body_parse_portfolio_api_portfolios_parse_post: {
@@ -3031,6 +3232,30 @@ export interface components {
             name?: string | null;
             /** Start Date */
             start_date?: string | null;
+        };
+        /** PortfolioCreate */
+        PortfolioCreate: {
+            /**
+             * Members
+             * @default []
+             */
+            members?: components["schemas"]["PortfolioMemberIn"][];
+            /** Name */
+            name: string;
+        };
+        /** PortfolioMemberIn */
+        PortfolioMemberIn: {
+            /** Company Id */
+            company_id: number;
+            /** Weight */
+            weight?: number | null;
+        };
+        /** PortfolioUpdate */
+        PortfolioUpdate: {
+            /** Members */
+            members?: components["schemas"]["PortfolioMemberIn"][] | null;
+            /** Name */
+            name?: string | null;
         };
         /** RecomputeRequest */
         RecomputeRequest: {
@@ -3175,6 +3400,8 @@ export interface components {
         };
         /** VariantSpec */
         VariantSpec: {
+            /** Daily Timing */
+            daily_timing?: boolean | null;
             /**
              * Frequency
              * @enum {string}
@@ -3188,6 +3415,8 @@ export interface components {
             min_price_score?: number | null;
             /** Rebalance Weekday */
             rebalance_weekday?: number | null;
+            /** Regime Floor */
+            regime_floor?: number | null;
             /**
              * Strategy Type
              * @enum {string}
@@ -3199,6 +3428,8 @@ export interface components {
             top_n_sectors?: number | null;
             /** Universe Label */
             universe_label?: string | null;
+            /** Vol Target */
+            vol_target?: number | null;
         };
         /** _GuruFocusExchangeSearchBody */
         _GuruFocusExchangeSearchBody: {
@@ -3632,6 +3863,37 @@ export interface operations {
         };
     };
     get_health_api_admin_health_get: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    network_diagnostics_api_admin_network_diagnostics_get: {
         parameters: {
             query?: never;
             header: {
@@ -4326,7 +4588,67 @@ export interface operations {
             };
         };
     };
+    refresh_market_caps_api_companies_market_cap_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    market_cap_refresh_status_api_companies_market_cap_refresh_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     list_company_memberships_api_companies_memberships_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_company_sectors_api_companies_sectors_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -4428,6 +4750,187 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_portfolios_api_earnings_portfolios_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    create_portfolio_api_earnings_portfolios_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortfolioCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_portfolio_api_earnings_portfolios__portfolio_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortfolioUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_portfolio_api_earnings_portfolios__portfolio_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    portfolio_member_metrics_api_earnings_portfolios__portfolio_id__member_metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    portfolio_metrics_api_earnings_portfolios__portfolio_id__metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

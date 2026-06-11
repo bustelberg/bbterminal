@@ -4,6 +4,7 @@ import { memo, useMemo } from 'react';
 import { type ChartCadence, type MetricRow } from './types';
 import { dropExtremeOutliers } from './utils';
 import { bandOf, type Band } from './MetricBandChart';
+import { buildMemberSeries, weightedAverageSeries, type PortfolioMemberMetrics } from './portfolioBreakdown';
 import type { SnapshotChartConfig } from './snapshotBandCharts';
 import { chartTheme } from '../../../lib/chartTheme';
 
@@ -28,16 +29,22 @@ type Props = {
   /** Shared min-width (in `ch`) for the label so both rows' circles align
    * regardless of name length — pass the longer of the two names' lengths. */
   labelMinCh?: number;
+  /** Per-member metrics when this row scores a portfolio — the latest value is
+   * then the weighted-member average, matching the band charts below. */
+  breakdown?: PortfolioMemberMetrics[];
 };
 
 /** At-a-glance scorecard above the Charts grid: one green/amber/red circle per
  * banded chart, coloured by where the company's LATEST value lands in that
  * chart's scoring rubric. Reads from the same config the charts render from,
  * so a circle always agrees with its chart's latest-point colour. */
-function BandScorecardInner({ charts, metrics, cadence, hideOutliers, label, labelMinCh }: Props) {
+function BandScorecardInner({ charts, metrics, cadence, hideOutliers, label, labelMinCh, breakdown }: Props) {
   const items = useMemo(() => {
     return charts.map((c) => {
-      const series = hideOutliers ? dropExtremeOutliers(c.buildSeries(metrics, cadence)) : c.buildSeries(metrics, cadence);
+      const buildOne = (m: MetricRow[]) => (hideOutliers ? dropExtremeOutliers(c.buildSeries(m, cadence)) : c.buildSeries(m, cadence));
+      // Portfolio → weighted-member average (matches the band chart's line);
+      // single company → its own series.
+      const series = breakdown ? weightedAverageSeries(buildMemberSeries(breakdown, buildOne)) : buildOne(metrics);
       const latest = series.length > 0 ? series[series.length - 1].value : null;
       const band = bandOf(latest, c.band);
       return {
@@ -47,7 +54,7 @@ function BandScorecardInner({ charts, metrics, cadence, hideOutliers, label, lab
         valueLabel: latest == null ? 'no data' : c.format(latest),
       };
     });
-  }, [charts, metrics, cadence, hideOutliers]);
+  }, [charts, metrics, cadence, hideOutliers, breakdown]);
 
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">

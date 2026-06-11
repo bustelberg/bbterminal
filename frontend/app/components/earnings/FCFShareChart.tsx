@@ -9,6 +9,7 @@ import InfoTip from '../InfoTip';
 import Spinner from '../Spinner';
 import { MC, type MetricRow } from './types';
 import { annualSeries, computeCAGR, fmtNum, fmtPct, tooltipStyle } from './utils';
+import { buildMemberSeries, weightedAverageSeries, type PortfolioMemberMetrics } from './portfolioBreakdown';
 import { chartTheme } from '../../../lib/chartTheme';
 
 // Series colors — must match ForwardPEChart and RelativeGrowthChart's
@@ -32,6 +33,11 @@ type Props = {
    * "CAGR / Latest" pill area for B so the comparison column doesn't
    * just sit blank while data is loading. */
   loadingB?: boolean;
+  /** Per-member metrics when a side is a portfolio (already EUR-converted) —
+   * the line is then the weighted-member average, smooth instead of the raw
+   * fiscal-misaligned blend. */
+  breakdownA?: PortfolioMemberMetrics[];
+  breakdownB?: PortfolioMemberMetrics[];
 };
 
 const IDENTITY = (v: number) => v;
@@ -41,16 +47,22 @@ const IDENTITY = (v: number) => v;
  * compound math meaningful. With a comparison company, the second
  * series renders in amber + its own CAGR / Latest pills appear in the
  * header. */
-function FCFShareChartInner({ metrics, metricsB, labelA, labelB, nameA, nameB, toEurA = IDENTITY, toEurB = IDENTITY, loadingB }: Props) {
+function FCFShareChartInner({ metrics, metricsB, labelA, labelB, nameA, nameB, toEurA = IDENTITY, toEurB = IDENTITY, loadingB, breakdownA, breakdownB }: Props) {
   // FCF/share is reported in the company's native currency; convert each
   // year's value to EUR (at that year's FX rate) so A and B compare directly.
+  // A portfolio's line is the weighted average of its holdings' (already-EUR)
+  // FCF/share series — no re-conversion, and no fiscal-misalignment spikes.
   const seriesA = useMemo(
-    () => annualSeries(metrics, MC.FCF_PS).map((p) => ({ date: p.date, value: toEurA(p.value, p.date) })),
-    [metrics, toEurA],
+    () => (breakdownA
+      ? weightedAverageSeries(buildMemberSeries(breakdownA, (m) => annualSeries(m, MC.FCF_PS)))
+      : annualSeries(metrics, MC.FCF_PS).map((p) => ({ date: p.date, value: toEurA(p.value, p.date) }))),
+    [breakdownA, metrics, toEurA],
   );
   const seriesB = useMemo(
-    () => (metricsB ? annualSeries(metricsB, MC.FCF_PS).map((p) => ({ date: p.date, value: toEurB(p.value, p.date) })) : []),
-    [metricsB, toEurB],
+    () => (breakdownB
+      ? weightedAverageSeries(buildMemberSeries(breakdownB, (m) => annualSeries(m, MC.FCF_PS)))
+      : (metricsB ? annualSeries(metricsB, MC.FCF_PS).map((p) => ({ date: p.date, value: toEurB(p.value, p.date) })) : [])),
+    [breakdownB, metricsB, toEurB],
   );
   const cagrA = useMemo(() => computeCAGR(seriesA.filter((s) => s.value > 0)), [seriesA]);
   const cagrB = useMemo(() => computeCAGR(seriesB.filter((s) => s.value > 0)), [seriesB]);

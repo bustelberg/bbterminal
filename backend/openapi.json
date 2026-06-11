@@ -17,6 +17,11 @@
             ],
             "title": "Category Weights"
           },
+          "daily_timing": {
+            "default": false,
+            "title": "Daily Timing",
+            "type": "boolean"
+          },
           "db_only": {
             "default": true,
             "title": "Db Only",
@@ -119,6 +124,27 @@
             "title": "Rebalance Weekday",
             "type": "integer"
           },
+          "regime_floor": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regime Floor"
+          },
+          "regime_ramp_hi": {
+            "default": 0.7,
+            "title": "Regime Ramp Hi",
+            "type": "number"
+          },
+          "regime_ramp_lo": {
+            "default": 0.3,
+            "title": "Regime Ramp Lo",
+            "type": "number"
+          },
           "sector_etfs": {
             "anyOf": [
               {
@@ -206,6 +232,17 @@
               }
             ],
             "title": "Variants"
+          },
+          "vol_target": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vol Target"
           }
         },
         "title": "BacktestRequest",
@@ -554,6 +591,82 @@
           }
         },
         "title": "LongEquitySaveUniverseRequest",
+        "type": "object"
+      },
+      "PortfolioCreate": {
+        "properties": {
+          "members": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PortfolioMemberIn"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "PortfolioCreate",
+        "type": "object"
+      },
+      "PortfolioMemberIn": {
+        "properties": {
+          "company_id": {
+            "title": "Company Id",
+            "type": "integer"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight"
+          }
+        },
+        "required": [
+          "company_id"
+        ],
+        "title": "PortfolioMemberIn",
+        "type": "object"
+      },
+      "PortfolioUpdate": {
+        "properties": {
+          "members": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PortfolioMemberIn"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Members"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "PortfolioUpdate",
         "type": "object"
       },
       "RecomputeRequest": {
@@ -1001,6 +1114,17 @@
       },
       "VariantSpec": {
         "properties": {
+          "daily_timing": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Timing"
+          },
           "frequency": {
             "enum": [
               "daily",
@@ -1069,6 +1193,17 @@
             ],
             "title": "Rebalance Weekday"
           },
+          "regime_floor": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regime Floor"
+          },
           "strategy_type": {
             "enum": [
               "long_only",
@@ -1109,6 +1244,17 @@
               }
             ],
             "title": "Universe Label"
+          },
+          "vol_target": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vol Target"
           }
         },
         "required": [
@@ -1759,6 +1905,47 @@
           }
         },
         "summary": "Get Health",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/network-diagnostics": {
+      "get": {
+        "description": "Reachability report for every external service the terminal depends on\n\u2014 backs the /network page. Returns this backend's egress IP, the live\nGuruFocus Cloudflare circuit-breaker state, and per-source verdicts (DNS\nIP, latency, status, and a plain-language reason). GuruFocus is probed\nthrough the real curl_cffi impersonation ladder so the verdict matches\nwhat the ingest pipeline experiences in prod. See routers/_network_diag.py.",
+        "operationId": "network_diagnostics_api_admin_network_diagnostics_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Network Diagnostics",
         "tags": [
           "admin"
         ]
@@ -2709,6 +2896,46 @@
         ]
       }
     },
+    "/api/companies/market-cap/refresh": {
+      "post": {
+        "description": "Admin-only: (re)fetch every company's market cap from GuruFocus and store\nthe EUR snapshot. Spawns a background thread (the job takes ~an hour \u2014 one\nGuruFocus call per company) and returns immediately; poll\n`/api/companies/market-cap/refresh/status`. No-op if already running.",
+        "operationId": "refresh_market_caps_api_companies_market_cap_refresh_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Refresh Market Caps",
+        "tags": [
+          "companies"
+        ]
+      }
+    },
+    "/api/companies/market-cap/refresh/status": {
+      "get": {
+        "description": "Progress for the market-cap refresh (running flag + latest message +\nfinal count). Polled by the /companies refresh button.",
+        "operationId": "market_cap_refresh_status_api_companies_market_cap_refresh_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Market Cap Refresh Status",
+        "tags": [
+          "companies"
+        ]
+      }
+    },
     "/api/companies/memberships": {
       "get": {
         "description": "Distinct universe labels per company. Computed server-side via the\n`company_universe_labels` RPC; backed by an index on\nuniverse_membership(company_id) so the aggregate is fast even when the\ntable holds millions of per-month rows. Returns\n`{memberships: {company_id: [labels]}}`.\n\nPagination: the cloud Supabase project caps PostgREST responses at\n`db-max-rows=1000` per request (local Docker Supabase is bumped to\n10000 in `supabase/config.toml`, which hides the cap during dev). The\nRPC returns ~2800 rows in prod, so without paging we'd silently miss\nthe membership chips for every company past offset 1000 \u2014 see the\n2G Energy AG / cid=4875 incident on 2026-05-22. The loop here pages\nvia `.range()` until a partial page comes back.",
@@ -2724,6 +2951,26 @@
           }
         },
         "summary": "List Company Memberships",
+        "tags": [
+          "companies"
+        ]
+      }
+    },
+    "/api/companies/sectors": {
+      "get": {
+        "description": "Latest known sector per company (from `universe_membership`), for the\n/companies Sector column + filter. Returns `{company_id: sector}`.\n\nSame `.range()` pagination + try/except-\u2192-{} resilience as\n/memberships (so a not-yet-migrated prod returns empty rather than 500).\nBacked by the `company_latest_sector` RPC (DISTINCT ON company_id).",
+        "operationId": "list_company_sectors_api_companies_sectors_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Company Sectors",
         "tags": [
           "companies"
         ]
@@ -2838,6 +3085,236 @@
         ]
       }
     },
+    "/api/earnings/portfolios": {
+      "get": {
+        "description": "All portfolios with their members + display labels.",
+        "operationId": "list_portfolios_api_earnings_portfolios_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Portfolios",
+        "tags": [
+          "earnings"
+        ]
+      },
+      "post": {
+        "description": "Create a portfolio. Weights default to equal when none are supplied.",
+        "operationId": "create_portfolio_api_earnings_portfolios_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Portfolio",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/portfolios/{portfolio_id}": {
+      "delete": {
+        "description": "Delete a portfolio (members cascade).",
+        "operationId": "delete_portfolio_api_earnings_portfolios__portfolio_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Portfolio",
+        "tags": [
+          "earnings"
+        ]
+      },
+      "put": {
+        "description": "Rename and/or replace the members of a portfolio.",
+        "operationId": "update_portfolio_api_earnings_portfolios__portfolio_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Portfolio",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/portfolios/{portfolio_id}/member-metrics": {
+      "get": {
+        "description": "Per-member metrics (EUR-converted, same as the aggregate) so the charts\ncan show each holding's own value for a metric and rank them by impact in\nthe tooltip. Returns `[{company_id, ticker, name, weight, metrics: [...]}]`.",
+        "operationId": "portfolio_member_metrics_api_earnings_portfolios__portfolio_id__member_metrics_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Portfolio Member Metrics",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/portfolios/{portfolio_id}/metrics": {
+      "get": {
+        "description": "Aggregated MetricRow[] for the portfolio \u2014 weighted mean per (metric,\ndate) over members holding data there (weights renormalized to those\npresent), currency-denominated metrics converted to EUR first. Same shape\nas /api/earnings/{company_id}/metrics, so every chart consumes it directly.",
+        "operationId": "portfolio_metrics_api_earnings_portfolios__portfolio_id__metrics_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Portfolio Metrics",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
     "/api/earnings/{company_id}/metric-codes": {
       "get": {
         "description": "Debug: distinct metric codes stored for a company.",
@@ -2881,7 +3358,7 @@
     },
     "/api/earnings/{company_id}/metrics": {
       "get": {
-        "description": "Dashboard metrics for a company (source=gurufocus, dates >= 1998).\n\nPostgREST caps a single response at ~1000 rows regardless of `.limit(N)`,\nand our `.order(\"target_date\")` is ascending \u2014 so a flat `.limit(5000)`\nsilently returns the OLDEST 1000 rows and hides everything recent.\nEvery multi-row read here paginates instead.",
+        "description": "Dashboard metrics for a company (source=gurufocus, dates >= 1998).",
         "operationId": "get_earnings_metrics_api_earnings__company_id__metrics_get",
         "parameters": [
           {

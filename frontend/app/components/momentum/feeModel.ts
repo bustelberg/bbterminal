@@ -190,7 +190,11 @@ function transactionDrags(
     for (const cid of cur) if (next == null || !next.has(cid)) departures++;
     const n = Math.max(cur.size, 1);
     const legFrac = (entrants + departures) / n;
-    out.push({ t: parseDate(periodExitDate(closed[i])), factor: Math.max(0, 1 - legFrac * fee) });
+    // Daily tit-for-tat swaps: each is one full-book side at the flat
+    // transaction fee, compounded on top of this period's rebalance drag.
+    const nSwaps = closed[i].daily_timing_swaps ?? 0;
+    const swapFactor = nSwaps > 0 ? Math.pow(1 - fee, nSwaps) : 1;
+    out.push({ t: parseDate(periodExitDate(closed[i])), factor: Math.max(0, 1 - legFrac * fee) * swapFactor });
   }
   return out;
 }

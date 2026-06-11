@@ -65,6 +65,31 @@ export type PeriodRecord = {
   // Number of companies that actually contributed to universe_return_pct
   // this period (signals minus missing-price drops). Diagnostic only.
   universe_constituents?: number | null;
+  // Book-level exposure multiplier applied this period by the vol-target
+  // and/or regime overlays (1.0 = fully invested). Absent when no overlay
+  // scaled this period (back-compat: treat missing as 1.0).
+  exposure_scale?: number;
+  // Composite 0..1 market-health score that drove the regime filter this
+  // period (trend + 6-mo momentum + drawdown breadth). Present only when
+  // the regime filter was active; used to chart the raw signal.
+  market_health?: number | null;
+  // Per-component breakdown of the health score (each 0..1), present
+  // alongside market_health. Lets the Regime Detector chart which
+  // sub-signal leads a crisis.
+  market_health_components?: {
+    trend?: number;
+    momentum?: number;
+    drawdown?: number;
+    composite?: number;
+  } | null;
+  // Average RSI(14) across the universe this period, two ways (each
+  // 0..100) — a momentum-breadth gauge charted separately on the Regime
+  // Detector. `simple` = SMA-style; `wilder` = Wilder's smoothing.
+  universe_rsi?: { simple?: number; wilder?: number } | null;
+  // Daily cash<->stocks swaps the tit-for-tat overlay made this period
+  // (each = one full-book trade). The fee model charges these at the held
+  // book's per-exchange fees. Absent/0 when timing is off.
+  daily_timing_swaps?: number;
 };
 
 export type DrawdownPeriod = {
@@ -186,6 +211,20 @@ export type VariantParams = {
   // first-Wednesday etc. Signals are computed strict-`<` the rebalance
   // date, so a Wednesday variant decides on Tuesday's close.
   rebalance_weekday?: number;
+  // Annualized volatility target (percent, e.g. 12). Undefined = no vol
+  // targeting (the original momentum strategy, fully invested); a number
+  // makes this a distinct vol-targeted variant that scales exposure
+  // toward the target each rebalance (de-risk only, holds cash in
+  // turbulent regimes). Off and on appear as separate rows in the table.
+  vol_target?: number;
+  // Market-regime trend filter: risk-off exposure floor (0 = all cash,
+  // 0.5 = half) applied when universe breadth (% above 200-MA) drops below
+  // the base threshold. Undefined = no filter (original strategy). 0 is a
+  // valid floor, so callers must guard with `!= null`, not truthiness.
+  regime_floor?: number;
+  // Daily "tit-for-tat" timing overlay: hold the strategy today only if
+  // yesterday's daily return was >= 0, else cash. Undefined/false = off.
+  daily_timing?: boolean;
 };
 
 /** Short weekday labels indexed 0=Mon..6=Sun (Python `date.weekday()`).
@@ -204,6 +243,9 @@ export function makeVariantKey(p: VariantParams): VariantKey {
   if (p.universe != null) parts.push(`u${p.universe}`);
   if (p.grouping != null) parts.push(`g${p.grouping}`);
   if (p.rebalance_weekday != null) parts.push(`w${p.rebalance_weekday}`);
+  if (p.vol_target != null) parts.push(`v${p.vol_target}`);
+  if (p.regime_floor != null) parts.push(`r${p.regime_floor}`);
+  if (p.daily_timing) parts.push('t1');
   return parts.join('__');
 }
 
@@ -228,6 +270,9 @@ export function parseVariantKey(key: VariantKey): VariantParams | null {
     else if (tag === 'u') { out.universe = rest; }
     else if (tag === 'g') { if (rest === 'sector' || rest === 'industry') out.grouping = rest; }
     else if (tag === 'w') { const n = Number(rest); if (Number.isFinite(n)) out.rebalance_weekday = n; }
+    else if (tag === 'v') { const n = Number(rest); if (Number.isFinite(n)) out.vol_target = n; }
+    else if (tag === 'r') { const n = Number(rest); if (Number.isFinite(n)) out.regime_floor = n; }
+    else if (tag === 't') { out.daily_timing = rest === '1'; }
   }
   return out;
 }
@@ -253,6 +298,9 @@ export function variantLabel(p: VariantParams): string {
   if (p.top_n_per_sector != null) parts.push(`${p.top_n_per_sector} per ${bucketSingular}`);
   if (p.min_price_score != null) parts.push(`min ${p.min_price_score}`);
   if (p.rebalance_weekday != null) parts.push(`${VARIANT_WEEKDAY_SHORT[p.rebalance_weekday] ?? `wd${p.rebalance_weekday}`} rebal`);
+  if (p.vol_target != null) parts.push(`vol ${p.vol_target}%`);
+  if (p.regime_floor != null) parts.push(`regime ${p.regime_floor === 0 ? '→cash' : `→${p.regime_floor}×`}`);
+  if (p.daily_timing) parts.push('tit-for-tat');
   return parts.join(' · ');
 }
 
@@ -443,6 +491,9 @@ export async function startVariantsBacktest(
       ...(v.universe != null ? { index_universe: v.universe } : {}),
       ...(v.grouping != null ? { grouping: v.grouping } : {}),
       ...(v.rebalance_weekday != null ? { rebalance_weekday: v.rebalance_weekday } : {}),
+      ...(v.vol_target != null ? { vol_target: v.vol_target } : {}),
+      ...(v.regime_floor != null ? { regime_floor: v.regime_floor } : {}),
+      ...(v.daily_timing ? { daily_timing: true } : {}),
     })),
   };
 

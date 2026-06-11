@@ -393,6 +393,8 @@ _MKTCAP_REFRESH: dict = {
     "running": False,
     "done": False,
     "message": "",
+    "processed": 0,
+    "total": 0,
     "set": 0,
     "error": None,
     "started_at": None,
@@ -404,8 +406,16 @@ _MKTCAP_LOCK = threading.Lock()
 def _run_market_cap_refresh() -> None:
     from index_universe.backfill_market_cap import backfill_market_cap  # noqa: PLC0415
     try:
-        def on_progress(msg: str) -> None:
-            _MKTCAP_REFRESH["message"] = msg
+        def on_progress(d: dict) -> None:
+            # Structured per-company payload from the backfill: drives the
+            # live progress bar on the /companies button.
+            _MKTCAP_REFRESH["message"] = d.get("message", "")
+            if "processed" in d:
+                _MKTCAP_REFRESH["processed"] = d["processed"]
+            if "total" in d:
+                _MKTCAP_REFRESH["total"] = d["total"]
+            if "set" in d:
+                _MKTCAP_REFRESH["set"] = d["set"]
         res = backfill_market_cap(supabase, only_missing=False, on_progress=on_progress)
         _MKTCAP_REFRESH["set"] = res.set_count
         _MKTCAP_REFRESH["message"] = f"Done — updated {res.set_count} companies."
@@ -429,6 +439,7 @@ async def refresh_market_caps():
             return {"started": False, "running": True, "message": _MKTCAP_REFRESH["message"]}
         _MKTCAP_REFRESH.update({
             "running": True, "done": False, "error": None, "set": 0,
+            "processed": 0, "total": 0,
             "message": "Starting…",
             "started_at": datetime.now(timezone.utc).isoformat(),
             "finished_at": None,

@@ -234,8 +234,22 @@ export function computeNetStats(
       }
     }
 
-    const portRet = aggregatePortfolio(longReturns, shortReturns, cur.hasShortLeg);
-    if (portRet == null) continue;
+    const portRetRaw = aggregatePortfolio(longReturns, shortReturns, cur.hasShortLeg);
+    if (portRetRaw == null) continue;
+    // Daily tit-for-tat swap cost: each full-book cash<->stocks trade this
+    // period pays the held book's AVERAGE per-exchange fee (the whole book
+    // is sold/bought, so the leg fraction is 1). Applied on top of the
+    // period's rebalance buy/sell fees. No-op when timing is off (0 swaps).
+    let portRet = portRetRaw;
+    const nSwaps = cur.record.daily_timing_swaps ?? 0;
+    if (nSwaps > 0 && cur.record.holdings.length > 0) {
+      let feeSum = 0;
+      for (const h of cur.record.holdings) feeSum += feeFor(h.company_id);
+      const avgFee = feeSum / cur.record.holdings.length;
+      if (avgFee > 0) {
+        portRet = ((1 + portRetRaw / 100) * Math.pow(1 - avgFee, nSwaps) - 1) * 100;
+      }
+    }
     // CRITICAL: only closed periods feed the headline-stat
     // accumulation. Open periods still go through the loop above so
     // their company_ids influence the trade-aware fee classification

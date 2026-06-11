@@ -9,6 +9,7 @@ import InfoTip from '../InfoTip';
 import Spinner from '../Spinner';
 import { type ChartCadence, type MetricRow } from './types';
 import { dropExtremeOutliers, tooltipStyle } from './utils';
+import { buildMemberSeries, weightedAverageSeries, MemberRanking, type MemberSeries, type PortfolioMemberMetrics } from './portfolioBreakdown';
 import { chartTheme } from '../../../lib/chartTheme';
 
 // Series colors — must match the other earnings charts' A/B treatment so the
@@ -86,7 +87,57 @@ type Props = {
   infoText: string;
   /** Shown when neither company has data. */
   emptyText: string;
+  /** Per-member metrics when a side is a portfolio — drives the
+   * ranked-by-impact holdings list in the tooltip. */
+  breakdownA?: PortfolioMemberMetrics[];
+  breakdownB?: PortfolioMemberMetrics[];
 };
+
+/** Custom tooltip used when a side is a portfolio: the blended value plus the
+ * holdings ranked best→worst on this metric (recharts injects active/payload/
+ * label). `dataKey` 'a'/'b' map to the two lines; `label` is the date. */
+function BandBreakdownTooltip({
+  active, payload, label,
+  format, betterIsLower, nameA, nameB, memberSeriesA, memberSeriesB,
+}: {
+  active?: boolean;
+  payload?: Array<{ dataKey?: string; value?: number }>;
+  label?: string | number;
+  format: (v: number) => string;
+  betterIsLower: boolean;
+  nameA: string;
+  nameB: string;
+  memberSeriesA: MemberSeries[] | null;
+  memberSeriesB: MemberSeries[] | null;
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+  const date = String(label ?? '');
+  const aVal = payload.find((p) => p.dataKey === 'a')?.value;
+  const bVal = payload.find((p) => p.dataKey === 'b')?.value;
+  return (
+    <div style={tooltipStyle} className="text-xs min-w-[12rem]">
+      <div className="text-fg-faint mb-1">{date.slice(0, 10)}</div>
+      {aVal != null && (
+        <div>
+          <div className="flex items-center gap-3">
+            <span style={{ color: COLOR_A }}>{nameA}</span>
+            <span className="ml-auto font-mono text-fg-strong">{format(Number(aVal))}</span>
+          </div>
+          {memberSeriesA && <MemberRanking date={date} members={memberSeriesA} format={format} betterIsLower={betterIsLower} color={COLOR_A} />}
+        </div>
+      )}
+      {bVal != null && (
+        <div className="mt-2">
+          <div className="flex items-center gap-3">
+            <span style={{ color: COLOR_B }}>{nameB}</span>
+            <span className="ml-auto font-mono text-fg-strong">{format(Number(bVal))}</span>
+          </div>
+          {memberSeriesB && <MemberRanking date={date} members={memberSeriesB} format={format} betterIsLower={betterIsLower} color={COLOR_B} />}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Generic banded metric-over-time chart for the /earnings Charts grid. One
  * quarterly series per company, with green/amber/red background bands at the
@@ -97,16 +148,37 @@ type Props = {
 function MetricBandChartInner({
   metrics, metricsB, labelA, labelB, nameA, nameB, loadingB, cadence = 'quarterly', hideOutliers = false,
   buildSeries, band, format, axisFormat, subtitle, cadenceLabel, infoText, emptyText,
+  breakdownA, breakdownB,
 }: Props) {
-  const seriesA = useMemo(() => {
-    const s = buildSeries(metrics, cadence);
-    return hideOutliers ? dropExtremeOutliers(s) : s;
-  }, [buildSeries, metrics, cadence, hideOutliers]);
-  const seriesB = useMemo(() => {
-    if (!metricsB) return [];
-    const s = buildSeries(metricsB, cadence);
-    return hideOutliers ? dropExtremeOutliers(s) : s;
-  }, [buildSeries, metricsB, cadence, hideOutliers]);
+  const buildOne = useMemo(
+    () => (m: MetricRow[]) => {
+      const s = buildSeries(m, cadence);
+      return hideOutliers ? dropExtremeOutliers(s) : s;
+    },
+    [buildSeries, cadence, hideOutliers],
+  );
+  // Per-member series (portfolio sides only) — same builder as the line, so
+  // each holding's value is directly comparable in the tooltip.
+  const memberSeriesA = useMemo<MemberSeries[] | null>(
+    () => (breakdownA ? buildMemberSeries(breakdownA, buildOne) : null),
+    [breakdownA, buildOne],
+  );
+  const memberSeriesB = useMemo<MemberSeries[] | null>(
+    () => (breakdownB ? buildMemberSeries(breakdownB, buildOne) : null),
+    [breakdownB, buildOne],
+  );
+
+  // The line: for a portfolio, the weighted average of each holding's charted
+  // value (correct even for derived series like PEG, where blending raw
+  // components per date is meaningless). Single company → its own series.
+  const seriesA = useMemo(
+    () => (memberSeriesA ? weightedAverageSeries(memberSeriesA) : buildOne(metrics)),
+    [memberSeriesA, buildOne, metrics],
+  );
+  const seriesB = useMemo(
+    () => (memberSeriesB ? weightedAverageSeries(memberSeriesB) : (metricsB ? buildOne(metricsB) : [])),
+    [memberSeriesB, buildOne, metricsB],
+  );
 
   const meanA = useMemo(
     () => (seriesA.length > 0 ? seriesA.reduce((s, p) => s + p.value, 0) / seriesA.length : null),
@@ -226,14 +298,27 @@ function MetricBandChartInner({
             </>
           )}
           {hasNegative && <ReferenceLine y={0} stroke={chartTheme.axisTick} strokeDasharray="3 3" />}
-          <Tooltip
-            contentStyle={tooltipStyle}
-            labelStyle={{ color: chartTheme.axisLabel }}
-            formatter={(v, name) => {
-              const lab = name === 'a' ? (nameA ?? labelA ?? 'A') : name === 'b' ? (nameB ?? labelB ?? 'B') : String(name);
-              return [format(Number(v)), lab];
-            }}
-          />
+          {memberSeriesA || memberSeriesB ? (
+            <Tooltip content={
+              <BandBreakdownTooltip
+                format={format}
+                betterIsLower={band.kind === 'lower'}
+                nameA={nameA ?? labelA ?? 'A'}
+                nameB={nameB ?? labelB ?? 'B'}
+                memberSeriesA={memberSeriesA}
+                memberSeriesB={memberSeriesB}
+              />
+            } />
+          ) : (
+            <Tooltip
+              contentStyle={tooltipStyle}
+              labelStyle={{ color: chartTheme.axisLabel }}
+              formatter={(v, name) => {
+                const lab = name === 'a' ? (nameA ?? labelA ?? 'A') : name === 'b' ? (nameB ?? labelB ?? 'B') : String(name);
+                return [format(Number(v)), lab];
+              }}
+            />
+          )}
           {/* Latest point gets an emphasized marker in its band colour, so the
               current zone (green/amber/red) shows on the plot, not just the pill. */}
           <Line

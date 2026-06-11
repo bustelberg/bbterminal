@@ -44,7 +44,7 @@ export type Company = {
   out_of_scope_reason?: string | null;
 };
 
-export type SortField = 'company_name' | 'gurufocus_ticker' | 'gurufocus_exchange' | 'isin' | 'country' | 'sector';
+export type SortField = 'company_name' | 'gurufocus_ticker' | 'gurufocus_exchange' | 'isin' | 'country' | 'sector' | 'market_cap_eur';
 export type SortDir = 'asc' | 'desc';
 
 /** A possible-duplicate match returned by `/api/companies/check-duplicates`,

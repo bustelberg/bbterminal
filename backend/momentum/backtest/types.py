@@ -144,6 +144,47 @@ class BacktestConfig:
     # closed-only behavior unchanged. The HTTP path (BacktestConfig.from_dict)
     # defaults this to True so API requests opt in by default.
     include_open_period: bool = False
+    # === Volatility targeting ===========================================
+    # When set, each rebalance scales the book's exposure by
+    #   k_t = min(vol_target_max_leverage, vol_target / σ̂_t)
+    # where σ̂_t is the trailing annualized volatility of the equal-
+    # weighted basket of the selected holdings, estimated over
+    # `vol_target_lookback` trading days ending strictly before the
+    # rebalance bar (the prior-close `entry_ts` the runner already uses —
+    # no look-ahead). The remaining `1 - k_t` sits in cash (earns 0, same
+    # rf=0 convention as the Sharpe calc). `vol_target` is an ANNUALIZED
+    # percent (e.g. 12.0 = run at ~12% vol). None disables (default), so
+    # every existing caller keeps fixed 100% exposure.
+    #
+    # `vol_target_max_leverage` caps k_t. 1.0 = "de-risk only" — the book
+    # can scale down into cash in turbulent regimes but never borrows;
+    # >1.0 would let calm regimes lever up.
+    vol_target: float | None = None
+    vol_target_lookback: int = 60
+    vol_target_max_leverage: float = 1.0
+    # === Market-regime (trend) filter ===================================
+    # When `regime_floor` is set, each rebalance scales exposure on a
+    # linear ramp driven by a composite 0..1 market-health score (trend +
+    # 6-month momentum + drawdown breadth — see `compute_market_health`):
+    #   health >= regime_ramp_hi → fully invested (1.0)
+    #   health <= regime_ramp_lo → at the floor
+    #   in between                → proportional (cash ∝ market weakness).
+    # `regime_floor` is the defensive floor (0.0 = all cash, 0.5 = half).
+    # The factor multiplies into the same per-period exposure scale as vol
+    # targeting, so the two compose. None disables (default) — the
+    # original strategy is untouched.
+    regime_floor: float | None = None
+    regime_ramp_lo: float = 0.3
+    regime_ramp_hi: float = 0.7
+    # === Daily "tit-for-tat" timing overlay =============================
+    # When True, gate daily exposure on the strategy's OWN prior-day return:
+    # if yesterday's daily return was >= 0 we hold the full strategy today;
+    # if it was negative we sit in cash today (0%). A momentum-on-momentum
+    # day-trading filter. It reshapes the daily equity curve (and therefore
+    # Sharpe / Sortino / max-DD / total) but does NOT change selection — the
+    # holdings per period are identical; only the day-by-day in/out differs.
+    # False (default) leaves the curve untouched.
+    daily_timing: bool = False
 
     @classmethod
     def from_dict(cls, d: dict) -> BacktestConfig:
@@ -162,6 +203,17 @@ class BacktestConfig:
             strategy_type=d.get("strategy_type", _DEFAULT_STRATEGY),
             min_price_score=d.get("min_price_score"),
             include_open_period=d.get("include_open_period", True),
+            vol_target=d.get("vol_target"),
+            vol_target_lookback=int(d.get("vol_target_lookback", 60) or 60),
+            vol_target_max_leverage=float(d.get("vol_target_max_leverage", 1.0) or 1.0),
+            regime_floor=d.get("regime_floor"),
+            regime_ramp_lo=float(
+                d.get("regime_ramp_lo", 0.3) if d.get("regime_ramp_lo") is not None else 0.3
+            ),
+            regime_ramp_hi=float(
+                d.get("regime_ramp_hi", 0.7) if d.get("regime_ramp_hi") is not None else 0.7
+            ),
+            daily_timing=bool(d.get("daily_timing", False)),
         )
 
 
@@ -228,6 +280,33 @@ class PeriodRecord:
     # this period (eligibility minus missing-price drops). Useful diagnostic
     # for "is the universe baseline meaningful here?".
     universe_constituents: int | None = None
+    # Book-level exposure multiplier applied this period by volatility
+    # targeting (1.0 = fully invested, the default + non-targeted case).
+    # The period's `portfolio_return_pct` is already scaled by this; the
+    # daily-equity-curve reconstruction also reads it so Sharpe / Sortino /
+    # max-DD reflect the scaled exposure. Surfaced for transparency so the
+    # UI can show "held 0.6x in this turbulent month".
+    exposure_scale: float = 1.0
+    # Composite 0..1 market-health score that drove the regime filter this
+    # period (trend + 6-month momentum + drawdown breadth). Populated only
+    # when the regime filter is active (regime_floor set); None otherwise.
+    # Surfaced so the health signal can be charted for manual inspection.
+    market_health: float | None = None
+    # Number of daily cash<->stocks swaps the tit-for-tat timing overlay
+    # made during this period (each = one full-book trade). 0 when timing is
+    # off. The client fee model charges these at the held book's per-exchange
+    # fees so the (net) figures reflect the daily churn cost.
+    daily_timing_swaps: int = 0
+    # Per-component breakdown of `market_health` — {trend, momentum,
+    # drawdown, composite}. Display-only; lets the /regime-detector page
+    # chart each sub-signal so you can see which one leads a crisis.
+    # Populated alongside `market_health` (regime filter active) else None.
+    market_health_components: dict | None = None
+    # Average RSI(14) across the eligible universe this period, two ways —
+    # {"simple": 0..100, "wilder": 0..100}. A momentum-breadth gauge
+    # charted separately on /regime-detector. Populated alongside
+    # `market_health` (regime filter active) else None.
+    universe_rsi: dict | None = None
 
 
 @dataclass
@@ -429,6 +508,11 @@ class BacktestResult:
                     **({"empty_reason": r.empty_reason} if r.empty_reason else {}),
                     **({"is_open": True} if r.is_open else {}),
                     **({"as_of_date": r.as_of_date} if r.as_of_date else {}),
+                    **({"exposure_scale": r.exposure_scale} if r.exposure_scale != 1.0 else {}),
+                    **({"daily_timing_swaps": r.daily_timing_swaps} if r.daily_timing_swaps else {}),
+                    **({"market_health": r.market_health} if r.market_health is not None else {}),
+                    **({"market_health_components": r.market_health_components} if r.market_health_components is not None else {}),
+                    **({"universe_rsi": r.universe_rsi} if r.universe_rsi is not None else {}),
                 }
                 for r in self.monthly_records
             ],

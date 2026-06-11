@@ -38,6 +38,25 @@ class VariantSpec(BaseModel):
     # the rebalance date, so a Wednesday variant decides on the prior
     # trading day's (Tuesday's) close and enters at Wednesday's close.
     rebalance_weekday: int | None = None
+    # Annualized volatility target (percent, e.g. 12.0). None inherits the
+    # base request's `vol_target` (off by default). When set, each
+    # rebalance scales the book's exposure toward the target using the
+    # holdings' trailing basket vol, holding cash for the remainder
+    # (de-risk only — never levers above 100%). Lets a sweep compare
+    # off vs 10 vs 12 vs 15% side by side.
+    vol_target: float | None = None
+    # Daily "tit-for-tat" timing overlay. None inherits the base request
+    # (off). True = hold the full strategy today only if yesterday's daily
+    # return was >= 0, else cash — a daily in/out filter that reshapes the
+    # equity curve without changing selection. Sweep alongside the plain
+    # variant to A/B whether the timing helps.
+    daily_timing: bool | None = None
+    # Market-regime trend filter: risk-off exposure floor (0.0 = all cash,
+    # 0.5 = half) applied when the universe's breadth (% above 200-MA)
+    # falls below the base request's `regime_breadth_threshold`. None
+    # inherits the base (off by default). Sweep `off, 0, 0.5` to compare
+    # full-cash vs partial de-risk vs no filter.
+    regime_floor: float | None = None
 
 
 class BacktestRequest(BaseModel):
@@ -97,6 +116,26 @@ class BacktestRequest(BaseModel):
     # through the prior trading day's close. Ignored for daily frequency.
     rebalance_weekday: int = 0
     strategy_type: Literal["long_only", "long_short"] = "long_only"
+    # Annualized volatility target (percent, e.g. 12.0). None (default)
+    # disables vol targeting — the book runs fully invested. When set,
+    # each rebalance scales exposure toward the target from the holdings'
+    # trailing basket vol, parking the remainder in cash (de-risk only,
+    # capped at 100%). Used as the base for a `vol_target` sweep axis or
+    # standalone on a single run.
+    vol_target: float | None = None
+    # Market-regime trend filter. `regime_floor` is the defensive exposure
+    # floor (0.0 = all cash, 0.5 = half); None (default) disables it. The
+    # book scales linearly between `regime_ramp_lo` (health → floor) and
+    # `regime_ramp_hi` (health → fully invested), driven by a composite
+    # 0..1 market-health score (trend + 6-month momentum + drawdown).
+    # `regime_floor` is the sweep axis; the ramp endpoints stay fixed.
+    regime_floor: float | None = None
+    regime_ramp_lo: float = 0.3
+    regime_ramp_hi: float = 0.7
+    # Daily "tit-for-tat" timing overlay (see VariantSpec). False (default)
+    # leaves the equity curve untouched; True gates daily exposure on the
+    # prior day's return. Base for the daily-timing sweep axis.
+    daily_timing: bool = False
     # When set (non-empty), the request becomes a variants sweep: the data
     # pipeline (universe load → ensure → bulk-load prices/volumes → FX) runs
     # ONCE, then the backtest computation runs per variant against the same

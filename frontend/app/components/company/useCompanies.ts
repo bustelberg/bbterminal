@@ -27,6 +27,10 @@ export function useCompanies() {
   // small spinner instead of "—" so an empty chip cell isn't mistaken for
   // "this company belongs to no universes".
   const [membershipsLoading, setMembershipsLoading] = useState(true);
+  // Sectors are fetched as a third roundtrip (alongside memberships) after the
+  // base list. Same treatment: a spinner instead of "—" while in flight so an
+  // empty cell isn't mistaken for "this company has no sector".
+  const [sectorsLoading, setSectorsLoading] = useState(true);
   // company_id whose Delete request is currently in flight, or null.
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [pendingAdd, setPendingAdd] = useState<PendingAdd | null>(null);
@@ -36,6 +40,7 @@ export function useCompanies() {
   const load = useCallback(async () => {
     setLoading(true);
     setMembershipsLoading(true);
+    setSectorsLoading(true);
     try {
       const res = await trackedFetch('Loading companies', `${API_URL}/api/companies`);
       const data: Company[] = await res.json();
@@ -78,6 +83,8 @@ export function useCompanies() {
         );
       } catch {
         // Non-fatal — sector column just shows "—".
+      } finally {
+        setSectorsLoading(false);
       }
     })();
 
@@ -285,6 +292,7 @@ export function useCompanies() {
     companies,
     loading,
     membershipsLoading,
+    sectorsLoading,
     deletingId,
     error,
     setError,

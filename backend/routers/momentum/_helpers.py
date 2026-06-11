@@ -135,6 +135,11 @@ def backtest_strategy_hash(req: "BacktestRequest") -> str:
         "rebalance_frequency": req.rebalance_frequency,
         "rebalance_weekday": req.rebalance_weekday,
         "strategy_type": req.strategy_type,
+        "vol_target": req.vol_target,
+        "regime_floor": req.regime_floor,
+        "regime_ramp_lo": req.regime_ramp_lo,
+        "regime_ramp_hi": req.regime_ramp_hi,
+        "daily_timing": req.daily_timing,
     }
     s = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(s.encode()).hexdigest()[:16]

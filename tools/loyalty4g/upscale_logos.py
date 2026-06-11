@@ -17,8 +17,8 @@ Strategy per under-sized image:
 Idempotent: images already >= MIN on both sides are left untouched.
 
 Usage:
-  uv run --with pillow python upscale_logos.py --check   # report only
-  uv run --with pillow python upscale_logos.py           # fix in place
+  uv run --with pillow python tools/loyalty4g/upscale_logos.py --check   # report only
+  uv run --with pillow python tools/loyalty4g/upscale_logos.py           # fix in place
 """
 from __future__ import annotations
 

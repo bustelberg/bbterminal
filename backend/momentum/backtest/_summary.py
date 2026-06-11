@@ -79,17 +79,26 @@ def build_backtest_result(
     benchmark_price_index: dict[int, pd.Series] | None,
     rebalance_frequency,
     monthly_baseline: dict | None = None,
+    daily_timing: bool = False,
 ) -> BacktestResult:
     """Build the final `BacktestResult` from the per-period state."""
     closed_records = [r for r in period_records if not r.is_open]
-    daily_curve, _daily_returns_full = _build_daily_equity_curve(
+    daily_curve, _daily_returns_full, swaps_per_period = _build_daily_equity_curve(
         period_records, price_index, strategy_type,
         benchmark_price_index=benchmark_price_index,
+        daily_timing=daily_timing,
     )
-    closed_curve, closed_daily_returns = _build_daily_equity_curve(
+    closed_curve, closed_daily_returns, _ = _build_daily_equity_curve(
         closed_records, price_index, strategy_type,
         benchmark_price_index=benchmark_price_index,
+        daily_timing=daily_timing,
     )
+    # Stamp each period record with its daily-timing swap count (full-book
+    # cash<->stocks trades) so the client fee model can charge them at the
+    # held book's per-exchange fees. Indices align with `period_records`.
+    for _idx, _cnt in swaps_per_period.items():
+        if 0 <= _idx < len(period_records):
+            period_records[_idx].daily_timing_swaps = _cnt
     # `total_return` and `annualized_return_pct` are intentionally both
     # derived from the period-chain `cumulative_factor`. The daily curve
     # shadows the same growth path on average but diverges on the margin
@@ -117,6 +126,18 @@ def build_backtest_result(
         round((accumulators.cumulative_factor ** (1 / n_years) - 1) * 100, 2)
         if n_years > 0 else 0
     )
+
+    # Daily-timing overlay reshapes the daily path, so the period-chain
+    # total/annualized no longer reflect realized growth — take them from
+    # the (timed) closed daily curve instead. Sharpe / Sortino / max-DD /
+    # win-rate already derive from that curve, so they're consistent.
+    if daily_timing and closed_curve:
+        total_return = round(closed_curve[-1][1], 2)
+        timed_factor = 1.0 + total_return / 100.0
+        annualized = (
+            round((timed_factor ** (1 / n_years) - 1) * 100, 2)
+            if n_years > 0 and timed_factor > 0 else 0
+        )
 
     # Identify all drawdown periods (peak-to-trough-to-recovery) on the
     # closed-period daily curve. Open period is excluded so a still-running

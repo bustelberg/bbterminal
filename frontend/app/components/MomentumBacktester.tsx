@@ -32,6 +32,7 @@ import RunControls from './momentum/RunControls';
 import SavedRunsDropdown from './momentum/SavedRunsDropdown';
 import SectorTimelineChart from './momentum/SectorTimelineChart';
 import DailyReturnsHistograms from './momentum/DailyReturnsHistograms';
+import MarketHealthCard from './momentum/MarketHealthCard';
 import MonthlyReturnsHeatmap from './momentum/MonthlyReturnsHeatmap';
 import SignalWeightSliders from './momentum/SignalWeightSliders';
 import StrategyModeSelect from './momentum/StrategyModeSelect';
@@ -675,6 +676,10 @@ export default function MomentumBacktester() {
             />
 
             <FeeWaterfallPanel result={displayResult} />
+
+            {/* Only renders when the active variant used the regime filter
+                (records carry a market_health score); otherwise null. */}
+            <MarketHealthCard result={displayResult} />
 
             <SectorTimelineChart result={displayResult} />
 

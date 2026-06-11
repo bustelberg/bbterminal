@@ -18,7 +18,8 @@ def _build_daily_equity_curve(
     price_index: dict[int, pd.Series],
     strategy_type: StrategyType,
     benchmark_price_index: dict[int, pd.Series] | None = None,
-) -> tuple[list[tuple[str, float]], list[float]]:
+    daily_timing: bool = False,
+) -> tuple[list[tuple[str, float]], list[float], dict[int, int]]:
     """Reconstruct a daily portfolio equity curve from the period-level
     holdings.
 
@@ -51,9 +52,14 @@ def _build_daily_equity_curve(
         return price_index.get(cid)
     daily_dates: list[date] = []
     daily_factors: list[float] = []
+    # Which period (index into `period_records`) each curve day belongs to —
+    # lets the daily-timing overlay attribute each cash<->stocks swap to the
+    # rebalance period whose holdings it would trade, so per-exchange fees
+    # apply to the right book.
+    daily_period_idx: list[int] = []
     cumulative_factor = 1.0  # carries across periods
 
-    for pr in period_records:
+    for pidx, pr in enumerate(period_records):
         if not pr.holdings:
             continue
         long_h = [h for h in pr.holdings if h.side == "long" and h.entry_price_eur not in (None, 0)]
@@ -116,18 +122,65 @@ def _build_daily_equity_curve(
 
             long_avg = sum(long_vals) / len(long_vals) if long_vals else 1.0
             short_avg = sum(short_vals) / len(short_vals) if short_vals else 1.0
-            if strategy_type == "long_short":
-                period_relative = 1.0 + (long_avg - 1.0) - (short_avg - 1.0)
+            # Volatility-target exposure multiplier for this period (1.0 =
+            # fully invested). When scale == 1.0 (vol targeting off — the
+            # default + the original momentum strategy) we run the EXACT
+            # original expression so non-targeted results stay byte-
+            # identical. When scaled, the fully-invested book's relative
+            # value `1 + book_pnl` becomes `1 + k·book_pnl` (the remaining
+            # 1−k sits in cash, 0% return).
+            scale = getattr(pr, "exposure_scale", 1.0) or 1.0
+            if scale == 1.0:
+                if strategy_type == "long_short":
+                    period_relative = 1.0 + (long_avg - 1.0) - (short_avg - 1.0)
+                else:
+                    period_relative = long_avg
+            elif strategy_type == "long_short":
+                period_relative = 1.0 + scale * ((long_avg - 1.0) - (short_avg - 1.0))
             else:
-                period_relative = long_avg
+                period_relative = 1.0 + scale * (long_avg - 1.0)
 
             daily_factor = cumulative_factor * period_relative
             daily_dates.append(day.date())
             daily_factors.append(daily_factor)
+            daily_period_idx.append(pidx)
 
         if daily_factors:
             # Chain-link: next period starts where this one finishes.
             cumulative_factor = daily_factors[-1]
+
+    # === Daily "tit-for-tat" timing overlay ============================
+    # Re-chain the curve so we only capture a day's return when the
+    # PRIOR day's underlying strategy return was non-negative; a negative
+    # prior day puts us in cash (0%) today. The decision uses the
+    # strategy's actual daily return (always observable), while what we
+    # realize is gated. `>= 0` keeps us invested through flat days —
+    # including the zero-return period-boundary duplicates this curve
+    # carries — so only a genuine down day forces cash. Holdings are
+    # unchanged; this only reshapes the realized daily path.
+    # `swaps_per_period[idx]` = number of cash<->stocks transitions during
+    # period `idx` — a full-book trade each, which the fee layer charges at
+    # that period's per-exchange fees. Empty when timing is off.
+    swaps_per_period: dict[int, int] = {}
+    if daily_timing and len(daily_factors) >= 2:
+        rets = [
+            (daily_factors[i] / daily_factors[i - 1] - 1.0) if daily_factors[i - 1] > 0 else 0.0
+            for i in range(1, len(daily_factors))
+        ]  # rets[k] = return realized ON day k+1
+        timed = [daily_factors[0]]
+        prev_invested = True  # day 0 starts invested
+        for t in range(1, len(daily_factors)):
+            # Invested today iff yesterday's return (rets[t-2]) was >= 0;
+            # day 1 has no prior-day return, so we start invested.
+            invested = True if t == 1 else (rets[t - 2] >= 0.0)
+            if invested != prev_invested:
+                # A swap: enter cash (sell book) or re-enter (buy book) —
+                # one full-book trade, billed to this day's period.
+                swaps_per_period[daily_period_idx[t]] = swaps_per_period.get(daily_period_idx[t], 0) + 1
+            prev_invested = invested
+            r = rets[t - 1] if invested else 0.0
+            timed.append(timed[-1] * (1.0 + r))
+        daily_factors = timed
 
     daily_records = [
         (d.isoformat(), round((f - 1) * 100, 4))
@@ -138,7 +191,7 @@ def _build_daily_equity_curve(
         prev = daily_factors[i - 1]
         if prev > 0:
             daily_returns.append(daily_factors[i] / prev - 1)
-    return daily_records, daily_returns
+    return daily_records, daily_returns, swaps_per_period
 
 
 def _compute_universe_period_daily(

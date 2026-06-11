@@ -88,6 +88,7 @@ export default function CompanyManager() {
         totalCount={companies.length}
         loading={loading}
         membershipsLoading={data.membershipsLoading}
+        sectorsLoading={data.sectorsLoading}
         isAdmin={isAdmin}
         adding={adding}
         editingId={editingId}

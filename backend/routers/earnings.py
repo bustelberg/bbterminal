@@ -238,9 +238,13 @@ _LONGEQUITY_METRIC_CODES = [
 ]
 
 
-@router.get("/api/earnings/{company_id}/metrics")
-async def get_earnings_metrics(company_id: int):
-    """Dashboard metrics for a company (source=gurufocus, dates >= 1998).
+def load_company_metric_rows(company_id: int) -> list[dict]:
+    """Load the dashboard metric rows for one company (source=gurufocus +
+    longequity, dates >= 1998). Returns `{metric_code, target_date,
+    numeric_value, is_prediction}` dicts.
+
+    Shared by the single-company `/metrics` endpoint and the portfolio
+    aggregation endpoint (`routers/earnings_portfolios.py`).
 
     PostgREST caps a single response at ~1000 rows regardless of `.limit(N)`,
     and our `.order("target_date")` is ascending — so a flat `.limit(5000)`
@@ -260,51 +264,57 @@ async def get_earnings_metrics(company_id: int):
             offset += page_size
         return rows
 
+    non_price_codes = [c for c in _DASHBOARD_METRIC_CODES if c != "close_price"]
+    rows = _paginate(lambda: (
+        supabase.table("metric_data")
+        .select("metric_code,target_date,numeric_value,is_prediction")
+        .eq("company_id", company_id)
+        .eq("source_code", "gurufocus")
+        .gte("target_date", "1998-01-01")
+        .in_("metric_code", non_price_codes)
+        .order("target_date")
+    ))
+
+    rows.extend(_paginate(lambda: (
+        supabase.table("metric_data")
+        .select("metric_code,target_date,numeric_value,is_prediction")
+        .eq("company_id", company_id)
+        .eq("source_code", "gurufocus")
+        .eq("metric_code", "close_price")
+        .gte("target_date", "1998-01-01")
+        .order("target_date")
+    )))
+
+    # Analyst estimates (annual_* prefix).
+    rows.extend(_paginate(lambda: (
+        supabase.table("metric_data")
+        .select("metric_code,target_date,numeric_value,is_prediction")
+        .eq("company_id", company_id)
+        .eq("source_code", "gurufocus")
+        .eq("is_prediction", True)
+        .gte("target_date", "1998-01-01")
+        .like("metric_code", "annual_%")
+        .order("target_date")
+    )))
+
+    rows.extend(_paginate(lambda: (
+        supabase.table("metric_data")
+        .select("metric_code,target_date,numeric_value,is_prediction")
+        .eq("company_id", company_id)
+        .eq("source_code", "longequity")
+        .in_("metric_code", _LONGEQUITY_METRIC_CODES)
+        .order("target_date")
+    )))
+    return rows
+
+
+@router.get("/api/earnings/{company_id}/metrics")
+async def get_earnings_metrics(company_id: int):
+    """Dashboard metrics for a company (source=gurufocus, dates >= 1998)."""
     try:
-        non_price_codes = [c for c in _DASHBOARD_METRIC_CODES if c != "close_price"]
-        rows = _paginate(lambda: (
-            supabase.table("metric_data")
-            .select("metric_code,target_date,numeric_value,is_prediction")
-            .eq("company_id", company_id)
-            .eq("source_code", "gurufocus")
-            .gte("target_date", "1998-01-01")
-            .in_("metric_code", non_price_codes)
-            .order("target_date")
-        ))
-
-        rows.extend(_paginate(lambda: (
-            supabase.table("metric_data")
-            .select("metric_code,target_date,numeric_value,is_prediction")
-            .eq("company_id", company_id)
-            .eq("source_code", "gurufocus")
-            .eq("metric_code", "close_price")
-            .gte("target_date", "1998-01-01")
-            .order("target_date")
-        )))
-
-        # Analyst estimates (annual_* prefix).
-        rows.extend(_paginate(lambda: (
-            supabase.table("metric_data")
-            .select("metric_code,target_date,numeric_value,is_prediction")
-            .eq("company_id", company_id)
-            .eq("source_code", "gurufocus")
-            .eq("is_prediction", True)
-            .gte("target_date", "1998-01-01")
-            .like("metric_code", "annual_%")
-            .order("target_date")
-        )))
-
-        rows.extend(_paginate(lambda: (
-            supabase.table("metric_data")
-            .select("metric_code,target_date,numeric_value,is_prediction")
-            .eq("company_id", company_id)
-            .eq("source_code", "longequity")
-            .in_("metric_code", _LONGEQUITY_METRIC_CODES)
-            .order("target_date")
-        )))
+        return load_company_metric_rows(company_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Query failed: {e}")
-    return rows
 
 
 @router.get("/api/earnings/{company_id}/metric-codes")

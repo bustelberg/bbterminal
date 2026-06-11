@@ -24,9 +24,14 @@ import pandas as pd
 
 from ._period import (
     adjust_open_period_holdings,
+    compute_average_rsi,
+    compute_exposure_scale,
+    compute_market_health,
+    compute_market_health_components,
     compute_selection_period,
     compute_sector_etf_period,
     compute_universe_period_return,
+    regime_exposure_from_health,
 )
 from ._summary import _PeriodAccumulators, build_backtest_result
 from .equity_curve import _compute_universe_period_daily
@@ -381,6 +386,22 @@ def run_backtest(
             )
             continue
 
+        # Composite market-health score for the regime filter. Computed
+        # once per period from this period's signals (the whole eligible
+        # universe, not just the holdings) when the filter is active, so
+        # it's available both to gate exposure below AND to surface on
+        # every period record for charting. None when the filter is off.
+        market_health = (
+            compute_market_health(signals_df)
+            if config.regime_floor is not None else None
+        )
+        # Display-only component breakdown (which sub-signal drives the
+        # read). Computed alongside the composite when the filter is on.
+        market_health_components = (
+            compute_market_health_components(signals_df)
+            if config.regime_floor is not None else None
+        )
+
         # Compute the universe-equal-weight baseline ONCE per period
         # from the same `signals_df` the strategy will operate on. For
         # closed periods the exit is `next_period`; for open periods we
@@ -395,6 +416,17 @@ def run_backtest(
         entry_ts = _prev_trading_ts(period_date)
         closed_exit_ts = (
             pd.Timestamp(next_period) if is_open_iter else _prev_trading_ts(next_period)
+        )
+        # Universe-average RSI(14) — a momentum-breadth gauge surfaced
+        # next to the health signal on /regime-detector. Computed only
+        # when the regime filter is active (same gate as market_health) so
+        # it never costs a normal backtest. Causal: prices on-or-before the
+        # prior-trading-day cutoff.
+        universe_rsi = (
+            compute_average_rsi(
+                signals_df["company_id"].astype(int), price_index, entry_ts=entry_ts,
+            )
+            if config.regime_floor is not None else None
         )
         # Variant-sweep cache short-circuit: when the orchestrator
         # precomputed per-period baselines for this (universe, freq),
@@ -487,6 +519,51 @@ def run_backtest(
                 strategy_type=config.strategy_type,
             )
 
+        # === Exposure overlays (vol targeting × regime filter) =============
+        # Both overlays produce a per-period exposure multiplier; the book
+        # is scaled by their PRODUCT, with the remainder in cash. Each is
+        # measured as of `entry_ts` (strictly before the rebalance bar —
+        # no look-ahead). The combined factor is stashed on the record so
+        # the daily-equity-curve reconstruction applies the identical
+        # multiplier (keeping Sharpe / Sortino / max-DD consistent with the
+        # period chain). Stays 1.0 — fully invested, original behavior —
+        # when both overlays are off, the period produced no holdings, or
+        # there's too little history to estimate.
+        exposure_scale = 1.0
+        if (
+            outcome.empty_reason is None
+            and outcome.port_return is not None
+            and outcome.holdings
+        ):
+            vol_scale = 1.0
+            if config.vol_target is not None:
+                def _scale_series_for(c: int) -> "pd.Series | None":
+                    if c < 0 and benchmark_price_index is not None:
+                        return benchmark_price_index.get(-c)
+                    return price_index.get(c)
+
+                vol_scale = compute_exposure_scale(
+                    [h.company_id for h in outcome.holdings],
+                    price_index,
+                    entry_ts=entry_ts,
+                    target_vol_pct=config.vol_target,
+                    lookback=config.vol_target_lookback,
+                    max_leverage=config.vol_target_max_leverage,
+                    series_for=_scale_series_for,
+                )
+            # Regime ramp maps the period's composite market-health score
+            # (computed above, a property of the whole eligible universe)
+            # to an exposure multiplier on the lo→hi ramp.
+            regime_scale = regime_exposure_from_health(
+                market_health,
+                floor=config.regime_floor,
+                lo=config.regime_ramp_lo,
+                hi=config.regime_ramp_hi,
+            )
+            exposure_scale = round(vol_scale * regime_scale, 4)
+            if exposure_scale != 1.0:
+                outcome.port_return = round(outcome.port_return * exposure_scale, 4)
+
         # For the open period, redo the universe baseline using the
         # SAME `open_as_of` exit the strategy used. Without this the
         # baseline reads its exit as `next_period` (in the future) and
@@ -547,6 +624,9 @@ def run_backtest(
                     round(universe_cum_record, 2) if universe_cum_record is not None else None
                 ),
                 universe_constituents=universe_n if universe_ret is not None else None,
+                market_health=market_health,
+                market_health_components=market_health_components,
+                universe_rsi=universe_rsi,
             ))
             continue
 
@@ -589,6 +669,10 @@ def run_backtest(
                 round(universe_cum_record_v, 2) if universe_cum_record_v is not None else None
             ),
             universe_constituents=universe_n if universe_ret is not None else None,
+            exposure_scale=exposure_scale,
+            market_health=market_health,
+            market_health_components=market_health_components,
+            universe_rsi=universe_rsi,
         ))
 
     # Per-run summary of empty-selection events. Replaces the per-period
@@ -661,6 +745,7 @@ def run_backtest(
         benchmark_price_index=benchmark_price_index,
         rebalance_frequency=prepared.frequency,
         monthly_baseline=monthly_baseline,
+        daily_timing=config.daily_timing,
     )
 
 

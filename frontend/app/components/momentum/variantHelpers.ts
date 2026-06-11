@@ -66,7 +66,69 @@ export function parseMinScoreList(s: string): (number | null)[] {
   return out;
 }
 
-/** Cross-product of the five sweep axes against VARIANT_DEFS. For each
+/** Vol-target axis parser. Like `parseNumList` but recognizes the literal
+ * `off` / `none` tokens (case-insensitive) as `undefined` — meaning "no
+ * vol targeting for this variant", i.e. the original fully-invested
+ * momentum strategy. Sweeping `off, 12` therefore yields the plain
+ * strategy AND the 12%-vol-targeted strategy as two separate rows.
+ * Non-positive / non-finite numbers are dropped (a vol target must be > 0).
+ *
+ *   parseVolTargetList("off, 10, 12")  → [undefined, 10, 12]
+ *   parseVolTargetList("none, 12, 12") → [undefined, 12]   (dedup)
+ *   parseVolTargetList("")             → []
+ */
+export function parseVolTargetList(s: string): (number | undefined)[] {
+  const out: (number | undefined)[] = [];
+  let sawOff = false;
+  const seen = new Set<number>();
+  for (const tok of s.split(',')) {
+    const t = tok.trim();
+    if (!t) continue;
+    const lower = t.toLowerCase();
+    if (lower === 'off' || lower === 'none') {
+      if (!sawOff) { out.push(undefined); sawOff = true; }
+      continue;
+    }
+    const n = Number(t);
+    if (!Number.isFinite(n) || n <= 0) continue;
+    if (seen.has(n)) continue;
+    seen.add(n);
+    out.push(n);
+  }
+  return out;
+}
+
+/** Regime-floor axis parser. `off` / `none` → `undefined` (no trend
+ * filter, the original strategy). Numbers are the risk-off exposure floor
+ * and must lie in [0, 1] — `0` (all cash) is valid, unlike the vol-target
+ * axis. Out-of-range / non-finite tokens are dropped.
+ *
+ *   parseRegimeFloorList("off, 0, 0.5") → [undefined, 0, 0.5]
+ *   parseRegimeFloorList("1.5, -1, 0.5") → [0.5]
+ *   parseRegimeFloorList("")            → []
+ */
+export function parseRegimeFloorList(s: string): (number | undefined)[] {
+  const out: (number | undefined)[] = [];
+  let sawOff = false;
+  const seen = new Set<number>();
+  for (const tok of s.split(',')) {
+    const t = tok.trim();
+    if (!t) continue;
+    const lower = t.toLowerCase();
+    if (lower === 'off' || lower === 'none') {
+      if (!sawOff) { out.push(undefined); sawOff = true; }
+      continue;
+    }
+    const n = Number(t);
+    if (!Number.isFinite(n) || n < 0 || n > 1) continue;
+    if (seen.has(n)) continue;
+    seen.add(n);
+    out.push(n);
+  }
+  return out;
+}
+
+/** Cross-product of the sweep axes against VARIANT_DEFS. For each
  * (frequency × strategy) pair in VARIANT_DEFS that's selected, fan out
  * across whichever numeric/categorical axes have at least one value.
  * Empty axes are treated as a single `undefined` marker — that maps to
@@ -85,6 +147,9 @@ export function buildAllPermutations({
   topSectorsSweep,
   perSectorSweep,
   minScoreSweep,
+  volTargetSweep,
+  regimeFloorSweep,
+  sweepDailyTiming,
 }: {
   selectedFreqs: ReadonlySet<RebalanceFrequency>;
   selectedStrategies: ReadonlySet<StrategyType>;
@@ -96,16 +161,32 @@ export function buildAllPermutations({
   topSectorsSweep: string;
   perSectorSweep: string;
   minScoreSweep: string;
+  // Comma list of annualized vol targets (percent). `off`/`none` tokens
+  // emit the original, non-targeted strategy. Blank/omitted → don't sweep
+  // (every variant inherits the base = off).
+  volTargetSweep?: string;
+  // Comma list of regime-filter risk-off floors in [0, 1] (`off` = no
+  // filter). Blank/omitted → don't sweep (inherit base = off).
+  regimeFloorSweep?: string;
+  // When true, fan each variant into a plain + a daily tit-for-tat-timed
+  // version so they can be compared side by side. False → off only.
+  sweepDailyTiming?: boolean;
 }): VariantParams[] {
   const topList = parseNumList(topSectorsSweep);
   const perList = parseNumList(perSectorSweep);
   const minList = parseMinScoreList(minScoreSweep);
+  const volList = parseVolTargetList(volTargetSweep ?? '');
+  const regimeList = parseRegimeFloorList(regimeFloorSweep ?? '');
   const uniList = Array.from(selectedUniverses);
   const grpList = Array.from(selectedGroupings);
   const wdList = Array.from(selectedWeekdays ?? []);
   const topAxis: (number | undefined)[] = topList.length === 0 ? [undefined] : topList;
   const perAxis: (number | undefined)[] = perList.length === 0 ? [undefined] : perList;
   const minAxis: (number | null | undefined)[] = minList.length === 0 ? [undefined] : minList;
+  const volAxis: (number | undefined)[] = volList.length === 0 ? [undefined] : volList;
+  const regimeAxis: (number | undefined)[] = regimeList.length === 0 ? [undefined] : regimeList;
+  // Boolean axis: [off] normally, [off, on] when comparing tit-for-tat.
+  const timingAxis: (boolean | undefined)[] = sweepDailyTiming ? [undefined, true] : [undefined];
   const uniAxis: (string | undefined)[] = uniList.length === 0 ? [undefined] : uniList;
   const grpAxis: ('sector' | 'industry' | undefined)[] =
     grpList.length === 0 ? [undefined] : grpList;
@@ -115,7 +196,8 @@ export function buildAllPermutations({
     if (!selectedFreqs.has(v.frequency)) continue;
     if (!selectedStrategies.has(v.strategy)) continue;
     for (const t of topAxis) for (const p of perAxis) for (const m of minAxis)
-    for (const u of uniAxis) for (const g of grpAxis) for (const w of wdAxis) {
+    for (const u of uniAxis) for (const g of grpAxis) for (const w of wdAxis)
+    for (const vt of volAxis) for (const rf of regimeAxis) for (const dt of timingAxis) {
       out.push({
         frequency: v.frequency,
         strategy: v.strategy,
@@ -125,6 +207,9 @@ export function buildAllPermutations({
         ...(u !== undefined ? { universe: u } : {}),
         ...(g !== undefined ? { grouping: g } : {}),
         ...(w !== undefined ? { rebalance_weekday: w } : {}),
+        ...(vt !== undefined ? { vol_target: vt } : {}),
+        ...(rf !== undefined ? { regime_floor: rf } : {}),
+        ...(dt ? { daily_timing: true } : {}),
       });
     }
   }

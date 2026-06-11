@@ -19,6 +19,7 @@ const navItems: NavItem[] = [
   { href: '/', label: 'Welcome', userVisible: true },
   { href: '/earnings', label: 'Earnings Dashboard', userVisible: true },
   { href: '/backtest', label: 'Backtest' },
+  { href: '/regime-detector', label: 'Regime Detector' },
   { href: '/universe', label: 'Universe Overview' },
   { href: '/longequity-universe', label: 'LongEquity Universe' },
   { href: '/universe_index', label: 'SP500 Universe' },

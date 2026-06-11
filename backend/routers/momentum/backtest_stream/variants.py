@@ -70,6 +70,12 @@ def _variant_key(vspec) -> str:
         parts.append(f"g{vspec.grouping}")
     if vspec.rebalance_weekday is not None:
         parts.append(f"w{vspec.rebalance_weekday}")
+    if getattr(vspec, "vol_target", None) is not None:
+        parts.append(f"v{vspec.vol_target:g}")
+    if getattr(vspec, "regime_floor", None) is not None:
+        parts.append(f"r{vspec.regime_floor:g}")
+    if getattr(vspec, "daily_timing", None):
+        parts.append("t1")
     return "__".join(parts)
 
 
@@ -536,6 +542,9 @@ async def run_variants_sweep(
             v_index_universe = vspec_inner.index_universe if vspec_inner.index_universe is not None else req.index_universe
             v_grouping_field = vspec_inner.grouping if vspec_inner.grouping is not None else base_grouping
             v_weekday = vspec_inner.rebalance_weekday if vspec_inner.rebalance_weekday is not None else req.rebalance_weekday
+            v_vol_target = vspec_inner.vol_target if vspec_inner.vol_target is not None else req.vol_target
+            v_regime_floor = vspec_inner.regime_floor if vspec_inner.regime_floor is not None else req.regime_floor
+            v_daily_timing = vspec_inner.daily_timing if vspec_inner.daily_timing is not None else req.daily_timing
 
             # Per-combo cache lookups (Wins 1-3).
             v_monthly_eligible = monthly_eligible
@@ -582,6 +591,11 @@ async def run_variants_sweep(
                 "strategy_type": vspec_inner.strategy_type,
                 "sector_etfs": req.sector_etfs,
                 "min_price_score": v_min_score,
+                "vol_target": v_vol_target,
+                "regime_floor": v_regime_floor,
+                "regime_ramp_lo": req.regime_ramp_lo,
+                "regime_ramp_hi": req.regime_ramp_hi,
+                "daily_timing": v_daily_timing,
             })
 
             # Per-variant prepared (slices the shared signal panel for

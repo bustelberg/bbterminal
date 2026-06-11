@@ -8,6 +8,7 @@ import DailyReturnsHistograms from './DailyReturnsHistograms';
 import MonthlyReturnsHeatmap from './MonthlyReturnsHeatmap';
 import EquityCurveCard from './EquityCurveCard';
 import FeeWaterfallPanel from './FeeWaterfallPanel';
+import MarketHealthCard from './MarketHealthCard';
 import MonthlyHoldingsTable, { type ScoringConfig } from './MonthlyHoldingsTable';
 import SectorTimelineChart from './SectorTimelineChart';
 import type { SavedRun } from './types';
@@ -116,6 +117,9 @@ export default function BacktestResultView({
         defaultCollapsed={defaultCollapsed}
       />
       <FeeWaterfallPanel result={result} defaultCollapsed={defaultCollapsed} />
+      {/* Only renders when the regime filter was active (records carry a
+          market_health score) — otherwise returns null. */}
+      <MarketHealthCard result={result} defaultCollapsed={defaultCollapsed} />
       <SectorTimelineChart result={result} markerDate={markerDate} defaultCollapsed={defaultCollapsed} />
       <DailyReturnsHistograms result={result} defaultCollapsed={defaultCollapsed} />
       <MonthlyReturnsHeatmap result={result} defaultCollapsed={defaultCollapsed} />

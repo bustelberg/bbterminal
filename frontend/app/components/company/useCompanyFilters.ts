@@ -65,6 +65,16 @@ export function useCompanyFilters(companies: Company[]) {
     }
 
     return [...list].sort((a, b) => {
+      // Market cap sorts numerically; nulls sink to the bottom regardless of
+      // direction so "no data" never floats to the top of a desc sort.
+      if (sortField === 'market_cap_eur') {
+        const av = a.market_cap_eur;
+        const bv = b.market_cap_eur;
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        return sortDir === 'asc' ? av - bv : bv - av;
+      }
       const av = (a[sortField] ?? '') as string;
       const bv = (b[sortField] ?? '') as string;
       const cmp = av.localeCompare(bv, undefined, { sensitivity: 'base' });

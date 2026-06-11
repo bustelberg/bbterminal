@@ -18,8 +18,8 @@ Modes:
   --name / --logo   create ONE share with that name + logo file
 
 Run from the backend env (has Playwright):
-  uv run --project backend python loyalty4g_upload.py --explore
-  uv run --project backend python loyalty4g_upload.py --name "2G Energy AG" --logo backend/leonteq_logos/images/86505899.png
+  uv run --project backend python tools/loyalty4g/upload.py --explore
+  uv run --project backend python tools/loyalty4g/upload.py --name "2G Energy AG" --logo backend/leonteq_logos/images/86505899.png
 """
 from __future__ import annotations
 

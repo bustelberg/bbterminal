@@ -12,10 +12,16 @@ import { trackedFetch } from '../../lib/loading';
 
 import { API_URL } from '../../lib/apiUrl';
 import { useFxToEur } from '../../lib/hooks/useFxToEur';
+import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
 import InfoTip from './InfoTip';
 import SectionLoader from './SectionLoader';
 import Spinner from './Spinner';
 import CompanyPicker from './earnings/CompanyPicker';
+import PortfolioPicker from './earnings/PortfolioPicker';
+import PortfolioManagerModal from './earnings/PortfolioManagerModal';
+import { usePortfolios, type Portfolio } from './earnings/usePortfolios';
+import type { PortfolioMemberMetrics } from './earnings/portfolioBreakdown';
+import { apiFetch } from '../../lib/apiFetch';
 import RefreshButton from './earnings/RefreshButton';
 import LogPanel from './earnings/LogPanel';
 import SnapshotStats from './earnings/SnapshotStats';
@@ -70,6 +76,25 @@ function useSSERefresh(
 // constant + `dcfValue`/`solveImpliedGrowth` helpers all moved to
 // `./earnings/*.tsx`. Imported above.
 
+// Per-side source toggle: a comparison side is either a single stock or a
+// saved portfolio (weighted basket). Tiny segmented control.
+function ModeToggle({ value, onChange }: { value: 'company' | 'portfolio'; onChange: (m: 'company' | 'portfolio') => void }) {
+  return (
+    <div className="flex items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5">
+      {(['company', 'portfolio'] as const).map((m) => (
+        <button
+          key={m}
+          type="button"
+          onClick={() => onChange(m)}
+          className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${value === m ? 'bg-accent-600 text-fg-strong' : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/5'}`}
+        >
+          {m === 'company' ? 'Stock' : 'Portfolio'}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -88,6 +113,29 @@ export default function EarningsDashboard() {
   const [compareCompany, setCompareCompany] = useState<Company | null>(null);
   const [compareMetrics, setCompareMetrics] = useState<MetricRow[]>([]);
   const [loadingCompareMetrics, setLoadingCompareMetrics] = useState(false);
+  // Portfolio mode: either comparison side can be flipped from a single
+  // company to a saved portfolio (a weighted basket whose metrics are
+  // aggregated server-side into the same MetricRow[] shape). `aMode`/`bMode`
+  // pick the source; `selectedPortfolio`/`comparePortfolio` hold the basket.
+  const isAdmin = useIsAdmin();
+  const portfolioApi = usePortfolios();
+  // Which side (if any) opened the portfolio manager. 'header' = the global
+  // button (no auto-select); 'a'/'b' = opened from a side's picker, so a
+  // newly created/saved portfolio is auto-selected onto that side.
+  const [managerSide, setManagerSide] = useState<'header' | 'a' | 'b' | null>(null);
+  const [aMode, setAMode] = useState<'company' | 'portfolio'>('company');
+  const [bMode, setBMode] = useState<'company' | 'portfolio'>('company');
+  const [selectedPortfolio, setSelectedPortfolio] = useState<Portfolio | null>(null);
+  const [comparePortfolio, setComparePortfolio] = useState<Portfolio | null>(null);
+  // Per-member metrics for a portfolio side — feeds the ranked "by impact"
+  // holdings list in chart tooltips. Fetched lazily when a portfolio is picked.
+  const [breakdownA, setBreakdownA] = useState<PortfolioMemberMetrics[] | null>(null);
+  const [breakdownB, setBreakdownB] = useState<PortfolioMemberMetrics[] | null>(null);
+  const aIsPortfolio = aMode === 'portfolio';
+  const bIsPortfolio = bMode === 'portfolio';
+  // "A is set" / "B is set" regardless of which source each side uses.
+  const hasA = aIsPortfolio ? !!selectedPortfolio : !!selected;
+  const hasB = bIsPortfolio ? !!comparePortfolio : !!compareCompany;
   const currentYear = new Date().getFullYear();
   const [startYear, setStartYear] = useState(2015);
   const [startYearInput, setStartYearInput] = useState('2015');
@@ -97,7 +145,7 @@ export default function EarningsDashboard() {
   // the charts read `deferredCadence` so the heavy series rebuild + recharts
   // re-render happens as a non-blocking deferred update (snappy click, data
   // catches up a beat later) instead of stalling the click.
-  const [chartCadence, setChartCadence] = useState<ChartCadence>('quarterly');
+  const [chartCadence, setChartCadence] = useState<ChartCadence>('annual');
   const deferredCadence = useDeferredValue(chartCadence);
   // Snapshot Stats lives at the bottom and is collapsed by default.
   const [snapshotOpen, setSnapshotOpen] = useState(false);
@@ -134,15 +182,35 @@ export default function EarningsDashboard() {
     () => compareMetrics.filter((m) => m.target_date >= `${startYear}-01-01`),
     [compareMetrics, startYear],
   );
+  // Breakdown filtered to the start-year window so the portfolio line + the
+  // ranked holdings respect the year selector (same as chartMetrics).
+  const chartBreakdownA = useMemo(
+    () => (breakdownA ? breakdownA.map((m) => ({ ...m, metrics: m.metrics.filter((r) => r.target_date >= `${startYear}-01-01`) })) : null),
+    [breakdownA, startYear],
+  );
+  const chartBreakdownB = useMemo(
+    () => (breakdownB ? breakdownB.map((m) => ({ ...m, metrics: m.metrics.filter((r) => r.target_date >= `${startYear}-01-01`) })) : null),
+    [breakdownB, startYear],
+  );
 
-  // Real company names for chart hover tooltips (the pills stay short A/B).
-  const chartNameA = selected ? (selected.company_name ?? selected.gurufocus_ticker) : undefined;
-  const chartNameB = compareCompany ? (compareCompany.company_name ?? compareCompany.gurufocus_ticker) : undefined;
+  // Real names for chart hover tooltips (the pills stay short A/B). Portfolio
+  // sides use the portfolio name.
+  const chartNameA = aIsPortfolio
+    ? selectedPortfolio?.name
+    : (selected ? (selected.company_name ?? selected.gurufocus_ticker) : undefined);
+  const chartNameB = bIsPortfolio
+    ? comparePortfolio?.name
+    : (compareCompany ? (compareCompany.company_name ?? compareCompany.gurufocus_ticker) : undefined);
+  // Short A/B pill tags.
+  const labelA = aIsPortfolio ? selectedPortfolio?.name : selected?.gurufocus_ticker;
+  const labelB = bIsPortfolio ? comparePortfolio?.name : compareCompany?.gurufocus_ticker;
 
   // Native-currency → EUR converters (FX history per currency), so currency-
   // denominated charts (FCF/share) compare directly. EUR companies → identity.
-  const fxA = useFxToEur(selected?.currency);
-  const fxB = useFxToEur(compareCompany?.currency);
+  // Portfolio metrics are already aggregated in EUR server-side → pass
+  // `undefined` so the hook yields the identity converter.
+  const fxA = useFxToEur(aIsPortfolio ? undefined : selected?.currency);
+  const fxB = useFxToEur(bIsPortfolio ? undefined : compareCompany?.currency);
 
   const usageBadgeRef = useRef<ApiUsageBadgeHandle>(null);
 
@@ -171,13 +239,14 @@ export default function EarningsDashboard() {
   const [refreshingSourcesB, setRefreshingSourcesB] = useState<Set<string>>(new Set());
 
   const loadMetrics = useCallback((opts?: { silent?: boolean }) => {
-    if (!selected) return Promise.resolve<MetricRow[]>([]);
+    const url = aMode === 'portfolio'
+      ? (selectedPortfolio ? `${API_URL}/api/earnings/portfolios/${selectedPortfolio.id}/metrics` : null)
+      : (selected ? `${API_URL}/api/earnings/${selected.company_id}/metrics` : null);
+    if (!url) return Promise.resolve<MetricRow[]>([]);
+    const who = aMode === 'portfolio' ? selectedPortfolio?.name : selected?.gurufocus_ticker;
     const silent = opts?.silent ?? false;
     if (!silent) setLoadingMetrics(true);
-    return trackedFetch(
-      `Loading earnings metrics for ${selected.gurufocus_ticker}`,
-      `${API_URL}/api/earnings/${selected.company_id}/metrics`,
-    )
+    return trackedFetch(`Loading earnings metrics for ${who}`, url)
       .then((r) => r.json())
       .then((data) => {
         const rows: MetricRow[] = Array.isArray(data) ? data : [];
@@ -189,19 +258,20 @@ export default function EarningsDashboard() {
         return [] as MetricRow[];
       })
       .finally(() => { if (!silent) setLoadingMetrics(false); });
-  }, [selected]);
+  }, [aMode, selected, selectedPortfolio]);
 
   // Mirror of `loadMetrics` for the comparison company. Kept as a
   // standalone callback (not a generalized factory) so the side-A code
   // path stays a copy-paste read with the same shape.
   const loadCompareMetrics = useCallback((opts?: { silent?: boolean }) => {
-    if (!compareCompany) return Promise.resolve<MetricRow[]>([]);
+    const url = bMode === 'portfolio'
+      ? (comparePortfolio ? `${API_URL}/api/earnings/portfolios/${comparePortfolio.id}/metrics` : null)
+      : (compareCompany ? `${API_URL}/api/earnings/${compareCompany.company_id}/metrics` : null);
+    if (!url) return Promise.resolve<MetricRow[]>([]);
+    const who = bMode === 'portfolio' ? comparePortfolio?.name : compareCompany?.gurufocus_ticker;
     const silent = opts?.silent ?? false;
     if (!silent) setLoadingCompareMetrics(true);
-    return trackedFetch(
-      `Loading earnings metrics for ${compareCompany.gurufocus_ticker} (compare)`,
-      `${API_URL}/api/earnings/${compareCompany.company_id}/metrics`,
-    )
+    return trackedFetch(`Loading earnings metrics for ${who} (compare)`, url)
       .then((r) => r.json())
       .then((data) => {
         const rows: MetricRow[] = Array.isArray(data) ? data : [];
@@ -213,7 +283,7 @@ export default function EarningsDashboard() {
         return [] as MetricRow[];
       })
       .finally(() => { if (!silent) setLoadingCompareMetrics(false); });
-  }, [compareCompany]);
+  }, [bMode, compareCompany, comparePortfolio]);
 
   const refresh = useCallback((
     source: string,
@@ -221,7 +291,7 @@ export default function EarningsDashboard() {
     silent = false,
     trackedSources?: string[],
   ) => {
-    if (!selected) return;
+    if (!selected || aMode === 'portfolio') return;
     const endpoint = source === 'all' ? 'refresh-all' : `refresh/${source}`;
     const tracking = trackedSources
       ?? (source === 'all'
@@ -233,7 +303,7 @@ export default function EarningsDashboard() {
       usageBadgeRef.current?.refresh();
       setRefreshingSources(new Set());
     });
-  }, [selected, sse, loadMetrics]);
+  }, [selected, aMode, sse, loadMetrics]);
 
   // Refresh for the comparison company. Independent from A's refresh —
   // both can be in flight simultaneously without sharing log state.
@@ -243,7 +313,7 @@ export default function EarningsDashboard() {
     silent = false,
     trackedSources?: string[],
   ) => {
-    if (!compareCompany) return;
+    if (!compareCompany || bMode === 'portfolio') return;
     const endpoint = source === 'all' ? 'refresh-all' : `refresh/${source}`;
     const tracking = trackedSources
       ?? (source === 'all'
@@ -255,7 +325,7 @@ export default function EarningsDashboard() {
       usageBadgeRef.current?.refresh();
       setRefreshingSourcesB(new Set());
     });
-  }, [compareCompany, sseB, loadCompareMetrics]);
+  }, [compareCompany, bMode, sseB, loadCompareMetrics]);
 
   // Comparison company → mirror of the side-A effect below. Wipe its
   // log panel + refreshing-sources, load the DB metrics, then kick off
@@ -265,6 +335,12 @@ export default function EarningsDashboard() {
   useEffect(() => {
     sseB.clearLogs();
     setRefreshingSourcesB(new Set());
+    if (bMode === 'portfolio') {
+      // Portfolios are read-only aggregates — load, never auto-refresh.
+      if (comparePortfolio) loadCompareMetrics(); else setCompareMetrics([]);
+      autoRefreshedForB.current = null;
+      return;
+    }
     if (!compareCompany) {
       setCompareMetrics([]);
       autoRefreshedForB.current = null;
@@ -294,6 +370,12 @@ export default function EarningsDashboard() {
   useEffect(() => {
     sse.clearLogs();
     setRefreshingSources(new Set());
+    if (aMode === 'portfolio') {
+      // Portfolios are read-only aggregates — load, never auto-refresh.
+      if (selectedPortfolio) loadMetrics(); else setMetrics([]);
+      autoRefreshedFor.current = null;
+      return;
+    }
     if (!selected) { autoRefreshedFor.current = null; return; }
     const companyId = selected.company_id;
     loadMetrics().then((rows) => {
@@ -310,82 +392,173 @@ export default function EarningsDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadMetrics]);
 
+  // Drop a portfolio selection when that portfolio is deleted (or absent
+  // after a reload) so the charts don't keep requesting a gone id.
+  useEffect(() => {
+    const ids = new Set(portfolioApi.portfolios.map((p) => p.id));
+    if (selectedPortfolio && !ids.has(selectedPortfolio.id)) setSelectedPortfolio(null);
+    if (comparePortfolio && !ids.has(comparePortfolio.id)) setComparePortfolio(null);
+  }, [portfolioApi.portfolios, selectedPortfolio, comparePortfolio]);
+
+  // Lazily load per-member metrics for whichever side is a portfolio (drives
+  // the ranked holdings breakdown in chart tooltips).
+  useEffect(() => {
+    if (aMode !== 'portfolio' || !selectedPortfolio) { setBreakdownA(null); return; }
+    let cancelled = false;
+    apiFetch(`${API_URL}/api/earnings/portfolios/${selectedPortfolio.id}/member-metrics`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setBreakdownA(Array.isArray(d) ? d : null); })
+      .catch(() => { if (!cancelled) setBreakdownA(null); });
+    return () => { cancelled = true; };
+  }, [aMode, selectedPortfolio]);
+
+  useEffect(() => {
+    if (bMode !== 'portfolio' || !comparePortfolio) { setBreakdownB(null); return; }
+    let cancelled = false;
+    apiFetch(`${API_URL}/api/earnings/portfolios/${comparePortfolio.id}/member-metrics`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setBreakdownB(Array.isArray(d) ? d : null); })
+      .catch(() => { if (!cancelled) setBreakdownB(null); });
+    return () => { cancelled = true; };
+  }, [bMode, comparePortfolio]);
+
   return (
     <div className="px-8 py-5 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-fg-strong">Earnings Dashboard</h1>
-        <ApiUsageBadge ref={usageBadgeRef} />
+        <div className="flex items-center gap-3">
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setManagerSide('header')}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium bg-card border border-neutral-800/60 text-fg-muted hover:text-fg-strong transition-colors"
+            >
+              Portfolios
+            </button>
+          )}
+          <ApiUsageBadge ref={usageBadgeRef} />
+        </div>
       </div>
 
-      {/* Company picker(s). The secondary picker is hidden until the
-          user clicks "+ Compare" and lets them pick a second company for
-          side-by-side stats + chart overlays. The comparison company is
-          read-only — refresh buttons + the staleness auto-refresh only
-          touch the primary `selected`. */}
+      {/* Picker(s). Each side can be a single stock or a saved portfolio
+          (weighted basket, aggregated server-side). The secondary picker is
+          hidden until side A is set. Portfolio sides are read-only — refresh +
+          the staleness auto-refresh only touch a single primary company. */}
       <div className="flex items-center gap-4 flex-wrap">
-        <CompanyPicker companies={companies} selected={selected} onSelect={setSelected} className="w-72" />
-        {selected && (
+        <div className="flex items-center gap-2">
+          <ModeToggle value={aMode} onChange={setAMode} />
+          {aIsPortfolio ? (
+            <>
+              <PortfolioPicker portfolios={portfolioApi.portfolios} selected={selectedPortfolio} onSelect={setSelectedPortfolio} />
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setManagerSide('a')}
+                  className="px-2.5 py-2 rounded-lg text-sm font-medium bg-card border border-neutral-800/60 text-fg-muted hover:text-fg-strong transition-colors whitespace-nowrap"
+                  title="Create / edit portfolios"
+                >+ New / Manage</button>
+              )}
+            </>
+          ) : (
+            <CompanyPicker companies={companies} selected={selected} onSelect={setSelected} className="w-72" />
+          )}
+        </div>
+        {hasA && (
           <>
             <div className="flex items-center gap-2">
               <span className="text-fg-subtle text-sm">vs</span>
-              {/* Filter A out of the secondary picker's options so the user
-                  can't pick the same company on both sides. */}
-              <CompanyPicker
-                companies={companies.filter((c) => c.company_id !== selected.company_id)}
-                selected={compareCompany}
-                onSelect={setCompareCompany}
-                className="w-72"
-              />
-              {compareCompany && (
+              <ModeToggle value={bMode} onChange={setBMode} />
+              {bIsPortfolio ? (
+                <>
+                  <PortfolioPicker portfolios={portfolioApi.portfolios} selected={comparePortfolio} onSelect={setComparePortfolio} />
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => setManagerSide('b')}
+                      className="px-2.5 py-2 rounded-lg text-sm font-medium bg-card border border-neutral-800/60 text-fg-muted hover:text-fg-strong transition-colors whitespace-nowrap"
+                      title="Create / edit portfolios"
+                    >+ New / Manage</button>
+                  )}
+                </>
+              ) : (
+                <CompanyPicker
+                  // Filter A out of the secondary picker so the same company
+                  // can't sit on both sides (only when A is itself a company).
+                  companies={!aIsPortfolio && selected ? companies.filter((c) => c.company_id !== selected.company_id) : companies}
+                  selected={compareCompany}
+                  onSelect={setCompareCompany}
+                  className="w-72"
+                />
+              )}
+              {hasB && (
                 <button
                   type="button"
-                  onClick={() => setCompareCompany(null)}
+                  onClick={() => { setCompareCompany(null); setComparePortfolio(null); }}
                   className="text-fg-subtle hover:text-neg-400 transition-colors px-2 py-1 text-sm"
                   title="Clear comparison"
                 >×</button>
               )}
               {loadingCompareMetrics && <Spinner size={12} />}
             </div>
-            <RefreshButton label="Refresh All" running={sse.running} onClick={() => refresh('all', noCache)} />
-            <label className="flex items-center gap-2 text-sm text-fg-muted cursor-pointer" title="Bypass GuruFocus storage cache and re-fetch every source from the API.">
-              <input
-                type="checkbox"
-                checked={noCache}
-                onChange={(e) => setNoCache(e.target.checked)}
-                disabled={sse.running}
-                className="h-4 w-4 rounded border-neutral-700 bg-page text-accent-600 focus:ring-1 focus:ring-accent-500/30"
-              />
-              Don&apos;t use cache
-            </label>
+            {/* Refresh applies to a single company only — hidden in portfolio mode. */}
+            {!aIsPortfolio && (
+              <>
+                <RefreshButton label="Refresh All" running={sse.running} onClick={() => refresh('all', noCache)} />
+                <label className="flex items-center gap-2 text-sm text-fg-muted cursor-pointer" title="Bypass GuruFocus storage cache and re-fetch every source from the API.">
+                  <input
+                    type="checkbox"
+                    checked={noCache}
+                    onChange={(e) => setNoCache(e.target.checked)}
+                    disabled={sse.running}
+                    className="h-4 w-4 rounded border-neutral-700 bg-page text-accent-600 focus:ring-1 focus:ring-accent-500/30"
+                  />
+                  Don&apos;t use cache
+                </label>
+              </>
+            )}
           </>
         )}
       </div>
 
-      {!selected && (
-        <div className="text-fg-subtle py-12 text-center">Select a company to view earnings data</div>
+      {!hasA && (
+        <div className="text-fg-subtle py-12 text-center">Select a {aIsPortfolio ? 'portfolio' : 'company'} to view earnings data</div>
       )}
 
-      {selected && (
+      {hasA && (
         <>
           <div className="text-fg-muted text-sm flex items-center gap-2 flex-wrap">
-            <span><span className="text-accent-400 font-mono mr-1">A:</span>{selected.company_name || selected.gurufocus_ticker} — {selected.gurufocus_ticker}.{selected.gurufocus_exchange}</span>
-            {compareCompany && (
+            <span>
+              {/* A:/B: tags only make sense when comparing two entities. */}
+              {hasB && <span className="text-accent-400 font-mono mr-1">A:</span>}
+              {aIsPortfolio
+                ? `${selectedPortfolio?.name} (${selectedPortfolio?.members.length} companies, equal-wtd EUR)`
+                : `${selected?.company_name || selected?.gurufocus_ticker} — ${selected?.gurufocus_ticker}.${selected?.gurufocus_exchange}`}
+            </span>
+            {hasB && (
               <>
                 <span className="text-fg-faint">·</span>
-                <span><span className="text-warn-400 font-mono mr-1">B:</span>{compareCompany.company_name || compareCompany.gurufocus_ticker} — {compareCompany.gurufocus_ticker}.{compareCompany.gurufocus_exchange}</span>
+                <span>
+                  <span className="text-warn-400 font-mono mr-1">B:</span>
+                  {bIsPortfolio
+                    ? `${comparePortfolio?.name} (${comparePortfolio?.members.length} companies, EUR)`
+                    : `${compareCompany?.company_name || compareCompany?.gurufocus_ticker} — ${compareCompany?.gurufocus_ticker}.${compareCompany?.gurufocus_exchange}`}
+                </span>
               </>
             )}
           </div>
 
           <div className="space-y-2">
-            <LogPanel
-              logs={sse.logs}
-              logEndRef={sse.logEndRef}
-              running={sse.running}
-              onClose={sse.clearLogs}
-              label={compareCompany ? selected.gurufocus_ticker : undefined}
-            />
-            {compareCompany && (
+            {/* SSE refresh logs only exist for single-company sides. */}
+            {!aIsPortfolio && (
+              <LogPanel
+                logs={sse.logs}
+                logEndRef={sse.logEndRef}
+                running={sse.running}
+                onClose={sse.clearLogs}
+                label={hasB ? selected?.gurufocus_ticker : undefined}
+              />
+            )}
+            {!bIsPortfolio && compareCompany && (
               <LogPanel
                 logs={sseB.logs}
                 logEndRef={sseB.logEndRef}
@@ -460,10 +633,11 @@ export default function EarningsDashboard() {
                 metrics={chartMetrics}
                 cadence={deferredCadence}
                 hideOutliers={hideOutliers}
-                label={compareCompany ? chartNameA : undefined}
+                label={hasB ? chartNameA : undefined}
                 labelMinCh={Math.max(chartNameA?.length ?? 0, chartNameB?.length ?? 0)}
+                breakdown={aIsPortfolio ? chartBreakdownA ?? undefined : undefined}
               />
-              {compareCompany && (
+              {hasB && (
                 <BandScorecard
                   charts={SNAPSHOT_BAND_CHARTS}
                   metrics={chartCompareMetrics}
@@ -471,6 +645,7 @@ export default function EarningsDashboard() {
                   hideOutliers={hideOutliers}
                   label={chartNameB}
                   labelMinCh={Math.max(chartNameA?.length ?? 0, chartNameB?.length ?? 0)}
+                  breakdown={bIsPortfolio ? chartBreakdownB ?? undefined : undefined}
                 />
               )}
             </div>
@@ -478,17 +653,19 @@ export default function EarningsDashboard() {
               {/* FCF Yield */}
               <div className="bg-page rounded-lg border border-accent-500/20 p-4 space-y-2 overflow-hidden min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-fg-strong text-sm font-medium flex items-center gap-1.5"><span className="truncate">Forward P/E</span> <InfoTip text="Forward Price-to-Earnings ratio over time. Shows how much investors pay per dollar of expected earnings. Compare to the period average (red dashed) to spot relative cheapness or richness." />{(refreshingSources.has('indicators') || refreshingSourcesB.has('indicators')) && <Spinner size={10} />}</h3>
+                  <h3 className="text-fg-strong text-sm font-medium flex items-center gap-1.5"><span className="truncate">Forward P/E</span> <InfoTip text="Forward P/E — the share price divided by next-fiscal-year consensus EPS estimate; how much you pay today per dollar of earnings the company is expected to make next year. Computed as price ÷ FY1 EPS estimate (GuruFocus indicators) and plotted over time. Lower = cheaper relative to expected earnings; compare a stock to its own 'period avg' to judge whether it's trading rich or cheap versus its own history rather than in absolute terms." />{(refreshingSources.has('indicators') || refreshingSourcesB.has('indicators')) && <Spinner size={10} />}</h3>
                   <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('indicators')} />
                 </div>
                 {loadingMetrics ? <SectionLoader label="Forward P/E" /> : (
                   <ForwardPEChart
                     metrics={chartMetrics}
-                    metricsB={compareCompany ? chartCompareMetrics : undefined}
+                    metricsB={hasB ? chartCompareMetrics : undefined}
                     nameA={chartNameA}
                     nameB={chartNameB}
                     hideOutliers={hideOutliers}
                     loadingB={loadingCompareMetrics}
+                    breakdownA={aIsPortfolio ? chartBreakdownA ?? undefined : undefined}
+                    breakdownB={bIsPortfolio ? chartBreakdownB ?? undefined : undefined}
                   />
                 )}
               </div>
@@ -496,16 +673,18 @@ export default function EarningsDashboard() {
               {/* Relative Growth */}
               <div className="bg-page rounded-lg border border-accent-500/20 p-4 space-y-2 overflow-hidden min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-fg-strong text-sm font-medium flex items-center gap-1.5"><span className="truncate">Share Price vs. Owners Earnings</span> <InfoTip text="Tracks whether the share price is growing in line with Owner Earnings (EPS, excluding non-recurring items). On a log scale, parallel lines mean the valuation multiple is stable. Divergence signals re-rating." />{(refreshingSources.has('prices') || refreshingSourcesB.has('prices')) && <Spinner size={10} />}</h3>
+                  <h3 className="text-fg-strong text-sm font-medium flex items-center gap-1.5"><span className="truncate">Share Price vs. Owners Earnings</span> <InfoTip text="Share Price vs Owner Earnings — compares how fast the stock price has grown against the company's underlying earning power (Owner Earnings ≈ EPS excluding non-recurring items). Both series are indexed to 100 at the first overlapping year and drawn on a log scale, so slope = growth rate: parallel lines mean a flat valuation multiple, price outpacing earnings = multiple expansion (getting more expensive), earnings outpacing price = de-rating (getting cheaper). Dividends are deliberately excluded — a dividend is a distribution of EPS, not earnings on top of it." />{(refreshingSources.has('prices') || refreshingSourcesB.has('prices')) && <Spinner size={10} />}</h3>
                   <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('prices')} />
                 </div>
                 {loadingMetrics ? <SectionLoader label="Relative Growth" /> : (
                   <RelativeGrowthChart
                     metrics={chartMetrics}
-                    metricsB={compareCompany ? chartCompareMetrics : undefined}
+                    metricsB={hasB ? chartCompareMetrics : undefined}
                     nameA={chartNameA}
                     nameB={chartNameB}
                     loadingB={loadingCompareMetrics}
+                    breakdownA={aIsPortfolio ? chartBreakdownA ?? undefined : undefined}
+                    breakdownB={bIsPortfolio ? chartBreakdownB ?? undefined : undefined}
                   />
                 )}
               </div>
@@ -513,18 +692,20 @@ export default function EarningsDashboard() {
               {/* FCF/share Growth */}
               <div className="bg-page rounded-lg border border-accent-500/20 p-4 space-y-2 overflow-hidden min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-fg-strong text-sm font-medium flex items-center gap-1.5"><span className="truncate">FCF / share</span> <InfoTip text="Free Cash Flow per share over time, converted to EUR so companies compare directly. Shows the trajectory of cash generation. Negative values are highlighted with red dots." />{(refreshingSources.has('financials') || refreshingSourcesB.has('financials')) && <Spinner size={10} />}</h3>
+                  <h3 className="text-fg-strong text-sm font-medium flex items-center gap-1.5"><span className="truncate">FCF / share</span> <InfoTip text="Free Cash Flow per share — the cash a business throws off after funding its capital spending, divided by shares outstanding; the real fuel for dividends, buybacks and debt paydown. Computed as Free Cash Flow ÷ shares (GuruFocus financials) and converted to EUR at the historical FX rate so companies in different currencies compare directly. A rising line = growing per-share cash generation; negative values (red dots) mean the company burned cash that period." />{(refreshingSources.has('financials') || refreshingSourcesB.has('financials')) && <Spinner size={10} />}</h3>
                   <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('financials')} />
                 </div>
                 {loadingMetrics ? <SectionLoader label="FCF/share" /> : (
                   <FCFShareChart
                     metrics={chartMetrics}
-                    metricsB={compareCompany ? chartCompareMetrics : undefined}
+                    metricsB={hasB ? chartCompareMetrics : undefined}
                     nameA={chartNameA}
                     nameB={chartNameB}
                     toEurA={fxA.toEur}
                     toEurB={fxB.toEur}
                     loadingB={loadingCompareMetrics}
+                    breakdownA={aIsPortfolio ? chartBreakdownA ?? undefined : undefined}
+                    breakdownB={bIsPortfolio ? chartBreakdownB ?? undefined : undefined}
                   />
                 )}
               </div>
@@ -541,7 +722,7 @@ export default function EarningsDashboard() {
                   {loadingMetrics ? <SectionLoader label={cfg.title} /> : (
                     <MetricBandChart
                       metrics={chartMetrics}
-                      metricsB={compareCompany ? chartCompareMetrics : undefined}
+                      metricsB={hasB ? chartCompareMetrics : undefined}
                       nameA={chartNameA}
                       nameB={chartNameB}
                       cadence={deferredCadence}
@@ -555,6 +736,8 @@ export default function EarningsDashboard() {
                       cadenceLabel={cfg.cadenceLabel}
                       infoText={cfg.chartInfo}
                       emptyText={cfg.emptyText}
+                      breakdownA={aIsPortfolio ? chartBreakdownA ?? undefined : undefined}
+                      breakdownB={bIsPortfolio ? chartBreakdownB ?? undefined : undefined}
                     />
                   )}
                 </div>
@@ -578,12 +761,22 @@ export default function EarningsDashboard() {
             </div>
             {snapshotOpen && (
               <div className="px-5 pb-5 space-y-4">
-                {loadingMetrics ? <SectionLoader label="snapshot stats" /> : (
+                {aIsPortfolio || bIsPortfolio ? (
+                  // Snapshot Stats are single-company fundamentals (incl.
+                  // derived stats like interest coverage + CAGRs that can't be
+                  // cleanly weighted across holdings). Rather than show
+                  // misleading aggregates, point the user to the charts above,
+                  // whose portfolio lines ARE weighted-member averages.
+                  <p className="text-fg-subtle text-sm py-6 text-center">
+                    Snapshot Stats aren’t aggregated for portfolios — open a single company to see them.
+                    The charts above show the portfolio’s weighted-average trends.
+                  </p>
+                ) : loadingMetrics ? <SectionLoader label="snapshot stats" /> : (
                   <SnapshotStats
                     metrics={metrics}
-                    metricsB={compareCompany ? compareMetrics : undefined}
-                    labelA={selected.gurufocus_ticker}
-                    labelB={compareCompany?.gurufocus_ticker}
+                    metricsB={hasB ? compareMetrics : undefined}
+                    labelA={labelA}
+                    labelB={labelB}
                     refreshingSources={refreshingSources}
                     refreshingSourcesB={refreshingSourcesB}
                     loadingB={loadingCompareMetrics}
@@ -593,6 +786,25 @@ export default function EarningsDashboard() {
             )}
           </section>
         </>
+      )}
+
+      {managerSide !== null && (
+        <PortfolioManagerModal
+          companies={companies}
+          portfolios={portfolioApi.portfolios}
+          create={portfolioApi.create}
+          update={portfolioApi.update}
+          remove={portfolioApi.remove}
+          onSaved={(p) => {
+            // Auto-select the just-saved portfolio onto the side that opened
+            // the manager AND close, so "create → use" is one flow and the
+            // user immediately sees its charts. Opened from the header → stay
+            // open (managing several) and don't change a side.
+            if (managerSide === 'a') { setAMode('portfolio'); setSelectedPortfolio(p); setManagerSide(null); }
+            else if (managerSide === 'b') { setBMode('portfolio'); setComparePortfolio(p); setManagerSide(null); }
+          }}
+          onClose={() => setManagerSide(null)}
+        />
       )}
     </div>
   );

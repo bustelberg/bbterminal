@@ -9,7 +9,44 @@ import InfoTip from '../InfoTip';
 import Spinner from '../Spinner';
 import { MC, type MetricRow } from './types';
 import { annualSeries, computeCAGR, fmtPct, timeSeries } from './utils';
+import { buildMemberSeries, weightedReturnIndex, weightedReturnIndexShared, type PortfolioMemberMetrics } from './portfolioBreakdown';
 import { chartTheme } from '../../../lib/chartTheme';
+
+type Pt = { date: string; value: number };
+/** The raw series `buildIndexed` needs. Pulled out so a portfolio can supply
+ * weighted-member-average series (smooth) instead of the backend's raw
+ * per-date blend (which spikes when only one holding has a point on a date). */
+type RawSeries = { price: Pt[]; annualPrice: Pt[]; oeActual: Pt[]; oeEst: Pt[] };
+
+function rawFromMetrics(metrics: MetricRow[]): RawSeries {
+  return {
+    price: timeSeries(metrics, 'close_price'),
+    annualPrice: annualSeries(metrics, MC.PRICE),
+    oeActual: annualSeries(metrics, MC.EPS_WO_NRI),
+    oeEst: annualSeries(metrics, MC.EPS_EST),
+  };
+}
+
+/** Portfolio raw series. This chart plots GROWTH (everything indexed to 100),
+ * so each series is a weighted buy-and-hold TOTAL-RETURN index — NOT a level
+ * blend. Blending price/EPS levels then indexing would weight by price level
+ * (Dow-style), over-weighting higher-priced holdings; the return index weights
+ * by the portfolio weights, so a 50/50 book shows the true 50/50 return. */
+function rawFromBreakdown(breakdown: PortfolioMemberMetrics[]): RawSeries {
+  const ri = (buildOne: (m: MetricRow[]) => Pt[]) => weightedReturnIndex(buildMemberSeries(breakdown, buildOne));
+  // OE actual + estimate share one base so the estimate continues the actual
+  // line (same per-holding anchor) instead of restarting at 100.
+  const oe = weightedReturnIndexShared(
+    buildMemberSeries(breakdown, (m) => annualSeries(m, MC.EPS_WO_NRI)),
+    buildMemberSeries(breakdown, (m) => annualSeries(m, MC.EPS_EST)),
+  );
+  return {
+    price: ri((m) => timeSeries(m, 'close_price')),
+    annualPrice: ri((m) => annualSeries(m, MC.PRICE)),
+    oeActual: oe.primary,
+    oeEst: oe.secondary,
+  };
+}
 
 // Tooltip style — the shared card-surface tooltip (centralized in chartTheme).
 const TOOLTIP_STYLE = chartTheme.tooltipCard.contentStyle;
@@ -40,10 +77,9 @@ type IndexedResult = {
  * on the log axis. When null, uses the natural "first date where price
  * AND OE actual are both positive" anchor. Returns startDate=null when
  * there's not enough data to plot. */
-function buildIndexed(metrics: MetricRow[], anchorDate: string | null = null): IndexedResult {
-  const dailyPrice = timeSeries(metrics, 'close_price');
-  const annualPrice = annualSeries(metrics, MC.PRICE);
-  const priceSeries = dailyPrice.length > 0 ? dailyPrice : annualPrice;
+function buildIndexed(raw: RawSeries, anchorDate: string | null = null): IndexedResult {
+  const dailyPrice = raw.price;
+  const priceSeries = dailyPrice.length > 0 ? dailyPrice : raw.annualPrice;
 
   // Owner earnings per share ≈ EPS (ex-NRI). Dividends are deliberately NOT
   // added: a dividend is a distribution OF earnings, not earnings on top of
@@ -52,8 +88,8 @@ function buildIndexed(metrics: MetricRow[], anchorDate: string | null = null): I
   // whenever the payout ratio changes (a company initiating/raising a
   // dividend would show fake "owner-earnings growth" on flat EPS). The chart
   // compares price growth to this earnings-power growth — a P/E-multiple read.
-  const oeActual = annualSeries(metrics, MC.EPS_WO_NRI);
-  const oeEst = annualSeries(metrics, MC.EPS_EST);
+  const oeActual = raw.oeActual;
+  const oeEst = raw.oeEst;
 
   if (priceSeries.length === 0 || oeActual.length === 0) {
     return { data: [], cagrs: { price: null, oe_act: null, oe_est: null }, startDate: null };
@@ -113,7 +149,7 @@ function buildIndexed(metrics: MetricRow[], anchorDate: string | null = null): I
   });
 
   // CAGRs — annual price for CAGR to match OE annual intervals.
-  const annualPriceForCagr = annualSeries(metrics, MC.PRICE);
+  const annualPriceForCagr = raw.annualPrice;
   const priceFiltered = annualPriceForCagr.filter((p) => p.date >= startDate);
   const oeActFiltered = oeActual.filter((o) => o.date >= startDate && o.value > 0);
   const oeEstFiltered = oeEst.filter((o) => o.date >= startDate && o.value > 0);
@@ -141,6 +177,10 @@ type Props = {
    * CAGR-pill row for B so the comparison side reads as "loading"
    * rather than silently missing. */
   loadingB?: boolean;
+  /** Per-member metrics when a side is a portfolio — the price/OE lines are
+   * then built as weighted-member averages (smooth) instead of the raw blend. */
+  breakdownA?: PortfolioMemberMetrics[];
+  breakdownB?: PortfolioMemberMetrics[];
 };
 
 /** Log-scale chart comparing share price growth to Owner Earnings (EPS,
@@ -150,15 +190,22 @@ type Props = {
  * colors so the user can pair "solid A vs dashed B" by hue. Both
  * companies share a common anchor (max of their natural start dates)
  * so the indexed slopes are directly comparable. */
-function RelativeGrowthChartInner({ metrics, metricsB, labelA, labelB, nameA, nameB, loadingB }: Props) {
+function RelativeGrowthChartInner({ metrics, metricsB, labelA, labelB, nameA, nameB, loadingB, breakdownA, breakdownB }: Props) {
   const hasB = !!metricsB;
   // With two companies this chart has 6 lines (3 metrics × 2) which reads as
   // chaos, so in comparison mode we show ONE company at a time and toggle.
   const [activeCompany, setActiveCompany] = useState<'a' | 'b'>('a');
+  // Raw series per side: weighted-member average for a portfolio, else the
+  // backend aggregate/single-company metrics.
+  const rawA = useMemo(() => (breakdownA ? rawFromBreakdown(breakdownA) : rawFromMetrics(metrics)), [breakdownA, metrics]);
+  const rawB = useMemo(
+    () => (metricsB ? (breakdownB ? rawFromBreakdown(breakdownB) : rawFromMetrics(metricsB)) : null),
+    [breakdownB, metricsB],
+  );
   const combined = useMemo(() => {
     // First pass — find each company's natural start date.
-    const naturalA = buildIndexed(metrics);
-    const naturalB = metricsB ? buildIndexed(metricsB) : null;
+    const naturalA = buildIndexed(rawA);
+    const naturalB = rawB ? buildIndexed(rawB) : null;
     // Force both companies onto the LATER of the two natural starts so
     // they share an x-axis origin (both lines start at 100). This is
     // what makes "is A appreciating faster than B?" answerable from
@@ -166,8 +213,8 @@ function RelativeGrowthChartInner({ metrics, metricsB, labelA, labelB, nameA, na
     const commonStart = naturalB?.startDate
       ? (naturalA.startDate && naturalA.startDate > naturalB.startDate ? naturalA.startDate : naturalB.startDate)
       : naturalA.startDate;
-    const A = commonStart ? buildIndexed(metrics, commonStart) : naturalA;
-    const B = hasB && commonStart ? buildIndexed(metricsB!, commonStart) : null;
+    const A = commonStart ? buildIndexed(rawA, commonStart) : naturalA;
+    const B = hasB && rawB && commonStart ? buildIndexed(rawB, commonStart) : null;
 
     // Merge A and B by `ts` so the chart treats them as one dataset.
     const byTs = new Map<number, Record<string, number | string | undefined>>();
@@ -189,7 +236,7 @@ function RelativeGrowthChartInner({ metrics, metricsB, labelA, labelB, nameA, na
     }
     const merged = Array.from(byTs.values()).sort((x, y) => Number(x.ts) - Number(y.ts));
     return { merged, cagrsA: A.cagrs, cagrsB: B?.cagrs ?? null, commonStart };
-  }, [metrics, metricsB, hasB]);
+  }, [rawA, rawB, hasB]);
 
   if (combined.merged.length === 0) {
     return <div className="text-fg-subtle text-sm py-8 text-center">Not enough data for Relative Growth chart. Refresh to load.</div>;

@@ -21,17 +21,17 @@ username and password:
 Usage:
 
     # fast headless login using the default ./loyalty4g.creds file:
-    uv run --with requests python loyalty4g_login.py
+    uv run --with requests python tools/loyalty4g/login.py
 
     # explicit creds on the CLI:
-    uv run --with requests python loyalty4g_login.py -u you@example.com -p 'secret'
+    uv run --with requests python tools/loyalty4g/login.py -u you@example.com -p 'secret'
 
     # WATCH IT LIVE in a real browser window (uses Playwright; run from the
     # backend env which already has it installed):
-    uv run --project backend python loyalty4g_login.py --browser
+    uv run --project backend python tools/loyalty4g/login.py --browser
 
     # persist the authenticated session cookies for reuse:
-    uv run --with requests python loyalty4g_login.py --save-cookies loyalty4g_session.json
+    uv run --with requests python tools/loyalty4g/login.py --save-cookies loyalty4g_session.json
 
 Exit code: 0 on successful login, 1 on failure.
 """
@@ -288,7 +288,7 @@ def main() -> int:
         except ImportError:
             print(
                 "Playwright isn't available. Run --browser from the backend env:\n"
-                "  uv run --project backend python loyalty4g_login.py --browser",
+                "  uv run --project backend python tools/loyalty4g/login.py --browser",
                 file=sys.stderr,
             )
             return 3

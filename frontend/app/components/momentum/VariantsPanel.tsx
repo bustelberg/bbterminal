@@ -67,6 +67,9 @@ export default function VariantsPanel({
     topSectorsSweep, setTopSectorsSweep,
     perSectorSweep, setPerSectorSweep,
     minScoreSweep, setMinScoreSweep,
+    volTargetSweep, setVolTargetSweep,
+    regimeFloorSweep, setRegimeFloorSweep,
+    sweepDailyTiming, setSweepDailyTiming,
     minPortfolioSizeRaw, setMinPortfolioSizeRaw,
     maxPortfolioSizeRaw, setMaxPortfolioSizeRaw,
     disabledPerms, setDisabledPerms,
@@ -135,6 +138,53 @@ export default function VariantsPanel({
             placeholder={`e.g. 20,30,off  (blank = ${minPriceScore.trim() || 'off'})`}
             className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
           />
+        </div>
+        <div>
+          <label className="text-fg-subtle text-xs block mb-1">
+            Vol target %{' '}
+            <span className="text-fg-faint text-[10px]">(comma list; &quot;off&quot; = plain strategy)</span>
+          </label>
+          <input
+            type="text"
+            value={volTargetSweep}
+            onChange={(e) => setVolTargetSweep(e.target.value)}
+            placeholder="e.g. off,10,12,15  (blank = off)"
+            className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
+          />
+          <p className="text-[10px] text-fg-faint mt-1.5">
+            A vol-targeted variant scales exposure toward the target each rebalance (holds cash when turbulent; never levers). Include <span className="font-mono">off</span> to compare against the original strategy.
+          </p>
+        </div>
+        <div>
+          <label className="text-fg-subtle text-xs block mb-1">
+            Regime filter floor{' '}
+            <span className="text-fg-faint text-[10px]">(comma list 0&ndash;1; &quot;off&quot; = no filter)</span>
+          </label>
+          <input
+            type="text"
+            value={regimeFloorSweep}
+            onChange={(e) => setRegimeFloorSweep(e.target.value)}
+            placeholder="e.g. off,0,0.5  (blank = off)"
+            className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
+          />
+          <p className="text-[10px] text-fg-faint mt-1.5">
+            Scales exposure with a composite market-health score (trend + 6-mo momentum + drawdown): fully invested when healthy, down to this floor (<span className="font-mono">0</span> = all cash, <span className="font-mono">0.5</span> = half) when broadly weak, proportional in between. <span className="font-mono">off</span> = no filter.
+          </p>
+        </div>
+        <div>
+          <label className="text-fg-subtle text-xs block mb-1">Daily timing</label>
+          <label className="flex items-center gap-2 px-3 py-2 rounded-lg border border-neutral-700 bg-page text-fg-soft text-sm cursor-pointer w-fit">
+            <input
+              type="checkbox"
+              checked={sweepDailyTiming}
+              onChange={(e) => setSweepDailyTiming(e.target.checked)}
+              className="accent-accent-500 w-3.5 h-3.5 cursor-pointer"
+            />
+            Compare tit-for-tat
+          </label>
+          <p className="text-[10px] text-fg-faint mt-1.5">
+            Fans each variant into a plain and a <span className="font-mono">tit-for-tat</span> version: invested today only if yesterday&apos;s daily return was up, else cash. A daily in/out overlay — holdings unchanged.
+          </p>
         </div>
       </div>
 

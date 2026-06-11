@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Spinner from '../Spinner';
 import { inputCls } from './styles';
+import { fmtMktCapEur } from './format';
 import type { Company } from './types';
 
 // ─── Inline edit row ──────────────────────────────────────────────────────────
@@ -41,6 +42,9 @@ export default function EditRow({
       <td className="px-3 py-2 text-fg-muted font-mono text-xs">{company.isin ?? '—'}</td>
       <td className="px-3 py-2 text-fg-muted">{company.country ?? '—'}</td>
       <td className="px-3 py-2 text-fg-muted text-xs">{company.sector ?? '—'}</td>
+      <td className="px-3 py-2 text-right font-mono text-xs text-fg-muted whitespace-nowrap">
+        {company.market_cap_eur != null ? fmtMktCapEur(company.market_cap_eur) : '—'}
+      </td>
       <td className="px-3 py-2 text-fg-faint text-xs">—</td>
       <td className="px-3 py-2">
         <div className="flex gap-1.5">
