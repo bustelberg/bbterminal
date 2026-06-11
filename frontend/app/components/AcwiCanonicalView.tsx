@@ -52,6 +52,8 @@ export default function AcwiCanonicalView() {
   const [refreshLog, setRefreshLog] = useState<string[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshResult, setRefreshResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [freezing, setFreezing] = useState(false);
+  const [freezeMsg, setFreezeMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const loadSummary = useCallback(async () => {
     setSummaryLoading(true);
@@ -167,6 +169,37 @@ export default function AcwiCanonicalView() {
     }
   }, [refreshing, loadSummary]);
 
+  // Freeze the currently-selected month into a fixed-basket static universe
+  // (D's constituents held constant across all months). It then shows up in
+  // the /backtest + /regime-detector universe dropdowns, pipeline-immune.
+  const freezeAsOf = useCallback(async () => {
+    if (!selectedMonth || freezing) return;
+    setFreezing(true);
+    setFreezeMsg(null);
+    try {
+      const r = await apiFetch(
+        `${API_URL}/api/universe-templates/${TEMPLATE_KEY}/freeze?as_of=${encodeURIComponent(selectedMonth)}`,
+        { method: 'POST' },
+      );
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setFreezeMsg({ ok: false, text: data.detail ?? `Freeze failed (${r.status})` });
+        return;
+      }
+      const label = data.label ?? `${TEMPLATE_KEY} (as of ${selectedMonth})`;
+      setFreezeMsg({
+        ok: true,
+        text: data.created === false
+          ? `Already frozen: "${label}" — selectable in /backtest + /regime-detector.`
+          : `Froze "${label}" — ${membership.length} constituents held constant. Now selectable in /backtest + /regime-detector.`,
+      });
+    } catch (e) {
+      setFreezeMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setFreezing(false);
+    }
+  }, [selectedMonth, freezing, membership.length]);
+
   if (summaryLoading && !summary) {
     return (
       <div className="bg-card rounded-xl border border-neutral-800/40 px-5 py-4 text-sm text-fg-subtle">
@@ -215,6 +248,15 @@ export default function AcwiCanonicalView() {
           </a>
           <button
             type="button"
+            onClick={() => void freezeAsOf()}
+            disabled={!hasData || freezing || !selectedMonth}
+            title={selectedMonth ? `Freeze ACWI's ${selectedMonth} constituents as a fixed, reusable universe` : 'Pick a month first'}
+            className="text-xs px-3 py-1.5 rounded-lg border border-neutral-700 text-fg hover:bg-overlay/5 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {freezing ? 'Freezing…' : `Freeze as of ${selectedMonth || '…'}`}
+          </button>
+          <button
+            type="button"
             onClick={() => void triggerRefresh()}
             disabled={refreshing}
             className="text-xs px-3 py-1.5 rounded-lg bg-accent-600 hover:bg-accent-500 disabled:opacity-50 disabled:cursor-not-allowed text-fg-strong transition-colors"
@@ -223,6 +265,13 @@ export default function AcwiCanonicalView() {
           </button>
         </div>
       </div>
+
+      {freezeMsg && (
+        <div className={`px-5 py-2.5 border-b border-neutral-800/40 text-xs flex items-start justify-between gap-3 ${freezeMsg.ok ? 'text-pos-300' : 'text-neg-300'}`}>
+          <span>{freezeMsg.text}</span>
+          <button type="button" onClick={() => setFreezeMsg(null)} className="text-fg-subtle hover:text-fg-soft shrink-0">dismiss</button>
+        </div>
+      )}
 
       {(refreshLog.length > 0 || refreshResult) && (
         <div className="px-5 py-3 border-b border-neutral-800/40">

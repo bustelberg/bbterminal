@@ -13,6 +13,7 @@ this module thin; if a helper has a clear home in one of the
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from dotenv import load_dotenv
@@ -23,8 +24,20 @@ if TYPE_CHECKING:
 
 # .env first (prod defaults), .env.local overrides (local dev only — file
 # doesn't exist on Railway/Vercel so this is a no-op there).
-load_dotenv()
-load_dotenv(".env.local", override=True)
+#
+# IMPORTANT: resolve both files relative to THIS file (backend/), NOT the
+# process CWD. `load_dotenv(".env.local")` is CWD-relative — starting uvicorn
+# from the repo root (or anywhere but backend/) silently skipped backend/.env.local
+# and left SUPABASE_URL pointing at the prod default in .env, so local dev hit
+# the prod DB. Anchoring to __file__ makes the launch directory irrelevant.
+_BACKEND_DIR = Path(__file__).resolve().parent
+load_dotenv(_BACKEND_DIR / ".env")
+load_dotenv(_BACKEND_DIR / ".env.local", override=True)
+
+# Log which DB this process is wired to — startup line makes "local vs prod"
+# obvious instead of a silent mystery (local dev hitting prod = empty market
+# caps, etc.). Host only, no keys.
+print(f"[deps] SUPABASE_URL = {os.environ.get('SUPABASE_URL', '<UNSET>')}", flush=True)
 
 
 class _LazySupabase:

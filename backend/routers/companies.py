@@ -28,6 +28,48 @@ from deps import supabase
 router = APIRouter(tags=["companies"])
 
 
+@router.get("/api/companies/diag")
+async def companies_diag():
+    """Diagnostic: which Supabase the backend is actually wired to + market-cap
+    coverage. Surfaced on /companies so a 'local dev hitting prod DB' misconfig
+    (empty market caps, etc.) is obvious instead of a silent mystery. Host only,
+    no keys."""
+    import os  # noqa: PLC0415
+    url = os.environ.get("SUPABASE_URL", "<unset>")
+    host = url.split("//", 1)[-1].split("/", 1)[0] if "//" in url else url
+    is_local = any(x in url for x in ("127.0.0.1", "localhost", "kong"))
+
+    def _q():
+        def _count(builder):
+            try:
+                return builder.execute().count
+            except Exception:
+                return None
+        total = _count(supabase.table("company").select("company_id", count="exact").limit(1))
+        with_cap = _count(
+            supabase.table("company").select("company_id", count="exact")
+            .not_.is_("market_cap_eur", "null").limit(1)
+        )
+        latest = (
+            supabase.table("company").select("market_cap_date")
+            .not_.is_("market_cap_date", "null").order("market_cap_date", desc=True).limit(1).execute()
+        )
+        sample = (
+            supabase.table("company").select("company_name, market_cap_eur")
+            .not_.is_("market_cap_eur", "null").limit(1).execute()
+        )
+        return {
+            "supabase_host": host,
+            "is_local": is_local,
+            "company_count": total,
+            "with_market_cap": with_cap,
+            "latest_market_cap_date": (latest.data[0]["market_cap_date"] if latest.data else None),
+            "sample": (sample.data[0] if sample.data else None),
+        }
+
+    return await asyncio.to_thread(_q)
+
+
 class CreateCompanyRequest(BaseModel):
     company_name: str
     gurufocus_ticker: str

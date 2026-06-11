@@ -14,6 +14,7 @@ export default function CompanyRow({
   isAdmin,
   membershipsLoading,
   sectorsLoading,
+  loading,
   duplicateNames,
   deletingId,
   onEdit,
@@ -25,6 +26,9 @@ export default function CompanyRow({
   isAdmin: boolean;
   membershipsLoading: boolean;
   sectorsLoading: boolean;
+  /** Table (re)load in flight — the Mkt Cap cell spins (its value arrives with
+   * the company row itself, so it has no separate fetch like sector does). */
+  loading: boolean;
   duplicateNames: Set<string>;
   deletingId: number | null;
   onEdit: (id: number) => void;
@@ -95,7 +99,13 @@ export default function CompanyRow({
         className="px-3 py-2.5 text-right font-mono text-xs text-fg-muted whitespace-nowrap"
         title={c.market_cap_eur != null && c.market_cap_date ? `as of ${c.market_cap_date} · converted to EUR` : undefined}
       >
-        {c.market_cap_eur != null ? fmtMktCapEur(c.market_cap_eur) : '—'}
+        {loading ? (
+          <Spinner size={10} className="inline-block h-2.5 w-2.5 text-fg-faint" />
+        ) : c.market_cap_eur != null ? (
+          fmtMktCapEur(c.market_cap_eur)
+        ) : (
+          '—'
+        )}
       </td>
       <td className="px-3 py-2.5">
         {(c.universes ?? []).length === 0 ? (

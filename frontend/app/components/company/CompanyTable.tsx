@@ -135,6 +135,7 @@ export default function CompanyTable({
                   isAdmin={isAdmin}
                   membershipsLoading={membershipsLoading}
                   sectorsLoading={sectorsLoading}
+                  loading={loading}
                   duplicateNames={duplicateNames}
                   deletingId={deletingId}
                   onEdit={onEdit}

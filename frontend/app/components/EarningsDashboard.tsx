@@ -19,6 +19,7 @@ import Spinner from './Spinner';
 import CompanyPicker from './earnings/CompanyPicker';
 import PortfolioPicker from './earnings/PortfolioPicker';
 import PortfolioManagerModal from './earnings/PortfolioManagerModal';
+import AttributionMatrix from './earnings/AttributionMatrix';
 import { usePortfolios, type Portfolio } from './earnings/usePortfolios';
 import type { PortfolioMemberMetrics } from './earnings/portfolioBreakdown';
 import { apiFetch } from '../../lib/apiFetch';
@@ -568,6 +569,12 @@ export default function EarningsDashboard() {
               />
             )}
           </div>
+
+          {/* Allocation × Selection attribution — only when BOTH sides are
+              portfolios (mixes one's sector weights with the other's returns). */}
+          {aIsPortfolio && bIsPortfolio && selectedPortfolio && comparePortfolio && (
+            <AttributionMatrix portfolioA={selectedPortfolio} portfolioB={comparePortfolio} />
+          )}
 
           {/* Charts container */}
           <section className="bg-card rounded-xl border border-accent-500/20 p-5 space-y-5">

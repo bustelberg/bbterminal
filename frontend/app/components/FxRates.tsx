@@ -400,6 +400,11 @@ export default function FxRates() {
               Loaded live from ECB (local <span className="font-mono">fx_rate</span> table is empty). Click <b>Sync from ECB</b> once to persist data for fast loads.
             </p>
           )}
+          {latestSource === 'db+ecb_live' && (
+            <p className="text-xs text-warn-400 mt-2">
+              Some rates were loaded live from ECB — they&apos;re not yet in the local <span className="font-mono">fx_rate</span> table. Click <b>Sync from ECB</b> to persist them for fast loads.
+            </p>
+          )}
           {syncMessage && (
             <p className="text-xs text-fg-subtle mt-2">{syncMessage}</p>
           )}

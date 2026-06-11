@@ -849,6 +849,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/diag": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Companies Diag
+         * @description Diagnostic: which Supabase the backend is actually wired to + market-cap
+         *     coverage. Surfaced on /companies so a 'local dev hitting prod DB' misconfig
+         *     (empty market caps, etc.) is obvious instead of a silent mystery. Host only,
+         *     no keys.
+         */
+        get: operations["companies_diag_api_companies_diag_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/field-options": {
         parameters: {
             query?: never;
@@ -1042,6 +1065,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/earnings/portfolios/attribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Portfolio Attribution
+         * @description Cross-portfolio sector attribution for two portfolios over one calendar
+         *     year. Returns the 2x2 matrix + the per-sector weights/returns behind it.
+         */
+        get: operations["portfolio_attribution_api_earnings_portfolios_attribution_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/earnings/portfolios/{portfolio_id}": {
         parameters: {
             query?: never;
@@ -1103,6 +1147,27 @@ export interface paths {
          *     as /api/earnings/{company_id}/metrics, so every chart consumes it directly.
          */
         get: operations["portfolio_metrics_api_earnings_portfolios__portfolio_id__metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/sector-universes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sector Universes
+         * @description Universes that carry a sector classification (for the attribution sector
+         *     picker). Leonteq first (the default).
+         */
+        get: operations["sector_universes_api_earnings_sector_universes_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1345,9 +1410,15 @@ export interface paths {
          * Fx Latest
          * @description Latest daily rates per currency.
          *
-         *     Reads from `fx_rate` (fast); falls back to live ECB when the table is
-         *     empty so the page renders on a fresh install — user can then click
-         *     "Sync from ECB" to populate the table and get the fast path next time.
+         *     Reads from `fx_rate` (fast); falls back to live ECB so the page never
+         *     shows a blank rate for a currency we can actually source:
+         *       - empty table → fetch everything live (fresh install).
+         *       - PARTIAL table → fetch live only for the fetchable currencies that
+         *         are missing from the DB and merge them in. A partially-populated
+         *         table is the normal case once a backtest's forward-only FX sync has
+         *         run for some currencies but not others; without this, those covered
+         *         currencies render blank even though their history loads live fine.
+         *     A one-time "Sync from ECB" persists everything for the fast path.
          */
         get: operations["fx_latest_api_fx_latest_get"];
         put?: never;
@@ -2525,11 +2596,17 @@ export interface paths {
         put?: never;
         /**
          * Freeze Template
-         * @description Snapshot a live template universe into a static, dated, NON-template
-         *     universe — `label = "<KEY> (as of YYYY-MM-DD)"`, `template_key = NULL` — so
-         *     the pipeline never re-reconstructs it and backtests against it are
-         *     reproducible. Idempotent per calendar day: a second call on the same date
-         *     returns the existing snapshot instead of duplicating it.
+         * @description Snapshot a live template universe into a static, NON-template universe
+         *     (`template_key = NULL`) so the pipeline never re-reconstructs it and
+         *     backtests against it are reproducible.
+         *
+         *     Two modes:
+         *       - `as_of=YYYY-MM[-DD]` → FIXED BASKET: the constituents on that month,
+         *         replicated across every month so a backtest holds them constant.
+         *         Label `"<KEY> (as of YYYY-MM)"`.
+         *       - no `as_of` → full-history copy labelled with today's date.
+         *     Idempotent on the resulting label — a repeat call returns the existing
+         *     snapshot instead of duplicating it.
          */
         post: operations["freeze_template_api_universe_templates__key__freeze_post"];
         delete?: never;
@@ -4568,6 +4645,26 @@ export interface operations {
             };
         };
     };
+    companies_diag_api_companies_diag_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     get_company_field_options_api_companies_field_options_get: {
         parameters: {
             query?: never;
@@ -4807,6 +4904,40 @@ export interface operations {
             };
         };
     };
+    portfolio_attribution_api_earnings_portfolios_attribution_get: {
+        parameters: {
+            query: {
+                a: number;
+                b: number;
+                universe?: string;
+                year?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     update_portfolio_api_earnings_portfolios__portfolio_id__put: {
         parameters: {
             query?: never;
@@ -4931,6 +5062,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sector_universes_api_earnings_sector_universes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };
@@ -6826,7 +6977,9 @@ export interface operations {
     };
     freeze_template_api_universe_templates__key__freeze_post: {
         parameters: {
-            query?: never;
+            query?: {
+                as_of?: string | null;
+            };
             header?: never;
             path: {
                 key: string;

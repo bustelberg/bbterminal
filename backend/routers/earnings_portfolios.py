@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from deps import supabase
+from deps import supabase, chunked
 from routers.earnings import load_company_metric_rows
 
 router = APIRouter(tags=["earnings"])
@@ -321,3 +321,213 @@ async def portfolio_member_metrics(portfolio_id: int):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Member metrics failed: {e}")
+
+
+# ── Cross-portfolio sector attribution (Brinson-style) ───────────────────────
+# A 2x2 matrix mixing one portfolio's sector ALLOCATION (weights) with another's
+# sector SELECTION (returns): cell(row i, col j) = Σ_sectors Wᵢ(s)·Rⱼ(s).
+# Diagonal = each portfolio's own one-year return; off-diagonal = counterfactual
+# (i's weights × j's stock-picking), isolating allocation vs selection alpha.
+
+def _universe_sector_map(label: str) -> dict[int, str]:
+    """`{company_id: sector}` from a universe's latest membership month."""
+    u = supabase.table("universe").select("universe_id").eq("label", label).limit(1).execute()
+    if not u.data:
+        return {}
+    uid = u.data[0]["universe_id"]
+    lm = (
+        supabase.table("universe_membership").select("target_month")
+        .eq("universe_id", uid).order("target_month", desc=True).limit(1).execute()
+    )
+    if not lm.data:
+        return {}
+    month = lm.data[0]["target_month"]
+    out: dict[int, str] = {}
+    offset, page = 0, 1000
+    while True:
+        resp = (
+            supabase.table("universe_membership")
+            .select("company_id, sector")
+            .eq("universe_id", uid).eq("target_month", month)
+            .range(offset, offset + page - 1).execute()
+        )
+        batch = resp.data or []
+        for r in batch:
+            if r.get("sector"):
+                out[r["company_id"]] = r["sector"]
+        if len(batch) < page:
+            break
+        offset += page
+    return out
+
+
+def _asof_price(series: list[tuple[str, float]], date: str) -> float | None:
+    """Latest EUR price on or before `date` (series sorted ascending)."""
+    if not series:
+        return None
+    idx = bisect.bisect_right([d for d, _ in series], date) - 1
+    return series[idx][1] if idx >= 0 else None
+
+
+def _load_eur_close_prices(cids: list[int], start_date: str, end_date: str) -> dict[int, list[tuple[str, float]]]:
+    """EUR-converted daily close prices per company over [start, end]."""
+    currency_by_cid, fx_cache = _members_currency_fx([{"company_id": c} for c in cids])
+    out: dict[int, list[tuple[str, float]]] = {c: [] for c in cids}
+    for chunk in chunked(cids):
+        offset, page = 0, 1000
+        while True:
+            resp = (
+                supabase.table("metric_data")
+                .select("company_id, target_date, numeric_value")
+                .eq("source_code", "gurufocus").eq("metric_code", "close_price")
+                .in_("company_id", chunk)
+                .gte("target_date", start_date).lte("target_date", end_date)
+                .order("target_date")
+                .range(offset, offset + page - 1).execute()
+            )
+            batch = resp.data or []
+            for r in batch:
+                v = r.get("numeric_value")
+                if v is None:
+                    continue
+                c = r["company_id"]
+                cur = currency_by_cid.get(c, "EUR")
+                val = float(v)
+                if cur != "EUR":
+                    rate = _asof_rate(fx_cache.get(cur), r["target_date"])
+                    if not rate:
+                        continue
+                    val = val / rate
+                out[c].append((r["target_date"], val))
+            if len(batch) < page:
+                break
+            offset += page
+    return out
+
+
+def _latest_close_year(cids: list[int]) -> int | None:
+    """Calendar year of the most recent close price across `cids`."""
+    for chunk in chunked(cids):
+        resp = (
+            supabase.table("metric_data").select("target_date")
+            .eq("source_code", "gurufocus").eq("metric_code", "close_price")
+            .in_("company_id", chunk).order("target_date", desc=True).limit(1).execute()
+        )
+        if resp.data:
+            return int(resp.data[0]["target_date"][:4])
+    return None
+
+
+def _portfolio_sectors(weighted: list[tuple[int, float]], sector_of, ret: dict[int, float | None]):
+    """Per-sector weight Wᵢ(s) + within-sector weighted return Rᵢ(s) (over the
+    priced holdings; None when the sector has no priced holding)."""
+    sec_w: dict[str, float] = {}
+    ret_num: dict[str, float] = {}
+    ret_w: dict[str, float] = {}
+    for cid, w in weighted:
+        s = sector_of(cid)
+        sec_w[s] = sec_w.get(s, 0.0) + w
+        r = ret.get(cid)
+        if r is not None:
+            ret_num[s] = ret_num.get(s, 0.0) + w * r
+            ret_w[s] = ret_w.get(s, 0.0) + w
+    sec_r = {s: (ret_num[s] / ret_w[s] if ret_w.get(s, 0.0) > 0 else None) for s in sec_w}
+    return sec_w, sec_r
+
+
+@router.get("/api/earnings/sector-universes")
+async def sector_universes():
+    """Universes that carry a sector classification (for the attribution sector
+    picker). Leonteq first (the default)."""
+    def _q():
+        resp = supabase.table("universe").select("label").order("label").execute()
+        labels = [r["label"] for r in (resp.data or [])]
+        with_sectors = []
+        for lbl in labels:
+            uid_resp = supabase.table("universe").select("universe_id").eq("label", lbl).limit(1).execute()
+            if not uid_resp.data:
+                continue
+            uid = uid_resp.data[0]["universe_id"]
+            s = (
+                supabase.table("universe_membership").select("company_id")
+                .eq("universe_id", uid).not_.is_("sector", "null").limit(1).execute()
+            )
+            if s.data:
+                with_sectors.append(lbl)
+        with_sectors.sort(key=lambda x: (x != "Leonteq", x))  # Leonteq first
+        return {"universes": with_sectors}
+    return await asyncio.to_thread(_q)
+
+
+@router.get("/api/earnings/portfolios/attribution")
+async def portfolio_attribution(a: int, b: int, universe: str = "Leonteq", year: int | None = None):
+    """Cross-portfolio sector attribution for two portfolios over one calendar
+    year. Returns the 2x2 matrix + the per-sector weights/returns behind it."""
+    def _q():
+        pa, pb = _fetch_members(a), _fetch_members(b)
+        if not pa or not pb:
+            raise HTTPException(status_code=400, detail="Both portfolios need members")
+
+        def norm(members):
+            tot = sum((m["weight"] or 0.0) for m in members) or 1.0
+            return [(m["company_id"], (m["weight"] or 0.0) / tot) for m in members]
+
+        wa, wb = norm(pa), norm(pb)
+        cids = sorted({cid for cid, _ in wa} | {cid for cid, _ in wb})
+
+        yr = year if year is not None else (_latest_close_year(cids) or 0)
+        prices = _load_eur_close_prices(cids, f"{yr - 1}-01-01", f"{yr}-12-31")
+        ret: dict[int, float | None] = {}
+        for cid in cids:
+            series = prices.get(cid) or []
+            p_end = _asof_price(series, f"{yr}-12-31")
+            p_start = _asof_price(series, f"{yr - 1}-12-31")
+            ret[cid] = (p_end / p_start - 1.0) if (p_start and p_end and p_start != 0) else None
+
+        sector_by_cid = _universe_sector_map(universe)
+        def sector_of(cid):
+            return sector_by_cid.get(cid) or "Unclassified"
+
+        wa_s, ra_s = _portfolio_sectors(wa, sector_of, ret)
+        wb_s, rb_s = _portfolio_sectors(wb, sector_of, ret)
+        sectors = sorted(set(wa_s) | set(wb_s))
+
+        def rget(rmap, s):  # missing sector → 0% (per spec)
+            v = rmap.get(s)
+            return v if v is not None else 0.0
+
+        def cell(wi, rj):
+            return sum(wi.get(s, 0.0) * rget(rj, s) for s in sectors)
+
+        # rows = whose weights (a, b); cols = whose returns (a, b)
+        matrix = [
+            [cell(wa_s, ra_s), cell(wa_s, rb_s)],
+            [cell(wb_s, ra_s), cell(wb_s, rb_s)],
+        ]
+
+        def side(wmap, rmap):
+            return {
+                "name": None,  # filled below
+                "sector_weights": {s: wmap.get(s, 0.0) for s in sectors},
+                "sector_returns": {s: rmap.get(s) for s in sectors},
+            }
+
+        a_name = (supabase.table("earnings_portfolio").select("name").eq("id", a).limit(1).execute().data or [{}])[0].get("name")
+        b_name = (supabase.table("earnings_portfolio").select("name").eq("id", b).limit(1).execute().data or [{}])[0].get("name")
+        sa, sb = side(wa_s, ra_s), side(wb_s, rb_s)
+        sa["name"], sb["name"] = a_name, b_name
+        return {
+            "year": yr,
+            "universe": universe,
+            "sectors": sectors,
+            "a": sa,
+            "b": sb,
+            "matrix": matrix,
+        }
+
+    try:
+        return await asyncio.to_thread(_q)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Attribution failed: {e}")

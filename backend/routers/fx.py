@@ -48,16 +48,38 @@ async def fx_coverage():
 async def fx_latest():
     """Latest daily rates per currency.
 
-    Reads from `fx_rate` (fast); falls back to live ECB when the table is
-    empty so the page renders on a fresh install — user can then click
-    "Sync from ECB" to populate the table and get the fast path next time.
+    Reads from `fx_rate` (fast); falls back to live ECB so the page never
+    shows a blank rate for a currency we can actually source:
+      - empty table → fetch everything live (fresh install).
+      - PARTIAL table → fetch live only for the fetchable currencies that
+        are missing from the DB and merge them in. A partially-populated
+        table is the normal case once a backtest's forward-only FX sync has
+        run for some currencies but not others; without this, those covered
+        currencies render blank even though their history loads live fine.
+    A one-time "Sync from ECB" persists everything for the fast path.
     """
+    from fx_rates import fetch_all_latest
+
     rates = await asyncio.to_thread(fetch_latest_from_db, supabase)
-    source = "db"
     if not rates:
-        from fx_rates import fetch_all_latest
         rates = await asyncio.to_thread(fetch_all_latest)
-        source = "ecb_live"
+        return {"rates": rates, "count": len(rates), "source": "ecb_live"}
+
+    source = "db"
+    have = {r["currency"] for r in rates}
+    missing = _FETCHABLE - have
+    if missing:
+        try:
+            live = await asyncio.to_thread(fetch_all_latest)
+            for r in live:
+                if r["currency"] in missing:
+                    rates.append(r)
+            rates.sort(key=lambda r: r["currency"])
+            source = "db+ecb_live"
+        except Exception:
+            # ECB/Yahoo hiccup — keep the DB rates; the still-missing
+            # currencies stay blank rather than failing the whole page.
+            pass
     return {"rates": rates, "count": len(rates), "source": source}
 
 

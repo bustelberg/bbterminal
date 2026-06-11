@@ -14,13 +14,13 @@ Credentials are resolved in this order (first hit wins), for both
 username and password:
     1. --username / --password CLI args
     2. $LOYALTY4G_USERNAME / $LOYALTY4G_PASSWORD env vars
-    3. a KEY=VALUE creds file (default: ./loyalty4g.creds, gitignored;
+    3. a KEY=VALUE creds file (default: tools/loyalty4g/loyalty4g.creds, gitignored;
        override with --creds-file). The password additionally falls back
        to a hidden prompt if still unset.
 
 Usage:
 
-    # fast headless login using the default ./loyalty4g.creds file:
+    # fast headless login using the default tools/loyalty4g/loyalty4g.creds file:
     uv run --with requests python tools/loyalty4g/login.py
 
     # explicit creds on the CLI:
@@ -31,7 +31,7 @@ Usage:
     uv run --project backend python tools/loyalty4g/login.py --browser
 
     # persist the authenticated session cookies for reuse:
-    uv run --with requests python tools/loyalty4g/login.py --save-cookies loyalty4g_session.json
+    uv run --with requests python tools/loyalty4g/login.py --save-cookies tools/loyalty4g/loyalty4g_session.json
 
 Exit code: 0 on successful login, 1 on failure.
 """
@@ -50,7 +50,7 @@ import requests
 DEFAULT_BASE_URL = "https://tops.loyalty4g.com"
 _LOGIN_PATH = "/login"
 _LOGIN_CHECK_PATH = "/login_check"
-_DEFAULT_CREDS_FILE = "loyalty4g.creds"
+_DEFAULT_CREDS_FILE = "tools/loyalty4g/loyalty4g.creds"
 
 _UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

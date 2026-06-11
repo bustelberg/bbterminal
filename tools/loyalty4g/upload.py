@@ -31,7 +31,7 @@ import sys
 from playwright.sync_api import sync_playwright
 
 BASE_URL = "https://tops.loyalty4g.com"
-_DEFAULT_CREDS_FILE = "loyalty4g.creds"
+_DEFAULT_CREDS_FILE = "tools/loyalty4g/loyalty4g.creds"
 
 # Set once after the initial login so create_share can transparently
 # re-authenticate if the session expires during a multi-hour run.
@@ -323,7 +323,7 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=2, help="Max NEW shares to create this run (default 2).")
     ap.add_argument("--manifest", default="backend/leonteq_logos/companies.json")
     ap.add_argument("--images-dir", default="backend/leonteq_logos/images")
-    ap.add_argument("--created-file", default="loyalty4g_created.json",
+    ap.add_argument("--created-file", default="tools/loyalty4g/loyalty4g_created.json",
                     help="Local log of names this script created (for resume/dedup).")
     ap.add_argument("--real-logos-only", action="store_true",
                     help="Skip the generated first-letter badge logos (status=letter).")

@@ -52,7 +52,7 @@ from .fetch_loop import run_fetch_loop
 from .models import BacktestRequest
 from .self_heal import compute_gap_cids, run_self_heal
 from .single_run import run_single
-from .universe_loader import load_monthly_eligible_for
+from .universe_loader import broadcast_constant, load_monthly_eligible_for
 from .variants import run_variants_sweep
 
 _log = logging.getLogger(__name__)
@@ -286,6 +286,15 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             if did_error:
                 return
             if me is not None:
+                # Single-snapshot universes (frozen "fixed basket") are
+                # constant through time — broadcast their one snapshot
+                # across the backtest window so every rebalance sees the
+                # set. Multi-month universes pass through unchanged.
+                me = broadcast_constant(
+                    me,
+                    date.fromisoformat(req.start_date),
+                    date.fromisoformat(req.end_date),
+                )
                 monthly_eligible_by_combo[combo] = me
 
         monthly_eligible = monthly_eligible_by_combo.get(base_combo)

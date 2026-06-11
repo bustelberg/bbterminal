@@ -8,9 +8,43 @@ so the SSE stream stays byte-identical."""
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 from routers._sse import sse_event as _emit
 
 from deps import supabase
+
+
+def broadcast_constant(
+    monthly_eligible: dict[str, dict[int, str | None]] | None,
+    start_date: date,
+    end_date: date,
+) -> dict[str, dict[int, str | None]] | None:
+    """Treat a SINGLE-month universe as a constant basket: apply its one
+    snapshot to every calendar month in [start, end].
+
+    This is how frozen "fixed basket" universes work — a freeze stores the
+    chosen month's constituents once and the set is assumed to hold through
+    time, so we don't materialize a row per (member × month). It also
+    rescues any single-snapshot universe from being empty outside its lone
+    month. Multi-month universes (the live ACWI reconstruction, etc.) have
+    >1 captured month and are returned UNCHANGED so their point-in-time
+    membership — and survivorship-free backtests — are preserved.
+
+    The expanded months all alias the same inner dict; downstream reads it
+    read-only (filters + sector lookups), never mutating it."""
+    if not monthly_eligible or len(monthly_eligible) != 1:
+        return monthly_eligible
+    (only_set,) = monthly_eligible.values()
+    if not only_set:
+        return monthly_eligible
+    out: dict[str, dict[int, str | None]] = {}
+    y, m = start_date.year, start_date.month
+    while (y, m) <= (end_date.year, end_date.month):
+        out[f"{y:04d}-{m:02d}"] = only_set
+        m += 1
+        if m > 12:
+            m, y = 1, y + 1
+    return out or monthly_eligible
 
 
 def _load_universe_membership(

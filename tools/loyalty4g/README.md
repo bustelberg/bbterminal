@@ -34,4 +34,10 @@ paths (`backend/leonteq_logos/...`, `loyalty4g.creds`).
 ## Credentials
 
 Resolved in order: CLI args → `LOYALTY4G_USERNAME`/`LOYALTY4G_PASSWORD` env →
-a `KEY=VALUE` creds file (default `./loyalty4g.creds`, gitignored).
+a `KEY=VALUE` creds file (default `tools/loyalty4g/loyalty4g.creds`, gitignored).
+
+## Runtime artifacts (all gitignored, kept in this folder)
+
+`loyalty4g.creds` (credentials), `loyalty4g_session.json` (saved cookies),
+`loyalty4g_created.json` (`--created-file` output log), `loyalty4g_run.log`
+(if you `tee` a run here). None are committed.
