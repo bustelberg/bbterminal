@@ -16,7 +16,7 @@ export default function RefreshButton({
     <button
       onClick={onClick}
       disabled={running}
-      className="px-3 py-1.5 rounded-lg text-sm font-medium bg-accent-600 hover:bg-accent-500 text-fg-strong transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      className="inline-flex items-center justify-center h-10 px-3 rounded-lg text-sm font-medium bg-accent-600 hover:bg-accent-500 text-fg-strong transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
     >
       {running ? 'Refreshing...' : label}
     </button>

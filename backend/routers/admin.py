@@ -289,17 +289,19 @@ async def get_egress_ip(authorization: str = Header(...)):
 
 
 @router.get("/api/admin/network-diagnostics")
-async def network_diagnostics(authorization: str = Header(...)):
+async def network_diagnostics(authorization: str = Header(...), guru_method: str = "curl"):
     """Reachability report for every external service the terminal depends on
     — backs the /network page. Returns this backend's egress IP, the live
     GuruFocus Cloudflare circuit-breaker state, and per-source verdicts (DNS
-    IP, latency, status, and a plain-language reason). GuruFocus is probed
-    through the real curl_cffi impersonation ladder so the verdict matches
-    what the ingest pipeline experiences in prod. See routers/_network_diag.py."""
+    IP, latency, status, and a plain-language reason). `guru_method=curl`
+    (default) probes GuruFocus through the real curl_cffi impersonation ladder
+    so the verdict matches what the ingest pipeline experiences in prod;
+    `guru_method=plain` uses a bare requests.get to show whether the API still
+    bot-challenges fingerprint-less clients. See routers/_network_diag.py."""
     _require_admin(authorization)
     from routers._network_diag import run_diagnostics  # noqa: PLC0415
 
-    return await run_diagnostics()
+    return await run_diagnostics(guru_method)
 
 
 @router.get("/api/admin/copy-status")

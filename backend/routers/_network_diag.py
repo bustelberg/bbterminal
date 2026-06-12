@@ -336,9 +336,94 @@ def _probe_gurufocus(src: dict) -> dict:
     return entry
 
 
-def _probe_source(src: dict) -> dict:
+def _probe_gurufocus_plain(src: dict) -> dict:
+    """Probe GuruFocus with a *plain* `requests.get` — NO browser impersonation,
+    NO proxy, and it never touches the curl_cffi circuit breaker (so it always
+    makes a real network call, even when the breaker is open).
+
+    This is the "is it a proper, un-challenged API yet?" test. While GuruFocus
+    keeps Cloudflare Bot Management in front of the API, a fingerprint-less
+    request gets challenged → `blocked` (expected). The day this flips to
+    `ok` (HTTP 200), Cloudflare is no longer bot-scoring this IP and the whole
+    curl_cffi impersonation ladder becomes redundant for this endpoint —
+    exactly the plain, boring API call it should always have been."""
+    import requests  # noqa: PLC0415
+
+    url, masked_url, cfg_err = _gurufocus_probe_url()
+    entry = _base_entry(src, masked_url or "https://api.gurufocus.com/")
+    entry["domain"] = "api.gurufocus.com"
+    entry["used_target"] = "plain requests (no impersonation, no proxy)"
+
+    if cfg_err:
+        entry["verdict"] = "degraded"
+        entry["reason"] = cfg_err
+        return entry
+
+    t0 = time.monotonic()
+    try:
+        r = requests.get(
+            url,
+            timeout=_HTTP_TIMEOUT,
+            allow_redirects=True,
+            headers={"Accept": "application/json"},
+        )
+    except requests.exceptions.Timeout:
+        entry["latency_ms"] = round((time.monotonic() - t0) * 1000)
+        entry["reason"] = f"Plain requests timed out after {_HTTP_TIMEOUT}s — no HTTP response."
+        return entry
+    except Exception as e:  # noqa: BLE001
+        entry["latency_ms"] = round((time.monotonic() - t0) * 1000)
+        entry["reason"] = f"Plain requests failed: {type(e).__name__}: {e}"
+        return entry
+
+    entry["latency_ms"] = round((time.monotonic() - t0) * 1000)
+    headers = {str(k).lower(): str(v) for k, v in r.headers.items()}
+    body_head = (r.text or "")[:500]
+    entry["status_code"] = r.status_code
+    entry["server"] = headers.get("server")
+    entry["cdn_headers"] = _cdn_headers(headers)
+
+    if _looks_like_cf_block(r.status_code, headers, body_head):
+        entry["verdict"] = "blocked"
+        entry["reason"] = (
+            f"Plain requests (no browser impersonation) was blocked by Cloudflare "
+            f"(HTTP {r.status_code}). This is EXPECTED while GuruFocus runs Bot "
+            f"Management on the API — it's the probe that should flip to 'Reachable' "
+            f"once they exempt the API hostname or allowlist our IP at the Cloudflare "
+            f"layer. Until then, the ingest pipeline needs the curl_cffi impersonation."
+        )
+        return entry
+
+    if r.status_code >= 500:
+        entry["verdict"] = "degraded"
+        entry["reason"] = f"Reached past Cloudflare but upstream returned HTTP {r.status_code} (server error)."
+        return entry
+
+    if r.status_code < 400:
+        entry["verdict"] = "ok"
+        entry["reason"] = (
+            f"Plain requests got through — HTTP {r.status_code} in {entry['latency_ms']}ms, "
+            f"NO browser impersonation needed. GuruFocus is no longer bot-challenging this "
+            f"IP; curl_cffi is now redundant for this endpoint and the backend could go back "
+            f"to a plain API call."
+        )
+        return entry
+
+    # Non-CF 4xx — got past Cloudflare, but the API itself rejected the call.
+    entry["verdict"] = "degraded"
+    entry["reason"] = (
+        f"Plain requests reached GuruFocus past Cloudflare (HTTP {r.status_code}, not a block) "
+        f"but the API rejected the call — likely key/quota/subscription, not an IP block. "
+        f"Notably, Cloudflare did NOT challenge the plain request here."
+    )
+    return entry
+
+
+def _probe_source(src: dict, guru_method: str = "curl") -> dict:
     try:
         if src["kind"] == "gurufocus":
+            if guru_method == "plain":
+                return _probe_gurufocus_plain(src)
             return _probe_gurufocus(src)
         if src["kind"] == "supabase":
             return _probe_supabase(src)
@@ -396,12 +481,18 @@ def _gurufocus_circuit() -> dict:
     }
 
 
-async def run_diagnostics() -> dict:
+async def run_diagnostics(guru_method: str = "curl") -> dict:
     """Run the egress-IP lookup + every source probe concurrently (each is
-    blocking I/O, so off-thread) and return the assembled report."""
+    blocking I/O, so off-thread) and return the assembled report.
+
+    `guru_method` controls how the GuruFocus probe connects: "curl" (default)
+    uses the curl_cffi browser-impersonation ladder the ingest pipeline relies
+    on; "plain" uses a bare `requests.get` so the page can demonstrate whether
+    the API is still bot-challenging fingerprint-less clients."""
+    method = guru_method if guru_method in ("curl", "plain") else "curl"
     egress_task = asyncio.to_thread(_egress_ip)
     circuit_task = asyncio.to_thread(_gurufocus_circuit)
-    source_tasks = [asyncio.to_thread(_probe_source, s) for s in _SOURCES]
+    source_tasks = [asyncio.to_thread(_probe_source, s, method) for s in _SOURCES]
     egress, circuit, *sources = await asyncio.gather(egress_task, circuit_task, *source_tasks)
 
     counts: dict[str, int] = {}
@@ -410,6 +501,7 @@ async def run_diagnostics() -> dict:
 
     return {
         "observed_at": datetime.now(timezone.utc).isoformat(),
+        "guru_method": method,
         "egress": egress,
         "gurufocus_circuit": circuit,
         "sources": sources,

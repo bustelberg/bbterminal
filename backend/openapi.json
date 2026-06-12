@@ -1912,9 +1912,19 @@
     },
     "/api/admin/network-diagnostics": {
       "get": {
-        "description": "Reachability report for every external service the terminal depends on\n\u2014 backs the /network page. Returns this backend's egress IP, the live\nGuruFocus Cloudflare circuit-breaker state, and per-source verdicts (DNS\nIP, latency, status, and a plain-language reason). GuruFocus is probed\nthrough the real curl_cffi impersonation ladder so the verdict matches\nwhat the ingest pipeline experiences in prod. See routers/_network_diag.py.",
+        "description": "Reachability report for every external service the terminal depends on\n\u2014 backs the /network page. Returns this backend's egress IP, the live\nGuruFocus Cloudflare circuit-breaker state, and per-source verdicts (DNS\nIP, latency, status, and a plain-language reason). `guru_method=curl`\n(default) probes GuruFocus through the real curl_cffi impersonation ladder\nso the verdict matches what the ingest pipeline experiences in prod;\n`guru_method=plain` uses a bare requests.get to show whether the API still\nbot-challenges fingerprint-less clients. See routers/_network_diag.py.",
         "operationId": "network_diagnostics_api_admin_network_diagnostics_get",
         "parameters": [
+          {
+            "in": "query",
+            "name": "guru_method",
+            "required": false,
+            "schema": {
+              "default": "curl",
+              "title": "Guru Method",
+              "type": "string"
+            }
+          },
           {
             "in": "header",
             "name": "authorization",

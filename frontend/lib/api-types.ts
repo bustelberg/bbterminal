@@ -428,9 +428,11 @@ export interface paths {
          * @description Reachability report for every external service the terminal depends on
          *     — backs the /network page. Returns this backend's egress IP, the live
          *     GuruFocus Cloudflare circuit-breaker state, and per-source verdicts (DNS
-         *     IP, latency, status, and a plain-language reason). GuruFocus is probed
-         *     through the real curl_cffi impersonation ladder so the verdict matches
-         *     what the ingest pipeline experiences in prod. See routers/_network_diag.py.
+         *     IP, latency, status, and a plain-language reason). `guru_method=curl`
+         *     (default) probes GuruFocus through the real curl_cffi impersonation ladder
+         *     so the verdict matches what the ingest pipeline experiences in prod;
+         *     `guru_method=plain` uses a bare requests.get to show whether the API still
+         *     bot-challenges fingerprint-less clients. See routers/_network_diag.py.
          */
         get: operations["network_diagnostics_api_admin_network_diagnostics_get"];
         put?: never;
@@ -3972,7 +3974,9 @@ export interface operations {
     };
     network_diagnostics_api_admin_network_diagnostics_get: {
         parameters: {
-            query?: never;
+            query?: {
+                guru_method?: string;
+            };
             header: {
                 authorization: string;
             };

@@ -24,8 +24,11 @@ type SourceResult = {
   reason: string;
 };
 
+type GuruMethod = 'curl' | 'plain';
+
 type Diagnostics = {
   observed_at: string;
+  guru_method?: GuruMethod;
   egress: { ip: string | null; source: string | null; error: string | null };
   gurufocus_circuit: {
     curl_cffi_available: boolean;
@@ -148,12 +151,14 @@ export default function NetworkDiagnostics() {
   const [showSupport, setShowSupport] = useState(false);
   const [draft, setDraft] = useState('');
   const [copied, setCopied] = useState(false);
+  const [guruMethod, setGuruMethod] = useState<GuruMethod>('curl');
 
-  const run = useCallback(async () => {
+  const run = useCallback(async (method?: GuruMethod) => {
+    const m = method ?? guruMethod;
     setLoading(true);
     setError(null);
     try {
-      const resp = await apiFetch(`${API_URL}/api/admin/network-diagnostics`);
+      const resp = await apiFetch(`${API_URL}/api/admin/network-diagnostics?guru_method=${m}`);
       if (!resp.ok) {
         const body = await resp.text().catch(() => '');
         throw new Error(`HTTP ${resp.status}${body ? ` — ${body.slice(0, 200)}` : ''}`);
@@ -164,8 +169,10 @@ export default function NetworkDiagnostics() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [guruMethod]);
 
+  // Fires on mount and whenever the probe method changes (toggling guruMethod
+  // recreates `run`, which re-triggers this effect → automatic re-probe).
   useEffect(() => {
     void run();
   }, [run]);
@@ -240,7 +247,30 @@ export default function NetworkDiagnostics() {
         </div>
 
         <div className="bg-card rounded-xl border border-neutral-800/40 p-5">
-          <div className="text-xs uppercase tracking-wider text-fg-subtle mb-1">GuruFocus reachability</div>
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="text-xs uppercase tracking-wider text-fg-subtle">GuruFocus reachability</div>
+            {/* Probe-method switch. "Plain requests" is the proof-of-fix test:
+                if a fingerprint-less request ever returns 200, GuruFocus has
+                stopped bot-challenging this IP and curl_cffi is redundant. */}
+            <div className="flex items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5 shrink-0">
+              {(['curl', 'plain'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setGuruMethod(m)}
+                  disabled={loading}
+                  title={
+                    m === 'curl'
+                      ? 'Probe via the curl_cffi browser-impersonation ladder — exactly what the ingest pipeline uses.'
+                      : 'Probe with a plain requests.get — no impersonation, no proxy, bypasses the circuit breaker. Succeeds only if GuruFocus has stopped bot-challenging this IP.'
+                  }
+                  className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors disabled:opacity-50 ${guruMethod === m ? 'bg-accent-600 text-white' : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/5'}`}
+                >
+                  {m === 'curl' ? 'Browser (curl_cffi)' : 'Plain requests'}
+                </button>
+              ))}
+            </div>
+          </div>
           {circuit && guru ? (
             <>
               {/* Headline = the LIVE probe verdict (the source of truth), not
@@ -256,18 +286,33 @@ export default function NetworkDiagnostics() {
                 <div className="text-2xl font-semibold text-warn-300">Degraded</div>
               )}
               <div className="text-xs text-fg-muted mt-1 space-y-1">
-                <div>
-                  Impersonating <span className="font-mono">{circuit.preferred_target ?? '—'}</span>
-                  {circuit.proxy_configured ? ' through a proxy.' : ' directly (no proxy).'}
-                  {!circuit.curl_cffi_available && ' ⚠ curl_cffi missing — prod calls will be blocked.'}
-                </div>
-                <div>
-                  {circuit.circuit_open
-                    ? `Circuit breaker OPEN — calls suppressed for ${circuit.circuit_seconds_remaining}s.`
-                    : guruBlocked
-                      ? 'Circuit breaker not yet tripped (opens after 5 consecutive blocks), but live calls are being blocked right now.'
-                      : 'Circuit breaker closed.'}
-                </div>
+                {guruMethod === 'plain' ? (
+                  <>
+                    <div>
+                      Probed with a plain <span className="font-mono">requests.get</span> — no browser
+                      impersonation, no proxy, circuit breaker bypassed.
+                    </div>
+                    <div>
+                      This only succeeds once GuruFocus stops bot-challenging this IP — i.e. it&rsquo;s the
+                      &ldquo;proper API&rdquo; test.
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      Impersonating <span className="font-mono">{circuit.preferred_target ?? '—'}</span>
+                      {circuit.proxy_configured ? ' through a proxy.' : ' directly (no proxy).'}
+                      {!circuit.curl_cffi_available && ' ⚠ curl_cffi missing — prod calls will be blocked.'}
+                    </div>
+                    <div>
+                      {circuit.circuit_open
+                        ? `Circuit breaker OPEN — calls suppressed for ${circuit.circuit_seconds_remaining}s.`
+                        : guruBlocked
+                          ? 'Circuit breaker not yet tripped (opens after 5 consecutive blocks), but live calls are being blocked right now.'
+                          : 'Circuit breaker closed.'}
+                    </div>
+                  </>
+                )}
               </div>
             </>
           ) : (

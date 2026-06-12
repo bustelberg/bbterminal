@@ -81,13 +81,13 @@ function useSSERefresh(
 // saved portfolio (weighted basket). Tiny segmented control.
 function ModeToggle({ value, onChange }: { value: 'company' | 'portfolio'; onChange: (m: 'company' | 'portfolio') => void }) {
   return (
-    <div className="flex items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5">
+    <div className="flex items-stretch gap-0.5 rounded-lg border border-neutral-700 p-0.5 h-10">
       {(['company', 'portfolio'] as const).map((m) => (
         <button
           key={m}
           type="button"
           onClick={() => onChange(m)}
-          className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${value === m ? 'bg-accent-600 text-fg-strong' : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/5'}`}
+          className={`inline-flex items-center px-2 rounded-md text-xs font-medium transition-colors ${value === m ? 'bg-accent-600 text-fg-strong' : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/5'}`}
         >
           {m === 'company' ? 'Stock' : 'Portfolio'}
         </button>
@@ -455,7 +455,7 @@ export default function EarningsDashboard() {
                 <button
                   type="button"
                   onClick={() => setManagerSide('a')}
-                  className="px-2.5 py-2 rounded-lg text-sm font-medium bg-card border border-neutral-800/60 text-fg-muted hover:text-fg-strong transition-colors whitespace-nowrap"
+                  className="inline-flex items-center h-10 px-2.5 rounded-lg text-sm font-medium bg-card border border-neutral-800/60 text-fg-muted hover:text-fg-strong transition-colors whitespace-nowrap"
                   title="Create / edit portfolios"
                 >+ New / Manage</button>
               )}
@@ -476,7 +476,7 @@ export default function EarningsDashboard() {
                     <button
                       type="button"
                       onClick={() => setManagerSide('b')}
-                      className="px-2.5 py-2 rounded-lg text-sm font-medium bg-card border border-neutral-800/60 text-fg-muted hover:text-fg-strong transition-colors whitespace-nowrap"
+                      className="inline-flex items-center h-10 px-2.5 rounded-lg text-sm font-medium bg-card border border-neutral-800/60 text-fg-muted hover:text-fg-strong transition-colors whitespace-nowrap"
                       title="Create / edit portfolios"
                     >+ New / Manage</button>
                   )}

@@ -22,7 +22,7 @@ export default function PortfolioPicker({
         const id = Number(e.target.value);
         onSelect(portfolios.find((p) => p.id === id) ?? null);
       }}
-      className={`bg-page border border-neutral-700 rounded-lg px-3 py-2.5 text-fg-strong outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 transition-colors ${className ?? 'w-72'}`}
+      className={`h-10 bg-page border border-neutral-700 rounded-lg px-3 text-fg-strong outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 transition-colors ${className ?? 'w-72'}`}
     >
       <option value="">
         {portfolios.length === 0 ? 'No portfolios yet' : 'Select portfolio…'}

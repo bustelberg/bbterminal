@@ -43,7 +43,7 @@ export default function CompanyPicker({
         onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         placeholder={selected ? `${selected.company_name || selected.gurufocus_ticker}` : 'Search company or ticker...'}
-        className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2.5 text-fg-strong placeholder-fg-subtle focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
+        className="w-full h-10 bg-page border border-neutral-700 rounded-lg px-3 text-fg-strong placeholder-fg-subtle focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
       />
       {open && filtered.length > 0 && (
         <div className="absolute z-50 mt-1 w-full max-h-64 overflow-y-auto bg-card border border-neutral-700 rounded-lg shadow-xl">
