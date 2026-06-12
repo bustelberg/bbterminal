@@ -153,14 +153,22 @@ def _copy_memberships_via_supabase(src_id: int, dst_id: int) -> int:
     return len(payload)
 
 
-def _freeze_month_snapshot(src_id: int, dst_id: int, month: str) -> int:
+def _freeze_month_snapshot(src_id: int, dst_id: int, month: str, on_progress=None) -> int:
     """Copy ONE month's constituents (`month` = YYYY-MM) of `src` into `dst`,
     stored under that single month. A universe with a lone month is treated
     as a CONSTANT basket by the backtest loader (`broadcast_constant`) — its
     set is applied to every rebalance — so there's no need to materialize a
-    row per (member × month). ~one membership-sized insert."""
+    row per (member × month). ~one membership-sized insert.
+
+    `on_progress(message)` (optional) is called as the copy proceeds so an SSE
+    caller can surface real per-chunk progress instead of a single spinner."""
     from deps import chunked, paginate  # noqa: PLC0415
 
+    def _note(msg: str) -> None:
+        if on_progress:
+            on_progress(msg)
+
+    _note(f"Reading {month} membership…")
     cols = ("company_id", "universe_ticker", "sector", "industry")
     members = list(paginate(
         lambda lo, hi: supabase.table("universe_membership")
@@ -177,9 +185,14 @@ def _freeze_month_snapshot(src_id: int, dst_id: int, month: str) -> int:
         {"universe_id": dst_id, "target_month": month, **{c: m.get(c) for c in cols}}
         for m in members
     ]
+    total = len(payload)
+    _note(f"Copying {total} constituents…")
+    done = 0
     for chunk in chunked(payload, 500):
         supabase.table("universe_membership").insert(chunk).execute()
-    return len(payload)
+        done += len(chunk)
+        _note(f"Inserted {done}/{total} constituents…")
+    return total
 
 
 @router.get("/api/static-universes")
@@ -202,8 +215,114 @@ async def list_static_universes(response: Response):
     return await asyncio.to_thread(_q)
 
 
+def _freeze_core(key: str, as_of: str | None, on_progress=None, *, src_universe_id: int | None = None) -> dict:
+    """The actual freeze work, with optional `on_progress(message)` callbacks so
+    an SSE caller can stream real progress. Raises HTTPException on bad input
+    (propagated as an HTTP error by the JSON path, mapped to an `error` SSE
+    event by the streaming path). Returns the frozen-snapshot summary dict.
+
+    `src_universe_id` lets a NON-template universe (e.g. the SP500 universe,
+    which lives in the `universe` table but isn't a registered template) be
+    frozen through the same path: when given, the template lookup is skipped and
+    that universe is the copy source. `key` is still used to label the snapshot
+    (`"<key> (as of …)"`)."""
+    def _note(msg: str) -> None:
+        if on_progress:
+            on_progress(msg)
+
+    if src_universe_id is not None:
+        src_id = src_universe_id
+    else:
+        _note(f"Resolving {key} template…")
+        try:
+            template = get_template(key)
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail=f"Unknown template '{key}'") from e
+        src_id = template.universe_id(supabase)
+        if src_id is None:
+            raise HTTPException(status_code=409, detail=f"Template '{key}' has no universe yet — refresh it first.")
+
+    if as_of:
+        month = as_of[:7]
+        label = f"{key} (as of {month})"
+        description = (
+            f"Fixed basket: {key} constituents as of {month}, held constant through "
+            f"time (a single snapshot the backtest applies to every month). The "
+            f"pipeline never refreshes it."
+        )
+    else:
+        today = date.today().isoformat()
+        label = f"{key} (as of {today})"
+        description = f"Static snapshot of {key} frozen {today}. Membership is fixed — the pipeline never refreshes it."
+
+    _note("Checking for an existing snapshot…")
+    existing = (
+        supabase.table("universe")
+        .select("universe_id, label, description, frozen_at, frozen_from")
+        .eq("label", label)
+        .limit(1)
+        .execute()
+    )
+    if existing.data:
+        return {"created": False, **_frozen_summary(existing.data[0])}
+
+    _note(f"Creating snapshot universe \"{label}\"…")
+    ins = (
+        supabase.table("universe")
+        .insert({
+            "label": label,
+            "template_key": None,
+            "frozen_at": datetime.now(timezone.utc).isoformat(),
+            "frozen_from": key,
+            "description": description,
+        })
+        .execute()
+    )
+    dst_id = ins.data[0]["universe_id"]
+
+    if as_of:
+        copied = _freeze_month_snapshot(src_id, dst_id, month, on_progress=on_progress)
+        if not copied:
+            # No constituents at that month — don't leave an empty
+            # universe lying around.
+            supabase.table("universe").delete().eq("universe_id", dst_id).execute()
+            raise HTTPException(
+                status_code=409,
+                detail=f"{key} has no membership for {month} — pick a captured month.",
+            )
+    else:
+        _note("Copying full membership history…")
+        from momentum.data._pg import copy_universe_memberships_via_pg  # noqa: PLC0415
+        copied = copy_universe_memberships_via_pg(src_id, dst_id)
+        if copied is None:
+            copied = _copy_memberships_via_supabase(src_id, dst_id)
+
+    _note("Finalizing…")
+    u = (
+        supabase.table("universe")
+        .select("universe_id, label, description, frozen_at, frozen_from")
+        .eq("universe_id", dst_id)
+        .limit(1)
+        .execute()
+    ).data[0]
+    return {"created": True, "members_copied": copied, **_frozen_summary(u)}
+
+
+def _freeze_done_message(result: dict) -> str:
+    """Human-readable `done`-event summary mirroring the message the /acwi UI
+    used to compose client-side."""
+    label = result.get("label", "snapshot")
+    if result.get("created") is False:
+        return f'Already frozen: "{label}" — selectable in /backtest + /regime-detector.'
+    copied = result.get("members_copied", 0)
+    return (
+        f'Froze "{label}" — {copied} constituents held constant. '
+        f"Now selectable in /backtest + /regime-detector."
+    )
+
+
 @router.post("/api/universe-templates/{key}/freeze")
-async def freeze_template(key: str, as_of: str | None = None):
+async def freeze_template(key: str, request: Request, as_of: str | None = None):
     """Snapshot a live template universe into a static, NON-template universe
     (`template_key = NULL`) so the pipeline never re-reconstructs it and
     backtests against it are reproducible.
@@ -214,79 +333,40 @@ async def freeze_template(key: str, as_of: str | None = None):
         Label `"<KEY> (as of YYYY-MM)"`.
       - no `as_of` → full-history copy labelled with today's date.
     Idempotent on the resulting label — a repeat call returns the existing
-    snapshot instead of duplicating it."""
+    snapshot instead of duplicating it.
 
-    def _do():
+    Content-negotiated: clients sending `Accept: text/event-stream` (the /acwi
+    page) get an SSE progress stream (`progress`/`done`/`error` events); all
+    other callers (the /leonteq page, external scripts) get the JSON summary."""
+    wants_sse = "text/event-stream" in (request.headers.get("accept") or "")
+
+    if not wants_sse:
+        return await asyncio.to_thread(_freeze_core, key, as_of, None)
+
+    q: _queue.Queue = _queue.Queue()
+
+    def _worker():
+        def push(message: str):
+            q.put(json.dumps({"type": "progress", "message": message}))
         try:
-            template = get_template(key)
-        except KeyError as e:
-            raise HTTPException(status_code=404, detail=f"Unknown template '{key}'") from e
-        src_id = template.universe_id(supabase)
-        if src_id is None:
-            raise HTTPException(status_code=409, detail=f"Template '{key}' has no universe yet — refresh it first.")
+            result = _freeze_core(key, as_of, push)
+            q.put(json.dumps({
+                "type": "done",
+                "message": _freeze_done_message(result),
+                "result": result,
+            }))
+        except HTTPException as he:
+            q.put(json.dumps({"type": "error", "message": str(he.detail)}))
+        except Exception as e:  # noqa: BLE001
+            q.put(json.dumps({"type": "error", "message": f"{e}\n{traceback.format_exc()}"}))
+        q.put(None)
 
-        if as_of:
-            month = as_of[:7]
-            label = f"{key} (as of {month})"
-            description = (
-                f"Fixed basket: {key} constituents as of {month}, held constant through "
-                f"time (a single snapshot the backtest applies to every month). The "
-                f"pipeline never refreshes it."
-            )
-        else:
-            today = date.today().isoformat()
-            label = f"{key} (as of {today})"
-            description = f"Static snapshot of {key} frozen {today}. Membership is fixed — the pipeline never refreshes it."
+    threading.Thread(target=_worker, daemon=True).start()
 
-        existing = (
-            supabase.table("universe")
-            .select("universe_id, label, description, frozen_at, frozen_from")
-            .eq("label", label)
-            .limit(1)
-            .execute()
-        )
-        if existing.data:
-            return {"created": False, **_frozen_summary(existing.data[0])}
-
-        ins = (
-            supabase.table("universe")
-            .insert({
-                "label": label,
-                "template_key": None,
-                "frozen_at": datetime.now(timezone.utc).isoformat(),
-                "frozen_from": key,
-                "description": description,
-            })
-            .execute()
-        )
-        dst_id = ins.data[0]["universe_id"]
-
-        if as_of:
-            copied = _freeze_month_snapshot(src_id, dst_id, month)
-            if not copied:
-                # No constituents at that month — don't leave an empty
-                # universe lying around.
-                supabase.table("universe").delete().eq("universe_id", dst_id).execute()
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"{key} has no membership for {month} — pick a captured month.",
-                )
-        else:
-            from momentum.data._pg import copy_universe_memberships_via_pg  # noqa: PLC0415
-            copied = copy_universe_memberships_via_pg(src_id, dst_id)
-            if copied is None:
-                copied = _copy_memberships_via_supabase(src_id, dst_id)
-
-        u = (
-            supabase.table("universe")
-            .select("universe_id, label, description, frozen_at, frozen_from")
-            .eq("universe_id", dst_id)
-            .limit(1)
-            .execute()
-        ).data[0]
-        return {"created": True, "members_copied": copied, **_frozen_summary(u)}
-
-    return await asyncio.to_thread(_do)
+    async def _gen():
+        async for chunk in drain_thread_queue(q):
+            yield chunk
+    return StreamingResponse(_gen(), media_type="text/event-stream")
 
 
 @router.get("/api/universe-templates")

@@ -21,7 +21,6 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from deps import supabase, chunked
-from routers.earnings import load_company_metric_rows
 
 router = APIRouter(tags=["earnings"])
 
@@ -224,69 +223,158 @@ def _members_currency_fx(members: list[dict]) -> tuple[dict[int, str], dict[str,
     return currency_by_cid, fx_cache
 
 
-def _member_eur_rows(company_id: int, currency: str, fx: list[tuple[str, float]] | None) -> list[dict]:
-    """One member's dashboard rows with currency-denominated metrics converted
-    to EUR (unit-less ratios pass through). Drops null values."""
-    out: list[dict] = []
-    for row in load_company_metric_rows(company_id):
-        v = row.get("numeric_value")
-        if v is None:
-            continue
-        code, date = row["metric_code"], row["target_date"]
-        val = float(v)
-        if currency != "EUR" and _is_currency_metric(code):
-            rate = _asof_rate(fx, date) if fx else None
-            if not rate:
+def _load_members_eur_rows(
+    members: list[dict],
+    currency_by_cid: dict[int, str],
+    fx_cache: dict[str, list[tuple[str, float]]],
+) -> dict[int, list[dict]]:
+    """Batched EUR-converted dashboard rows for EVERY member, keyed by
+    company_id. Mirrors `routers.earnings.load_company_metric_rows` (the same
+    four source queries) but fetches all members at once via chunked
+    `.in_(company_id)` reads instead of one round-trip per company — so a
+    frozen-universe basket of thousands of companies aggregates without
+    thousands of sequential queries. Currency-denominated metrics are converted
+    to EUR (unit-less ratios pass through); null values dropped."""
+    from routers.earnings import (  # noqa: PLC0415
+        _DASHBOARD_METRIC_CODES,
+        _LONGEQUITY_METRIC_CODES,
+    )
+
+    cids = [m["company_id"] for m in members]
+    raw: dict[int, list[dict]] = {c: [] for c in cids}
+
+    def _collect(builder_factory, chunk: list[int]) -> None:
+        # Paginate one source query for one company chunk. Order by
+        # (company_id, target_date, metric_code) so range-pagination is stable
+        # across page boundaries — a date-only order can shuffle ties when many
+        # companies share a date.
+        offset, page = 0, 1000
+        while True:
+            resp = builder_factory(chunk).range(offset, offset + page - 1).execute()
+            batch = resp.data or []
+            for r in batch:
+                raw.setdefault(r["company_id"], []).append(r)
+            if len(batch) < page:
+                break
+            offset += page
+
+    non_price_codes = [c for c in _DASHBOARD_METRIC_CODES if c != "close_price"]
+    sel = "company_id,metric_code,target_date,numeric_value,is_prediction"
+    for chunk in chunked(cids):
+        _collect(lambda ch: (
+            supabase.table("metric_data").select(sel)
+            .in_("company_id", ch).eq("source_code", "gurufocus")
+            .gte("target_date", "1998-01-01").in_("metric_code", non_price_codes)
+            .order("company_id").order("target_date").order("metric_code")
+        ), chunk)
+        _collect(lambda ch: (
+            supabase.table("metric_data").select(sel)
+            .in_("company_id", ch).eq("source_code", "gurufocus")
+            .eq("metric_code", "close_price").gte("target_date", "1998-01-01")
+            .order("company_id").order("target_date")
+        ), chunk)
+        _collect(lambda ch: (
+            supabase.table("metric_data").select(sel)
+            .in_("company_id", ch).eq("source_code", "gurufocus")
+            .eq("is_prediction", True).gte("target_date", "1998-01-01")
+            .like("metric_code", "annual_%")
+            .order("company_id").order("target_date").order("metric_code")
+        ), chunk)
+        _collect(lambda ch: (
+            supabase.table("metric_data").select(sel)
+            .in_("company_id", ch).eq("source_code", "longequity")
+            .in_("metric_code", _LONGEQUITY_METRIC_CODES)
+            .order("company_id").order("target_date").order("metric_code")
+        ), chunk)
+
+    out: dict[int, list[dict]] = {}
+    for c in cids:
+        cur = currency_by_cid.get(c, "EUR")
+        fx = fx_cache.get(cur)
+        conv: list[dict] = []
+        for row in raw.get(c, []):
+            v = row.get("numeric_value")
+            if v is None:
                 continue
-            val = val / rate
-        out.append({
-            "metric_code": code,
-            "target_date": date,
-            "numeric_value": val,
-            "is_prediction": bool(row.get("is_prediction")),
-        })
+            code, date = row["metric_code"], row["target_date"]
+            val = float(v)
+            if cur != "EUR" and _is_currency_metric(code):
+                rate = _asof_rate(fx, date) if fx else None
+                if not rate:
+                    continue
+                val = val / rate
+            conv.append({
+                "metric_code": code,
+                "target_date": date,
+                "numeric_value": val,
+                "is_prediction": bool(row.get("is_prediction")),
+            })
+        out[c] = conv
     return out
+
+
+def _aggregate_members(members: list[dict]) -> list[dict]:
+    """Weighted mean per (metric, date) over members holding data there (weights
+    renormalized to those present), currency metrics already EUR. Same shape as
+    /api/earnings/{company_id}/metrics, so every chart consumes it directly.
+    Shared by the portfolio + frozen-universe basket endpoints."""
+    if not members:
+        return []
+    currency_by_cid, fx_cache = _members_currency_fx(members)
+    rows_by_cid = _load_members_eur_rows(members, currency_by_cid, fx_cache)
+
+    # acc[(code, date)] = [sum_wv, sum_w, is_prediction]
+    acc: dict[tuple[str, str], list] = {}
+    for m in members:
+        w = float(m["weight"] or 0.0)
+        if w <= 0:
+            continue
+        for row in rows_by_cid.get(m["company_id"], []):
+            code, date, val = row["metric_code"], row["target_date"], row["numeric_value"]
+            slot = acc.get((code, date))
+            if slot is None:
+                acc[(code, date)] = [w * val, w, row["is_prediction"]]
+            else:
+                slot[0] += w * val
+                slot[1] += w
+                slot[2] = slot[2] or row["is_prediction"]
+
+    out = [
+        {"metric_code": code, "target_date": date, "numeric_value": sum_wv / sum_w, "is_prediction": is_pred}
+        for (code, date), (sum_wv, sum_w, is_pred) in acc.items()
+        if sum_w > 0
+    ]
+    out.sort(key=lambda r: r["target_date"])
+    return out
+
+
+def _member_metrics_payload(members: list[dict]) -> list[dict]:
+    """Per-member EUR-converted metrics (same conversion as the aggregate) so the
+    charts can show each holding's own value and rank holdings by impact in the
+    tooltip. `[{company_id, ticker, name, weight, metrics: [...]}]`."""
+    if not members:
+        return []
+    currency_by_cid, fx_cache = _members_currency_fx(members)
+    rows_by_cid = _load_members_eur_rows(members, currency_by_cid, fx_cache)
+    return [
+        {
+            "company_id": m["company_id"],
+            "ticker": m["ticker"],
+            "name": m["name"],
+            "weight": m["weight"],
+            "metrics": rows_by_cid.get(m["company_id"], []),
+        }
+        for m in members
+    ]
 
 
 @router.get("/api/earnings/portfolios/{portfolio_id}/metrics")
 async def portfolio_metrics(portfolio_id: int):
     """Aggregated MetricRow[] for the portfolio — weighted mean per (metric,
-    date) over members holding data there (weights renormalized to those
-    present), currency-denominated metrics converted to EUR first. Same shape
-    as /api/earnings/{company_id}/metrics, so every chart consumes it directly."""
-    def _q():
-        members = _fetch_members(portfolio_id)
-        if not members:
-            return []
-        currency_by_cid, fx_cache = _members_currency_fx(members)
-
-        # acc[(code, date)] = [sum_wv, sum_w, is_prediction]
-        acc: dict[tuple[str, str], list] = {}
-        for m in members:
-            w = float(m["weight"] or 0.0)
-            if w <= 0:
-                continue
-            cur = currency_by_cid.get(m["company_id"], "EUR")
-            for row in _member_eur_rows(m["company_id"], cur, fx_cache.get(cur)):
-                code, date, val = row["metric_code"], row["target_date"], row["numeric_value"]
-                slot = acc.get((code, date))
-                if slot is None:
-                    acc[(code, date)] = [w * val, w, row["is_prediction"]]
-                else:
-                    slot[0] += w * val
-                    slot[1] += w
-                    slot[2] = slot[2] or row["is_prediction"]
-
-        out = [
-            {"metric_code": code, "target_date": date, "numeric_value": sum_wv / sum_w, "is_prediction": is_pred}
-            for (code, date), (sum_wv, sum_w, is_pred) in acc.items()
-            if sum_w > 0
-        ]
-        out.sort(key=lambda r: r["target_date"])
-        return out
-
+    date), currency-denominated metrics converted to EUR. Same shape as
+    /api/earnings/{company_id}/metrics, so every chart consumes it directly."""
     try:
-        return await asyncio.to_thread(_q)
+        return await asyncio.to_thread(lambda: _aggregate_members(_fetch_members(portfolio_id)))
     except HTTPException:
         raise
     except Exception as e:
@@ -295,28 +383,125 @@ async def portfolio_metrics(portfolio_id: int):
 
 @router.get("/api/earnings/portfolios/{portfolio_id}/member-metrics")
 async def portfolio_member_metrics(portfolio_id: int):
-    """Per-member metrics (EUR-converted, same as the aggregate) so the charts
-    can show each holding's own value for a metric and rank them by impact in
-    the tooltip. Returns `[{company_id, ticker, name, weight, metrics: [...]}]`."""
-    def _q():
-        members = _fetch_members(portfolio_id)
-        if not members:
-            return []
-        currency_by_cid, fx_cache = _members_currency_fx(members)
-        out = []
-        for m in members:
-            cur = currency_by_cid.get(m["company_id"], "EUR")
-            out.append({
-                "company_id": m["company_id"],
-                "ticker": m["ticker"],
-                "name": m["name"],
-                "weight": m["weight"],
-                "metrics": _member_eur_rows(m["company_id"], cur, fx_cache.get(cur)),
-            })
-        return out
-
+    """Per-member metrics (EUR-converted, same as the aggregate) for the ranked
+    holdings breakdown in chart tooltips."""
     try:
-        return await asyncio.to_thread(_q)
+        return await asyncio.to_thread(lambda: _member_metrics_payload(_fetch_members(portfolio_id)))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Member metrics failed: {e}")
+
+
+# ── Frozen-universe baskets ──────────────────────────────────────────────────
+# A frozen universe snapshot (universe.frozen_at set, template_key NULL — the
+# "ACWI (as of 2026-06)" / "LEONTEQ (as of …)" rows the Freeze button creates)
+# can be treated as an equal-weighted basket and aggregated through the exact
+# same machinery as a portfolio, so the /earnings dropdown can chart a universe
+# next to hand-built portfolios. Endpoints live under /api/earnings so they
+# inherit the earnings auth tier (the /static-universes listing is admin-only).
+
+def _universe_members(universe_id: int) -> list[dict]:
+    """Equal-weighted members of a universe's latest membership month, shaped
+    like `_fetch_members` (company_id, weight, ticker, name) so the aggregation
+    reuses verbatim."""
+    lm = (
+        supabase.table("universe_membership").select("target_month")
+        .eq("universe_id", universe_id).order("target_month", desc=True).limit(1).execute()
+    )
+    if not lm.data:
+        return []
+    month = lm.data[0]["target_month"]
+    cids: list[int] = []
+    offset, page = 0, 1000
+    while True:
+        resp = (
+            supabase.table("universe_membership").select("company_id")
+            .eq("universe_id", universe_id).eq("target_month", month)
+            .range(offset, offset + page - 1).execute()
+        )
+        batch = resp.data or []
+        cids.extend(r["company_id"] for r in batch)
+        if len(batch) < page:
+            break
+        offset += page
+    cids = sorted(set(cids))
+    if not cids:
+        return []
+    labels: dict[int, dict] = {}
+    for chunk in chunked(cids):
+        resp = (
+            supabase.table("company")
+            .select("company_id, gurufocus_ticker, company_name")
+            .in_("company_id", chunk).execute()
+        )
+        for r in resp.data or []:
+            labels[r["company_id"]] = r
+    w = 1.0 / len(cids)
+    out = [
+        {
+            "company_id": c,
+            "weight": w,
+            "ticker": (labels.get(c) or {}).get("gurufocus_ticker"),
+            "name": (labels.get(c) or {}).get("company_name"),
+        }
+        for c in cids
+    ]
+    out.sort(key=lambda m: (m.get("name") or m.get("ticker") or "").lower())
+    return out
+
+
+@router.get("/api/earnings/universes")
+async def list_earnings_universes():
+    """Frozen universe snapshots selectable as equal-weighted baskets in the
+    earnings Portfolio dropdown. `[{universe_id, label, count}]`, newest first."""
+    def _q():
+        resp = (
+            supabase.table("universe")
+            .select("universe_id, label, frozen_at")
+            .not_.is_("frozen_at", "null")
+            .order("frozen_at", desc=True)
+            .execute()
+        )
+        out = []
+        for u in resp.data or []:
+            uid = u["universe_id"]
+            lm = (
+                supabase.table("universe_membership").select("target_month")
+                .eq("universe_id", uid).order("target_month", desc=True).limit(1).execute()
+            )
+            count = 0
+            if lm.data:
+                c_resp = (
+                    supabase.table("universe_membership")
+                    .select("company_id", count="exact")
+                    .eq("universe_id", uid).eq("target_month", lm.data[0]["target_month"])
+                    .limit(0).execute()
+                )
+                count = getattr(c_resp, "count", 0) or 0
+            out.append({"universe_id": uid, "label": u["label"], "count": count})
+        return out
+    return await asyncio.to_thread(_q)
+
+
+@router.get("/api/earnings/universes/{universe_id}/metrics")
+async def universe_metrics(universe_id: int):
+    """Aggregated MetricRow[] for a frozen universe treated as an equal-weighted
+    basket — same shape + machinery as the portfolio aggregate."""
+    try:
+        return await asyncio.to_thread(lambda: _aggregate_members(_universe_members(universe_id)))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Aggregation failed: {e}")
+
+
+@router.get("/api/earnings/universes/{universe_id}/member-metrics")
+async def universe_member_metrics(universe_id: int):
+    """Per-member metrics for a frozen-universe basket (drives the ranked
+    holdings breakdown in chart tooltips)."""
+    try:
+        return await asyncio.to_thread(lambda: _member_metrics_payload(_universe_members(universe_id)))
     except HTTPException:
         raise
     except Exception as e:

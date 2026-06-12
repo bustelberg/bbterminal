@@ -3,6 +3,7 @@
 import Stat from './Stat';
 import MonthlySparkline from './MonthlySparkline';
 import SectorBreakdown from './SectorBreakdown';
+import UniverseDataPanel from './UniverseDataPanel';
 import { buildFilterPills } from './filterConfig';
 import type { DerivedCriterionSpec, UniverseRow } from './types';
 
@@ -172,6 +173,8 @@ export default function UniverseCard({
           )}
         </div>
       </div>
+
+      <UniverseDataPanel universe={u} />
 
       {expanded && (
         <div className="border-t border-neutral-800/40 grid grid-cols-1 lg:grid-cols-2 gap-0">

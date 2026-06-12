@@ -36,9 +36,9 @@ const tiles: Tile[] = [
     description: 'Monthly snapshots of the LongEquity universe, grouped by region and country. Run the ingest pipeline from here.',
   },
   {
-    href: '/universe_index',
-    label: 'SP500 Universe',
-    description: 'Reconstructed S&P 500 memberships over time, with monthly tickers and change history.',
+    href: '/sp500',
+    label: 'S&P 500 Universe',
+    description: 'Reconstructed S&P 500 memberships over time, with monthly tickers and change history. Freeze a reusable copy here.',
   },
   {
     href: '/acwi',

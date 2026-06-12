@@ -76,12 +76,24 @@ def load_universe(
 
     df = pd.DataFrame(flat_rows)
 
-    # If a universe is specified, join with universe_membership for sector
-    if universe_label and target_month:
+    # If a universe is specified, join with universe_membership for sector.
+    # Fixed-basket model: always use the universe's LATEST stored month (any
+    # `target_month` argument is ignored — universes are frozen snapshots now).
+    if universe_label:
         # Get universe_id
         u_resp = supabase.table("universe").select("universe_id").eq("label", universe_label).limit(1).execute()
         if u_resp.data:
             universe_id = u_resp.data[0]["universe_id"]
+            lm = (
+                supabase.table("universe_membership")
+                .select("target_month")
+                .eq("universe_id", universe_id)
+                .order("target_month", desc=True)
+                .limit(1)
+                .execute()
+            )
+            target_month = lm.data[0]["target_month"] if lm.data else target_month
+        if u_resp.data and target_month:
             # Load membership rows
             m_rows: list[dict] = []
             m_offset = 0

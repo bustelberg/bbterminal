@@ -1121,9 +1121,8 @@ export interface paths {
         };
         /**
          * Portfolio Member Metrics
-         * @description Per-member metrics (EUR-converted, same as the aggregate) so the charts
-         *     can show each holding's own value for a metric and rank them by impact in
-         *     the tooltip. Returns `[{company_id, ticker, name, weight, metrics: [...]}]`.
+         * @description Per-member metrics (EUR-converted, same as the aggregate) for the ranked
+         *     holdings breakdown in chart tooltips.
          */
         get: operations["portfolio_member_metrics_api_earnings_portfolios__portfolio_id__member_metrics_get"];
         put?: never;
@@ -1144,9 +1143,8 @@ export interface paths {
         /**
          * Portfolio Metrics
          * @description Aggregated MetricRow[] for the portfolio — weighted mean per (metric,
-         *     date) over members holding data there (weights renormalized to those
-         *     present), currency-denominated metrics converted to EUR first. Same shape
-         *     as /api/earnings/{company_id}/metrics, so every chart consumes it directly.
+         *     date), currency-denominated metrics converted to EUR. Same shape as
+         *     /api/earnings/{company_id}/metrics, so every chart consumes it directly.
          */
         get: operations["portfolio_metrics_api_earnings_portfolios__portfolio_id__metrics_get"];
         put?: never;
@@ -1170,6 +1168,69 @@ export interface paths {
          *     picker). Leonteq first (the default).
          */
         get: operations["sector_universes_api_earnings_sector_universes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/universes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Earnings Universes
+         * @description Frozen universe snapshots selectable as equal-weighted baskets in the
+         *     earnings Portfolio dropdown. `[{universe_id, label, count}]`, newest first.
+         */
+        get: operations["list_earnings_universes_api_earnings_universes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/universes/{universe_id}/member-metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Universe Member Metrics
+         * @description Per-member metrics for a frozen-universe basket (drives the ranked
+         *     holdings breakdown in chart tooltips).
+         */
+        get: operations["universe_member_metrics_api_earnings_universes__universe_id__member_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/universes/{universe_id}/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Universe Metrics
+         * @description Aggregated MetricRow[] for a frozen universe treated as an equal-weighted
+         *     basket — same shape + machinery as the portfolio aggregate.
+         */
+        get: operations["universe_metrics_api_earnings_universes__universe_id__metrics_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1587,6 +1648,35 @@ export interface paths {
         get: operations["index_universe_cumulative_api_index_universe_cumulative_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/index-universe/freeze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Index Universe Freeze
+         * @description Freeze a static, pipeline-immune copy of a stored index.
+         *
+         *     The index (e.g. SP500) lives in the `universe` table but isn't a registered
+         *     template, so this reuses the template-freeze core with an explicit source
+         *     universe id. Two modes (mirroring the /acwi Freeze button):
+         *       - `as_of=YYYY-MM` → FIXED BASKET of that month's constituents.
+         *       - no `as_of`      → full-history copy (survivorship-bias-free), labelled
+         *                           with today's date.
+         *     Idempotent on the resulting label. The snapshot then shows up everywhere
+         *     frozen universes are listed (/universe, /backtest, /earnings).
+         */
+        post: operations["index_universe_freeze_api_index_universe_freeze_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2609,6 +2699,10 @@ export interface paths {
          *       - no `as_of` → full-history copy labelled with today's date.
          *     Idempotent on the resulting label — a repeat call returns the existing
          *     snapshot instead of duplicating it.
+         *
+         *     Content-negotiated: clients sending `Accept: text/event-stream` (the /acwi
+         *     page) get an SSE progress stream (`progress`/`done`/`error` events); all
+         *     other callers (the /leonteq page, external scripts) get the JSON summary.
          */
         post: operations["freeze_template_api_universe_templates__key__freeze_post"];
         delete?: never;
@@ -3030,6 +3124,48 @@ export interface paths {
         get: operations["universe_validate_api_universe_validate_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/universe/{universe_id}/data-freshness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Universe Data Freshness
+         * @description Coverage + most-recent GuruFocus data date across the universe's members
+         *     (union of all membership months).
+         */
+        get: operations["universe_data_freshness_api_universe__universe_id__data_freshness_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/universe/{universe_id}/fetch-data": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Universe Fetch Data
+         * @description SSE: fetch all /earnings data sources for every company that has ever been
+         *     a member of the universe. Self-skips fresh sources unless `force=true`.
+         */
+        post: operations["universe_fetch_data_api_universe__universe_id__fetch_data_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5090,6 +5226,88 @@ export interface operations {
             };
         };
     };
+    list_earnings_universes_api_earnings_universes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    universe_member_metrics_api_earnings_universes__universe_id__member_metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                universe_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    universe_metrics_api_earnings_universes__universe_id__metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                universe_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_earnings_metric_codes_api_earnings__company_id__metric_codes_get: {
         parameters: {
             query?: never;
@@ -5663,6 +5881,38 @@ export interface operations {
         parameters: {
             query?: {
                 index?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    index_universe_freeze_api_index_universe_freeze_post: {
+        parameters: {
+            query?: {
+                index?: string;
+                as_of?: string | null;
             };
             header?: never;
             path?: never;
@@ -7646,6 +7896,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    universe_data_freshness_api_universe__universe_id__data_freshness_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                universe_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    universe_fetch_data_api_universe__universe_id__fetch_data_post: {
+        parameters: {
+            query?: {
+                force?: boolean;
+            };
+            header?: never;
+            path: {
+                universe_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

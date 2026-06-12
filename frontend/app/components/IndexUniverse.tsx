@@ -12,6 +12,7 @@ import {
   clearSp500GfCheck,
 } from '../../lib/stores/sp500';
 import { trackedFetch } from '../../lib/loading';
+import { apiFetch } from '../../lib/apiFetch';
 import type { Column } from '../../lib/tableExport';
 import TableDownloadButton from './TableDownloadButton';
 import LoadingDots from './LoadingDots';
@@ -67,6 +68,10 @@ export default function IndexUniverse() {
   const gfResult = sp500GfCheckStore.use((s) => s.gfResult);
   const [showMissing, setShowMissing] = useState(false);
 
+  // Freeze a static copy of the selected index
+  const [freezing, setFreezing] = useState(false);
+  const [freezeMsg, setFreezeMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
   // Load indexes on mount
   const loadIndexes = useCallback(() => {
     trackedFetch('Loading indexes', `${API_URL}/api/index-universe/indexes`)
@@ -111,6 +116,7 @@ export default function IndexUniverse() {
     clearSp500GfCheck();
     setChanges([]);
     setCumulative([]);
+    setFreezeMsg(null);
     loadMonths(idx);
     loadChanges(idx);
   };
@@ -142,6 +148,39 @@ export default function IndexUniverse() {
     if (!selectedIndex) return;
     startSp500GfCheck(selectedIndex);
   };
+
+  // Freeze a static, pipeline-immune copy of the selected index — full history
+  // (no asOf) or a single-month fixed basket (asOf = 'YYYY-MM'). The snapshot
+  // then appears wherever frozen universes are listed (/universe, /backtest,
+  // /earnings).
+  const freezeCopy = useCallback(async (asOf?: string) => {
+    if (!selectedIndex || freezing) return;
+    setFreezing(true);
+    setFreezeMsg(null);
+    try {
+      const qs = asOf ? `&as_of=${encodeURIComponent(asOf)}` : '';
+      const r = await apiFetch(
+        `${API_URL}/api/index-universe/freeze?index=${encodeURIComponent(selectedIndex)}${qs}`,
+        { method: 'POST' },
+      );
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setFreezeMsg({ ok: false, text: data.detail ?? `Freeze failed (${r.status})` });
+        return;
+      }
+      const label = data.label ?? `${selectedIndex} (frozen)`;
+      setFreezeMsg({
+        ok: true,
+        text: data.created === false
+          ? `Already frozen: "${label}" — available in /universe, /backtest and /earnings.`
+          : `Froze "${label}" — ${data.members_copied ?? 0} membership rows copied. Now selectable in /universe, /backtest and /earnings.`,
+      });
+    } catch (e) {
+      setFreezeMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setFreezing(false);
+    }
+  }, [selectedIndex, freezing]);
 
   // Delete index
   const deleteIndex = async (idx: string) => {
@@ -208,8 +247,8 @@ export default function IndexUniverse() {
       <div className="shrink-0 px-8 py-5 border-b border-neutral-800/40">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-fg-strong text-lg font-semibold">Index Universe</h1>
-            <p className="text-fg-subtle text-sm mt-0.5">Import and manage index constituent histories</p>
+            <h1 className="text-fg-strong text-lg font-semibold">S&amp;P 500</h1>
+            <p className="text-fg-subtle text-sm mt-0.5">Reconstructed S&amp;P 500 constituent history — import, inspect participants, and freeze reusable copies</p>
           </div>
           <button
             onClick={runImport}
@@ -281,6 +320,48 @@ export default function IndexUniverse() {
         {/* Selected Index content */}
         {selectedIndex && (
           <>
+            {/* Freeze a reusable copy */}
+            <div className="bg-card rounded-xl border border-neutral-800/40 px-5 py-4">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="min-w-0">
+                  <h3 className="text-sm font-medium text-fg-strong">Freeze a copy</h3>
+                  <p className="text-fg-subtle text-xs mt-0.5">
+                    Create a static, pipeline-immune snapshot of {selectedIndex}. It becomes selectable in
+                    {' '}/universe, /backtest and /earnings.
+                    {selectedMonth
+                      ? ' Freeze just the selected month as a fixed basket, or the full history.'
+                      : ' Select a month below to also freeze a single-month basket.'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {selectedMonth && (
+                    <button
+                      onClick={() => void freezeCopy(selectedMonth)}
+                      disabled={freezing}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium border border-neutral-700 text-fg hover:bg-overlay/5 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      title={`Freeze ${selectedIndex}'s ${selectedMonth} constituents as a fixed basket`}
+                    >
+                      Freeze {selectedMonth} basket
+                    </button>
+                  )}
+                  <button
+                    onClick={() => void freezeCopy()}
+                    disabled={freezing}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-accent-600 hover:bg-accent-500 text-fg-strong disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    title={`Freeze ${selectedIndex}'s full monthly membership history (survivorship-bias-free)`}
+                  >
+                    {freezing ? 'Freezing…' : 'Freeze full history'}
+                  </button>
+                </div>
+              </div>
+              {freezeMsg && (
+                <div className={`mt-3 text-xs flex items-start justify-between gap-3 ${freezeMsg.ok ? 'text-pos-300' : 'text-neg-300'}`}>
+                  <span>{freezeMsg.text}</span>
+                  <button type="button" onClick={() => setFreezeMsg(null)} className="text-fg-subtle hover:text-fg-soft shrink-0">dismiss</button>
+                </div>
+              )}
+            </div>
+
             {/* Tab bar */}
             <div className="flex gap-1 bg-card rounded-lg p-1 border border-neutral-800/40 w-fit">
               <button

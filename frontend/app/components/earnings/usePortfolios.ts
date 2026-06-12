@@ -27,6 +27,37 @@ export type Portfolio = {
 
 export type PortfolioMemberInput = { company_id: number; weight?: number };
 
+/**
+ * A selectable "basket" for the earnings dashboard — either a saved portfolio
+ * or a frozen-universe snapshot. Both aggregate through the same backend
+ * machinery; the `kind` only picks the URL segment (`portfolios` vs `universes`)
+ * and gates portfolio-only features (the manager modal, attribution).
+ */
+export type Basket = {
+  kind: 'portfolio' | 'universe';
+  id: number; // portfolio id OR universe_id
+  name: string; // portfolio name OR universe label
+  memberCount: number;
+};
+
+export function portfolioToBasket(p: Portfolio): Basket {
+  return { kind: 'portfolio', id: p.id, name: p.name, memberCount: p.members.length };
+}
+
+function basketSegment(b: Basket): string {
+  return b.kind === 'universe' ? 'universes' : 'portfolios';
+}
+
+/** `/api/earnings/{portfolios|universes}/{id}/metrics` for a basket. */
+export function basketMetricsPath(b: Basket): string {
+  return `/api/earnings/${basketSegment(b)}/${b.id}/metrics`;
+}
+
+/** `/api/earnings/{portfolios|universes}/{id}/member-metrics` for a basket. */
+export function basketMemberMetricsPath(b: Basket): string {
+  return `/api/earnings/${basketSegment(b)}/${b.id}/member-metrics`;
+}
+
 async function parse(r: Response): Promise<{ ok: boolean; body: unknown }> {
   const body = await r.json().catch(() => ({}));
   return { ok: r.ok, body };

@@ -86,7 +86,7 @@ _SOURCES: list[dict] = [
         "name": "Wikipedia",
         "kind": "http",
         "category": "optional",
-        "purpose": "S&P 500 constituent history (/universe_index)",
+        "purpose": "S&P 500 constituent history (/sp500)",
         "url": "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
     },
     {

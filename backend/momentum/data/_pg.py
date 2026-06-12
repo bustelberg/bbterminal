@@ -357,12 +357,15 @@ def load_all_latest_close_dates_via_copy() -> dict[int, str] | None:
 def load_universe_membership_via_copy(
     universe_id: int, grouping_field: str,
 ) -> dict[str, dict[int, str | None]] | None:
-    """Stream a universe's FULL membership panel (every month × company) via
-    a single COPY, returning the same `{YYYY-MM: {company_id: grouping_value}}`
-    shape as the PostgREST pager in `universe_loader._load_index_universe`.
-    Returns `None` for the fall-back. This is the heaviest universe read —
-    ACWI spans ~2k companies × ~290 months (~hundreds of thousands of rows),
-    so the PostgREST pager makes hundreds of round-trips; COPY is one.
+    """Stream a universe's membership for its LATEST month via a single COPY,
+    returning `{YYYY-MM: {company_id: grouping_value}}` (one key — the newest
+    captured month). Returns `None` for the fall-back.
+
+    Fixed-basket model: universes are frozen snapshots, so a backtest uses only
+    the newest month's membership (`broadcast_constant` then applies it across
+    all of history). Restricting the COPY to `max(target_month)` keeps this cheap
+    even for a legacy multi-month universe (e.g. an old ACWI reconstruction with
+    hundreds of months still in the table).
 
     `grouping_field` is validated to `sector`/`industry` before it's
     interpolated into the SQL (no other caller-controlled SQL text)."""
@@ -373,9 +376,10 @@ def load_universe_membership_via_copy(
     sql = (
         f"COPY (SELECT target_month, company_id, {grouping_field} "
         "FROM universe_membership WHERE universe_id = %s "
+        "AND target_month = (SELECT max(target_month) FROM universe_membership WHERE universe_id = %s) "
         "ORDER BY target_month) TO STDOUT WITH (FORMAT csv)"
     )
-    buf = _run_copy(sql, (universe_id,))
+    buf = _run_copy(sql, (universe_id, universe_id))
     if buf is None:
         return None
 

@@ -89,7 +89,7 @@ Routers + the prune/template/momentum *phase orchestrators* still lack unit test
 - `/schedule` — scheduled pipeline UI. Top: scheduled-strategies list (expand → per-strategy run history → holdings via `MonthlyHoldingsTable`). Middle: weekly/monthly job cards + "Run now". Bottom: recent runs (five-dot phase pip, expand → per-template diff + searchable membership + per-strategy holdings).
 - `/api` — admin-only interactive endpoint explorer (uses the live Supabase session as Bearer). `/documentation` — admin-only external-script reference (full `bbterminal_client.py`, curl/PowerShell quick-start, endpoint table).
 - `/login`, `/set-password` — auth; redirect to `/` on success. `frontend/proxy.ts` enforces auth on non-public routes and bounces authed users off `/login`.
-- Others (orientation): `/` welcome · `/longequity-universe` · `/airs-portfolio` · `/companies` · `/benchmarks` · `/earnings` · `/universe` (criteria screener) · `/universe_index` · `/fx-rates` · `/request_gurufocus`.
+- Others (orientation): `/` welcome · `/longequity-universe` · `/airs-portfolio` · `/companies` · `/benchmarks` · `/earnings` · `/universe` (criteria screener) · `/sp500` (S&P 500 index history + freeze-a-copy) · `/fx-rates` · `/request_gurufocus`.
 
 **Component notes** (non-obvious):
 - `LongEquityUniverse.tsx` — **nothing fetches on mount**; empty until **Load** or **Run ingest**.

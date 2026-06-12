@@ -11,20 +11,31 @@ import { API_URL } from '../../lib/apiUrl';
 import { apiFetch } from '../../lib/apiFetch';
 
 type NavItem = { href: string; label: string; userVisible?: true };
+// A collapsible group: its `href` (if set) makes the header itself a link;
+// `children` are indented sub-pages shown when expanded.
+type NavSection = { label: string; href?: string; userVisible?: true; children: NavItem[] };
+type NavEntry = NavItem | NavSection;
+
+const isSection = (e: NavEntry): e is NavSection => 'children' in e;
 
 // Items marked `userVisible: true` are shown to regular users; everything
 // else is admin-only (and to admins viewing as a regular user via the
 // "View as user" toggle, only the userVisible items show).
-const navItems: NavItem[] = [
+const navItems: NavEntry[] = [
   { href: '/', label: 'Welcome', userVisible: true },
   { href: '/earnings', label: 'Earnings Dashboard', userVisible: true },
   { href: '/backtest', label: 'Backtest' },
   { href: '/regime-detector', label: 'Regime Detector' },
-  { href: '/universe', label: 'Universe Overview' },
-  { href: '/longequity-universe', label: 'LongEquity Universe' },
-  { href: '/universe_index', label: 'SP500 Universe' },
-  { href: '/acwi', label: 'ACWI Universe' },
-  { href: '/leonteq', label: 'Leonteq Universe' },
+  {
+    label: 'Universe Overview',
+    href: '/universe',
+    children: [
+      { href: '/longequity-universe', label: 'LongEquity Universe' },
+      { href: '/sp500', label: 'S&P 500 Universe' },
+      { href: '/acwi', label: 'ACWI Universe' },
+      { href: '/leonteq', label: 'Leonteq Universe' },
+    ],
+  },
   { href: '/fx-rates', label: 'FX Rates' },
   { href: '/airs-portfolio', label: 'AIRS Portfolio', userVisible: true },
   { href: '/request_gurufocus', label: 'Request GuruFocus' },
@@ -133,6 +144,8 @@ export default function Sidebar({ initialUser }: Props) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [viewAsUser, setViewAsUser] = useState(false);
+  // Which collapsible nav sections are expanded. Universe Overview starts open.
+  const [openSections, setOpenSections] = useState<Set<string>>(() => new Set(['Universe Overview']));
 
   // Account switcher state
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -393,9 +406,30 @@ export default function Sidebar({ initialUser }: Props) {
 
   const isAdmin = role === 'admin';
   const effectiveRole: 'admin' | 'user' = isAdmin && !viewAsUser ? 'admin' : 'user';
-  const visibleNav = effectiveRole === 'admin'
-    ? navItems
-    : navItems.filter((n) => n.userVisible);
+  const isAdminView = effectiveRole === 'admin';
+  // Filter top-level items + section children by visibility; drop sections that
+  // end up empty (and aren't a link in their own right).
+  const visibleNav: NavEntry[] = navItems
+    .map((e): NavEntry | null => {
+      if (isSection(e)) {
+        if (!isAdminView && !e.userVisible) return null;
+        const children = e.children.filter((c) => isAdminView || c.userVisible);
+        if (children.length === 0 && !e.href) return null;
+        return { ...e, children };
+      }
+      return isAdminView || e.userVisible ? e : null;
+    })
+    .filter((e): e is NavEntry => e !== null);
+
+  const isActive = (href: string) =>
+    pathname === href || (pathname.startsWith(href + '/') && href !== '/');
+  const toggleSection = (label: string) =>
+    setOpenSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
 
   return (
     <aside className="w-56 shrink-0 border-r border-neutral-800/60 bg-sidebar flex flex-col">
@@ -415,19 +449,76 @@ export default function Sidebar({ initialUser }: Props) {
         </Link>
       </div>
       <nav className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1">
-        {visibleNav.map(({ href, label }) => (
-          <Link
-            key={href}
-            href={href}
-            className={`block px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              pathname === href || (pathname.startsWith(href + '/') && href !== '/')
-                ? 'bg-accent-600/15 text-accent-400'
-                : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/5'
-            }`}
-          >
-            {label}
-          </Link>
-        ))}
+        {visibleNav.map((entry) => {
+          if (!isSection(entry)) {
+            return (
+              <Link
+                key={entry.href}
+                href={entry.href}
+                className={`block px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive(entry.href)
+                    ? 'bg-accent-600/15 text-accent-400'
+                    : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/5'
+                }`}
+              >
+                {entry.label}
+              </Link>
+            );
+          }
+          const headerActive = entry.href ? isActive(entry.href) : false;
+          // Keep a section open whenever its header or one of its children is
+          // the active route, so the current page is never hidden behind a
+          // collapsed group.
+          const open =
+            openSections.has(entry.label) ||
+            headerActive ||
+            entry.children.some((c) => isActive(c.href));
+          return (
+            <div key={entry.label}>
+              <div className={`flex items-center rounded-lg ${headerActive ? 'bg-accent-600/15' : 'hover:bg-overlay/5'}`}>
+                {entry.href ? (
+                  <Link
+                    href={entry.href}
+                    className={`flex-1 px-3 py-2.5 rounded-l-lg text-sm font-medium transition-colors ${
+                      headerActive ? 'text-accent-400' : 'text-fg-muted hover:text-fg-strong'
+                    }`}
+                  >
+                    {entry.label}
+                  </Link>
+                ) : (
+                  <span className="flex-1 px-3 py-2.5 text-sm font-medium text-fg-muted">{entry.label}</span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => toggleSection(entry.label)}
+                  aria-label={open ? `Collapse ${entry.label}` : `Expand ${entry.label}`}
+                  className="px-2 py-2.5 text-fg-subtle hover:text-fg-strong transition-colors"
+                >
+                  <svg className={`w-3 h-3 transition-transform ${open ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M7.21 5.23a.75.75 0 011.06.02l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 11-1.04-1.08L11.168 10 7.23 6.29a.75.75 0 01-.02-1.06z" clipRule="evenodd" />
+                  </svg>
+                </button>
+              </div>
+              {open && (
+                <div className="mt-1 ml-4 pl-2 border-l border-neutral-800/60 space-y-1">
+                  {entry.children.map((c) => (
+                    <Link
+                      key={c.href}
+                      href={c.href}
+                      className={`block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        isActive(c.href)
+                          ? 'bg-accent-600/15 text-accent-400'
+                          : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/5'
+                      }`}
+                    >
+                      {c.label}
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
         {effectiveRole === 'admin' && (
           <Link
             href="/users"

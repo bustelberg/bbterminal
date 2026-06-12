@@ -20,7 +20,14 @@ import CompanyPicker from './earnings/CompanyPicker';
 import PortfolioPicker from './earnings/PortfolioPicker';
 import PortfolioManagerModal from './earnings/PortfolioManagerModal';
 import AttributionMatrix from './earnings/AttributionMatrix';
-import { usePortfolios, type Portfolio } from './earnings/usePortfolios';
+import {
+  usePortfolios,
+  portfolioToBasket,
+  basketMetricsPath,
+  basketMemberMetricsPath,
+  type Basket,
+} from './earnings/usePortfolios';
+import { useEarningsUniverses } from './earnings/useEarningsUniverses';
 import type { PortfolioMemberMetrics } from './earnings/portfolioBreakdown';
 import { apiFetch } from '../../lib/apiFetch';
 import RefreshButton from './earnings/RefreshButton';
@@ -120,14 +127,16 @@ export default function EarningsDashboard() {
   // pick the source; `selectedPortfolio`/`comparePortfolio` hold the basket.
   const isAdmin = useIsAdmin();
   const portfolioApi = usePortfolios();
+  const universeApi = useEarningsUniverses();
   // Which side (if any) opened the portfolio manager. 'header' = the global
   // button (no auto-select); 'a'/'b' = opened from a side's picker, so a
   // newly created/saved portfolio is auto-selected onto that side.
   const [managerSide, setManagerSide] = useState<'header' | 'a' | 'b' | null>(null);
   const [aMode, setAMode] = useState<'company' | 'portfolio'>('company');
   const [bMode, setBMode] = useState<'company' | 'portfolio'>('company');
-  const [selectedPortfolio, setSelectedPortfolio] = useState<Portfolio | null>(null);
-  const [comparePortfolio, setComparePortfolio] = useState<Portfolio | null>(null);
+  // A basket is either a saved portfolio or a frozen-universe snapshot.
+  const [selectedPortfolio, setSelectedPortfolio] = useState<Basket | null>(null);
+  const [comparePortfolio, setComparePortfolio] = useState<Basket | null>(null);
   // Per-member metrics for a portfolio side — feeds the ranked "by impact"
   // holdings list in chart tooltips. Fetched lazily when a portfolio is picked.
   const [breakdownA, setBreakdownA] = useState<PortfolioMemberMetrics[] | null>(null);
@@ -137,6 +146,15 @@ export default function EarningsDashboard() {
   // "A is set" / "B is set" regardless of which source each side uses.
   const hasA = aIsPortfolio ? !!selectedPortfolio : !!selected;
   const hasB = bIsPortfolio ? !!comparePortfolio : !!compareCompany;
+  // Attribution is portfolio-only (its backend queries earnings_portfolio by id
+  // and mixes editable sector weights). Resolve each side's full Portfolio when
+  // — and only when — it's a portfolio-kind basket; universe baskets opt out.
+  const attributionA = selectedPortfolio?.kind === 'portfolio'
+    ? portfolioApi.portfolios.find((p) => p.id === selectedPortfolio.id) ?? null
+    : null;
+  const attributionB = comparePortfolio?.kind === 'portfolio'
+    ? portfolioApi.portfolios.find((p) => p.id === comparePortfolio.id) ?? null
+    : null;
   const currentYear = new Date().getFullYear();
   const [startYear, setStartYear] = useState(2015);
   const [startYearInput, setStartYearInput] = useState('2015');
@@ -241,7 +259,7 @@ export default function EarningsDashboard() {
 
   const loadMetrics = useCallback((opts?: { silent?: boolean }) => {
     const url = aMode === 'portfolio'
-      ? (selectedPortfolio ? `${API_URL}/api/earnings/portfolios/${selectedPortfolio.id}/metrics` : null)
+      ? (selectedPortfolio ? `${API_URL}${basketMetricsPath(selectedPortfolio)}` : null)
       : (selected ? `${API_URL}/api/earnings/${selected.company_id}/metrics` : null);
     if (!url) return Promise.resolve<MetricRow[]>([]);
     const who = aMode === 'portfolio' ? selectedPortfolio?.name : selected?.gurufocus_ticker;
@@ -266,7 +284,7 @@ export default function EarningsDashboard() {
   // path stays a copy-paste read with the same shape.
   const loadCompareMetrics = useCallback((opts?: { silent?: boolean }) => {
     const url = bMode === 'portfolio'
-      ? (comparePortfolio ? `${API_URL}/api/earnings/portfolios/${comparePortfolio.id}/metrics` : null)
+      ? (comparePortfolio ? `${API_URL}${basketMetricsPath(comparePortfolio)}` : null)
       : (compareCompany ? `${API_URL}/api/earnings/${compareCompany.company_id}/metrics` : null);
     if (!url) return Promise.resolve<MetricRow[]>([]);
     const who = bMode === 'portfolio' ? comparePortfolio?.name : compareCompany?.gurufocus_ticker;
@@ -393,20 +411,22 @@ export default function EarningsDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadMetrics]);
 
-  // Drop a portfolio selection when that portfolio is deleted (or absent
-  // after a reload) so the charts don't keep requesting a gone id.
+  // Drop a portfolio-kind selection when that portfolio is deleted (or absent
+  // after a reload) so the charts don't keep requesting a gone id. Universe
+  // baskets aren't managed here, so they're left alone.
   useEffect(() => {
     const ids = new Set(portfolioApi.portfolios.map((p) => p.id));
-    if (selectedPortfolio && !ids.has(selectedPortfolio.id)) setSelectedPortfolio(null);
-    if (comparePortfolio && !ids.has(comparePortfolio.id)) setComparePortfolio(null);
+    if (selectedPortfolio?.kind === 'portfolio' && !ids.has(selectedPortfolio.id)) setSelectedPortfolio(null);
+    if (comparePortfolio?.kind === 'portfolio' && !ids.has(comparePortfolio.id)) setComparePortfolio(null);
   }, [portfolioApi.portfolios, selectedPortfolio, comparePortfolio]);
 
-  // Lazily load per-member metrics for whichever side is a portfolio (drives
-  // the ranked holdings breakdown in chart tooltips).
+  // Lazily load per-member metrics for whichever side is a basket (drives the
+  // ranked holdings breakdown in chart tooltips). Works for both portfolios and
+  // frozen-universe baskets.
   useEffect(() => {
     if (aMode !== 'portfolio' || !selectedPortfolio) { setBreakdownA(null); return; }
     let cancelled = false;
-    apiFetch(`${API_URL}/api/earnings/portfolios/${selectedPortfolio.id}/member-metrics`)
+    apiFetch(`${API_URL}${basketMemberMetricsPath(selectedPortfolio)}`)
       .then((r) => r.json())
       .then((d) => { if (!cancelled) setBreakdownA(Array.isArray(d) ? d : null); })
       .catch(() => { if (!cancelled) setBreakdownA(null); });
@@ -416,7 +436,7 @@ export default function EarningsDashboard() {
   useEffect(() => {
     if (bMode !== 'portfolio' || !comparePortfolio) { setBreakdownB(null); return; }
     let cancelled = false;
-    apiFetch(`${API_URL}/api/earnings/portfolios/${comparePortfolio.id}/member-metrics`)
+    apiFetch(`${API_URL}${basketMemberMetricsPath(comparePortfolio)}`)
       .then((r) => r.json())
       .then((d) => { if (!cancelled) setBreakdownB(Array.isArray(d) ? d : null); })
       .catch(() => { if (!cancelled) setBreakdownB(null); });
@@ -450,7 +470,7 @@ export default function EarningsDashboard() {
           <ModeToggle value={aMode} onChange={setAMode} />
           {aIsPortfolio ? (
             <>
-              <PortfolioPicker portfolios={portfolioApi.portfolios} selected={selectedPortfolio} onSelect={setSelectedPortfolio} />
+              <PortfolioPicker portfolios={portfolioApi.portfolios} universes={universeApi.universes} selected={selectedPortfolio} onSelect={setSelectedPortfolio} />
               {isAdmin && (
                 <button
                   type="button"
@@ -471,7 +491,7 @@ export default function EarningsDashboard() {
               <ModeToggle value={bMode} onChange={setBMode} />
               {bIsPortfolio ? (
                 <>
-                  <PortfolioPicker portfolios={portfolioApi.portfolios} selected={comparePortfolio} onSelect={setComparePortfolio} />
+                  <PortfolioPicker portfolios={portfolioApi.portfolios} universes={universeApi.universes} selected={comparePortfolio} onSelect={setComparePortfolio} />
                   {isAdmin && (
                     <button
                       type="button"
@@ -532,7 +552,7 @@ export default function EarningsDashboard() {
               {/* A:/B: tags only make sense when comparing two entities. */}
               {hasB && <span className="text-accent-400 font-mono mr-1">A:</span>}
               {aIsPortfolio
-                ? `${selectedPortfolio?.name} (${selectedPortfolio?.members.length} companies, equal-wtd EUR)`
+                ? `${selectedPortfolio?.name} (${selectedPortfolio?.memberCount} companies, equal-wtd EUR)`
                 : `${selected?.company_name || selected?.gurufocus_ticker} — ${selected?.gurufocus_ticker}.${selected?.gurufocus_exchange}`}
             </span>
             {hasB && (
@@ -541,7 +561,7 @@ export default function EarningsDashboard() {
                 <span>
                   <span className="text-warn-400 font-mono mr-1">B:</span>
                   {bIsPortfolio
-                    ? `${comparePortfolio?.name} (${comparePortfolio?.members.length} companies, EUR)`
+                    ? `${comparePortfolio?.name} (${comparePortfolio?.memberCount} companies, EUR)`
                     : `${compareCompany?.company_name || compareCompany?.gurufocus_ticker} — ${compareCompany?.gurufocus_ticker}.${compareCompany?.gurufocus_exchange}`}
                 </span>
               </>
@@ -571,9 +591,10 @@ export default function EarningsDashboard() {
           </div>
 
           {/* Allocation × Selection attribution — only when BOTH sides are
-              portfolios (mixes one's sector weights with the other's returns). */}
-          {aIsPortfolio && bIsPortfolio && selectedPortfolio && comparePortfolio && (
-            <AttributionMatrix portfolioA={selectedPortfolio} portfolioB={comparePortfolio} />
+              (saved) portfolios (mixes one's sector weights with the other's
+              returns). Universe baskets don't participate. */}
+          {aIsPortfolio && bIsPortfolio && attributionA && attributionB && (
+            <AttributionMatrix portfolioA={attributionA} portfolioB={attributionB} />
           )}
 
           {/* Charts container */}
@@ -807,8 +828,8 @@ export default function EarningsDashboard() {
             // the manager AND close, so "create → use" is one flow and the
             // user immediately sees its charts. Opened from the header → stay
             // open (managing several) and don't change a side.
-            if (managerSide === 'a') { setAMode('portfolio'); setSelectedPortfolio(p); setManagerSide(null); }
-            else if (managerSide === 'b') { setBMode('portfolio'); setComparePortfolio(p); setManagerSide(null); }
+            if (managerSide === 'a') { setAMode('portfolio'); setSelectedPortfolio(portfolioToBasket(p)); setManagerSide(null); }
+            else if (managerSide === 'b') { setBMode('portfolio'); setComparePortfolio(portfolioToBasket(p)); setManagerSide(null); }
           }}
           onClose={() => setManagerSide(null)}
         />

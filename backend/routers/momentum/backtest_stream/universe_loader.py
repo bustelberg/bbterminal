@@ -47,6 +47,23 @@ def broadcast_constant(
     return out or monthly_eligible
 
 
+def _latest_month_only(
+    panel: dict[str, dict[int, str | None]] | None,
+) -> dict[str, dict[int, str | None]] | None:
+    """Collapse a membership panel to ONLY its latest captured month.
+
+    Universes are fixed baskets (frozen-snapshots-only model): a backtest uses
+    the newest snapshot, and `broadcast_constant` applies it across all of
+    history. Any older months still stored in `universe_membership` (e.g. a
+    legacy multi-month ACWI/SP500 reconstruction) are ignored at load time — we
+    deliberately do NOT use point-in-time membership. Single-month frozen
+    snapshots pass through unchanged."""
+    if not panel:
+        return panel
+    latest = max(panel.keys())
+    return {latest: panel[latest]}
+
+
 def _load_universe_membership(
     label: str, grouping_field: str = "sector",
 ) -> dict[str, dict[int, str | None]]:
@@ -75,7 +92,7 @@ def _load_universe_membership(
     from momentum.data._pg import load_universe_membership_via_copy  # noqa: PLC0415
     via_copy = load_universe_membership_via_copy(universe_id, grouping_field)
     if via_copy is not None:
-        return via_copy
+        return _latest_month_only(via_copy)
 
     rows = []
     offset = 0
@@ -111,7 +128,7 @@ def _load_universe_membership(
         if m not in result:
             result[m] = {}
         result[m][r["company_id"]] = r.get(grouping_field)
-    return result
+    return _latest_month_only(result)
 
 
 def _find_universe_row(label: str) -> dict | None:
@@ -168,7 +185,7 @@ def _load_index_universe(
     universe doesn't have a row for that specific month."""
     if grouping_field not in ("sector", "industry"):
         raise ValueError(f"invalid grouping_field={grouping_field!r}")
-    from index_universe.templates._cache import full_universe_cache  # noqa: PLC0415
+    from ._universe_cache import full_universe_cache  # noqa: PLC0415
 
     cache_key = (label, grouping_field)
     cached = full_universe_cache.get(cache_key)
@@ -236,6 +253,11 @@ def _load_index_universe(
             if m not in result:
                 result[m] = {}
             result[m][r["company_id"]] = r.get(grouping_field)
+
+    # Fixed-basket model: ignore any historical months and keep only the newest
+    # snapshot. (The COPY fast-path already returns a single month; this also
+    # collapses the PostgREST pager fallback.)
+    result = _latest_month_only(result) or {}
 
     # ACWI_LEONTEQ + industry: ACWI_LEONTEQ rows don't carry industry,
     # so the values above are all None. Backfill from LEONTEQ.

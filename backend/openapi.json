@@ -3341,7 +3341,7 @@
     },
     "/api/earnings/portfolios/{portfolio_id}/member-metrics": {
       "get": {
-        "description": "Per-member metrics (EUR-converted, same as the aggregate) so the charts\ncan show each holding's own value for a metric and rank them by impact in\nthe tooltip. Returns `[{company_id, ticker, name, weight, metrics: [...]}]`.",
+        "description": "Per-member metrics (EUR-converted, same as the aggregate) for the ranked\nholdings breakdown in chart tooltips.",
         "operationId": "portfolio_member_metrics_api_earnings_portfolios__portfolio_id__member_metrics_get",
         "parameters": [
           {
@@ -3382,7 +3382,7 @@
     },
     "/api/earnings/portfolios/{portfolio_id}/metrics": {
       "get": {
-        "description": "Aggregated MetricRow[] for the portfolio \u2014 weighted mean per (metric,\ndate) over members holding data there (weights renormalized to those\npresent), currency-denominated metrics converted to EUR first. Same shape\nas /api/earnings/{company_id}/metrics, so every chart consumes it directly.",
+        "description": "Aggregated MetricRow[] for the portfolio \u2014 weighted mean per (metric,\ndate), currency-denominated metrics converted to EUR. Same shape as\n/api/earnings/{company_id}/metrics, so every chart consumes it directly.",
         "operationId": "portfolio_metrics_api_earnings_portfolios__portfolio_id__metrics_get",
         "parameters": [
           {
@@ -3436,6 +3436,108 @@
           }
         },
         "summary": "Sector Universes",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/universes": {
+      "get": {
+        "description": "Frozen universe snapshots selectable as equal-weighted baskets in the\nearnings Portfolio dropdown. `[{universe_id, label, count}]`, newest first.",
+        "operationId": "list_earnings_universes_api_earnings_universes_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Earnings Universes",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/universes/{universe_id}/member-metrics": {
+      "get": {
+        "description": "Per-member metrics for a frozen-universe basket (drives the ranked\nholdings breakdown in chart tooltips).",
+        "operationId": "universe_member_metrics_api_earnings_universes__universe_id__member_metrics_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "universe_id",
+            "required": true,
+            "schema": {
+              "title": "Universe Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Universe Member Metrics",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/universes/{universe_id}/metrics": {
+      "get": {
+        "description": "Aggregated MetricRow[] for a frozen universe treated as an equal-weighted\nbasket \u2014 same shape + machinery as the portfolio aggregate.",
+        "operationId": "universe_metrics_api_earnings_universes__universe_id__metrics_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "universe_id",
+            "required": true,
+            "schema": {
+              "title": "Universe Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Universe Metrics",
         "tags": [
           "earnings"
         ]
@@ -4248,6 +4350,64 @@
           }
         },
         "summary": "Index Universe Cumulative",
+        "tags": [
+          "index-universe"
+        ]
+      }
+    },
+    "/api/index-universe/freeze": {
+      "post": {
+        "description": "Freeze a static, pipeline-immune copy of a stored index.\n\nThe index (e.g. SP500) lives in the `universe` table but isn't a registered\ntemplate, so this reuses the template-freeze core with an explicit source\nuniverse id. Two modes (mirroring the /acwi Freeze button):\n  - `as_of=YYYY-MM` \u2192 FIXED BASKET of that month's constituents.\n  - no `as_of`      \u2192 full-history copy (survivorship-bias-free), labelled\n                      with today's date.\nIdempotent on the resulting label. The snapshot then shows up everywhere\nfrozen universes are listed (/universe, /backtest, /earnings).",
+        "operationId": "index_universe_freeze_api_index_universe_freeze_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "index",
+            "required": false,
+            "schema": {
+              "default": "SP500",
+              "title": "Index",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "as_of",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As Of"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Index Universe Freeze",
         "tags": [
           "index-universe"
         ]
@@ -5901,7 +6061,7 @@
     },
     "/api/universe-templates/{key}/freeze": {
       "post": {
-        "description": "Snapshot a live template universe into a static, NON-template universe\n(`template_key = NULL`) so the pipeline never re-reconstructs it and\nbacktests against it are reproducible.\n\nTwo modes:\n  - `as_of=YYYY-MM[-DD]` \u2192 FIXED BASKET: the constituents on that month,\n    replicated across every month so a backtest holds them constant.\n    Label `\"<KEY> (as of YYYY-MM)\"`.\n  - no `as_of` \u2192 full-history copy labelled with today's date.\nIdempotent on the resulting label \u2014 a repeat call returns the existing\nsnapshot instead of duplicating it.",
+        "description": "Snapshot a live template universe into a static, NON-template universe\n(`template_key = NULL`) so the pipeline never re-reconstructs it and\nbacktests against it are reproducible.\n\nTwo modes:\n  - `as_of=YYYY-MM[-DD]` \u2192 FIXED BASKET: the constituents on that month,\n    replicated across every month so a backtest holds them constant.\n    Label `\"<KEY> (as of YYYY-MM)\"`.\n  - no `as_of` \u2192 full-history copy labelled with today's date.\nIdempotent on the resulting label \u2014 a repeat call returns the existing\nsnapshot instead of duplicating it.\n\nContent-negotiated: clients sending `Accept: text/event-stream` (the /acwi\npage) get an SSE progress stream (`progress`/`done`/`error` events); all\nother callers (the /leonteq page, external scripts) get the JSON summary.",
         "operationId": "freeze_template_api_universe_templates__key__freeze_post",
         "parameters": [
           {
@@ -6768,6 +6928,98 @@
           }
         },
         "summary": "Universe Validate",
+        "tags": [
+          "universe"
+        ]
+      }
+    },
+    "/api/universe/{universe_id}/data-freshness": {
+      "get": {
+        "description": "Coverage + most-recent GuruFocus data date across the universe's members\n(union of all membership months).",
+        "operationId": "universe_data_freshness_api_universe__universe_id__data_freshness_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "universe_id",
+            "required": true,
+            "schema": {
+              "title": "Universe Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Universe Data Freshness",
+        "tags": [
+          "universe"
+        ]
+      }
+    },
+    "/api/universe/{universe_id}/fetch-data": {
+      "post": {
+        "description": "SSE: fetch all /earnings data sources for every company that has ever been\na member of the universe. Self-skips fresh sources unless `force=true`.",
+        "operationId": "universe_fetch_data_api_universe__universe_id__fetch_data_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "universe_id",
+            "required": true,
+            "schema": {
+              "title": "Universe Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Universe Fetch Data",
         "tags": [
           "universe"
         ]

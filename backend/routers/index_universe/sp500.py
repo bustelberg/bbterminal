@@ -102,6 +102,12 @@ async def index_universe_import_sp500():
 async def index_universe_list():
     """List stored index universes with month range and unique ticker counts.
 
+    Only genuine *imported index* universes belong here — NOT the
+    template-managed universes (ACWI / Leonteq / LongEquity), their frozen
+    snapshots, or criteria-derived universes, all of which live on their own
+    pages. An index universe is a "bare" `universe` row: no `template_key`,
+    no `frozen_at`, no `parent_universe_id`, no `filter_config`.
+
     Aggregates come from the universe_stats view — querying membership rows
     directly + counting in Python ran ~70s for SP500 + ACWI. Cached 5min;
     falls back to a stale cache entry on timeout, then to a degraded
@@ -111,6 +117,26 @@ async def index_universe_list():
         cached = _UNIVERSE_STATS_CACHE.get("data")
         if cached is not None and (now - _UNIVERSE_STATS_CACHE["ts"]) < _UNIVERSE_STATS_TTL:
             return cached
+
+        # The set of labels that are genuine index imports (everything else —
+        # templates, frozen snapshots, derived/criteria universes — is excluded).
+        meta = (
+            supabase.table("universe")
+            .select("label, description, created_at, template_key, frozen_at, parent_universe_id, filter_config")
+            .order("label")
+            .execute()
+        ).data or []
+
+        def _is_index(m: dict) -> bool:
+            return (
+                not m.get("template_key")
+                and not m.get("frozen_at")
+                and not m.get("parent_universe_id")
+                and not m.get("filter_config")
+            )
+
+        index_labels = {m["label"] for m in meta if _is_index(m)}
+
         try:
             resp = (
                 supabase.table("universe_stats")
@@ -120,6 +146,8 @@ async def index_universe_list():
             )
             result = []
             for r in (resp.data or []):
+                if r.get("label") not in index_labels:
+                    continue  # not an imported index — belongs to another page
                 if not r.get("start_month"):
                     continue  # skip empty universes
                 result.append({
@@ -142,27 +170,20 @@ async def index_universe_list():
             )
             if cached is not None:
                 return cached
-            try:
-                u_resp = (
-                    supabase.table("universe")
-                    .select("universe_id, label, description, created_at")
-                    .order("label")
-                    .execute()
-                )
-                return [
-                    {
-                        "index_name": r["label"],
-                        "description": r.get("description"),
-                        "created_at": r.get("created_at"),
-                        "start_month": None,
-                        "end_month": None,
-                        "month_count": 0,
-                        "total_unique_tickers": 0,
-                    }
-                    for r in (u_resp.data or [])
-                ]
-            except Exception:
-                raise e
+            # Degraded: list the index universes from the metadata we already
+            # have (no membership stats available).
+            return [
+                {
+                    "index_name": m["label"],
+                    "description": m.get("description"),
+                    "created_at": m.get("created_at"),
+                    "start_month": None,
+                    "end_month": None,
+                    "month_count": 0,
+                    "total_unique_tickers": 0,
+                }
+                for m in meta if _is_index(m)
+            ]
     return await asyncio.to_thread(_run)
 
 
@@ -286,3 +307,29 @@ async def index_universe_delete(index_name: str):
         lambda: supabase.table("universe").delete().eq("label", index_name).execute()
     )
     return {"ok": True}
+
+
+@router.post("/api/index-universe/freeze")
+async def index_universe_freeze(index: str = "SP500", as_of: str | None = None):
+    """Freeze a static, pipeline-immune copy of a stored index.
+
+    The index (e.g. SP500) lives in the `universe` table but isn't a registered
+    template, so this reuses the template-freeze core with an explicit source
+    universe id. Two modes (mirroring the /acwi Freeze button):
+      - `as_of=YYYY-MM` → FIXED BASKET of that month's constituents.
+      - no `as_of`      → full-history copy (survivorship-bias-free), labelled
+                          with today's date.
+    Idempotent on the resulting label. The snapshot then shows up everywhere
+    frozen universes are listed (/universe, /backtest, /earnings)."""
+    from routers.universe_templates import _freeze_core  # noqa: PLC0415
+
+    def _do():
+        u = (
+            supabase.table("universe").select("universe_id")
+            .eq("label", index).limit(1).execute()
+        )
+        if not u.data:
+            raise HTTPException(status_code=404, detail=f"Index '{index}' not found — import it first.")
+        return _freeze_core(index, as_of, None, src_universe_id=u.data[0]["universe_id"])
+
+    return await asyncio.to_thread(_do)

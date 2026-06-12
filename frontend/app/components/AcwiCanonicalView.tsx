@@ -53,6 +53,7 @@ export default function AcwiCanonicalView() {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshResult, setRefreshResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [freezing, setFreezing] = useState(false);
+  const [freezeLog, setFreezeLog] = useState<string[]>([]);
   const [freezeMsg, setFreezeMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const loadSummary = useCallback(async () => {
@@ -172,33 +173,58 @@ export default function AcwiCanonicalView() {
   // Freeze the currently-selected month into a fixed-basket static universe
   // (D's constituents held constant across all months). It then shows up in
   // the /backtest + /regime-detector universe dropdowns, pipeline-immune.
+  // Streams SSE progress (same event shape as the refresh stream) so the user
+  // sees real per-step updates — reading membership, copying in chunks, done —
+  // instead of an opaque "Freezing…" spinner.
   const freezeAsOf = useCallback(async () => {
     if (!selectedMonth || freezing) return;
     setFreezing(true);
     setFreezeMsg(null);
+    setFreezeLog([]);
     try {
-      const r = await apiFetch(
+      const resp = await apiFetch(
         `${API_URL}/api/universe-templates/${TEMPLATE_KEY}/freeze?as_of=${encodeURIComponent(selectedMonth)}`,
-        { method: 'POST' },
+        { method: 'POST', headers: { 'Accept': 'text/event-stream' } },
       );
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        setFreezeMsg({ ok: false, text: data.detail ?? `Freeze failed (${r.status})` });
+      if (!resp.ok || !resp.body) {
+        // The backend still answers JSON on an early error status.
+        const data = (await resp.json().catch(() => ({}))) as { detail?: string };
+        setFreezeMsg({ ok: false, text: data.detail ?? `Freeze failed (${resp.status})` });
         return;
       }
-      const label = data.label ?? `${TEMPLATE_KEY} (as of ${selectedMonth})`;
-      setFreezeMsg({
-        ok: true,
-        text: data.created === false
-          ? `Already frozen: "${label}" — selectable in /backtest + /regime-detector.`
-          : `Froze "${label}" — ${membership.length} constituents held constant. Now selectable in /backtest + /regime-detector.`,
-      });
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() ?? '';
+        for (const part of parts) {
+          const lines = part.split('\n').filter((l) => l.startsWith('data: '));
+          if (!lines.length) continue;
+          const payload = lines.map((l) => l.slice(6)).join('\n');
+          try {
+            const evt = JSON.parse(payload);
+            if (evt.type === 'progress' && evt.message) {
+              setFreezeLog((l) => [...l, evt.message]);
+            } else if (evt.type === 'done') {
+              setFreezeMsg({ ok: true, text: evt.message });
+            } else if (evt.type === 'error') {
+              setFreezeMsg({ ok: false, text: evt.message });
+            }
+          } catch {
+            // Non-JSON keepalive lines — ignore.
+          }
+        }
+      }
     } catch (e) {
       setFreezeMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
     } finally {
       setFreezing(false);
     }
-  }, [selectedMonth, freezing, membership.length]);
+  }, [selectedMonth, freezing]);
 
   if (summaryLoading && !summary) {
     return (
@@ -266,10 +292,18 @@ export default function AcwiCanonicalView() {
         </div>
       </div>
 
-      {freezeMsg && (
-        <div className={`px-5 py-2.5 border-b border-neutral-800/40 text-xs flex items-start justify-between gap-3 ${freezeMsg.ok ? 'text-pos-300' : 'text-neg-300'}`}>
-          <span>{freezeMsg.text}</span>
-          <button type="button" onClick={() => setFreezeMsg(null)} className="text-fg-subtle hover:text-fg-soft shrink-0">dismiss</button>
+      {(freezeLog.length > 0 || freezeMsg) && (
+        <div className="px-5 py-3 border-b border-neutral-800/40">
+          <ProgressTimeline
+            steps={[]}
+            log={freezeLog}
+            doneSummary={freezeMsg?.ok ? freezeMsg.text : null}
+            errorMessage={freezeMsg && !freezeMsg.ok ? freezeMsg.text : null}
+            running={freezing}
+            defaultLogOpen
+            title="Freeze progress"
+            onDismiss={() => { setFreezeLog([]); setFreezeMsg(null); }}
+          />
         </div>
       )}
 

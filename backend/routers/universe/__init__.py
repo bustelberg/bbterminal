@@ -12,6 +12,7 @@ Layout:
   labels.py         — /labels, /months, /months/{month} CRUD
   derived_metrics.py — /derived-metrics/criteria, /status, /recompute
   derive.py         — /derive/preview, /derive (the big SSE)
+  data_fetch.py     — /{id}/data-freshness, /{id}/fetch-data (bulk earnings SSE)
 
 "Derived" universes tighten a base universe via quality-metric thresholds —
 e.g., "longequity_cumulative + ROIC>10% + FCF growth>5%". The base + child
@@ -21,13 +22,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from .data_fetch import router as _data_fetch_router
 from .derive import router as _derive_router
 from .derived_metrics import router as _derived_metrics_router
 from .labels import router as _labels_router
 from .screening import router as _screening_router
 
 router = APIRouter()
-for _r in (_screening_router, _labels_router, _derived_metrics_router, _derive_router):
+for _r in (_screening_router, _labels_router, _derived_metrics_router, _derive_router, _data_fetch_router):
     router.include_router(_r)
 
 __all__ = ["router"]
