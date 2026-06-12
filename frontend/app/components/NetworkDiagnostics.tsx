@@ -52,6 +52,85 @@ const CATEGORY_LABEL: Record<SourceResult['category'], string> = {
   optional: 'Optional — single page / background job',
 };
 
+/**
+ * Build a ready-to-send support message for GuruFocus, populated from the live
+ * diagnostics. The crux: their team whitelisted our IP *for the User API* (their
+ * application-level access control), but the block we hit is at Cloudflare's edge
+ * (bot management / IP reputation) — a separate layer the User-API allowlist
+ * doesn't touch. The cf-ray / server=cloudflare headers are the proof, and the
+ * concrete ask is a Cloudflare IP Access Rule. We only have cf-ray when a real
+ * probe ran (the circuit breaker short-circuits without a network call when
+ * open), so the message degrades gracefully and tells them how to capture one.
+ */
+function buildSupportMessage(d: Diagnostics, guru: SourceResult): string {
+  const egressIp = d.egress.ip ?? '(unknown — please ask us to re-check)';
+  const domain = guru.domain ?? 'api.gurufocus.com';
+  const cfIp = guru.resolved_ip ?? '(unresolved)';
+  const path = guru.url ?? `https://${domain}/public/user/<API_KEY>/stock/{TICKER}/price`;
+  const cfRay = guru.cdn_headers['cf-ray'];
+  const server = guru.cdn_headers['server'];
+  const cfMitigated = guru.cdn_headers['cf-mitigated'];
+  const status = guru.status_code;
+  const target = guru.used_target ?? d.gurufocus_circuit.preferred_target ?? null;
+  const observed = new Date(d.observed_at).toISOString();
+
+  const evidence: string[] = [
+    `- ${domain} resolves to ${cfIp}, which is a Cloudflare edge IP.`,
+  ];
+  if (status != null) {
+    evidence.push(
+      `- Our request received HTTP ${status} — a Cloudflare challenge/block page, not a GuruFocus application response.`,
+    );
+  }
+  const cfHeaderBits = [
+    cfRay ? `cf-ray=${cfRay}` : null,
+    server ? `server=${server}` : null,
+    cfMitigated ? `cf-mitigated=${cfMitigated}` : null,
+  ].filter(Boolean);
+  if (cfHeaderBits.length) {
+    evidence.push(
+      `- The response carried Cloudflare edge headers (${cfHeaderBits.join(', ')}), confirming the block is at the Cloudflare layer rather than your API.`,
+    );
+  }
+  if (target) {
+    evidence.push(
+      `- We send a genuine desktop-browser TLS fingerprint (impersonating ${target}) and are still blocked across multiple browser fingerprints — this points to an IP-reputation / bot-management block, not a TLS or User-Agent issue.`,
+    );
+  }
+
+  const noRayNote = cfRay
+    ? ''
+    : `\n\nNote: no cf-ray ID was captured in this snapshot${
+        d.gurufocus_circuit.circuit_open
+          ? ' (our client briefly suppressed calls after repeated blocks)'
+          : ''
+      }. If you need a cf-ray to locate the blocked requests in your Cloudflare logs, let us know and we'll re-run the check to capture one.`;
+
+  return `Subject: Cloudflare is blocking our whitelisted server IP on ${domain} (User API)
+
+Hi GuruFocus Support,
+
+Our server's automated calls to the GuruFocus User API are being blocked by Cloudflare, even though our egress IP was already whitelisted "for the User API."
+
+Account / request details
+- Server egress IP to allow: ${egressIp}
+- Endpoint we call: GET ${path}
+- API key: present (masked here for security)
+
+What we observe (measured server-side from our backend)
+${evidence.join('\n')}${noRayNote}
+
+Why the existing whitelist didn't resolve it
+The IP was whitelisted for the User API — your application-level access control. The block we hit happens earlier, at Cloudflare's edge (bot management / IP Access Rules), before the request ever reaches the User API. These are two separate layers, so a User-API allowlist does not stop the Cloudflare challenge.
+
+What we're asking
+Please allowlist our egress IP ${egressIp} at the Cloudflare layer for ${domain} — for example a Cloudflare IP Access Rule set to "Allow", or a WAF / Bot Management skip rule — so automated API traffic from this IP is no longer challenged.
+
+Measured at: ${observed}
+
+Thank you,`;
+}
+
 function VerdictChip({ verdict }: { verdict: Verdict }) {
   const m = VERDICT_META[verdict];
   return (
@@ -66,6 +145,9 @@ export default function NetworkDiagnostics() {
   const [data, setData] = useState<Diagnostics | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showSupport, setShowSupport] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [copied, setCopied] = useState(false);
 
   const run = useCallback(async () => {
     setLoading(true);
@@ -91,6 +173,24 @@ export default function NetworkDiagnostics() {
   const circuit = data?.gurufocus_circuit;
   const guru = data?.sources.find((s) => s.name === 'GuruFocus API');
   const guruBlocked = guru?.verdict === 'blocked';
+  const supportMessage = data && guru ? buildSupportMessage(data, guru) : '';
+
+  // Refresh the editable draft whenever a fresh probe regenerates the message
+  // (a re-run = new data = new message; intentionally discards manual edits).
+  useEffect(() => {
+    setDraft(supportMessage);
+  }, [supportMessage]);
+
+  const copyDraft = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(draft);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard blocked — the textarea is still selectable for manual copy */
+    }
+  }, [draft]);
+
   const grouped = (['critical', 'important', 'optional'] as const).map((cat) => ({
     cat,
     rows: (data?.sources ?? []).filter((s) => s.category === cat),
@@ -175,6 +275,52 @@ export default function NetworkDiagnostics() {
           )}
         </div>
       </div>
+
+      {/* GuruFocus support-message drafter — only when GuruFocus isn't healthy.
+          Gives the user a copy-pasteable message that tells GuruFocus support
+          the block is at Cloudflare's edge (not the User API they whitelisted)
+          and the exact fix to request. */}
+      {guru && guru.verdict !== 'ok' && (
+        <div className="bg-card rounded-xl border border-neutral-800/40 p-5 mb-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-sm font-semibold text-fg-strong">Message for GuruFocus support</div>
+              <div className="text-xs text-fg-muted mt-1 max-w-2xl">
+                A ready-to-send message explaining that the block is at Cloudflare&rsquo;s edge — not the
+                User-API allowlist they already applied — with the live evidence and the exact Cloudflare
+                fix to request. Review, add your sign-off, then copy.
+              </div>
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowSupport((v) => !v)}
+                className="text-sm font-medium px-3 py-2 rounded-lg hover:bg-overlay/5 text-fg-soft transition-colors"
+              >
+                {showSupport ? 'Hide' : 'Draft message'}
+              </button>
+              {showSupport && (
+                <button
+                  type="button"
+                  onClick={() => void copyDraft()}
+                  className="bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                >
+                  {copied ? 'Copied!' : 'Copy'}
+                </button>
+              )}
+            </div>
+          </div>
+          {showSupport && (
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              rows={22}
+              spellCheck={false}
+              className="mt-3 w-full bg-page border border-neutral-700 rounded-lg p-3 font-mono text-xs text-fg leading-relaxed focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 focus:outline-none resize-y"
+            />
+          )}
+        </div>
+      )}
 
       {/* Per-source table, grouped by criticality. */}
       <div className="bg-card rounded-xl border border-neutral-800/40 overflow-hidden">
