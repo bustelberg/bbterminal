@@ -62,6 +62,11 @@ type Props = {
   /** Start collapsed (the /schedule strategy detail collapses every card).
    * Defaults to expanded so /backtest is unchanged. */
   defaultCollapsed?: boolean;
+  /** Let the active strategy define the alignment window's right edge
+   * instead of clamping to the earliest-ending series. /schedule sets this
+   * so a live-extended strategy curve isn't truncated back to the frozen
+   * universe baseline. */
+  activeDefinesWindowEnd?: boolean;
 };
 
 /** "Equity Curve" card cluster: comparison pill row, summary stats,
@@ -69,7 +74,7 @@ type Props = {
  * own benchmark/saved comparison state and all the chart-derived memos
  * — the parent only feeds it the active strategy plus the saved-run
  * list. */
-function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLabel, markerDate, defaultCollapsed = false }: Props) {
+function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLabel, markerDate, defaultCollapsed = false, activeDefinesWindowEnd = false }: Props) {
   // Benchmark options for the "add series" dropdown — fetched via the
   // shared cached hook so a sibling component (e.g. MomentumBacktester's
   // sector-ETF lookup) reuses the same fetch instead of re-requesting.
@@ -258,7 +263,10 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
 
   // Alignment window + per-series rebased points + stats — moved to
   // `./equityCurve/seriesMath.ts:alignSeries`.
-  const alignedSeries = useMemo(() => alignSeries(resolvedSeries), [resolvedSeries]);
+  const alignedSeries = useMemo(
+    () => alignSeries(resolvedSeries, activeDefinesWindowEnd),
+    [resolvedSeries, activeDefinesWindowEnd],
+  );
 
   // The original ~125-line block below is dead code from the old inline
   // implementation — kept temporarily for ref while extraction stabilizes.

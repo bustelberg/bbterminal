@@ -71,6 +71,41 @@ describe('seriesFromPrices', () => {
   });
 });
 
+// ─── alignSeries (activeDefinesEnd) ─────────────────────────────────
+
+describe('alignSeries activeDefinesEnd', () => {
+  // Strategy is live-extended past the frozen universe baseline (the
+  // /schedule case). Default alignment clamps both to the common (earlier)
+  // end; activeDefinesEnd lets the strategy define the right edge.
+  const active = mkSeries('active', 'active', [
+    { date: '2024-01-31', value: 0 },
+    { date: '2024-02-29', value: 10 },
+    { date: '2024-03-31', value: 21 }, // strategy runs one month longer
+  ]);
+  const universe = mkSeries('universe', 'benchmark', [
+    { date: '2024-01-31', value: 0 },
+    { date: '2024-02-29', value: 5 }, // baseline stops here (can't extend)
+  ]);
+
+  it('clamps to the common window by default', () => {
+    const aligned = alignSeries([active, universe]);
+    expect(aligned.windowEnd).toBe('2024-02-29');
+    const strat = aligned.series.find((s) => s.kind === 'active')!;
+    expect(strat.stats.totalReturn).toBeCloseTo(10); // truncated at Feb
+  });
+
+  it('lets the active strategy define the right edge when opted in', () => {
+    const aligned = alignSeries([active, universe], true);
+    expect(aligned.windowEnd).toBe('2024-03-31');
+    const strat = aligned.series.find((s) => s.kind === 'active')!;
+    expect(strat.stats.totalReturn).toBeCloseTo(21); // runs through March
+    // The universe baseline reports null past its last day (line stops).
+    const uni = aligned.series.find((s) => s.id === 'universe')!;
+    const march = uni.points.find((p) => p.date === '2024-03-31');
+    expect(march?.cumReturnPct).toBeNull();
+  });
+});
+
 // ─── computeYearlySubplots ──────────────────────────────────────────
 
 function mkSeries(

@@ -32,73 +32,70 @@ def _extract_sectors(holdings: list[dict] | None) -> list[dict]:
     ]
 
 
-def _compute_period_returns(snapshots: list[dict], today: date) -> dict:
-    """MTD + YTD returns for a strategy.
+def _walk_snapshot_curve(
+    snapshots: list[dict],
+) -> tuple[list[tuple[str, float]], str | None, float]:
+    """Walk a strategy's current-picks snapshot history into a relative
+    equity curve (base 1.0). The single source of truth for a strategy's
+    LIVE forward performance — `period_return_pct` is marked-to-market by
+    the price-update job, so this curve always reaches the latest priced
+    day (unlike `current_picks_day`, which only advances on a full compute).
 
-    Walks the strategy's full snapshot history chronologically to build
-    a relative equity curve, then reads off the ratio between current
-    equity and equity at the start of the current month / year.
+    `snapshots` must be ascending by (latest_price_date, created_at).
 
     Snapshot convention: `period_return_pct` on each row is the running
     return for THAT row's open period as of the row's `latest_price_date`.
-    For a BACKFILL rebalance this is the full closed-period return (the
-    backfill knew the whole period at compute time). For a LIVE rebalance
-    inserted by the pipeline tick it's 0% at creation, then refreshed by
-    the daily MTD price_update flow.
+    For a BACKFILL rebalance it's the full closed-period return; for a LIVE
+    rebalance it's 0% at creation, then refreshed by the price_update flow.
 
     Walker rules:
-      - On rebalance: close prior period at its running return, then
-        open a new one whose initial running return = THIS row's stored
-        `period_return_pct` (full-period value for backfill, 0 for
-        live).
-      - On price_update: refresh the open period's running return with
-        this row's `period_return_pct`.
+      - rebalance: close the prior period at its running return, then open
+        a new one whose initial running return = this row's stored value.
+      - price_update: refresh the open period's running return.
 
-    This treats backfill + live snapshots uniformly — both have the
-    same "running return on this row" semantic.
-
-    Returns {mtd_return_pct, ytd_return_pct, as_of_date} all None-able.
-    `as_of_date` is the latest_price_date of the newest snapshot, surfaced
-    so the UI can render "+12.7% (as of 2026-05-22)" without a second
-    lookup."""
-    if not snapshots:
-        return {"mtd_return_pct": None, "ytd_return_pct": None, "as_of_date": None}
-
-    # Iterate in chronological order; snapshots are passed already sorted
-    # by (latest_price_date asc, created_at asc).
+    Returns `(curve, last_rebalance_eff_date, open_period_start_equity)`,
+    where `curve` is `[(effective_date, equity), ...]` (effective_date =
+    the day the row's return is marked through). The latter two feed
+    `_compute_period_returns`'s month-anchor logic."""
     open_period_return_pct = 0.0
     open_period_start_equity = 1.0
     last_rebalance_eff_date: str | None = None
-    # Equity curve points keyed by effective date; multiple snapshots on
-    # the same date overwrite each other (last wins), which is what we
-    # want — a price_update later in the day reflects more-current data.
     curve: list[tuple[str, float]] = []
 
     for s in snapshots:
-        eff_date = (s.get("latest_price_date") or s.get("as_of_date") or "")
-        eff_date = str(eff_date)[:10]
+        eff_date = str(s.get("latest_price_date") or s.get("as_of_date") or "")[:10]
         if not eff_date:
             continue
         kind = s.get("kind") or "rebalance"
         pct = s.get("period_return_pct")
         if kind == "rebalance":
-            # Close prior period at its last-known running return.
-            equity_after_close = open_period_start_equity * (1.0 + open_period_return_pct / 100.0)
-            # Open new period. The new period's initial running return =
-            # whatever this rebalance row stored — for a backfill row
-            # that's the full closed-period return; for a live-pipeline
-            # rebalance row that's 0 (no observed return yet).
-            open_period_start_equity = equity_after_close
+            open_period_start_equity = open_period_start_equity * (1.0 + open_period_return_pct / 100.0)
             open_period_return_pct = float(pct) if pct is not None else 0.0
             last_rebalance_eff_date = eff_date
-        else:
-            # price_update: refresh the open period's running return.
-            if pct is not None:
-                open_period_return_pct = float(pct)
-        # Snapshot the current equity (open period running return applied).
+        elif pct is not None:
+            open_period_return_pct = float(pct)
+        # Same-date rows overwrite (last wins) — a later price_update is
+        # more current.
         equity_now = open_period_start_equity * (1.0 + open_period_return_pct / 100.0)
         curve.append((eff_date, equity_now))
 
+    return curve, last_rebalance_eff_date, open_period_start_equity
+
+
+def _compute_period_returns(snapshots: list[dict], today: date) -> dict:
+    """MTD + YTD returns for a strategy, read off the snapshot equity curve
+    (`_walk_snapshot_curve`).
+
+    Returns {mtd_return_pct, ytd_return_pct, as_of_date} all None-able.
+    `as_of_date` is the latest_price_date of the newest snapshot, surfaced
+    so the UI can render "+12.7% (as of 2026-05-22)" without a second
+    lookup. Used as the fallback when a strategy has no source backtest;
+    when it does, `_returns_from_backtest` is preferred (anchored at
+    go-live, finer-grained history)."""
+    if not snapshots:
+        return {"mtd_return_pct": None, "ytd_return_pct": None, "as_of_date": None}
+
+    curve, last_rebalance_eff_date, open_period_start_equity = _walk_snapshot_curve(snapshots)
     if not curve:
         return {"mtd_return_pct": None, "ytd_return_pct": None, "as_of_date": None}
 
@@ -141,36 +138,10 @@ def _compute_period_returns(snapshots: list[dict], today: date) -> dict:
     }
 
 
-def _returns_from_backtest(
-    backtest_run_id: int,
-    inception_iso: str,
-    today: date,
-    live_tail: dict | None = None,
-) -> dict | None:
-    """MTD / YTD / since-inception returns from the strategy's BACKTEST equity
-    curve, anchored at the go-live (inception) date.
-
-    The live current-picks snapshots only span the current open period, so an
-    MTD/YTD walked from them collapses to that one period's return. The real
-    performance lives in the saved backtest's daily equity curve (the same one
-    the detail view's equity chart draws). We read the cumulative-return level
-    at the anchor dates and take the relative move to the curve's latest point.
-
-    - MTD  = from the start of the current calendar month
-    - YTD  = from the start of the current calendar year
-    - since-inception = from the go-live date (`inception_iso`)
-
-    MTD/YTD are calendar-anchored and independent of the go-live date; only
-    since-inception moves when the go-live date changes. Returns None when the
-    run has no curve.
-
-    `live_tail` (the latest current-picks snapshot) keeps the numbers fresh
-    past the frozen backtest curve: a saved backtest's curve ends on whatever
-    day it was run, but the price-update pipeline marks the held portfolio to
-    market daily. When the snapshot's `latest_price_date` is newer than the
-    curve's last day, we splice the open period's live return onto the curve
-    end so MTD/YTD/since-inception + `as_of_date` track the latest priced day
-    instead of going stale."""
+def _load_backtest_pts(backtest_run_id: int) -> list[tuple[str, float]]:
+    """The saved backtest's daily equity curve as
+    ``[(YYYY-MM-DD, cumulative_return_pct), ...]`` ascending. Empty when the
+    run has no stored curve. Best-effort (storage errors → empty)."""
     from routers.momentum.backtest_crud import load_backtest_result_sync  # noqa: PLC0415
 
     res = load_backtest_result_sync(backtest_run_id)
@@ -180,9 +151,108 @@ def _returns_from_backtest(
         cum = d.get("cumulative_return_pct")
         if dt and cum is not None:
             pts.append((dt, float(cum)))
+    pts.sort(key=lambda p: p[0])
+    return pts
+
+
+def _splice_snapshot_tail(
+    backtest_pts: list[tuple[str, float]],
+    snap_curve: list[tuple[str, float]],
+) -> tuple[str | None, list[dict]]:
+    """Graft the live forward tail onto the (frozen) backtest daily curve so
+    a strategy's monthly-returns + equity views stay current with the latest
+    priced day.
+
+    `backtest_pts` — the backtest curve as
+    ``[(YYYY-MM-DD, cumulative_return_pct), ...]`` (any order).
+    `snap_curve`   — the snapshot equity curve from `_walk_snapshot_curve`
+    (base 1.0), which the price-update job marks to market through the
+    latest priced day. This is the single live source — `current_picks_day`
+    is deliberately NOT used here: it only advances on a full compute and so
+    lags the price-update snapshots.
+
+    Returns ``(cutover_date, tail_points)``:
+      * `cutover_date` — the first forward date. The caller keeps backtest
+        points strictly before it and appends `tail_points`. None when
+        there's nothing to splice (no curve, or live data no fresher than
+        the backtest curve's end).
+      * `tail_points` — ``[{"date", "cumulative_return_pct"}, ...]`` on the
+        SAME cumulative scale as the backtest curve.
+
+    Only snapshot points dated AFTER the backtest curve's last day extend
+    it, and their RELATIVE move from that boundary is grafted on — so a
+    level mismatch between the two independently-computed curves never shows
+    at the join."""
+    if not backtest_pts or not snap_curve:
+        return None, []
+    bt = sorted(backtest_pts, key=lambda p: p[0])
+    bt_last_date, bt_last_cum = bt[-1]
+    sc = sorted(snap_curve, key=lambda p: p[0])
+
+    forward = [(d, e) for d, e in sc if d > bt_last_date]
+    if not forward:
+        return None, []
+
+    # Snapshot equity at the backtest boundary: last point on/before it,
+    # else the first snapshot point (curve begins after the boundary).
+    anchor_eq: float | None = None
+    for d, e in sc:
+        if d <= bt_last_date:
+            anchor_eq = e
+        else:
+            break
+    if anchor_eq is None:
+        anchor_eq = sc[0][1]
+    if anchor_eq <= 0:
+        return None, []
+
+    rebase = (1.0 + bt_last_cum / 100.0) / anchor_eq
+    tail = [
+        {"date": d, "cumulative_return_pct": round((e * rebase - 1.0) * 100.0, 6)}
+        for d, e in forward
+    ]
+    return forward[0][0], tail
+
+
+def _extended_curve(
+    backtest_run_id: int, snapshots: list[dict],
+) -> list[tuple[str, float]]:
+    """The strategy's full equity curve: the backtest daily curve with the
+    live snapshot tail spliced on (continuous cumulative scale). The single
+    source of truth shared by the run-history rollups (`_returns_from_backtest`)
+    and the detail view's live curve (`build_live_curve`). Empty when the run
+    has no stored curve."""
+    bt_pts = _load_backtest_pts(backtest_run_id)
+    if not bt_pts:
+        return []
+    snap_curve, _, _ = _walk_snapshot_curve(snapshots or [])
+    _, tail = _splice_snapshot_tail(bt_pts, snap_curve)
+    return bt_pts + [(p["date"], p["cumulative_return_pct"]) for p in tail]
+
+
+def _returns_from_backtest(
+    backtest_run_id: int,
+    inception_iso: str,
+    today: date,
+    snapshots: list[dict] | None = None,
+) -> dict | None:
+    """MTD / YTD / since-inception returns read off the strategy's full
+    equity curve (`_extended_curve`), anchored at the go-live date.
+
+    The backtest curve alone goes stale on the day it was saved; splicing
+    the live snapshot tail keeps MTD/YTD/since-inception + `as_of_date`
+    tracking the latest priced day.
+
+    - MTD  = from the start of the current calendar month
+    - YTD  = from the start of the current calendar year
+    - since-inception = from the go-live date (`inception_iso`)
+
+    MTD/YTD are calendar-anchored and independent of the go-live date; only
+    since-inception moves when the go-live date changes. Returns None when
+    the run has no curve."""
+    pts = _extended_curve(backtest_run_id, snapshots or [])
     if not pts:
         return None
-    pts.sort(key=lambda p: p[0])
     latest_date, latest_cum = pts[-1]
 
     def cum_at(date_iso: str) -> float | None:
@@ -199,23 +269,6 @@ def _returns_from_backtest(
         if a is None or b is None:
             return None
         return round(((1 + a / 100.0) / (1 + b / 100.0) - 1) * 100.0, 2)
-
-    # Splice the live open-period return onto the curve end when the latest
-    # snapshot is priced past the frozen backtest curve. `as_of_date` is the
-    # open period's start (the last rebalance), which is the curve point the
-    # period return compounds onto: cum(latest) = cum(period_start) × (1+ret).
-    # Anchors below still read from the backtest curve, so MTD/YTD telescope
-    # correctly (e.g. MTD = curve[month_start→period_start] × live[period]).
-    if live_tail:
-        lpd = str(live_tail.get("latest_price_date") or "")[:10]
-        per = live_tail.get("period_return_pct")
-        per_start = str(live_tail.get("as_of_date") or "")[:10]
-        if lpd and per is not None and per_start and lpd > latest_date:
-            base = cum_at(per_start)
-            if base is None:
-                base = latest_cum
-            latest_cum = ((1 + base / 100.0) * (1 + float(per) / 100.0) - 1) * 100.0
-            latest_date = lpd
 
     # Anchor cumulative levels; when an anchor predates the curve, fall back
     # to the curve's start (earliest data we have).
@@ -237,6 +290,29 @@ def _returns_from_backtest(
         "since_inception_pct": rel(latest_cum, inc_cum),
         "inception_date": inception_iso,
         "as_of_date": latest_date,
+    }
+
+
+def build_live_curve(backtest_run_id: int, snapshots: list[dict]) -> dict | None:
+    """The live-extension of a scheduled strategy's backtest curve, for the
+    detail view's monthly-returns heatmap + equity curve.
+
+    Splices the snapshot tail (`_splice_snapshot_tail`) onto the backtest
+    daily curve — same single source as the run-history rollups. Returns
+    ``{cutover_date, points, as_of_date}`` (the caller keeps backtest points
+    before `cutover_date` and appends `points`), or None when there's no
+    backtest curve / no live data fresher than the curve's end."""
+    bt_pts = _load_backtest_pts(backtest_run_id)
+    if not bt_pts:
+        return None
+    snap_curve, _, _ = _walk_snapshot_curve(snapshots or [])
+    cutover_date, tail = _splice_snapshot_tail(bt_pts, snap_curve)
+    if not cutover_date or not tail:
+        return None
+    return {
+        "cutover_date": cutover_date,
+        "points": tail,
+        "as_of_date": tail[-1]["date"],
     }
 
 
@@ -313,7 +389,7 @@ def _hydrate(rows: list[dict]) -> list[dict]:
                 try:
                     bt = _returns_from_backtest(
                         int(r["backtest_run_id"]), inception_date, today,
-                        live_tail=latest,
+                        snapshots=hist,
                     )
                 except Exception:
                     bt = None

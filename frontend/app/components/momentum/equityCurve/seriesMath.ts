@@ -181,8 +181,20 @@ export function seriesFromPrices(
 
 /** Find the [maxStart, minEnd] alignment window across every series and
  * compute per-series aligned points (rebased to 0% on windowStart),
- * stats, and top drawdowns. */
-export function alignSeries(resolvedSeries: ResolvedSeries[]): AlignedResult {
+ * stats, and top drawdowns.
+ *
+ * `activeDefinesEnd` lets the active strategy set the window's right edge
+ * instead of clamping to the earliest-ending series. Used by /schedule,
+ * where the strategy's curve is live-extended past the backtest horizon but
+ * the equal-weight universe baseline can't be (it would need every
+ * company's latest price — beyond the monthly API budget). Comparisons that
+ * end earlier just report null for the tail, so their lines stop while the
+ * strategy continues. Off by default — /backtest keeps the symmetric
+ * clamp-to-common-window behaviour. */
+export function alignSeries(
+  resolvedSeries: ResolvedSeries[],
+  activeDefinesEnd = false,
+): AlignedResult {
   if (resolvedSeries.length === 0) return { series: [], windowStart: null, windowEnd: null, allMonths: [] };
 
   let maxStart = '';
@@ -193,6 +205,10 @@ export function alignSeries(resolvedSeries: ResolvedSeries[]): AlignedResult {
     const last = s.months[s.months.length - 1];
     if (first > maxStart) maxStart = first;
     if (last < minEnd) minEnd = last;
+  }
+  if (activeDefinesEnd) {
+    const act = resolvedSeries.find((s) => s.kind === 'active' && s.months.length > 0);
+    if (act) minEnd = act.months[act.months.length - 1];
   }
   if (!maxStart || minEnd === '9999-99' || maxStart > minEnd) {
     return { series: [], windowStart: null, windowEnd: null, allMonths: [] };

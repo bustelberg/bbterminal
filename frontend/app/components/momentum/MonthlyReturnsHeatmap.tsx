@@ -33,11 +33,25 @@ const monthLabel = (ym: string) => {
 export default function MonthlyReturnsHeatmap({
   result,
   defaultCollapsed = false,
+  markerDate,
+  liveThrough,
 }: {
   result: BacktestResult;
   defaultCollapsed?: boolean;
+  /** Go-live date (YYYY-MM-DD). Months before it render dimmed (backtested
+   * context); the go-live month gets a red outline matching the equity
+   * curve's go-live marker. */
+  markerDate?: string;
+  /** When the curve was extended with live data, the latest priced day
+   * (YYYY-MM-DD) — surfaced in the caption so it's clear the grid is
+   * current rather than ending where the backtest was saved. */
+  liveThrough?: string;
 }) {
   const [selected, setSelected] = useState<string | null>(null); // "YYYY-MM" drill-down
+  // Go-live anchors: the month it falls in gets a marker outline; earlier
+  // months are dimmed as pre-go-live backtest context.
+  const goLiveMonth = markerDate ? markerDate.slice(0, 7) : null;
+  const goLiveYear = markerDate ? markerDate.slice(0, 4) : null;
 
   const { years, byKey, yearTotals, maxAbs, maxAbsYear, dailyByMonth, maxAbsDaily } = useMemo(() => {
     // Dedupe by date (keep the last cumulative value) — the daily curve repeats
@@ -119,30 +133,42 @@ export default function MonthlyReturnsHeatmap({
             </tr>
           </thead>
           <tbody>
-            {years.map((y) => (
+            {years.map((y) => {
+              const isPreGoLiveYear = goLiveYear != null && y < goLiveYear;
+              return (
               <tr key={y}>
-                <td className="px-2 py-1 font-mono text-fg-soft" style={{ border: '1px solid var(--color-card)' }}>{y}</td>
+                <td className="px-2 py-1 font-mono text-fg-soft" style={{ border: '1px solid var(--color-card)', ...(isPreGoLiveYear ? { opacity: 0.4 } : {}) }}>{y}</td>
                 {MONTHS.map((_, mi) => {
                   const key = `${y}-${String(mi + 1).padStart(2, '0')}`;
                   const v = byKey.get(key);
                   const isSel = selected === key;
+                  const isPreGoLive = goLiveMonth != null && key < goLiveMonth;
+                  const isGoLive = goLiveMonth != null && key === goLiveMonth;
+                  // Go-live outline (red, matching the equity-curve marker)
+                  // wins over the click-selection ring when both apply.
+                  const ring = isSel
+                    ? 'inset 0 0 0 2px var(--color-accent-500)'
+                    : isGoLive
+                      ? 'inset 0 0 0 2px var(--color-neg-400)'
+                      : undefined;
                   return (
                     <td
                       key={mi}
                       onClick={v == null ? undefined : () => setSelected(isSel ? null : key)}
-                      title={v == null ? undefined : `${monthLabel(key)}: ${fmt(v)}% — click for daily`}
+                      title={v == null ? undefined : `${monthLabel(key)}: ${fmt(v)}%${isGoLive ? ' — go-live month' : ''}${isPreGoLive ? ' — pre go-live (backtest)' : ''} — click for daily`}
                       className={`px-1.5 py-1 text-center font-mono ${v == null ? '' : 'cursor-pointer'}`}
-                      style={{ ...tint(v, maxAbs), ...(isSel ? { boxShadow: 'inset 0 0 0 2px var(--color-accent-500)' } : {}) }}
+                      style={{ ...tint(v, maxAbs), ...(ring ? { boxShadow: ring } : {}), ...(isPreGoLive ? { opacity: 0.4 } : {}) }}
                     >
                       {v == null ? '' : fmt(v)}
                     </td>
                   );
                 })}
-                <td className="px-2 py-1 text-right font-mono font-medium" style={tint(yearTotals.get(y), maxAbsYear)}>
+                <td className="px-2 py-1 text-right font-mono font-medium" style={{ ...tint(yearTotals.get(y), maxAbsYear), ...(isPreGoLiveYear ? { opacity: 0.4 } : {}) }}>
                   {(() => { const yv = yearTotals.get(y); return yv == null ? '' : fmt(yv); })()}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -182,6 +208,21 @@ export default function MonthlyReturnsHeatmap({
           </div>
         );
       })()}
+      {markerDate && (
+        <p className="text-[10px] text-fg-faint mt-2 px-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm" style={{ boxShadow: 'inset 0 0 0 2px var(--color-neg-400)' }} />
+            Go-live <span className="font-mono text-fg-subtle">{markerDate}</span>
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm" style={{ background: 'var(--color-pos-500)', opacity: 0.4 }} />
+            Dimmed = pre go-live (backtested context)
+          </span>
+          {liveThrough && (
+            <span>Live data through <span className="font-mono text-fg-subtle">{liveThrough}</span></span>
+          )}
+        </p>
+      )}
       <p className="text-[10px] text-fg-faint mt-2 px-2">
         Calendar-month % returns from the daily equity curve (resampled to month-end). Green = up, red = down; intensity scales with magnitude. The first month is measured from inception; &ldquo;Year&rdquo; compounds that year&apos;s months. <span className="text-fg-subtle">Click a month to drill into its daily returns.</span>
       </p>

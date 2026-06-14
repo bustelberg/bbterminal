@@ -56,15 +56,27 @@ function rebasedReturn(
  * strategy's live forward performance is shown separately in the run-
  * history table below this card in `ScheduledStrategyDetail`.
  */
+type LiveCurve = {
+  cutover_date: string;
+  points: { date: string; cumulative_return_pct: number }[];
+  as_of_date: string;
+};
+
 export default function SourceBacktestCard({
   runId,
   markerDate,
+  liveCurve,
 }: {
   runId: number;
   /** "Go-live" date (YYYY-MM-DD) for the red dashed marker on the equity
    * curve — the strategy's configured start_date (or its scheduled-at
    * date as a fallback). */
   markerDate?: string;
+  /** Live extension of the backtest daily curve (from /runs). When present,
+   * backtest daily points before `cutover_date` are kept and `points` are
+   * appended, so the equity curve + monthly-returns heatmap track the
+   * latest priced day rather than ending where the backtest was saved. */
+  liveCurve?: LiveCurve | null;
 }) {
   const [data, setData] = useState<LoadedBacktest | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -95,6 +107,28 @@ export default function SourceBacktestCard({
     return () => { cancelled = true; };
   }, [runId]);
 
+  // The saved result with ONLY its strategy daily curve extended by the live
+  // forward tail — everything the held portfolio drives (equity curve line,
+  // per-series summary stats, monthly-returns heatmap, daily-return
+  // distribution, the "Since go-live" callout below) then tracks the latest
+  // priced day. `monthly_records`, `universe_daily_records`, and `summary`
+  // are left frozen: the holdings table + sector timeline are backtest
+  // history, and the equal-weight universe baseline / alpha can't be extended
+  // (that needs every company's latest price, beyond the monthly API budget).
+  // The equity card lets the active line outrun the universe via
+  // `activeDefinesWindowEnd`. Backtest points before the cutover are kept;
+  // the live points (already on the same cumulative scale) are appended.
+  const liveExtendedResult = useMemo(() => {
+    const base = data?.result;
+    if (!base) return base ?? null;
+    const pts = liveCurve?.points ?? [];
+    if (pts.length === 0) return base;
+    const kept = (base.daily_records ?? []).filter(
+      (d) => d.date.slice(0, 10) < liveCurve!.cutover_date,
+    );
+    return { ...base, daily_records: [...kept, ...pts] };
+  }, [data, liveCurve]);
+
   // Rebuild the scoring config from the saved run's params so the holdings
   // table's category-score columns match /backtest. Empty maps are a safe
   // fallback — the columns still render from each holding's category_scores.
@@ -105,37 +139,54 @@ export default function SourceBacktestCard({
     category_weights: data?.config?.category_weights ?? {},
   }), [data]);
 
-  // Performance since the go-live date, derived from the backtest equity
-  // curve (rebased at go-live) rather than live snapshots — so it's
-  // available immediately from the saved backtest's most-recent data
-  // point. Prefers the daily curve; falls back to monthly. Includes the
-  // equal-weight universe + alpha when a universe curve is present.
+  // Performance since the go-live date. The strategy line uses the
+  // live-extended curve so it tracks the latest priced day; the equal-weight
+  // universe baseline comes from the frozen backtest (no live extension), so
+  // alpha is computed over the window the two share (through the backtest
+  // horizon) while the headline strategy return runs through the latest day.
   const sinceGoLive = useMemo(() => {
-    const r = data?.result;
+    const r = liveExtendedResult;
     if (!r || !markerDate) return null;
     const monthly = r.monthly_records ?? [];
     const daily = r.daily_records ?? [];
-    const uniDaily = r.universe_daily_records ?? [];
+    const uniDaily = data?.result?.universe_daily_records ?? [];
+    const frozenMonthly = data?.result?.monthly_records ?? [];
     const useDaily = daily.length > 0;
     const stratSeries = useDaily
       ? daily.map((d) => ({ date: d.date.slice(0, 10), cum: d.cumulative_return_pct }))
       : monthly.map((m) => ({ date: m.date.slice(0, 10), cum: m.cumulative_return_pct ?? 0 }));
     const uniSeries = useDaily && uniDaily.length > 0
       ? uniDaily.map((d) => ({ date: d.date.slice(0, 10), cum: d.cumulative_return_pct }))
-      : monthly
+      : frozenMonthly
           .map((m) => ({ date: m.date.slice(0, 10), cum: m.universe_cumulative_return_pct }))
           .filter((p): p is { date: string; cum: number } => p.cum != null);
     const strat = rebasedReturn(stratSeries, markerDate);
     if (!strat) return null;
     const uni = uniSeries.length > 0 ? rebasedReturn(uniSeries, markerDate) : null;
+    // Window-match alpha: re-measure the strategy through the universe's last
+    // day so we compare like-for-like rather than strat(→latest) − uni(→btEnd).
+    let alpha: number | null = null;
+    if (uni) {
+      const stratThroughBench = rebasedReturn(
+        stratSeries.filter((p) => p.date <= uni.to), markerDate,
+      );
+      alpha = stratThroughBench ? stratThroughBench.ret - uni.ret : null;
+    }
     return {
       strat: strat.ret,
       uni: uni?.ret ?? null,
-      alpha: uni ? strat.ret - uni.ret : null,
+      alpha,
       from: strat.from,
       to: strat.to,
+      // The benchmark's last day — shown when it lags the strategy's so the
+      // "vs universe / alpha" window is unambiguous.
+      benchTo: uni && uni.to !== strat.to ? uni.to : null,
     };
-  }, [data, markerDate]);
+  }, [data, liveExtendedResult, markerDate]);
+
+  // Latest priced day reflected in the live-extended views (for the heatmap
+  // caption); null when there's no live extension.
+  const liveThrough = (liveCurve?.points?.length ?? 0) > 0 ? liveCurve!.as_of_date : null;
 
   if (loading) {
     return (
@@ -176,6 +227,9 @@ export default function SourceBacktestCard({
                 <span className={`font-mono ${sinceGoLive.uni >= 0 ? 'text-pos-400/80' : 'text-neg-400/80'}`}>
                   {sinceGoLive.uni >= 0 ? '+' : ''}{sinceGoLive.uni.toFixed(2)}%
                 </span>
+                {sinceGoLive.benchTo && (
+                  <span className="text-fg-faint font-mono">(→ {sinceGoLive.benchTo})</span>
+                )}
               </div>
             )}
             {sinceGoLive.alpha != null && (
@@ -189,7 +243,7 @@ export default function SourceBacktestCard({
             <span className="text-[11px] text-fg-subtle font-mono ml-auto">{sinceGoLive.from} → {sinceGoLive.to}</span>
           </div>
           <p className="text-[10px] text-fg-faint mt-1.5">
-            Backtested return from the go-live date through the latest available data ({sinceGoLive.to}). Live pipeline performance, once it accrues, appears in the run history below.
+            Return from the go-live date through the latest priced day ({sinceGoLive.to}) — the held portfolio is marked to market by the price-update job past the backtest horizon{sinceGoLive.benchTo ? `; the universe baseline + alpha run through ${sinceGoLive.benchTo} (no live benchmark)` : ''}. Per-period live performance is in the run history below.
           </p>
         </div>
       )}
@@ -197,12 +251,14 @@ export default function SourceBacktestCard({
         Source backtest{data.name ? ` · ${data.name}` : ''}
       </div>
       <BacktestResultView
-        result={data.result}
+        result={liveExtendedResult ?? data.result}
         universe={data.result.universe ?? []}
         loadedRunId={runId}
         activeStrategyLabel={data.name ?? undefined}
         scoringConfig={scoringConfig}
         markerDate={markerDate}
+        liveThrough={liveThrough ?? undefined}
+        activeDefinesWindowEnd={liveThrough != null}
         defaultCollapsed
       />
     </div>

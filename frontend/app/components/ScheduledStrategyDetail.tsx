@@ -46,6 +46,17 @@ export type StrategyRunHistory = {
    * expansion. Null for strategies added manually via /schedule. */
   backtest_run_id: number | null;
   runs: RunHistoryEntry[];
+  /** Live extension of the source-backtest daily curve. The held
+   * portfolio's forward performance (kept current by the price-update job)
+   * grafted onto the frozen backtest curve so the monthly-returns + equity
+   * views track the latest priced day. Keep backtest daily points before
+   * `cutover_date`, then append `points` (same cumulative scale). Null when
+   * there's no source backtest or no live data yet. */
+  live_curve: {
+    cutover_date: string;
+    points: { date: string; cumulative_return_pct: number }[];
+    as_of_date: string;
+  } | null;
 };
 
 /** Per-strategy expanded view: strategy params + the source-backtest
@@ -193,7 +204,7 @@ export default function ScheduledStrategyDetail({
             {/* Source backtest — the variant's full equity curve, sector
                 timeline + per-month holdings, exactly as on /backtest, with
                 the red dashed go-live marker at the date above. */}
-            <SourceBacktestCard runId={data.backtest_run_id} markerDate={effectiveStart} />
+            <SourceBacktestCard runId={data.backtest_run_id} markerDate={effectiveStart} liveCurve={data.live_curve} />
           </>
         );
       })()}

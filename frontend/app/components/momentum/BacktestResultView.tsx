@@ -39,6 +39,14 @@ type Props = {
    * sets this so an expanded strategy stays compact; /backtest leaves it
    * false (cards expanded). */
   defaultCollapsed?: boolean;
+  /** Latest priced day the result's curve has been live-extended through
+   * (YYYY-MM-DD) — shown in the monthly-returns heatmap caption.
+   * /schedule's source-backtest detail supplies this; /backtest omits it. */
+  liveThrough?: string;
+  /** Forwarded to the equity curve so the live-extended strategy line
+   * defines the alignment window's right edge (the frozen universe baseline
+   * can't be extended). /schedule sets this. */
+  activeDefinesWindowEnd?: boolean;
 };
 
 /** The complete /backtest result view: the equity-curve card (log-scale
@@ -56,6 +64,8 @@ export default function BacktestResultView({
   savedRuns = [],
   markerDate,
   defaultCollapsed = false,
+  liveThrough,
+  activeDefinesWindowEnd = false,
 }: Props) {
   // Live company directory — the fallback exchange source. Saved backtests
   // often bundle an EMPTY `universe` payload (e.g. run 32), so without this
@@ -115,6 +125,7 @@ export default function BacktestResultView({
         activeStrategyLabel={activeStrategyLabel}
         markerDate={markerDate}
         defaultCollapsed={defaultCollapsed}
+        activeDefinesWindowEnd={activeDefinesWindowEnd}
       />
       <FeeWaterfallPanel result={result} defaultCollapsed={defaultCollapsed} />
       {/* Only renders when the regime filter was active (records carry a
@@ -122,7 +133,12 @@ export default function BacktestResultView({
       <MarketHealthCard result={result} defaultCollapsed={defaultCollapsed} />
       <SectorTimelineChart result={result} markerDate={markerDate} defaultCollapsed={defaultCollapsed} />
       <DailyReturnsHistograms result={result} defaultCollapsed={defaultCollapsed} />
-      <MonthlyReturnsHeatmap result={result} defaultCollapsed={defaultCollapsed} />
+      <MonthlyReturnsHeatmap
+        result={result}
+        markerDate={markerDate}
+        liveThrough={liveThrough}
+        defaultCollapsed={defaultCollapsed}
+      />
       <MonthlyHoldingsTable
         result={result}
         categories={categories}

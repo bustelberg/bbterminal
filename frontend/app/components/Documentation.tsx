@@ -337,6 +337,7 @@ type TocLink = { id: string; label: string };
 
 const TOC: TocLink[] = [
   { id: 'overview', label: 'Overview' },
+  { id: 'tiers', label: 'Access tiers' },
   { id: 'quickstart', label: 'Quick start (curl)' },
   { id: 'python-client', label: 'Python client' },
   { id: 'env-vars', label: 'Environment variables' },
@@ -365,7 +366,8 @@ export default function Documentation() {
       <div className="px-8 py-5 border-b border-neutral-800/40">
         <h1 className="text-xl font-semibold text-fg-strong">Documentation</h1>
         <p className="text-sm text-fg-subtle mt-1">
-          How to call the BBTerminal admin API from your own scripts. Same auth your IBKR rebalancer would use.
+          How to authenticate to the BBTerminal API from your own scripts and which endpoints your account can call.
+          Same flow the web app and the IBKR rebalancer use.
         </p>
         <div className="mt-3 inline-flex items-center gap-2 text-xs bg-card border border-neutral-800/40 rounded-lg px-3 py-1.5">
           <span className="text-fg-subtle">URLs in code blocks are filled in from</span>
@@ -394,19 +396,80 @@ export default function Documentation() {
 
           <Section id="overview" title="Overview">
             <p>
-              The <code className="text-warn-300">/api/admin/*</code> endpoints exist so external scripts (an IBKR rebalancer,
-              a monitoring cron, a CI smoke test) can pull data from BBTerminal without opening the web UI.
-              All admin endpoints require a Supabase JWT whose <code className="text-warn-300">app_metadata.role == &apos;admin&apos;</code>.
+              <strong>Every</strong> <code className="text-warn-300">/api/*</code> endpoint requires a Supabase JWT — there is no
+              unauthenticated read access. The auth flow is the same for every caller (the web app, an external script, the
+              IBKR rebalancer): you exchange your <strong>email + password</strong> for an
+              {' '}<code className="text-warn-300">access_token</code>, then pass it as
+              {' '}<code className="text-warn-300">Authorization: Bearer …</code> on each call.
             </p>
             <p>
-              You authenticate by exchanging your <strong>email + password</strong> for an <code className="text-warn-300">access_token</code> at
-              {' '}<code className="text-warn-300">$SUPABASE_URL/auth/v1/token?grant_type=password</code>, then pass it as
-              {' '}<code className="text-warn-300">Authorization: Bearer …</code> on each API call. Tokens last about 1&nbsp;hour;
-              after that you either re-authenticate or use the returned <code className="text-warn-300">refresh_token</code>.
+              Tokens are minted by Supabase Auth directly, not by this API — you POST to
+              {' '}<code className="text-warn-300">$SUPABASE_URL/auth/v1/token?grant_type=password</code> with the public
+              {' '}<code className="text-warn-300">anon</code> key as the <code className="text-warn-300">apikey</code> header.
+              Tokens last about 1&nbsp;hour; after that you either re-authenticate or use the returned
+              {' '}<code className="text-warn-300">refresh_token</code> (<code className="text-warn-300">grant_type=refresh_token</code>).
+            </p>
+            <p>
+              <strong>What you can call depends on your account&apos;s role</strong> — see <a href="#tiers" className="text-accent-400 hover:underline">Access tiers</a> below.
+              The token mechanism is identical regardless of role; only the set of allowed paths differs.
             </p>
             <p>
               For one-off probing, the <a href="/api" className="text-accent-400 hover:underline">/api page</a> in this app does
               all of that for you with Try buttons and copy-as-curl. For an automated script, use the Python client below.
+            </p>
+          </Section>
+
+          <Section id="tiers" title="Access tiers">
+            <p>
+              The API gate (<code className="text-warn-300">enforce_api_auth</code>) checks your JWT on every request and
+              authorizes by role. A missing/invalid token is <code className="text-warn-300">401</code>; an authenticated
+              user reaching beyond their tier is <code className="text-warn-300">403</code>.
+            </p>
+            <div className="overflow-auto border border-neutral-800/40 rounded-lg">
+              <table className="w-full text-xs">
+                <thead className="text-fg-subtle text-[10px] uppercase">
+                  <tr className="border-b border-neutral-800/40 bg-card">
+                    <th className="text-left px-3 py-2 font-medium">Tier</th>
+                    <th className="text-left px-3 py-2 font-medium">Token</th>
+                    <th className="text-left px-3 py-2 font-medium">Can call</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b border-neutral-800/20">
+                    <td className="px-3 py-2 font-mono text-fg">anonymous</td>
+                    <td className="px-3 py-2 text-fg-muted">none</td>
+                    <td className="px-3 py-2 text-fg-muted">
+                      Only the public tier: <code className="text-warn-300">/api/health</code>, <code className="text-warn-300">/api/hello</code>,
+                      and the <code className="text-warn-300">*/cron</code> endpoints (which gate on <code className="text-warn-300">X-Cron-Secret</code>).
+                      Everything else → <code className="text-warn-300">401</code>.
+                    </td>
+                  </tr>
+                  <tr className="border-b border-neutral-800/20">
+                    <td className="px-3 py-2 font-mono text-fg">user</td>
+                    <td className="px-3 py-2 text-fg-muted">any valid JWT</td>
+                    <td className="px-3 py-2 text-fg-muted">
+                      Reads under <code className="text-warn-300">/api/companies</code>, <code className="text-warn-300">/api/earnings</code>,
+                      {' '}<code className="text-warn-300">/api/airs</code>, <code className="text-warn-300">/api/usage</code>; plus the writes
+                      {' '}<code className="text-warn-300">POST /api/portfolios/parse</code> and <code className="text-warn-300">POST /api/earnings/&#123;id&#125;/refresh</code>.
+                      Anything else → <code className="text-warn-300">403</code>.
+                    </td>
+                  </tr>
+                  <tr className="border-b border-neutral-800/20">
+                    <td className="px-3 py-2 font-mono text-fg">admin</td>
+                    <td className="px-3 py-2 text-fg-muted"><code className="text-warn-300">app_metadata.role == &apos;admin&apos;</code></td>
+                    <td className="px-3 py-2 text-fg-muted">
+                      Every <code className="text-warn-300">/api/*</code> endpoint, including the <code className="text-warn-300">/api/admin/*</code> surface
+                      documented below.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-fg-subtle">
+              <code className="text-warn-300">/api/auth/*</code> is self-authenticating — those endpoints verify your token
+              themselves (e.g. <code className="text-warn-300">GET /api/auth/me</code> returns your id, email, and role; use it to
+              check which tier you&apos;re in). SSE endpoints need the token as the <code className="text-warn-300">Authorization</code> header,
+              so a browser <code className="text-warn-300">EventSource</code> won&apos;t work — read the stream with an HTTP client that sets headers.
             </p>
           </Section>
 

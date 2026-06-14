@@ -32,7 +32,7 @@ from deps import fetch_in_chunks, supabase
 from momentum.schedule import _expected_latest_trading_day, _initial_next_due_at
 
 from ._schedule_backfill import reset_stale_backfills  # noqa: F401 — re-exported for main.py
-from ._schedule_hydration import _hydrate
+from ._schedule_hydration import _hydrate, build_live_curve
 from ._schedule_snapshots import _seed_snapshot_from_backtest
 
 _log = logging.getLogger(__name__)
@@ -586,6 +586,28 @@ async def list_strategy_runs(strategy_id: int, limit: int = 50):
             for s in snapshots
         ]
 
+        # Live extension of the source-backtest daily curve — grafts the
+        # held portfolio's forward performance (the price-update job marks
+        # the snapshots to market through the latest priced day) onto the
+        # frozen backtest curve so the detail view's monthly-returns +
+        # equity curve track the latest priced day instead of ending where
+        # the backtest was saved. Same snapshot source the run-history
+        # rollups use. Best-effort: None when there's no source backtest or
+        # no live data fresher than the curve's end.
+        live_curve = None
+        if sched.get("backtest_run_id"):
+            curve_hist = (
+                supabase.table("current_picks_snapshot")
+                .select("kind, as_of_date, latest_price_date, period_return_pct, created_at")
+                .eq("scheduled_strategy_id", strategy_id)
+                .order("latest_price_date", desc=False)
+                .order("created_at", desc=False)
+                .execute()
+            )
+            live_curve = build_live_curve(
+                int(sched["backtest_run_id"]), curve_hist.data or []
+            )
+
         return {
             "id": sched["id"],
             "name": sched.get("name") or f"Strategy #{sched['id']}",
@@ -612,6 +634,10 @@ async def list_strategy_runs(strategy_id: int, limit: int = 50):
                 "finished_at": sched.get("backfill_finished_at"),
             },
             "runs": history,
+            # {cutover_date, points:[{date,cumulative_return_pct}], as_of_date}
+            # or None. Frontend keeps backtest daily points before
+            # cutover_date and appends `points` (same cumulative scale).
+            "live_curve": live_curve,
         }
 
     return await asyncio.to_thread(_query)
