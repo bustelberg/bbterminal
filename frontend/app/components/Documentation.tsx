@@ -226,7 +226,7 @@ class BBTerminalClient:
 
     def schedule(self, strategy_id: int) -> dict:
         """One strategy's CURRENT holdings — order-ready. Each holding
-        carries ticker, exchange, country, currency, company_name, side,
+        carries ticker, exchange, country, currency, isin, company_name, side,
         target_weight, score, entry_price_local, entry_price_eur. Also
         returns as_of_date / latest_price_date — gate on those (or
         health()) so you never trade on stale data."""
@@ -591,7 +591,7 @@ export default function Documentation() {
                 <tbody>
                   {[
                     ['GET', '/api/admin/schedules', 'bb.schedules()', 'List strategies + each one’s next rebalance date (lightweight).'],
-                    ['GET', '/api/admin/schedules/{id}', 'bb.schedule(id)', 'One strategy’s current holdings — order-ready (ticker, exchange, country, currency, weight, side) + as_of_date.'],
+                    ['GET', '/api/admin/schedules/{id}', 'bb.schedule(id)', 'One strategy’s current holdings — order-ready (ticker, exchange, country, currency, isin, weight, side) + as_of_date.'],
                     ['GET', '/api/admin/health', 'bb.health()', 'Composite go/no-go. Gate trades on is_healthy_strict.'],
                     ['GET', '/api/auth/me', 'bb.whoami()', 'Caller identity + role. Bail fast if role != "admin".'],
                   ].map(([method, path, py, desc]) => (

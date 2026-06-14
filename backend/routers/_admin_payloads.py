@@ -23,6 +23,7 @@ def _build_portfolio_payload(snapshot_row: dict) -> dict:
         company_id        DB id, useful for cross-referencing
         company_name      display name
         sector            GICS sector (for verification)
+        isin              ISO 6166 security identifier (null if unknown)
         entry_price_local most recent close in the listing currency
         entry_price_eur   …same converted to EUR
         score             the momentum score at selection time
@@ -41,11 +42,12 @@ def _build_portfolio_payload(snapshot_row: dict) -> dict:
     cids = [int(h["company_id"]) for h in raw_holdings if h.get("company_id") is not None]
     exchange_by_cid: dict[int, str] = {}
     country_by_cid: dict[int, str | None] = {}
+    isin_by_cid: dict[int, str | None] = {}
     for row in fetch_in_chunks(
         cids,
         lambda chunk: supabase.table("company")
         .select(
-            "company_id, gurufocus_exchange:gurufocus_exchange("
+            "company_id, isin, gurufocus_exchange:gurufocus_exchange("
             "exchange_code, country:country(country_name))"
         )
         .in_("company_id", chunk)
@@ -55,6 +57,7 @@ def _build_portfolio_payload(snapshot_row: dict) -> dict:
         cid = int(row["company_id"])
         exchange_by_cid[cid] = exch_info.get("exchange_code") or ""
         country_by_cid[cid] = (exch_info.get("country") or {}).get("country_name")
+        isin_by_cid[cid] = row.get("isin")
 
     total_weight = 0.0
     holdings_out: list[dict] = []
@@ -68,6 +71,7 @@ def _build_portfolio_payload(snapshot_row: dict) -> dict:
             "exchange": exchange_by_cid.get(cid, "") if cid is not None else "",
             "country": country_by_cid.get(cid) if cid is not None else None,
             "currency": h.get("currency"),
+            "isin": isin_by_cid.get(cid) if cid is not None else None,
             "side": h.get("side") or "long",
             "target_weight": round(weight, 6),
             "company_name": h.get("company_name"),

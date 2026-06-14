@@ -21,7 +21,7 @@ Endpoints — the IBKR buy flow is just three:
     GET /api/admin/schedules         — list strategies + each one's next rebalance date
                                         (lightweight; no holdings)
     GET /api/admin/schedules/{id}    — one strategy's CURRENT holdings (order-ready:
-                                        ticker/exchange/country/currency/company_name/
+                                        ticker/exchange/country/currency/isin/company_name/
                                         weight/side/prices) + as_of_date
     GET /api/admin/health            — composite go/no-go; gate trades on is_healthy_strict
 
@@ -435,7 +435,7 @@ async def get_schedule(strategy_id: int, authorization: str = Header(...)):
     an empty `holdings` list. 404 when the strategy doesn't exist.
 
     Each holding carries everything needed to place an order:
-        company_id, ticker, exchange, country, currency, company_name,
+        company_id, ticker, exchange, country, currency, isin, company_name,
         side, target_weight, score, entry_price_local, entry_price_eur
 
     Response: `{strategy_id, name, enabled, frequency, next_rebalance_at,

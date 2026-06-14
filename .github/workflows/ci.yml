@@ -541,6 +541,7 @@ jobs:
             /api/acwi/announcement-detail      # needs ?url=
             /api/index-universe/tickers        # needs ?month=
             /api/longequity/companies          # needs ?target_date=
+            /api/earnings/portfolios/attribution  # needs ?a=&b=
             # SSE that fans out ~2k detail lookups to GuruFocus (needs an
             # API key; slow/flaky without one).
             /api/acwi/fetch-all-details
