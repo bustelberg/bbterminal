@@ -15,10 +15,16 @@
  * Typecheck and openapi.json drift are NOT here — they're in
  * `.husky/pre-commit` because they need to see the whole project,
  * not a slice of staged files.
+ *
+ * `--cache` makes eslint skip files whose contents haven't changed
+ * since the last run — the cold ESLint+TS-parser startup still costs a
+ * few seconds, but per-file linting is near-instant on repeat commits.
+ * The cache lives at `frontend/.eslintcache` (cwd is set to the
+ * sub-package by the run helper) and is gitignored.
  */
 module.exports = {
   'frontend/**/*.{ts,tsx,js,jsx,mjs,cjs}':
-    'node scripts/lint-staged-run.js frontend npx eslint --fix --no-warn-ignored --',
+    'node scripts/lint-staged-run.js frontend npx eslint --fix --cache --no-warn-ignored --',
   'backend/**/*.py':
     'node scripts/lint-staged-run.js backend uvx ruff check --fix --',
 };
