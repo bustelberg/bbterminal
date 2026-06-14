@@ -115,6 +115,8 @@ async def list_held_companies():
             "gurufocus_url": str|None,            # canonical GuruFocus summary link
             "latest_close_price_date": str|None,  # max(target_date) in metric_data for this company
             "latest_close_price": float|None,     # close at that date, in `currency` (unconverted)
+            "fx_rate_per_eur": float|None,        # latest {currency}/EUR rate (same source as /fx-rates; 1.0 for EUR)
+            "latest_close_price_eur": float|None, # latest_close_price / fx_rate_per_eur
             "held_by": [{
               "strategy_id", "strategy_name",
               "snapshot_id", "snapshot_kind",  # "rebalance"|"price_update"
@@ -292,6 +294,35 @@ async def list_held_companies():
         for cid, bucket in pooled.items():
             bucket["latest_close_price_date"] = latest_close_by_cid.get(cid)
             bucket["latest_close_price"] = latest_price_by_cid.get(cid)
+
+        # Step 5b — FX to EUR. Reuses `fetch_latest_from_db` — the SAME
+        # latest-rate-per-currency lookup that backs the /fx-rates page's
+        # `/api/fx/latest`, so any currency the FX page shows resolves here
+        # too (units of currency per 1 EUR). A per-price-date window would
+        # leave cells blank whenever ECB's latest published rate lags the
+        # close date; the latest stored rate is the correct forward-filled
+        # value for a marked-to-market holding anyway. EUR passes through at
+        # 1.0; the EUR price is `local / rate`. Best-effort — null on error.
+        latest_fx_by_ccy: dict[str, float] = {}
+        try:
+            from fx_rates import fetch_latest_from_db  # noqa: PLC0415
+            for row in fetch_latest_from_db(supabase):
+                code = row.get("currency")
+                rate = row.get("rate")
+                if code and rate:
+                    latest_fx_by_ccy[code] = float(rate)
+        except Exception:
+            latest_fx_by_ccy = {}
+        for bucket in pooled.values():
+            cur = bucket.get("currency")
+            price = bucket.get("latest_close_price")
+            rate = 1.0 if cur == "EUR" else (latest_fx_by_ccy.get(cur) if cur else None)
+            bucket["fx_rate_per_eur"] = rate
+            bucket["latest_close_price_eur"] = (
+                round(price / rate, 4)
+                if rate and price is not None and rate > 0
+                else None
+            )
 
         # Compute the freshness summary against the EXPECTED latest trading
         # day — NOT the held set's own max (which would call everything

@@ -1,14 +1,14 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  CartesianGrid, Legend, ReferenceArea, ReferenceLine,
+  CartesianGrid, Legend, ReferenceArea, ReferenceLine, Brush,
 } from 'recharts';
 import CollapsibleCard from '../CollapsibleCard';
 import { tooltipStyle } from '../utils';
 import { chartTheme } from '../../../../lib/chartTheme';
-import type { AlignedResult } from './seriesMath';
+import { computeChartYDomain, type AlignedResult } from './seriesMath';
 
 /** Cumulative-return line chart with log-scale toggle + drawdown
  * overlays for the active strategy's top 3 drawdowns. One line per
@@ -53,6 +53,26 @@ export default function EquityChart({
     return typeof last === 'string' ? last : null;
   }, [markerDate, displayChartData]);
 
+  // Timeframe slider (recharts <Brush>): selected [startIndex, endIndex] into
+  // displayChartData. null = full range. Reset when the dataset's length
+  // changes (new run / strategy loaded) so a stale zoom doesn't carry over.
+  const [brush, setBrush] = useState<{ startIndex: number; endIndex: number } | null>(null);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setBrush(null);
+  }, [displayChartData.length]);
+
+  // Y-axis domain: full-range when not zoomed, otherwise recomputed from just
+  // the visible slice so a short window fills the vertical space instead of
+  // reading flat against the whole curve's scale.
+  const yDomain = useMemo<[number, number]>(() => {
+    if (!brush || displayChartData.length === 0) return chartYDomain;
+    const s = Math.max(0, Math.min(brush.startIndex, displayChartData.length - 1));
+    const e = Math.max(s, Math.min(brush.endIndex, displayChartData.length - 1));
+    if (s === 0 && e === displayChartData.length - 1) return chartYDomain;
+    return computeChartYDomain(displayChartData.slice(s, e + 1), alignedSeries);
+  }, [brush, chartYDomain, displayChartData, alignedSeries]);
+
   return (
     <CollapsibleCard
       title={`Equity Curve (${logScale ? 'Log' : 'Cumulative'} Return %)`}
@@ -72,7 +92,7 @@ export default function EquityChart({
       }
       bodyClassName="px-5 pb-5"
     >
-      <ResponsiveContainer width="100%" height={350}>
+      <ResponsiveContainer width="100%" height={380}>
         <LineChart data={displayChartData}>
           <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
           <XAxis
@@ -85,7 +105,8 @@ export default function EquityChart({
             tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
             tickLine={false}
             tickFormatter={(v: number) => `${v}%`}
-            domain={chartYDomain}
+            domain={yDomain}
+            allowDataOverflow
           />
           <Tooltip
             {...tooltipStyle}
@@ -147,6 +168,22 @@ export default function EquityChart({
               label={{ value: 'Go-live', position: 'insideTopRight', fill: chartTheme.goLiveLabel, fontSize: 10 }}
             />
           )}
+          {/* Timeframe slider — drag the handles to zoom into a date range;
+              the Y-axis rescales to the visible window. Drag fully open to
+              reset to the whole curve. */}
+          <Brush
+            dataKey="date"
+            height={24}
+            travellerWidth={8}
+            stroke={chartTheme.axisTick}
+            fill={chartTheme.grid}
+            tickFormatter={(d: string) => (typeof d === 'string' ? d.slice(0, 7) : '')}
+            onChange={(r: { startIndex?: number; endIndex?: number }) => {
+              if (typeof r.startIndex === 'number' && typeof r.endIndex === 'number') {
+                setBrush({ startIndex: r.startIndex, endIndex: r.endIndex });
+              }
+            }}
+          />
         </LineChart>
       </ResponsiveContainer>
     </CollapsibleCard>

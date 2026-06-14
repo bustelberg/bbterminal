@@ -253,6 +253,17 @@ function PriceUpdateSection({
           ) : (
             <div className="max-h-80 overflow-auto rounded-lg border border-neutral-800/40">
               <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-card z-10">
+                  <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+                    <th className="px-3 py-1.5 text-left font-medium">Ticker</th>
+                    <th className="px-3 py-1.5 text-left font-medium">Company</th>
+                    <th className="px-3 py-1.5 text-left font-medium">Sector</th>
+                    <th className="px-3 py-1.5 text-right font-medium">Price</th>
+                    <th className="px-3 py-1.5 text-right font-medium" title="Listing currency per 1 EUR — latest stored rate (same source as the FX page)">FX /€</th>
+                    <th className="px-3 py-1.5 text-right font-medium" title="Close converted to EUR (local ÷ FX rate)">Price €</th>
+                    <th className="px-3 py-1.5 text-right font-medium">Date</th>
+                  </tr>
+                </thead>
                 <tbody className="divide-y divide-neutral-800/20">
                   {held.companies.map((c) => (
                     <HeldRow key={c.company_id} c={c} expected={fresh?.expected_close_date ?? null} />
@@ -332,6 +343,20 @@ function HeldRow({ c, expected }: { c: HeldCompany; expected: string | null }) {
   const priceLabel = price == null
     ? '—'
     : `${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${c.currency ? ` ${c.currency}` : ''}`;
+  // FX rate as of the price date: {ccy}/EUR (units per 1 EUR). Decimal
+  // precision scales with magnitude (CHF ~0.95 vs JPY ~170) like /fx-rates.
+  const fx = c.fx_rate_per_eur;
+  const fxLabel = fx == null
+    ? '—'
+    : fx.toLocaleString(undefined, {
+        minimumFractionDigits: fx < 10 ? 4 : fx < 1000 ? 2 : 0,
+        maximumFractionDigits: fx < 10 ? 4 : fx < 1000 ? 2 : 0,
+      });
+  // Close converted to EUR (local ÷ rate).
+  const eur = c.latest_close_price_eur;
+  const eurLabel = eur == null
+    ? '—'
+    : `€${eur.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   return (
     <tr className="hover:bg-overlay/[0.02]">
       <td className="px-3 py-1.5 font-mono whitespace-nowrap">
@@ -352,6 +377,8 @@ function HeldRow({ c, expected }: { c: HeldCompany; expected: string | null }) {
       <td className="px-3 py-1.5 text-fg-soft truncate max-w-[240px]">{c.company_name ?? '—'}</td>
       <td className="px-3 py-1.5 text-fg-subtle whitespace-nowrap">{c.sector ?? '—'}</td>
       <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap text-fg">{priceLabel}</td>
+      <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap text-fg-subtle">{fxLabel}</td>
+      <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap text-fg">{eurLabel}</td>
       <td className={`px-3 py-1.5 text-right font-mono whitespace-nowrap ${tone}`}>{d ?? 'none'}</td>
     </tr>
   );

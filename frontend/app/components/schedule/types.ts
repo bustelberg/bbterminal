@@ -168,6 +168,12 @@ export type HeldCompany = {
   latest_close_price_date: string | null;
   /** Latest close in `currency`, unconverted. Null when no price data. */
   latest_close_price: number | null;
+  /** Latest stored {currency}/EUR rate (units of `currency` per 1 EUR) —
+   * same source as the /fx-rates page; 1.0 for EUR, null when unavailable. */
+  fx_rate_per_eur: number | null;
+  /** `latest_close_price / fx_rate_per_eur` — the close in EUR. Null when
+   * the price or FX rate is unavailable. */
+  latest_close_price_eur: number | null;
   held_by: Array<{
     strategy_id: number;
     strategy_name: string;
