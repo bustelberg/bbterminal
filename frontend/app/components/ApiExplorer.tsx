@@ -80,6 +80,8 @@ const MANUAL_OVERRIDES: Record<string, Partial<Endpoint> & { hide?: boolean }> =
 const VISIBLE_ENDPOINTS = new Set<string>([
   'GET /api/admin/schedules',
   'GET /api/admin/schedules/{strategy_id}',
+  'GET /api/admin/universes',
+  'GET /api/admin/universes/{universe_id}',
   'GET /api/admin/health',
 ]);
 

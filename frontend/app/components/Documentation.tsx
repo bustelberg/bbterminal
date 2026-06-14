@@ -236,6 +236,21 @@ class BBTerminalClient:
         """Composite go/no-go. Gate trades on is_healthy_strict."""
         return self._request("GET", "/api/admin/health")
 
+    def universes(self) -> list[dict]:
+        """List every universe — id, label, kind (template / frozen /
+        derived / index), and month range. Pick a universe_id to pass to
+        universe()."""
+        return self._request("GET", "/api/admin/universes")["universes"]
+
+    def universe(self, universe_id: int, month: str | None = None) -> dict:
+        """One universe's full membership for a single month (default the
+        latest; pass month='YYYY-MM' for a historical snapshot). Each member
+        carries the same descriptive attributes as a holding — ticker,
+        exchange, country, currency, isin, company_name, sector — plus the
+        latest close (native + EUR). No position fields (weight/side/score)."""
+        params = {"month": month} if month else None
+        return self._request("GET", f"/api/admin/universes/{universe_id}", params=params)
+
     # ─── Factory ─────────────────────────────────────────────────
 
     @classmethod
@@ -592,6 +607,8 @@ export default function Documentation() {
                   {[
                     ['GET', '/api/admin/schedules', 'bb.schedules()', 'List strategies + each one’s next rebalance date (lightweight).'],
                     ['GET', '/api/admin/schedules/{id}', 'bb.schedule(id)', 'One strategy’s current holdings — order-ready (ticker, exchange, country, currency, isin, weight, side) + as_of_date.'],
+                    ['GET', '/api/admin/universes', 'bb.universes()', 'List every universe + its id / kind / month range. Pick an id for the membership call.'],
+                    ['GET', '/api/admin/universes/{id}', 'bb.universe(id)', 'Full membership for a month (default latest; ?month=YYYY-MM) — same per-company fields as holdings (ticker, exchange, country, currency, isin, sector) + latest close (native + EUR).'],
                     ['GET', '/api/admin/health', 'bb.health()', 'Composite go/no-go. Gate trades on is_healthy_strict.'],
                     ['GET', '/api/auth/me', 'bb.whoami()', 'Caller identity + role. Bail fast if role != "admin".'],
                   ].map(([method, path, py, desc]) => (

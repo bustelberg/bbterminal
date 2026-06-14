@@ -2014,7 +2014,7 @@
     },
     "/api/admin/schedules/{strategy_id}": {
       "get": {
-        "description": "One scheduled strategy's CURRENT holdings \u2014 the order-ready call your\nIBKR buyer makes. Admin only.\n\nHoldings come from the strategy's most recent `current_picks_snapshot`;\n`as_of_date` is the date they were selected and `latest_price_date` the\nmost recent close priced into them \u2014 gate on these (or `/api/admin/health`)\nso you never trade on stale data. A strategy with no snapshot yet returns\nan empty `holdings` list. 404 when the strategy doesn't exist.\n\nEach holding carries everything needed to place an order:\n    company_id, ticker, exchange, country, currency, company_name,\n    side, target_weight, score, entry_price_local, entry_price_eur\n\nResponse: `{strategy_id, name, enabled, frequency, next_rebalance_at,\nlast_run_at, as_of_date, latest_price_date, holdings_count, holdings:[\u2026]}`.",
+        "description": "One scheduled strategy's CURRENT holdings \u2014 the order-ready call your\nIBKR buyer makes. Admin only.\n\nHoldings come from the strategy's most recent `current_picks_snapshot`;\n`as_of_date` is the date they were selected and `latest_price_date` the\nmost recent close priced into them \u2014 gate on these (or `/api/admin/health`)\nso you never trade on stale data. A strategy with no snapshot yet returns\nan empty `holdings` list. 404 when the strategy doesn't exist.\n\nEach holding carries everything needed to place an order:\n    company_id, ticker, exchange, country, currency, isin, company_name,\n    side, target_weight, score, entry_price_local, entry_price_eur\n\nResponse: `{strategy_id, name, enabled, frequency, next_rebalance_at,\nlast_run_at, as_of_date, latest_price_date, holdings_count, holdings:[\u2026]}`.",
         "operationId": "get_schedule_api_admin_schedules__strategy_id__get",
         "parameters": [
           {
@@ -2057,6 +2057,113 @@
           }
         },
         "summary": "Get Schedule",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/universes": {
+      "get": {
+        "description": "List every universe \u2014 the discovery call for the membership endpoint\nbelow. Admin only.\n\nCovers all universe kinds: template-managed canonicals (ACWI, LEONTEQ,\n\u2026, `template_key` set), frozen snapshots (`frozen_at` set), criteria-\nderived universes (`parent_universe_id` set), and imported index\nuniverses (all three null). Month range + counts come from the\n`universe_stats` materialized view when available (a refreshed-on-\npipeline hint; may lag slightly) \u2014 `null` when it hasn't been\npopulated. Pick a `universe_id` and pass it to\n`GET /api/admin/universes/{id}`.\n\nResponse: `{count, universes:[{universe_id, label, description, kind,\ntemplate_key, frozen_at, parent_universe_id, created_at,\nlast_refreshed_at, start_month, end_month, month_count,\nunique_tickers}]}`.",
+        "operationId": "list_universes_api_admin_universes_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Universes",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/universes/{universe_id}": {
+      "get": {
+        "description": "Full membership of one universe for a single month, each member\nenriched with the same per-company attributes the holdings endpoint\nreturns. Admin only.\n\nBy default returns the universe's LATEST month; pass `?month=YYYY-MM`\nfor a historical snapshot (a universe carries one membership set per\nmonth). 404 when the universe doesn't exist; empty `members` when the\nuniverse (or the requested month) has no membership.\n\nEach member carries:\n    company_id, ticker, exchange, country, currency, isin,\n    company_name, sector, industry,\n    latest_close_local, latest_close_eur, latest_close_date,\n    fx_rate_per_eur\n\nSame descriptive fields as a scheduled strategy's holdings; the\nposition-specific fields (side / target_weight / score / entry_date)\ndon't apply to a universe member, and the holding's entry price becomes\nthe latest close (native + EUR).\n\nResponse: `{universe_id, label, template_key, frozen_at, target_month,\nmember_count, members:[\u2026]}`.",
+        "operationId": "get_universe_api_admin_universes__universe_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "universe_id",
+            "required": true,
+            "schema": {
+              "title": "Universe Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "month",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Month"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Universe",
         "tags": [
           "admin"
         ]

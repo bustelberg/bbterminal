@@ -103,6 +103,128 @@ def _build_portfolio_payload(snapshot_row: dict) -> dict:
     }
 
 
+def _enrich_universe_members(member_rows: list[dict]) -> list[dict]:
+    """Turn `universe_membership` rows into the same per-company shape the
+    admin holdings endpoint returns — so a universe member reads like a
+    portfolio holding minus the position-specific fields.
+
+    Each member row carries `company_id`, `universe_ticker`, `sector`,
+    `industry`. We resolve the descriptive attributes from `company`
+    (joined to `gurufocus_exchange` → `country`) exactly like
+    `_build_portfolio_payload`, attach the latest close (native + EUR via
+    the same `fetch_latest_from_db` FX source the /fx-rates page uses), and
+    emit:
+
+        company_id, ticker, exchange, country, currency, isin,
+        company_name, sector, industry,
+        latest_close_local, latest_close_eur, latest_close_date,
+        fx_rate_per_eur
+
+    The portfolio-only fields (`side`, `target_weight`, `score`,
+    `entry_date`) are omitted — a universe member isn't a position — and
+    the holding's `entry_price_*` becomes `latest_close_*` (the current
+    close, which is what a fresh pick's entry price would be). Sorted by
+    (sector, ticker) for stable output.
+    """
+    cids = [int(m["company_id"]) for m in member_rows if m.get("company_id") is not None]
+    if not cids:
+        return []
+
+    # Descriptive attributes from the company table — same join as
+    # `_build_portfolio_payload`, plus currency + isin.
+    comp: dict[int, dict] = {}
+    for row in fetch_in_chunks(
+        cids,
+        lambda chunk: supabase.table("company")
+        .select(
+            "company_id, company_name, gurufocus_ticker, isin, "
+            "gurufocus_exchange:gurufocus_exchange("
+            "exchange_code, currency_code, country:country(country_name))"
+        )
+        .in_("company_id", chunk)
+        .execute(),
+    ):
+        gfx = row.get("gurufocus_exchange") or {}
+        comp[int(row["company_id"])] = {
+            "company_name": row.get("company_name"),
+            "ticker": row.get("gurufocus_ticker"),
+            "isin": row.get("isin"),
+            "exchange": gfx.get("exchange_code") or "",
+            "currency": gfx.get("currency_code"),
+            "country": (gfx.get("country") or {}).get("country_name"),
+        }
+
+    # Latest native-currency close per company (fast COPY path; per-company
+    # PostgREST fallback when SUPABASE_DB_URL is unset).
+    latest_close: dict[int, dict] = {}
+    try:
+        from momentum.data._pg import load_latest_close_prices_via_copy  # noqa: PLC0415
+        fast = load_latest_close_prices_via_copy(cids)
+        if fast is not None:
+            latest_close = fast
+        else:
+            for cid in cids:
+                r = (
+                    supabase.table("metric_data")
+                    .select("target_date, numeric_value")
+                    .eq("metric_code", "close_price")
+                    .eq("company_id", cid)
+                    .order("target_date", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if r.data:
+                    val = r.data[0].get("numeric_value")
+                    latest_close[cid] = {
+                        "date": r.data[0]["target_date"],
+                        "price": float(val) if val is not None else None,
+                    }
+    except Exception:
+        latest_close = {}
+
+    # Latest {ccy}/EUR rate per currency — same source as the /fx-rates page.
+    fx: dict[str, float] = {}
+    try:
+        from fx_rates import fetch_latest_from_db  # noqa: PLC0415
+        for r in fetch_latest_from_db(supabase):
+            code, rate = r.get("currency"), r.get("rate")
+            if code and rate:
+                fx[code] = float(rate)
+    except Exception:
+        fx = {}
+
+    out: list[dict] = []
+    for m in member_rows:
+        cid = int(m["company_id"]) if m.get("company_id") is not None else None
+        c = comp.get(cid, {}) if cid is not None else {}
+        cur = c.get("currency")
+        lc = latest_close.get(cid, {}) if cid is not None else {}
+        local = lc.get("price")
+        rate = 1.0 if cur == "EUR" else (fx.get(cur) if cur else None)
+        eur = (
+            round(local / rate, 4)
+            if rate and local is not None and rate > 0
+            else None
+        )
+        out.append({
+            "company_id": cid,
+            "ticker": c.get("ticker") or m.get("universe_ticker"),
+            "exchange": c.get("exchange", ""),
+            "country": c.get("country"),
+            "currency": cur,
+            "isin": c.get("isin"),
+            "company_name": c.get("company_name"),
+            "sector": m.get("sector"),
+            "industry": m.get("industry"),
+            "latest_close_local": local,
+            "latest_close_eur": eur,
+            "latest_close_date": lc.get("date"),
+            "fx_rate_per_eur": rate,
+        })
+    out.sort(key=lambda x: ((x.get("sector") or "~"), (x.get("ticker") or "").upper()))
+    return out
+
+
 def _fetch_latest_snapshots_for(strategy_ids: list[int]) -> dict[int, dict]:
     """For each strategy id, return its most-recent snapshot row (or omit
     when none exists). Batches in IN_CHUNK_SIZE chunks to dodge

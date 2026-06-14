@@ -25,6 +25,13 @@ Endpoints — the IBKR buy flow is just three:
                                         weight/side/prices) + as_of_date
     GET /api/admin/health            — composite go/no-go; gate trades on is_healthy_strict
 
+Universe explorer (same per-company shape as holdings):
+    GET /api/admin/universes         — list every universe + its id / kind / month range
+    GET /api/admin/universes/{id}    — full membership for a month (default latest;
+                                        ?month=YYYY-MM), each member with
+                                        ticker/exchange/country/currency/isin/sector +
+                                        latest close (native + EUR)
+
 The remaining endpoints are data-maintenance tools (GuruFocus exchange resolution,
 companies missing/flagged), separate from the buy flow.
 """
@@ -41,6 +48,7 @@ from deps import fetch_in_chunks, supabase
 from routers._admin_health import _max_target_date, _now_utc, _trading_day_age
 from routers._admin_payloads import (
     _build_portfolio_payload,
+    _enrich_universe_members,
     _fetch_latest_snapshots_for,
 )
 from routers.auth import _require_admin
@@ -466,6 +474,175 @@ async def get_schedule(strategy_id: int, authorization: str = Header(...)):
             "latest_price_date": payload.get("latest_price_date") if payload else None,
             "holdings_count": len(payload.get("holdings")) if payload else 0,
             "holdings": payload.get("holdings") if payload else [],
+        }
+
+    return await asyncio.to_thread(_query)
+
+
+# ─── Universes ─────────────────────────────────────────────────────
+
+
+@router.get("/api/admin/universes")
+async def list_universes(authorization: str = Header(...)):
+    """List every universe — the discovery call for the membership endpoint
+    below. Admin only.
+
+    Covers all universe kinds: template-managed canonicals (ACWI, LEONTEQ,
+    …, `template_key` set), frozen snapshots (`frozen_at` set), criteria-
+    derived universes (`parent_universe_id` set), and imported index
+    universes (all three null). Month range + counts come from the
+    `universe_stats` materialized view when available (a refreshed-on-
+    pipeline hint; may lag slightly) — `null` when it hasn't been
+    populated. Pick a `universe_id` and pass it to
+    `GET /api/admin/universes/{id}`.
+
+    Response: `{count, universes:[{universe_id, label, description, kind,
+    template_key, frozen_at, parent_universe_id, created_at,
+    last_refreshed_at, start_month, end_month, month_count,
+    unique_tickers}]}`."""
+    _require_admin(authorization)
+
+    def _query() -> dict:
+        rows = (
+            supabase.table("universe")
+            .select(
+                "universe_id, label, description, template_key, frozen_at, "
+                "parent_universe_id, created_at, last_refreshed_at"
+            )
+            .order("label")
+            .execute()
+        ).data or []
+
+        # Aggregates from the materialized view (best-effort — it may be
+        # unpopulated / stale; the membership endpoint computes the live count).
+        stats: dict[int, dict] = {}
+        try:
+            srows = (
+                supabase.table("universe_stats")
+                .select("universe_id, start_month, end_month, month_count, total_unique_tickers")
+                .execute()
+            ).data or []
+            stats = {int(s["universe_id"]): s for s in srows}
+        except Exception:
+            stats = {}
+
+        out: list[dict] = []
+        for r in rows:
+            uid = int(r["universe_id"])
+            s = stats.get(uid, {})
+            if r.get("template_key"):
+                kind = "template"
+            elif r.get("frozen_at"):
+                kind = "frozen"
+            elif r.get("parent_universe_id"):
+                kind = "derived"
+            else:
+                kind = "index"
+            out.append({
+                "universe_id": uid,
+                "label": r.get("label"),
+                "description": r.get("description"),
+                "kind": kind,
+                "template_key": r.get("template_key"),
+                "frozen_at": r.get("frozen_at"),
+                "parent_universe_id": r.get("parent_universe_id"),
+                "created_at": r.get("created_at"),
+                "last_refreshed_at": r.get("last_refreshed_at"),
+                "start_month": s.get("start_month"),
+                "end_month": s.get("end_month"),
+                "month_count": s.get("month_count"),
+                "unique_tickers": s.get("total_unique_tickers"),
+            })
+        return {"count": len(out), "universes": out}
+
+    return await asyncio.to_thread(_query)
+
+
+@router.get("/api/admin/universes/{universe_id}")
+async def get_universe(
+    universe_id: int,
+    month: str | None = None,
+    authorization: str = Header(...),
+):
+    """Full membership of one universe for a single month, each member
+    enriched with the same per-company attributes the holdings endpoint
+    returns. Admin only.
+
+    By default returns the universe's LATEST month; pass `?month=YYYY-MM`
+    for a historical snapshot (a universe carries one membership set per
+    month). 404 when the universe doesn't exist; empty `members` when the
+    universe (or the requested month) has no membership.
+
+    Each member carries:
+        company_id, ticker, exchange, country, currency, isin,
+        company_name, sector, industry,
+        latest_close_local, latest_close_eur, latest_close_date,
+        fx_rate_per_eur
+
+    Same descriptive fields as a scheduled strategy's holdings; the
+    position-specific fields (side / target_weight / score / entry_date)
+    don't apply to a universe member, and the holding's entry price becomes
+    the latest close (native + EUR).
+
+    Response: `{universe_id, label, template_key, frozen_at, target_month,
+    member_count, members:[…]}`."""
+    _require_admin(authorization)
+
+    def _query() -> dict:
+        urow = (
+            supabase.table("universe")
+            .select("universe_id, label, description, template_key, frozen_at, parent_universe_id")
+            .eq("universe_id", universe_id)
+            .limit(1)
+            .execute()
+        ).data
+        if not urow:
+            raise HTTPException(404, f"Universe #{universe_id} not found")
+        u = urow[0]
+
+        # Target month: explicit override, else the universe's latest.
+        target_month = month
+        if not target_month:
+            latest = (
+                supabase.table("universe_membership")
+                .select("target_month")
+                .eq("universe_id", universe_id)
+                .order("target_month", desc=True)
+                .limit(1)
+                .execute()
+            ).data
+            target_month = latest[0]["target_month"] if latest else None
+
+        # Pull the whole month's membership — paginated, since a broad
+        # universe (e.g. Leonteq ~1.6k names) exceeds PostgREST's single-
+        # response cap.
+        members_raw: list[dict] = []
+        if target_month:
+            offset, page = 0, 1000
+            while True:
+                chunk = (
+                    supabase.table("universe_membership")
+                    .select("company_id, universe_ticker, sector, industry")
+                    .eq("universe_id", universe_id)
+                    .eq("target_month", target_month)
+                    .order("company_id")
+                    .range(offset, offset + page - 1)
+                    .execute()
+                ).data or []
+                members_raw.extend(chunk)
+                if len(chunk) < page:
+                    break
+                offset += page
+
+        members = _enrich_universe_members(members_raw)
+        return {
+            "universe_id": u["universe_id"],
+            "label": u.get("label"),
+            "template_key": u.get("template_key"),
+            "frozen_at": u.get("frozen_at"),
+            "target_month": target_month,
+            "member_count": len(members),
+            "members": members,
         }
 
     return await asyncio.to_thread(_query)

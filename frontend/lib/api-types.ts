@@ -496,13 +496,89 @@ export interface paths {
          *     an empty `holdings` list. 404 when the strategy doesn't exist.
          *
          *     Each holding carries everything needed to place an order:
-         *         company_id, ticker, exchange, country, currency, company_name,
+         *         company_id, ticker, exchange, country, currency, isin, company_name,
          *         side, target_weight, score, entry_price_local, entry_price_eur
          *
          *     Response: `{strategy_id, name, enabled, frequency, next_rebalance_at,
          *     last_run_at, as_of_date, latest_price_date, holdings_count, holdings:[…]}`.
          */
         get: operations["get_schedule_api_admin_schedules__strategy_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/universes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Universes
+         * @description List every universe — the discovery call for the membership endpoint
+         *     below. Admin only.
+         *
+         *     Covers all universe kinds: template-managed canonicals (ACWI, LEONTEQ,
+         *     …, `template_key` set), frozen snapshots (`frozen_at` set), criteria-
+         *     derived universes (`parent_universe_id` set), and imported index
+         *     universes (all three null). Month range + counts come from the
+         *     `universe_stats` materialized view when available (a refreshed-on-
+         *     pipeline hint; may lag slightly) — `null` when it hasn't been
+         *     populated. Pick a `universe_id` and pass it to
+         *     `GET /api/admin/universes/{id}`.
+         *
+         *     Response: `{count, universes:[{universe_id, label, description, kind,
+         *     template_key, frozen_at, parent_universe_id, created_at,
+         *     last_refreshed_at, start_month, end_month, month_count,
+         *     unique_tickers}]}`.
+         */
+        get: operations["list_universes_api_admin_universes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/universes/{universe_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Universe
+         * @description Full membership of one universe for a single month, each member
+         *     enriched with the same per-company attributes the holdings endpoint
+         *     returns. Admin only.
+         *
+         *     By default returns the universe's LATEST month; pass `?month=YYYY-MM`
+         *     for a historical snapshot (a universe carries one membership set per
+         *     month). 404 when the universe doesn't exist; empty `members` when the
+         *     universe (or the requested month) has no membership.
+         *
+         *     Each member carries:
+         *         company_id, ticker, exchange, country, currency, isin,
+         *         company_name, sector, industry,
+         *         latest_close_local, latest_close_eur, latest_close_date,
+         *         fx_rate_per_eur
+         *
+         *     Same descriptive fields as a scheduled strategy's holdings; the
+         *     position-specific fields (side / target_weight / score / entry_date)
+         *     don't apply to a universe member, and the holding's entry price becomes
+         *     the latest close (native + EUR).
+         *
+         *     Response: `{universe_id, label, template_key, frozen_at, target_month,
+         *     member_count, members:[…]}`.
+         */
+        get: operations["get_universe_api_admin_universes__universe_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1714,6 +1790,12 @@ export interface paths {
          * Index Universe List
          * @description List stored index universes with month range and unique ticker counts.
          *
+         *     Only genuine *imported index* universes belong here — NOT the
+         *     template-managed universes (ACWI / Leonteq / LongEquity), their frozen
+         *     snapshots, or criteria-derived universes, all of which live on their own
+         *     pages. An index universe is a "bare" `universe` row: no `template_key`,
+         *     no `frozen_at`, no `parent_universe_id`, no `filter_config`.
+         *
          *     Aggregates come from the universe_stats view — querying membership rows
          *     directly + counting in Python ran ~70s for SP500 + ACWI. Cached 5min;
          *     falls back to a stale cache entry on timeout, then to a degraded
@@ -2522,6 +2604,8 @@ export interface paths {
          *             "gurufocus_url": str|None,            # canonical GuruFocus summary link
          *             "latest_close_price_date": str|None,  # max(target_date) in metric_data for this company
          *             "latest_close_price": float|None,     # close at that date, in `currency` (unconverted)
+         *             "fx_rate_per_eur": float|None,        # latest {currency}/EUR rate (same source as /fx-rates; 1.0 for EUR)
+         *             "latest_close_price_eur": float|None, # latest_close_price / fx_rate_per_eur
          *             "held_by": [{
          *               "strategy_id", "strategy_name",
          *               "snapshot_id", "snapshot_kind",  # "rebalance"|"price_update"
@@ -4182,6 +4266,72 @@ export interface operations {
             };
             path: {
                 strategy_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_universes_api_admin_universes_get: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_universe_api_admin_universes__universe_id__get: {
+        parameters: {
+            query?: {
+                month?: string | null;
+            };
+            header: {
+                authorization: string;
+            };
+            path: {
+                universe_id: number;
             };
             cookie?: never;
         };
