@@ -96,8 +96,22 @@ def store_index_membership(
     Uses universe + universe_membership tables. Deletes existing data
     for the universe and batch-inserts rows.
     Returns summary stats.
+
+    Single-snapshot model (2026-06): a universe is a frozen set as of a date,
+    not a per-month series — so only the LATEST reconstructed month is
+    persisted (the caller may still hand us full history; we keep the newest
+    and `universe.as_of_date` records it). The momentum loader broadcasts that
+    one snapshot across all rebalance months. Shared by both the SP500 import
+    and the ACWI save, so both collapse here.
     """
     emit = on_progress or (lambda _: None)
+
+    # Collapse to the latest captured month before doing any work.
+    if monthly_holdings:
+        _latest = max(monthly_holdings.keys())
+        if len(monthly_holdings) > 1:
+            emit(f"Single-snapshot model: keeping only {_latest} (dropping {len(monthly_holdings) - 1} earlier months).")
+        monthly_holdings = {_latest: monthly_holdings[_latest]}
 
     # Ensure universe exists
     emit(f"Setting up universe '{index_name}'...")
@@ -168,6 +182,16 @@ def store_index_membership(
             batch, on_conflict="universe_id,company_id,target_month"
         ).execute()
         total_rows += len(batch)
+
+    # Stamp the snapshot date (frozen single-set model). `months` holds the
+    # single retained month after the collapse above.
+    if months:
+        try:
+            supabase.table("universe").update(
+                {"as_of_date": f"{months[-1][:7]}-01"}
+            ).eq("universe_id", universe_id).execute()
+        except Exception:
+            log.warning("Could not stamp as_of_date for %s", index_name)
 
     # Store changes as a JSON blob in the first row's metadata (or a separate approach)
     # For simplicity, store as a separate storage file

@@ -31,9 +31,13 @@ export function useBacktestConfig() {
   const [categories, setCategories] = useState<string[]>([]);
   const [categoryWeights, setCategoryWeights] = useState<Record<string, number>>({});
 
-  const currentYear = new Date().getFullYear();
-  const [startDate, setStartDate] = useState('2017-01');
-  const [endDate, setEndDate] = useState(`${currentYear}-01`);
+  // Date range is independent of the selected universe (universes are now
+  // single frozen sets, not per-month series). Default to the full window:
+  // start at Jan 2002, end at the current month.
+  const _now = new Date();
+  const _currentMonth = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}`;
+  const [startDate, setStartDate] = useState('2002-01');
+  const [endDate, setEndDate] = useState(_currentMonth);
   const [topSectors, setTopSectors] = useState(4);
   const [topPerSector, setTopPerSector] = useState(6);
   // 'sector' is universal; 'industry' is only meaningful for LEONTEQ /

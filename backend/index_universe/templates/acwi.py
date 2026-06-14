@@ -96,6 +96,10 @@ class ACWITemplate(UniverseTemplate):
             "unresolved_forward_additions", []
         )
 
+        # Single-set model: `run_acwi_save_universe` writes through
+        # `store_index_membership`, which already collapses to the latest
+        # month and stamps `universe.as_of_date` — so the universe is a single
+        # dated snapshot here with no extra pruning needed.
         months = self.available_months(supabase)
 
         # Mark refreshed (bumps `universe.last_refreshed_at` and

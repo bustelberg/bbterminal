@@ -198,6 +198,12 @@ class ACWILeonteqTemplate(UniverseTemplate):
             this_month=this_month,
         )
 
+        # Single-set model: both parents are single-month now, so the
+        # intersection is already one month — but finalize defensively
+        # (collapse + stamp as_of_date) so the result is guaranteed a single
+        # dated snapshot even if a parent momentarily held extra months.
+        self.finalize_snapshot(supabase, universe_id)
+
         self.mark_refreshed(supabase, universe_id)
 
         log.info(

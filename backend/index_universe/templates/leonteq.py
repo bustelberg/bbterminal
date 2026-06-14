@@ -349,22 +349,15 @@ class LeonteqTemplate(UniverseTemplate):
                     ci, type(e).__name__, e,
                 )
 
-        # Replicate today's snapshot across every month from
-        # `earliest_date` to today so the momentum backtester sees the
-        # same set on every period (survivorship-biased universe over
-        # the full history; matches the cumulative LongEquity model).
+        # Single-snapshot model (2026-06): a universe is a frozen set as of a
+        # date, NOT a per-month series. Write ONLY the current month; the
+        # backtester broadcasts this one snapshot across all history
+        # (`broadcast_constant`), so there's no need to materialize a row per
+        # (member × month). `as_of_date` is stamped below.
         today = date.today().replace(day=1)
-        months: list[str] = []
-        cur = date(self.earliest_date.year, self.earliest_date.month, 1)
-        while cur <= today:
-            months.append(cur.strftime("%Y-%m"))
-            cur = (
-                date(cur.year + 1, 1, 1)
-                if cur.month == 12
-                else date(cur.year, cur.month + 1, 1)
-            )
+        months: list[str] = [today.strftime("%Y-%m")]
 
-        emit(f"Replicating membership across {len(months)} months ({months[0]} -> {months[-1]})", 85)
+        emit(f"Writing membership snapshot as of {months[0]}", 85)
 
         # Wipe ALL existing memberships for this universe — past runs
         # may have written only current-month rows, and we don't want
@@ -482,18 +475,22 @@ class LeonteqTemplate(UniverseTemplate):
         # Look up "previous month" — for a snapshot template this is
         # whatever earlier month we have membership for. compute_month_diff
         # handles None gracefully by treating everything as additions.
-        # Now that we replicate across history, every refresh writes to
-        # every month — so "this month" is the most recent one we just
-        # wrote (always today's month) and "prev_month" is the one
-        # before it in the replication.
+        # Single-snapshot model: only the current month is written, so the
+        # diff is computed against whatever earlier month still exists (none,
+        # after the snapshot migration → everything reads as additions).
         this_month = months[-1]
-        prev_month = months[-2] if len(months) >= 2 else None
+        prev_month = None
         diff = self.compute_month_diff(
             supabase=supabase,
             universe_id=universe_id,
             prev_month=prev_month,
             this_month=this_month,
         )
+
+        # Stamp the snapshot date (frozen single-set model).
+        supabase.table("universe").update(
+            {"as_of_date": today.isoformat()}
+        ).eq("universe_id", universe_id).execute()
 
         self.mark_refreshed(supabase, universe_id)
 

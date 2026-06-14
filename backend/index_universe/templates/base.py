@@ -174,6 +174,46 @@ class UniverseTemplate(ABC):
             return None
         return resp.data[0].get("last_refreshed_at")
 
+    def finalize_snapshot(self, supabase: Client, universe_id: int) -> str | None:
+        """Collapse a non-monthly universe to a single dated snapshot: keep
+        only the latest captured month's membership, delete every earlier
+        month, and stamp `universe.as_of_date`. Idempotent.
+
+        Single-set model (2026-06): a universe is "a set of companies as of a
+        date", so templates whose reconstruction writes many months (ACWI,
+        ACWI∩Leonteq) call this as their last step to keep only the newest.
+        The momentum loader broadcasts that one snapshot across all history,
+        so nothing downstream needs the older months. Returns the as_of_date
+        ISO string, or None when the universe has no membership.
+
+        (Inefficient by design for now — the reconstruction still materializes
+        every month before this prunes them. Optimize to current-month-only
+        reconstruction later if the manual-refresh latency bites.)"""
+        months = self.available_months(supabase)
+        if not months:
+            return None
+        latest = max(months)
+        # Delete all earlier months; loop to outlast the PostgREST row cap.
+        for _ in range(50):
+            supabase.table("universe_membership").delete().eq(
+                "universe_id", universe_id,
+            ).lt("target_month", latest).execute()
+            check = (
+                supabase.table("universe_membership")
+                .select("company_id")
+                .eq("universe_id", universe_id)
+                .lt("target_month", latest)
+                .limit(1)
+                .execute()
+            )
+            if not check.data:
+                break
+        as_of = f"{latest[:7]}-01"
+        supabase.table("universe").update(
+            {"as_of_date": as_of}
+        ).eq("universe_id", universe_id).execute()
+        return as_of
+
     def mark_refreshed(self, supabase: Client, universe_id: int) -> str:
         """Bump `universe.last_refreshed_at` to now() and invalidate the
         in-process caches for this template. Called by subclass

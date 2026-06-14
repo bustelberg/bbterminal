@@ -490,16 +490,19 @@ async def list_universes(authorization: str = Header(...)):
     Covers all universe kinds: template-managed canonicals (ACWI, LEONTEQ,
     …, `template_key` set), frozen snapshots (`frozen_at` set), criteria-
     derived universes (`parent_universe_id` set), and imported index
-    universes (all three null). Month range + counts come from the
-    `universe_stats` materialized view when available (a refreshed-on-
-    pipeline hint; may lag slightly) — `null` when it hasn't been
-    populated. Pick a `universe_id` and pass it to
-    `GET /api/admin/universes/{id}`.
+    universes (all three null).
+
+    Single-set model: each universe is a frozen set as of `as_of_date`.
+    `is_monthly` is true only for the LongEquity time-series universe; the
+    `start_month` / `end_month` / `month_count` fields are populated only when
+    `is_monthly` (null otherwise). `member_count` comes from the
+    `universe_stats` materialized view (a refreshed-on-pipeline hint; may
+    lag). Pick a `universe_id` and pass it to `GET /api/admin/universes/{id}`.
 
     Response: `{count, universes:[{universe_id, label, description, kind,
     template_key, frozen_at, parent_universe_id, created_at,
-    last_refreshed_at, start_month, end_month, month_count,
-    unique_tickers}]}`."""
+    last_refreshed_at, as_of_date, is_monthly, member_count, start_month,
+    end_month, month_count}]}`."""
     _require_admin(authorization)
 
     def _query() -> dict:
@@ -507,7 +510,8 @@ async def list_universes(authorization: str = Header(...)):
             supabase.table("universe")
             .select(
                 "universe_id, label, description, template_key, frozen_at, "
-                "parent_universe_id, created_at, last_refreshed_at"
+                "parent_universe_id, created_at, last_refreshed_at, "
+                "as_of_date, is_monthly"
             )
             .order("label")
             .execute()
@@ -548,10 +552,15 @@ async def list_universes(authorization: str = Header(...)):
                 "parent_universe_id": r.get("parent_universe_id"),
                 "created_at": r.get("created_at"),
                 "last_refreshed_at": r.get("last_refreshed_at"),
-                "start_month": s.get("start_month"),
-                "end_month": s.get("end_month"),
-                "month_count": s.get("month_count"),
-                "unique_tickers": s.get("total_unique_tickers"),
+                # Single-set model: as_of_date is the snapshot date; is_monthly
+                # is true only for the LongEquity time-series universe (the
+                # month-range fields below are only meaningful when true).
+                "as_of_date": r.get("as_of_date"),
+                "is_monthly": bool(r.get("is_monthly")),
+                "member_count": s.get("total_unique_tickers"),
+                "start_month": s.get("start_month") if r.get("is_monthly") else None,
+                "end_month": s.get("end_month") if r.get("is_monthly") else None,
+                "month_count": s.get("month_count") if r.get("is_monthly") else None,
             })
         return {"count": len(out), "universes": out}
 

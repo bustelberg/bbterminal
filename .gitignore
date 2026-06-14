@@ -244,3 +244,4 @@ loyalty4g_created.json
 # Scraped company logos (~1,700 PNGs + manifest) — regenerable via
 # backend/scripts/scrape_leonteq_logos.py; don't bloat the repo.
 backend/leonteq_logos/
+db-backups/

@@ -4,8 +4,6 @@ import { Fragment, useState, useEffect, useMemo, useRef } from 'react';
 
 import ApiUsageBadge from './ApiUsageBadge';
 import Spinner from './Spinner';
-import { API_URL } from '../../lib/apiUrl';
-import { apiFetch } from '../../lib/apiFetch';
 import ProgressTimeline from './ProgressTimeline';
 import NotificationsPanel from './momentum/NotificationsPanel';
 import {
@@ -246,11 +244,6 @@ export default function MomentumBacktester() {
   // removed; the AxisColumn for universes below reads the loaded list
   // straight from `indexUniverses` and just renders nothing while it's
   // empty.
-  // Latest available close-price date, fed by GET /api/data/latest-price-date.
-  // Cached for the lifetime of the page mount — the data refresh runs
-  // weekly, so revalidating per-render is wasteful.
-  const [latestPriceDate, setLatestPriceDate] = useState<string | null>(null);
-
   // Memoized so `MonthlyHoldingsTable`'s React.memo barrier holds —
   // an inline `{...}` literal would create a fresh object reference
   // every parent re-render, busting shallow-equality on the props
@@ -284,7 +277,11 @@ export default function MomentumBacktester() {
       // dropdown shows the latest month's count as a representative number.
       total_unique_tickers: t.latest_membership_count,
     });
-    const all = [...(_utRaw ?? []), ...(_staticHook ?? [])];
+    // Backtests run only against frozen (single-set) universes. LongEquity
+    // is the one time-series universe (per-month membership), so it's
+    // excluded from the picker.
+    const all = [...(_utRaw ?? []), ...(_staticHook ?? [])]
+      .filter((t) => t.template_key !== 'LONGEQUITY');
     if (all.length === 0) return;
     setIndexUniverses(all.map(mapUni));
   }, [_utRaw, _staticHook]);
@@ -293,40 +290,16 @@ export default function MomentumBacktester() {
   // fetch. The endpoint hooks above own all the recurring fetches.
   useEffect(() => {
     loadSavedRuns();
-    apiFetch(`${API_URL}/api/data/latest-price-date`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${r.status}`))))
-      .then((d: { date: string | null }) => setLatestPriceDate(d.date))
-      .catch(() => { /* silent — the user can still pick a date manually */ });
     return () => undefined;
     // Intentionally mount-only — `loadSavedRuns` (from useSavedRuns) is a
     // fresh reference each render, so including it would re-fire every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // When universe selection changes, auto-set start/end dates per the
-  // /backtest convention: start = the universe's hard backstop (its
-  // permanent earliest date — e.g. ACWI: 2002-01), end = the latest
-  // close-price date we have data for (independent of universe).
-  // Both are stored as YYYY-MM-DD on the server; the `<input
-  // type="month">` wants YYYY-MM, so slice.
-  // When the user picks exactly one universe in the Variants panel
-  // below, adopt its hard-backstop as the default start date so the
-  // backtest doesn't try to look further back than the universe was
-  // first captured. End date follows the latest available price.
-  // Triggered by changes to `selectedUniverses` rather than the
-  // (now-removed) top-row Universe `<select>`. We only auto-adjust on
-  // single-selection so a multi-universe sweep doesn't yank the dates
-  // around each toggle.
-  useEffect(() => {
-    if (selectedUniverses.size !== 1) return;
-    const only = Array.from(selectedUniverses)[0];
-    const entry = indexUniverses.find((i) => i.index_name === only);
-    if (!entry) return;
-    setStartDate(entry.hard_backstop.slice(0, 7));
-    setEndDate((latestPriceDate ?? entry.end_month).slice(0, 7));
-    // setStartDate / setEndDate are referentially-stable hook setters, so
-    // listing them doesn't widen the effect's re-run scope.
-  }, [selectedUniverses, indexUniverses, latestPriceDate, setStartDate, setEndDate]);
+  // Date range is intentionally NOT derived from the selected universe —
+  // universes are single frozen sets now, so start/end default to the full
+  // window (Jan 2002 → current month, set in useBacktestConfig) and the user
+  // adjusts them freely.
 
   // null = first fetch in flight; [] = loaded but empty; non-empty array =
   // populated. The header dropdown reads this to show a spinner + "Loading

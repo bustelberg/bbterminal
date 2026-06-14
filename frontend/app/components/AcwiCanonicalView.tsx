@@ -255,8 +255,7 @@ export default function AcwiCanonicalView() {
           </h2>
           <p className="text-xs text-fg-subtle mt-1 leading-relaxed max-w-3xl">
             {summary.description}{' '}
-            Data starts <span className="font-mono text-fg-muted">{summary.earliest_date}</span>.
-            Refreshed automatically on every pipeline tick (weekly + monthly) — no manual creation needed.
+            A single frozen set of the current ACWI constituents — refresh to rebuild it from the latest iShares holdings.
           </p>
           <XlsAgeBadge />
         </div>
@@ -322,30 +321,23 @@ export default function AcwiCanonicalView() {
         </div>
       )}
 
-      <div className="px-5 py-4 grid gap-3 grid-cols-2 sm:grid-cols-4 text-xs">
-        <Stat label="Months captured" value={summary.months_captured.toString()} />
-        <Stat label="Earliest month" value={summary.earliest_captured_month ?? '—'} />
-        <Stat label="Latest month" value={summary.latest_captured_month ?? '—'} />
-        <Stat label="Latest count" value={summary.latest_membership_count.toString()} />
+      <div className="px-5 py-4 grid gap-3 grid-cols-2 text-xs">
+        <Stat label="As of" value={summary.latest_captured_month ?? '—'} />
+        <Stat label="Members" value={summary.latest_membership_count.toString()} />
       </div>
 
       {!hasData ? (
         <div className="px-5 py-6 text-sm text-fg-muted border-t border-neutral-800/40">
-          No memberships captured yet. Click <span className="text-fg">Refresh now</span> to do an initial build (it&apos;ll reconstruct ~290 monthly snapshots from {summary.earliest_date} to today — takes ~30-60s).
+          No membership captured yet. Click <span className="text-fg">Refresh now</span> to build the current ACWI snapshot (takes ~30-60s).
         </div>
       ) : (
         <div className="border-t border-neutral-800/40">
           <div className="px-5 py-3 flex items-center gap-3 flex-wrap">
-            <label className="text-xs text-fg-muted">Month</label>
-            <select
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
-              className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-xs text-fg font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 focus:outline-none"
-            >
-              {summary.months.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
+            {/* Single-set model: the universe is one frozen snapshot, so
+                there's no month to scrub — just show the as-of date. */}
+            <span className="text-xs text-fg-muted">
+              As of <span className="font-mono text-fg">{selectedMonth || '—'}</span>
+            </span>
             <input
               type="search"
               placeholder="Search by ticker, name, exchange, sector…"
