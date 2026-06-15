@@ -132,6 +132,7 @@ def _run_prices_phase(
     run_id: int,
     accumulated_errors: list[str],
     companies_override: list[dict] | None = None,
+    budget_by_region: dict[str, int] | None = None,
 ) -> None:
     """Phase 3 — the price/volume refresh that used to be the whole job.
     Walks every row in `company`, parallel-pumps each through
@@ -142,7 +143,14 @@ def _run_prices_phase(
 
     `companies_override` short-circuits `_load_all_companies()`; pass the
     pooled held-company list for the daily MTD refresh so we don't churn
-    through the full ~2000-company universe."""
+    through the full ~2000-company universe.
+
+    `budget_by_region` caps GuruFocus calls per region (`{usa, europe, asia}` →
+    requests still available this month). When set, `region_remaining` is
+    decremented by each fetch's actual `api_calls`; once a region hits 0 its
+    remaining companies are skipped (tallied in `budget_skipped`) instead of
+    hammering an exhausted quota. Used by the month-end full-price refresh."""
+    from ingest.api_usage import _region_for_exchange  # noqa: PLC0415
     from ingest.prices import (  # noqa: PLC0415
         ensure_prices_for_company,
         ensure_volume_for_company,
@@ -156,10 +164,14 @@ def _run_prices_phase(
         "forbidden": 0,
         "delisted": 0,
         "errors": 0,
+        "budget_skipped": 0,
     }
     forbidden_exchanges: set[str] = set()
     error_examples: list[str] = []
     lock = threading.Lock()
+    # Per-region remaining monthly quota (only when budgeting). Decremented by
+    # each fetch's real `api_calls`; a region at 0 skips its remaining names.
+    region_remaining: dict[str, int] = dict(budget_by_region) if budget_by_region else {}
 
     companies = companies_override if companies_override is not None else _load_all_companies()
 
@@ -181,7 +193,26 @@ def _run_prices_phase(
         cid = c["cid"]
         ticker = c["ticker"]
         exch = c["exchange"]
+        region = _region_for_exchange(exch)
         checkpoint: dict | None = None
+
+        # Budget gate — when month-end budgeting, skip companies whose region
+        # has no monthly GuruFocus quota left (counts toward budget_skipped, no
+        # API call).
+        if budget_by_region is not None:
+            skip = False
+            with lock:
+                if region_remaining.get(region, 0) <= 0:
+                    counters["processed"] += 1
+                    counters["budget_skipped"] += 1
+                    skip = True
+                    if counters["processed"] % _CHECKPOINT_EVERY == 0:
+                        checkpoint = dict(counters)
+            if checkpoint:
+                _checkpoint(run_id, checkpoint, total)
+                checkpoint = None
+            if skip:
+                return
 
         # Short-circuit on known-forbidden exchanges. Same pattern as
         # `momentum.data.self_heal`: a single 403 marks the exchange so
@@ -219,6 +250,8 @@ def _run_prices_phase(
                 forbidden_exchanges.add(exch)
                 counters["processed"] += 1
                 counters["forbidden"] += 1
+                if budget_by_region is not None:
+                    region_remaining[region] = region_remaining.get(region, 0) - r_p.api_calls
                 if counters["processed"] % _CHECKPOINT_EVERY == 0:
                     checkpoint = dict(counters)
             if checkpoint:
@@ -228,6 +261,8 @@ def _run_prices_phase(
             with lock:
                 counters["processed"] += 1
                 counters["delisted"] += 1
+                if budget_by_region is not None:
+                    region_remaining[region] = region_remaining.get(region, 0) - r_p.api_calls
                 if counters["processed"] % _CHECKPOINT_EVERY == 0:
                     checkpoint = dict(counters)
             if checkpoint:
@@ -281,6 +316,8 @@ def _run_prices_phase(
                 counters["errors"] += 1
                 if r_p.rows_loaded > 0:
                     counters["prices"] += 1
+                if budget_by_region is not None:
+                    region_remaining[region] = region_remaining.get(region, 0) - r_p.api_calls
                 if len(error_examples) < 5:
                     error_examples.append(
                         f"cid={cid} ({exch}:{ticker}) volume: {type(e).__name__}: {e}"
@@ -297,6 +334,8 @@ def _run_prices_phase(
                 counters["prices"] += 1
             if r_v.rows_loaded > 0:
                 counters["volumes"] += 1
+            if budget_by_region is not None:
+                region_remaining[region] = region_remaining.get(region, 0) - (r_p.api_calls + r_v.api_calls)
             if counters["processed"] % _CHECKPOINT_EVERY == 0:
                 checkpoint = dict(counters)
         if checkpoint:
@@ -320,6 +359,8 @@ def _run_prices_phase(
             f"Prices phase done: {counters['processed']} of {total} processed · "
             f"{counters['prices']} prices / {counters['volumes']} volumes refreshed · "
             f"{counters['forbidden']} forbidden, {counters['errors']} errors"
+            + (f" · {counters['budget_skipped']} skipped (monthly budget reached)"
+               if counters['budget_skipped'] else "")
         ),
     )
     if error_examples:
@@ -340,17 +381,21 @@ def _checkpoint(run_id: int, snap: dict, total: int | None = None) -> None:
     catch up. Includes a `current_message` summarizing per-class
     counters so /schedule renders an actionable status line between
     structured-counter updates."""
+    budget_note = (
+        f" · {snap['budget_skipped']} skipped (budget)"
+        if snap.get("budget_skipped") else ""
+    )
     if total is not None:
         msg = (
             f"Refreshing {snap['processed']} of {total} companies · "
             f"{snap['prices']}p / {snap['volumes']}v refreshed · "
-            f"{snap['forbidden']} forbidden, {snap['errors']} errors"
+            f"{snap['forbidden']} forbidden, {snap['errors']} errors" + budget_note
         )
     else:
         msg = (
             f"{snap['processed']} processed · "
             f"{snap['prices']}p / {snap['volumes']}v refreshed · "
-            f"{snap['forbidden']} forbidden, {snap['errors']} errors"
+            f"{snap['forbidden']} forbidden, {snap['errors']} errors" + budget_note
         )
     _update_run(
         run_id,

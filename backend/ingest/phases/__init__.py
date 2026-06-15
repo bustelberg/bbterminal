@@ -21,6 +21,7 @@ here.
 from __future__ import annotations
 
 from .pipeline import (
+    _run_full_price_refresh_pipeline_sync,
     _run_pipeline_sync,
     _run_price_update_pipeline_sync,
     _run_rebalance_pipeline_sync,
@@ -31,6 +32,7 @@ from .runlog import _create_run, _now_utc_iso, _update_run
 __all__ = [
     "_create_run",
     "_now_utc_iso",
+    "_run_full_price_refresh_pipeline_sync",
     "_run_pipeline_sync",
     "_run_price_update_pipeline_sync",
     "_run_rebalance_pipeline_sync",

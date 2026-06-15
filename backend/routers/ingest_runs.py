@@ -43,6 +43,7 @@ from common.cron import verify_cron_secret
 from deps import supabase
 from ingest.phases import (
     _create_run,
+    _run_full_price_refresh_pipeline_sync,
     _run_pipeline_sync,
     _run_price_update_pipeline_sync,
     _run_rebalance_pipeline_sync,
@@ -57,6 +58,7 @@ _VALID_JOB_NAMES = {
     # concurrently. See `ingest.phases.pipeline` + `scheduler.py`.
     "price_update",  # re-price the ~24 held companies + MTD snapshot
     "rebalance",     # rebalance the due strategies from a fresh universe
+    "full_price_refresh",  # month-end: re-price ALL companies within budget
     # The dependency-driven daily tick — retained for the cron-revert path /
     # existing run history; no longer fired by the in-process scheduler.
     "smart_daily",
@@ -76,6 +78,8 @@ def _spawn_ingest(run_id: int, job_name: str) -> None:
         target = _run_price_update_pipeline_sync
     elif job_name == "rebalance":
         target = _run_rebalance_pipeline_sync
+    elif job_name == "full_price_refresh":
+        target = _run_full_price_refresh_pipeline_sync
     elif job_name == "smart_daily":
         target = _run_smart_pipeline_sync
     else:
@@ -176,6 +180,16 @@ _JOB_META: dict[str, dict[str, str]] = {
         "label": "Rebalance",
         "description": "rebalances strategies that are due from a fresh universe",
         "cadence": "Daily 02:00 UTC (runs only when a strategy is due)",
+    },
+    "full_price_refresh": {
+        "label": "Month-end full price refresh",
+        "description": "re-prices ALL companies (most-stale first), bounded by the monthly API budget that's about to reset",
+        "cadence": "Last day of month 12:00 UTC",
+    },
+    "month_end_price_refresh": {
+        "label": "Month-end full price refresh",
+        "description": "re-prices ALL companies (most-stale first), bounded by the monthly API budget that's about to reset",
+        "cadence": "Last day of month 12:00 UTC",
     },
     "daily_pipeline": {
         "label": "Daily pipeline",

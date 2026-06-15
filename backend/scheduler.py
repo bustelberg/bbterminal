@@ -390,6 +390,21 @@ def register_scheduler(app) -> None:
             coalesce=True,
             misfire_grace_time=600,
         )
+        # Month-end FULL price refresh — re-price EVERY company (most-stale
+        # first), bounded by the monthly GuruFocus quota that's about to reset.
+        # `day='last'` = the last calendar day of the month; noon UTC (07:00
+        # EST) is safely inside the EST usage month (which resets midnight EST
+        # on the 1st = 05:00 UTC) and leaves ~17h of runway. The full refresh is
+        # prices-only and serializes against the daily ops via the pipeline lock.
+        sched.add_job(
+            _fire_job,
+            CronTrigger(day="last", hour=12, minute=0, timezone="UTC"),
+            args=["full_price_refresh"],
+            id="month_end_price_refresh",
+            replace_existing=True,
+            coalesce=True,
+            misfire_grace_time=3600,
+        )
         sched.start()
         _scheduler = sched
         # Reap any orphan `ingest_run` rows left in `status='running'`

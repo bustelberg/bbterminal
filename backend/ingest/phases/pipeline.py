@@ -494,6 +494,47 @@ def _run_rebalance_pipeline_sync(run_id: int) -> None:
     _finalize_run(run_id, accumulated_errors, log, tag="rebalance")
 
 
+def _run_full_price_refresh_pipeline_sync(run_id: int) -> None:
+    """Operation 3 of the split pipeline — month-end FULL price refresh.
+
+    Walks EVERY company in the DB (most-stale-first) and refreshes prices +
+    volumes, but bounded by the monthly GuruFocus quota still available per
+    region: each region stops once its remaining budget is spent (the rest of
+    that region's companies are skipped, not errored). The monthly quota resets
+    at midnight EST on the 1st, so this "uses up" whatever's left before it's
+    lost. Prices only — no templates/prune/momentum.
+
+    Serialized against the other ops via `_PIPELINE_LOCK`."""
+    log = logging.getLogger(__name__)
+    accumulated_errors: list[str] = []
+
+    with _serialized(run_id):
+        from ingest.api_usage import remaining_budget  # noqa: PLC0415
+        from deps import supabase  # noqa: PLC0415
+
+        _update_run(
+            run_id, current_phase="prices",
+            current_message="Computing remaining monthly API budget…",
+        )
+        try:
+            budget = remaining_budget(supabase)
+            _update_run(
+                run_id,
+                current_message=(
+                    f"Budget left this month — USA {budget.get('usa', 0)}, "
+                    f"EU {budget.get('europe', 0)}, Asia {budget.get('asia', 0)}. "
+                    "Refreshing all companies, most-stale first…"
+                ),
+            )
+            _run_prices_phase(run_id, accumulated_errors, budget_by_region=budget)
+        except Exception as e:
+            msg = f"Full price refresh failed: {type(e).__name__}: {e}"
+            log.warning("[full_price_refresh] run_id=%s %s", run_id, msg)
+            accumulated_errors.append(msg)
+
+    _finalize_run(run_id, accumulated_errors, log, tag="full_price_refresh")
+
+
 def _finalize_run(run_id: int, accumulated_errors: list[str], log, *, tag: str) -> None:
     """Shared run-finalizer for the split orchestrators: marks `done`, sets
     `status` from whether any phase errored, and rolls the first few errors

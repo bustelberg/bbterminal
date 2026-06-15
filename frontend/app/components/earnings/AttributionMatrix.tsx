@@ -7,7 +7,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import InfoTip from '../InfoTip';
 import Spinner from '../Spinner';
 import { chartTheme } from '../../../lib/chartTheme';
-import type { Portfolio } from './usePortfolios';
+import type { Basket } from './usePortfolios';
 
 type Side = {
   name: string | null;
@@ -38,9 +38,10 @@ const INFO =
   'for stock-selection skill. A sector a portfolio doesn’t hold contributes 0%. Sectors come from the chosen ' +
   'universe’s membership; returns are EUR price returns over the chosen calendar year.';
 
-/** Brinson-style allocation×selection matrix for two portfolios. Shown on
- * /earnings when both comparison sides are portfolios. */
-export default function AttributionMatrix({ portfolioA, portfolioB }: { portfolioA: Portfolio; portfolioB: Portfolio }) {
+/** Brinson-style allocation×selection matrix for two baskets (saved portfolios
+ * and/or frozen-universe snapshots). The sole content of /earnings portfolio
+ * mode. */
+export default function AttributionMatrix({ basketA, basketB }: { basketA: Basket; basketB: Basket }) {
   const currentYear = new Date().getFullYear();
   const [universe, setUniverse] = useState('Leonteq');
   const [universes, setUniverses] = useState<string[]>(['Leonteq']);
@@ -65,7 +66,7 @@ export default function AttributionMatrix({ portfolioA, portfolioB }: { portfoli
       setLoading(true);
       setErr(null);
       try {
-        const r = await apiFetch(`${API_URL}/api/earnings/portfolios/attribution?a=${portfolioA.id}&b=${portfolioB.id}&universe=${encodeURIComponent(universe)}&year=${year}`);
+        const r = await apiFetch(`${API_URL}/api/earnings/portfolios/attribution?a=${basketA.id}&b=${basketB.id}&a_kind=${basketA.kind}&b_kind=${basketB.kind}&universe=${encodeURIComponent(universe)}&year=${year}`);
         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? `HTTP ${r.status}`);
         const d = (await r.json()) as AttributionResult;
         if (!cancelled) setData(d);
@@ -76,10 +77,10 @@ export default function AttributionMatrix({ portfolioA, portfolioB }: { portfoli
       }
     })();
     return () => { cancelled = true; };
-  }, [portfolioA.id, portfolioB.id, universe, year]);
+  }, [basketA.id, basketA.kind, basketB.id, basketB.kind, universe, year]);
 
-  const aName = portfolioA.name;
-  const bName = portfolioB.name;
+  const aName = basketA.name;
+  const bName = basketB.name;
   const m = data?.matrix;
   const headCls = 'px-3 py-2 text-xs font-medium text-center';
   const selCls = 'bg-page border border-neutral-700 rounded-lg px-2 py-1 text-xs text-fg-strong outline-none focus:border-accent-500';

@@ -96,3 +96,106 @@ async def latest_price_date(response: Response):
         # through).
         return {"date": str(raw)[:10] if raw else None}
     return await asyncio.to_thread(_q)
+
+
+@router.get("/api/data/price-coverage")
+async def price_coverage(response: Response):
+    """Freshest + most-stale company by LATEST close-price date — so the
+    /schedule month-end refresh can show prices actually moved.
+
+    Reads each company's latest close date from the
+    `company_latest_close_price_dates` RPC (the same source the prices phase
+    sorts on), then enriches the min/max companies with name / ticker /
+    exchange. `newest` = the most recent price held anywhere (should be the last
+    trading day right after a refresh); `oldest` = the company whose latest
+    price is furthest behind. Both null when no company has prices. Cached (1
+    min) since the underlying aggregation isn't cheap."""
+    response.headers["Cache-Control"] = CACHE_PIPELINE
+
+    def _q() -> dict:
+        latest_by_cid: dict[int, str] = {}
+        page, offset = 1000, 0
+        for _ in range(20):
+            try:
+                resp = (
+                    supabase.rpc("company_latest_close_price_dates", {})
+                    .range(offset, offset + page - 1)
+                    .execute()
+                )
+            except Exception as e:
+                return {
+                    "newest": None, "oldest": None, "priced_companies": 0,
+                    "error": f"{type(e).__name__}: {e}",
+                }
+            batch = resp.data or []
+            if not batch:
+                break
+            for row in batch:
+                cid = row.get("company_id")
+                d = row.get("latest_target_date")
+                if cid is not None and d:
+                    latest_by_cid[int(cid)] = str(d)[:10]
+            if len(batch) < page:
+                break
+            offset += page
+
+        if not latest_by_cid:
+            return {"newest": None, "oldest": None, "priced_companies": 0}
+
+        # Exclude companies we've marked as not-validly-priced — delisted /
+        # acquired (`delisted_at`), out-of-GuruFocus-coverage (`out_of_scope_at`),
+        # or illiquid (`illiquid_at`, trades rarely so GuruFocus serves stale
+        # prices). Their perpetually-behind "latest close" isn't a valid measure
+        # of how fresh our ACTIVE prices are. (Covestro AG was acquired late
+        # 2025; Telecom Italia savings shares MIL:TITR are illiquid — both kept
+        # surfacing as the "oldest" until marked.)
+        excluded: set[int] = set()
+        try:
+            ex_page, ex_off = 1000, 0
+            for _ in range(20):
+                ex = (
+                    supabase.table("company").select("company_id")
+                    .or_("delisted_at.not.is.null,out_of_scope_at.not.is.null,illiquid_at.not.is.null")
+                    .range(ex_off, ex_off + ex_page - 1).execute()
+                ).data or []
+                if not ex:
+                    break
+                for r in ex:
+                    excluded.add(int(r["company_id"]))
+                if len(ex) < ex_page:
+                    break
+                ex_off += ex_page
+        except Exception:
+            pass  # best-effort — without exclusion the measure is just noisier
+        latest_by_cid = {c: d for c, d in latest_by_cid.items() if c not in excluded}
+        if not latest_by_cid:
+            return {"newest": None, "oldest": None, "priced_companies": 0}
+
+        oldest_cid = min(latest_by_cid, key=lambda c: latest_by_cid[c])
+        newest_cid = max(latest_by_cid, key=lambda c: latest_by_cid[c])
+
+        rows = (
+            supabase.table("company")
+            .select(
+                "company_id, company_name, gurufocus_ticker, "
+                "gurufocus_exchange:gurufocus_exchange(exchange_code)"
+            )
+            .in_("company_id", list({oldest_cid, newest_cid}))
+            .execute()
+        ).data or []
+        info: dict[int, dict] = {}
+        for r in rows:
+            cid = int(r["company_id"])
+            info[cid] = {
+                "company_id": cid,
+                "company_name": r.get("company_name"),
+                "ticker": r.get("gurufocus_ticker"),
+                "exchange": (r.get("gurufocus_exchange") or {}).get("exchange_code"),
+                "date": latest_by_cid[cid],
+            }
+        return {
+            "newest": info.get(newest_cid),
+            "oldest": info.get(oldest_cid),
+            "priced_companies": len(latest_by_cid),
+        }
+    return await asyncio.to_thread(_q)

@@ -28,8 +28,7 @@ import {
   type Basket,
 } from './earnings/usePortfolios';
 import { useEarningsUniverses } from './earnings/useEarningsUniverses';
-import type { PortfolioMemberMetrics } from './earnings/portfolioBreakdown';
-import { apiFetch } from '../../lib/apiFetch';
+import { aggregateBasketMetrics, type PortfolioMemberMetrics } from './earnings/portfolioBreakdown';
 import RefreshButton from './earnings/RefreshButton';
 import LogPanel from './earnings/LogPanel';
 import SnapshotStats from './earnings/SnapshotStats';
@@ -132,8 +131,11 @@ export default function EarningsDashboard() {
   // button (no auto-select); 'a'/'b' = opened from a side's picker, so a
   // newly created/saved portfolio is auto-selected onto that side.
   const [managerSide, setManagerSide] = useState<'header' | 'a' | 'b' | null>(null);
+  // ONE switch for the whole dashboard: 'company' (stock) = the earnings
+  // dashboard comparing a stock vs another stock; 'portfolio' = only the
+  // Allocation × Selection matrix comparing two baskets. Side B follows it.
   const [aMode, setAMode] = useState<'company' | 'portfolio'>('company');
-  const [bMode, setBMode] = useState<'company' | 'portfolio'>('company');
+  const bMode = aMode;
   // A basket is either a saved portfolio or a frozen-universe snapshot.
   const [selectedPortfolio, setSelectedPortfolio] = useState<Basket | null>(null);
   const [comparePortfolio, setComparePortfolio] = useState<Basket | null>(null);
@@ -146,15 +148,6 @@ export default function EarningsDashboard() {
   // "A is set" / "B is set" regardless of which source each side uses.
   const hasA = aIsPortfolio ? !!selectedPortfolio : !!selected;
   const hasB = bIsPortfolio ? !!comparePortfolio : !!compareCompany;
-  // Attribution is portfolio-only (its backend queries earnings_portfolio by id
-  // and mixes editable sector weights). Resolve each side's full Portfolio when
-  // — and only when — it's a portfolio-kind basket; universe baskets opt out.
-  const attributionA = selectedPortfolio?.kind === 'portfolio'
-    ? portfolioApi.portfolios.find((p) => p.id === selectedPortfolio.id) ?? null
-    : null;
-  const attributionB = comparePortfolio?.kind === 'portfolio'
-    ? portfolioApi.portfolios.find((p) => p.id === comparePortfolio.id) ?? null
-    : null;
   const currentYear = new Date().getFullYear();
   const [startYear, setStartYear] = useState(2015);
   const [startYearInput, setStartYearInput] = useState('2015');
@@ -355,8 +348,9 @@ export default function EarningsDashboard() {
     sseB.clearLogs();
     setRefreshingSourcesB(new Set());
     if (bMode === 'portfolio') {
-      // Portfolios are read-only aggregates — load, never auto-refresh.
-      if (comparePortfolio) loadCompareMetrics(); else setCompareMetrics([]);
+      // Baskets are read-only aggregates derived from the breakdown-B effect's
+      // single member-metrics fetch — no separate /metrics call here.
+      if (!comparePortfolio) setCompareMetrics([]);
       autoRefreshedForB.current = null;
       return;
     }
@@ -390,8 +384,11 @@ export default function EarningsDashboard() {
     sse.clearLogs();
     setRefreshingSources(new Set());
     if (aMode === 'portfolio') {
-      // Portfolios are read-only aggregates — load, never auto-refresh.
-      if (selectedPortfolio) loadMetrics(); else setMetrics([]);
+      // Baskets (portfolio + universe) are read-only aggregates: the breakdown
+      // effect below fetches member-metrics ONCE and derives `metrics` (the
+      // aggregate) from it client-side — no separate /metrics call, no
+      // auto-refresh. Just clear when nothing is selected.
+      if (!selectedPortfolio) setMetrics([]);
       autoRefreshedFor.current = null;
       return;
     }
@@ -420,28 +417,36 @@ export default function EarningsDashboard() {
     if (comparePortfolio?.kind === 'portfolio' && !ids.has(comparePortfolio.id)) setComparePortfolio(null);
   }, [portfolioApi.portfolios, selectedPortfolio, comparePortfolio]);
 
-  // Lazily load per-member metrics for whichever side is a basket (drives the
-  // ranked holdings breakdown in chart tooltips). Works for both portfolios and
-  // frozen-universe baskets.
-  useEffect(() => {
-    if (aMode !== 'portfolio' || !selectedPortfolio) { setBreakdownA(null); return; }
-    let cancelled = false;
-    apiFetch(`${API_URL}${basketMemberMetricsPath(selectedPortfolio)}`)
-      .then((r) => r.json())
-      .then((d) => { if (!cancelled) setBreakdownA(Array.isArray(d) ? d : null); })
-      .catch(() => { if (!cancelled) setBreakdownA(null); });
-    return () => { cancelled = true; };
-  }, [aMode, selectedPortfolio]);
+  // Side A is a basket ONLY in portfolio mode, which now shows just the
+  // attribution matrix (its own endpoint) — no charts — so we never load side-A
+  // basket metrics/breakdown. (In stock mode side A is always a company, handled
+  // by the company path above.)
+  useEffect(() => { setBreakdownA(null); }, [aMode, selectedPortfolio]);
 
+  // Basket loader (side B). Feeds the STOCK-mode charts (company A vs portfolio
+  // B): one member-metrics fetch drives BOTH the ranked holdings breakdown AND
+  // the aggregate `compareMetrics` (derived client-side, no second server load).
+  // Skipped in portfolio mode, which shows only the matrix.
   useEffect(() => {
-    if (bMode !== 'portfolio' || !comparePortfolio) { setBreakdownB(null); return; }
+    if (bMode !== 'portfolio' || aMode === 'portfolio') { setBreakdownB(null); return; }
+    if (!comparePortfolio) { setBreakdownB(null); setCompareMetrics([]); return; }
     let cancelled = false;
-    apiFetch(`${API_URL}${basketMemberMetricsPath(comparePortfolio)}`)
+    setLoadingCompareMetrics(true);
+    trackedFetch(
+      `Loading earnings for ${comparePortfolio.name} (${comparePortfolio.memberCount} companies) (compare)`,
+      `${API_URL}${basketMemberMetricsPath(comparePortfolio)}`,
+    )
       .then((r) => r.json())
-      .then((d) => { if (!cancelled) setBreakdownB(Array.isArray(d) ? d : null); })
-      .catch(() => { if (!cancelled) setBreakdownB(null); });
+      .then((d) => {
+        if (cancelled) return;
+        const members: PortfolioMemberMetrics[] = Array.isArray(d) ? d : [];
+        setBreakdownB(members);
+        setCompareMetrics(aggregateBasketMetrics(members));
+      })
+      .catch(() => { if (!cancelled) { setBreakdownB(null); setCompareMetrics([]); } })
+      .finally(() => { if (!cancelled) setLoadingCompareMetrics(false); });
     return () => { cancelled = true; };
-  }, [bMode, comparePortfolio]);
+  }, [bMode, aMode, comparePortfolio]);
 
   return (
     <div className="px-8 py-5 space-y-6">
@@ -467,6 +472,7 @@ export default function EarningsDashboard() {
           the staleness auto-refresh only touch a single primary company. */}
       <div className="flex items-center gap-4 flex-wrap">
         <div className="flex items-center gap-2">
+          {/* The single Stock / Portfolio switch for the whole dashboard. */}
           <ModeToggle value={aMode} onChange={setAMode} />
           {aIsPortfolio ? (
             <>
@@ -488,7 +494,9 @@ export default function EarningsDashboard() {
           <>
             <div className="flex items-center gap-2">
               <span className="text-fg-subtle text-sm">vs</span>
-              <ModeToggle value={bMode} onChange={setBMode} />
+              {/* No per-side toggle — side B is the same kind as A (set by the
+                  single switch above): a stock in Stock mode, a basket in
+                  Portfolio mode. */}
               {bIsPortfolio ? (
                 <>
                   <PortfolioPicker portfolios={portfolioApi.portfolios} universes={universeApi.universes} selected={comparePortfolio} onSelect={setComparePortfolio} />
@@ -568,6 +576,45 @@ export default function EarningsDashboard() {
             )}
           </div>
 
+          {/* PORTFOLIO MODE — the ONLY content is the two-basket sector
+              Allocation × Selection matrix (it has its own data load; no charts,
+              no snapshot). Works for saved portfolios AND universe snapshots. */}
+          {aIsPortfolio && (
+            selectedPortfolio && comparePortfolio ? (
+              <AttributionMatrix basketA={selectedPortfolio} basketB={comparePortfolio} />
+            ) : (
+              <div className="text-fg-subtle bg-card border border-neutral-800/40 rounded-xl py-12 text-center text-sm">
+                Pick a portfolio on each side to compare their sector allocation × selection.
+              </div>
+            )
+          )}
+
+          {/* STOCK MODE — charts + snapshot for a single company (optionally
+              compared against another company or a portfolio). */}
+          {!aIsPortfolio && (
+          <>
+          {/* Clear "what's loading" banner. The charts each show their own
+              SectionLoader, but for a large universe basket the user wants to
+              know WHAT is loading and that it's expected to take a moment. */}
+          {(loadingMetrics || loadingCompareMetrics) && (
+            <div className="flex items-center gap-2.5 text-sm bg-card border border-accent-500/20 rounded-lg px-3.5 py-2.5">
+              <Spinner size={14} />
+              <span className="text-fg-soft">
+                Loading earnings data
+                {aIsPortfolio && selectedPortfolio && (
+                  <> for <span className="font-medium text-fg-strong">{selectedPortfolio.name}</span> — aggregating {selectedPortfolio.memberCount} companies</>
+                )}
+                {loadingCompareMetrics && hasB && bIsPortfolio && comparePortfolio && (
+                  <> {(loadingMetrics ? '+ ' : 'for ')}<span className="font-medium text-fg-strong">{comparePortfolio.name}</span> ({comparePortfolio.memberCount})</>
+                )}
+                …
+              </span>
+              {(aIsPortfolio || bIsPortfolio) && (
+                <span className="text-fg-faint text-xs">Large universes can take a few seconds the first time.</span>
+              )}
+            </div>
+          )}
+
           <div className="space-y-2">
             {/* SSE refresh logs only exist for single-company sides. */}
             {!aIsPortfolio && (
@@ -589,13 +636,6 @@ export default function EarningsDashboard() {
               />
             )}
           </div>
-
-          {/* Allocation × Selection attribution — only when BOTH sides are
-              (saved) portfolios (mixes one's sector weights with the other's
-              returns). Universe baskets don't participate. */}
-          {aIsPortfolio && bIsPortfolio && attributionA && attributionB && (
-            <AttributionMatrix portfolioA={attributionA} portfolioB={attributionB} />
-          )}
 
           {/* Charts container */}
           <section className="bg-card rounded-xl border border-accent-500/20 p-5 space-y-5">
@@ -813,6 +853,8 @@ export default function EarningsDashboard() {
               </div>
             )}
           </section>
+          </>
+          )}
         </>
       )}
 
@@ -829,7 +871,7 @@ export default function EarningsDashboard() {
             // user immediately sees its charts. Opened from the header → stay
             // open (managing several) and don't change a side.
             if (managerSide === 'a') { setAMode('portfolio'); setSelectedPortfolio(portfolioToBasket(p)); setManagerSide(null); }
-            else if (managerSide === 'b') { setBMode('portfolio'); setComparePortfolio(portfolioToBasket(p)); setManagerSide(null); }
+            else if (managerSide === 'b') { setComparePortfolio(portfolioToBasket(p)); setManagerSide(null); }
           }}
           onClose={() => setManagerSide(null)}
         />

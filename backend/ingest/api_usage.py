@@ -18,6 +18,10 @@ from supabase import Client
 
 logger = logging.getLogger(__name__)
 
+# GuruFocus monthly request cap PER REGION (USA / Europe / Asia). Mirrored in
+# the frontend ApiUsageBadge (`LIMIT`). Resets at midnight EST on the 1st.
+MONTHLY_API_LIMIT = 20000
+
 US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX", "CBOE"}
 ASIA_EXCHANGES = {
     "TSE", "HKSE", "SHSE", "SSE", "SZSE", "TPE", "TWSE", "ROCO",
@@ -76,6 +80,17 @@ def track_api_call(supabase: Client, exchange: str, count: int = 1) -> None:
                 ).execute()
         except Exception as e2:
             logger.warning(f"Failed to track API usage: {e2}")
+
+
+def remaining_budget(supabase: Client) -> dict:
+    """Per-region GuruFocus requests still available this month:
+    `{usa, europe, asia}` = `MONTHLY_API_LIMIT - used` (floored at 0). Used by
+    the month-end full-price refresh to bound how many companies it fetches."""
+    used = get_usage(supabase)
+    return {
+        r: max(0, MONTHLY_API_LIMIT - int(used.get(r, 0) or 0))
+        for r in ("usa", "europe", "asia")
+    }
 
 
 def get_usage(supabase: Client) -> dict:

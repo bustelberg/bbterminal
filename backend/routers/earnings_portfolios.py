@@ -207,16 +207,20 @@ def _members_currency_fx(members: list[dict]) -> tuple[dict[int, str], dict[str,
     (once per distinct non-EUR currency). Shared by the aggregate + per-member
     endpoints so both convert identically."""
     cids = [m["company_id"] for m in members]
-    cur_resp = (
-        supabase.table("company")
-        .select("company_id, gurufocus_exchange:gurufocus_exchange(currency_code)")
-        .in_("company_id", cids)
-        .execute()
-    )
     currency_by_cid: dict[int, str] = {}
-    for r in cur_resp.data or []:
-        exch = r.get("gurufocus_exchange") or {}
-        currency_by_cid[r["company_id"]] = (exch.get("currency_code") or "EUR").upper()
+    # Chunked: a single `.in_()` over a big union (e.g. two large universes in
+    # the attribution matrix, ~2k+ ids) overflows the request URI (PostgREST
+    # 414 "URI too long").
+    for chunk in chunked(cids):
+        cur_resp = (
+            supabase.table("company")
+            .select("company_id, gurufocus_exchange:gurufocus_exchange(currency_code)")
+            .in_("company_id", chunk)
+            .execute()
+        )
+        for r in cur_resp.data or []:
+            exch = r.get("gurufocus_exchange") or {}
+            currency_by_cid[r["company_id"]] = (exch.get("currency_code") or "EUR").upper()
     fx_cache: dict[str, list[tuple[str, float]]] = {
         cur: _load_fx_asof(cur) for cur in set(currency_by_cid.values()) if cur != "EUR"
     }
@@ -227,6 +231,8 @@ def _load_members_eur_rows(
     members: list[dict],
     currency_by_cid: dict[int, str],
     fx_cache: dict[str, list[tuple[str, float]]],
+    *,
+    start_year: int | None = None,
 ) -> dict[int, list[dict]]:
     """Batched EUR-converted dashboard rows for EVERY member, keyed by
     company_id. Mirrors `routers.earnings.load_company_metric_rows` (the same
@@ -234,12 +240,18 @@ def _load_members_eur_rows(
     `.in_(company_id)` reads instead of one round-trip per company — so a
     frozen-universe basket of thousands of companies aggregates without
     thousands of sequential queries. Currency-denominated metrics are converted
-    to EUR (unit-less ratios pass through); null values dropped."""
+    to EUR (unit-less ratios pass through); null values dropped.
+
+    `start_year` floors the date filter (default 1998). The /earnings dashboard
+    can never display data before its year-selector floor (2015), so passing
+    that floor skips loading/transferring ~17 years of unshowable history per
+    member — a big saving for a 400+-company universe basket."""
     from routers.earnings import (  # noqa: PLC0415
         _DASHBOARD_METRIC_CODES,
         _LONGEQUITY_METRIC_CODES,
     )
 
+    date_floor = f"{start_year}-01-01" if start_year else "1998-01-01"
     cids = [m["company_id"] for m in members]
     raw: dict[int, list[dict]] = {c: [] for c in cids}
 
@@ -264,19 +276,19 @@ def _load_members_eur_rows(
         _collect(lambda ch: (
             supabase.table("metric_data").select(sel)
             .in_("company_id", ch).eq("source_code", "gurufocus")
-            .gte("target_date", "1998-01-01").in_("metric_code", non_price_codes)
+            .gte("target_date", date_floor).in_("metric_code", non_price_codes)
             .order("company_id").order("target_date").order("metric_code")
         ), chunk)
         _collect(lambda ch: (
             supabase.table("metric_data").select(sel)
             .in_("company_id", ch).eq("source_code", "gurufocus")
-            .eq("metric_code", "close_price").gte("target_date", "1998-01-01")
+            .eq("metric_code", "close_price").gte("target_date", date_floor)
             .order("company_id").order("target_date")
         ), chunk)
         _collect(lambda ch: (
             supabase.table("metric_data").select(sel)
             .in_("company_id", ch).eq("source_code", "gurufocus")
-            .eq("is_prediction", True).gte("target_date", "1998-01-01")
+            .eq("is_prediction", True).gte("target_date", date_floor)
             .like("metric_code", "annual_%")
             .order("company_id").order("target_date").order("metric_code")
         ), chunk)
@@ -313,7 +325,7 @@ def _load_members_eur_rows(
     return out
 
 
-def _aggregate_members(members: list[dict]) -> list[dict]:
+def _aggregate_members(members: list[dict], *, start_year: int | None = None) -> list[dict]:
     """Weighted mean per (metric, date) over members holding data there (weights
     renormalized to those present), currency metrics already EUR. Same shape as
     /api/earnings/{company_id}/metrics, so every chart consumes it directly.
@@ -321,7 +333,7 @@ def _aggregate_members(members: list[dict]) -> list[dict]:
     if not members:
         return []
     currency_by_cid, fx_cache = _members_currency_fx(members)
-    rows_by_cid = _load_members_eur_rows(members, currency_by_cid, fx_cache)
+    rows_by_cid = _load_members_eur_rows(members, currency_by_cid, fx_cache, start_year=start_year)
 
     # acc[(code, date)] = [sum_wv, sum_w, is_prediction]
     acc: dict[tuple[str, str], list] = {}
@@ -348,14 +360,14 @@ def _aggregate_members(members: list[dict]) -> list[dict]:
     return out
 
 
-def _member_metrics_payload(members: list[dict]) -> list[dict]:
+def _member_metrics_payload(members: list[dict], *, start_year: int | None = None) -> list[dict]:
     """Per-member EUR-converted metrics (same conversion as the aggregate) so the
     charts can show each holding's own value and rank holdings by impact in the
     tooltip. `[{company_id, ticker, name, weight, metrics: [...]}]`."""
     if not members:
         return []
     currency_by_cid, fx_cache = _members_currency_fx(members)
-    rows_by_cid = _load_members_eur_rows(members, currency_by_cid, fx_cache)
+    rows_by_cid = _load_members_eur_rows(members, currency_by_cid, fx_cache, start_year=start_year)
     return [
         {
             "company_id": m["company_id"],
@@ -369,12 +381,13 @@ def _member_metrics_payload(members: list[dict]) -> list[dict]:
 
 
 @router.get("/api/earnings/portfolios/{portfolio_id}/metrics")
-async def portfolio_metrics(portfolio_id: int):
+async def portfolio_metrics(portfolio_id: int, start_year: int | None = None):
     """Aggregated MetricRow[] for the portfolio — weighted mean per (metric,
     date), currency-denominated metrics converted to EUR. Same shape as
-    /api/earnings/{company_id}/metrics, so every chart consumes it directly."""
+    /api/earnings/{company_id}/metrics, so every chart consumes it directly.
+    `start_year` floors the history loaded (the dashboard passes its 2015 floor)."""
     try:
-        return await asyncio.to_thread(lambda: _aggregate_members(_fetch_members(portfolio_id)))
+        return await asyncio.to_thread(lambda: _aggregate_members(_fetch_members(portfolio_id), start_year=start_year))
     except HTTPException:
         raise
     except Exception as e:
@@ -382,11 +395,11 @@ async def portfolio_metrics(portfolio_id: int):
 
 
 @router.get("/api/earnings/portfolios/{portfolio_id}/member-metrics")
-async def portfolio_member_metrics(portfolio_id: int):
+async def portfolio_member_metrics(portfolio_id: int, start_year: int | None = None):
     """Per-member metrics (EUR-converted, same as the aggregate) for the ranked
-    holdings breakdown in chart tooltips."""
+    holdings breakdown in chart tooltips. `start_year` floors the history loaded."""
     try:
-        return await asyncio.to_thread(lambda: _member_metrics_payload(_fetch_members(portfolio_id)))
+        return await asyncio.to_thread(lambda: _member_metrics_payload(_fetch_members(portfolio_id), start_year=start_year))
     except HTTPException:
         raise
     except Exception as e:
@@ -485,11 +498,12 @@ async def list_earnings_universes():
 
 
 @router.get("/api/earnings/universes/{universe_id}/metrics")
-async def universe_metrics(universe_id: int):
+async def universe_metrics(universe_id: int, start_year: int | None = None):
     """Aggregated MetricRow[] for a frozen universe treated as an equal-weighted
-    basket — same shape + machinery as the portfolio aggregate."""
+    basket — same shape + machinery as the portfolio aggregate. `start_year`
+    floors the history loaded (the dashboard passes its 2015 floor)."""
     try:
-        return await asyncio.to_thread(lambda: _aggregate_members(_universe_members(universe_id)))
+        return await asyncio.to_thread(lambda: _aggregate_members(_universe_members(universe_id), start_year=start_year))
     except HTTPException:
         raise
     except Exception as e:
@@ -497,11 +511,11 @@ async def universe_metrics(universe_id: int):
 
 
 @router.get("/api/earnings/universes/{universe_id}/member-metrics")
-async def universe_member_metrics(universe_id: int):
+async def universe_member_metrics(universe_id: int, start_year: int | None = None):
     """Per-member metrics for a frozen-universe basket (drives the ranked
-    holdings breakdown in chart tooltips)."""
+    holdings breakdown in chart tooltips). `start_year` floors the history loaded."""
     try:
-        return await asyncio.to_thread(lambda: _member_metrics_payload(_universe_members(universe_id)))
+        return await asyncio.to_thread(lambda: _member_metrics_payload(_universe_members(universe_id), start_year=start_year))
     except HTTPException:
         raise
     except Exception as e:
@@ -644,14 +658,40 @@ async def sector_universes():
     return await asyncio.to_thread(_q)
 
 
+def _basket_members(kind: str, bid: int) -> list[dict]:
+    """Members of a basket — a saved portfolio (`kind='portfolio'`, weighted) or
+    a frozen universe snapshot (`kind='universe'`, equal-weighted). Same shape
+    either way so attribution treats them identically."""
+    return _universe_members(bid) if kind == "universe" else _fetch_members(bid)
+
+
+def _basket_name(kind: str, bid: int) -> str | None:
+    """Display name for a basket: a universe's `label` or a portfolio's `name`."""
+    if kind == "universe":
+        r = supabase.table("universe").select("label").eq("universe_id", bid).limit(1).execute().data
+        return (r or [{}])[0].get("label")
+    r = supabase.table("earnings_portfolio").select("name").eq("id", bid).limit(1).execute().data
+    return (r or [{}])[0].get("name")
+
+
 @router.get("/api/earnings/portfolios/attribution")
-async def portfolio_attribution(a: int, b: int, universe: str = "Leonteq", year: int | None = None):
-    """Cross-portfolio sector attribution for two portfolios over one calendar
-    year. Returns the 2x2 matrix + the per-sector weights/returns behind it."""
+async def portfolio_attribution(
+    a: int,
+    b: int,
+    a_kind: str = "portfolio",
+    b_kind: str = "portfolio",
+    universe: str = "Leonteq",
+    year: int | None = None,
+):
+    """Cross-basket sector attribution over one calendar year. Each side is a
+    basket — a saved portfolio (`*_kind=portfolio`) or a frozen-universe snapshot
+    (`*_kind=universe`, equal-weighted) — so the /earnings portfolio mode can
+    compare two universes, two portfolios, or one of each. Returns the 2x2
+    matrix + the per-sector weights/returns behind it."""
     def _q():
-        pa, pb = _fetch_members(a), _fetch_members(b)
+        pa, pb = _basket_members(a_kind, a), _basket_members(b_kind, b)
         if not pa or not pb:
-            raise HTTPException(status_code=400, detail="Both portfolios need members")
+            raise HTTPException(status_code=400, detail="Both baskets need members")
 
         def norm(members):
             tot = sum((m["weight"] or 0.0) for m in members) or 1.0
@@ -697,8 +737,8 @@ async def portfolio_attribution(a: int, b: int, universe: str = "Leonteq", year:
                 "sector_returns": {s: rmap.get(s) for s in sectors},
             }
 
-        a_name = (supabase.table("earnings_portfolio").select("name").eq("id", a).limit(1).execute().data or [{}])[0].get("name")
-        b_name = (supabase.table("earnings_portfolio").select("name").eq("id", b).limit(1).execute().data or [{}])[0].get("name")
+        a_name = _basket_name(a_kind, a)
+        b_name = _basket_name(b_kind, b)
         sa, sb = side(wa_s, ra_s), side(wb_s, rb_s)
         sa["name"], sb["name"] = a_name, b_name
         return {

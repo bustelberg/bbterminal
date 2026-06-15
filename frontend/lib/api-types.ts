@@ -253,6 +253,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/company-illiquid": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Company Illiquid
+         * @description Mark / unmark a company as **illiquid** — a listing that trades
+         *     infrequently, so GuruFocus serves stale prices for it (e.g. Telecom Italia
+         *     savings shares MIL:TITR). Sets `company.illiquid_at` (now / NULL). Illiquid
+         *     companies are still priced (they occasionally trade) but are excluded from
+         *     the price-coverage freshness measure so their perpetually-behind close can't
+         *     masquerade as the 'oldest' active price. Admin only.
+         */
+        post: operations["set_company_illiquid_api_admin_company_illiquid_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/copy-status": {
         parameters: {
             query?: never;
@@ -1154,6 +1179,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/data/price-coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Price Coverage
+         * @description Freshest + most-stale company by LATEST close-price date — so the
+         *     /schedule month-end refresh can show prices actually moved.
+         *
+         *     Reads each company's latest close date from the
+         *     `company_latest_close_price_dates` RPC (the same source the prices phase
+         *     sorts on), then enriches the min/max companies with name / ticker /
+         *     exchange. `newest` = the most recent price held anywhere (should be the last
+         *     trading day right after a refresh); `oldest` = the company whose latest
+         *     price is furthest behind. Both null when no company has prices. Cached (1
+         *     min) since the underlying aggregation isn't cheap.
+         */
+        get: operations["price_coverage_api_data_price_coverage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/earnings/portfolios": {
         parameters: {
             query?: never;
@@ -1187,8 +1241,11 @@ export interface paths {
         };
         /**
          * Portfolio Attribution
-         * @description Cross-portfolio sector attribution for two portfolios over one calendar
-         *     year. Returns the 2x2 matrix + the per-sector weights/returns behind it.
+         * @description Cross-basket sector attribution over one calendar year. Each side is a
+         *     basket — a saved portfolio (`*_kind=portfolio`) or a frozen-universe snapshot
+         *     (`*_kind=universe`, equal-weighted) — so the /earnings portfolio mode can
+         *     compare two universes, two portfolios, or one of each. Returns the 2x2
+         *     matrix + the per-sector weights/returns behind it.
          */
         get: operations["portfolio_attribution_api_earnings_portfolios_attribution_get"];
         put?: never;
@@ -1233,7 +1290,7 @@ export interface paths {
         /**
          * Portfolio Member Metrics
          * @description Per-member metrics (EUR-converted, same as the aggregate) for the ranked
-         *     holdings breakdown in chart tooltips.
+         *     holdings breakdown in chart tooltips. `start_year` floors the history loaded.
          */
         get: operations["portfolio_member_metrics_api_earnings_portfolios__portfolio_id__member_metrics_get"];
         put?: never;
@@ -1256,6 +1313,7 @@ export interface paths {
          * @description Aggregated MetricRow[] for the portfolio — weighted mean per (metric,
          *     date), currency-denominated metrics converted to EUR. Same shape as
          *     /api/earnings/{company_id}/metrics, so every chart consumes it directly.
+         *     `start_year` floors the history loaded (the dashboard passes its 2015 floor).
          */
         get: operations["portfolio_metrics_api_earnings_portfolios__portfolio_id__metrics_get"];
         put?: never;
@@ -1318,7 +1376,7 @@ export interface paths {
         /**
          * Universe Member Metrics
          * @description Per-member metrics for a frozen-universe basket (drives the ranked
-         *     holdings breakdown in chart tooltips).
+         *     holdings breakdown in chart tooltips). `start_year` floors the history loaded.
          */
         get: operations["universe_member_metrics_api_earnings_universes__universe_id__member_metrics_get"];
         put?: never;
@@ -1339,7 +1397,8 @@ export interface paths {
         /**
          * Universe Metrics
          * @description Aggregated MetricRow[] for a frozen universe treated as an equal-weighted
-         *     basket — same shape + machinery as the portfolio aggregate.
+         *     basket — same shape + machinery as the portfolio aggregate. `start_year`
+         *     floors the history loaded (the dashboard passes its 2015 floor).
          */
         get: operations["universe_metrics_api_earnings_universes__universe_id__metrics_get"];
         put?: never;
@@ -3815,6 +3874,16 @@ export interface components {
             /** Ticker */
             ticker: string;
         };
+        /** _IlliquidBody */
+        _IlliquidBody: {
+            /** Company Id */
+            company_id: number;
+            /**
+             * Illiquid
+             * @default true
+             */
+            illiquid?: boolean;
+        };
     };
     responses: never;
     parameters: never;
@@ -4077,6 +4146,41 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_company_illiquid_api_admin_company_illiquid_post: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_IlliquidBody"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -5246,6 +5350,26 @@ export interface operations {
             };
         };
     };
+    price_coverage_api_data_price_coverage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     list_portfolios_api_earnings_portfolios_get: {
         parameters: {
             query?: never;
@@ -5304,6 +5428,8 @@ export interface operations {
             query: {
                 a: number;
                 b: number;
+                a_kind?: string;
+                b_kind?: string;
                 universe?: string;
                 year?: number | null;
             };
@@ -5401,7 +5527,9 @@ export interface operations {
     };
     portfolio_member_metrics_api_earnings_portfolios__portfolio_id__member_metrics_get: {
         parameters: {
-            query?: never;
+            query?: {
+                start_year?: number | null;
+            };
             header?: never;
             path: {
                 portfolio_id: number;
@@ -5432,7 +5560,9 @@ export interface operations {
     };
     portfolio_metrics_api_earnings_portfolios__portfolio_id__metrics_get: {
         parameters: {
-            query?: never;
+            query?: {
+                start_year?: number | null;
+            };
             header?: never;
             path: {
                 portfolio_id: number;
@@ -5503,7 +5633,9 @@ export interface operations {
     };
     universe_member_metrics_api_earnings_universes__universe_id__member_metrics_get: {
         parameters: {
-            query?: never;
+            query?: {
+                start_year?: number | null;
+            };
             header?: never;
             path: {
                 universe_id: number;
@@ -5534,7 +5666,9 @@ export interface operations {
     };
     universe_metrics_api_earnings_universes__universe_id__metrics_get: {
         parameters: {
-            query?: never;
+            query?: {
+                start_year?: number | null;
+            };
             header?: never;
             path: {
                 universe_id: number;

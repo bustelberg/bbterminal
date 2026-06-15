@@ -79,6 +79,29 @@ class _GfCompanyNameBody(BaseModel):
     exchange: str | None = None
 
 
+class _IlliquidBody(BaseModel):
+    company_id: int
+    illiquid: bool = True
+
+
+@router.post("/api/admin/company-illiquid")
+async def set_company_illiquid(body: _IlliquidBody, authorization: str = Header(...)):
+    """Mark / unmark a company as **illiquid** — a listing that trades
+    infrequently, so GuruFocus serves stale prices for it (e.g. Telecom Italia
+    savings shares MIL:TITR). Sets `company.illiquid_at` (now / NULL). Illiquid
+    companies are still priced (they occasionally trade) but are excluded from
+    the price-coverage freshness measure so their perpetually-behind close can't
+    masquerade as the 'oldest' active price. Admin only."""
+    _require_admin(authorization)
+
+    def _q() -> dict:
+        val = datetime.now(timezone.utc).isoformat() if body.illiquid else None
+        supabase.table("company").update({"illiquid_at": val}).eq("company_id", body.company_id).execute()
+        return {"company_id": body.company_id, "illiquid": body.illiquid}
+
+    return await asyncio.to_thread(_q)
+
+
 @router.post("/api/admin/gurufocus-company-name")
 async def gurufocus_company_name(body: _GfCompanyNameBody, authorization: str = Header(...)):
     """Fetch the company name GuruFocus reports for a (ticker, exchange) — so a

@@ -5,10 +5,11 @@ import Spinner from '../Spinner';
 import LoadingDots from '../LoadingDots';
 import { API_URL } from '../../../lib/apiUrl';
 import { apiFetch } from '../../../lib/apiFetch';
+import { guruFocusUrl } from '../../../lib/gurufocusUrl';
 import { useNow } from '../../../lib/hooks/useNow';
 import { usePollingFetch } from '../../../lib/hooks/usePollingFetch';
 import CollapsibleCard from '../momentum/CollapsibleCard';
-import { relTime } from './utils';
+import { relTime, formatExecAt, countdownLeft } from './utils';
 import type {
   ScheduleUpcoming,
   HeldCompaniesResponse,
@@ -18,7 +19,27 @@ import type {
   ScheduledStrategy,
 } from './types';
 
-/** Two independent operations of the split pipeline, stacked:
+/** GuruFocus monthly request cap per region — mirrors `ApiUsageBadge.LIMIT`
+ * and the backend `MONTHLY_API_LIMIT`. */
+const API_LIMIT = 20000;
+type ApiUsage = { usa: number; europe: number; asia: number; month: string };
+
+/** Freshest / most-stale company by latest close-price date — from
+ * `/api/data/price-coverage`. Lets the month-end refresh show prices moved. */
+type CoverageCompany = {
+  company_id: number;
+  company_name: string | null;
+  ticker: string | null;
+  exchange: string | null;
+  date: string;
+};
+type PriceCoverage = {
+  newest: CoverageCompany | null;
+  oldest: CoverageCompany | null;
+  priced_companies: number;
+};
+
+/** Three independent operations of the split pipeline, stacked:
  *   1. Price update — re-prices the held companies + refreshes MTD (daily).
  *   2. Rebalance    — rebalances strategies that are due, from a fresh
  *      universe (runs when due; no-op otherwise).
@@ -34,6 +55,11 @@ export default function SmartPipelineActivity() {
   const { data: held, error: heldErr } = usePollingFetch<HeldCompaniesResponse>(`${API_URL}/api/scheduled-strategies/held-companies`, interval);
   const { data: strategies } = usePollingFetch<ScheduledStrategy[]>(`${API_URL}/api/scheduled-strategies`, interval);
   const { data: recentRuns } = usePollingFetch<IngestRun[]>(`${API_URL}/api/ingest/runs?limit=20`, interval);
+  const { data: usage } = usePollingFetch<ApiUsage>(`${API_URL}/api/usage`, interval);
+  // Coverage drives the freshest/most-stale display. The underlying aggregation
+  // isn't cheap (+ is cached 1 min server-side), so poll it on a fixed slow
+  // cadence rather than the 3s active interval.
+  const { data: coverage } = usePollingFetch<PriceCoverage>(`${API_URL}/api/data/price-coverage`, 30000);
   const loadError = upErr ?? heldErr;
   const nowMs = useNow(15000);
 
@@ -49,6 +75,8 @@ export default function SmartPipelineActivity() {
 
   // Both ops fire off the one daily tick — its next fire time drives "next run".
   const dailyJob = upcoming?.jobs?.find((j) => j.id === 'daily_pipeline') ?? null;
+  // The month-end full-price-refresh job (its own monthly cron).
+  const monthEndJob = upcoming?.jobs?.find((j) => j.id === 'month_end_price_refresh') ?? null;
   const schedulerOff = upcoming?.scheduler_enabled === false;
   const loading = upcoming == null && held == null;
 
@@ -92,6 +120,15 @@ export default function SmartPipelineActivity() {
             schedulerOff={schedulerOff}
             nowMs={nowMs}
           />
+          <FullPriceRefreshSection
+            running={running('full_price_refresh')}
+            lastRun={lastRun('full_price_refresh')}
+            nextRunAt={monthEndJob?.next_run_at ?? null}
+            schedulerOff={schedulerOff}
+            usage={usage}
+            coverage={coverage}
+            nowMs={nowMs}
+          />
         </>
       )}
     </div>
@@ -130,6 +167,20 @@ function RunNowButton({ job, busy }: { job: string; busy: boolean }) {
     >
       {busy ? 'Running…' : pending ? 'Starting…' : 'Run now'}
     </button>
+  );
+}
+
+/** Exact next-execution time (the viewer's local timezone, with the tz
+ * abbreviation) + a precise "Xd Yh left" countdown — shown in each pipeline
+ * section's header bar. */
+function NextRun({ at, nowMs }: { at: string | null; nowMs: number }) {
+  if (!at) return null;
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className="font-mono text-fg-soft">{formatExecAt(at)}</span>
+      <span className="text-fg-faint">·</span>
+      <span className="font-mono text-accent-300">{countdownLeft(at, nowMs)}</span>
+    </span>
   );
 }
 
@@ -213,7 +264,7 @@ function PriceUpdateSection({
             schedulerOff={schedulerOff}
             lastRun={lastRun}
             nowMs={nowMs}
-            idleNode={<span className="font-mono">{nextRunAt ? `next ${relTime(nextRunAt, nowMs)}` : <LastResult run={lastRun} nowMs={nowMs} />}</span>}
+            idleNode={nextRunAt ? <NextRun at={nextRunAt} nowMs={nowMs} /> : <LastResult run={lastRun} nowMs={nowMs} />}
           />
           {held && <span className="text-fg-faint">{held.total_companies} held</span>}
           {staleish > 0
@@ -303,7 +354,7 @@ function RebalanceSection({
             schedulerOff={schedulerOff}
             lastRun={lastRun}
             nowMs={nowMs}
-            idleNode={<span className="font-mono">{nextDue ? `next due ${nextDue.slice(0, 10)}` : <LastResult run={lastRun} nowMs={nowMs} />}</span>}
+            idleNode={nextDue ? <NextRun at={nextDue} nowMs={nowMs} /> : <LastResult run={lastRun} nowMs={nowMs} />}
           />
           <RunNowButton job="rebalance" busy={!!running} />
         </>
@@ -328,6 +379,179 @@ function RebalanceSection({
         )
       ) : (
         <div className="text-fg-subtle">No rebalance has run yet.</div>
+      )}
+    </CollapsibleCard>
+  );
+}
+
+/** Month-end full-price refresh: re-prices EVERY company, bounded by the
+ * monthly GuruFocus quota that's about to reset. Shows per-region budget left
+ * (so you can see how much it has to spend), the next month-end run, a live
+ * progress bar, and a Run-now button to spend the budget on demand. */
+/** One freshest/most-stale coverage line: date + ticker (GuruFocus link) +
+ * exchange + company name. When `onMark` is supplied, a "mark illiquid" button
+ * lets the user flag a stale-but-dead listing so it drops out of the measure. */
+function CoverageLine({ label, c, tone, marked, onMark }: {
+  label: string;
+  c: CoverageCompany | null;
+  tone: string;
+  marked?: boolean;
+  onMark?: () => void;
+}) {
+  if (!c) return null;
+  const href = c.ticker ? guruFocusUrl(c.ticker, c.exchange ?? '') : null;
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="text-fg-faint w-12 shrink-0">{label}</span>
+      <span className={`font-mono ${tone}`}>{c.date}</span>
+      <span className="text-fg-faint">·</span>
+      {href ? (
+        <a href={href} target="_blank" rel="noopener noreferrer" className="font-mono text-accent-400 hover:text-accent-300 hover:underline">
+          {c.ticker}
+        </a>
+      ) : (
+        <span className="font-mono text-fg">{c.ticker ?? '—'}</span>
+      )}
+      {c.exchange && <span className="text-fg-faint">·{c.exchange}</span>}
+      <span className="text-fg-soft truncate max-w-[200px]">{c.company_name ?? '—'}</span>
+      {onMark && (marked ? (
+        <span className="text-[10px] text-warn-300">✓ illiquid · refreshing…</span>
+      ) : (
+        <button
+          type="button"
+          onClick={onMark}
+          title="Mark as illiquid — trades rarely, so its stale GuruFocus price isn't a valid freshness measure. Excluded from this measure (still priced)."
+          className="text-[10px] px-1.5 py-0.5 rounded border border-neutral-700 text-fg-muted hover:text-warn-300 hover:border-warn-500/50 transition-colors"
+        >
+          Mark illiquid
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function FullPriceRefreshSection({
+  running, lastRun, nextRunAt, schedulerOff, usage, coverage, nowMs,
+}: {
+  running: RunningJob | null;
+  lastRun: IngestRun | null;
+  nextRunAt: string | null;
+  schedulerOff: boolean;
+  usage: ApiUsage | null | undefined;
+  coverage: PriceCoverage | null | undefined;
+  nowMs: number;
+}) {
+  const total = running?.companies_total ?? 0;
+  const done = running?.companies_processed ?? 0;
+  const showBar = !!running && total > 0 && running.current_phase === 'prices';
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+
+  const regions = usage
+    ? ([
+        { key: 'USA', used: usage.usa ?? 0 },
+        { key: 'EU', used: usage.europe ?? 0 },
+        { key: 'Asia', used: usage.asia ?? 0 },
+      ] as const)
+    : [];
+  const totalLeft = regions.reduce((s, r) => s + Math.max(0, API_LIMIT - r.used), 0);
+
+  // Companies the user just marked illiquid this session — hidden optimistically
+  // (shown as "✓ illiquid · refreshing…") until the 30s coverage poll drops them.
+  const [markedIlliquid, setMarkedIlliquid] = useState<Set<number>>(new Set());
+  const markIlliquid = useCallback(async (cid: number) => {
+    try {
+      const r = await apiFetch(`${API_URL}/api/admin/company-illiquid`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company_id: cid, illiquid: true }),
+      });
+      if (r.ok) setMarkedIlliquid((s) => new Set(s).add(cid));
+    } catch {
+      // The coverage poll reconciles regardless — no inline error needed.
+    }
+  }, []);
+
+  return (
+    <CollapsibleCard
+      title="Month-end full price refresh"
+      defaultCollapsed
+      bodyClassName="px-5 py-4 text-xs space-y-3"
+      rightSlot={
+        <>
+          <HeaderStatus
+            running={running}
+            schedulerOff={schedulerOff}
+            lastRun={lastRun}
+            nowMs={nowMs}
+            idleNode={nextRunAt ? <NextRun at={nextRunAt} nowMs={nowMs} /> : <LastResult run={lastRun} nowMs={nowMs} />}
+          />
+          {usage && <span className="text-fg-faint font-mono">{totalLeft.toLocaleString()} calls left</span>}
+          <RunNowButton job="full_price_refresh" busy={!!running} />
+        </>
+      }
+    >
+      <div className="text-fg-soft">
+        Re-prices <span className="text-fg">every company</span> in the database (most-stale first), capped by the
+        monthly GuruFocus quota that resets on the 1st — so the remaining budget is spent before it&apos;s lost.
+        {nextRunAt && <> Runs automatically <span className="font-mono text-fg">{relTime(nextRunAt, nowMs)}</span> (last day of the month).</>}
+      </div>
+
+      {showBar && (
+        <div className="flex items-center gap-2">
+          <div className="flex-1 h-1.5 rounded-full bg-inset overflow-hidden">
+            <div className="h-full bg-accent-500 transition-all" style={{ width: `${pct}%` }} />
+          </div>
+          <span className="text-[11px] font-mono text-fg-faint shrink-0">{done}/{total}</span>
+        </div>
+      )}
+
+      {usage && (
+        <div className="space-y-1.5">
+          <div className="text-[10px] uppercase tracking-wide text-fg-faint">
+            Budget left this month ({usage.month})
+          </div>
+          {regions.map((r) => {
+            const left = Math.max(0, API_LIMIT - r.used);
+            const usedPct = Math.min(100, Math.round((r.used / API_LIMIT) * 100));
+            const tone = usedPct >= 90 ? 'bg-neg-500' : usedPct >= 70 ? 'bg-warn-500' : 'bg-accent-500';
+            return (
+              <div key={r.key} className="flex items-center gap-2">
+                <span className="w-10 text-fg-muted">{r.key}</span>
+                <div className="flex-1 h-1.5 rounded-full bg-inset overflow-hidden">
+                  <div className={`h-full rounded-full ${tone}`} style={{ width: `${usedPct}%` }} />
+                </div>
+                <span className="font-mono text-fg-subtle whitespace-nowrap">
+                  {left.toLocaleString()} left
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {coverage && (coverage.newest || coverage.oldest) && (
+        <div className="space-y-1.5 pt-1 border-t border-neutral-800/30">
+          <div className="text-[10px] uppercase tracking-wide text-fg-faint">
+            Prices on file · {coverage.priced_companies.toLocaleString()} active companies — newest &amp; most-stale latest close (delisted / out-of-scope excluded)
+          </div>
+          <CoverageLine label="Newest" c={coverage.newest} tone="text-pos-400" />
+          <CoverageLine
+            label="Oldest"
+            c={coverage.oldest}
+            tone="text-warn-300"
+            marked={coverage.oldest ? markedIlliquid.has(coverage.oldest.company_id) : false}
+            onMark={coverage.oldest ? () => markIlliquid(coverage.oldest!.company_id) : undefined}
+          />
+        </div>
+      )}
+
+      {running?.current_message && (
+        <div className="text-fg-subtle">{running.current_message}</div>
+      )}
+      {!running && lastRun?.current_message && (
+        <div className="text-fg-subtle">
+          Last run {relTime(lastRun.finished_at ?? lastRun.started_at, nowMs)}: {lastRun.current_message}
+        </div>
       )}
     </CollapsibleCard>
   );

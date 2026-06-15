@@ -240,6 +240,28 @@ html {
      zoom). Single knob: nudge this value to rescale the whole UI. */
   font-size: 17.5px;
   background: var(--color-page);
+  /* Stop iOS Safari from auto-inflating text on rotate, which would break the
+     careful rem scale below. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* ── Responsive scale ────────────────────────────────────────────────────────
+   The entire UI is rem/em-based off the `html` font-size, so stepping it down
+   on narrower viewports proportionally compacts every page — headers, tables,
+   spacing, type — so dense data fits a tablet or phone without per-component
+   breakpoints. (The `data-density` presets still override when explicitly set,
+   since their `:root[...]` selector outranks this `html` one.) */
+@media (max-width: 1024px) { html { font-size: 16px; } }
+@media (max-width: 640px)  { html { font-size: 15px; } }
+@media (max-width: 380px)  { html { font-size: 14px; } }
+
+/* On phones, trim the generous `px-8` page-header / section gutters (2rem each
+   side) down so content gets the width back. Scoped to the small breakpoint;
+   the rem scale above handles the rest. Unlayered so it wins over Tailwind's
+   layered utility within this media range. */
+@media (max-width: 640px) {
+  .px-8 { padding-left: 1rem; padding-right: 1rem; }
 }
 
 body {

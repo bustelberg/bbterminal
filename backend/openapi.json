@@ -1342,6 +1342,24 @@
         ],
         "title": "_GuruFocusExchangeSearchRequest",
         "type": "object"
+      },
+      "_IlliquidBody": {
+        "properties": {
+          "company_id": {
+            "title": "Company Id",
+            "type": "integer"
+          },
+          "illiquid": {
+            "default": true,
+            "title": "Illiquid",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "company_id"
+        ],
+        "title": "_IlliquidBody",
+        "type": "object"
       }
     }
   },
@@ -1694,6 +1712,57 @@
           }
         },
         "summary": "Resolve Missing Exchanges",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/company-illiquid": {
+      "post": {
+        "description": "Mark / unmark a company as **illiquid** \u2014 a listing that trades\ninfrequently, so GuruFocus serves stale prices for it (e.g. Telecom Italia\nsavings shares MIL:TITR). Sets `company.illiquid_at` (now / NULL). Illiquid\ncompanies are still priced (they occasionally trade) but are excluded from\nthe price-coverage freshness measure so their perpetually-behind close can't\nmasquerade as the 'oldest' active price. Admin only.",
+        "operationId": "set_company_illiquid_api_admin_company_illiquid_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/_IlliquidBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Company Illiquid",
         "tags": [
           "admin"
         ]
@@ -3307,6 +3376,26 @@
         ]
       }
     },
+    "/api/data/price-coverage": {
+      "get": {
+        "description": "Freshest + most-stale company by LATEST close-price date \u2014 so the\n/schedule month-end refresh can show prices actually moved.\n\nReads each company's latest close date from the\n`company_latest_close_price_dates` RPC (the same source the prices phase\nsorts on), then enriches the min/max companies with name / ticker /\nexchange. `newest` = the most recent price held anywhere (should be the last\ntrading day right after a refresh); `oldest` = the company whose latest\nprice is furthest behind. Both null when no company has prices. Cached (1\nmin) since the underlying aggregation isn't cheap.",
+        "operationId": "price_coverage_api_data_price_coverage_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Price Coverage",
+        "tags": [
+          "system"
+        ]
+      }
+    },
     "/api/earnings/portfolios": {
       "get": {
         "description": "All portfolios with their members + display labels.",
@@ -3367,7 +3456,7 @@
     },
     "/api/earnings/portfolios/attribution": {
       "get": {
-        "description": "Cross-portfolio sector attribution for two portfolios over one calendar\nyear. Returns the 2x2 matrix + the per-sector weights/returns behind it.",
+        "description": "Cross-basket sector attribution over one calendar year. Each side is a\nbasket \u2014 a saved portfolio (`*_kind=portfolio`) or a frozen-universe snapshot\n(`*_kind=universe`, equal-weighted) \u2014 so the /earnings portfolio mode can\ncompare two universes, two portfolios, or one of each. Returns the 2x2\nmatrix + the per-sector weights/returns behind it.",
         "operationId": "portfolio_attribution_api_earnings_portfolios_attribution_get",
         "parameters": [
           {
@@ -3386,6 +3475,26 @@
             "schema": {
               "title": "B",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "a_kind",
+            "required": false,
+            "schema": {
+              "default": "portfolio",
+              "title": "A Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "b_kind",
+            "required": false,
+            "schema": {
+              "default": "portfolio",
+              "title": "B Kind",
+              "type": "string"
             }
           },
           {
@@ -3533,7 +3642,7 @@
     },
     "/api/earnings/portfolios/{portfolio_id}/member-metrics": {
       "get": {
-        "description": "Per-member metrics (EUR-converted, same as the aggregate) for the ranked\nholdings breakdown in chart tooltips.",
+        "description": "Per-member metrics (EUR-converted, same as the aggregate) for the ranked\nholdings breakdown in chart tooltips. `start_year` floors the history loaded.",
         "operationId": "portfolio_member_metrics_api_earnings_portfolios__portfolio_id__member_metrics_get",
         "parameters": [
           {
@@ -3543,6 +3652,22 @@
             "schema": {
               "title": "Portfolio Id",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_year",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Year"
             }
           }
         ],
@@ -3574,7 +3699,7 @@
     },
     "/api/earnings/portfolios/{portfolio_id}/metrics": {
       "get": {
-        "description": "Aggregated MetricRow[] for the portfolio \u2014 weighted mean per (metric,\ndate), currency-denominated metrics converted to EUR. Same shape as\n/api/earnings/{company_id}/metrics, so every chart consumes it directly.",
+        "description": "Aggregated MetricRow[] for the portfolio \u2014 weighted mean per (metric,\ndate), currency-denominated metrics converted to EUR. Same shape as\n/api/earnings/{company_id}/metrics, so every chart consumes it directly.\n`start_year` floors the history loaded (the dashboard passes its 2015 floor).",
         "operationId": "portfolio_metrics_api_earnings_portfolios__portfolio_id__metrics_get",
         "parameters": [
           {
@@ -3584,6 +3709,22 @@
             "schema": {
               "title": "Portfolio Id",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_year",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Year"
             }
           }
         ],
@@ -3655,7 +3796,7 @@
     },
     "/api/earnings/universes/{universe_id}/member-metrics": {
       "get": {
-        "description": "Per-member metrics for a frozen-universe basket (drives the ranked\nholdings breakdown in chart tooltips).",
+        "description": "Per-member metrics for a frozen-universe basket (drives the ranked\nholdings breakdown in chart tooltips). `start_year` floors the history loaded.",
         "operationId": "universe_member_metrics_api_earnings_universes__universe_id__member_metrics_get",
         "parameters": [
           {
@@ -3665,6 +3806,22 @@
             "schema": {
               "title": "Universe Id",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_year",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Year"
             }
           }
         ],
@@ -3696,7 +3853,7 @@
     },
     "/api/earnings/universes/{universe_id}/metrics": {
       "get": {
-        "description": "Aggregated MetricRow[] for a frozen universe treated as an equal-weighted\nbasket \u2014 same shape + machinery as the portfolio aggregate.",
+        "description": "Aggregated MetricRow[] for a frozen universe treated as an equal-weighted\nbasket \u2014 same shape + machinery as the portfolio aggregate. `start_year`\nfloors the history loaded (the dashboard passes its 2015 floor).",
         "operationId": "universe_metrics_api_earnings_universes__universe_id__metrics_get",
         "parameters": [
           {
@@ -3706,6 +3863,22 @@
             "schema": {
               "title": "Universe Id",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_year",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Year"
             }
           }
         ],

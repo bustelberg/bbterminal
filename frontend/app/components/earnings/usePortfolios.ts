@@ -48,14 +48,23 @@ function basketSegment(b: Basket): string {
   return b.kind === 'universe' ? 'universes' : 'portfolios';
 }
 
+/** Earliest year the dashboard's chart year-selector allows (`< 2015` is
+ * rejected). Passed to the basket loaders so the backend skips fetching ~17
+ * years of pre-2015 history that can never be displayed — a big saving for a
+ * 400+-company universe. */
+export const EARNINGS_MIN_YEAR = 2015;
+
 /** `/api/earnings/{portfolios|universes}/{id}/metrics` for a basket. */
 export function basketMetricsPath(b: Basket): string {
-  return `/api/earnings/${basketSegment(b)}/${b.id}/metrics`;
+  return `/api/earnings/${basketSegment(b)}/${b.id}/metrics?start_year=${EARNINGS_MIN_YEAR}`;
 }
 
-/** `/api/earnings/{portfolios|universes}/{id}/member-metrics` for a basket. */
+/** `/api/earnings/{portfolios|universes}/{id}/member-metrics` for a basket. The
+ * dashboard derives the aggregate from this client-side (see
+ * `aggregateBasketMetrics`), so this single call replaces the separate
+ * `/metrics` fetch. */
 export function basketMemberMetricsPath(b: Basket): string {
-  return `/api/earnings/${basketSegment(b)}/${b.id}/member-metrics`;
+  return `/api/earnings/${basketSegment(b)}/${b.id}/member-metrics?start_year=${EARNINGS_MIN_YEAR}`;
 }
 
 async function parse(r: Response): Promise<{ ok: boolean; body: unknown }> {

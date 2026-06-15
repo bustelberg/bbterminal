@@ -93,3 +93,34 @@ export function relTime(iso: string | null, nowMs: number): string {
   const d = Math.round(diffSec / 86400);
   return `in ${d}d`;
 }
+
+/** Exact execution time: weekday, date, HH:MM, and the viewer's timezone
+ * abbreviation (e.g. "Mon, 30 Jun 2026, 12:00 GMT+2"). Rendered in the
+ * browser's local timezone so "when it executes" reads in the user's own clock.
+ * Returns '—' when null/unparseable. */
+export function formatExecAt(iso: string | null): string {
+  if (!iso) return '—';
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '—';
+  return new Date(t).toLocaleString(undefined, {
+    weekday: 'short', day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
+  });
+}
+
+/** Precise "2d 5h left" / "5h 12m left" / "12m left" / "now" countdown to a
+ * future ISO timestamp, relative to `nowMs`. Returns '—' when null. */
+export function countdownLeft(iso: string | null, nowMs: number): string {
+  if (!iso) return '—';
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '—';
+  const ms = t - nowMs;
+  if (ms <= 0) return 'now';
+  const totalMin = Math.floor(ms / 60000);
+  const days = Math.floor(totalMin / 1440);
+  const hours = Math.floor((totalMin % 1440) / 60);
+  const mins = totalMin % 60;
+  if (days > 0) return `${days}d ${hours}h left`;
+  if (hours > 0) return `${hours}h ${mins}m left`;
+  return `${mins}m left`;
+}

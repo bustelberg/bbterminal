@@ -146,6 +146,8 @@ export default function Sidebar({ initialUser }: Props) {
   const [viewAsUser, setViewAsUser] = useState(false);
   // Which collapsible nav sections are expanded. Universe Overview starts open.
   const [openSections, setOpenSections] = useState<Set<string>>(() => new Set(['Universe Overview']));
+  // Mobile nav: off-canvas drawer on < lg, static rail on lg+.
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   // Account switcher state
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -223,6 +225,12 @@ export default function Sidebar({ initialUser }: Props) {
   }, [initialUser]);
 
   useClickOutside(accountMenuRef, () => setAccountMenuOpen(false), accountMenuOpen);
+
+  // Close the mobile drawer on every route change so tapping a nav link
+  // doesn't leave the overlay covering the page.
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [pathname]);
 
   // When the admin opens the menu, fetch the user list once so we know who
   // we can switch to. Skipped for non-admins (they can't list users) and
@@ -432,8 +440,44 @@ export default function Sidebar({ initialUser }: Props) {
     });
 
   return (
-    <aside className="w-56 shrink-0 border-r border-neutral-800/60 bg-sidebar flex flex-col">
-      <div className="px-5 py-5 border-b border-neutral-800/60">
+    <>
+      {/* Mobile top bar (< lg). In normal flow — the body is a column on
+          mobile — so it pushes content down; hidden on lg+ where the static
+          rail takes over. Holds the hamburger that opens the drawer. */}
+      <div className="lg:hidden sticky top-0 z-30 flex items-center gap-3 h-14 px-4 border-b border-neutral-800/60 bg-sidebar">
+        <button
+          type="button"
+          onClick={() => setDrawerOpen(true)}
+          aria-label="Open navigation menu"
+          aria-expanded={drawerOpen}
+          className="p-2 -ml-2 rounded-lg text-fg-muted hover:text-fg-strong hover:bg-overlay/5 transition-colors"
+        >
+          <svg className="w-5 h-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <path strokeLinecap="round" d="M3 5h14M3 10h14M3 15h14" />
+          </svg>
+        </button>
+        <Link href="/" className="flex items-center gap-2">
+          <Image src="/logo.jpg" alt="BBTerminal" width={24} height={24} className="rounded-md shrink-0" priority />
+          <span className="text-base font-semibold tracking-tight text-fg-strong">BBTerminal</span>
+        </Link>
+      </div>
+
+      {/* Scrim behind the open drawer (mobile only). Tap to close. */}
+      {drawerOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-40 bg-scrim/60"
+          onClick={() => setDrawerOpen(false)}
+          aria-hidden
+        />
+      )}
+
+      <aside
+        className={`bg-sidebar flex flex-col border-r border-neutral-800/60
+          fixed inset-y-0 left-0 z-50 w-64 max-w-[82vw] transition-transform duration-200 ease-out
+          ${drawerOpen ? 'translate-x-0' : '-translate-x-full'}
+          lg:static lg:z-auto lg:w-56 lg:max-w-none lg:translate-x-0 lg:shrink-0`}
+      >
+      <div className="px-5 py-5 border-b border-neutral-800/60 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2.5 group">
           <Image
             src="/logo.jpg"
@@ -447,6 +491,17 @@ export default function Sidebar({ initialUser }: Props) {
             BBTerminal
           </span>
         </Link>
+        {/* Close button — drawer only (mobile). */}
+        <button
+          type="button"
+          onClick={() => setDrawerOpen(false)}
+          aria-label="Close navigation menu"
+          className="lg:hidden p-1.5 -mr-1.5 rounded-lg text-fg-muted hover:text-fg-strong hover:bg-overlay/5 transition-colors"
+        >
+          <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+          </svg>
+        </button>
       </div>
       <nav className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1">
         {visibleNav.map((entry) => {
@@ -696,5 +751,6 @@ export default function Sidebar({ initialUser }: Props) {
         )}
       </div>
     </aside>
+    </>
   );
 }
