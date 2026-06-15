@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { API_URL } from '../../lib/apiUrl';
 import { runSSE } from '../../lib/stream';
-import { useUniverseTemplates, useStaticUniverses } from '../../lib/hooks/apiData';
+import { useStaticUniverses } from '../../lib/hooks/apiData';
 import type { BacktestResult } from '../../lib/stores/momentum';
 import MarketHealthCard from './momentum/MarketHealthCard';
 import ExposureReturnsBreakdown from './momentum/ExposureReturnsBreakdown';
@@ -29,15 +29,11 @@ const today = () => new Date().toISOString().slice(0, 10);
 type Progress = { pct: number; message: string };
 
 export default function RegimeDetector() {
-  const { data: templates } = useUniverseTemplates();
   const { data: statics } = useStaticUniverses();
 
-  // Both template-managed (ACWI) and frozen snapshots are valid universes
-  // for the signals-only run — `index_universe` resolves either.
-  const universes = useMemo(
-    () => [...(templates ?? []), ...(statics ?? [])],
-    [templates, statics],
-  );
+  // Frozen-only policy: only frozen static snapshots are selectable (the live
+  // templates are excluded everywhere except the LongEquity per-month page).
+  const universes = useMemo(() => statics ?? [], [statics]);
 
   const [universe, setUniverse] = useState<string>('');
   // Default to a range that's inside typical FX + price coverage. The

@@ -75,7 +75,10 @@ test.describe('/backtest', () => {
     await page.goto('/backtest');
 
     await expect(page.getByRole('heading', { name: 'Variants' })).toBeVisible();
-    await expect(page.getByText('Permutations')).toBeVisible();
+    // `exact` so the "Permutations" label isn't ambiguous with the empty-state
+    // hint ("…to generate permutations") shown when no universe is picked yet
+    // (the default — universe is a required axis with nothing checked).
+    await expect(page.getByText('Permutations', { exact: true })).toBeVisible();
     // The cross-product axis columns ("Strategy" is omitted — it collides
     // with the mode-select label above).
     await expect(page.getByText('Frequency')).toBeVisible();

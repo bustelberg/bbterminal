@@ -143,6 +143,7 @@ async def list_companies():
                     "company_id,company_name,gurufocus_ticker,exchange_id,isin,"
                     "delisted_at,gurufocus_lookup_failed_at,"
                     "out_of_scope_at,out_of_scope_reason,market_cap_eur,market_cap_date,"
+                    "market_cap_native,market_cap_currency,market_cap_fx_rate,"
                     "gurufocus_exchange:gurufocus_exchange("
                     "exchange_code,currency_code,country:country(country_name))"
                 )
@@ -160,12 +161,18 @@ async def list_companies():
             if len(batch) < page:
                 break
             offset += page
+        from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
         for r in rows:
             exch_info = r.pop("gurufocus_exchange", None) or {}
             country_info = exch_info.pop("country", None) or {}
-            r["gurufocus_exchange"] = exch_info.get("exchange_code")
+            code = exch_info.get("exchange_code")
+            r["gurufocus_exchange"] = code
             r["currency"] = exch_info.get("currency_code")
             r["country"] = country_info.get("country_name")
+            # GuruFocus subscription covers USA + Europe + Asia + Middle East;
+            # AU/NZ, Russia, Africa, LatAm are out of scope. Flag those so the
+            # UI can explain an empty market cap as "unsubscribed" not "missing".
+            r["gf_unsubscribed"] = not is_gf_subscribed_exchange(code)
         return rows
 
     return await asyncio.to_thread(_query)
@@ -227,20 +234,23 @@ async def list_company_memberships():
 
 @router.get("/api/companies/sectors")
 async def list_company_sectors():
-    """Latest known sector per company (from `universe_membership`), for the
-    /companies Sector column + filter. Returns `{company_id: sector}`.
+    """Sector per company + the universe it came from, for the /companies
+    Sector column + filter. Returns `{company_id: {sector, source}}`.
 
-    Same `.range()` pagination + try/except-→-{} resilience as
-    /memberships (so a not-yet-migrated prod returns empty rather than 500).
-    Backed by the `company_latest_sector` RPC (DISTINCT ON company_id)."""
+    Sector is preferentially the company's **Leonteq** sector, else the most
+    recent month's sector from any universe; `source` is that universe's label
+    (shown as an annotation). Backed by the `company_sector_with_source` RPC
+    (DISTINCT ON company_id). Same `.range()` pagination + try/except-→-{}
+    resilience as /memberships (so a not-yet-migrated prod returns empty
+    rather than 500)."""
     def _query():
         try:
             page = 1000
             offset = 0
-            collected: dict[str, str] = {}
+            collected: dict[str, dict] = {}
             for _attempt in range(20):
                 resp = (
-                    supabase.rpc("company_latest_sector")
+                    supabase.rpc("company_sector_with_source")
                     .range(offset, offset + page - 1)
                     .execute()
                 )
@@ -253,7 +263,7 @@ async def list_company_sectors():
                     if cid in collected:
                         continue
                     if r.get("sector"):
-                        collected[cid] = r["sector"]
+                        collected[cid] = {"sector": r["sector"], "source": r.get("source_label")}
                         added += 1
                 if added == 0 or len(batch) < page:
                     break

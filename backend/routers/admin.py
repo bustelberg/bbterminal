@@ -74,6 +74,23 @@ class _GuruFocusExchangeSearchBody(BaseModel):
     candidate_exchanges: list[str] | None = None
 
 
+class _GfCompanyNameBody(BaseModel):
+    ticker: str
+    exchange: str | None = None
+
+
+@router.post("/api/admin/gurufocus-company-name")
+async def gurufocus_company_name(body: _GfCompanyNameBody, authorization: str = Header(...)):
+    """Fetch the company name GuruFocus reports for a (ticker, exchange) — so a
+    mislabeled row can be corrected to what its GuruFocus link actually shows
+    (e.g. a row stored as "TSMC" whose `TSE:2330` listing GuruFocus calls
+    "Forside Co Ltd"). One GuruFocus call. Returns `{name, found, symbol, log}`;
+    the caller confirms + writes the rename via PUT /api/companies/{id}."""
+    _require_admin(authorization)
+    from index_universe.backfill_market_cap import gf_company_name_for  # noqa: PLC0415
+    return await asyncio.to_thread(gf_company_name_for, body.ticker, body.exchange)
+
+
 @router.post("/api/admin/gurufocus-exchange-search")
 async def gurufocus_exchange_search(
     body: _GuruFocusExchangeSearchBody,
@@ -483,14 +500,19 @@ async def get_schedule(strategy_id: int, authorization: str = Header(...)):
 
 
 @router.get("/api/admin/universes")
-async def list_universes(authorization: str = Header(...)):
-    """List every universe — the discovery call for the membership endpoint
-    below. Admin only.
+async def list_universes(
+    include_all: bool = False,
+    authorization: str = Header(...),
+):
+    """List the **frozen** universes — the discovery call for the membership
+    endpoint below. Admin only.
 
-    Covers all universe kinds: template-managed canonicals (ACWI, LEONTEQ,
-    …, `template_key` set), frozen snapshots (`frozen_at` set), criteria-
-    derived universes (`parent_universe_id` set), and imported index
-    universes (all three null).
+    By default returns ONLY frozen static snapshots (`frozen_at` set) — the
+    reproducible "X (as of YYYY-MM)" universes that are the canonical, usable
+    sets across the app. Pass `?include_all=true` to also list the live
+    template-managed canonicals (`template_key` set), the LongEquity
+    time-series universe, criteria-derived universes (`parent_universe_id`),
+    and imported index universes.
 
     Single-set model: each universe is a frozen set as of `as_of_date`.
     `is_monthly` is true only for the LongEquity time-series universe; the
@@ -506,16 +528,17 @@ async def list_universes(authorization: str = Header(...)):
     _require_admin(authorization)
 
     def _query() -> dict:
-        rows = (
+        q = (
             supabase.table("universe")
             .select(
                 "universe_id, label, description, template_key, frozen_at, "
                 "parent_universe_id, created_at, last_refreshed_at, "
                 "as_of_date, is_monthly"
             )
-            .order("label")
-            .execute()
-        ).data or []
+        )
+        if not include_all:
+            q = q.not_.is_("frozen_at", "null")
+        rows = q.order("label").execute().data or []
 
         # Aggregates from the materialized view (best-effort — it may be
         # unpopulated / stale; the membership endpoint computes the live count).
@@ -573,14 +596,17 @@ async def get_universe(
     month: str | None = None,
     authorization: str = Header(...),
 ):
-    """Full membership of one universe for a single month, each member
-    enriched with the same per-company attributes the holdings endpoint
-    returns. Admin only.
+    """Full membership of one universe, each member enriched with the same
+    per-company attributes the holdings endpoint returns. Admin only.
 
-    By default returns the universe's LATEST month; pass `?month=YYYY-MM`
-    for a historical snapshot (a universe carries one membership set per
-    month). 404 when the universe doesn't exist; empty `members` when the
-    universe (or the requested month) has no membership.
+    Almost every universe is a single frozen set (one `target_month`), so by
+    default you get that set and the `month` param does nothing. The ONE
+    exception is the live, multi-month **LongEquity** time-series universe
+    (`is_monthly=true`, reachable via `?include_all=true` on the list): there
+    `?month=YYYY-MM` selects a historical snapshot, defaulting to its latest
+    month. For any single-month universe `month` is IGNORED (you always get
+    the frozen set, never an empty wrong-month result). 404 when the universe
+    doesn't exist; empty `members` when it has no membership.
 
     Each member carries:
         company_id, ticker, exchange, country, currency, isin,
@@ -593,14 +619,14 @@ async def get_universe(
     don't apply to a universe member, and the holding's entry price becomes
     the latest close (native + EUR).
 
-    Response: `{universe_id, label, template_key, frozen_at, target_month,
-    member_count, members:[…]}`."""
+    Response: `{universe_id, label, template_key, frozen_at, is_monthly,
+    target_month, member_count, members:[…]}`."""
     _require_admin(authorization)
 
     def _query() -> dict:
         urow = (
             supabase.table("universe")
-            .select("universe_id, label, description, template_key, frozen_at, parent_universe_id")
+            .select("universe_id, label, description, template_key, frozen_at, parent_universe_id, is_monthly")
             .eq("universe_id", universe_id)
             .limit(1)
             .execute()
@@ -609,8 +635,12 @@ async def get_universe(
             raise HTTPException(404, f"Universe #{universe_id} not found")
         u = urow[0]
 
-        # Target month: explicit override, else the universe's latest.
-        target_month = month
+        # `month` is only meaningful for the multi-month LongEquity universe;
+        # for a single-month frozen set it's ignored so a stray ?month= can't
+        # return empty members. Target month = the override (monthly only),
+        # else the universe's latest.
+        is_monthly = bool(u.get("is_monthly"))
+        target_month = month if is_monthly else None
         if not target_month:
             latest = (
                 supabase.table("universe_membership")
@@ -649,6 +679,7 @@ async def get_universe(
             "label": u.get("label"),
             "template_key": u.get("template_key"),
             "frozen_at": u.get("frozen_at"),
+            "is_monthly": is_monthly,
             "target_month": target_month,
             "member_count": len(members),
             "members": members,

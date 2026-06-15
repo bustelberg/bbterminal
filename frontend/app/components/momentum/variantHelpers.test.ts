@@ -103,10 +103,13 @@ describe('parseRegimeFloorList', () => {
 describe('buildAllPermutations', () => {
   // Minimal "empty axes everywhere" baseline so each test focuses on one
   // dimension at a time.
+  // Universe is a REQUIRED axis (one frozen universe checked), unlike the
+  // optional sweep axes which default empty. So the baseline carries a single
+  // universe; the rest of the axes stay empty to isolate one dimension each.
   const base = {
     selectedFreqs: new Set<RebalanceFrequency>(['monthly']),
     selectedStrategies: new Set<StrategyType>(['long_only']),
-    selectedUniverses: new Set<string>(),
+    selectedUniverses: new Set<string>(['ACWI']),
     selectedGroupings: new Set<'sector' | 'industry'>(),
     topSectorsSweep: '',
     perSectorSweep: '',
@@ -116,12 +119,17 @@ describe('buildAllPermutations', () => {
   it('produces a single permutation when all sweep axes are empty', () => {
     const out = buildAllPermutations(base);
     expect(out).toHaveLength(1);
-    expect(out[0]).toEqual({ frequency: 'monthly', strategy: 'long_only' });
+    expect(out[0]).toEqual({ frequency: 'monthly', strategy: 'long_only', universe: 'ACWI' });
   });
 
-  it('omits axis fields entirely when the sweep is empty (not undefined values)', () => {
+  it('omits optional axis fields entirely when their sweep is empty', () => {
     const out = buildAllPermutations(base);
-    expect(Object.keys(out[0])).toEqual(['frequency', 'strategy']);
+    expect(Object.keys(out[0]).sort()).toEqual(['frequency', 'strategy', 'universe']);
+  });
+
+  it('produces ZERO permutations when no universe is selected (required axis)', () => {
+    const out = buildAllPermutations({ ...base, selectedUniverses: new Set<string>() });
+    expect(out).toHaveLength(0);
   });
 
   it('fans out across each non-empty axis (full cross-product)', () => {

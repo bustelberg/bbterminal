@@ -6,7 +6,7 @@ import { guruFocusUrl } from '../../../lib/gurufocusUrl';
 import TableDownloadButton from '../TableDownloadButton';
 import MultiSelectFilter from './MultiSelectFilter';
 import type { Company } from './types';
-import type { UseCompanyFiltersResult } from './useCompanyFilters';
+import { NO_UNIVERSE, type UseCompanyFiltersResult } from './useCompanyFilters';
 
 /** The search / multi-select-filter / download bar above the table.
  * Filter state comes from `useCompanyFilters`; the export columns mirror
@@ -78,7 +78,7 @@ export default function CompaniesToolbar({
       />
       <MultiSelectFilter
         label="Universes"
-        options={universeOptions}
+        options={[NO_UNIVERSE, ...universeOptions]}
         selected={filterUniverse}
         onChange={setFilterUniverse}
         combineMode="AND"

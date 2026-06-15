@@ -36,19 +36,23 @@ def _enrich_tickers(rows: list[dict]) -> list[dict]:
     for c in fetch_in_chunks(
         company_ids,
         lambda chunk: supabase.table("company").select(
-            "company_id, company_name, gurufocus_exchange:gurufocus_exchange(exchange_code)"
+            "company_id, company_name, gurufocus_ticker, gurufocus_exchange:gurufocus_exchange(exchange_code)"
         ).in_("company_id", chunk).execute(),
     ):
         exch_info = c.get("gurufocus_exchange") or {}
         company_info[c["company_id"]] = {
             "company_name": c.get("company_name") or "",
             "exchange": exch_info.get("exchange_code") or "",
+            "gurufocus_ticker": c.get("gurufocus_ticker") or "",
         }
 
     result = []
     for r in rows:
         info = company_info.get(r["company_id"], {}) if r["company_id"] else {}
-        ticker = r["ticker"]
+        # Fall back to the company's gurufocus_ticker when the membership row
+        # carries no `universe_ticker` (e.g. the LongEquity frozen union, whose
+        # rows are company-id-based) so the ticker column always populates.
+        ticker = r.get("ticker") or info.get("gurufocus_ticker") or ""
         exchange = info.get("exchange") or None
         result.append({
             "ticker": ticker,

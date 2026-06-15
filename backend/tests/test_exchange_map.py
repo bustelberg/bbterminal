@@ -203,11 +203,15 @@ class TestUnavailableReason:
 class TestFeasibleExchanges:
     def test_us_and_core_regions_feasible(self):
         assert "" in FEASIBLE_GF_EXCHANGES  # US
-        assert {"LSE", "XTER", "HKSE", "TSE", "SAU"} <= FEASIBLE_GF_EXCHANGES
+        # Continental Europe + Asia + Middle East are covered.
+        assert {"XTER", "HKSE", "TSE", "SAU"} <= FEASIBLE_GF_EXCHANGES
 
-    def test_out_of_scope_regions_excluded(self):
-        # Russia / Australia / NZ / Africa / LatAm are out of subscription.
-        for code in ("MCX", "ASX", "NZSE", "JSE", "CAI", "TSX", "MEX"):
+    def test_unsubscribed_regions_excluded(self):
+        # GuruFocus returns "403 unsubscribed region" for these (confirmed by
+        # probing): India (NSE/BSE), UK (LSE), Ireland (DUB) — plus the
+        # always-out-of-scope Russia / Australia / NZ / Africa / LatAm.
+        for code in ("NSE", "BSE", "LSE", "DUB",
+                     "MCX", "ASX", "NZSE", "JSE", "CAI", "TSX", "MEX"):
             assert code not in FEASIBLE_GF_EXCHANGES
 
 

@@ -27,7 +27,7 @@ export default function InfoTip({ text }: { text: string }) {
       <span ref={iconRef} className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-neutral-600 text-fg-subtle text-[10px] leading-none hover:border-accent-400 hover:text-accent-400 transition-colors">i</span>
       {show && (
         <span
-          className="fixed w-56 px-3 py-2 bg-popover border border-neutral-700 rounded-lg text-xs text-fg-soft leading-relaxed z-[9999] shadow-xl pointer-events-none"
+          className="fixed w-56 px-3 py-2 bg-popover border border-neutral-700 rounded-lg text-xs text-fg-soft leading-relaxed z-[9999] shadow-xl pointer-events-none whitespace-normal break-words"
           style={{ top: pos.top, left: pos.left, transform: 'translate(-50%, 0)' }}
         >
           {text}

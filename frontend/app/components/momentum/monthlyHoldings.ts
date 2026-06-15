@@ -52,6 +52,45 @@ export function collectHeldCompanies(records: readonly PeriodRecord[]): HeldComp
   return Array.from(seen.values()).sort((a, b) => a.ticker.localeCompare(b.ticker));
 }
 
+/** Per-period membership churn vs the previous non-empty portfolio. */
+export type MonthChange = {
+  /** company_ids held this period that weren't held the prior period. */
+  newcomerIds: Set<number>;
+  /** Prior-period holdings NOT held this period — the names to SELL at this
+   * rebalance. Carries the prior `Holding` so the UI can show ticker / name /
+   * sector. Empty for the first period (no prior portfolio to sell from). */
+  dropped: Holding[];
+};
+
+/** Per-period entries (newcomers) and exits (sells) vs the immediately
+ * preceding non-empty portfolio, keyed by `record.date`. The first period has
+ * no prior holdings → nothing flagged. Empty periods are skipped as the
+ * "previous" reference (a gap month doesn't mass-flag the next real period).
+ * Membership-only, so the result is identical whether computed on the raw
+ * records or the re-priced/split display records. */
+export function computeMonthChanges(records: readonly PeriodRecord[]): Record<string, MonthChange> {
+  const out: Record<string, MonthChange> = {};
+  let prev: Holding[] | null = null;
+  for (const r of records) {
+    if (r.holdings.length === 0) {
+      out[r.date] = { newcomerIds: new Set(), dropped: [] };
+      continue; // keep `prev` pointing at the last real portfolio
+    }
+    const currIds = new Set(r.holdings.map((h) => h.company_id));
+    if (prev === null) {
+      out[r.date] = { newcomerIds: new Set(), dropped: [] };
+    } else {
+      const prevIds = new Set(prev.map((h) => h.company_id));
+      const newcomerIds = new Set<number>();
+      for (const id of currIds) if (!prevIds.has(id)) newcomerIds.add(id);
+      const dropped = prev.filter((h) => !currIds.has(h.company_id));
+      out[r.date] = { newcomerIds, dropped };
+    }
+    prev = r.holdings;
+  }
+  return out;
+}
+
 /** One-way turnover per period: % of the period's holdings that weren't held
  * in the previous period. The first period (no prior portfolio) and any
  * empty period are null. */

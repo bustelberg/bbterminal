@@ -9,7 +9,6 @@ import NotificationsPanel from './momentum/NotificationsPanel';
 import {
   useCompanyExchangeMap,
   useCompanyIsinMap,
-  useUniverseTemplates,
   useStaticUniverses,
   type UniverseTemplate,
 } from '../../lib/hooks/apiData';
@@ -256,15 +255,17 @@ export default function MomentumBacktester() {
     category_weights: categoryWeights,
   }), [selectedIndexUniverse, weights, categoryWeights]);
 
-  // Universe options = live templates + frozen static snapshots. Snapshots
-  // are pipeline-immune (reproducible) and resolve by label; their
-  // `template_key` field carries that label (the value sent as
-  // `index_universe`). Both map into the locally-shaped `IndexUniverseEntry`
-  // the Variants AxisColumn wants. (Snapshots are CREATED on the Leonteq
-  // page; here they just appear as another pickable universe.)
-  const { data: _utRaw, loading: _utLoading } = useUniverseTemplates();
+  // Universe options = FROZEN static snapshots ONLY. A backtest must run
+  // against an immutable set so a saved run stays reproducible — the live
+  // pipeline-managed templates (ACWI / Leonteq / ACWI∩Leonteq) change under
+  // you on every refresh, so they're deliberately NOT pickable here. To
+  // backtest one of those, freeze a copy first (/acwi, /sp500,
+  // /longequity-universe) and it shows up here. Snapshots resolve by label;
+  // their `template_key` field carries that label (the value sent as
+  // `index_universe`), and map into the `IndexUniverseEntry` shape the
+  // Variants AxisColumn wants.
   const { data: _staticHook, loading: _staticLoading } = useStaticUniverses();
-  const universesLoading = _utLoading || _staticLoading;
+  const universesLoading = _staticLoading;
   useEffect(() => {
     const mapUni = (t: UniverseTemplate) => ({
       index_name: t.template_key,
@@ -277,14 +278,9 @@ export default function MomentumBacktester() {
       // dropdown shows the latest month's count as a representative number.
       total_unique_tickers: t.latest_membership_count,
     });
-    // Backtests run only against frozen (single-set) universes. LongEquity
-    // is the one time-series universe (per-month membership), so it's
-    // excluded from the picker.
-    const all = [...(_utRaw ?? []), ...(_staticHook ?? [])]
-      .filter((t) => t.template_key !== 'LONGEQUITY');
-    if (all.length === 0) return;
-    setIndexUniverses(all.map(mapUni));
-  }, [_utRaw, _staticHook]);
+    if (!_staticHook) return; // still loading — don't flash an empty picker
+    setIndexUniverses(_staticHook.map(mapUni));
+  }, [_staticHook]);
 
   // One-time bookkeeping at mount: saved runs and the latest-price-date
   // fetch. The endpoint hooks above own all the recurring fetches.

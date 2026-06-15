@@ -77,9 +77,14 @@ export function useCompanies() {
           'Loading sectors',
           `${API_URL}/api/companies/sectors`,
         );
-        const { sectors } = (await res.json()) as { sectors: Record<string, string> };
+        const { sectors } = (await res.json()) as {
+          sectors: Record<string, { sector: string; source: string | null }>;
+        };
         setCompanies((prev) =>
-          prev.map((c) => ({ ...c, sector: sectors[String(c.company_id)] ?? null })),
+          prev.map((c) => {
+            const s = sectors[String(c.company_id)];
+            return { ...c, sector: s?.sector ?? null, sector_source: s?.source ?? null };
+          }),
         );
       } catch {
         // Non-fatal — sector column just shows "—".
@@ -114,35 +119,43 @@ export function useCompanies() {
     return [...s].sort();
   }, [companies]);
 
-  // Detect duplicate company names (case-insensitive)
-  const duplicateNames = useMemo(() => {
+  // Companies in no universe (orphaned stubs) — surfaced as a count + toggle.
+  // Zero while memberships are still loading so the badge doesn't flash the
+  // full list count.
+  const unlinkedCount = useMemo(
+    () => (membershipsLoading ? 0 : companies.filter((c) => (c.universes ?? []).length === 0).length),
+    [companies, membershipsLoading],
+  );
+
+  // Detect TRUE duplicates by ISIN (same security stored twice) — NOT by name.
+  // Name-matching false-flags legitimately-distinct securities that share a
+  // company name (share classes like GOOG/GOOGL or Atlas Copco A/B, ADR-vs-
+  // primary, bearer-vs-participation), which got far noisier once GuruFocus
+  // name-normalisation made those names identical. A shared ISIN is the real
+  // "same security" signal.
+  const duplicateIsins = useMemo(() => {
     const counts = new Map<string, number>();
     for (const c of companies) {
-      const name = (c.company_name ?? '').toLowerCase().trim();
-      if (name) counts.set(name, (counts.get(name) ?? 0) + 1);
+      const isin = (c.isin ?? '').trim();
+      if (isin) counts.set(isin, (counts.get(isin) ?? 0) + 1);
     }
     const dupes = new Set<string>();
-    for (const [name, count] of counts) {
-      if (count > 1) dupes.add(name);
+    for (const [isin, count] of counts) {
+      if (count > 1) dupes.add(isin);
     }
     return dupes;
   }, [companies]);
 
-  // Count of companies that share a name with at least one other company.
+  // Count of companies that share an ISIN with at least one other company.
   // Click the badge in the header to filter the table to just these rows.
   const duplicateCount = useMemo(() => {
-    const nameCounts = new Map<string, number>();
-    for (const c of companies) {
-      const name = (c.company_name ?? '').trim().toLowerCase();
-      if (name) nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
-    }
     let n = 0;
     for (const c of companies) {
-      const name = (c.company_name ?? '').trim().toLowerCase();
-      if (name && (nameCounts.get(name) ?? 0) > 1) n++;
+      const isin = (c.isin ?? '').trim();
+      if (isin && duplicateIsins.has(isin)) n++;
     }
     return n;
-  }, [companies]);
+  }, [companies, duplicateIsins]);
 
   const handleSave = useCallback(async (id: number, updated: Partial<Company>) => {
     setError(null);
@@ -270,6 +283,42 @@ export function useCompanies() {
     }
   }, [handleSave]);
 
+  /** Fetch the company name GuruFocus reports for this row's (ticker,
+   * exchange) and, after a confirm, overwrite `company_name` with it. Fixes
+   * mislabeled rows (a row stored as "TSMC" whose GuruFocus link actually
+   * shows "Forside Co Ltd"). Writes through the same PUT the inline edit uses. */
+  const fetchGfName = useCallback(async (c: Company) => {
+    try {
+      const res = await apiFetch(`${API_URL}/api/admin/gurufocus-company-name`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker: c.gurufocus_ticker, exchange: c.gurufocus_exchange }),
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        await dialog.alert(`GuruFocus lookup failed: ${b.detail ?? `HTTP ${res.status}`}`);
+        return;
+      }
+      const d = (await res.json()) as { name: string | null; found: boolean; symbol: string | null; log: string };
+      if (!d.found || !d.name) {
+        await dialog.alert(`GuruFocus returned no name for ${d.symbol ?? c.gurufocus_ticker}.\n\n${d.log ?? ''}`);
+        return;
+      }
+      if (d.name.trim() === (c.company_name ?? '').trim()) {
+        await dialog.alert(`Already matches GuruFocus: "${d.name}".`);
+        return;
+      }
+      const ok = await dialog.confirm(
+        `GuruFocus lists ${d.symbol} as:\n\n  "${d.name}"\n\nCurrent name: "${c.company_name ?? '(none)'}"\n\nUpdate this row's name to GuruFocus's?`,
+        { confirmLabel: 'Use GuruFocus name' },
+      );
+      if (!ok) return;
+      await handleSave(c.company_id, { company_name: d.name });
+    } catch (e) {
+      await dialog.alert(`GuruFocus lookup failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, [handleSave]);
+
   const handleDelete = useCallback(async (id: number, name: string) => {
     if (!(await dialog.confirm(`Delete "${name}"? This cannot be undone.`, { destructive: true, confirmLabel: 'Delete' }))) return;
     setError(null);
@@ -302,13 +351,15 @@ export function useCompanies() {
     countryOptions,
     sectorOptions,
     universeOptions,
-    duplicateNames,
+    duplicateIsins,
     duplicateCount,
+    unlinkedCount,
     // mutations
     handleSave,
     handleAdd,
     handleDelete,
     findCorrectExchange,
+    fetchGfName,
     // add-confirm flow
     pendingAdd,
     setPendingAdd,

@@ -66,4 +66,19 @@ export async function mockCompanies(page: Page) {
       }),
     });
   });
+
+  // Sector + source-universe annotation (new shape: {cid: {sector, source}}).
+  await page.route('**/api/companies/sectors', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        sectors: {
+          '1': { sector: 'Technology', source: 'ACWI' },
+          '2': { sector: 'Technology', source: 'ACWI' },
+          '3': { sector: 'Technology', source: 'Leonteq' },
+        },
+      }),
+    });
+  });
 }

@@ -16,6 +16,7 @@ export default function AxisColumn<T>({
   renderItem,
   maxHClass,
   loading = false,
+  emptyHint,
 }: {
   label: string;
   options: readonly T[];
@@ -23,6 +24,10 @@ export default function AxisColumn<T>({
   onAll: () => void;
   onNone: () => void;
   renderItem: (option: T) => ReactNode;
+  /** Text shown when there are no options (and not loading). Defaults to
+   * "No options"; the Universe axis overrides it to point at the freeze
+   * pages, since an empty list there means "nothing frozen yet". */
+  emptyHint?: string;
   /** Tailwind class for the inner `<ul>`'s max-height — varies between
    * the four axes since they have very different option counts
    * (frequency: 14, strategy: 2, universe: a few, grouping: 2). */
@@ -58,7 +63,7 @@ export default function AxisColumn<T>({
                 <span className="inline-block w-3 h-3 rounded-full border-2 border-neutral-700 border-t-accent-500 animate-spin" />
                 Loading…
               </>
-            ) : 'No options'}
+            ) : (emptyHint ?? 'No options')}
           </li>
         ) : (
           options.map((opt) => <li key={String(opt)}>{renderItem(opt)}</li>)

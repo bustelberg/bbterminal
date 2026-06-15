@@ -1,12 +1,14 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import type { Snapshot } from '../longequity-universe/page';
 
 import { ingestStore, startIngest } from '../../lib/stores/ingest';
 import ProgressTimeline from './ProgressTimeline';
 import { trackedFetch } from '../../lib/loading';
+import { apiFetch } from '../../lib/apiFetch';
 import LoadingDots from './LoadingDots';
+import FrozenUniversesPanel from './FrozenUniversesPanel';
 import { API_URL } from '../../lib/apiUrl';
 
 type Company = {
@@ -215,6 +217,25 @@ export default function LongEquityUniverse() {
   const ingestLog = ingestStore.use((s) => s.log);
   const setIngestLog = (next: typeof ingestLog) => ingestStore.set({ log: next });
 
+  // Freeze the all-months union into a single frozen universe. Returns a
+  // result for the shared FrozenUniversesPanel (which renders the button +
+  // message + refreshes its list).
+  const freezeUnion = useCallback(async (): Promise<{ ok: boolean; text: string }> => {
+    try {
+      const r = await apiFetch(`${API_URL}/api/longequity/freeze-union`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return { ok: false, text: d.detail ?? `Freeze failed (${r.status})` };
+      return {
+        ok: true,
+        text: d.created === false
+          ? `Already frozen today: "${d.label}" (${d.companies} companies).`
+          : `Froze "${d.label}" — ${d.companies} companies in one set, now selectable in /backtest.`,
+      };
+    } catch (e) {
+      return { ok: false, text: e instanceof Error ? e.message : String(e) };
+    }
+  }, []);
+
 
   async function refreshSnapshots() {
     try {
@@ -227,10 +248,39 @@ export default function LongEquityUniverse() {
     } catch {}
   }
 
+  // Probe the newest report month available remotely. Cheap single request —
+  // run on mount so the header shows it without waiting for a "Load" click
+  // (the heavier snapshot tables still stay lazy per the page's design).
+  const loadLatestAvailable = useCallback(async () => {
+    setLoadingAvailable(true);
+    try {
+      const res = await trackedFetch(
+        'Checking latest available month',
+        `${API_URL}/api/longequity/latest-available`,
+      );
+      if (!res.ok) {
+        // Backend reachable but errored. Common causes: LONGEQUITY_BASE_URL
+        // env var unset, remote upstream temporarily down. Surface it so the
+        // user doesn't stare at a blank dash.
+        let detail = '';
+        try { detail = (await res.json())?.detail ?? ''; } catch {}
+        setLatestAvailable(detail ? `Error: ${detail.slice(0, 80)}` : `Error ${res.status}`);
+        return;
+      }
+      const d: { available: boolean; year?: number; month?: number } = await res.json();
+      setLatestAvailable(d.available && d.year && d.month ? `${MONTH_NAMES[d.month]} ${d.year}` : 'Not found');
+    } catch (e) {
+      setLatestAvailable(e instanceof Error ? `Error: ${e.message}` : 'Unknown');
+    } finally {
+      setLoadingAvailable(false);
+    }
+  }, []);
+
+  useEffect(() => { void loadLatestAvailable(); }, [loadLatestAvailable]);
+
   async function loadAll() {
     setHasLoaded(true);
     setSnapshotsLoading(true);
-    setLoadingAvailable(true);
     const snapshotsPromise = (async () => {
       try {
         const res = await trackedFetch('Loading LongEquity snapshots', `${API_URL}/api/longequity/snapshots`);
@@ -244,34 +294,7 @@ export default function LongEquityUniverse() {
         setSnapshotsLoading(false);
       }
     })();
-    const availablePromise = (async () => {
-      try {
-        const res = await trackedFetch(
-          'Checking latest available month',
-          `${API_URL}/api/longequity/latest-available`,
-        );
-        if (!res.ok) {
-          // Backend reachable but errored. Common causes: LONGEQUITY_BASE_URL
-          // env var unset, remote upstream temporarily down. Surface it so the
-          // user doesn't stare at a blank dash.
-          let detail = '';
-          try { detail = (await res.json())?.detail ?? ''; } catch {}
-          setLatestAvailable(detail ? `Error: ${detail.slice(0, 80)}` : `Error ${res.status}`);
-          return;
-        }
-        const d: { available: boolean; year?: number; month?: number } = await res.json();
-        if (d.available && d.year && d.month) {
-          setLatestAvailable(`${MONTH_NAMES[d.month]} ${d.year}`);
-        } else {
-          setLatestAvailable('Not found');
-        }
-      } catch (e) {
-        setLatestAvailable(e instanceof Error ? `Error: ${e.message}` : 'Unknown');
-      } finally {
-        setLoadingAvailable(false);
-      }
-    })();
-    await Promise.all([snapshotsPromise, availablePromise]);
+    await Promise.all([snapshotsPromise, loadLatestAvailable()]);
   }
 
   function runIngest() {
@@ -315,11 +338,11 @@ export default function LongEquityUniverse() {
         <div>
           <h1 className="text-lg font-semibold text-fg-strong">LongEquity Universe</h1>
           <p className="text-xs text-fg-subtle mt-0.5">
-            Per-month snapshots of LongEquity reports. The cumulative <span className="font-mono">LongEquity</span> universe (every company ever seen) is rebuilt automatically at the end of each ingest.
+            Per-month snapshots of LongEquity reports. The <span className="font-mono">LongEquity</span> universe holds true point-in-time membership per month (rebuilt each ingest). Use <span className="font-medium">Freeze union</span> to snapshot every company across every month into one frozen set for backtests/earnings.
           </p>
         </div>
         <div className="flex items-center gap-4 shrink-0">
-          {hasLoaded && (
+          {(latestAvailable !== null || loadingAvailable) && (
             <div className="text-right text-sm">
               <div className="text-fg-muted">
                 Latest available:{' '}
@@ -353,6 +376,15 @@ export default function LongEquityUniverse() {
 
       {/* Content */}
       <div className="flex-1 overflow-auto px-8 py-5 space-y-5">
+        {/* Uniform frozen-universes panel (inspect / delete / freeze union). */}
+        <FrozenUniversesPanel
+          frozenFrom={['LongEquity']}
+          title="Frozen LongEquity universes"
+          description="LongEquity is a per-month universe. Freeze the union of every company across every month into one static set to use in /backtest. Click a snapshot to inspect its companies."
+          onFreeze={freezeUnion}
+          freezeLabel="Freeze union"
+          freezeHint="Snapshot the union of all companies across all LongEquity months into one frozen universe"
+        />
 
 
         {/* Ingest progress (shared store) */}

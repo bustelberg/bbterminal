@@ -317,6 +317,7 @@ export default function VariantsPanel({
             );
           }}
           loading={universesLoading}
+          emptyHint="No frozen universes yet — freeze one on /acwi, /sp500 or /longequity-universe to backtest it."
           maxHClass="max-h-56"
         />
         <AxisColumn
@@ -410,7 +411,7 @@ export default function VariantsPanel({
         <ul className="max-h-72 overflow-auto p-1">
           {allPermutations.length === 0 ? (
             <li className="px-3 py-2 text-xs text-fg-faint">
-              Pick at least one frequency, strategy, universe, and grouping above to generate permutations.
+              Nothing to run yet — tick a universe above to start (each ticked axis multiplies the run count).
             </li>
           ) : (
             allPermutations.map((p) => {

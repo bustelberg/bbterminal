@@ -25,22 +25,37 @@ export async function mockBacktestPageReads(page: Page) {
     });
   });
 
-  await page.route('**/api/universe-templates', async (route) => {
+  // The /backtest universe picker now lists ONLY frozen static snapshots
+  // (live templates are excluded for reproducibility). Source: GET
+  // /api/static-universes — shape per _frozen_summary (template_key carries
+  // the label sent as index_universe; frozen_at set).
+  await page.route('**/api/static-universes', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify([
         {
-          template_key: 'ACWI',
-          label: 'ACWI',
-          earliest_date: '2002-01-01',
-          earliest_captured_month: '2002-01',
+          template_key: 'ACWI (as of 2026-05)',
+          label: 'ACWI (as of 2026-05)',
+          description: 'Frozen ACWI snapshot',
+          earliest_date: '2026-05-01',
+          universe_id: 9001,
+          months_captured: 1,
+          earliest_captured_month: '2026-05',
           latest_captured_month: '2026-05',
-          months_captured: 293,
           latest_membership_count: 2700,
+          last_refreshed_at: '2026-05-28T00:00:00Z',
+          frozen_at: '2026-05-28T00:00:00Z',
+          frozen_from: 'ACWI',
         },
       ]),
     });
+  });
+
+  // Still mocked though no longer the picker source — harmless if some
+  // shared hook fetches it; keeps the route from hitting the network.
+  await page.route('**/api/universe-templates', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
   });
 
   await page.route('**/api/momentum/backtests', async (route) => {

@@ -82,6 +82,8 @@ erDiagram
         jsonb filter_config
         text template_key UK
         timestamptz last_refreshed_at
+        date as_of_date
+        boolean is_monthly
     }
 
     universe_membership {
@@ -324,6 +326,8 @@ Disambiguated by `(company_id, metric_code, source_code, target_date)`.
 - `universe` rows are named groupings. A row with `parent_universe_id IS NULL` is a base universe; a non-NULL parent makes it a **derived universe** (per-month subset of the parent filtered against `metric_data` rows where `source_code='derived'`, using thresholds in `filter_config`).
 - `template_key` (UNIQUE) is non-NULL on template-managed canonical universes (ACWI, LEONTEQ) — one self-updating row per template; NULL on user-created criteria universes. `last_refreshed_at` is the cache-invalidation key / HTTP ETag input, set on every `UniverseTemplate.refresh()`.
 - `universe_membership` carries the per-month `(universe, company, target_month, sector, industry)` rows.
+- **Frozen vs monthly (2026-06-14 single-set model)**: every universe is a single frozen snapshot **as of `as_of_date`** EXCEPT LongEquity (`is_monthly = true`, `template_key = 'LONGEQUITY'`), which keeps per-month membership. The backtest loader treats a frozen universe's single month as a constant basket (`broadcast_constant`) across all of history; only frozen universes are selectable for backtest/earnings (a monthly universe would silently collapse to its latest month → survivorship bias).
+- **Invariant enforced in-DB** (migration `20260615000000`): two triggers make the bad state impossible — `universe_membership_frozen_single_month_{ins,upd}` reject writes that leave a frozen (`is_monthly = false`) universe holding more than one distinct `target_month`; `universe_monthly_flag_guard` rejects flipping a multi-month universe to `is_monthly = false`. Backend backstop for "frozen-only": `monthly_universe_labels()` in `routers/momentum/backtest_stream/universe_loader.py` (the backtest stream rejects any monthly universe up front).
 
 ### `backtest_run`
 - `config` JSONB stores the full request payload (signal weights, date range, top_n_sectors, selection_mode, etc.).
@@ -379,6 +383,7 @@ OpenFIGI ticker resolutions: `ticker` is the input we tried to look up, the `gur
 | `increment_api_usage(p_month, p_region, p_count)` | Upserts the `api_usage` counter. |
 | `merge_company_data(p_from_id, p_to_id)` | Moves non-conflicting `metric_data` rows from one company to another, deletes the rest — used during deduplication. |
 | `universe_all_companies_ever(p_universe_id)` | Every company ever in a universe + first/last month, months count, `still_current` flag. Backs the template `all-companies.csv` export. |
+| `longequity_membership_by_month()` | One row per LongEquity report month: `(target_month, company_ids int[])` — distinct companies in that month's report (`metric_data` source `longequity`). Backs the true per-month LongEquity rebuild + the frozen-union freeze. Array-per-month so the whole panel returns in ~9 rows (under the PostgREST cap). |
 | `universe_available_months(p_universe_id)` | Distinct `target_month` values for a universe. |
 | `universe_full_stats()` | One-shot aggregate per universe (total/unique counts, monthly counts, sector counts) used by `/api/universe/labels`. |
 

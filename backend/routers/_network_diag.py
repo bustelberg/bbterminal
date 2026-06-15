@@ -459,6 +459,44 @@ def _egress_ip() -> dict:
     return {"ip": None, "source": None, "error": "all egress-IP reflectors failed"}
 
 
+def _geolocate_ips(ips: list[str]) -> dict[str, dict]:
+    """Best-effort geolocation for a batch of IPs so the page can show roughly
+    WHERE each host sits. Uses ip-api.com (free, no key, HTTP-only) batch
+    endpoint — one request for every IP on the page. Returns
+    `{ip: {country, country_code, city}}` for the IPs that resolve; private
+    ranges / lookup failures are simply absent. Geo is decorative, so this
+    never raises and a failure just means no flags."""
+    import requests  # noqa: PLC0415
+
+    uniq = sorted({ip for ip in ips if ip})
+    if not uniq:
+        return {}
+    out: dict[str, dict] = {}
+    try:
+        r = requests.post(
+            "http://ip-api.com/batch?fields=status,country,countryCode,city,query",
+            json=uniq,
+            timeout=8,
+            headers={"User-Agent": _USER_AGENT},
+        )
+        if not r.ok:
+            return out
+        for item in (r.json() or []):
+            if not isinstance(item, dict) or item.get("status") != "success":
+                continue
+            ip = item.get("query")
+            if not ip:
+                continue
+            out[ip] = {
+                "country": item.get("country") or None,
+                "country_code": item.get("countryCode") or None,
+                "city": item.get("city") or None,
+            }
+    except Exception:  # noqa: BLE001 — geo is decorative; never fail the page
+        return out
+    return out
+
+
 def _gurufocus_circuit() -> dict:
     """Live curl_cffi ladder + circuit-breaker state — the "why" behind the
     GuruFocus verdict, independent of this run's probe."""
@@ -494,6 +532,17 @@ async def run_diagnostics(guru_method: str = "curl") -> dict:
     circuit_task = asyncio.to_thread(_gurufocus_circuit)
     source_tasks = [asyncio.to_thread(_probe_source, s, method) for s in _SOURCES]
     egress, circuit, *sources = await asyncio.gather(egress_task, circuit_task, *source_tasks)
+
+    # Geolocate every distinct IP we surfaced (each source's resolved IP +
+    # our egress IP) in one batch, then attach a `geo` tag so the page can
+    # show a rough country/city per IP. Done after the probes since the IPs
+    # come from their DNS resolution.
+    ips = [s.get("resolved_ip") for s in sources]
+    ips.append(egress.get("ip"))
+    geo = await asyncio.to_thread(_geolocate_ips, [ip for ip in ips if ip])
+    for s in sources:
+        s["geo"] = geo.get(s.get("resolved_ip") or "")
+    egress["geo"] = geo.get(egress.get("ip") or "")
 
     counts: dict[str, int] = {}
     for s in sources:

@@ -5,6 +5,7 @@ import AddRow from './AddRow';
 import EditRow from './EditRow';
 import CompanyRow from './CompanyRow';
 import { thCls } from './styles';
+import type { CSSProperties } from 'react';
 import type { Company, SortField } from './types';
 
 const sortIcon = (sortField: SortField, sortDir: 'asc' | 'desc', field: SortField) => {
@@ -26,7 +27,7 @@ export default function CompanyTable({
   adding,
   editingId,
   exchangeOptions,
-  duplicateNames,
+  duplicateIsins,
   deletingId,
   sortField,
   sortDir,
@@ -38,7 +39,9 @@ export default function CompanyTable({
   onCancelEdit,
   onDelete,
   onFindExchange,
+  onFetchGfName,
   onToggleUniverse,
+  universeStyle,
 }: {
   rows: Company[];
   totalCount: number;
@@ -49,7 +52,7 @@ export default function CompanyTable({
   adding: boolean;
   editingId: number | null;
   exchangeOptions: string[];
-  duplicateNames: Set<string>;
+  duplicateIsins: Set<string>;
   deletingId: number | null;
   sortField: SortField;
   sortDir: 'asc' | 'desc';
@@ -61,7 +64,11 @@ export default function CompanyTable({
   onCancelEdit: () => void;
   onDelete: (id: number, name: string) => void;
   onFindExchange: (c: Company) => void;
+  onFetchGfName: (c: Company) => void;
   onToggleUniverse: (u: string) => void;
+  /** Distinct colour per universe label (built once in the orchestrator) —
+   * used for the membership chips + the sector-source annotation. */
+  universeStyle: (label: string) => CSSProperties;
 }) {
   return (
     <div className="flex-1 overflow-auto px-8 py-4">
@@ -74,9 +81,9 @@ export default function CompanyTable({
                 <span className="flex items-center gap-2">
                   Name{sortIcon(sortField, sortDir, 'company_name')}
                   {!loading && (
-                    duplicateNames.size > 0 ? (
+                    duplicateIsins.size > 0 ? (
                       <span className="px-1.5 py-0.5 text-[10px] font-medium bg-warn-500/15 text-warn-400 border border-warn-500/25 rounded">
-                        {duplicateNames.size} dupe{duplicateNames.size > 1 ? 's' : ''}
+                        {duplicateIsins.size} dupe{duplicateIsins.size > 1 ? 's' : ''}
                       </span>
                     ) : (
                       <span className="px-1.5 py-0.5 text-[10px] font-medium bg-pos-500/15 text-pos-400 border border-pos-500/25 rounded">
@@ -136,12 +143,14 @@ export default function CompanyTable({
                   membershipsLoading={membershipsLoading}
                   sectorsLoading={sectorsLoading}
                   loading={loading}
-                  duplicateNames={duplicateNames}
+                  duplicateIsins={duplicateIsins}
                   deletingId={deletingId}
                   onEdit={onEdit}
                   onDelete={onDelete}
                   onFindExchange={onFindExchange}
+                  onFetchGfName={onFetchGfName}
                   onToggleUniverse={onToggleUniverse}
+                  universeStyle={universeStyle}
                 />
               ),
             )}

@@ -312,6 +312,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/gurufocus-company-name": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Gurufocus Company Name
+         * @description Fetch the company name GuruFocus reports for a (ticker, exchange) — so a
+         *     mislabeled row can be corrected to what its GuruFocus link actually shows
+         *     (e.g. a row stored as "TSMC" whose `TSE:2330` listing GuruFocus calls
+         *     "Forside Co Ltd"). One GuruFocus call. Returns `{name, found, symbol, log}`;
+         *     the caller confirms + writes the rename via PUT /api/companies/{id}.
+         */
+        post: operations["gurufocus_company_name_api_admin_gurufocus_company_name_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/gurufocus-exchange-search": {
         parameters: {
             query?: never;
@@ -520,22 +544,27 @@ export interface paths {
         };
         /**
          * List Universes
-         * @description List every universe — the discovery call for the membership endpoint
-         *     below. Admin only.
+         * @description List the **frozen** universes — the discovery call for the membership
+         *     endpoint below. Admin only.
          *
-         *     Covers all universe kinds: template-managed canonicals (ACWI, LEONTEQ,
-         *     …, `template_key` set), frozen snapshots (`frozen_at` set), criteria-
-         *     derived universes (`parent_universe_id` set), and imported index
-         *     universes (all three null). Month range + counts come from the
-         *     `universe_stats` materialized view when available (a refreshed-on-
-         *     pipeline hint; may lag slightly) — `null` when it hasn't been
-         *     populated. Pick a `universe_id` and pass it to
-         *     `GET /api/admin/universes/{id}`.
+         *     By default returns ONLY frozen static snapshots (`frozen_at` set) — the
+         *     reproducible "X (as of YYYY-MM)" universes that are the canonical, usable
+         *     sets across the app. Pass `?include_all=true` to also list the live
+         *     template-managed canonicals (`template_key` set), the LongEquity
+         *     time-series universe, criteria-derived universes (`parent_universe_id`),
+         *     and imported index universes.
+         *
+         *     Single-set model: each universe is a frozen set as of `as_of_date`.
+         *     `is_monthly` is true only for the LongEquity time-series universe; the
+         *     `start_month` / `end_month` / `month_count` fields are populated only when
+         *     `is_monthly` (null otherwise). `member_count` comes from the
+         *     `universe_stats` materialized view (a refreshed-on-pipeline hint; may
+         *     lag). Pick a `universe_id` and pass it to `GET /api/admin/universes/{id}`.
          *
          *     Response: `{count, universes:[{universe_id, label, description, kind,
          *     template_key, frozen_at, parent_universe_id, created_at,
-         *     last_refreshed_at, start_month, end_month, month_count,
-         *     unique_tickers}]}`.
+         *     last_refreshed_at, as_of_date, is_monthly, member_count, start_month,
+         *     end_month, month_count}]}`.
          */
         get: operations["list_universes_api_admin_universes_get"];
         put?: never;
@@ -555,14 +584,17 @@ export interface paths {
         };
         /**
          * Get Universe
-         * @description Full membership of one universe for a single month, each member
-         *     enriched with the same per-company attributes the holdings endpoint
-         *     returns. Admin only.
+         * @description Full membership of one universe, each member enriched with the same
+         *     per-company attributes the holdings endpoint returns. Admin only.
          *
-         *     By default returns the universe's LATEST month; pass `?month=YYYY-MM`
-         *     for a historical snapshot (a universe carries one membership set per
-         *     month). 404 when the universe doesn't exist; empty `members` when the
-         *     universe (or the requested month) has no membership.
+         *     Almost every universe is a single frozen set (one `target_month`), so by
+         *     default you get that set and the `month` param does nothing. The ONE
+         *     exception is the live, multi-month **LongEquity** time-series universe
+         *     (`is_monthly=true`, reachable via `?include_all=true` on the list): there
+         *     `?month=YYYY-MM` selects a historical snapshot, defaulting to its latest
+         *     month. For any single-month universe `month` is IGNORED (you always get
+         *     the frozen set, never an empty wrong-month result). 404 when the universe
+         *     doesn't exist; empty `members` when it has no membership.
          *
          *     Each member carries:
          *         company_id, ticker, exchange, country, currency, isin,
@@ -575,8 +607,8 @@ export interface paths {
          *     don't apply to a universe member, and the holding's entry price becomes
          *     the latest close (native + EUR).
          *
-         *     Response: `{universe_id, label, template_key, frozen_at, target_month,
-         *     member_count, members:[…]}`.
+         *     Response: `{universe_id, label, template_key, frozen_at, is_monthly,
+         *     target_month, member_count, members:[…]}`.
          */
         get: operations["get_universe_api_admin_universes__universe_id__get"];
         put?: never;
@@ -1055,12 +1087,15 @@ export interface paths {
         };
         /**
          * List Company Sectors
-         * @description Latest known sector per company (from `universe_membership`), for the
-         *     /companies Sector column + filter. Returns `{company_id: sector}`.
+         * @description Sector per company + the universe it came from, for the /companies
+         *     Sector column + filter. Returns `{company_id: {sector, source}}`.
          *
-         *     Same `.range()` pagination + try/except-→-{} resilience as
-         *     /memberships (so a not-yet-migrated prod returns empty rather than 500).
-         *     Backed by the `company_latest_sector` RPC (DISTINCT ON company_id).
+         *     Sector is preferentially the company's **Leonteq** sector, else the most
+         *     recent month's sector from any universe; `source` is that universe's label
+         *     (shown as an annotation). Backed by the `company_sector_with_source` RPC
+         *     (DISTINCT ON company_id). Same `.range()` pagination + try/except-→-{}
+         *     resilience as /memberships (so a not-yet-migrated prod returns empty
+         *     rather than 500).
          */
         get: operations["list_company_sectors_api_companies_sectors_get"];
         put?: never;
@@ -2125,6 +2160,32 @@ export interface paths {
         get: operations["get_longequity_companies_api_longequity_companies_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/longequity/freeze-union": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Freeze Longequity Union Endpoint
+         * @description Freeze the UNION of every company across every LongEquity report month
+         *     into a single dated frozen universe (`is_monthly=false`).
+         *
+         *     LongEquity itself is the time-series (per-month) universe; this produces
+         *     the static, frozen-only counterpart selectable in backtests / earnings.
+         *     Idempotent per day. Returns `{created, universe_id, label, companies,
+         *     as_of_date}`.
+         */
+        post: operations["freeze_longequity_union_endpoint_api_longequity_freeze_union_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3730,6 +3791,13 @@ export interface components {
             /** Vol Target */
             vol_target?: number | null;
         };
+        /** _GfCompanyNameBody */
+        _GfCompanyNameBody: {
+            /** Exchange */
+            exchange?: string | null;
+            /** Ticker */
+            ticker: string;
+        };
         /** _GuruFocusExchangeSearchBody */
         _GuruFocusExchangeSearchBody: {
             /** Candidate Exchanges */
@@ -4092,6 +4160,41 @@ export interface operations {
             };
         };
     };
+    gurufocus_company_name_api_admin_gurufocus_company_name_post: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_GfCompanyNameBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     gurufocus_exchange_search_api_admin_gurufocus_exchange_search_post: {
         parameters: {
             query?: never;
@@ -4293,7 +4396,9 @@ export interface operations {
     };
     list_universes_api_admin_universes_get: {
         parameters: {
-            query?: never;
+            query?: {
+                include_all?: boolean;
+            };
             header: {
                 authorization: string;
             };
@@ -6526,6 +6631,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    freeze_longequity_union_endpoint_api_longequity_freeze_union_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

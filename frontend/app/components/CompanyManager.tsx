@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
 import LoadingDots from './LoadingDots';
 import CompaniesToolbar from './company/CompaniesToolbar';
@@ -9,6 +9,7 @@ import MarketCapRefreshButton from './company/MarketCapRefreshButton';
 import VerifyAddModal from './company/VerifyAddModal';
 import { useCompanies } from './company/useCompanies';
 import { useCompanyFilters } from './company/useCompanyFilters';
+import { buildUniverseStyles, FALLBACK_STYLE } from './company/styles';
 
 // This page was decomposed (2026-06-04) into `app/components/company/`:
 // data fetching + Add/Edit/Delete mutations live in `useCompanies`, the
@@ -20,7 +21,7 @@ import { useCompanyFilters } from './company/useCompanyFilters';
 
 export default function CompanyManager() {
   const data = useCompanies();
-  const filters = useCompanyFilters(data.companies);
+  const filters = useCompanyFilters(data.companies, data.membershipsLoading);
   // Mutation controls (Add / Edit / Delete) are admin-only. Read paths
   // — sort, search, filters, universe chips — stay open to everyone.
   const isAdmin = useIsAdmin();
@@ -28,8 +29,17 @@ export default function CompanyManager() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [adding, setAdding] = useState(false);
 
-  const { companies, loading, error, setError, duplicateCount } = data;
-  const { filtered, filterDupes, setFilterDupes } = filters;
+  const { companies, loading, error, setError, duplicateCount, unlinkedCount } = data;
+  const { filtered, filterDupes, setFilterDupes, hideUnlinked, setHideUnlinked } = filters;
+
+  // One distinct colour per universe label, spread evenly around the wheel so
+  // chips (and the sector-source annotation) are easy to tell apart. Shared by
+  // every row via `universeStyle`.
+  const universeStyles = useMemo(() => buildUniverseStyles(data.universeOptions), [data.universeOptions]);
+  const universeStyle = useCallback(
+    (label: string) => universeStyles.get(label) ?? FALLBACK_STYLE,
+    [universeStyles],
+  );
 
   return (
     <div className="flex flex-col h-full">
@@ -46,9 +56,23 @@ export default function CompanyManager() {
                   className={`underline-offset-2 hover:underline transition-colors ${
                     filterDupes ? 'text-neg-400' : 'text-neg-400/80 hover:text-neg-400'
                   }`}
-                  title={filterDupes ? 'Click to clear duplicates filter' : 'Click to show only duplicate entries'}
+                  title={filterDupes ? 'Click to clear duplicates filter' : 'Click to show only rows sharing an ISIN (same security stored twice)'}
                 >
-                  {duplicateCount} duplicate{duplicateCount === 1 ? '' : 's'}
+                  {duplicateCount} duplicate{duplicateCount === 1 ? '' : 's'} (same ISIN)
+                </button>
+              </>
+            )}
+            {!loading && unlinkedCount > 0 && (
+              <>
+                {' · '}
+                <button
+                  onClick={() => setHideUnlinked(!hideUnlinked)}
+                  className={`underline-offset-2 hover:underline transition-colors ${
+                    hideUnlinked ? 'text-fg-faint hover:text-fg-muted' : 'text-warn-400'
+                  }`}
+                  title={hideUnlinked ? `Click to SHOW the ${unlinkedCount} companies in no universe` : 'Click to hide companies in no universe'}
+                >
+                  {unlinkedCount} not in any universe {hideUnlinked ? '(hidden)' : '(shown)'}
                 </button>
               </>
             )}
@@ -93,7 +117,7 @@ export default function CompanyManager() {
         adding={adding}
         editingId={editingId}
         exchangeOptions={data.exchangeOptions}
-        duplicateNames={data.duplicateNames}
+        duplicateIsins={data.duplicateIsins}
         deletingId={data.deletingId}
         sortField={filters.sortField}
         sortDir={filters.sortDir}
@@ -105,7 +129,9 @@ export default function CompanyManager() {
         onCancelEdit={() => setEditingId(null)}
         onDelete={data.handleDelete}
         onFindExchange={data.findCorrectExchange}
+        onFetchGfName={data.fetchGfName}
         onToggleUniverse={filters.toggleUniverse}
+        universeStyle={universeStyle}
       />
 
       {data.pendingAdd && (

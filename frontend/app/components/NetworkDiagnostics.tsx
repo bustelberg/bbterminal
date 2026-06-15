@@ -7,6 +7,14 @@ import { apiFetch } from '../../lib/apiFetch';
 // ── Shape of GET /api/admin/network-diagnostics ────────────────────────
 type Verdict = 'ok' | 'blocked' | 'degraded' | 'unreachable';
 
+// Rough geolocation of an IP (ip-api.com, best-effort — absent for private
+// ranges / lookup failures).
+type Geo = {
+  country: string | null;
+  country_code: string | null;
+  city: string | null;
+};
+
 type SourceResult = {
   name: string;
   category: 'critical' | 'important' | 'optional';
@@ -22,6 +30,7 @@ type SourceResult = {
   used_target?: string | null;
   verdict: Verdict;
   reason: string;
+  geo?: Geo | null;
 };
 
 type GuruMethod = 'curl' | 'plain';
@@ -29,7 +38,7 @@ type GuruMethod = 'curl' | 'plain';
 type Diagnostics = {
   observed_at: string;
   guru_method?: GuruMethod;
-  egress: { ip: string | null; source: string | null; error: string | null };
+  egress: { ip: string | null; source: string | null; error: string | null; geo?: Geo | null };
   gurufocus_circuit: {
     curl_cffi_available: boolean;
     circuit_open: boolean;
@@ -134,6 +143,39 @@ Measured at: ${observed}
 Thank you,`;
 }
 
+/** A small country flag image (flagcdn) — renders reliably across OSes,
+ *  unlike emoji regional-indicator flags which don't render on Windows. */
+function CountryFlag({ cc }: { cc?: string | null }) {
+  if (!cc || cc.length !== 2) return null;
+  const code = cc.toLowerCase();
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- tiny external flag asset, next/image is overkill
+    <img
+      src={`https://flagcdn.com/20x15/${code}.png`}
+      srcSet={`https://flagcdn.com/40x30/${code}.png 2x`}
+      width={20}
+      height={15}
+      alt={cc.toUpperCase()}
+      title={cc.toUpperCase()}
+      loading="lazy"
+      className="inline-block rounded-[2px] align-[-2px] shrink-0"
+    />
+  );
+}
+
+/** Flag + "City, Country" tag for a geolocated IP. Renders nothing when geo
+ *  is missing (private range / lookup failed). */
+function GeoTag({ geo }: { geo?: Geo | null }) {
+  if (!geo || (!geo.country_code && !geo.city && !geo.country)) return null;
+  const place = [geo.city, geo.country].filter(Boolean).join(', ');
+  return (
+    <span className="inline-flex items-center gap-1.5 text-fg-subtle" title={place}>
+      <CountryFlag cc={geo.country_code} />
+      <span className="truncate">{place || geo.country_code}</span>
+    </span>
+  );
+}
+
 function VerdictChip({ verdict }: { verdict: Verdict }) {
   const m = VERDICT_META[verdict];
   return (
@@ -234,9 +276,15 @@ export default function NetworkDiagnostics() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
         <div className="bg-card rounded-xl border border-neutral-800/40 p-5">
           <div className="text-xs uppercase tracking-wider text-fg-subtle mb-1">Our egress IP</div>
-          <div className="font-mono text-2xl text-fg-strong">
-            {data?.egress.ip ?? (loading ? '…' : '—')}
+          <div className="font-mono text-2xl text-fg-strong flex items-center gap-2">
+            <span>{data?.egress.ip ?? (loading ? '…' : '—')}</span>
+            {data?.egress.geo?.country_code && <CountryFlag cc={data.egress.geo.country_code} />}
           </div>
+          {data?.egress.geo && (
+            <div className="text-xs mt-1">
+              <GeoTag geo={data.egress.geo} />
+            </div>
+          )}
           <div className="text-xs text-fg-muted mt-1">
             {data?.egress.error
               ? data.egress.error
@@ -402,6 +450,11 @@ export default function NetworkDiagnostics() {
                       {s.resolved_ip ?? (s.dns_error ? 'DNS failed' : '—')}
                       {s.status_code != null && <span className="ml-2 text-fg-faint">HTTP {s.status_code}</span>}
                     </div>
+                    {s.geo && (
+                      <div className="mt-0.5 normal-case">
+                        <GeoTag geo={s.geo} />
+                      </div>
+                    )}
                   </td>
                   <td className="px-3 py-3">
                     <VerdictChip verdict={s.verdict} />

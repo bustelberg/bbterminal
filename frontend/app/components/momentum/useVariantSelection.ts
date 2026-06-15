@@ -67,8 +67,12 @@ export function useVariantSelection({
   const [selectedStrategies, setSelectedStrategies] = useState<Set<StrategyType>>(
     () => new Set<StrategyType>(['long_only']),
   );
+  // Universe is a REQUIRED axis with NO default selection — backtests run only
+  // against an explicitly-picked frozen universe, so nothing is checked until
+  // the user picks one (→ 0 permutations). The old `['LEONTEQ']` default seeded
+  // a non-frozen template that leaked into the permutations.
   const [selectedUniverses, setSelectedUniverses] = useState<Set<string>>(
-    () => new Set<string>(['LEONTEQ']),
+    () => new Set<string>(),
   );
   const [selectedGroupings, setSelectedGroupings] = useState<Set<'sector' | 'industry'>>(
     () => new Set<'sector' | 'industry'>(['sector']),

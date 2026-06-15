@@ -226,6 +226,7 @@ def load_companies_via_copy() -> list[dict] | None:
         f"{_TS_ISO_FMT % 'c.gurufocus_lookup_failed_at'}, "
         f"{_TS_ISO_FMT % 'c.out_of_scope_at'}, "
         "c.out_of_scope_reason, c.market_cap_eur, c.market_cap_date::text, "
+        "c.market_cap_native, c.market_cap_currency, c.market_cap_fx_rate, "
         "e.exchange_code, e.currency_code, co.country_name "
         "FROM company c "
         "LEFT JOIN gurufocus_exchange e ON e.exchange_id = c.exchange_id "
@@ -236,14 +237,16 @@ def load_companies_via_copy() -> list[dict] | None:
     if buf is None:
         return None
 
+    from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
     import csv as _csv  # noqa: PLC0415 — stdlib, local to keep boot cheap
     out: list[dict] = []
     reader = _csv.reader(io.TextIOWrapper(buf, encoding="utf-8"))
     for row in reader:
-        if len(row) != 14:
+        if len(row) != 17:
             continue
         (cid, name, ticker, exch_id, isin, delisted, gf_failed, oos_at, oos_reason,
-         mktcap_eur, mktcap_date, exch_code, currency, country) = row
+         mktcap_eur, mktcap_date, mktcap_native, mktcap_currency, mktcap_fx_rate,
+         exch_code, currency, country) = row
         out.append({
             "company_id": int(cid),
             "company_name": name or None,
@@ -256,9 +259,13 @@ def load_companies_via_copy() -> list[dict] | None:
             "out_of_scope_reason": oos_reason or None,
             "market_cap_eur": float(mktcap_eur) if mktcap_eur else None,
             "market_cap_date": mktcap_date or None,
+            "market_cap_native": float(mktcap_native) if mktcap_native else None,
+            "market_cap_currency": mktcap_currency or None,
+            "market_cap_fx_rate": float(mktcap_fx_rate) if mktcap_fx_rate else None,
             "gurufocus_exchange": exch_code or None,
             "currency": currency or None,
             "country": country or None,
+            "gf_unsubscribed": not is_gf_subscribed_exchange(exch_code or None),
         })
     return out
 

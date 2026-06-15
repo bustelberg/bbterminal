@@ -6,6 +6,7 @@ import { apiFetch } from '../../lib/apiFetch';
 import type { Column } from '../../lib/tableExport';
 import TableDownloadButton from './TableDownloadButton';
 import LoadingDots from './LoadingDots';
+import FrozenUniversesPanel from './FrozenUniversesPanel';
 import { API_URL } from '../../lib/apiUrl';
 import { useApiData } from '../../lib/hooks/useApiData';
 const TEMPLATE_KEY = 'ACWI';
@@ -55,6 +56,7 @@ export default function AcwiCanonicalView() {
   const [freezing, setFreezing] = useState(false);
   const [freezeLog, setFreezeLog] = useState<string[]>([]);
   const [freezeMsg, setFreezeMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [freezeCount, setFreezeCount] = useState(0); // bump → refresh frozen panel
 
   const loadSummary = useCallback(async () => {
     setSummaryLoading(true);
@@ -211,6 +213,7 @@ export default function AcwiCanonicalView() {
               setFreezeLog((l) => [...l, evt.message]);
             } else if (evt.type === 'done') {
               setFreezeMsg({ ok: true, text: evt.message });
+              setFreezeCount((c) => c + 1);
             } else if (evt.type === 'error') {
               setFreezeMsg({ ok: false, text: evt.message });
             }
@@ -244,6 +247,7 @@ export default function AcwiCanonicalView() {
   const hasData = summary.months_captured > 0;
 
   return (
+    <div className="space-y-5">
     <div className="bg-card rounded-xl border border-neutral-800/40">
       <div className="px-5 py-4 border-b border-neutral-800/40 flex items-start justify-between gap-4 flex-wrap">
         <div className="min-w-0">
@@ -392,6 +396,16 @@ export default function AcwiCanonicalView() {
           </div>
         </div>
       )}
+    </div>
+
+    {/* Uniform frozen-universes panel — inspect / delete the ACWI snapshots
+        you've frozen (created via "Freeze as of …" above). */}
+    <FrozenUniversesPanel
+      frozenFrom={['ACWI']}
+      title="Frozen ACWI snapshots"
+      description="Static copies you've frozen from the ACWI universe — click one to inspect its constituents or delete it. Reproducible universes selectable in /backtest."
+      reloadSignal={freezeCount}
+    />
     </div>
   );
 }

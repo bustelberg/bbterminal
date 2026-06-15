@@ -1,4 +1,5 @@
-"""Backfill `company.market_cap_eur` + `market_cap_date` from GuruFocus.
+"""Backfill `company.market_cap_eur` + `market_cap_date` (and correct
+`company_name`) from GuruFocus.
 
 GuruFocus's stock summary returns the current market cap at
 `summary.company_data.mktcap`, in MILLIONS of the stock's native (exchange)
@@ -42,18 +43,56 @@ class MarketCapResult:
     set_count: int = 0
     no_mktcap: int = 0       # call made, no usable mktcap came back
     no_fx_rate: int = 0      # had a mktcap but the currency has no FX rate → can't convert
+    renamed: int = 0         # company_name corrected from GuruFocus
+    renames: list[str] = field(default_factory=list)  # "cid: old → new" samples
     errors: list[str] = field(default_factory=list)
 
 
+def _name_from_company_data(cd: dict) -> str | None:
+    """The company's display name out of GuruFocus `summary.company_data`.
+    GuruFocus uses `company` for the full name; we also try a couple of
+    fallback keys so a minor API-shape change doesn't silently no-op."""
+    for k in ("company", "company_name", "name"):
+        v = cd.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return None
+
+
+def _name_key(s: str | None) -> str:
+    """Alphanumeric-only, lowercased form for comparing names WITHOUT churning
+    on punctuation/spacing ("Apple Inc" == "Apple Inc."). A genuine mismatch
+    (the wrong company entirely, e.g. "TSMC" vs "Forside Co Ltd") still differs."""
+    import re  # noqa: PLC0415
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def gf_company_name_for(ticker: str, exchange_code: str | None) -> dict:
+    """Fetch the company name GuruFocus reports for a (ticker, exchange).
+    Returns `{name, found, symbol, log}`. Used by the per-row "name from
+    GuruFocus" action so a mislabeled listing can be corrected to what the
+    GuruFocus link actually shows."""
+    from ingest.earnings._api_client import _api_request, _build_api_url  # noqa: PLC0415
+    symbol = _gf_symbol(ticker or "", exchange_code)
+    if not symbol:
+        return {"name": None, "found": False, "symbol": None, "log": "no GuruFocus symbol for this (ticker, exchange)"}
+    res = _api_request(_build_api_url(f"stock/{symbol}/summary"))
+    if res.data is None:
+        return {"name": None, "found": False, "symbol": symbol, "log": res.log}
+    cd = ((res.data.get("summary") or {}).get("company_data") or {}) if isinstance(res.data, dict) else {}
+    name = _name_from_company_data(cd)
+    return {"name": name, "found": bool(name), "symbol": symbol, "log": res.log}
+
+
 def _load_companies(supabase: Client) -> list[dict]:
-    """Every company with ticker + exchange code + currency + current mktcap."""
+    """Every company with name + ticker + exchange code + currency + current mktcap."""
     out: list[dict] = []
     offset = 0
     page = 1000
     for _ in range(50):
         resp = (
             supabase.table("company")
-            .select("company_id, gurufocus_ticker, market_cap_eur, "
+            .select("company_id, company_name, gurufocus_ticker, market_cap_eur, "
                     "gurufocus_exchange:gurufocus_exchange(exchange_code, currency_code)")
             .order("company_id")
             .range(offset, offset + page - 1)
@@ -82,19 +121,24 @@ def _fx_rates_per_eur(supabase: Client) -> dict[str, float]:
     return rates
 
 
-def _gurufocus_mktcap(symbol: str) -> tuple[float | None, str]:
-    """Fetch `summary.company_data.mktcap` (native, millions) for a symbol."""
+def _gurufocus_summary(symbol: str) -> tuple[float | None, str | None, str]:
+    """Fetch a GuruFocus summary for `symbol` → `(mktcap, name, log)`.
+    `mktcap` is `summary.company_data.mktcap` (native, millions); `name` is the
+    company name GuruFocus reports for that listing (used to correct mislabeled
+    rows). One call serves both."""
     from ingest.earnings._api_client import _api_request, _build_api_url  # noqa: PLC0415
     res = _api_request(_build_api_url(f"stock/{symbol}/summary"))
     if res.data is None:
-        return None, res.log
+        return None, None, res.log
     cd = ((res.data.get("summary") or {}).get("company_data") or {}) if isinstance(res.data, dict) else {}
+    name = _name_from_company_data(cd)
     raw = cd.get("mktcap")
     try:
         v = float(raw)
-        return (v if v > 0 else None), res.log
+        mktcap = v if v > 0 else None
     except (TypeError, ValueError):
-        return None, res.log
+        mktcap = None
+    return mktcap, name, res.log
 
 
 def backfill_market_cap(
@@ -147,30 +191,55 @@ def backfill_market_cap(
             continue
         result.gurufocus_calls += 1
         try:
-            mktcap_native_m, _msg = _gurufocus_mktcap(symbol)
+            mktcap_native_m, gf_name, _msg = _gurufocus_summary(symbol)
         except Exception as e:
             result.errors.append(f"cid={cid} ({symbol}) GF error: {type(e).__name__}: {e}")
             continue
+
+        # Accumulate every field this company's summary lets us correct, then
+        # write once. The name fix is independent of market cap — a company GF
+        # can't price still gets its name corrected.
+        updates: dict = {}
+
+        # Name correction: GuruFocus is authoritative for what a (ticker,
+        # exchange) listing actually IS, so a genuinely-different name (the
+        # wrong company entirely, e.g. "TSMC" on a listing GF calls "Forside Co
+        # Ltd") gets overwritten. Punctuation/spacing-only diffs are ignored.
+        if gf_name and _name_key(gf_name) != _name_key(c.get("company_name")):
+            updates["company_name"] = gf_name
+            if len(result.renames) < 50:
+                result.renames.append(f"cid={cid}: {c.get('company_name')!r} → {gf_name!r}")
+
         if mktcap_native_m is None:
             result.no_mktcap += 1
+        else:
+            cur = (exch.get("currency_code") or "EUR").upper()
+            rate = fx.get(cur)
+            if not rate:
+                result.no_fx_rate += 1
+            else:
+                # mktcap is in millions of native currency → absolute EUR.
+                native_abs = mktcap_native_m * 1_000_000.0
+                updates["market_cap_native"] = native_abs
+                updates["market_cap_currency"] = cur
+                updates["market_cap_fx_rate"] = rate
+                updates["market_cap_eur"] = native_abs / rate
+                updates["market_cap_date"] = today
+
+        if not updates:
             continue
-        cur = (exch.get("currency_code") or "EUR").upper()
-        rate = fx.get(cur)
-        if not rate:
-            result.no_fx_rate += 1
-            continue
-        # mktcap is in millions of native currency → absolute EUR.
-        eur = (mktcap_native_m * 1_000_000.0) / rate
         try:
-            supabase.table("company").update(
-                {"market_cap_eur": eur, "market_cap_date": today}
-            ).eq("company_id", cid).execute()
-            result.set_count += 1
+            supabase.table("company").update(updates).eq("company_id", cid).execute()
+            if "market_cap_eur" in updates:
+                result.set_count += 1
+            if "company_name" in updates:
+                result.renamed += 1
         except Exception as e:
             result.errors.append(f"cid={cid} update failed: {type(e).__name__}: {e}")
 
-    emit(f"Done. set={result.set_count} no-mktcap={result.no_mktcap} "
-         f"no-fx={result.no_fx_rate} errors={len(result.errors)}",
+    emit(f"Done. set={result.set_count} renamed={result.renamed} "
+         f"no-mktcap={result.no_mktcap} no-fx={result.no_fx_rate} "
+         f"errors={len(result.errors)}",
          processed=total, total=total, set=result.set_count)
     return result
 
@@ -181,10 +250,13 @@ def format_summary(r: MarketCapResult) -> str:
         f"  Skipped (had val): {r.skipped_have_value}",
         f"  GuruFocus calls:   {r.gurufocus_calls}",
         f"  Set:               {r.set_count}",
+        f"  Renamed:           {r.renamed}",
         f"  No mktcap:         {r.no_mktcap}",
         f"  No FX rate:        {r.no_fx_rate}",
         f"  Errors:            {len(r.errors)}",
     ]
+    for rn in r.renames[:10]:
+        lines.append(f"    {rn}")
     for e in r.errors[:10]:
         lines.append(f"    {e}")
     return "\n".join(lines)

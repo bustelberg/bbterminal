@@ -1,9 +1,10 @@
 'use client';
 
+import type { CSSProperties } from 'react';
 import Spinner from '../Spinner';
+import InfoTip from '../universe/InfoTip';
 import { guruFocusUrl } from '../../../lib/gurufocusUrl';
-import { universeChipStyle } from './styles';
-import { fmtMktCapEur } from './format';
+import { fmtMktCapEur, fmtMktCapNative } from './format';
 import type { Company } from './types';
 
 /** One non-editing company row: status badges (delisted / out-of-scope /
@@ -15,12 +16,14 @@ export default function CompanyRow({
   membershipsLoading,
   sectorsLoading,
   loading,
-  duplicateNames,
+  duplicateIsins,
   deletingId,
   onEdit,
   onDelete,
   onFindExchange,
+  onFetchGfName,
   onToggleUniverse,
+  universeStyle,
 }: {
   company: Company;
   isAdmin: boolean;
@@ -29,12 +32,14 @@ export default function CompanyRow({
   /** Table (re)load in flight — the Mkt Cap cell spins (its value arrives with
    * the company row itself, so it has no separate fetch like sector does). */
   loading: boolean;
-  duplicateNames: Set<string>;
+  duplicateIsins: Set<string>;
   deletingId: number | null;
   onEdit: (id: number) => void;
   onDelete: (id: number, name: string) => void;
   onFindExchange: (c: Company) => void;
+  onFetchGfName: (c: Company) => void;
   onToggleUniverse: (u: string) => void;
+  universeStyle: (label: string) => CSSProperties;
 }) {
   return (
     <tr className="border-b border-neutral-800/30 hover:bg-overlay/[0.02] transition-colors group">
@@ -67,8 +72,8 @@ export default function CompanyRow({
             GF LOOKUP
           </button>
         )}
-        {c.company_name && duplicateNames.has(c.company_name.toLowerCase().trim()) && (
-          <span className="ml-2 px-1.5 py-0.5 text-[10px] font-medium bg-warn-500/15 text-warn-400 border border-warn-500/25 rounded" title="Duplicate company name">
+        {c.isin && duplicateIsins.has(c.isin.trim()) && (
+          <span className="ml-2 px-1.5 py-0.5 text-[10px] font-medium bg-warn-500/15 text-warn-400 border border-warn-500/25 rounded" title={`Duplicate — another company has the same ISIN (${c.isin}), i.e. the same security stored twice.`}>
             DUPE
           </span>
         )}
@@ -88,21 +93,46 @@ export default function CompanyRow({
       <td className="px-3 py-2.5 text-fg-muted">{c.country ?? '—'}</td>
       <td className="px-3 py-2.5 text-fg-muted text-xs">
         {c.sector ? (
-          c.sector
+          <span className="inline-flex items-center gap-1.5">
+            <span>{c.sector}</span>
+            {c.sector_source && (
+              <span
+                style={universeStyle(c.sector_source)}
+                title={`Sector from the ${c.sector_source} universe`}
+                className="px-1 py-0.5 rounded text-[9px] font-medium border leading-none"
+              >
+                {c.sector_source.split(' (')[0]}
+              </span>
+            )}
+          </span>
         ) : sectorsLoading ? (
           <Spinner size={10} className="h-2.5 w-2.5 text-fg-faint" />
         ) : (
           '—'
         )}
       </td>
-      <td
-        className="px-3 py-2.5 text-right font-mono text-xs text-fg-muted whitespace-nowrap"
-        title={c.market_cap_eur != null && c.market_cap_date ? `as of ${c.market_cap_date} · converted to EUR` : undefined}
-      >
+      <td className="px-3 py-2.5 text-right font-mono text-xs text-fg-muted whitespace-nowrap">
         {loading ? (
           <Spinner size={10} className="inline-block h-2.5 w-2.5 text-fg-faint" />
         ) : c.market_cap_eur != null ? (
-          fmtMktCapEur(c.market_cap_eur)
+          <span className="inline-flex items-center justify-end gap-1.5">
+            <span>{fmtMktCapEur(c.market_cap_eur)}</span>
+            <InfoTip
+              text={[
+                c.market_cap_date ? `As of ${c.market_cap_date}.` : null,
+                c.market_cap_native != null && c.market_cap_currency && c.market_cap_currency !== 'EUR'
+                  ? `Native ${fmtMktCapNative(c.market_cap_native, c.market_cap_currency)}, converted at ${c.market_cap_fx_rate} ${c.market_cap_currency}/EUR (ECB rate) → ${fmtMktCapEur(c.market_cap_eur)}.`
+                  : 'Quoted in EUR — no FX conversion.',
+              ].filter(Boolean).join(' ')}
+            />
+          </span>
+        ) : c.gf_unsubscribed ? (
+          <span
+            className="px-1.5 py-0.5 text-[10px] font-medium bg-warn-500/15 text-warn-300 border border-warn-500/30 rounded cursor-help"
+            title={`${c.gurufocus_exchange} is outside our GuruFocus subscription (India, AU/NZ, Russia, Africa, LatAm) — no market-cap / price / ISIN data is available for this listing.`}
+          >
+            UNSUBSCRIBED
+          </span>
         ) : (
           '—'
         )}
@@ -120,7 +150,7 @@ export default function CompanyRow({
               <button
                 key={u}
                 onClick={() => onToggleUniverse(u)}
-                style={universeChipStyle(u)}
+                style={universeStyle(u)}
                 title={`Filter by ${u}`}
                 className="px-1.5 py-0.5 rounded text-[10px] font-medium border hover:brightness-125 transition"
               >
@@ -139,6 +169,14 @@ export default function CompanyRow({
             </span>
           ) : (
             <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button
+                onClick={() => onFetchGfName(c)}
+                disabled={deletingId !== null}
+                title="Fetch this listing's name from GuruFocus and (after confirm) correct the row"
+                className="px-2.5 py-1 rounded-lg text-xs text-fg-muted hover:text-fg-strong hover:bg-overlay/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                GF name
+              </button>
               <button
                 onClick={() => onEdit(c.company_id)}
                 disabled={deletingId !== null}

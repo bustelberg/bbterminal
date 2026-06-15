@@ -413,6 +413,24 @@ def get_longequity_snapshots():
     return [{"target_date": row["target_date"]} for row in (resp.data or [])]
 
 
+@router.post("/api/longequity/freeze-union")
+async def freeze_longequity_union_endpoint():
+    """Freeze the UNION of every company across every LongEquity report month
+    into a single dated frozen universe (`is_monthly=false`).
+
+    LongEquity itself is the time-series (per-month) universe; this produces
+    the static, frozen-only counterpart selectable in backtests / earnings.
+    Idempotent per day. Returns `{created, universe_id, label, companies,
+    as_of_date}`."""
+    from ingest.longequity_universe import freeze_longequity_union  # noqa: PLC0415
+    try:
+        return await asyncio.to_thread(freeze_longequity_union, supabase)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"freeze_longequity_union failed: {e}")
+
+
 @router.get("/api/longequity/companies")
 def get_longequity_companies(target_date: str):
     """Companies present in the LongEquity snapshot for `target_date`, plus

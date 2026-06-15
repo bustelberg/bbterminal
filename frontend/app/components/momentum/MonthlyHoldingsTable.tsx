@@ -20,11 +20,13 @@ import { useFeeConfig } from '../../../lib/hooks/apiData';
 import { EXCHANGE_NAMES, displayExchange, fmtPct, fmtPrice, guruFocusUrl } from './utils';
 import {
   collectHeldCompanies,
+  computeMonthChanges,
   computeTurnoverByDate,
   repriceOpenPeriod,
   splitAtGoLive,
   type DisplayRow,
   type HeldCompany,
+  type MonthChange,
   type PriceMap,
 } from './monthlyHoldings';
 
@@ -117,6 +119,15 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
   // last month. First month has no prior portfolio → null.
   const turnoverByDate = useMemo(
     () => computeTurnoverByDate(result.monthly_records), [result],
+  );
+
+  // Per-month entries (newcomers) + exits (names to sell), keyed by the
+  // period date. Membership-only, so it's keyed by `r.date` and survives the
+  // re-price / go-live split (both keep the original date) — one computation
+  // serves the collapsed +N/−M badge, the per-holding NEW pill, and the
+  // "Sold" chip list in the expanded detail.
+  const monthChanges = useMemo<Record<string, MonthChange>>(
+    () => computeMonthChanges(result.monthly_records), [result],
   );
 
   // Fetch the go-live-date close prices for the holdings of the period
@@ -274,6 +285,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
     period: string;
     is_open: boolean;
     side: string;
+    status: string;
     ticker: string;
     exchange: string;
     isin: string;
@@ -298,6 +310,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
           period: r.date,
           is_open: !!r.is_open,
           side: h.side ?? 'long',
+          status: monthChanges[r.date]?.newcomerIds.has(h.company_id) ? 'new' : 'held',
           ticker: h.ticker ?? '',
           exchange: exchangeByCompany.get(h.company_id) ?? '',
           isin: isinByCompany?.get(h.company_id) ?? '',
@@ -317,7 +330,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
       }
     }
     return out;
-  }, [result, exchangeByCompany, isinByCompany]);
+  }, [result, exchangeByCompany, isinByCompany, monthChanges]);
 
   // Category-score columns are dynamic (price/volume usually; some
   // strategies add more). Spread them between the fixed Score and
@@ -326,6 +339,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
     const cols: Column<FlatHolding>[] = [
       { key: 'period', header: 'Period', accessor: (r) => r.period },
       { key: 'side', header: 'Side', accessor: (r) => r.side },
+      { key: 'status', header: 'Status', accessor: (r) => r.status },
       { key: 'ticker', header: 'Ticker', accessor: (r) => r.ticker },
       { key: 'exchange', header: 'Exchange', accessor: (r) => r.exchange },
       { key: 'isin', header: 'ISIN', accessor: (r) => r.isin },
@@ -388,7 +402,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
                 Period<CellInfoTip>Rebalance period start. The strategy enters this period&apos;s portfolio at the first trading day and holds until the next rebalance. Format is YYYY-MM for monthly+ cadences and YYYY-MM-DD for daily/weekly.</CellInfoTip>
               </th>
               <th className="text-right px-3 py-2.5 font-medium">
-                Holdings<CellInfoTip>Number of stocks in the portfolio for this period (equal-weighted). Long-only: top_n_sectors × top_n_per_sector. Long-short: same on each side, so total is up to 2×.</CellInfoTip>
+                Holdings<CellInfoTip>Number of stocks in the portfolio for this period (equal-weighted). Long-only: top_n_sectors × top_n_per_sector. Long-short: same on each side, so total is up to 2×. The green <b>+N</b> / red <b>−M</b> badge counts newcomers this period and names sold vs. the previous period — expand the row to see each (NEW pills + the Sold list).</CellInfoTip>
               </th>
               <th className="text-right px-3 py-2.5 font-medium">
                 Return<CellInfoTip>Equal-weighted portfolio return for this period in EUR. Long-only: mean of holdings&apos; (exit ÷ entry) − 1. Long-short: long-side mean minus short-side mean.</CellInfoTip>
@@ -446,7 +460,24 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
                       </span>
                     )}
                   </td>
-                  <td className="text-right px-3 py-2.5 text-fg-muted font-mono">{r.holdings.length}</td>
+                  <td className="text-right px-3 py-2.5 text-fg-muted font-mono whitespace-nowrap">
+                    {r.holdings.length}
+                    {(() => {
+                      const chg = monthChanges[r.date];
+                      const nNew = chg?.newcomerIds.size ?? 0;
+                      const nSold = chg?.dropped.length ?? 0;
+                      if (nNew === 0 && nSold === 0) return null;
+                      return (
+                        <span
+                          className="ml-1.5 text-[10px]"
+                          title={`${nNew} new this period, ${nSold} sold vs the previous period`}
+                        >
+                          {nNew > 0 && <span className="text-pos-400">+{nNew}</span>}
+                          {nSold > 0 && <span className="text-neg-400 ml-0.5">−{nSold}</span>}
+                        </span>
+                      );
+                    })()}
+                  </td>
                   <td className={`text-right px-3 py-2.5 font-mono ${r.portfolio_return_pct != null ? (r.portfolio_return_pct >= 0 ? 'text-pos-400' : 'text-neg-400') : 'text-fg-faint'}`}>
                     {fmtPct(r.portfolio_return_pct)}
                     <span className="text-fg-subtle">{parenPct(netByRow.get(rowKey)?.portRet ?? undefined)}</span>
@@ -595,6 +626,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
                               const isin = isinByCompany?.get(h.company_id) ?? '';
                               const href = guruFocusUrl(h.ticker, exchRaw);
                               const isShort = h.side === 'short';
+                              const isNew = monthChanges[r.date]?.newcomerIds.has(h.company_id) ?? false;
                               return (
                                 <tr key={`${h.side ?? 'long'}-${h.company_id}`} className={`border-t border-neutral-800/20 ${isShort ? 'bg-neg-500/[0.04]' : ''}`}>
                                   <td className="py-1.5 pr-2 whitespace-nowrap">
@@ -634,6 +666,14 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
                                         title={EXCHANGE_NAMES[exch.toUpperCase()] ?? exch}
                                       >
                                         ({exch})
+                                      </span>
+                                    )}
+                                    {isNew && (
+                                      <span
+                                        className="ml-1.5 inline-flex items-center px-1 py-0.5 rounded text-[9px] uppercase tracking-wide font-semibold bg-pos-500/15 text-pos-300 border border-pos-500/30 align-middle"
+                                        title="New this period — not held in the previous portfolio"
+                                      >
+                                        New
                                       </span>
                                     )}
                                   </td>
@@ -746,6 +786,43 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
                             })}
                         </tbody>
                       </table>
+                      {(() => {
+                        // Names held the previous period but not this one —
+                        // the stocks to SELL at this rebalance. Rendered as a
+                        // compact chip list under the holdings so the month's
+                        // exits read at a glance alongside its NEW entries.
+                        const dropped = monthChanges[r.date]?.dropped ?? [];
+                        if (dropped.length === 0) return null;
+                        return (
+                          <div className="mt-3 pt-3 border-t border-neutral-800/30">
+                            <div className="text-[11px] uppercase tracking-wider text-neg-300/80 mb-1.5 font-medium">
+                              Sold — held last period, not this one ({dropped.length})
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {[...dropped]
+                                .sort((a, b) => (a.ticker ?? '').localeCompare(b.ticker ?? ''))
+                                .map((h) => {
+                                  const exchRaw = exchangeByCompany.get(h.company_id) ?? '';
+                                  const exch = displayExchange(exchRaw, h.ticker);
+                                  return (
+                                    <a
+                                      key={h.company_id}
+                                      href={guruFocusUrl(h.ticker, exchRaw)}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      title={`${h.company_name}${h.sector ? ` · ${h.sector}` : ''} — sold this period`}
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-neg-500/10 border border-neg-500/25 hover:bg-neg-500/15 transition-colors"
+                                    >
+                                      <span className="font-mono text-[11px] text-neg-300">{h.ticker || '—'}</span>
+                                      {exch && <span className="text-[9px] text-fg-subtle">({exch})</span>}
+                                      <span className="text-[11px] text-fg-subtle truncate max-w-[150px]">{h.company_name}</span>
+                                    </a>
+                                  );
+                                })}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </td>
                   </tr>
                 )}

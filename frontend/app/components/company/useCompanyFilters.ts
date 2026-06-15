@@ -10,10 +10,19 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { Company, SortField, SortDir } from './types';
 
+/** Sentinel option in the Universe filter for "companies in no universe".
+ * Unlikely to collide with a real label (all of which are "X (as of …)"). */
+export const NO_UNIVERSE = '(No universe)';
+
 export type UseCompanyFiltersResult = ReturnType<typeof useCompanyFilters>;
 
-export function useCompanyFilters(companies: Company[]) {
+export function useCompanyFilters(companies: Company[], membershipsLoading = false) {
   const [search, setSearch] = useState('');
+  // Hide companies that belong to no universe — these are mostly orphaned
+  // stubs (old delisted index tickers with no name/data) that clutter the
+  // table. Default ON; the header shows the count + a toggle. Only applied
+  // once memberships have loaded (otherwise every row looks unlinked).
+  const [hideUnlinked, setHideUnlinked] = useState(true);
   // Multi-select filters. Exchange / Country combine as OR (a company has
   // exactly one of each, so AND would always return empty as soon as 2+
   // are checked). Universe combines as AND so the user can pick the
@@ -29,6 +38,17 @@ export function useCompanyFilters(companies: Company[]) {
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     let list = companies;
+    // Explicitly filtering FOR the no-universe companies overrides hideUnlinked.
+    const wantNoUniverse = filterUniverse.includes(NO_UNIVERSE);
+    if (hideUnlinked && !wantNoUniverse) {
+      // Nameless stubs (the visibly-empty orphan rows) are hidden IMMEDIATELY
+      // — `company_name` is in the base response, so they never flash in before
+      // the slower memberships arrive. Named-but-unlinked rows are hidden only
+      // once memberships have loaded (we can't tell they're unlinked before).
+      list = list.filter(
+        (c) => !!c.company_name && (membershipsLoading || (c.universes ?? []).length > 0),
+      );
+    }
     if (q) {
       list = list.filter(
         (c) =>
@@ -47,20 +67,28 @@ export function useCompanyFilters(companies: Company[]) {
       list = list.filter((c) => c.sector != null && filterSector.includes(c.sector));
     }
     if (filterUniverse.length > 0) {
+      // "(No universe)" matches companies with zero memberships. Real labels
+      // still AND together (the intersection). Picking the sentinel alongside
+      // real labels unions the two (no-universe rows OR rows in all picked
+      // universes).
+      const realLabels = filterUniverse.filter((u) => u !== NO_UNIVERSE);
       list = list.filter((c) => {
         const us = c.universes ?? [];
-        return filterUniverse.every((u) => us.includes(u));
+        const matchesNone = wantNoUniverse && us.length === 0;
+        if (realLabels.length === 0) return matchesNone;
+        return matchesNone || realLabels.every((u) => us.includes(u));
       });
     }
     if (filterDupes) {
-      const nameCounts = new Map<string, number>();
+      // True duplicates = same ISIN (same security), not same name.
+      const isinCounts = new Map<string, number>();
       for (const c of companies) {
-        const name = (c.company_name ?? '').trim().toLowerCase();
-        if (name) nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+        const isin = (c.isin ?? '').trim();
+        if (isin) isinCounts.set(isin, (isinCounts.get(isin) ?? 0) + 1);
       }
       list = list.filter((c) => {
-        const name = (c.company_name ?? '').trim().toLowerCase();
-        return name && (nameCounts.get(name) ?? 0) > 1;
+        const isin = (c.isin ?? '').trim();
+        return isin && (isinCounts.get(isin) ?? 0) > 1;
       });
     }
 
@@ -80,7 +108,7 @@ export function useCompanyFilters(companies: Company[]) {
       const cmp = av.localeCompare(bv, undefined, { sensitivity: 'base' });
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [companies, search, filterExchange, filterCountry, filterSector, filterUniverse, filterDupes, sortField, sortDir]);
+  }, [companies, hideUnlinked, membershipsLoading, search, filterExchange, filterCountry, filterSector, filterUniverse, filterDupes, sortField, sortDir]);
 
   const handleSort = useCallback((field: SortField) => {
     if (sortField === field) {
@@ -114,6 +142,7 @@ export function useCompanyFilters(companies: Company[]) {
     filterSector, setFilterSector,
     filterUniverse, setFilterUniverse,
     filterDupes, setFilterDupes,
+    hideUnlinked, setHideUnlinked,
     sortField, sortDir,
     filtered,
     handleSort,

@@ -26,20 +26,20 @@ from .base import (
 from .leonteq import LeonteqTemplate
 from .longequity import LongEquityTemplate
 
-# Order matters two ways:
-#   1. LongEquity is listed first because its refresh() probes upstream
-#      for newer data; running it before the other templates means the
-#      pipeline's effective data freshness for LongEquity tracks the
-#      tick time, not "tick minus N minutes spent on other templates".
-#   2. ACWI_LEONTEQ is a derived template that reads from the ACWI and
-#      LEONTEQ universe_membership rows. Register it AFTER its two
-#      parents so the pipeline's templates phase refreshes the parents
-#      first; otherwise the intersection lags by one tick.
+# LongEquity is listed first because its refresh() probes upstream for newer
+# data; running it before the other templates means the pipeline's effective
+# data freshness for LongEquity tracks the tick time, not "tick minus N
+# minutes spent on other templates".
+#
+# ACWI_LEONTEQ (the ACWI ∩ Leonteq intersection) is intentionally DEREGISTERED
+# (2026-06-15): the user dropped it, so the pipeline must not recreate it. The
+# class is kept importable for any historical reference but is no longer a
+# managed template. The universe row itself is removed in
+# 20260615003000_companies_frozen_only_memberships.sql.
 TEMPLATES: dict[str, type[UniverseTemplate]] = {
     LongEquityTemplate.template_key: LongEquityTemplate,
     ACWITemplate.template_key: ACWITemplate,
     LeonteqTemplate.template_key: LeonteqTemplate,
-    ACWILeonteqTemplate.template_key: ACWILeonteqTemplate,
 }
 
 

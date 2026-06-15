@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { Holding, PeriodRecord } from '../../../lib/stores/momentum';
 import {
   collectHeldCompanies,
+  computeMonthChanges,
   computeTurnoverByDate,
   repriceOpenPeriod,
   splitAtGoLive,
@@ -30,6 +31,37 @@ describe('computeTurnoverByDate', () => {
       rec({ date: '2024-03', holdings: [] }),
     ];
     expect(computeTurnoverByDate(records)).toEqual({ '2024-01': null, '2024-02': 50, '2024-03': null });
+  });
+});
+
+describe('computeMonthChanges', () => {
+  it('flags newcomers + dropped names vs the previous period', () => {
+    const records = [
+      rec({ date: '2024-01', holdings: [hold({ company_id: 1, ticker: 'A' }), hold({ company_id: 2, ticker: 'B' })] }),
+      // keeps 2, drops 1, adds 3
+      rec({ date: '2024-02', holdings: [hold({ company_id: 2, ticker: 'B' }), hold({ company_id: 3, ticker: 'C' })] }),
+    ];
+    const chg = computeMonthChanges(records);
+    // first period: nothing to compare against
+    expect(chg['2024-01'].newcomerIds.size).toBe(0);
+    expect(chg['2024-01'].dropped).toEqual([]);
+    // second period: 3 is new, 1 is sold
+    expect([...chg['2024-02'].newcomerIds]).toEqual([3]);
+    expect(chg['2024-02'].dropped.map((h) => h.company_id)).toEqual([1]);
+  });
+
+  it('skips empty periods as the "previous" reference', () => {
+    const records = [
+      rec({ date: '2024-01', holdings: [hold({ company_id: 1 })] }),
+      rec({ date: '2024-02', holdings: [] }),
+      rec({ date: '2024-03', holdings: [hold({ company_id: 1 }), hold({ company_id: 2 })] }),
+    ];
+    const chg = computeMonthChanges(records);
+    expect(chg['2024-02'].newcomerIds.size).toBe(0);
+    expect(chg['2024-02'].dropped).toEqual([]);
+    // 03 compares against 01 (the last non-empty), so only 2 is new, none sold
+    expect([...chg['2024-03'].newcomerIds]).toEqual([2]);
+    expect(chg['2024-03'].dropped).toEqual([]);
   });
 });
 

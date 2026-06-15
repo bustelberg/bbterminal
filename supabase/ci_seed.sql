@@ -56,13 +56,16 @@ FROM generate_series(0, 5) AS g;
 
 INSERT INTO public.universe (universe_id, label, template_key) VALUES (900002, 'ACWI', 'ACWI');
 
--- Membership (2 sectors × 3 companies) for every month the backtest range
--- + lookback could touch.
+-- Membership (2 sectors × 3 companies) as a single frozen snapshot. ACWI is
+-- a frozen (is_monthly=false) universe, so it must hold exactly ONE month
+-- (enforced by the universe_membership_frozen_single_month trigger). The
+-- backtest loader collapses to the latest month and broadcasts it across the
+-- whole date range (broadcast_constant), so one month is all the smoke test
+-- needs.
 INSERT INTO public.universe_membership (universe_id, company_id, target_month, sector)
-SELECT 900002, 900010 + g, to_char(m, 'YYYY-MM'),
+SELECT 900002, 900010 + g, '2026-05',
        CASE WHEN g < 3 THEN 'Technology' ELSE 'Energy' END
-FROM generate_series(0, 5) AS g,
-     generate_series(DATE '2025-06-01', DATE '2026-05-01', INTERVAL '1 month') AS m;
+FROM generate_series(0, 5) AS g;
 
 -- Daily close prices: weekdays only, base 100 with a per-company slope
 -- (company 900015 climbs fastest → strongest momentum).

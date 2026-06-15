@@ -187,7 +187,11 @@ export function buildAllPermutations({
   const regimeAxis: (number | undefined)[] = regimeList.length === 0 ? [undefined] : regimeList;
   // Boolean axis: [off] normally, [off, on] when comparing tit-for-tat.
   const timingAxis: (boolean | undefined)[] = sweepDailyTiming ? [undefined, true] : [undefined];
-  const uniAxis: (string | undefined)[] = uniList.length === 0 ? [undefined] : uniList;
+  // Universe is REQUIRED, not inherited: an empty selection yields ZERO
+  // permutations (NOT a `[undefined]` "inherit base universe" fallback like the
+  // other axes). Backtests must run against an explicitly-chosen frozen
+  // universe, so nothing selected → nothing to run.
+  const uniAxis: string[] = uniList;
   const grpAxis: ('sector' | 'industry' | undefined)[] =
     grpList.length === 0 ? [undefined] : grpList;
   const wdAxis: (number | undefined)[] = wdList.length === 0 ? [undefined] : wdList;

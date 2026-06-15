@@ -1264,6 +1264,30 @@
         "title": "VariantSpec",
         "type": "object"
       },
+      "_GfCompanyNameBody": {
+        "properties": {
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker"
+        ],
+        "title": "_GfCompanyNameBody",
+        "type": "object"
+      },
       "_GuruFocusExchangeSearchBody": {
         "properties": {
           "candidate_exchanges": {
@@ -1757,6 +1781,57 @@
         ]
       }
     },
+    "/api/admin/gurufocus-company-name": {
+      "post": {
+        "description": "Fetch the company name GuruFocus reports for a (ticker, exchange) \u2014 so a\nmislabeled row can be corrected to what its GuruFocus link actually shows\n(e.g. a row stored as \"TSMC\" whose `TSE:2330` listing GuruFocus calls\n\"Forside Co Ltd\"). One GuruFocus call. Returns `{name, found, symbol, log}`;\nthe caller confirms + writes the rename via PUT /api/companies/{id}.",
+        "operationId": "gurufocus_company_name_api_admin_gurufocus_company_name_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/_GfCompanyNameBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Gurufocus Company Name",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/admin/gurufocus-exchange-search": {
       "post": {
         "description": "Probe GuruFocus to find which exchange code ACTUALLY resolves for\neach ticker. Use case: `company.gurufocus_lookup_failed_at` is set on\na row whose `exchange_id` is wrong (e.g. NYSE:ASND when the listing\nis really NASDAQ:ASND). This endpoint tries each candidate exchange\nin turn until one returns price data, then reports the match per\nticker.\n\nCost: O(tickers \u00d7 candidates_per_ticker) GuruFocus API calls in the\nworst case. The probe short-circuits to the first hit, so a ticker\nthat lives on its first-tried exchange is cheap (1 call). Bound\n`candidate_exchanges` to a small list if you're searching across\nmany tickers.\n\nResponse: one entry per ticker with `{ticker, current_exchange,\nfound_exchange, status, candidates_tried, error}`. `found_exchange`\nis non-null only when an exchange resolved to a 200 with parseable\ndata.",
@@ -2064,9 +2139,19 @@
     },
     "/api/admin/universes": {
       "get": {
-        "description": "List every universe \u2014 the discovery call for the membership endpoint\nbelow. Admin only.\n\nCovers all universe kinds: template-managed canonicals (ACWI, LEONTEQ,\n\u2026, `template_key` set), frozen snapshots (`frozen_at` set), criteria-\nderived universes (`parent_universe_id` set), and imported index\nuniverses (all three null). Month range + counts come from the\n`universe_stats` materialized view when available (a refreshed-on-\npipeline hint; may lag slightly) \u2014 `null` when it hasn't been\npopulated. Pick a `universe_id` and pass it to\n`GET /api/admin/universes/{id}`.\n\nResponse: `{count, universes:[{universe_id, label, description, kind,\ntemplate_key, frozen_at, parent_universe_id, created_at,\nlast_refreshed_at, start_month, end_month, month_count,\nunique_tickers}]}`.",
+        "description": "List the **frozen** universes \u2014 the discovery call for the membership\nendpoint below. Admin only.\n\nBy default returns ONLY frozen static snapshots (`frozen_at` set) \u2014 the\nreproducible \"X (as of YYYY-MM)\" universes that are the canonical, usable\nsets across the app. Pass `?include_all=true` to also list the live\ntemplate-managed canonicals (`template_key` set), the LongEquity\ntime-series universe, criteria-derived universes (`parent_universe_id`),\nand imported index universes.\n\nSingle-set model: each universe is a frozen set as of `as_of_date`.\n`is_monthly` is true only for the LongEquity time-series universe; the\n`start_month` / `end_month` / `month_count` fields are populated only when\n`is_monthly` (null otherwise). `member_count` comes from the\n`universe_stats` materialized view (a refreshed-on-pipeline hint; may\nlag). Pick a `universe_id` and pass it to `GET /api/admin/universes/{id}`.\n\nResponse: `{count, universes:[{universe_id, label, description, kind,\ntemplate_key, frozen_at, parent_universe_id, created_at,\nlast_refreshed_at, as_of_date, is_monthly, member_count, start_month,\nend_month, month_count}]}`.",
         "operationId": "list_universes_api_admin_universes_get",
         "parameters": [
+          {
+            "in": "query",
+            "name": "include_all",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include All",
+              "type": "boolean"
+            }
+          },
           {
             "in": "header",
             "name": "authorization",
@@ -2105,7 +2190,7 @@
     },
     "/api/admin/universes/{universe_id}": {
       "get": {
-        "description": "Full membership of one universe for a single month, each member\nenriched with the same per-company attributes the holdings endpoint\nreturns. Admin only.\n\nBy default returns the universe's LATEST month; pass `?month=YYYY-MM`\nfor a historical snapshot (a universe carries one membership set per\nmonth). 404 when the universe doesn't exist; empty `members` when the\nuniverse (or the requested month) has no membership.\n\nEach member carries:\n    company_id, ticker, exchange, country, currency, isin,\n    company_name, sector, industry,\n    latest_close_local, latest_close_eur, latest_close_date,\n    fx_rate_per_eur\n\nSame descriptive fields as a scheduled strategy's holdings; the\nposition-specific fields (side / target_weight / score / entry_date)\ndon't apply to a universe member, and the holding's entry price becomes\nthe latest close (native + EUR).\n\nResponse: `{universe_id, label, template_key, frozen_at, target_month,\nmember_count, members:[\u2026]}`.",
+        "description": "Full membership of one universe, each member enriched with the same\nper-company attributes the holdings endpoint returns. Admin only.\n\nAlmost every universe is a single frozen set (one `target_month`), so by\ndefault you get that set and the `month` param does nothing. The ONE\nexception is the live, multi-month **LongEquity** time-series universe\n(`is_monthly=true`, reachable via `?include_all=true` on the list): there\n`?month=YYYY-MM` selects a historical snapshot, defaulting to its latest\nmonth. For any single-month universe `month` is IGNORED (you always get\nthe frozen set, never an empty wrong-month result). 404 when the universe\ndoesn't exist; empty `members` when it has no membership.\n\nEach member carries:\n    company_id, ticker, exchange, country, currency, isin,\n    company_name, sector, industry,\n    latest_close_local, latest_close_eur, latest_close_date,\n    fx_rate_per_eur\n\nSame descriptive fields as a scheduled strategy's holdings; the\nposition-specific fields (side / target_weight / score / entry_date)\ndon't apply to a universe member, and the holding's entry price becomes\nthe latest close (native + EUR).\n\nResponse: `{universe_id, label, template_key, frozen_at, is_monthly,\ntarget_month, member_count, members:[\u2026]}`.",
         "operationId": "get_universe_api_admin_universes__universe_id__get",
         "parameters": [
           {
@@ -3095,7 +3180,7 @@
     },
     "/api/companies/sectors": {
       "get": {
-        "description": "Latest known sector per company (from `universe_membership`), for the\n/companies Sector column + filter. Returns `{company_id: sector}`.\n\nSame `.range()` pagination + try/except-\u2192-{} resilience as\n/memberships (so a not-yet-migrated prod returns empty rather than 500).\nBacked by the `company_latest_sector` RPC (DISTINCT ON company_id).",
+        "description": "Sector per company + the universe it came from, for the /companies\nSector column + filter. Returns `{company_id: {sector, source}}`.\n\nSector is preferentially the company's **Leonteq** sector, else the most\nrecent month's sector from any universe; `source` is that universe's label\n(shown as an annotation). Backed by the `company_sector_with_source` RPC\n(DISTINCT ON company_id). Same `.range()` pagination + try/except-\u2192-{}\nresilience as /memberships (so a not-yet-migrated prod returns empty\nrather than 500).",
         "operationId": "list_company_sectors_api_companies_sectors_get",
         "responses": {
           "200": {
@@ -5113,6 +5198,26 @@
           }
         },
         "summary": "Get Longequity Companies",
+        "tags": [
+          "longequity"
+        ]
+      }
+    },
+    "/api/longequity/freeze-union": {
+      "post": {
+        "description": "Freeze the UNION of every company across every LongEquity report month\ninto a single dated frozen universe (`is_monthly=false`).\n\nLongEquity itself is the time-series (per-month) universe; this produces\nthe static, frozen-only counterpart selectable in backtests / earnings.\nIdempotent per day. Returns `{created, universe_id, label, companies,\nas_of_date}`.",
+        "operationId": "freeze_longequity_union_endpoint_api_longequity_freeze_union_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Freeze Longequity Union Endpoint",
         "tags": [
           "longequity"
         ]

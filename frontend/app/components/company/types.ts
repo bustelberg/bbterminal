@@ -17,10 +17,23 @@ export type Company = {
    * "Refresh market caps" button (GuruFocus, converted to EUR). */
   market_cap_eur?: number | null;
   market_cap_date?: string | null;
-  /** Latest known sector (from universe_membership), merged in via the slower
+  /** The native-currency market cap behind `market_cap_eur` + the ECB FX rate
+   * used (units per EUR; EUR = native / rate), so the conversion is auditable. */
+  market_cap_native?: number | null;
+  market_cap_currency?: string | null;
+  market_cap_fx_rate?: number | null;
+  /** True when the listing's exchange is outside our GuruFocus subscription
+   * (AU/NZ, Russia, Africa, LatAm) — so an empty market cap is a coverage gap,
+   * shown as an "unsubscribed" label rather than a bare "—". */
+  gf_unsubscribed?: boolean;
+  /** Sector (from universe_membership), merged in via the slower
    * /api/companies/sectors roundtrip — null until it lands / if the company is
-   * in no universe. */
+   * in no universe. Preferentially the company's Leonteq sector, else the
+   * latest month's sector from any universe. */
   sector?: string | null;
+  /** The universe label the `sector` came from (annotation), e.g. "Leonteq"
+   * or "ACWI". Null until sectors land / if the company is in no universe. */
+  sector_source?: string | null;
   universes: string[];
   /** ISO timestamp set by the price phase when GuruFocus returns "delisted"
    * or "stock not found" for this (ticker, exchange). Companies with a

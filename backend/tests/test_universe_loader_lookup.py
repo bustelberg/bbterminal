@@ -53,3 +53,43 @@ def test_injection_string_is_treated_as_literal(monkeypatch):
     ])
     malicious = "ACWI),label.not.is.null,(label.eq.x"
     assert universe_loader._find_universe_row(malicious) is None
+
+
+# ── frozen-only guard (monthly_universe_labels) ──────────────────────
+
+_UNIVERSE_ROWS = [
+    {"universe_id": 1, "template_key": "LONGEQUITY", "label": "LongEquity", "is_monthly": True},
+    {"universe_id": 7, "template_key": "ACWI", "label": "acwi-2026", "is_monthly": False},
+    {"universe_id": 11, "template_key": None, "label": "SP500", "is_monthly": False},
+]
+
+
+def test_resolve_is_monthly_by_template_key(monkeypatch):
+    _patch(monkeypatch, _UNIVERSE_ROWS)
+    assert universe_loader._resolve_is_monthly("LONGEQUITY") is True
+    assert universe_loader._resolve_is_monthly("ACWI") is False
+
+
+def test_resolve_is_monthly_by_label_fallback(monkeypatch):
+    # Resolves via the `label` lookup (LongEquity has a template_key, but the
+    # label form must also be caught — the universe_label request path).
+    _patch(monkeypatch, _UNIVERSE_ROWS)
+    assert universe_loader._resolve_is_monthly("LongEquity") is True
+    assert universe_loader._resolve_is_monthly("SP500") is False
+
+
+def test_resolve_is_monthly_unknown_label_is_false(monkeypatch):
+    _patch(monkeypatch, _UNIVERSE_ROWS)
+    assert universe_loader._resolve_is_monthly("NOPE") is False
+
+
+def test_monthly_universe_labels_returns_only_monthly(monkeypatch):
+    _patch(monkeypatch, _UNIVERSE_ROWS)
+    # Mix of monthly, frozen, None, and unknown — only the monthly survives.
+    candidates = {"ACWI", "LongEquity", "SP500", None, "NOPE"}
+    assert universe_loader.monthly_universe_labels(candidates) == {"LongEquity"}
+
+
+def test_monthly_universe_labels_empty_when_all_frozen(monkeypatch):
+    _patch(monkeypatch, _UNIVERSE_ROWS)
+    assert universe_loader.monthly_universe_labels({"ACWI", "SP500", None}) == set()

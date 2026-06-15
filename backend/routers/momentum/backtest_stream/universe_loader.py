@@ -155,6 +155,39 @@ def _find_universe_row(label: str) -> dict | None:
     return None
 
 
+def _resolve_is_monthly(label: str) -> bool:
+    """True if `label` resolves (by template_key, then label) to a monthly
+    (time-series) universe — i.e. `universe.is_monthly = true`.
+
+    Monthly universes (only LongEquity today) carry point-in-time
+    per-month membership and must NOT be selected for a frozen-basket
+    backtest/earnings view: the fixed-basket path (`broadcast_constant`)
+    would silently use only their latest month, quietly introducing
+    survivorship bias. Resolution mirrors `_find_universe_row` so both the
+    `universe_label` and `index_universe` request paths are covered.
+    Returns False when the label doesn't resolve."""
+    for column in ("template_key", "label"):
+        resp = (
+            supabase.table("universe")
+            .select("is_monthly")
+            .eq(column, label)
+            .limit(1)
+            .execute()
+        )
+        if resp.data:
+            return bool(resp.data[0].get("is_monthly"))
+    return False
+
+
+def monthly_universe_labels(labels) -> set[str]:
+    """Return the subset of `labels` that resolve to a monthly universe.
+
+    Reusable guard for any frozen-only surface (backtest today; earnings
+    universe-scoping when it lands): pass every candidate universe label /
+    index-universe key and reject the request if the result is non-empty."""
+    return {lbl for lbl in labels if lbl and _resolve_is_monthly(lbl)}
+
+
 def _load_index_universe(
     label: str, grouping_field: str = "sector",
 ) -> dict[str, dict[int, str | None]]:

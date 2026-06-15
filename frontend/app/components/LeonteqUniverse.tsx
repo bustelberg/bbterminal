@@ -9,6 +9,7 @@ import { fmtTimestamp } from '../../lib/format';
 import type { Column } from '../../lib/tableExport';
 import TableDownloadButton from './TableDownloadButton';
 import LoadingDots from './LoadingDots';
+import FrozenUniversesPanel from './FrozenUniversesPanel';
 import { API_URL } from '../../lib/apiUrl';
 const TEMPLATE_KEY = 'LEONTEQ';
 
@@ -58,6 +59,7 @@ export default function LeonteqUniverse() {
 
   const [freezing, setFreezing] = useState(false);
   const [freezeResult, setFreezeResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [freezeCount, setFreezeCount] = useState(0); // bump → refresh frozen panel
 
   const load = useCallback(async () => {
     try {
@@ -231,6 +233,7 @@ export default function LeonteqUniverse() {
       const j = await resp.json();
       // So /backtest's cached static-universe list re-fetches and shows it.
       invalidateCache('GET /api/static-universes');
+      setFreezeCount((c) => c + 1); // refresh the frozen-universes panel
       setFreezeResult({
         ok: true,
         message: j.created
@@ -326,6 +329,15 @@ export default function LeonteqUniverse() {
             </button>
           </div>
         )}
+
+        {/* Uniform frozen-universes panel — inspect / delete the Leonteq
+            snapshots you've frozen (created via "Freeze snapshot" above). */}
+        <FrozenUniversesPanel
+          frozenFrom={['LEONTEQ']}
+          title="Frozen Leonteq snapshots"
+          description="Static copies you've frozen from the Leonteq universe — click one to inspect its constituents or delete it. Reproducible universes selectable in /backtest."
+          reloadSignal={freezeCount}
+        />
 
         {(refreshLog.length > 0 || refreshResult) && (
           <ProgressTimeline

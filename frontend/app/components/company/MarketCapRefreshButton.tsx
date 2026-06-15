@@ -75,7 +75,7 @@ export default function MarketCapRefreshButton({ onRefreshed }: { onRefreshed: (
       type="button"
       onClick={start}
       disabled={running}
-      title={running ? message : "Re-fetch every company's market cap from GuruFocus and store it in EUR. Runs in the background (~an hour); progress updates live."}
+      title={running ? message : "Re-fetch every company's market cap (in EUR) AND correct its name from GuruFocus — fixes mislabeled listings. Runs in the background (~an hour); progress updates live."}
       className="relative overflow-hidden px-3 py-2 rounded-lg text-sm font-medium bg-card border border-neutral-800/60 text-fg-muted hover:text-fg-strong transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-2"
     >
       {/* Live progress fill — width tracks processed/total, behind the label. */}

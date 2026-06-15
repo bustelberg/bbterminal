@@ -52,7 +52,11 @@ from .fetch_loop import run_fetch_loop
 from .models import BacktestRequest
 from .self_heal import compute_gap_cids, run_self_heal
 from .single_run import run_single
-from .universe_loader import broadcast_constant, load_monthly_eligible_for
+from .universe_loader import (
+    broadcast_constant,
+    load_monthly_eligible_for,
+    monthly_universe_labels,
+)
 from .variants import run_variants_sweep
 
 _log = logging.getLogger(__name__)
@@ -85,6 +89,28 @@ async def _momentum_backtest_stream(req: BacktestRequest):
     # save the bundle from the UI.
     if req.variants and req.mode == "current_portfolio":
         yield _emit({"type": "error", "message": "Variants sweep is not supported with mode='current_portfolio'"})
+        return
+
+    # Frozen-only guard: a backtest treats its universe as a fixed basket
+    # (broadcast_constant), so a monthly (time-series) universe like
+    # LongEquity would silently collapse to its latest month and bias the
+    # run. Reject any monthly universe up front — across the base request
+    # AND every variant — before doing any load work. The frontend already
+    # hides monthly universes from the picker; this is the backend backstop.
+    _candidate_labels = {req.universe_label, req.index_universe}
+    for _v in (req.variants or []):
+        _candidate_labels.add(_v.universe_label)
+        _candidate_labels.add(_v.index_universe)
+    _monthly = await asyncio.to_thread(monthly_universe_labels, _candidate_labels)
+    if _monthly:
+        yield _emit({
+            "type": "error",
+            "message": (
+                f"Universe(s) {sorted(_monthly)} are monthly (time-series) "
+                "universes and cannot be backtested — backtests require a "
+                "frozen snapshot universe. Freeze a copy from its source page."
+            ),
+        })
         return
 
     # Backtests are unconditionally DB-only — the canonical refresher is the

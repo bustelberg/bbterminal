@@ -209,6 +209,19 @@ def backfill_isin(
 
     emit(f"Done. Leonteq={result.set_from_leonteq} GuruFocus={result.set_from_gurufocus} "
          f"misses={result.gurufocus_misses} errors={len(result.errors)}")
+
+    # Permanent dedupe guarantee: now that ISINs are resolved, merge any two
+    # companies that ended up sharing one (the same security on two exchanges).
+    # Runs every ISIN backfill so cross-universe duplicates can never persist.
+    try:
+        from ingest.dedupe import dedupe_by_isin  # noqa: PLC0415
+        rep = dedupe_by_isin(supabase)
+        if rep.groups_merged:
+            emit(f"ISIN dedupe: merged {rep.groups_merged} duplicate group(s), "
+                 f"deleted {rep.rows_deleted} row(s).")
+    except Exception as e:  # noqa: BLE001 — dedupe must never fail the backfill
+        result.errors.append(f"isin dedupe failed: {type(e).__name__}: {e}")
+
     return result
 
 

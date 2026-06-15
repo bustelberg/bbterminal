@@ -16,6 +16,7 @@ import { apiFetch } from '../../lib/apiFetch';
 import type { Column } from '../../lib/tableExport';
 import TableDownloadButton from './TableDownloadButton';
 import LoadingDots from './LoadingDots';
+import FrozenUniversesPanel from './FrozenUniversesPanel';
 import { API_URL } from '../../lib/apiUrl';
 
 type IndexEntry = {
@@ -25,7 +26,8 @@ type IndexEntry = {
   month_count: number;
   total_unique_tickers: number;
 };
-type MonthEntry = { month: string; ticker_count: number };
+// Shape of GET /api/index-universe/months (one row per captured month).
+type MonthEntry = { target_month: string; count: number };
 type TickerEntry = {
   ticker: string;
   company_id: number | null;
@@ -51,6 +53,12 @@ export default function IndexUniverse() {
   // Indexes
   const [indexes, setIndexes] = useState<IndexEntry[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<string | null>(null);
+
+  // The live index whose constituents the table below is showing. Frozen
+  // snapshots are listed + inspected + deleted by the shared
+  // FrozenUniversesPanel; bumping `freezeCount` refreshes it after a freeze.
+  const [inspectedLabel, setInspectedLabel] = useState<string | null>(null);
+  const [freezeCount, setFreezeCount] = useState(0);
 
   // The single captured month (the snapshot's as-of) + its constituents.
   const [snapshotMonth, setSnapshotMonth] = useState<string | null>(null);
@@ -78,20 +86,21 @@ export default function IndexUniverse() {
 
   useEffect(() => { loadIndexes(); }, [loadIndexes]);
 
-  // Load the snapshot (latest captured month + its constituents) for an index.
-  const loadSnapshot = useCallback((idx: string) => {
+  // Load the constituents for the selected live index by label. Picks the
+  // latest captured month.
+  const loadSnapshot = useCallback((label: string) => {
     setLoadingTickers(true);
     setTickers([]);
     setSnapshotMonth(null);
-    trackedFetch(`Loading ${idx} months`, `${API_URL}/api/index-universe/months?index=${encodeURIComponent(idx)}`)
+    trackedFetch(`Loading ${label} months`, `${API_URL}/api/index-universe/months?index=${encodeURIComponent(label)}`)
       .then(r => r.json())
       .then((data: MonthEntry[]) => {
-        const month = data.length > 0 ? data[data.length - 1].month : null;
+        const month = data.length > 0 ? data[data.length - 1].target_month : null;
         setSnapshotMonth(month);
         if (!month) { setLoadingTickers(false); return; }
         return trackedFetch(
-          `Loading ${idx} constituents`,
-          `${API_URL}/api/index-universe/tickers?index=${encodeURIComponent(idx)}&month=${month}`,
+          `Loading ${label} constituents`,
+          `${API_URL}/api/index-universe/tickers?index=${encodeURIComponent(label)}&month=${month}`,
         )
           .then(r => r.json())
           .then((t: TickerEntry[]) => { setTickers(t); setLoadingTickers(false); });
@@ -99,9 +108,10 @@ export default function IndexUniverse() {
       .catch(() => setLoadingTickers(false));
   }, []);
 
-  // Select an index
+  // Select the LIVE index — enables freeze + GuruFocus-coverage actions.
   const selectIndex = (idx: string) => {
     setSelectedIndex(idx);
+    setInspectedLabel(idx);
     clearSp500GfCheck();
     setFreezeMsg(null);
     setTickerFilter('');
@@ -147,6 +157,7 @@ export default function IndexUniverse() {
           ? `Already frozen: "${label}" — available in /universe, /backtest and /earnings.`
           : `Froze "${label}" — ${data.members_copied ?? 0} membership rows copied. Now selectable in /universe, /backtest and /earnings.`,
       });
+      setFreezeCount(c => c + 1); // refresh the frozen-universes panel below
     } catch (e) {
       setFreezeMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -162,6 +173,7 @@ export default function IndexUniverse() {
         loadIndexes();
         if (selectedIndex === idx) {
           setSelectedIndex(null);
+          setInspectedLabel(null);
           setSnapshotMonth(null);
           setTickers([]);
           clearSp500GfCheck();
@@ -260,6 +272,16 @@ export default function IndexUniverse() {
           </div>
         </div>
 
+        {/* Frozen snapshots — shared panel: inspect / delete. Freezing is done
+            from the selected index's "Freeze a copy" card below (it carries the
+            GuruFocus-coverage check), which bumps `freezeCount` to refresh. */}
+        <FrozenUniversesPanel
+          frozenFrom={['SP500']}
+          title="Frozen snapshots"
+          description="Static copies you've frozen from S&P 500 — click one to inspect its constituents or delete it. These are the reproducible universes selectable in /backtest."
+          reloadSignal={freezeCount}
+        />
+
         {/* Selected Index content */}
         {selectedIndex && (
           <>
@@ -357,12 +379,16 @@ export default function IndexUniverse() {
                 </div>
               </div>
             )}
+          </>
+        )}
 
-            {/* Constituents (the single snapshot) */}
+        {/* Constituents of the inspected universe — works for the live index
+            OR a frozen snapshot (both resolve by label). */}
+        {inspectedLabel && (
             <div className="bg-card rounded-xl border border-neutral-800/40">
               <div className="px-5 py-4 border-b border-neutral-800/40 flex items-center justify-between gap-3 flex-wrap">
                 <h3 className="text-sm font-medium text-fg-strong">
-                  {selectedIndex} constituents{snapshotMonth ? ` — as of ${snapshotMonth}` : ''} — {tickers.length} tickers
+                  {inspectedLabel} constituents{snapshotMonth ? ` — as of ${snapshotMonth}` : ''} — {tickers.length} tickers
                   {tickers.length > 0 && (
                     <span className="text-fg-subtle font-normal ml-2">
                       ({tickers.filter(t => t.company_id).length} matched to companies)
@@ -380,7 +406,7 @@ export default function IndexUniverse() {
                   <TableDownloadButton
                     rows={filteredTickers}
                     columns={tickerExportColumns}
-                    filename={`index_${selectedIndex}_${snapshotMonth ?? 'constituents'}`}
+                    filename={`index_${inspectedLabel}_${snapshotMonth ?? 'constituents'}`}
                     title={`Download ${filteredTickers.length} tickers as CSV / XLSX`}
                   />
                 </div>
@@ -423,7 +449,6 @@ export default function IndexUniverse() {
                 )}
               </div>
             </div>
-          </>
         )}
       </div>
     </div>

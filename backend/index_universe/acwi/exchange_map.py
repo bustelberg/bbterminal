@@ -344,12 +344,31 @@ def gurufocus_ticker_normalized(ticker: str, exchange: str) -> tuple[str, str] |
 # FEASIBLE_GF_EXCHANGES set. Empty string = US.
 FEASIBLE_GF_EXCHANGES = frozenset([
     "",  # US (NYSE, NASDAQ, Cboe BZX)
-    # Europe
-    "LSE", "XTER", "XPAR", "XAMS", "XBRU", "XLIS", "MIL", "XMAD", "XSWX",
-    "OSTO", "OCSE", "OSL", "OHEL", "WAR", "XPRA", "ATH", "DUB", "BUD", "IST",
+    # Europe — NOTE: UK (LSE) and Ireland (DUB) are NOT here; GuruFocus
+    # returns "403 unsubscribed region" for them (confirmed by probing every
+    # exchange), same as India. Continental Europe is covered.
+    "XTER", "XPAR", "XAMS", "XBRU", "XLIS", "MIL", "XMAD", "XSWX",
+    "OSTO", "OCSE", "OSL", "OHEL", "WAR", "XPRA", "ATH", "BUD", "IST",
     # Asia (East / SE / South)
+    # NOTE: India (NSE, BSE) is NOT here — GuruFocus returns
+    # "403 unsubscribed region [India]" for it, so we have no price/mktcap/ISIN
+    # data for Indian listings (they get the UNSUBSCRIBED badge + are excluded
+    # from feasible ACWI holdings). Confirmed by probing every exchange below.
     "TSE", "HKSE", "SHSE", "SZSE", "TPE", "ROCO", "XKRX",
-    "NSE", "BSE", "SGX", "XKLS", "ISX", "BKK", "PHS",
+    "SGX", "XKLS", "ISX", "BKK", "PHS",
     # Middle East
     "SAU", "DSMD", "KUW", "XTAE", "ADX", "DFM",
 ])
+
+
+def is_gf_subscribed_exchange(exchange_code: str | None) -> bool:
+    """True if our GuruFocus subscription covers this exchange — so a missing
+    market cap (or price) is a data gap, NOT a coverage gap. US exchanges are
+    represented as '' inside FEASIBLE_GF_EXCHANGES, so they're checked against
+    `_US_EXCHANGES`; every other exchange is matched by its code directly.
+    Unknown/empty exchange → False (we can't claim coverage)."""
+    if not exchange_code:
+        return False
+    if exchange_code in _US_EXCHANGES:
+        return True
+    return exchange_code in FEASIBLE_GF_EXCHANGES

@@ -588,6 +588,170 @@ def merge_existing_duplicates(
     return report
 
 
+_EU_DB_EXCHANGE_CODES = {
+    "XTER", "XPAR", "XAMS", "XBRU", "XLIS", "MIL", "XMAD", "XSWX",
+    "OSTO", "OCSE", "OSL", "OHEL", "WAR", "XPRA", "ATH", "BUD", "IST",
+}
+
+
+def _is_usa_or_eu(exchange_code: str | None) -> bool:
+    code = (exchange_code or "").strip().upper()
+    return code in _US_DB_EXCHANGE_CODES or code in _EU_DB_EXCHANGE_CODES
+
+
+def _name_root(name: str | None) -> str:
+    """Alphanumeric-only company-name key for matching same-ISIN siblings,
+    ignoring ADR/ADS markers + punctuation so "KE Holdings Inc" matches
+    "KE Holdings Inc - ADR" but two genuinely different issuers don't."""
+    n = re.sub(r"\b(adr|ads)\b", "", canonical_name(name))
+    return re.sub(r"[^a-z0-9]", "", n)
+
+
+def _leonteq_company_ids(supabase: Client) -> set[int]:
+    """Company ids that are Leonteq holdings — members of the live LEONTEQ
+    universe or any frozen copy of it. Used so a same-ISIN merge keeps the
+    Leonteq listing."""
+    uids: list[int] = []
+    for r in paginate(
+        lambda lo, hi: supabase.table("universe")
+        .select("universe_id, template_key, frozen_from")
+        .range(lo, hi)
+        .execute()
+    ):
+        if (r.get("template_key") == "LEONTEQ") or (r.get("frozen_from") == "LEONTEQ"):
+            uids.append(r["universe_id"])
+    ids: set[int] = set()
+    for uid in uids:
+        for r in paginate(
+            lambda lo, hi, uid=uid: supabase.table("universe_membership")
+            .select("company_id").eq("universe_id", uid).range(lo, hi).execute()
+        ):
+            if r.get("company_id") is not None:
+                ids.add(int(r["company_id"]))
+    return ids
+
+
+def _pick_winner_isin(group: list[CompanyRow], leonteq_ids: set[int]) -> CompanyRow:
+    """Survivor of a same-ISIN group. Preference (lowest wins): a Leonteq
+    holding first, then a USA/EU listing, then a viable listing, then exchange
+    priority, then lowest company_id."""
+    def key(c: CompanyRow):
+        return (
+            0 if c.company_id in leonteq_ids else 1,
+            0 if _is_usa_or_eu(c.exchange_code) else 1,
+            0 if _is_viable(c) else 1,
+            exchange_priority(c.exchange_code),
+            c.company_id,
+        )
+    return sorted(group, key=key)[0]
+
+
+def _reassign_and_delete(supabase: Client, loser_id: int, winner_id: int, report: MergeReport) -> None:
+    """Move every cross-table reference from `loser_id` onto `winner_id`, then
+    delete the loser company row. Shared by the ISIN merge + conflict handling."""
+    mv, dr = _move_metric_data(supabase, loser_id, winner_id)
+    report.metric_data_reassigned += mv
+    report.metric_data_dropped += dr
+    report.universe_membership_reassigned += _move_simple_fk(
+        supabase, "universe_membership", loser_id, winner_id, dedup_keys=["universe_id", "target_month"])
+    report.portfolio_weight_reassigned += _move_simple_fk(
+        supabase, "portfolio_weight", loser_id, winner_id, dedup_keys=["portfolio_id"])
+    report.company_source_reassigned += _move_simple_fk(
+        supabase, "company_source", loser_id, winner_id, dedup_keys=["source_code"])
+    for table in ("leonteq_equity", "current_picks_snapshot", "index_membership"):
+        try:
+            supabase.table(table).update({"company_id": winner_id}).eq("company_id", loser_id).execute()
+        except Exception:  # noqa: BLE001 — best-effort FK rewiring
+            pass
+    # If the keeper lacks a market cap but the loser has one (same issuer),
+    # carry it over so the merge never drops a known value.
+    try:
+        w = supabase.table("company").select("market_cap_eur").eq("company_id", winner_id).limit(1).execute()
+        if w.data and w.data[0].get("market_cap_eur") is None:
+            mc_cols = "market_cap_eur, market_cap_native, market_cap_currency, market_cap_fx_rate, market_cap_date"
+            ld = supabase.table("company").select(mc_cols).eq("company_id", loser_id).limit(1).execute()
+            if ld.data and ld.data[0].get("market_cap_eur") is not None:
+                supabase.table("company").update(ld.data[0]).eq("company_id", winner_id).execute()
+    except Exception:  # noqa: BLE001 — best-effort, never block the merge
+        pass
+    try:
+        supabase.table("company").delete().eq("company_id", loser_id).execute()
+        report.rows_deleted += 1
+    except Exception as e:  # noqa: BLE001
+        _log.warning("[dedupe] could not delete cid=%s: %s", loser_id, e)
+
+
+def dedupe_by_isin(supabase: Client, *, dry_run: bool = False) -> MergeReport:
+    """Merge companies that share a (non-null) ISIN — i.e. the SAME security
+    stored under two listings (e.g. a US name on both NYSE and NASDAQ ingested
+    from different universes). This is the reliable duplicate signal; merging
+    by name alone wrongly collapses share classes (GOOG/GOOGL, A/B shares) that
+    have DIFFERENT ISINs. Winner: the Leonteq holding, else a USA/EU listing
+    (see `_pick_winner_isin`). Idempotent. Backs the permanent dedupe guarantee
+    (also called at the end of the ISIN backfill)."""
+    report = MergeReport()
+    leonteq_ids = _leonteq_company_ids(supabase)
+
+    from collections import defaultdict  # noqa: PLC0415
+    by_isin: dict[str, list[CompanyRow]] = defaultdict(list)
+    for r in paginate(
+        lambda lo, hi: supabase.table("company")
+        .select(
+            "company_id, company_name, gurufocus_ticker, isin, "
+            "gurufocus_lookup_failed_at, out_of_scope_at, "
+            "gurufocus_exchange:gurufocus_exchange(exchange_code, exchange_id)")
+        .range(lo, hi).execute()
+    ):
+        isin = (r.get("isin") or "").strip()
+        if not isin:
+            continue
+        exch = r.get("gurufocus_exchange") or {}
+        by_isin[isin].append(CompanyRow(
+            company_id=r["company_id"], company_name=r.get("company_name"),
+            gurufocus_ticker=r.get("gurufocus_ticker"),
+            exchange_code=exch.get("exchange_code"), exchange_id=exch.get("exchange_id"),
+            gurufocus_lookup_failed_at=r.get("gurufocus_lookup_failed_at"),
+            out_of_scope_at=r.get("out_of_scope_at"),
+        ))
+
+    for isin, group in sorted(by_isin.items()):
+        if len(group) < 2:
+            continue
+        winner = _pick_winner_isin(group, leonteq_ids)
+        win_root = _name_root(winner.company_name)
+        # Merge rows of the SAME company (same ISIN + same name-root). This
+        # covers both the same security on two exchanges (LIN on NYSE+NASDAQ)
+        # AND share-class / ADR siblings of one issuer (LISN/LISP, BEKE/02423 —
+        # one of which carries a mislabeled ISIN); the user wants a single row
+        # per company, keeping the Leonteq holding. Only a same-ISIN row whose
+        # name is UNRELATED (a gross wrong-ISIN linking two different issuers)
+        # is left as a suspect rather than wrongly fused.
+        mergeable = [c for c in group
+                     if c.company_id != winner.company_id and _name_root(c.company_name) == win_root]
+        suspects = [c for c in group
+                    if c.company_id != winner.company_id and _name_root(c.company_name) != win_root]
+        for s in suspects:
+            report.actions.append(
+                f'SUSPECT ISIN {isin}: cid={s.company_id} ({s.exchange_code}:{s.gurufocus_ticker}) shares the '
+                f'ISIN of cid={winner.company_id} ({winner.exchange_code}:{winner.gurufocus_ticker}) but a '
+                f'different ticker — likely a wrong ISIN on one row; left for manual review, NOT merged.'
+            )
+        if not mergeable:
+            continue
+        report.actions.append(
+            f'ISIN {isin}: keep cid={winner.company_id} '
+            f'({winner.exchange_code}:{winner.gurufocus_ticker}), merge '
+            + ', '.join(f'cid={m.company_id} ({m.exchange_code}:{m.gurufocus_ticker})' for m in mergeable)
+        )
+        report.groups_merged += 1
+        if dry_run:
+            report.rows_deleted += len(mergeable)
+            continue
+        for loser in mergeable:
+            _reassign_and_delete(supabase, loser.company_id, winner.company_id, report)
+    return report
+
+
 def format_report(report: MergeReport, *, dry_run: bool) -> str:
     lines: list[str] = []
     if dry_run:

@@ -29,9 +29,14 @@ async def universe_labels():
     `universe_full_stats` RPC so this is two round trips regardless of
     universe size."""
     def _run():
+        # Frozen-only policy: /universe lists ONLY frozen static snapshots
+        # (frozen_at set) — the live templates, time-series LongEquity, and
+        # criteria/derived universes are intentionally excluded everywhere
+        # except the LongEquity page's own per-month view.
         u_rows = (
             supabase.table("universe")
             .select("universe_id, label, description, created_at, parent_universe_id, filter_config")
+            .not_.is_("frozen_at", "null")
             .order("label")
             .execute()
             .data or []
