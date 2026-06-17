@@ -28,6 +28,45 @@ _UNIVERSE_STATS_CACHE: dict = {"ts": 0.0, "data": None}
 _UNIVERSE_STATS_TTL = 300.0
 
 
+def fetch_all_membership(
+    universe_id: int,
+    select_cols: str,
+    *,
+    month: str | None = None,
+    order: str | None = None,
+) -> list[dict]:
+    """Fetch ALL `universe_membership` rows for a universe, paginating past the
+    PostgREST `db-max-rows` cap (1000 on cloud, 10000 local).
+
+    A single `.limit(100000)` does NOT bypass that cap — the server truncates the
+    response regardless — which is why a 1487-company frozen universe only showed
+    1000 rows. A windowed `.range()` loop does, since each page requests a window
+    within the cap and we keep going until a short page. A `company_id` tiebreaker
+    is always appended to the sort: `range()` over a non-unique order silently
+    skips/duplicates rows across page boundaries (see project_postgrest_max_rows_trap).
+    """
+    rows: list[dict] = []
+    offset = 0
+    page = 1000
+    while True:
+        q = (
+            supabase.table("universe_membership")
+            .select(select_cols)
+            .eq("universe_id", universe_id)
+        )
+        if month is not None:
+            q = q.eq("target_month", month)
+        if order is not None:
+            q = q.order(order)
+        resp = q.order("company_id").range(offset, offset + page - 1).execute()
+        batch = resp.data or []
+        rows.extend(batch)
+        if len(batch) < page:
+            break
+        offset += page
+    return rows
+
+
 def _enrich_tickers(rows: list[dict]) -> list[dict]:
     """Add company_name + exchange + GuruFocus URL to ticker rows."""
     from ingest.gurufocus_url import gurufocus_url, pad_hkse_ticker  # noqa: PLC0415

@@ -38,6 +38,7 @@ from ._helpers import (
     _UNIVERSE_STATS_TTL,
     _enrich_tickers,
     drain_executor_queue,
+    fetch_all_membership,
 )
 
 router = APIRouter(tags=["index-universe"])
@@ -195,8 +196,8 @@ async def index_universe_months(index: str = "SP500"):
         if not u_resp.data:
             return []
         universe_id = u_resp.data[0]["universe_id"]
-        resp = supabase.table("universe_membership").select("target_month").eq("universe_id", universe_id).limit(100000).execute()
-        counts = Counter(r["target_month"] for r in (resp.data or []))
+        rows = fetch_all_membership(universe_id, "target_month")
+        counts = Counter(r["target_month"] for r in rows)
         return [{"target_month": m, "count": c} for m, c in sorted(counts.items())]
     return await asyncio.to_thread(_run)
 
@@ -212,14 +213,10 @@ async def index_universe_tickers(index: str = "SP500", month: str = ""):
         if not u_resp.data:
             return []
         universe_id = u_resp.data[0]["universe_id"]
-        rows = (
-            supabase.table("universe_membership")
-            .select("universe_ticker, company_id")
-            .eq("universe_id", universe_id)
-            .eq("target_month", month)
-            .order("universe_ticker")
-            .execute()
-        ).data or []
+        rows = fetch_all_membership(
+            universe_id, "universe_ticker, company_id",
+            month=month, order="universe_ticker",
+        )
         # Map universe_ticker -> ticker for _enrich_tickers compatibility.
         for r in rows:
             r["ticker"] = r.pop("universe_ticker", "")
@@ -236,11 +233,9 @@ async def index_universe_cumulative(index: str = "SP500"):
         if not u_resp.data:
             return []
         universe_id = u_resp.data[0]["universe_id"]
-        resp = supabase.table("universe_membership").select(
-            "universe_ticker, company_id"
-        ).eq("universe_id", universe_id).limit(100000).execute()
+        rows = fetch_all_membership(universe_id, "universe_ticker, company_id")
         seen: dict[str, dict] = {}
-        for r in (resp.data or []):
+        for r in rows:
             t = r.get("universe_ticker")
             if t and t not in seen:
                 seen[t] = {"ticker": t, "company_id": r["company_id"]}
