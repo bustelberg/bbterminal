@@ -17,6 +17,7 @@ export default function CompaniesToolbar({
   countryOptions,
   sectorOptions,
   universeOptions,
+  openfigiOptions,
   rows,
 }: {
   filters: UseCompanyFiltersResult;
@@ -24,6 +25,7 @@ export default function CompaniesToolbar({
   countryOptions: string[];
   sectorOptions: string[];
   universeOptions: string[];
+  openfigiOptions: string[];
   rows: Company[];
 }) {
   const {
@@ -32,6 +34,7 @@ export default function CompaniesToolbar({
     filterCountry, setFilterCountry,
     filterSector, setFilterSector,
     filterUniverse, setFilterUniverse,
+    filterOpenfigi, setFilterOpenfigi,
     filterDupes, setFilterDupes,
     clearFilters, hasActiveFilters,
   } = filters;
@@ -82,6 +85,13 @@ export default function CompaniesToolbar({
         selected={filterUniverse}
         onChange={setFilterUniverse}
         combineMode="AND"
+      />
+      <MultiSelectFilter
+        label="OpenFIGI"
+        options={openfigiOptions}
+        selected={filterOpenfigi}
+        onChange={setFilterOpenfigi}
+        combineMode="OR"
       />
       <button
         onClick={() => setFilterDupes(!filterDupes)}
