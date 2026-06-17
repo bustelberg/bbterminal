@@ -15,6 +15,12 @@ ISIN backfill). See migration `20260617002000_company_override.sql`.
                 ISIN). Matched by `isin`, else `(ticker, exchange)`. The pass
                 marks it `out_of_scope_at` (idempotent), so it stays suppressed
                 even after an index reconstruction re-creates it.
+  - `set_isin` — pin a company's stored ISIN. Matched by `(ticker, exchange)`,
+                the pass overwrites `company.isin` with `canonical_isin`. The
+                ISIN backfill is NULL-only so a hand-correction usually sticks,
+                but the source that seeded the wrong value can re-seed it on a
+                re-creation (e.g. Leonteq holds BOTH share-class ISINs against
+                one Zillow row); this forces the right one every ingest.
 """
 from __future__ import annotations
 
@@ -35,6 +41,7 @@ class OverrideReport:
     aliases_merged: int = 0
     rows_deleted: int = 0
     excluded_marked: int = 0
+    isin_set: int = 0
     actions: list[str] = field(default_factory=list)
 
 
@@ -68,6 +75,23 @@ def add_exclusion(supabase: Client, *, isin: str | None = None, ticker: str | No
     }).execute()
 
 
+def set_company_isin(supabase: Client, *, ticker: str, exchange: str, isin: str,
+                     note: str | None = None) -> None:
+    """Pin a company's stored ISIN: the override pass forces `company.isin` to
+    `isin` for the company matched by `(ticker, exchange)` on every ingest.
+    Idempotent upsert (one `set_isin` row per ticker+exchange)."""
+    existing = (
+        supabase.table("company_override").select("id")
+        .eq("kind", "set_isin").eq("ticker", ticker).eq("exchange", exchange).limit(1).execute()
+    ).data
+    payload = {"kind": "set_isin", "ticker": ticker, "exchange": exchange,
+               "canonical_isin": isin, "note": note}
+    if existing:
+        supabase.table("company_override").update(payload).eq("id", existing[0]["id"]).execute()
+    else:
+        supabase.table("company_override").insert(payload).execute()
+
+
 def _company_by_isin(supabase: Client, isin: str | None) -> dict | None:
     if not isin:
         return None
@@ -81,7 +105,7 @@ def _company_by_ticker_exchange(supabase: Client, ticker: str | None, exchange: 
         return None
     rows = (
         supabase.table("company")
-        .select("company_id, out_of_scope_at, gurufocus_exchange:gurufocus_exchange(exchange_code)")
+        .select("company_id, isin, out_of_scope_at, gurufocus_exchange:gurufocus_exchange(exchange_code)")
         .eq("gurufocus_ticker", ticker).execute()
     ).data or []
     for r in rows:
@@ -186,5 +210,24 @@ def apply_company_overrides(supabase: Client, *, dry_run: bool = False) -> Overr
                 # out-of-scope supersedes the "wrong exchange, go fix it" flag.
                 "gurufocus_lookup_failed_at": None,
             }).eq("company_id", target["company_id"]).execute()
+
+        elif o["kind"] == "set_isin":
+            # Force a specific company's ISIN. Match by (ticker, exchange) — a
+            # stable key that survives the ISIN change itself (matching by the
+            # OLD isin would break once we've set the NEW one).
+            target = (_company_by_ticker_exchange(supabase, o.get("ticker"), o.get("exchange"))
+                      if o.get("ticker") else _company_by_isin(supabase, o.get("isin")))
+            want = (o.get("canonical_isin") or "").strip()
+            if not target or not want or (target.get("isin") or "").strip() == want:
+                continue  # missing target or already correct → no-op (idempotent)
+            report.actions.append(
+                f'set_isin: cid={target["company_id"]} '
+                f'{o.get("ticker")}/{o.get("exchange")} -> {want}'
+            )
+            report.isin_set += 1
+            if dry_run:
+                continue
+            supabase.table("company").update({"isin": want}).eq(
+                "company_id", target["company_id"]).execute()
 
     return report

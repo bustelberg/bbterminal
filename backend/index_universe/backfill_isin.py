@@ -242,9 +242,9 @@ def backfill_isin(
     try:
         from ingest.company_overrides import apply_company_overrides  # noqa: PLC0415
         orep = apply_company_overrides(supabase)
-        if orep.aliases_merged or orep.excluded_marked:
+        if orep.aliases_merged or orep.excluded_marked or orep.isin_set:
             emit(f"Overrides: {orep.aliases_merged} alias merge(s), "
-                 f"{orep.excluded_marked} exclude(s).")
+                 f"{orep.excluded_marked} exclude(s), {orep.isin_set} ISIN set(s).")
     except Exception as e:  # noqa: BLE001 — never fail the backfill
         result.errors.append(f"company overrides failed: {type(e).__name__}: {e}")
 

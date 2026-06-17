@@ -94,7 +94,8 @@ def _run_dedupe_phase(run_id: int) -> None:
         f"name-dupes: folded {name_report.rows_deleted} no-ISIN stub(s) into "
         f"{name_report.groups_merged} row(s); "
         f"overrides: {override_report.aliases_merged} alias merge(s), "
-        f"{override_report.excluded_marked} exclude(s)."
+        f"{override_report.excluded_marked} exclude(s), "
+        f"{override_report.isin_set} ISIN set(s)."
     )
     _update_run(run_id, current_message=msg)
     log.info("[pipeline.dedupe] run_id=%s %s", run_id, msg)

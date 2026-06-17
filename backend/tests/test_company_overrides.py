@@ -6,7 +6,7 @@ FK-rewire machinery.
 """
 from __future__ import annotations
 
-from ingest.company_overrides import apply_company_overrides
+from ingest.company_overrides import apply_company_overrides, set_company_isin
 from tests._fake_supabase import FakeSupabase
 
 
@@ -57,3 +57,50 @@ def test_exclude_by_ticker_exchange():
     rep = apply_company_overrides(fake, dry_run=True)
     assert rep.excluded_marked == 1  # only GVTD/NSE
     assert rep.aliases_merged == 0
+
+
+def test_set_isin_forces_value_and_is_idempotent():
+    fake = FakeSupabase(tables={
+        "company": [
+            # Zillow Class C row carrying the WRONG (Class A) ISIN.
+            _co(4253, "Zillow Group Inc", "US98954M1018", ticker="Z", exch="NASDAQ"),
+            # Already-correct row → must NOT be rewritten.
+            _co(99, "Other Co", "US0000000001", ticker="OTH", exch="NASDAQ"),
+        ],
+        "company_override": [
+            {"kind": "set_isin", "isin": None, "ticker": "Z", "exchange": "NASDAQ",
+             "canonical_isin": "US98954M2008", "note": "Class C"},
+            {"kind": "set_isin", "isin": None, "ticker": "OTH", "exchange": "NASDAQ",
+             "canonical_isin": "US0000000001", "note": "already correct"},
+        ],
+    })
+    rep = apply_company_overrides(fake)  # not dry_run — assert the actual write
+    assert rep.isin_set == 1  # only Zillow; "Other Co" already matches → no-op
+    by_id = {c["company_id"]: c for c in fake.tables["company"]}
+    assert by_id[4253]["isin"] == "US98954M2008"
+    assert by_id[99]["isin"] == "US0000000001"
+
+    # Re-running is a no-op now that the value is correct (idempotent).
+    rep2 = apply_company_overrides(fake)
+    assert rep2.isin_set == 0
+
+
+def test_set_company_isin_inserts_when_absent():
+    fake = FakeSupabase(tables={"company_override": []})
+    set_company_isin(fake, ticker="Z", exchange="NASDAQ", isin="US98954M2008")
+    rows = [r for r in fake.tables["company_override"] if r["kind"] == "set_isin"]
+    assert len(rows) == 1
+    assert rows[0]["canonical_isin"] == "US98954M2008"
+
+
+def test_set_company_isin_updates_existing_in_place():
+    # Pre-seed a row WITH an id (real Postgres assigns it) so the upsert takes
+    # the update branch instead of inserting a duplicate.
+    fake = FakeSupabase(tables={"company_override": [
+        {"id": 1, "kind": "set_isin", "isin": None, "ticker": "Z", "exchange": "NASDAQ",
+         "canonical_isin": "US98954M1018", "note": "stale"},
+    ]})
+    set_company_isin(fake, ticker="Z", exchange="NASDAQ", isin="US98954M2008")
+    rows = [r for r in fake.tables["company_override"] if r["kind"] == "set_isin"]
+    assert len(rows) == 1  # updated in place, not duplicated
+    assert rows[0]["canonical_isin"] == "US98954M2008"
