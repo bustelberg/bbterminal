@@ -59,16 +59,20 @@ def _build_portfolio_payload(snapshot_row: dict) -> dict:
         country_by_cid[cid] = (exch_info.get("country") or {}).get("country_name")
         isin_by_cid[cid] = row.get("isin")
 
+    from ingest.gurufocus_url import gurufocus_url, pad_hkse_ticker  # noqa: PLC0415
+
     total_weight = 0.0
     holdings_out: list[dict] = []
     for h in raw_holdings:
         cid = int(h.get("company_id")) if h.get("company_id") is not None else None
         weight = float(h.get("weight") or 0.0)
         total_weight += weight
+        exchange = exchange_by_cid.get(cid, "") if cid is not None else ""
+        gf_ticker = pad_hkse_ticker(h.get("ticker"), exchange)
         holdings_out.append({
             "company_id": cid,
             "ticker": h.get("ticker"),
-            "exchange": exchange_by_cid.get(cid, "") if cid is not None else "",
+            "exchange": exchange,
             "country": country_by_cid.get(cid) if cid is not None else None,
             "currency": h.get("currency"),
             "isin": isin_by_cid.get(cid) if cid is not None else None,
@@ -80,6 +84,7 @@ def _build_portfolio_payload(snapshot_row: dict) -> dict:
             "entry_price_eur": h.get("entry_price_eur"),
             "entry_date": h.get("entry_date"),
             "score": h.get("score"),
+            "gurufocus_url": gurufocus_url(gf_ticker, exchange),
         })
 
     return {
@@ -193,6 +198,8 @@ def _enrich_universe_members(member_rows: list[dict]) -> list[dict]:
     except Exception:
         fx = {}
 
+    from ingest.gurufocus_url import gurufocus_url, pad_hkse_ticker  # noqa: PLC0415
+
     out: list[dict] = []
     for m in member_rows:
         cid = int(m["company_id"]) if m.get("company_id") is not None else None
@@ -206,10 +213,15 @@ def _enrich_universe_members(member_rows: list[dict]) -> list[dict]:
             if rate and local is not None and rate > 0
             else None
         )
+        ticker = c.get("ticker") or m.get("universe_ticker")
+        exchange = c.get("exchange", "")
+        # GuruFocus deep-link to the listing (HKSE tickers zero-padded to match
+        # the canonical GuruFocus symbol, same as the /companies + index reads).
+        gf_ticker = pad_hkse_ticker(ticker, exchange)
         out.append({
             "company_id": cid,
-            "ticker": c.get("ticker") or m.get("universe_ticker"),
-            "exchange": c.get("exchange", ""),
+            "ticker": ticker,
+            "exchange": exchange,
             "country": c.get("country"),
             "currency": cur,
             "isin": c.get("isin"),
@@ -220,6 +232,7 @@ def _enrich_universe_members(member_rows: list[dict]) -> list[dict]:
             "latest_close_eur": eur,
             "latest_close_date": lc.get("date"),
             "fx_rate_per_eur": rate,
+            "gurufocus_url": gurufocus_url(gf_ticker, exchange),
         })
     out.sort(key=lambda x: ((x.get("sector") or "~"), (x.get("ticker") or "").upper()))
     return out
