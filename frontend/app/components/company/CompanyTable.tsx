@@ -77,10 +77,21 @@ export default function CompanyTable({
   universeStyle: (label: string) => CSSProperties;
 }) {
   return (
-    <div className="flex-1 overflow-auto px-8 py-4">
-      <div className="bg-card rounded-xl border border-neutral-800/40 overflow-hidden">
+    // Outer holds page gutters + vertical spacing only (NOT the scroll
+    // container), so the bordered box below hugs the table, not the viewport.
+    <div className="flex-1 min-h-0 flex flex-col px-8 py-4">
+      {/* The scroll container IS the rounded, bordered box: `overflow` clips its
+          children to the border-radius (clean rounded corners on the sticky
+          header + last row), and since it's the scroll/sticky context the
+          stick-on-scroll still works. The inner min-w driver forces a
+          horizontal scrollbar once the viewport is narrower than the table. */}
+      <div className="flex-1 min-h-0 overflow-auto rounded-xl border border-neutral-800/40 bg-card">
+        <div className="min-w-[1400px]">
         <table className="w-full text-sm">
-          <thead>
+          {/* [&_th]:bg-card — under border-collapse, a bg on thead/tr doesn't
+              paint; only the cell backgrounds do. Without it the scrolling rows
+              show through the (otherwise transparent) sticky header cells. */}
+          <thead className="sticky top-0 z-20 [&_th]:bg-card">
             <tr className="border-b border-neutral-800/60 text-fg-subtle">
               <th className="px-4 py-3 text-left text-xs font-medium w-12">ID</th>
               <th className={thCls} onClick={() => onSort('company_name')}>
@@ -172,12 +183,13 @@ export default function CompanyTable({
             )}
           </tbody>
         </table>
+        </div>
+        {!loading && rows.length === 0 && (
+          <p className="text-center text-fg-subtle text-sm py-12">
+            {totalCount === 0 ? 'No companies in database.' : 'No companies match your filters.'}
+          </p>
+        )}
       </div>
-      {!loading && rows.length === 0 && (
-        <p className="text-center text-fg-subtle text-sm py-12">
-          {totalCount === 0 ? 'No companies in database.' : 'No companies match your filters.'}
-        </p>
-      )}
     </div>
   );
 }

@@ -36,6 +36,7 @@ type TickerEntry = {
   ticker: string;
   company_id: number | null;
   company_name: string | null;
+  isin: string | null;
   exchange: string | null;
   gurufocus_url: string;
 };
@@ -166,6 +167,7 @@ export default function FrozenUniversesPanel({
       ? tickers.filter(t =>
           t.ticker.toLowerCase().includes(filter.toLowerCase()) ||
           (t.company_name || '').toLowerCase().includes(filter.toLowerCase()) ||
+          (t.isin || '').toLowerCase().includes(filter.toLowerCase()) ||
           (t.exchange || '').toLowerCase().includes(filter.toLowerCase()))
       : tickers
   ), [tickers, filter]);
@@ -173,6 +175,7 @@ export default function FrozenUniversesPanel({
   const exportColumns = useMemo<Column<TickerEntry>[]>(() => [
     { key: 'ticker', header: 'Ticker', accessor: (t) => t.ticker },
     { key: 'exchange', header: 'Exchange', accessor: (t) => t.exchange ?? '' },
+    { key: 'isin', header: 'ISIN', accessor: (t) => t.isin ?? '' },
     { key: 'company_id', header: 'Company ID', accessor: (t) => t.company_id ?? '' },
     { key: 'company_name', header: 'Company', accessor: (t) => t.company_name ?? '' },
     { key: 'gurufocus_url', header: 'GuruFocus URL', accessor: (t) => t.gurufocus_url },
@@ -303,6 +306,7 @@ export default function FrozenUniversesPanel({
                     <th className="px-5 py-2.5 font-medium w-12">#</th>
                     <th className="px-3 py-2.5 font-medium">Ticker</th>
                     <th className="px-3 py-2.5 font-medium">Exchange</th>
+                    <th className="px-3 py-2.5 font-medium">ISIN</th>
                     <th className="px-3 py-2.5 font-medium">Company</th>
                     <th className="px-3 py-2.5 font-medium">GuruFocus</th>
                   </tr>
@@ -313,6 +317,7 @@ export default function FrozenUniversesPanel({
                       <td className="px-5 py-2.5 text-fg-faint font-mono">{i + 1}</td>
                       <td className="px-3 py-2.5 text-fg-strong font-mono font-medium">{t.ticker || '—'}</td>
                       <td className="px-3 py-2.5 text-fg-muted font-mono text-xs">{t.exchange || '—'}</td>
+                      <td className="px-3 py-2.5 text-fg-muted font-mono text-xs">{t.isin || '—'}</td>
                       <td className="px-3 py-2.5 text-fg-soft">{t.company_name || '—'}</td>
                       <td className="px-3 py-2.5">
                         <a href={t.gurufocus_url} target="_blank" rel="noopener noreferrer" className="text-xs text-accent-400 hover:text-accent-300 transition-colors">

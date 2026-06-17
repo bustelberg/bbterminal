@@ -75,12 +75,13 @@ def _enrich_tickers(rows: list[dict]) -> list[dict]:
     for c in fetch_in_chunks(
         company_ids,
         lambda chunk: supabase.table("company").select(
-            "company_id, company_name, gurufocus_ticker, gurufocus_exchange:gurufocus_exchange(exchange_code)"
+            "company_id, company_name, isin, gurufocus_ticker, gurufocus_exchange:gurufocus_exchange(exchange_code)"
         ).in_("company_id", chunk).execute(),
     ):
         exch_info = c.get("gurufocus_exchange") or {}
         company_info[c["company_id"]] = {
             "company_name": c.get("company_name") or "",
+            "isin": c.get("isin") or "",
             "exchange": exch_info.get("exchange_code") or "",
             "gurufocus_ticker": c.get("gurufocus_ticker") or "",
         }
@@ -100,6 +101,7 @@ def _enrich_tickers(rows: list[dict]) -> list[dict]:
             "ticker": ticker,
             "company_id": r["company_id"],
             "company_name": info.get("company_name") or None,
+            "isin": info.get("isin") or None,
             "exchange": exchange,
             "gurufocus_url": gurufocus_url(ticker, exchange),
         })
