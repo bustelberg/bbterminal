@@ -4,12 +4,14 @@ Extracted from `routers.scheduled_strategies` so the pipeline + tests can
 import the date math without pulling in the HTTP router (FastAPI, the
 backfill worker, the backtest stream). No I/O, no DB — just `datetime`.
 
-The smart daily pipeline fires every day at 02:00 UTC and rebalances a
-strategy when `next_due_at <= now`. A strategy's rebalance lands on the
-first occurrence of its baked `rebalance_weekday` (Mon=0..Sun=6) in its
-period — e.g. monthly + weekday=0 → the first Monday of the month — and
+The smart daily pipeline fires every day at 05:00 UTC and rebalances a
+strategy when `next_due_at <= now`. `next_due_at` is stamped at 02:00 UTC on
+the rebalance date (intentionally BEFORE the 05:00 tick, so the strategy is
+always caught with margin — see `compute_next_due_at`). A strategy's rebalance
+lands on the first occurrence of its baked `rebalance_weekday` (Mon=0..Sun=6)
+in its period — e.g. monthly + weekday=0 → the first Monday of the month — and
 decides on the prior trading day's close (Friday for a Monday, since the
-Monday 02:00 UTC tick already has Friday's settled close). The grid is
+Monday 05:00 UTC tick already has Friday's settled close). The grid is
 anchored to Jan 2000 so bi-/quarterly periods land on the same calendar
 months the backtest engine uses (`momentum/backtest/dates.py`); the two
 pure-date helpers below mirror that module so importing it (and pandas)
@@ -58,7 +60,7 @@ def _next_anchored_rebalance_date(after: date, stride_months: int, weekday: int)
 def _expected_latest_trading_day(today: date) -> date:
     """Most recent weekday strictly before `today` — the last trading day
     whose close should have settled and be fetchable (the daily pipeline runs
-    at 02:00 UTC and captures the prior day's close). Used as the freshness
+    at 05:00 UTC and captures the prior day's close). Used as the freshness
     reference for held-company prices. A market-holiday calendar isn't
     available, so weekends are skipped but holidays aren't — that errs toward
     'stale / go-fetch', which is the safe side."""
@@ -72,8 +74,12 @@ def compute_next_due_at(
     frequency: str, just_ran_at_utc: datetime, rebalance_weekday: int = 0,
 ) -> datetime:
     """Given a strategy just rebalanced at `just_ran_at_utc`, return the
-    next rebalance tick (the rebalance day's 02:00 UTC) per `frequency` and
-    the strategy's baked `rebalance_weekday`.
+    next rebalance due time: the rebalance day at 02:00 UTC. This is a
+    THRESHOLD, deliberately 3h before the 05:00 UTC daily tick — so the tick
+    always sees `next_due_at <= now` and rebalances the strategy that day
+    (don't "align" it to 05:00; the early threshold is what guarantees the
+    catch). Cadence follows `frequency` + the strategy's baked
+    `rebalance_weekday`.
 
     - daily: the next calendar day (the engine's daily grid ignores weekday).
     - weekly: the next occurrence of `rebalance_weekday` strictly after the

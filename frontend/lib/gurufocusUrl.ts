@@ -41,6 +41,17 @@ export function inferExchangeFromTicker(ticker: string): string {
   return '';
 }
 
+/**
+ * HKSE numeric tickers must be zero-padded to 5 digits for GuruFocus to
+ * resolve them (`HKSE:1` → `HKSE:00001`). Raw universe tickers (e.g. the
+ * Leonteq scrape) carry the unpadded form, so the URL builder normalizes
+ * here. Mirrors `canonical_ticker`'s HKSE rule in `backend/ingest/dedupe.py`.
+ */
+function padHkseTicker(ticker: string, exchange: string): string {
+  if (exchange === 'HKSE' && /^\d+$/.test(ticker)) return ticker.padStart(5, '0');
+  return ticker;
+}
+
 /** Return the canonical GuruFocus summary URL. Never returns null —
  * falls back to a bare-ticker URL when the exchange is missing and no
  * heuristic guess works. */
@@ -58,5 +69,5 @@ export function guruFocusUrl(ticker: string, exchange: string | null | undefined
       return `https://www.gurufocus.com/stock/${t}/summary`;
     }
   }
-  return `https://www.gurufocus.com/stock/${e}:${t}/summary`;
+  return `https://www.gurufocus.com/stock/${e}:${padHkseTicker(t, e)}/summary`;
 }

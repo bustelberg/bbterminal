@@ -60,7 +60,7 @@ _ISHARES_TO_GF: dict[str, str] = {
     "Korea Exchange (Stock Market)": "XKRX",
     "Korea Exchange (Kosdaq)": "XKRX",
     "National Stock Exchange Of India": "NSE",
-    "Bse Ltd": "BSE",
+    "Bse Ltd": "BOM",  # Bombay Stock Exchange — GuruFocus/IBKR code is BOM, not BSE
     "Asx - All Markets": "ASX",
     "New Zealand Exchange Ltd": "NZSE",
     "Singapore Exchange": "SGX",
@@ -344,13 +344,15 @@ def gurufocus_ticker_normalized(ticker: str, exchange: str) -> tuple[str, str] |
 # FEASIBLE_GF_EXCHANGES set. Empty string = US.
 FEASIBLE_GF_EXCHANGES = frozenset([
     "",  # US (NYSE, NASDAQ, Cboe BZX)
+    "OTCPK",  # US OTC Pink — GuruFocus prices these (e.g. QinetiQ QNTQF), USD
+
     # Europe — NOTE: UK (LSE) and Ireland (DUB) are NOT here; GuruFocus
     # returns "403 unsubscribed region" for them (confirmed by probing every
     # exchange), same as India. Continental Europe is covered.
     "XTER", "XPAR", "XAMS", "XBRU", "XLIS", "MIL", "XMAD", "XSWX",
     "OSTO", "OCSE", "OSL", "OHEL", "WAR", "XPRA", "ATH", "BUD", "IST",
     # Asia (East / SE / South)
-    # NOTE: India (NSE, BSE) is NOT here — GuruFocus returns
+    # NOTE: India (NSE, BOM) is NOT here — GuruFocus returns
     # "403 unsubscribed region [India]" for it, so we have no price/mktcap/ISIN
     # data for Indian listings (they get the UNSUBSCRIBED badge + are excluded
     # from feasible ACWI holdings). Confirmed by probing every exchange below.

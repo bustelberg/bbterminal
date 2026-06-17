@@ -30,7 +30,7 @@ _UNIVERSE_STATS_TTL = 300.0
 
 def _enrich_tickers(rows: list[dict]) -> list[dict]:
     """Add company_name + exchange + GuruFocus URL to ticker rows."""
-    from ingest.gurufocus_url import gurufocus_url  # noqa: PLC0415
+    from ingest.gurufocus_url import gurufocus_url, pad_hkse_ticker  # noqa: PLC0415
     company_ids = [r["company_id"] for r in rows if r["company_id"]]
     company_info: dict[int, dict] = {}
     for c in fetch_in_chunks(
@@ -54,6 +54,9 @@ def _enrich_tickers(rows: list[dict]) -> list[dict]:
         # rows are company-id-based) so the ticker column always populates.
         ticker = r.get("ticker") or info.get("gurufocus_ticker") or ""
         exchange = info.get("exchange") or None
+        # Display HKSE tickers in their canonical zero-padded form (1 → 00001),
+        # matching the GuruFocus link and the stored gurufocus_ticker.
+        ticker = pad_hkse_ticker(ticker, exchange)
         result.append({
             "ticker": ticker,
             "company_id": r["company_id"],

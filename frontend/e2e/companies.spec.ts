@@ -47,6 +47,25 @@ test.describe('/companies', () => {
     await expect(page.getByText('ASML', { exact: true })).toBeVisible();
   });
 
+  test('name-dupes filter shows the same-name / no-ISIN pair', async ({ page }) => {
+    await page.goto('/companies');
+    await expect(page.getByText('AAPL', { exact: true })).toBeVisible();
+    // Both Celestica rows render initially.
+    await expect(page.getByText('CLS', { exact: true })).toBeVisible();
+    await expect(page.getByText('CLA', { exact: true })).toBeVisible();
+
+    // The header shows the "N name dupes (no ISIN)" toggle once memberships load.
+    const toggle = page.getByRole('button', { name: /name dupe/i });
+    await expect(toggle).toBeVisible();
+    await toggle.click();
+
+    // Only the Celestica pair survives; unrelated rows drop out.
+    await expect(page.getByText('CLS', { exact: true })).toBeVisible();
+    await expect(page.getByText('CLA', { exact: true })).toBeVisible();
+    await expect(page.getByText('AAPL', { exact: true })).not.toBeVisible();
+    await expect(page.getByText('MSFT', { exact: true })).not.toBeVisible();
+  });
+
   test('search by company name also works', async ({ page }) => {
     await page.goto('/companies');
 

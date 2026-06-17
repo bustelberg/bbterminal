@@ -1,8 +1,8 @@
 """Rebalance-date generation.
 
 All rebalances land on a **Monday** — same convention the /schedule
-pipeline uses (the pipeline tick fires every Tuesday 02:00 UTC and
-captures the prior Monday's close). Backtest rebalance dates align to
+pipeline uses (the daily pipeline tick fires at 05:00 UTC and captures
+the prior trading day's close). Backtest rebalance dates align to
 this so backtest results approximate what the live pipeline would
 actually produce.
 

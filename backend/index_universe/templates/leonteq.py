@@ -97,7 +97,7 @@ _RIC_SUFFIX_TO_EXCHANGE: dict[str, str] = {
     "KQ": "XKRX",     # Korea KOSDAQ
     "KL": "XKLS",     # Kuala Lumpur
     "NS": "NSE",      # NSE India
-    "BO": "BSE",      # BSE India
+    "BO": "BOM",      # Bombay Stock Exchange (GuruFocus/IBKR code is BOM, not BSE)
     "NZ": "NZSE",     # New Zealand
     "N": "NYSE",
     "O": "NASDAQ",
@@ -140,7 +140,7 @@ _COUNTRY_TO_EXCHANGES: dict[str, list[str]] = {
     "Thailand": ["BKK"],
     "Singapore": ["SGX"],
     "Philippines": ["PHS"],
-    "India": ["NSE", "BSE"],
+    "India": ["NSE", "BOM"],
     "Greece": ["ATH"],
     "Israel": ["XTAE"],
     "Mexico": ["MEX"],

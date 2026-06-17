@@ -376,7 +376,7 @@ def _run_backfill(strategy_id: int) -> None:
     # `price_update` row whose `period_return_pct` overrides the open
     # period in `_compute_period_returns`'s walker — so /schedule
     # immediately reads the freshest per-holding prices instead of
-    # waiting for the next Tuesday 02:00 UTC tick to fire.
+    # waiting for the next daily 05:00 UTC tick to fire.
     try:
         pu_id = compute_and_save_price_update(
             strategy_id, ingest_run_id=None, is_backfill=True,

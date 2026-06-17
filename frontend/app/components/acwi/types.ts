@@ -9,12 +9,13 @@
 // excluding Russia / AU / NZ / Africa / LatAm.
 // US stocks are identified separately by gf_exchange === null (empty prefix).
 export const FEASIBLE_GF_EXCHANGES = new Set([
+  'OTCPK', // US OTC Pink — GuruFocus-priced (USD)
   // Europe
   'LSE', 'XTER', 'XPAR', 'XAMS', 'XBRU', 'XLIS', 'MIL', 'XMAD', 'XSWX',
   'OSTO', 'OCSE', 'OSL', 'OHEL', 'WAR', 'XPRA', 'ATH', 'DUB', 'BUD', 'IST',
   // Asia (East / SE / South)
   'TSE', 'HKSE', 'SHSE', 'SZSE', 'TPE', 'ROCO', 'XKRX',
-  'NSE', 'BSE', 'SGX', 'XKLS', 'ISX', 'BKK', 'PHS',
+  'NSE', 'BOM', 'SGX', 'XKLS', 'ISX', 'BKK', 'PHS',
   // Middle East
   'SAU', 'DSMD', 'KUW', 'XTAE', 'ADX', 'DFM',
 ]);

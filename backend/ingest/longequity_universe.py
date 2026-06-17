@@ -47,6 +47,25 @@ class RebuildResult:
     deleted_old_cumulative: bool
 
 
+def _excluded_company_ids(supabase: Client) -> set[int]:
+    """Company ids that must NOT enter a frozen universe — delisted or
+    out-of-scope listings (mirrors the `load_universe` backtest filter
+    `delisted_at IS NULL AND out_of_scope_at IS NULL`; `illiquid_at` names
+    still trade, so they're kept). Best-effort: on any error return empty so
+    a freeze never silently drops everything."""
+    try:
+        rows = list(paginate(
+            lambda lo, hi: supabase.table('company')
+            .select('company_id')
+            .or_('delisted_at.not.is.null,out_of_scope_at.not.is.null')
+            .range(lo, hi)
+            .execute()
+        ))
+        return {int(r['company_id']) for r in rows}
+    except Exception:  # noqa: BLE001 — never block a freeze on the guard query
+        return set()
+
+
 def _company_ids_with_longequity_metrics(supabase: Client) -> set[int]:
     """Every company_id that has at least one `metric_data` row with
     `source_code='longequity'`. This is the source-of-truth for "ever
@@ -387,6 +406,16 @@ def freeze_longequity_union(
         union |= member_set
     if not union:
         raise ValueError('No LongEquity report data to freeze.')
+
+    # Drop delisted / out-of-scope listings so the frozen union only holds
+    # tradeable securities (mirrors the `load_universe` backtest filter).
+    excluded = _excluded_company_ids(supabase)
+    dropped = union & excluded
+    if dropped:
+        union -= dropped
+        emit(f'Excluded {len(dropped)} delisted / out-of-scope company(ies) from the union.')
+        if not union:
+            raise ValueError('No tradeable LongEquity companies left to freeze.')
     emit(f'Freezing union of {len(union)} companies across {len(by_month)} report month(s)…')
 
     sectors = _latest_sector_per_company(supabase, union)

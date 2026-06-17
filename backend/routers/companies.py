@@ -144,6 +144,7 @@ async def list_companies():
                     "delisted_at,gurufocus_lookup_failed_at,"
                     "out_of_scope_at,out_of_scope_reason,market_cap_eur,market_cap_date,"
                     "market_cap_native,market_cap_currency,market_cap_fx_rate,"
+                    "openfigi_status,openfigi_name,openfigi_checked_at,"
                     "gurufocus_exchange:gurufocus_exchange("
                     "exchange_code,currency_code,country:country(country_name))"
                 )
@@ -468,9 +469,16 @@ def _run_market_cap_refresh() -> None:
                 _MKTCAP_REFRESH["total"] = d["total"]
             if "set" in d:
                 _MKTCAP_REFRESH["set"] = d["set"]
-        res = backfill_market_cap(supabase, only_missing=False, on_progress=on_progress)
+        # Smart: only fetch companies that DON'T yet have a cap, and skip
+        # out-of-coverage (UNSUBSCRIBED) exchanges — no point spending a
+        # GuruFocus call on a 403 or on a company we already priced.
+        res = backfill_market_cap(supabase, only_missing=True, on_progress=on_progress)
         _MKTCAP_REFRESH["set"] = res.set_count
-        _MKTCAP_REFRESH["message"] = f"Done — updated {res.set_count} companies."
+        _MKTCAP_REFRESH["message"] = (
+            f"Done — set {res.set_count} new market cap(s); skipped "
+            f"{res.skipped_have_value} that already had one + "
+            f"{res.skipped_unsubscribed} unsubscribed."
+        )
     except Exception as e:  # noqa: BLE001 — surface any failure to the status endpoint
         _MKTCAP_REFRESH["error"] = f"{type(e).__name__}: {e}"
         _MKTCAP_REFRESH["message"] = f"Failed: {_MKTCAP_REFRESH['error']}"
@@ -482,9 +490,11 @@ def _run_market_cap_refresh() -> None:
 
 @router.post("/api/companies/market-cap/refresh")
 async def refresh_market_caps():
-    """Admin-only: (re)fetch every company's market cap from GuruFocus and store
-    the EUR snapshot. Spawns a background thread (the job takes ~an hour — one
-    GuruFocus call per company) and returns immediately; poll
+    """Admin-only: fetch market caps from GuruFocus for the companies that are
+    MISSING one, skipping UNSUBSCRIBED (out-of-coverage) exchanges — so it only
+    spends GuruFocus calls where there's actually a cap to get (much faster than
+    a full re-fetch). Stores the EUR snapshot + corrects the name. Spawns a
+    background thread and returns immediately; poll
     `/api/companies/market-cap/refresh/status`. No-op if already running."""
     with _MKTCAP_LOCK:
         if _MKTCAP_REFRESH["running"]:
@@ -505,3 +515,99 @@ async def market_cap_refresh_status():
     """Progress for the market-cap refresh (running flag + latest message +
     final count). Polled by the /companies refresh button."""
     return dict(_MKTCAP_REFRESH)
+
+
+# Manual, on-demand: verify every company's stored ISIN against OpenFIGI and
+# store the per-company `openfigi_status`. Batched (one OpenFIGI call per 100
+# ISINs), so it's far faster than the market-cap sweep — but still a
+# background thread + polled status so the button stays responsive.
+_OPENFIGI_REFRESH: dict = {
+    "running": False,
+    "done": False,
+    "message": "",
+    "processed": 0,
+    "total": 0,
+    "verified": 0,
+    "mismatch": 0,
+    "error": None,
+    "started_at": None,
+    "finished_at": None,
+}
+_OPENFIGI_LOCK = threading.Lock()
+
+
+def _run_openfigi_verify() -> None:
+    from index_universe.openfigi_verify import verify_companies_openfigi  # noqa: PLC0415
+    try:
+        def on_progress(d: dict) -> None:
+            _OPENFIGI_REFRESH["message"] = d.get("message", "")
+            for k in ("processed", "total", "verified", "mismatch"):
+                if k in d:
+                    _OPENFIGI_REFRESH[k] = d[k]
+        res = verify_companies_openfigi(supabase, on_progress=on_progress)
+        _OPENFIGI_REFRESH["verified"] = res.verified
+        _OPENFIGI_REFRESH["mismatch"] = res.mismatch
+        _OPENFIGI_REFRESH["message"] = (
+            f"Done — {res.verified} verified, {res.mismatch} mismatch, "
+            f"{res.not_found} not found, {res.no_isin} no ISIN."
+        )
+    except Exception as e:  # noqa: BLE001 — surface to the status endpoint
+        _OPENFIGI_REFRESH["error"] = f"{type(e).__name__}: {e}"
+        _OPENFIGI_REFRESH["message"] = f"Failed: {_OPENFIGI_REFRESH['error']}"
+    finally:
+        _OPENFIGI_REFRESH["running"] = False
+        _OPENFIGI_REFRESH["done"] = True
+        _OPENFIGI_REFRESH["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+
+@router.post("/api/companies/openfigi/verify")
+async def verify_openfigi():
+    """Admin-only: verify every company's stored ISIN against OpenFIGI and
+    persist `openfigi_status` / `openfigi_name`. Spawns a background thread
+    (batched — finishes in a couple of minutes) and returns immediately; poll
+    `/api/companies/openfigi/verify/status`. No-op if already running."""
+    with _OPENFIGI_LOCK:
+        if _OPENFIGI_REFRESH["running"]:
+            return {"started": False, "running": True, "message": _OPENFIGI_REFRESH["message"]}
+        _OPENFIGI_REFRESH.update({
+            "running": True, "done": False, "error": None,
+            "processed": 0, "total": 0, "verified": 0, "mismatch": 0,
+            "message": "Starting…",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": None,
+        })
+    threading.Thread(target=_run_openfigi_verify, name="openfigi-verify", daemon=True).start()
+    return {"started": True, "running": True}
+
+
+@router.get("/api/companies/openfigi/verify/status")
+async def openfigi_verify_status():
+    """Progress for the OpenFIGI verification sweep (running flag + latest
+    message + verified/mismatch counts). Polled by the /companies button."""
+    return dict(_OPENFIGI_REFRESH)
+
+
+@router.post("/api/companies/{company_id}/openfigi-verify")
+async def verify_one_openfigi(company_id: int):
+    """Admin-only: re-verify ONE company against OpenFIGI now (one API call),
+    persist the result, and return it. The per-row '⟳' action on /companies.
+    Returns `{company_id, openfigi_status, openfigi_name, openfigi_checked_at}`;
+    404 if the company doesn't exist."""
+    def _run() -> dict:
+        from index_universe.openfigi_verify import verify_companies_openfigi  # noqa: PLC0415
+        exists = (
+            supabase.table("company").select("company_id").eq("company_id", company_id).limit(1).execute()
+        )
+        if not exists.data:
+            raise HTTPException(404, f"Company #{company_id} not found")
+        verify_companies_openfigi(supabase, company_ids=[company_id])
+        row = (
+            supabase.table("company")
+            .select("company_id, openfigi_status, openfigi_name, openfigi_checked_at")
+            .eq("company_id", company_id)
+            .limit(1)
+            .execute()
+        )
+        return row.data[0] if row.data else {"company_id": company_id, "openfigi_status": None}
+
+    return await asyncio.to_thread(_run)

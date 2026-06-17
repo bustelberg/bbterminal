@@ -131,12 +131,87 @@ def _frozen_summary(u: dict) -> dict:
     }
 
 
-def _copy_memberships_via_supabase(src_id: int, dst_id: int) -> int:
+def _excluded_company_ids() -> set[int]:
+    """Company ids that must NOT enter a frozen universe — delisted or
+    out-of-scope listings. Mirrors the `load_universe` backtest filter
+    (`delisted_at IS NULL AND out_of_scope_at IS NULL`) so a freeze can't
+    capture a security the backtest would just drop again (e.g. Arcadium
+    Lithium, acquired/delisted). `illiquid_at` is deliberately NOT excluded:
+    illiquid names still trade and are still priced. Best-effort — on any
+    query error, return empty so a freeze never silently loses everything."""
+    from deps import paginate  # noqa: PLC0415
+
+    try:
+        rows = list(paginate(
+            lambda lo, hi: supabase.table("company")
+            .select("company_id")
+            .or_("delisted_at.not.is.null,out_of_scope_at.not.is.null")
+            .range(lo, hi)
+            .execute()
+        ))
+        return {int(r["company_id"]) for r in rows}
+    except Exception:  # noqa: BLE001 — never block a freeze on the guard query
+        return set()
+
+
+# Market-cap floor for the Leonteq universe: only companies with a KNOWN market
+# cap at or above this are frozen in. (User requirement — adjust here.)
+LEONTEQ_MIN_MARKET_CAP_EUR = 1_000_000_000.0
+
+
+def _src_member_ids(src_id: int) -> list[int]:
+    """Distinct company_ids in a source universe (its current membership)."""
+    from deps import paginate  # noqa: PLC0415
+    ids: set[int] = set()
+    for r in paginate(
+        lambda lo, hi: supabase.table("universe_membership")
+        .select("company_id").eq("universe_id", src_id).range(lo, hi).execute()
+    ):
+        ids.add(int(r["company_id"]))
+    return sorted(ids)
+
+
+def _market_cap_partition(member_ids: list[int], min_eur: float) -> tuple[set[int], list[dict]]:
+    """Partition members by a market-cap floor. Returns `(exclude_ids, missing)`:
+      - `exclude_ids` — members to DROP: cap below the floor, OR no cap at all.
+      - `missing` — the SUBSCRIBED members that have NO cap: the data-gap list to
+        surface. A company whose exchange is outside GuruFocus coverage
+        (UNSUBSCRIBED) and has no cap is dropped SILENTLY (not reported), since
+        we can't get a cap for it anyway. Best-effort."""
+    from deps import fetch_in_chunks  # noqa: PLC0415
+    from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
+    rows = list(fetch_in_chunks(
+        member_ids,
+        lambda chunk: supabase.table("company")
+        .select("company_id, company_name, gurufocus_ticker, market_cap_eur, "
+                "gurufocus_exchange:gurufocus_exchange(exchange_code)")
+        .in_("company_id", chunk).execute(),
+    ))
+    exclude: set[int] = set()
+    missing: list[dict] = []
+    for r in rows:
+        cid = int(r["company_id"])
+        cap = r.get("market_cap_eur")
+        exch = (r.get("gurufocus_exchange") or {}).get("exchange_code")
+        if cap is not None and float(cap) >= min_eur:
+            continue  # meets the floor → keep
+        exclude.add(cid)
+        if cap is None and is_gf_subscribed_exchange(exch):
+            missing.append({
+                "company_id": cid, "company_name": r.get("company_name"),
+                "ticker": r.get("gurufocus_ticker"), "exchange": exch,
+            })
+    return exclude, missing
+
+
+def _copy_memberships_via_supabase(src_id: int, dst_id: int, *, exclude: set[int] | None = None) -> int:
     """PostgREST fall-back for the membership copy when direct Postgres
     (SUPABASE_DB_URL) isn't available: page through the source rows and bulk
-    insert them under the new universe_id."""
+    insert them under the new universe_id. Rows whose `company_id` is in
+    `exclude` (delisted / out-of-scope) are dropped."""
     from deps import chunked, paginate  # noqa: PLC0415
 
+    exclude = exclude or set()
     cols = ("company_id", "target_month", "universe_ticker", "sector", "industry")
     rows = list(paginate(
         lambda lo, hi: supabase.table("universe_membership")
@@ -147,7 +222,11 @@ def _copy_memberships_via_supabase(src_id: int, dst_id: int) -> int:
         .range(lo, hi)
         .execute()
     ))
-    payload = [{"universe_id": dst_id, **{c: r.get(c) for c in cols}} for r in rows]
+    payload = [
+        {"universe_id": dst_id, **{c: r.get(c) for c in cols}}
+        for r in rows
+        if int(r["company_id"]) not in exclude
+    ]
     for chunk in chunked(payload, 500):
         supabase.table("universe_membership").insert(chunk).execute()
     return len(payload)
@@ -181,10 +260,17 @@ def _freeze_month_snapshot(src_id: int, dst_id: int, month: str, on_progress=Non
     ))
     if not members:
         return 0
+    # Drop delisted / out-of-scope listings so the frozen snapshot only holds
+    # securities the backtest can actually trade (mirrors `load_universe`).
+    exclude = _excluded_company_ids()
     payload = [
         {"universe_id": dst_id, "target_month": month, **{c: m.get(c) for c in cols}}
         for m in members
+        if int(m["company_id"]) not in exclude
     ]
+    dropped = len(members) - len(payload)
+    if dropped:
+        _note(f"Skipped {dropped} delisted / out-of-scope constituent(s)…")
     total = len(payload)
     _note(f"Copying {total} constituents…")
     done = 0
@@ -215,7 +301,9 @@ async def list_static_universes(response: Response):
     return await asyncio.to_thread(_q)
 
 
-def _freeze_core(key: str, as_of: str | None, on_progress=None, *, src_universe_id: int | None = None) -> dict:
+def _freeze_core(key: str, as_of: str | None, on_progress=None, *,
+                 src_universe_id: int | None = None,
+                 min_market_cap_eur: float | None = None) -> dict:
     """The actual freeze work, with optional `on_progress(message)` callbacks so
     an SSE caller can stream real progress. Raises HTTPException on bad input
     (propagated as an HTTP error by the JSON path, mapped to an `error` SSE
@@ -229,6 +317,14 @@ def _freeze_core(key: str, as_of: str | None, on_progress=None, *, src_universe_
     def _note(msg: str) -> None:
         if on_progress:
             on_progress(msg)
+
+    # Market-cap floor: an explicit value wins; otherwise Leonteq defaults to
+    # LEONTEQ_MIN_MARKET_CAP_EUR and everything else has no floor.
+    min_cap = (
+        min_market_cap_eur if min_market_cap_eur is not None
+        else (LEONTEQ_MIN_MARKET_CAP_EUR if key == "LEONTEQ" else None)
+    )
+    apply_floor = bool(min_cap and min_cap > 0)
 
     if src_universe_id is not None:
         src_id = src_universe_id
@@ -290,12 +386,30 @@ def _freeze_core(key: str, as_of: str | None, on_progress=None, *, src_universe_
                 status_code=409,
                 detail=f"{key} has no membership for {month} — pick a captured month.",
             )
+    elif apply_floor:
+        # Market-cap floor: only companies with a known cap ≥ the floor are
+        # frozen in. Below-floor / no-cap are dropped; the SUBSCRIBED-but-no-cap
+        # ones are reported (a data gap to fix), while UNSUBSCRIBED-no-cap are
+        # dropped silently. Done in Python (the PG path can't compute the
+        # missing-cap report).
+        _note(f"Applying market-cap floor (≥ €{min_cap / 1e9:.2f}B)…")
+        excluded = _excluded_company_ids()
+        cap_exclude, missing_market_cap = _market_cap_partition(
+            _src_member_ids(src_id), min_cap)
+        # A delisted / out-of-scope company is dropped for THAT reason — don't
+        # also flag it as a "missing market cap" data gap to chase.
+        missing_market_cap = [m for m in missing_market_cap if m["company_id"] not in excluded]
+        copied = _copy_memberships_via_supabase(src_id, dst_id, exclude=excluded | cap_exclude)
+        _note(f"Kept {copied}; dropped {len(cap_exclude)} below/without cap "
+              f"({len(missing_market_cap)} subscribed but missing a market cap).")
     else:
         _note("Copying full membership history…")
         from momentum.data._pg import copy_universe_memberships_via_pg  # noqa: PLC0415
+        # The PG path filters delisted / out-of-scope in SQL; the PostgREST
+        # fall-back needs the explicit exclude set.
         copied = copy_universe_memberships_via_pg(src_id, dst_id)
         if copied is None:
-            copied = _copy_memberships_via_supabase(src_id, dst_id)
+            copied = _copy_memberships_via_supabase(src_id, dst_id, exclude=_excluded_company_ids())
 
     _note("Finalizing…")
     u = (
@@ -305,7 +419,11 @@ def _freeze_core(key: str, as_of: str | None, on_progress=None, *, src_universe_
         .limit(1)
         .execute()
     ).data[0]
-    return {"created": True, "members_copied": copied, **_frozen_summary(u)}
+    result = {"created": True, "members_copied": copied, **_frozen_summary(u)}
+    if apply_floor:
+        result["min_market_cap_eur"] = min_cap
+        result["missing_market_cap"] = missing_market_cap
+    return result
 
 
 def _freeze_done_message(result: dict) -> str:
@@ -315,14 +433,26 @@ def _freeze_done_message(result: dict) -> str:
     if result.get("created") is False:
         return f'Already frozen: "{label}" — selectable in /backtest + /regime-detector.'
     copied = result.get("members_copied", 0)
-    return (
+    msg = (
         f'Froze "{label}" — {copied} constituents held constant. '
         f"Now selectable in /backtest + /regime-detector."
     )
+    missing = result.get("missing_market_cap")
+    if missing:
+        names = ", ".join(m.get("company_name") or str(m.get("company_id")) for m in missing[:8])
+        more = f" +{len(missing) - 8} more" if len(missing) > 8 else ""
+        msg += (
+            f" ⚠ {len(missing)} subscribed compan{'y' if len(missing) == 1 else 'ies'} "
+            f"dropped for a MISSING market cap (refresh market caps, then re-freeze): {names}{more}."
+        )
+    return msg
 
 
 @router.post("/api/universe-templates/{key}/freeze")
-async def freeze_template(key: str, request: Request, as_of: str | None = None):
+async def freeze_template(
+    key: str, request: Request, as_of: str | None = None,
+    min_market_cap_eur: float | None = None,
+):
     """Snapshot a live template universe into a static, NON-template universe
     (`template_key = NULL`) so the pipeline never re-reconstructs it and
     backtests against it are reproducible.
@@ -335,13 +465,19 @@ async def freeze_template(key: str, request: Request, as_of: str | None = None):
     Idempotent on the resulting label — a repeat call returns the existing
     snapshot instead of duplicating it.
 
+    `min_market_cap_eur` applies a market-cap floor (only companies with a known
+    cap ≥ it are frozen in; subscribed-but-no-cap ones come back in
+    `missing_market_cap`). LEONTEQ defaults to `LEONTEQ_MIN_MARKET_CAP_EUR` (€1B)
+    when omitted; pass 0 to disable. Other templates have no floor unless given.
+
     Content-negotiated: clients sending `Accept: text/event-stream` (the /acwi
     page) get an SSE progress stream (`progress`/`done`/`error` events); all
     other callers (the /leonteq page, external scripts) get the JSON summary."""
     wants_sse = "text/event-stream" in (request.headers.get("accept") or "")
 
     if not wants_sse:
-        return await asyncio.to_thread(_freeze_core, key, as_of, None)
+        return await asyncio.to_thread(
+            lambda: _freeze_core(key, as_of, None, min_market_cap_eur=min_market_cap_eur))
 
     q: _queue.Queue = _queue.Queue()
 
@@ -349,7 +485,7 @@ async def freeze_template(key: str, request: Request, as_of: str | None = None):
         def push(message: str):
             q.put(json.dumps({"type": "progress", "message": message}))
         try:
-            result = _freeze_core(key, as_of, push)
+            result = _freeze_core(key, as_of, push, min_market_cap_eur=min_market_cap_eur)
             q.put(json.dumps({
                 "type": "done",
                 "message": _freeze_done_message(result),

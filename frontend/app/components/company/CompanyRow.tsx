@@ -7,9 +7,41 @@ import { guruFocusUrl } from '../../../lib/gurufocusUrl';
 import { fmtMktCapEur, fmtMktCapNative } from './format';
 import type { Company } from './types';
 
+/** The OpenFIGI verification badge for one company's stored ISIN. Colour-codes
+ * the persisted `openfigi_status`; the mismatch/verified tooltips surface the
+ * name OpenFIGI returned so "Hindustan Aeronautics → HAL TRUST" is legible. */
+function OpenFigiBadge({ c }: { c: Company }) {
+  const s = c.openfigi_status;
+  const checked = c.openfigi_checked_at ? ` Checked ${new Date(c.openfigi_checked_at).toLocaleString()}.` : '';
+  if (!s) return <span className="text-fg-faint text-xs" title="Not yet verified against OpenFIGI.">—</span>;
+  if (s === 'no_isin') return <span className="text-fg-faint text-xs" title="No ISIN stored to verify.">no ISIN</span>;
+  if (s === 'verified')
+    return (
+      <span className="px-1.5 py-0.5 text-[10px] font-medium bg-pos-500/15 text-pos-400 border border-pos-500/25 rounded cursor-help"
+        title={`OpenFIGI confirms this ISIN${c.openfigi_name ? ` → "${c.openfigi_name}"` : ''}.${checked}`}>
+        ✓ FIGI
+      </span>
+    );
+  if (s === 'mismatch')
+    return (
+      <span className="px-1.5 py-0.5 text-[10px] font-medium bg-neg-500/15 text-neg-300 border border-neg-500/25 rounded cursor-help"
+        title={`OpenFIGI resolves this ISIN to a DIFFERENT company: "${c.openfigi_name ?? '(unknown)'}". The stored ISIN is likely wrong.${checked}`}>
+        MISMATCH
+      </span>
+    );
+  if (s === 'not_found')
+    return (
+      <span className="px-1.5 py-0.5 text-[10px] font-medium bg-warn-500/15 text-warn-300 border border-warn-500/30 rounded cursor-help"
+        title={`OpenFIGI has no security for this ISIN — it may be invalid or unrecognized.${checked}`}>
+        NOT FOUND
+      </span>
+    );
+  return <span className="text-fg-faint text-xs" title="Verification call failed; re-run.">error</span>;
+}
+
 /** One non-editing company row: status badges (delisted / out-of-scope /
- * GF-lookup / dupe), the GuruFocus ticker link, clickable universe chips,
- * and the admin-only Edit/Delete actions. */
+ * GF-lookup / dupe), the GuruFocus ticker link, the OpenFIGI verification
+ * badge, clickable universe chips, and the admin-only Edit/Delete actions. */
 export default function CompanyRow({
   company: c,
   isAdmin,
@@ -17,11 +49,14 @@ export default function CompanyRow({
   sectorsLoading,
   loading,
   duplicateIsins,
+  nameDupes,
   deletingId,
+  verifyingId,
   onEdit,
   onDelete,
   onFindExchange,
   onFetchGfName,
+  onVerifyOpenfigi,
   onToggleUniverse,
   universeStyle,
 }: {
@@ -33,11 +68,16 @@ export default function CompanyRow({
    * the company row itself, so it has no separate fetch like sector does). */
   loading: boolean;
   duplicateIsins: Set<string>;
+  /** `company_id → the other same-name companies` (one side missing an ISIN) —
+   * drives the NAME DUPE badge. */
+  nameDupes: Map<number, Company[]>;
   deletingId: number | null;
+  verifyingId: number | null;
   onEdit: (id: number) => void;
   onDelete: (id: number, name: string) => void;
   onFindExchange: (c: Company) => void;
   onFetchGfName: (c: Company) => void;
+  onVerifyOpenfigi: (c: Company) => void;
   onToggleUniverse: (u: string) => void;
   universeStyle: (label: string) => CSSProperties;
 }) {
@@ -77,6 +117,14 @@ export default function CompanyRow({
             DUPE
           </span>
         )}
+        {nameDupes.has(c.company_id) && (
+          <span
+            className="ml-2 px-1.5 py-0.5 text-[10px] font-medium bg-warn-500/15 text-warn-300 border border-warn-500/30 rounded cursor-help"
+            title={`Likely duplicate by NAME — another row holds the same company but isn't caught by the ISIN check (one side has no ISIN). Also stored as: ${(nameDupes.get(c.company_id) ?? []).map((o) => `#${o.company_id} ${o.gurufocus_exchange}:${o.gurufocus_ticker}${o.isin ? ` (${o.isin})` : ' (no ISIN)'}`).join(', ')}.`}
+          >
+            NAME DUPE
+          </span>
+        )}
       </td>
       <td className="px-3 py-2.5">
         <a
@@ -90,6 +138,26 @@ export default function CompanyRow({
       </td>
       <td className="px-3 py-2.5 text-fg-muted">{c.gurufocus_exchange}</td>
       <td className="px-3 py-2.5 text-fg-muted font-mono text-xs">{c.isin ?? '—'}</td>
+      <td className="px-3 py-2.5">
+        <span className="inline-flex items-center gap-1.5">
+          <OpenFigiBadge c={c} />
+          {isAdmin && (
+            verifyingId === c.company_id ? (
+              <Spinner size={10} className="h-2.5 w-2.5 text-fg-faint" />
+            ) : (
+              <button
+                type="button"
+                onClick={() => onVerifyOpenfigi(c)}
+                disabled={verifyingId !== null}
+                title="Re-verify this ISIN against OpenFIGI now"
+                className="opacity-0 group-hover:opacity-100 text-fg-faint hover:text-fg-strong transition-opacity disabled:opacity-30"
+              >
+                ⟳
+              </button>
+            )
+          )}
+        </span>
+      </td>
       <td className="px-3 py-2.5 text-fg-muted">{c.country ?? '—'}</td>
       <td className="px-3 py-2.5 text-fg-muted text-xs">
         {c.sector ? (
@@ -142,7 +210,12 @@ export default function CompanyRow({
           membershipsLoading ? (
             <Spinner size={10} className="h-2.5 w-2.5 text-fg-faint" />
           ) : (
-            <span className="text-xs text-fg-faint">—</span>
+            <span
+              className="px-1.5 py-0.5 text-[10px] font-medium bg-warn-500/15 text-warn-300 border border-warn-500/30 rounded"
+              title="Not a member of any frozen universe snapshot. The company is kept (no longer pruned) and flagged here."
+            >
+              No membership
+            </span>
           )
         ) : (
           <div className="flex flex-wrap gap-1">

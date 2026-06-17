@@ -9,20 +9,25 @@
  */
 import { useCallback, useMemo, useState } from 'react';
 import type { Company, SortField, SortDir } from './types';
+import { computeNameDupes } from './nameDupe';
 
 /** Sentinel option in the Universe filter for "companies in no universe".
  * Unlikely to collide with a real label (all of which are "X (as of …)"). */
 export const NO_UNIVERSE = '(No universe)';
 
+/** Sentinel option in the OpenFIGI filter for "not yet verified" (null status). */
+export const OPENFIGI_UNCHECKED = '(Unchecked)';
+
 export type UseCompanyFiltersResult = ReturnType<typeof useCompanyFilters>;
 
 export function useCompanyFilters(companies: Company[], membershipsLoading = false) {
   const [search, setSearch] = useState('');
-  // Hide companies that belong to no universe — these are mostly orphaned
-  // stubs (old delisted index tickers with no name/data) that clutter the
-  // table. Default ON; the header shows the count + a toggle. Only applied
-  // once memberships have loaded (otherwise every row looks unlinked).
-  const [hideUnlinked, setHideUnlinked] = useState(true);
+  // Companies that belong to no (frozen) universe are KEPT and shown with a
+  // "No membership" badge (the user wants them visible, not hidden). Default
+  // OFF — they're surfaced by default; the "N not in any universe" header pill
+  // still filters TO only them. (Nameless empty stubs are filtered out below
+  // regardless, via the `!!c.company_name` guard.)
+  const [hideUnlinked, setHideUnlinked] = useState(false);
   // Multi-select filters. Exchange / Country combine as OR (a company has
   // exactly one of each, so AND would always return empty as soon as 2+
   // are checked). Universe combines as AND so the user can pick the
@@ -31,7 +36,12 @@ export function useCompanyFilters(companies: Company[], membershipsLoading = fal
   const [filterCountry, setFilterCountry] = useState<string[]>([]);
   const [filterSector, setFilterSector] = useState<string[]>([]);
   const [filterUniverse, setFilterUniverse] = useState<string[]>([]);
+  // OpenFIGI verification status — OR multi-select (a row has one status).
+  // The `OPENFIGI_UNCHECKED` sentinel matches rows with a null status.
+  const [filterOpenfigi, setFilterOpenfigi] = useState<string[]>([]);
   const [filterDupes, setFilterDupes] = useState(false);
+  const [filterNameDupes, setFilterNameDupes] = useState(false);
+  const [filterGfLookup, setFilterGfLookup] = useState(false);
   const [sortField, setSortField] = useState<SortField>('company_name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
 
@@ -40,13 +50,18 @@ export function useCompanyFilters(companies: Company[], membershipsLoading = fal
     let list = companies;
     // Explicitly filtering FOR the no-universe companies overrides hideUnlinked.
     const wantNoUniverse = filterUniverse.includes(NO_UNIVERSE);
-    if (hideUnlinked && !wantNoUniverse) {
-      // Nameless stubs (the visibly-empty orphan rows) are hidden IMMEDIATELY
-      // — `company_name` is in the base response, so they never flash in before
-      // the slower memberships arrive. Named-but-unlinked rows are hidden only
-      // once memberships have loaded (we can't tell they're unlinked before).
+    // A status filter (dupes / name dupes / GF lookup) should surface ALL its
+    // matches — including unlinked stubs, which are often exactly what you want
+    // to clean up — so it bypasses the default hide-unlinked.
+    const statusFilterActive = filterDupes || filterNameDupes || filterGfLookup;
+    // Nameless empty stubs are ALWAYS dropped (pure junk — no name in the base
+    // response), regardless of hideUnlinked, so they never flash in.
+    list = list.filter((c) => !!c.company_name);
+    if (hideUnlinked && !wantNoUniverse && !statusFilterActive) {
+      // Optional: also hide NAMED companies in no (frozen) universe. Default off
+      // now — those show with a "No membership" badge — but the toggle is kept.
       list = list.filter(
-        (c) => !!c.company_name && (membershipsLoading || (c.universes ?? []).length > 0),
+        (c) => membershipsLoading || (c.universes ?? []).length > 0,
       );
     }
     if (q) {
@@ -65,6 +80,9 @@ export function useCompanyFilters(companies: Company[], membershipsLoading = fal
     }
     if (filterSector.length > 0) {
       list = list.filter((c) => c.sector != null && filterSector.includes(c.sector));
+    }
+    if (filterOpenfigi.length > 0) {
+      list = list.filter((c) => filterOpenfigi.includes(c.openfigi_status ?? OPENFIGI_UNCHECKED));
     }
     if (filterUniverse.length > 0) {
       // "(No universe)" matches companies with zero memberships. Real labels
@@ -91,6 +109,17 @@ export function useCompanyFilters(companies: Company[], membershipsLoading = fal
         return isin && (isinCounts.get(isin) ?? 0) > 1;
       });
     }
+    if (filterNameDupes) {
+      // Same-name companies where at least one side has no ISIN — the gap the
+      // ISIN dupe filter can't see.
+      const ids = computeNameDupes(companies);
+      list = list.filter((c) => ids.has(c.company_id));
+    }
+    if (filterGfLookup) {
+      // Match the GF LOOKUP badge: delisted / out-of-scope rows show those
+      // badges instead, so they're not "GF lookup" for filtering purposes.
+      list = list.filter((c) => !!c.gurufocus_lookup_failed_at && !c.delisted_at && !c.out_of_scope_at);
+    }
 
     return [...list].sort((a, b) => {
       // Market cap sorts numerically; nulls sink to the bottom regardless of
@@ -108,7 +137,7 @@ export function useCompanyFilters(companies: Company[], membershipsLoading = fal
       const cmp = av.localeCompare(bv, undefined, { sensitivity: 'base' });
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [companies, hideUnlinked, membershipsLoading, search, filterExchange, filterCountry, filterSector, filterUniverse, filterDupes, sortField, sortDir]);
+  }, [companies, hideUnlinked, membershipsLoading, search, filterExchange, filterCountry, filterSector, filterUniverse, filterOpenfigi, filterDupes, filterNameDupes, filterGfLookup, sortField, sortDir]);
 
   const handleSort = useCallback((field: SortField) => {
     if (sortField === field) {
@@ -129,11 +158,14 @@ export function useCompanyFilters(companies: Company[], membershipsLoading = fal
     setFilterCountry([]);
     setFilterSector([]);
     setFilterUniverse([]);
+    setFilterOpenfigi([]);
     setFilterDupes(false);
+    setFilterNameDupes(false);
+    setFilterGfLookup(false);
   }, []);
 
   const hasActiveFilters =
-    !!search || filterExchange.length > 0 || filterCountry.length > 0 || filterSector.length > 0 || filterUniverse.length > 0 || filterDupes;
+    !!search || filterExchange.length > 0 || filterCountry.length > 0 || filterSector.length > 0 || filterUniverse.length > 0 || filterOpenfigi.length > 0 || filterDupes || filterNameDupes || filterGfLookup;
 
   return {
     search, setSearch,
@@ -141,7 +173,10 @@ export function useCompanyFilters(companies: Company[], membershipsLoading = fal
     filterCountry, setFilterCountry,
     filterSector, setFilterSector,
     filterUniverse, setFilterUniverse,
+    filterOpenfigi, setFilterOpenfigi,
     filterDupes, setFilterDupes,
+    filterNameDupes, setFilterNameDupes,
+    filterGfLookup, setFilterGfLookup,
     hideUnlinked, setHideUnlinked,
     sortField, sortDir,
     filtered,

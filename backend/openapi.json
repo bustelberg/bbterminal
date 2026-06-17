@@ -2206,6 +2206,106 @@
         ]
       }
     },
+    "/api/admin/schedules/{strategy_id}/performance": {
+      "get": {
+        "description": "A scheduled strategy's LIVE performance since go-live. Admin only.\n\nReturns the strategy's inception (go-live) date, its return since\ninception, the month-to-date return, the latest date the data is current\nthrough, and the full per-day return series since inception.\n\nAll figures track the live held portfolio: the frozen backtest curve is\nextended with the snapshot tail the price-update job marks to market\nthrough the latest priced day (`_extended_curve`), then read at the\nrelevant anchors (`_returns_from_backtest`). `daily_returns` is the\nper-day close-to-close series off that same curve from inception onward \u2014\nthe same numbers behind the /schedule 'daily returns' table, but for every\nday rather than one month. Returns are GROSS (no fee model on the live\npath). Inception = the strategy's `start_date`, or `created_at` when unset.\n\n404 if the strategy doesn't exist; null returns + empty `daily_returns`\nwhen it has no saved backtest / no live data yet. Response:\n    {strategy_id, name, inception_date, as_of_date,\n     since_inception_return_pct, mtd_return_pct,\n     daily_returns: [{date, return_pct}, ...]}",
+        "operationId": "get_schedule_performance_api_admin_schedules__strategy_id__performance_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Schedule Performance",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/schedules/{strategy_id}/risk-metrics": {
+      "get": {
+        "description": "A scheduled strategy's BACKTESTED risk-adjusted metrics \u2014 Sharpe +\nSortino \u2014 and the period they were computed over. Admin only.\n\nBoth ratios come from the strategy's source `backtest_run` summary\n(annualized, risk-free = 0, computed off the closed-period daily curve so\nthey're comparable across rebalance cadences \u2014 see\n`momentum/backtest/_summary.py`). The `period` is the actual span of that\nbacktest's daily curve (first \u2192 last dated point), i.e. exactly the data\nthe ratios were measured over (not the requested config range, which can\nextend past the data). `annualized_return_pct` + `max_drawdown_pct` round\nout the risk picture. 404 if the strategy doesn't exist; null metrics when\nit has no saved backtest. Response:\n    {strategy_id, name, backtest_run_id, sharpe_ratio, sortino_ratio,\n     annualized_return_pct, max_drawdown_pct,\n     period: {start_date, end_date}}",
+        "operationId": "get_schedule_risk_metrics_api_admin_schedules__strategy_id__risk_metrics_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Schedule Risk Metrics",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/admin/universes": {
       "get": {
         "description": "List the **frozen** universes \u2014 the discovery call for the membership\nendpoint below. Admin only.\n\nBy default returns ONLY frozen static snapshots (`frozen_at` set) \u2014 the\nreproducible \"X (as of YYYY-MM)\" universes that are the canonical, usable\nsets across the app. Pass `?include_all=true` to also list the live\ntemplate-managed canonicals (`template_key` set), the LongEquity\ntime-series universe, criteria-derived universes (`parent_universe_id`),\nand imported index universes.\n\nSingle-set model: each universe is a frozen set as of `as_of_date`.\n`is_monthly` is true only for the LongEquity time-series universe; the\n`start_month` / `end_month` / `month_count` fields are populated only when\n`is_monthly` (null otherwise). `member_count` comes from the\n`universe_stats` materialized view (a refreshed-on-pipeline hint; may\nlag). Pick a `universe_id` and pass it to `GET /api/admin/universes/{id}`.\n\nResponse: `{count, universes:[{universe_id, label, description, kind,\ntemplate_key, frozen_at, parent_universe_id, created_at,\nlast_refreshed_at, as_of_date, is_monthly, member_count, start_month,\nend_month, month_count}]}`.",
@@ -3247,6 +3347,46 @@
         ]
       }
     },
+    "/api/companies/openfigi/verify": {
+      "post": {
+        "description": "Admin-only: verify every company's stored ISIN against OpenFIGI and\npersist `openfigi_status` / `openfigi_name`. Spawns a background thread\n(batched \u2014 finishes in a couple of minutes) and returns immediately; poll\n`/api/companies/openfigi/verify/status`. No-op if already running.",
+        "operationId": "verify_openfigi_api_companies_openfigi_verify_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Verify Openfigi",
+        "tags": [
+          "companies"
+        ]
+      }
+    },
+    "/api/companies/openfigi/verify/status": {
+      "get": {
+        "description": "Progress for the OpenFIGI verification sweep (running flag + latest\nmessage + verified/mismatch counts). Polled by the /companies button.",
+        "operationId": "openfigi_verify_status_api_companies_openfigi_verify_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Openfigi Verify Status",
+        "tags": [
+          "companies"
+        ]
+      }
+    },
     "/api/companies/sectors": {
       "get": {
         "description": "Sector per company + the universe it came from, for the /companies\nSector column + filter. Returns `{company_id: {sector, source}}`.\n\nSector is preferentially the company's **Leonteq** sector, else the most\nrecent month's sector from any universe; `source` is that universe's label\n(shown as an annotation). Backed by the `company_sector_with_source` RPC\n(DISTINCT ON company_id). Same `.range()` pagination + try/except-\u2192-{}\nresilience as /memberships (so a not-yet-migrated prod returns empty\nrather than 500).",
@@ -3351,6 +3491,47 @@
           }
         },
         "summary": "Update Company",
+        "tags": [
+          "companies"
+        ]
+      }
+    },
+    "/api/companies/{company_id}/openfigi-verify": {
+      "post": {
+        "description": "Admin-only: re-verify ONE company against OpenFIGI now (one API call),\npersist the result, and return it. The per-row '\u27f3' action on /companies.\nReturns `{company_id, openfigi_status, openfigi_name, openfigi_checked_at}`;\n404 if the company doesn't exist.",
+        "operationId": "verify_one_openfigi_api_companies__company_id__openfigi_verify_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verify One Openfigi",
         "tags": [
           "companies"
         ]
@@ -6185,7 +6366,7 @@
         ]
       },
       "post": {
-        "description": "Create a new scheduled strategy. Sets `next_due_at` to the next\nupcoming Tuesday 02:00 UTC pipeline tick so the entry runs on the\nnext eligible tick regardless of frequency.",
+        "description": "Create a new scheduled strategy. Sets `next_due_at` to the next date\non its rebalance grid (stamped 02:00 UTC \u2014 the threshold the daily 05:00\nUTC tick picks up) so the entry runs on the next eligible tick.",
         "operationId": "add_scheduled_strategy_api_scheduled_strategies_post",
         "requestBody": {
           "content": {
@@ -6446,7 +6627,7 @@
     },
     "/api/universe-templates/{key}/freeze": {
       "post": {
-        "description": "Snapshot a live template universe into a static, NON-template universe\n(`template_key = NULL`) so the pipeline never re-reconstructs it and\nbacktests against it are reproducible.\n\nTwo modes:\n  - `as_of=YYYY-MM[-DD]` \u2192 FIXED BASKET: the constituents on that month,\n    replicated across every month so a backtest holds them constant.\n    Label `\"<KEY> (as of YYYY-MM)\"`.\n  - no `as_of` \u2192 full-history copy labelled with today's date.\nIdempotent on the resulting label \u2014 a repeat call returns the existing\nsnapshot instead of duplicating it.\n\nContent-negotiated: clients sending `Accept: text/event-stream` (the /acwi\npage) get an SSE progress stream (`progress`/`done`/`error` events); all\nother callers (the /leonteq page, external scripts) get the JSON summary.",
+        "description": "Snapshot a live template universe into a static, NON-template universe\n(`template_key = NULL`) so the pipeline never re-reconstructs it and\nbacktests against it are reproducible.\n\nTwo modes:\n  - `as_of=YYYY-MM[-DD]` \u2192 FIXED BASKET: the constituents on that month,\n    replicated across every month so a backtest holds them constant.\n    Label `\"<KEY> (as of YYYY-MM)\"`.\n  - no `as_of` \u2192 full-history copy labelled with today's date.\nIdempotent on the resulting label \u2014 a repeat call returns the existing\nsnapshot instead of duplicating it.\n\n`min_market_cap_eur` applies a market-cap floor (only companies with a known\ncap \u2265 it are frozen in; subscribed-but-no-cap ones come back in\n`missing_market_cap`). LEONTEQ defaults to `LEONTEQ_MIN_MARKET_CAP_EUR` (\u20ac1B)\nwhen omitted; pass 0 to disable. Other templates have no floor unless given.\n\nContent-negotiated: clients sending `Accept: text/event-stream` (the /acwi\npage) get an SSE progress stream (`progress`/`done`/`error` events); all\nother callers (the /leonteq page, external scripts) get the JSON summary.",
         "operationId": "freeze_template_api_universe_templates__key__freeze_post",
         "parameters": [
           {
@@ -6472,6 +6653,22 @@
                 }
               ],
               "title": "As Of"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_market_cap_eur",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Market Cap Eur"
             }
           }
         ],

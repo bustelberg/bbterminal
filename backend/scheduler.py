@@ -2,14 +2,14 @@
 
 One `BackgroundScheduler` cron trigger runs inside the FastAPI process:
 
-    smart_daily   Daily 02:00 UTC — dependency-driven pipeline
+    smart_daily   Daily 05:00 UTC — dependency-driven pipeline
 
 Each tick derives, from the enabled scheduled strategies, exactly what's
 needed and runs only that (`ingest.phases.pipeline._run_smart_pipeline_sync`):
 refresh only the universes those strategies use, keep every strategy's held
 companies priced daily, and rebalance each strategy on the first occurrence
-of its baked `rebalance_weekday` in its period. A Monday 02:00 UTC tick
-already has Friday's settled close (US close Fri 21:00 UTC + ~5h), so a
+of its baked `rebalance_weekday` in its period. A Monday 05:00 UTC tick
+already has Friday's settled close (US close Fri 21:00 UTC + ~8h), so a
 first-Monday rebalance decides on Friday's close. Weekend ticks (and any day
 with no strategy due + fresh held prices) are cheap no-ops via the
 per-company freshness short-circuit.
@@ -171,7 +171,7 @@ def _pipeline_already_running() -> bool:
 
 def _maybe_kickstart_smart(sched: BackgroundScheduler) -> None:
     """On startup, schedule a one-shot daily-sequence run when there's catch-up
-    work — so an env that was down across the 02:00 UTC tick (or freshly
+    work — so an env that was down across the 05:00 UTC tick (or freshly
     deployed) converges immediately rather than waiting a day. The sequence
     (price-update → rebalance) is itself scoped + idempotent, so firing it is
     always safe. Idempotent via the fixed job id + `replace_existing=True`.
@@ -368,20 +368,24 @@ def register_scheduler(app) -> None:
             return
 
         sched = BackgroundScheduler(timezone="UTC")
-        # Single daily tick at 02:00 UTC that runs the split pipeline's two
-        # operations IN ORDER (see `ingest.phases.pipeline`):
+        # Single daily tick at 05:00 UTC (~07:00 CEST / 06:00 CET) that runs the
+        # split pipeline's two operations IN ORDER (see `ingest.phases.pipeline`):
         #   1. price-update — re-price the held companies + refresh MTD;
         #   2. rebalance    — rebalance any strategy whose rebalance day has
         #      arrived (a no-op otherwise).
         # They run sequentially in one daemon thread and never overlap (the
         # rebalance also serializes against manual Run-now via the pipeline
-        # lock). Monday 02:00 UTC already has Friday's settled close (US close
-        # Fri 21:00 UTC + ~5h), so a first-Monday rebalance decides on
+        # lock). 05:00 UTC (was 02:00) gives GuruFocus a few extra hours to
+        # publish the previous day's EUROPEAN EOD closes — at 02:00 UTC the
+        # slower-publishing EU exchanges (XPAR/MIL/XAMS) often still lacked the
+        # prior close, leaving held EU names a day stale until the next tick.
+        # US/Asia closes are long settled by either hour. Monday's tick still
+        # has Friday's settled close, so a first-Monday rebalance decides on
         # Friday's close. Weekend ticks are cheap no-ops via the per-company
         # freshness short-circuit.
         sched.add_job(
             _fire_daily_sequence,
-            CronTrigger(day_of_week="mon-sun", hour=2, minute=0, timezone="UTC"),
+            CronTrigger(day_of_week="mon-sun", hour=5, minute=0, timezone="UTC"),
             id="daily_pipeline",
             replace_existing=True,
             # If a startup coincides with the tick (e.g. a deploy right at
@@ -422,7 +426,7 @@ def register_scheduler(app) -> None:
         # On startup, fire a one-shot `smart_daily` if anything the enabled
         # strategies need is behind (held prices stale, a strategy never
         # computed, or a NEEDED template unrefreshed/behind the month) — so
-        # an env that was down across the 02:00 UTC tick catches up
+        # an env that was down across the 05:00 UTC tick catches up
         # immediately instead of waiting for tomorrow. The smart tick is
         # itself scoped + idempotent, so this is always safe. Wrapped so a
         # probe failure can never take down scheduler startup.

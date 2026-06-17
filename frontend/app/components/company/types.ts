@@ -55,6 +55,16 @@ export type Company = {
    * explicit answer instead of a missing row. */
   out_of_scope_at?: string | null;
   out_of_scope_reason?: string | null;
+  /** OpenFIGI verification of the stored ISIN, set by the "Verify OpenFIGI"
+   * bulk action + the per-row re-check. `verified` = the ISIN resolves to our
+   * listing or a matching company name; `mismatch` = it resolves to a DIFFERENT
+   * company (a wrong-ISIN trap, see `openfigi_name`); `not_found` = OpenFIGI has
+   * no security for the ISIN; `no_isin` = nothing to check; null = never run. */
+  openfigi_status?: 'verified' | 'mismatch' | 'not_found' | 'no_isin' | 'error' | null;
+  /** The security name OpenFIGI returned for the ISIN — shown in the mismatch
+   * tooltip so "Hindustan Aeronautics → HAL TRUST" is self-explanatory. */
+  openfigi_name?: string | null;
+  openfigi_checked_at?: string | null;
 };
 
 export type SortField = 'company_name' | 'gurufocus_ticker' | 'gurufocus_exchange' | 'isin' | 'country' | 'sector' | 'market_cap_eur';

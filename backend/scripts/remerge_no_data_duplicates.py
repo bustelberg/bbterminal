@@ -64,7 +64,7 @@ def get_supabase():
 # `_KNOWN_UNSUBSCRIBED_EXCHANGES` in
 # `routers/momentum/backtest_stream/audit.py`.
 _UNSUBSCRIBED_EXCHANGES = {
-    "LSE", "JSE", "BSE", "NSE", "BMV", "ASX", "NZE", "MOEX",
+    "LSE", "JSE", "BOM", "NSE", "BMV", "ASX", "NZE", "MOEX",
 }
 
 

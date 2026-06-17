@@ -27,7 +27,7 @@ import pandas as pd
 #     same overall subscription (Africa, India, LatAm, AU/NZ, Russia).
 # Update this set when the subscription tier changes.
 _KNOWN_UNSUBSCRIBED_EXCHANGES = frozenset({
-    "LSE", "JSE", "BSE", "NSE", "BMV", "ASX", "NZE", "MOEX",
+    "LSE", "JSE", "BOM", "NSE", "BMV", "ASX", "NZE", "MOEX",
 })
 
 

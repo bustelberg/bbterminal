@@ -222,6 +222,32 @@ def backfill_isin(
     except Exception as e:  # noqa: BLE001 — dedupe must never fail the backfill
         result.errors.append(f"isin dedupe failed: {type(e).__name__}: {e}")
 
+    # Name-dupe guarantee: fold any NO-ISIN stub into a same-name company that
+    # DID get an ISIN (the gap the ISIN dedupe can't see — e.g. a LongEquity
+    # "Celestica" stub vs Leonteq "Celestica Inc", or an NSE primary vs its
+    # NYSE ADR). Runs AFTER the ISIN dedupe so the canonical row already holds
+    # its ISIN. Only acts on groups with exactly one ISIN row, so it's safe.
+    try:
+        from ingest.dedupe import merge_name_dupes_keep_isin  # noqa: PLC0415
+        nrep = merge_name_dupes_keep_isin(supabase)
+        if nrep.groups_merged:
+            emit(f"Name dedupe: folded {nrep.rows_deleted} no-ISIN stub(s) into "
+                 f"{nrep.groups_merged} canonical row(s).")
+    except Exception as e:  # noqa: BLE001 — never fail the backfill
+        result.errors.append(f"name dedupe failed: {type(e).__name__}: {e}")
+
+    # Manual overrides: cross-ISIN aliases (same issuer, different ISIN — ADR vs
+    # home line) + unwanted-constituent excludes. Re-applied so a consolidation
+    # sticks across reconstructions.
+    try:
+        from ingest.company_overrides import apply_company_overrides  # noqa: PLC0415
+        orep = apply_company_overrides(supabase)
+        if orep.aliases_merged or orep.excluded_marked:
+            emit(f"Overrides: {orep.aliases_merged} alias merge(s), "
+                 f"{orep.excluded_marked} exclude(s).")
+    except Exception as e:  # noqa: BLE001 — never fail the backfill
+        result.errors.append(f"company overrides failed: {type(e).__name__}: {e}")
+
     return result
 
 

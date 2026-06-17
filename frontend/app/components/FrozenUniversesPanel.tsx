@@ -68,6 +68,7 @@ export default function FrozenUniversesPanel({
 }) {
   const [snapshots, setSnapshots] = useState<FrozenSnapshot[]>([]);
   const [loadingList, setLoadingList] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
 
   const [inspected, setInspected] = useState<string | null>(null);
   const [inspectedMonth, setInspectedMonth] = useState<string | null>(null);
@@ -82,14 +83,22 @@ export default function FrozenUniversesPanel({
 
   const loadList = useCallback(() => {
     setLoadingList(true);
+    setListError(null);
     const allow = new Set(fromKey.split(',').filter(Boolean));
     trackedFetch('Loading frozen universes', `${API_URL}/api/static-universes`)
-      .then(r => r.json())
-      .then((data: FrozenSnapshot[]) => {
-        const rows = Array.isArray(data) ? data : [];
-        setSnapshots(rows.filter(s => s.frozen_from && allow.has(s.frozen_from)));
+      .then(async r => {
+        if (!r.ok) throw new Error(`Couldn't load snapshots (${r.status})`);
+        return r.json();
       })
-      .catch(() => {})
+      .then((data: FrozenSnapshot[]) => {
+        // A non-array body (e.g. an error object) is a failure, not "empty" —
+        // surface it instead of silently showing "No frozen snapshots yet".
+        if (!Array.isArray(data)) throw new Error("Couldn't load snapshots (unexpected response)");
+        setSnapshots(data.filter(s => s.frozen_from && allow.has(s.frozen_from)));
+      })
+      .catch((e: unknown) => {
+        setListError(e instanceof Error ? e.message : "Couldn't load snapshots");
+      })
       .finally(() => setLoadingList(false));
   }, [fromKey]);
 
@@ -200,6 +209,17 @@ export default function FrozenUniversesPanel({
       <div className="p-5">
         {loadingList && snapshots.length === 0 ? (
           <div className="text-sm text-fg-subtle"><LoadingDots label="Loading" /></div>
+        ) : listError ? (
+          <div className="text-sm text-neg-300 flex items-center gap-3">
+            <span>{listError}</span>
+            <button
+              type="button"
+              onClick={() => loadList()}
+              className="px-2 py-1 rounded-md text-xs bg-overlay/5 hover:bg-overlay/10 text-fg-soft transition-colors"
+            >
+              Retry
+            </button>
+          </div>
         ) : snapshots.length === 0 ? (
           <p className="text-sm text-fg-subtle">
             No frozen snapshots yet.{onFreeze ? ' Use the button above to create one.' : ''}

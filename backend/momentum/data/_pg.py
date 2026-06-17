@@ -91,8 +91,11 @@ def _run_copy(sql: str, params: tuple) -> io.BytesIO | None:
 def copy_universe_memberships_via_pg(src_universe_id: int, dst_universe_id: int) -> int | None:
     """Copy every `universe_membership` row from one universe to another in a
     single direct-Postgres `INSERT ... SELECT` (used to freeze a template into
-    a static snapshot). Returns the number of rows copied, or `None` to signal
-    fall-back (unconfigured / psycopg missing / error)."""
+    a static snapshot). Delisted / out-of-scope companies are filtered out (a
+    JOIN to `company`) so a frozen snapshot only holds tradeable securities —
+    mirrors the `load_universe` backtest filter. Returns the number of rows
+    copied, or `None` to signal fall-back (unconfigured / psycopg missing /
+    error)."""
     url = _db_url()
     if not url:
         return None
@@ -107,8 +110,11 @@ def copy_universe_memberships_via_pg(src_universe_id: int, dst_universe_id: int)
                 cur.execute(
                     "INSERT INTO universe_membership "
                     "(universe_id, company_id, target_month, universe_ticker, sector, industry) "
-                    "SELECT %s, company_id, target_month, universe_ticker, sector, industry "
-                    "FROM universe_membership WHERE universe_id = %s",
+                    "SELECT %s, um.company_id, um.target_month, um.universe_ticker, um.sector, um.industry "
+                    "FROM universe_membership um "
+                    "JOIN company c ON c.company_id = um.company_id "
+                    "WHERE um.universe_id = %s "
+                    "AND c.delisted_at IS NULL AND c.out_of_scope_at IS NULL",
                     (dst_universe_id, src_universe_id),
                 )
                 n = cur.rowcount
@@ -227,6 +233,8 @@ def load_companies_via_copy() -> list[dict] | None:
         f"{_TS_ISO_FMT % 'c.out_of_scope_at'}, "
         "c.out_of_scope_reason, c.market_cap_eur, c.market_cap_date::text, "
         "c.market_cap_native, c.market_cap_currency, c.market_cap_fx_rate, "
+        "c.openfigi_status, c.openfigi_name, "
+        f"{_TS_ISO_FMT % 'c.openfigi_checked_at'}, "
         "e.exchange_code, e.currency_code, co.country_name "
         "FROM company c "
         "LEFT JOIN gurufocus_exchange e ON e.exchange_id = c.exchange_id "
@@ -242,10 +250,11 @@ def load_companies_via_copy() -> list[dict] | None:
     out: list[dict] = []
     reader = _csv.reader(io.TextIOWrapper(buf, encoding="utf-8"))
     for row in reader:
-        if len(row) != 17:
+        if len(row) != 20:
             continue
         (cid, name, ticker, exch_id, isin, delisted, gf_failed, oos_at, oos_reason,
          mktcap_eur, mktcap_date, mktcap_native, mktcap_currency, mktcap_fx_rate,
+         openfigi_status, openfigi_name, openfigi_checked,
          exch_code, currency, country) = row
         out.append({
             "company_id": int(cid),
@@ -262,6 +271,9 @@ def load_companies_via_copy() -> list[dict] | None:
             "market_cap_native": float(mktcap_native) if mktcap_native else None,
             "market_cap_currency": mktcap_currency or None,
             "market_cap_fx_rate": float(mktcap_fx_rate) if mktcap_fx_rate else None,
+            "openfigi_status": openfigi_status or None,
+            "openfigi_name": openfigi_name or None,
+            "openfigi_checked_at": _match_postgrest_ts(openfigi_checked or None),
             "gurufocus_exchange": exch_code or None,
             "currency": currency or None,
             "country": country or None,

@@ -118,7 +118,7 @@ export const EXCHANGE_NAMES: Record<string, string> = {
   XKRX: 'Korea Exchange',
   KRX: 'Korea Exchange',
   NSE: 'National Stock Exchange of India',
-  BSE: 'Bombay Stock Exchange',
+  BOM: 'Bombay Stock Exchange',
   SGX: 'Singapore Exchange',
   XKLS: 'Bursa Malaysia',
   KLSE: 'Bursa Malaysia',

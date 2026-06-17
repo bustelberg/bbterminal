@@ -18,13 +18,32 @@ from __future__ import annotations
 US_EXCHANGE_CODES = frozenset({"NYSE", "NASDAQ", "AMEX", "CBOE", "CBOE BZX", "US"})
 
 
+def pad_hkse_ticker(ticker: str | None, exchange: str | None) -> str:
+    """Canonical HKSE ticker form: zero-pad a numeric Hong Kong ticker to 5
+    digits (`1` → `00001`, `700` → `00700`). GuruFocus only resolves the
+    padded form, and it's the form the DB stores. Single source of this rule
+    — reused by `gurufocus_url`, `canonical_ticker` (`ingest/dedupe.py`), and
+    the universe-ticker display enrichment. Pure; non-HKSE / non-numeric
+    tickers pass through untouched. Mirrors `frontend/lib/gurufocusUrl.ts`."""
+    t = (ticker or "").strip()
+    e = (exchange or "").strip().upper()
+    if e == "HKSE" and t.isdigit():
+        return t.zfill(5)
+    return t
+
+
 def gurufocus_url(ticker: str | None, exchange: str | None) -> str | None:
     """Return the canonical GuruFocus summary URL or None.
 
     None is returned when the ticker is missing or whitespace — we'd
     otherwise synthesize broken `:TICKER`-style or `EXCH:`-style URLs.
     An empty exchange is treated as US (the bare-ticker form), matching
-    the frontend's behavior so click-through links stay consistent."""
+    the frontend's behavior so click-through links stay consistent.
+
+    HKSE numeric tickers are zero-padded to 5 digits (`HKSE:1` →
+    `HKSE:00001`) via `pad_hkse_ticker`, since GuruFocus only resolves the
+    padded form and raw universe tickers (e.g. the Leonteq scrape) aren't
+    padded. Mirrors `frontend/lib/gurufocusUrl.ts`."""
     if not ticker:
         return None
     t = ticker.strip()
@@ -33,4 +52,4 @@ def gurufocus_url(ticker: str | None, exchange: str | None) -> str | None:
     e = (exchange or "").strip().upper()
     if not e or e in US_EXCHANGE_CODES:
         return f"https://www.gurufocus.com/stock/{t}/summary"
-    return f"https://www.gurufocus.com/stock/{e}:{t}/summary"
+    return f"https://www.gurufocus.com/stock/{e}:{pad_hkse_ticker(t, e)}/summary"

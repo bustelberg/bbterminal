@@ -52,6 +52,8 @@ class PruneResult:
     metric_data_deleted: int = 0
     portfolio_weight_deleted: int = 0
     companies_deleted: int = 0
+    orphans_marked: int = 0    # newly flagged orphaned_at
+    orphans_cleared: int = 0   # had orphaned_at but re-joined a universe
     company_count_after: int = 0
     # Sample of orphan rows, up to 20, for audit emit.
     orphan_sample: list[dict] = field(default_factory=list)
@@ -311,6 +313,51 @@ def prune_orphan_companies(
     return result
 
 
+def mark_orphan_companies(supabase: Client, *, dry_run: bool = False) -> PruneResult:
+    """FLAG orphan companies with `company.orphaned_at` instead of deleting them.
+
+    The pipeline used to delete any row not in a source universe; the user wants
+    those KEPT and visibly flagged (the "NO UNIVERSE" badge on /companies). This
+    sets `orphaned_at` on rows that belong to no source universe (and aren't
+    out-of-scope / frozen members), and CLEARS it on rows that have since
+    re-joined one. Idempotent — only writes the rows whose flag actually
+    changes. Best-effort per chunk."""
+    from datetime import datetime, timezone  # noqa: PLC0415
+
+    result = compute_orphans(supabase)
+    if dry_run:
+        result.company_count_after = result.company_count_before
+        return result
+
+    orphan_set = _load_all_company_ids(supabase) - _kept_union(supabase)
+    flagged: set[int] = set()
+    for r in paginate(
+        lambda lo, hi: supabase.table("company").select("company_id")
+        .not_.is_("orphaned_at", "null").range(lo, hi).execute()
+    ):
+        flagged.add(int(r["company_id"]))
+
+    to_mark = sorted(orphan_set - flagged)   # orphans not yet flagged
+    to_clear = sorted(flagged - orphan_set)  # flagged but re-joined a universe
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for chunk in chunked(to_mark):
+        try:
+            r = supabase.table("company").update({"orphaned_at": now_iso}).in_("company_id", chunk).execute()
+            result.orphans_marked += len(r.data or [])
+        except Exception as e:
+            _log.warning("[prune] orphaned_at mark chunk failed: %s: %s", type(e).__name__, e)
+    for chunk in chunked(to_clear):
+        try:
+            r = supabase.table("company").update({"orphaned_at": None}).in_("company_id", chunk).execute()
+            result.orphans_cleared += len(r.data or [])
+        except Exception as e:
+            _log.warning("[prune] orphaned_at clear chunk failed: %s: %s", type(e).__name__, e)
+
+    result.orphan_count = len(orphan_set)
+    result.company_count_after = result.company_count_before  # nothing deleted
+    return result
+
+
 def _kept_union(supabase: Client) -> set[int]:
     """Union of company_ids that belong to any source universe OR are
     explicitly tagged out-of-scope (deliberate out-of-coverage record,
@@ -364,7 +411,15 @@ if __name__ == "__main__":
     from deps import supabase  # noqa: PLC0415
 
     dry_run = "--apply" not in sys.argv
-    res = prune_orphan_companies(supabase, dry_run=dry_run)
-    print(format_audit(res))
-    if dry_run:
-        print("\n(dry run — pass --apply to actually delete)")
+    # Default = FLAG orphans (`orphaned_at`), keeping them — matches the pipeline.
+    # `--delete` opts into the old destructive prune.
+    if "--delete" in sys.argv:
+        res = prune_orphan_companies(supabase, dry_run=dry_run)
+        print(format_audit(res))
+        print("\n(dry run — pass --apply to actually DELETE)" if dry_run else "")
+    else:
+        res = mark_orphan_companies(supabase, dry_run=dry_run)
+        print(format_audit(res))
+        print(f"\nFlagged orphaned_at: +{res.orphans_marked} marked, "
+              f"-{res.orphans_cleared} cleared (nothing deleted)."
+              + ("  (dry run — pass --apply to write)" if dry_run else ""))

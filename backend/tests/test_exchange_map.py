@@ -208,9 +208,9 @@ class TestFeasibleExchanges:
 
     def test_unsubscribed_regions_excluded(self):
         # GuruFocus returns "403 unsubscribed region" for these (confirmed by
-        # probing): India (NSE/BSE), UK (LSE), Ireland (DUB) — plus the
+        # probing): India (NSE/BOM), UK (LSE), Ireland (DUB) — plus the
         # always-out-of-scope Russia / Australia / NZ / Africa / LatAm.
-        for code in ("NSE", "BSE", "LSE", "DUB",
+        for code in ("NSE", "BOM", "LSE", "DUB",
                      "MCX", "ASX", "NZSE", "JSE", "CAI", "TSX", "MEX"):
             assert code not in FEASIBLE_GF_EXCHANGES
 

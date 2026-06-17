@@ -42,7 +42,7 @@ from supabase import create_client
 
 
 _UNSUBSCRIBED_EXCHANGES = {
-    "LSE", "JSE", "BSE", "NSE", "BMV", "ASX", "NZE", "MOEX",
+    "LSE", "JSE", "BOM", "NSE", "BMV", "ASX", "NZE", "MOEX",
 }
 
 

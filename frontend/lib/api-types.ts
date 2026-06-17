@@ -560,6 +560,79 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/schedules/{strategy_id}/performance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Schedule Performance
+         * @description A scheduled strategy's LIVE performance since go-live. Admin only.
+         *
+         *     Returns the strategy's inception (go-live) date, its return since
+         *     inception, the month-to-date return, the latest date the data is current
+         *     through, and the full per-day return series since inception.
+         *
+         *     All figures track the live held portfolio: the frozen backtest curve is
+         *     extended with the snapshot tail the price-update job marks to market
+         *     through the latest priced day (`_extended_curve`), then read at the
+         *     relevant anchors (`_returns_from_backtest`). `daily_returns` is the
+         *     per-day close-to-close series off that same curve from inception onward —
+         *     the same numbers behind the /schedule 'daily returns' table, but for every
+         *     day rather than one month. Returns are GROSS (no fee model on the live
+         *     path). Inception = the strategy's `start_date`, or `created_at` when unset.
+         *
+         *     404 if the strategy doesn't exist; null returns + empty `daily_returns`
+         *     when it has no saved backtest / no live data yet. Response:
+         *         {strategy_id, name, inception_date, as_of_date,
+         *          since_inception_return_pct, mtd_return_pct,
+         *          daily_returns: [{date, return_pct}, ...]}
+         */
+        get: operations["get_schedule_performance_api_admin_schedules__strategy_id__performance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/schedules/{strategy_id}/risk-metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Schedule Risk Metrics
+         * @description A scheduled strategy's BACKTESTED risk-adjusted metrics — Sharpe +
+         *     Sortino — and the period they were computed over. Admin only.
+         *
+         *     Both ratios come from the strategy's source `backtest_run` summary
+         *     (annualized, risk-free = 0, computed off the closed-period daily curve so
+         *     they're comparable across rebalance cadences — see
+         *     `momentum/backtest/_summary.py`). The `period` is the actual span of that
+         *     backtest's daily curve (first → last dated point), i.e. exactly the data
+         *     the ratios were measured over (not the requested config range, which can
+         *     extend past the data). `annualized_return_pct` + `max_drawdown_pct` round
+         *     out the risk picture. 404 if the strategy doesn't exist; null metrics when
+         *     it has no saved backtest. Response:
+         *         {strategy_id, name, backtest_run_id, sharpe_ratio, sortino_ratio,
+         *          annualized_return_pct, max_drawdown_pct,
+         *          period: {start_date, end_date}}
+         */
+        get: operations["get_schedule_risk_metrics_api_admin_schedules__strategy_id__risk_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/universes": {
         parameters: {
             query?: never;
@@ -1103,6 +1176,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/openfigi/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify Openfigi
+         * @description Admin-only: verify every company's stored ISIN against OpenFIGI and
+         *     persist `openfigi_status` / `openfigi_name`. Spawns a background thread
+         *     (batched — finishes in a couple of minutes) and returns immediately; poll
+         *     `/api/companies/openfigi/verify/status`. No-op if already running.
+         */
+        post: operations["verify_openfigi_api_companies_openfigi_verify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/openfigi/verify/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Openfigi Verify Status
+         * @description Progress for the OpenFIGI verification sweep (running flag + latest
+         *     message + verified/mismatch counts). Polled by the /companies button.
+         */
+        get: operations["openfigi_verify_status_api_companies_openfigi_verify_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/sectors": {
         parameters: {
             query?: never;
@@ -1147,6 +1264,29 @@ export interface paths {
          * @description Manual cascade because the FKs predate ON DELETE CASCADE in places.
          */
         delete: operations["delete_company_api_companies__company_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company_id}/openfigi-verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify One Openfigi
+         * @description Admin-only: re-verify ONE company against OpenFIGI now (one API call),
+         *     persist the result, and return it. The per-row '⟳' action on /companies.
+         *     Returns `{company_id, openfigi_status, openfigi_name, openfigi_checked_at}`;
+         *     404 if the company doesn't exist.
+         */
+        post: operations["verify_one_openfigi_api_companies__company_id__openfigi_verify_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2667,9 +2807,9 @@ export interface paths {
         put?: never;
         /**
          * Add Scheduled Strategy
-         * @description Create a new scheduled strategy. Sets `next_due_at` to the next
-         *     upcoming Tuesday 02:00 UTC pipeline tick so the entry runs on the
-         *     next eligible tick regardless of frequency.
+         * @description Create a new scheduled strategy. Sets `next_due_at` to the next date
+         *     on its rebalance grid (stamped 02:00 UTC — the threshold the daily 05:00
+         *     UTC tick picks up) so the entry runs on the next eligible tick.
          */
         post: operations["add_scheduled_strategy_api_scheduled_strategies_post"];
         /**
@@ -2903,6 +3043,11 @@ export interface paths {
          *       - no `as_of` → full-history copy labelled with today's date.
          *     Idempotent on the resulting label — a repeat call returns the existing
          *     snapshot instead of duplicating it.
+         *
+         *     `min_market_cap_eur` applies a market-cap floor (only companies with a known
+         *     cap ≥ it are frozen in; subscribed-but-no-cap ones come back in
+         *     `missing_market_cap`). LEONTEQ defaults to `LEONTEQ_MIN_MARKET_CAP_EUR` (€1B)
+         *     when omitted; pass 0 to disable. Other templates have no floor unless given.
          *
          *     Content-negotiated: clients sending `Accept: text/event-stream` (the /acwi
          *     page) get an SSE progress stream (`progress`/`done`/`error` events); all
@@ -4498,6 +4643,72 @@ export interface operations {
             };
         };
     };
+    get_schedule_performance_api_admin_schedules__strategy_id__performance_get: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization: string;
+            };
+            path: {
+                strategy_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_schedule_risk_metrics_api_admin_schedules__strategy_id__risk_metrics_get: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization: string;
+            };
+            path: {
+                strategy_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_universes_api_admin_universes_get: {
         parameters: {
             query?: {
@@ -5244,6 +5455,46 @@ export interface operations {
             };
         };
     };
+    verify_openfigi_api_companies_openfigi_verify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    openfigi_verify_status_api_companies_openfigi_verify_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     list_company_sectors_api_companies_sectors_get: {
         parameters: {
             query?: never;
@@ -5300,6 +5551,37 @@ export interface operations {
         };
     };
     delete_company_api_companies__company_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_one_openfigi_api_companies__company_id__openfigi_verify_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -7642,6 +7924,7 @@ export interface operations {
         parameters: {
             query?: {
                 as_of?: string | null;
+                min_market_cap_eur?: number | null;
             };
             header?: never;
             path: {

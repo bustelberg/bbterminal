@@ -16,6 +16,8 @@ import { dialog } from '../../../lib/dialog';
 import { trackedFetch } from '../../../lib/loading';
 import { API_URL } from '../../../lib/apiUrl';
 import type { Company, PendingAdd } from './types';
+import { computeNameDupes } from './nameDupe';
+import { OPENFIGI_UNCHECKED } from './useCompanyFilters';
 
 export type UseCompaniesResult = ReturnType<typeof useCompanies>;
 
@@ -33,6 +35,7 @@ export function useCompanies() {
   const [sectorsLoading, setSectorsLoading] = useState(true);
   // company_id whose Delete request is currently in flight, or null.
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [verifyingId, setVerifyingId] = useState<number | null>(null);
   const [pendingAdd, setPendingAdd] = useState<PendingAdd | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -119,6 +122,15 @@ export function useCompanies() {
     return [...s].sort();
   }, [companies]);
 
+  // Distinct OpenFIGI verification statuses present in the table. Unchecked
+  // rows (null status) surface under the `OPENFIGI_UNCHECKED` sentinel so they
+  // can be filtered FOR (the common "what still needs verifying" query).
+  const openfigiOptions = useMemo(() => {
+    const s = new Set<string>();
+    for (const c of companies) s.add(c.openfigi_status ?? OPENFIGI_UNCHECKED);
+    return [...s].sort();
+  }, [companies]);
+
   // Companies in no universe (orphaned stubs) — surfaced as a count + toggle.
   // Zero while memberships are still loading so the badge doesn't flash the
   // full list count.
@@ -156,6 +168,21 @@ export function useCompanies() {
     }
     return n;
   }, [companies, duplicateIsins]);
+
+  // Name-based duplicates the ISIN badge can't catch (one side has no ISIN) —
+  // `company_id → the other same-name companies`, for the NAME-DUPE badge.
+  const nameDupes = useMemo(() => computeNameDupes(companies), [companies]);
+  const nameDupeIds = useMemo(() => new Set(nameDupes.keys()), [nameDupes]);
+  const nameDupeCount = nameDupeIds.size;
+
+  // Companies GuruFocus returned "stock not found" for (the GF LOOKUP badge —
+  // a wrong/retired ticker or exchange). Matches the row badge: delisted /
+  // out-of-scope rows still carry the flag but show THOSE badges instead, so
+  // they're excluded here too (otherwise the count > what's visibly badged).
+  const gfLookupCount = useMemo(
+    () => companies.filter((c) => c.gurufocus_lookup_failed_at && !c.delisted_at && !c.out_of_scope_at).length,
+    [companies],
+  );
 
   const handleSave = useCallback(async (id: number, updated: Partial<Company>) => {
     setError(null);
@@ -319,6 +346,33 @@ export function useCompanies() {
     }
   }, [handleSave]);
 
+  /** Re-verify ONE company's stored ISIN against OpenFIGI now (one API call),
+   * and patch the row's openfigi_* fields in place from the response. The
+   * per-row '⟳' action; the bulk sweep is the toolbar button. */
+  const verifyOne = useCallback(async (c: Company) => {
+    setVerifyingId(c.company_id);
+    try {
+      const res = await apiFetch(`${API_URL}/api/companies/${c.company_id}/openfigi-verify`, { method: 'POST' });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        await dialog.alert(`OpenFIGI verify failed: ${b.detail ?? `HTTP ${res.status}`}`);
+        return;
+      }
+      const d = (await res.json()) as Pick<Company, 'company_id' | 'openfigi_status' | 'openfigi_name' | 'openfigi_checked_at'>;
+      setCompanies((prev) =>
+        prev.map((x) =>
+          x.company_id === c.company_id
+            ? { ...x, openfigi_status: d.openfigi_status ?? null, openfigi_name: d.openfigi_name ?? null, openfigi_checked_at: d.openfigi_checked_at ?? null }
+            : x,
+        ),
+      );
+    } catch (e) {
+      await dialog.alert(`OpenFIGI verify failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setVerifyingId(null);
+    }
+  }, []);
+
   const handleDelete = useCallback(async (id: number, name: string) => {
     if (!(await dialog.confirm(`Delete "${name}"? This cannot be undone.`, { destructive: true, confirmLabel: 'Delete' }))) return;
     setError(null);
@@ -343,6 +397,7 @@ export function useCompanies() {
     membershipsLoading,
     sectorsLoading,
     deletingId,
+    verifyingId,
     error,
     setError,
     load,
@@ -351,8 +406,13 @@ export function useCompanies() {
     countryOptions,
     sectorOptions,
     universeOptions,
+    openfigiOptions,
     duplicateIsins,
     duplicateCount,
+    nameDupes,
+    nameDupeIds,
+    nameDupeCount,
+    gfLookupCount,
     unlinkedCount,
     // mutations
     handleSave,
@@ -360,6 +420,7 @@ export function useCompanies() {
     handleDelete,
     findCorrectExchange,
     fetchGfName,
+    verifyOne,
     // add-confirm flow
     pendingAdd,
     setPendingAdd,

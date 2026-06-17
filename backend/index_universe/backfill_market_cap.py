@@ -39,6 +39,7 @@ _log = logging.getLogger(__name__)
 class MarketCapResult:
     companies_scanned: int = 0
     skipped_have_value: int = 0
+    skipped_unsubscribed: int = 0  # exchange outside GuruFocus coverage — no point calling
     gurufocus_calls: int = 0
     set_count: int = 0
     no_mktcap: int = 0       # call made, no usable mktcap came back
@@ -161,17 +162,24 @@ def backfill_market_cap(
     fx = _fx_rates_per_eur(supabase)
     today = _dt.date.today().isoformat()
 
+    from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
     targets: list[dict] = []
     for c in companies:
         if only_missing and c.get("market_cap_eur") is not None:
             result.skipped_have_value += 1
+            continue
+        # GuruFocus returns 403 for out-of-coverage exchanges (India/UK/AU/…) —
+        # there's no cap to fetch, so don't spend a call on them.
+        if not is_gf_subscribed_exchange((c.get("gurufocus_exchange") or {}).get("exchange_code")):
+            result.skipped_unsubscribed += 1
             continue
         targets.append(c)
     if limit is not None:
         targets = targets[:limit]
 
     total = len(targets)
-    emit(f"{len(companies)} companies; resolving market cap for {total} "
+    emit(f"{len(companies)} companies; {result.skipped_have_value} already have a cap, "
+         f"{result.skipped_unsubscribed} unsubscribed (skipped) — resolving {total} "
          f"(~{round(total * 1.5 / 60)} min at the 1.5s rate limit)…",
          processed=0, total=total, set=0)
 
@@ -248,6 +256,7 @@ def format_summary(r: MarketCapResult) -> str:
     lines = [
         f"Companies scanned:   {r.companies_scanned}",
         f"  Skipped (had val): {r.skipped_have_value}",
+        f"  Skipped (unsub):   {r.skipped_unsubscribed}",
         f"  GuruFocus calls:   {r.gurufocus_calls}",
         f"  Set:               {r.set_count}",
         f"  Renamed:           {r.renamed}",

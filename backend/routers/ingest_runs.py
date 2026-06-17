@@ -24,7 +24,7 @@ Phases run independently — a failure in one is captured in
 `error_summary` but the next phase still attempts.
 
 One scheduled trigger (defined in `scheduler.py`):
-    smart_daily   Daily 02:00 UTC — dependency-driven pipeline that
+    smart_daily   Daily 05:00 UTC — dependency-driven pipeline that
                   refreshes only what the enabled scheduled strategies need
                   (see `ingest.phases.pipeline._run_smart_pipeline_sync`).
 
@@ -174,12 +174,12 @@ _JOB_META: dict[str, dict[str, str]] = {
     "price_update": {
         "label": "Price update",
         "description": "re-prices the held companies + refreshes MTD",
-        "cadence": "Daily 02:00 UTC",
+        "cadence": "Daily 05:00 UTC",
     },
     "rebalance": {
         "label": "Rebalance",
         "description": "rebalances strategies that are due from a fresh universe",
-        "cadence": "Daily 02:00 UTC (runs only when a strategy is due)",
+        "cadence": "Daily 05:00 UTC (runs only when a strategy is due)",
     },
     "full_price_refresh": {
         "label": "Month-end full price refresh",
@@ -194,12 +194,12 @@ _JOB_META: dict[str, dict[str, str]] = {
     "daily_pipeline": {
         "label": "Daily pipeline",
         "description": "price update, then rebalance any due strategies",
-        "cadence": "Daily 02:00 UTC",
+        "cadence": "Daily 05:00 UTC",
     },
     "smart_daily": {
         "label": "Smart daily pipeline",
         "description": "refreshes only what the scheduled strategies need, then rebalances those that are due",
-        "cadence": "Daily 02:00 UTC",
+        "cadence": "Daily 05:00 UTC",
     },
     "startup_smart_kickstart": {
         "label": "Smart catch-up",

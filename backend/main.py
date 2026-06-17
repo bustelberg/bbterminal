@@ -142,7 +142,8 @@ async def _size_io_thread_pool() -> None:
     )
 
 # In-process APScheduler for the scheduled price/volume ingest jobs
-# (weekly Tue 02:00 UTC + monthly 2nd 02:00 UTC). See scheduler.py for
-# the trade-offs vs Railway-native cron. Set DISABLE_SCHEDULER=1 in the
+# (daily price-update + rebalance at 05:00 UTC, month-end full price
+# refresh on the last day at 12:00 UTC). See scheduler.py for the
+# trade-offs vs Railway-native cron. Set DISABLE_SCHEDULER=1 in the
 # env to skip — useful when running multiple replicas or during CI.
 _register_scheduler(app)

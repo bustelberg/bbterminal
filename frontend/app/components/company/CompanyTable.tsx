@@ -28,7 +28,9 @@ export default function CompanyTable({
   editingId,
   exchangeOptions,
   duplicateIsins,
+  nameDupes,
   deletingId,
+  verifyingId,
   sortField,
   sortDir,
   onSort,
@@ -40,6 +42,7 @@ export default function CompanyTable({
   onDelete,
   onFindExchange,
   onFetchGfName,
+  onVerifyOpenfigi,
   onToggleUniverse,
   universeStyle,
 }: {
@@ -53,7 +56,9 @@ export default function CompanyTable({
   editingId: number | null;
   exchangeOptions: string[];
   duplicateIsins: Set<string>;
+  nameDupes: Map<number, Company[]>;
   deletingId: number | null;
+  verifyingId: number | null;
   sortField: SortField;
   sortDir: 'asc' | 'desc';
   onSort: (field: SortField) => void;
@@ -65,6 +70,7 @@ export default function CompanyTable({
   onDelete: (id: number, name: string) => void;
   onFindExchange: (c: Company) => void;
   onFetchGfName: (c: Company) => void;
+  onVerifyOpenfigi: (c: Company) => void;
   onToggleUniverse: (u: string) => void;
   /** Distinct colour per universe label (built once in the orchestrator) —
    * used for the membership chips + the sector-source annotation. */
@@ -82,12 +88,18 @@ export default function CompanyTable({
                   Name{sortIcon(sortField, sortDir, 'company_name')}
                   {!loading && (
                     duplicateIsins.size > 0 ? (
-                      <span className="px-1.5 py-0.5 text-[10px] font-medium bg-warn-500/15 text-warn-400 border border-warn-500/25 rounded">
-                        {duplicateIsins.size} dupe{duplicateIsins.size > 1 ? 's' : ''}
+                      <span
+                        className="px-1.5 py-0.5 text-[10px] font-medium bg-warn-500/15 text-warn-400 border border-warn-500/25 rounded"
+                        title="Companies sharing an ISIN (the same security stored twice). Name-based duplicates where one side has no ISIN are counted separately in the header."
+                      >
+                        {duplicateIsins.size} ISIN dupe{duplicateIsins.size > 1 ? 's' : ''}
                       </span>
                     ) : (
-                      <span className="px-1.5 py-0.5 text-[10px] font-medium bg-pos-500/15 text-pos-400 border border-pos-500/25 rounded">
-                        no dupes
+                      <span
+                        className="px-1.5 py-0.5 text-[10px] font-medium bg-pos-500/15 text-pos-400 border border-pos-500/25 rounded"
+                        title="No two companies share an ISIN. (Name-based duplicates where one side has no ISIN are a separate check — see the 'name dupes' count in the header.)"
+                      >
+                        no ISIN dupes
                       </span>
                     )
                   )}
@@ -96,6 +108,7 @@ export default function CompanyTable({
               <th className={`${thCls} w-24`} onClick={() => onSort('gurufocus_ticker')}>Ticker{sortIcon(sortField, sortDir, 'gurufocus_ticker')}</th>
               <th className={`${thCls} w-24`} onClick={() => onSort('gurufocus_exchange')}>Exchange{sortIcon(sortField, sortDir, 'gurufocus_exchange')}</th>
               <th className={`${thCls} w-36`} onClick={() => onSort('isin')}>ISIN{sortIcon(sortField, sortDir, 'isin')}</th>
+              <th className="px-3 py-3 text-left text-xs font-medium w-28" title="OpenFIGI verification of the stored ISIN — does it resolve to this company, or a different one (wrong-ISIN trap)? Populate via the 'Verify OpenFIGI' button.">OpenFIGI</th>
               <th className={`${thCls} w-32`} onClick={() => onSort('country')}>Country{sortIcon(sortField, sortDir, 'country')}</th>
               <th className={`${thCls} w-40`} onClick={() => onSort('sector')}>Sector{sortIcon(sortField, sortDir, 'sector')}</th>
               <th
@@ -118,7 +131,7 @@ export default function CompanyTable({
             )}
             {loading && (
               <tr>
-                <td colSpan={10} className="py-14 text-center">
+                <td colSpan={11} className="py-14 text-center">
                   <span className="inline-flex items-center gap-2.5 text-fg-subtle text-sm">
                     <Spinner size={14} />
                     <span>Loading companies…</span>
@@ -144,11 +157,14 @@ export default function CompanyTable({
                   sectorsLoading={sectorsLoading}
                   loading={loading}
                   duplicateIsins={duplicateIsins}
+                  nameDupes={nameDupes}
                   deletingId={deletingId}
+                  verifyingId={verifyingId}
                   onEdit={onEdit}
                   onDelete={onDelete}
                   onFindExchange={onFindExchange}
                   onFetchGfName={onFetchGfName}
+                  onVerifyOpenfigi={onVerifyOpenfigi}
                   onToggleUniverse={onToggleUniverse}
                   universeStyle={universeStyle}
                 />

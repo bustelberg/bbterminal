@@ -147,7 +147,7 @@ async def gurufocus_exchange_search(
         "XTER", "XPAR", "AMS", "OBOM", "MIL", "MAD", "WBO",
         "STO", "OSL", "HEL", "CSE", "LSE", "SWX",
         # Asia.
-        "TSE", "HKEX", "KSE", "BSE", "NSE", "SGX", "TPE",
+        "TSE", "HKEX", "KSE", "BOM", "NSE", "SGX", "TPE",
     ]
     candidates = body.candidate_exchanges or DEFAULT_CANDIDATES
 
@@ -515,6 +515,197 @@ async def get_schedule(strategy_id: int, authorization: str = Header(...)):
             "holdings_count": len(payload.get("holdings")) if payload else 0,
             "holdings": payload.get("holdings") if payload else [],
         }
+
+    return await asyncio.to_thread(_query)
+
+
+def _load_strategy_row(strategy_id: int) -> dict:
+    """Fetch one scheduled_strategy row or raise 404. Shared by the
+    risk-metrics + performance endpoints."""
+    resp = (
+        supabase.table("scheduled_strategy")
+        .select("*")
+        .eq("id", strategy_id)
+        .limit(1)
+        .execute()
+    )
+    if not resp.data:
+        raise HTTPException(404, f"Scheduled strategy #{strategy_id} not found")
+    return resp.data[0]
+
+
+def _strategy_snapshots(strategy_id: int) -> list[dict]:
+    """The strategy's `current_picks_snapshot` rows in curve order — the live
+    source `_extended_curve` / `_returns_from_backtest` walk to mark the
+    frozen backtest curve to market through the latest priced day. Same query
+    `/api/scheduled-strategies/{id}/runs` uses to build its live_curve."""
+    return (
+        supabase.table("current_picks_snapshot")
+        .select("kind, as_of_date, latest_price_date, period_return_pct, created_at")
+        .eq("scheduled_strategy_id", strategy_id)
+        .order("latest_price_date", desc=False)
+        .order("created_at", desc=False)
+        .execute()
+    ).data or []
+
+
+def _daily_returns_since(pts: list[tuple[str, float]], inception_iso: str) -> list[dict]:
+    """Per-day % returns from a cumulative-return curve `[(date, cum_pct)]`,
+    starting at `inception_iso`. Day N's return is the close-to-close move from
+    the prior curve point — identical to the /schedule monthly-returns heatmap
+    drill-down (`(1+cum[i])/(1+cum[i-1]) - 1`). Period-boundary dates (prior
+    exit == next entry) are de-duped keeping the last cumulative, matching the
+    UI, so no spurious 0% boundary days appear."""
+    if not pts:
+        return []
+    # De-dup by date (keep last cumulative), preserving ascending order.
+    seen: dict[str, int] = {}
+    deduped: list[tuple[str, float]] = []
+    for d, cum in pts:
+        if d in seen:
+            deduped[seen[d]] = (d, cum)
+        else:
+            seen[d] = len(deduped)
+            deduped.append((d, cum))
+    # Baseline = last point on/before inception; the first reported day is the
+    # next point after it (its return spans inception → that day).
+    anchor_idx: int | None = None
+    for i, (d, _cum) in enumerate(deduped):
+        if d <= inception_iso:
+            anchor_idx = i
+        else:
+            break
+    start_i = (anchor_idx + 1) if anchor_idx is not None else 1
+    out: list[dict] = []
+    for i in range(start_i, len(deduped)):
+        f0 = 1 + deduped[i - 1][1] / 100.0
+        f1 = 1 + deduped[i][1] / 100.0
+        if f0 <= 0:
+            continue
+        out.append({"date": deduped[i][0], "return_pct": round((f1 / f0 - 1) * 100.0, 4)})
+    return out
+
+
+@router.get("/api/admin/schedules/{strategy_id}/risk-metrics")
+async def get_schedule_risk_metrics(strategy_id: int, authorization: str = Header(...)):
+    """A scheduled strategy's BACKTESTED risk-adjusted metrics — Sharpe +
+    Sortino — and the period they were computed over. Admin only.
+
+    Both ratios come from the strategy's source `backtest_run` summary
+    (annualized, risk-free = 0, computed off the closed-period daily curve so
+    they're comparable across rebalance cadences — see
+    `momentum/backtest/_summary.py`). The `period` is the actual span of that
+    backtest's daily curve (first → last dated point), i.e. exactly the data
+    the ratios were measured over (not the requested config range, which can
+    extend past the data). `annualized_return_pct` + `max_drawdown_pct` round
+    out the risk picture. 404 if the strategy doesn't exist; null metrics when
+    it has no saved backtest. Response:
+        {strategy_id, name, backtest_run_id, sharpe_ratio, sortino_ratio,
+         annualized_return_pct, max_drawdown_pct,
+         period: {start_date, end_date}}"""
+    _require_admin(authorization)
+
+    def _query() -> dict:
+        from routers._schedule_hydration import _load_backtest_pts  # noqa: PLC0415
+        from routers.momentum.backtest_crud import load_backtest_result_sync  # noqa: PLC0415
+
+        strat = _load_strategy_row(strategy_id)
+        run_id = strat.get("backtest_run_id")
+        base = {
+            "strategy_id": strat["id"],
+            "name": strat.get("name") or f"Strategy #{strat['id']}",
+            "backtest_run_id": run_id,
+            "sharpe_ratio": None,
+            "sortino_ratio": None,
+            "annualized_return_pct": None,
+            "max_drawdown_pct": None,
+            "period": {"start_date": None, "end_date": None},
+        }
+        if not run_id:
+            return base
+        result = load_backtest_result_sync(int(run_id)) or {}
+        summary = result.get("summary") or {}
+        pts = _load_backtest_pts(int(run_id))
+        if pts:
+            period = {"start_date": pts[0][0], "end_date": pts[-1][0]}
+        else:
+            cfg = strat.get("config") or {}
+            period = {"start_date": cfg.get("start_date"), "end_date": cfg.get("end_date")}
+        base.update({
+            "sharpe_ratio": summary.get("sharpe_ratio"),
+            "sortino_ratio": summary.get("sortino_ratio"),
+            "annualized_return_pct": summary.get("annualized_return_pct"),
+            "max_drawdown_pct": summary.get("max_drawdown_pct"),
+            "period": period,
+        })
+        return base
+
+    return await asyncio.to_thread(_query)
+
+
+@router.get("/api/admin/schedules/{strategy_id}/performance")
+async def get_schedule_performance(strategy_id: int, authorization: str = Header(...)):
+    """A scheduled strategy's LIVE performance since go-live. Admin only.
+
+    Returns the strategy's inception (go-live) date, its return since
+    inception, the month-to-date return, the latest date the data is current
+    through, and the full per-day return series since inception.
+
+    All figures track the live held portfolio: the frozen backtest curve is
+    extended with the snapshot tail the price-update job marks to market
+    through the latest priced day (`_extended_curve`), then read at the
+    relevant anchors (`_returns_from_backtest`). `daily_returns` is the
+    per-day close-to-close series off that same curve from inception onward —
+    the same numbers behind the /schedule 'daily returns' table, but for every
+    day rather than one month. Returns are GROSS (no fee model on the live
+    path). Inception = the strategy's `start_date`, or `created_at` when unset.
+
+    404 if the strategy doesn't exist; null returns + empty `daily_returns`
+    when it has no saved backtest / no live data yet. Response:
+        {strategy_id, name, inception_date, as_of_date,
+         since_inception_return_pct, mtd_return_pct,
+         daily_returns: [{date, return_pct}, ...]}"""
+    _require_admin(authorization)
+
+    def _query() -> dict:
+        from routers._schedule_hydration import (  # noqa: PLC0415
+            _extended_curve,
+            _returns_from_backtest,
+        )
+
+        strat = _load_strategy_row(strategy_id)
+        run_id = strat.get("backtest_run_id")
+        # Inception = explicit go-live date, else the creation timestamp.
+        inception_iso = (
+            str(strat["start_date"])[:10]
+            if strat.get("start_date")
+            else str(strat.get("created_at") or "")[:10]
+        )
+        base = {
+            "strategy_id": strat["id"],
+            "name": strat.get("name") or f"Strategy #{strat['id']}",
+            "inception_date": inception_iso or None,
+            "as_of_date": None,
+            "since_inception_return_pct": None,
+            "mtd_return_pct": None,
+            "daily_returns": [],
+        }
+        if not run_id:
+            return base
+        snapshots = _strategy_snapshots(strategy_id)
+        rets = _returns_from_backtest(
+            int(run_id), inception_iso, _now_utc().date(), snapshots
+        )
+        if rets:
+            base.update({
+                "as_of_date": rets.get("as_of_date"),
+                "since_inception_return_pct": rets.get("since_inception_pct"),
+                "mtd_return_pct": rets.get("mtd_return_pct"),
+            })
+        base["daily_returns"] = _daily_returns_since(
+            _extended_curve(int(run_id), snapshots), inception_iso
+        )
+        return base
 
     return await asyncio.to_thread(_query)
 

@@ -46,7 +46,7 @@ from supabase import create_client
 # LSE (UK) is excluded — the subscription covers continental Europe but
 # not the UK.
 _UNSUBSCRIBED_EXCHANGES = {
-    "LSE", "JSE", "BSE", "NSE", "BMV", "ASX", "NZE", "MOEX",
+    "LSE", "JSE", "BOM", "NSE", "BMV", "ASX", "NZE", "MOEX",
 }
 
 

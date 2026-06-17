@@ -115,11 +115,11 @@ def test_country_fallback_when_no_ric() -> None:
 
 
 def test_country_multi_exchange_tries_each() -> None:
-    """India maps to [NSE, BSE]; if our company is on BSE, the second
+    """India maps to [NSE, BOM]; if our company is on BOM, the second
     candidate should match. (Order matters: NSE checked first, so if a
     company existed on both, NSE wins — matches the dict order.)"""
     by_te, by_bare, by_id = _build_indexes([
-        _co(20, "RELIANCE", "BSE"),
+        _co(20, "RELIANCE", "BOM"),
     ])
     tpl = LeonteqTemplate()
     cid = tpl._match_company(

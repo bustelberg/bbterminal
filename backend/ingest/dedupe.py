@@ -42,7 +42,7 @@ EXCHANGE_PRIORITY: dict[str, int] = {
     'OHEL': 1, 'WAR': 1, 'WBO': 1, 'ATH': 1, 'DUB': 1, 'BUD': 1,
     'XPRA': 1, 'IST': 1,
     # Asian primaries.
-    'TSE': 2, 'TPE': 2, 'ROCO': 2, 'XKRX': 2, 'NSE': 2, 'BSE': 2,
+    'TSE': 2, 'TPE': 2, 'ROCO': 2, 'XKRX': 2, 'NSE': 2, 'BOM': 2,
     'SGX': 2, 'XKLS': 2, 'ISX': 2, 'BKK': 2, 'PHS': 2,
     # Middle East primaries.
     'SAU': 2, 'ADX': 2, 'DFM': 2, 'DSMD': 2, 'KUW': 2, 'XTAE': 2,
@@ -88,7 +88,8 @@ def canonical_ticker(ticker: str | None, exchange_code: str | None) -> str:
     t = ticker.strip().upper()
     exch = (exchange_code or '').strip().upper()
     if exch == 'HKSE' and t.isdigit():
-        return t.zfill(5)
+        from ingest.gurufocus_url import pad_hkse_ticker  # noqa: PLC0415
+        return pad_hkse_ticker(t, exch)
     if exch in _NORDIC_EXCHANGES:
         # `NOVO.B`, `NOVO-B` → `NOVO B`
         m = re.match(r'^(.+)[.\-]([A-Z])$', t)
@@ -749,6 +750,112 @@ def dedupe_by_isin(supabase: Client, *, dry_run: bool = False) -> MergeReport:
             continue
         for loser in mergeable:
             _reassign_and_delete(supabase, loser.company_id, winner.company_id, report)
+    return report
+
+
+# Trailing corporate-form tokens stripped when matching names for the
+# no-ISIN merge. Mirrors `frontend/app/components/company/nameDupe.ts` —
+# keep the two in sync.
+_CORP_SUFFIXES = frozenset({
+    "inc", "incorporated", "ltd", "limited", "corp", "corporation", "co", "company",
+    "plc", "sa", "ag", "nv", "spa", "se", "llc", "lp", "group", "holding", "holdings",
+    "adr", "ads",
+})
+
+
+def _name_tokens(name: str | None) -> list[str]:
+    """Lowercase, punctuation → space, split into word tokens."""
+    return [t for t in re.sub(r"[^a-z0-9 ]+", " ", (name or "").lower()).split() if t]
+
+
+def _name_dupe_key(name: str | None) -> str:
+    """Suffix-stripped name key for BUCKETING candidates: drop trailing
+    corporate-form tokens so "Celestica" and "Celestica Inc" land in the same
+    bucket — but only suffixes go, never meaningful words ("BYD Co" → "byd",
+    "BYD Electronic" → "byd electronic"). Bucketing is coarse; `_foldable_names`
+    makes the final, safe decision."""
+    toks = _name_tokens(name)
+    while len(toks) > 1 and toks[-1] in _CORP_SUFFIXES:
+        toks.pop()
+    return " ".join(toks)
+
+
+def _foldable_names(a: list[str], b: list[str]) -> bool:
+    """True iff one name is the other with ONLY trailing corporate-form suffix
+    tokens added (or they're identical). So "Celestica" folds into "Celestica
+    Inc" and "HDFC Bank Ltd" == "HDFC Bank Ltd" fold — but "Siemens Ltd" and
+    "Siemens AG" do NOT (different non-suffix… different suffixes; neither is a
+    prefix of the other), nor "Apple" and "Apple Hospitality" (the extra token
+    isn't a corporate suffix). This is what keeps Siemens India from being
+    fused into the German parent. Mirrors `frontend/.../nameDupe.ts`."""
+    short, long = (a, b) if len(a) <= len(b) else (b, a)
+    if not short or long[: len(short)] != short:
+        return False
+    return all(t in _CORP_SUFFIXES for t in long[len(short):])
+
+
+def merge_name_dupes_keep_isin(supabase: Client, *, dry_run: bool = False) -> MergeReport:
+    """Fold a NO-ISIN company into a same-name company that HAS an ISIN.
+
+    This closes the gap both other passes miss: `dedupe_by_isin` keys on a
+    shared ISIN (so a no-ISIN stub can't match), and `merge_existing_duplicates`
+    keys on `canonical_name` (which keeps suffixes, so "Celestica" ≠ "Celestica
+    Inc"). The classic offenders: a LongEquity/index stub with no ISIN
+    duplicating a Leonteq holding, or an out-of-scope NSE primary (no ISIN)
+    duplicating its priced NYSE ADR.
+
+    SAFETY: acts ONLY on a name group (suffix-stripped key) holding EXACTLY ONE
+    ISIN-bearing company plus one-or-more no-ISIN ones. The single ISIN row is
+    the keeper (the canonical, identifiable, usually tradeable listing); the
+    no-ISIN rows merge into it. Groups with zero ISINs (no canonical to pick) or
+    two-plus ISINs (distinct securities / share classes — GOOG vs GOOGL) are
+    SKIPPED, so this can never fuse two different companies. Idempotent;
+    `dry_run=True` previews. Runs after `dedupe_by_isin` (same guarantee spot)."""
+    report = MergeReport()
+
+    from collections import defaultdict  # noqa: PLC0415
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for r in paginate(
+        lambda lo, hi: supabase.table("company")
+        .select("company_id, company_name, isin, gurufocus_ticker, "
+                "gurufocus_exchange:gurufocus_exchange(exchange_code)")
+        .range(lo, hi).execute()
+    ):
+        k = _name_dupe_key(r.get("company_name"))
+        if k:
+            groups[k].append(r)
+
+    for key, g in sorted(groups.items()):
+        if len(g) < 2:
+            continue
+        with_isin = [c for c in g if (c.get("isin") or "").strip()]
+        no_isin = [c for c in g if not (c.get("isin") or "").strip()]
+        # Exactly one canonical (ISIN) row + at least one stub → candidate fold.
+        if len(with_isin) != 1 or not no_isin:
+            continue
+        winner = with_isin[0]
+        win_tok = _name_tokens(winner.get("company_name"))
+        # Only fold stubs whose name is the winner's plus trailing suffixes —
+        # this drops e.g. "Siemens Ltd" (India) from the "Siemens AG" group.
+        foldable = [c for c in no_isin if _foldable_names(win_tok, _name_tokens(c.get("company_name")))]
+        if not foldable:
+            continue
+
+        def _label(c: dict) -> str:
+            ex = (c.get("gurufocus_exchange") or {}).get("exchange_code")
+            return f"cid={c['company_id']} ({ex}:{c.get('gurufocus_ticker')})"
+
+        report.actions.append(
+            f'NAME-DUPE "{key}": keep {_label(winner)} [isin {winner["isin"]}], '
+            f"merge no-ISIN " + ", ".join(_label(c) for c in foldable)
+        )
+        report.groups_merged += 1
+        if dry_run:
+            report.rows_deleted += len(foldable)
+            continue
+        for loser in foldable:
+            _reassign_and_delete(supabase, loser["company_id"], winner["company_id"], report)
+
     return report
 
 

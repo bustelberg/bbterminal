@@ -32,6 +32,25 @@ export const FIXTURE_COMPANIES = [
     country: 'Netherlands',
     universes: ['ACWI', 'LEONTEQ'],
   },
+  // A name-duplicate pair: same company, one side has no ISIN — the case the
+  // ISIN-based DUPE badge misses and the NAME-DUPE filter must surface.
+  {
+    company_id: 4,
+    company_name: 'Celestica Inc',
+    gurufocus_ticker: 'CLS',
+    gurufocus_exchange: 'TSX',
+    isin: 'CA15101Q2071',
+    country: 'Canada',
+    universes: ['LEONTEQ'],
+  },
+  {
+    company_id: 5,
+    company_name: 'Celestica',
+    gurufocus_ticker: 'CLA',
+    gurufocus_exchange: 'TSX',
+    country: 'Canada',
+    universes: ['ACWI'],
+  },
 ];
 
 /**
@@ -62,6 +81,8 @@ export async function mockCompanies(page: Page) {
           '1': ['ACWI'],
           '2': ['ACWI'],
           '3': ['ACWI', 'LEONTEQ'],
+          '4': ['LEONTEQ'],
+          '5': ['ACWI'],
         },
       }),
     });
@@ -77,6 +98,8 @@ export async function mockCompanies(page: Page) {
           '1': { sector: 'Technology', source: 'ACWI' },
           '2': { sector: 'Technology', source: 'ACWI' },
           '3': { sector: 'Technology', source: 'Leonteq' },
+          '4': { sector: 'Technology', source: 'Leonteq' },
+          '5': { sector: 'Technology', source: 'ACWI' },
         },
       }),
     });

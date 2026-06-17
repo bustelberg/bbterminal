@@ -388,9 +388,9 @@ async def list_scheduled_strategies():
 
 @router.post("/api/scheduled-strategies")
 async def add_scheduled_strategy(body: ScheduledStrategyCreate):
-    """Create a new scheduled strategy. Sets `next_due_at` to the next
-    upcoming Tuesday 02:00 UTC pipeline tick so the entry runs on the
-    next eligible tick regardless of frequency."""
+    """Create a new scheduled strategy. Sets `next_due_at` to the next date
+    on its rebalance grid (stamped 02:00 UTC — the threshold the daily 05:00
+    UTC tick picks up) so the entry runs on the next eligible tick."""
     if body.frequency not in FREQUENCIES:
         raise HTTPException(
             400,

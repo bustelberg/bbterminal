@@ -11,17 +11,17 @@ type Status = {
   message?: string;
   processed?: number;
   total?: number;
-  set?: number;
+  verified?: number;
+  mismatch?: number;
   error?: string | null;
 };
 
-/** Admin-only button that triggers the server-side market-cap backfill
- * (GuruFocus → EUR snapshot for every company) and polls its status. It's a
- * long (~hour), rarely-run maintenance job, so the work runs in a backend
- * thread and we just poll the latest progress message every 3s. On completion
- * it calls `onRefreshed` so the table reloads and the new caps appear in the
- * Mkt Cap column. */
-export default function MarketCapRefreshButton({ onRefreshed }: { onRefreshed: () => void }) {
+/** Admin-only button that verifies every company's stored ISIN against
+ * OpenFIGI (catching wrong-ISIN traps — an ISIN that resolves to a different
+ * company) and polls progress. Batched, so it's quick (a couple of minutes for
+ * ~2,800 companies). On completion it calls `onVerified` so the table reloads
+ * and the OpenFIGI column reflects the new statuses. */
+export default function OpenFigiVerifyButton({ onVerified }: { onVerified: () => void }) {
   const [running, setRunning] = useState(false);
   const [message, setMessage] = useState('');
   const [processed, setProcessed] = useState(0);
@@ -39,19 +39,17 @@ export default function MarketCapRefreshButton({ onRefreshed }: { onRefreshed: (
     setProcessed(0);
     setTotal(0);
     try {
-      const r = await apiFetch(`${API_URL}/api/companies/market-cap/refresh`, { method: 'POST' });
+      const r = await apiFetch(`${API_URL}/api/companies/openfigi/verify`, { method: 'POST' });
       const d = await r.json();
       if (!d.started && !d.running) { setRunning(false); return; }
     } catch {
       setRunning(false);
       return;
     }
-    // Poll the status every second — the backend now emits per-company, so this
-    // shows near-real-time progress (one GuruFocus call ≈ every 1.5s).
     stop();
     interval.current = window.setInterval(async () => {
       try {
-        const sr = await apiFetch(`${API_URL}/api/companies/market-cap/refresh/status`);
+        const sr = await apiFetch(`${API_URL}/api/companies/openfigi/verify/status`);
         const s: Status = await sr.json();
         setMessage(s.message ?? '');
         setProcessed(s.processed ?? 0);
@@ -59,14 +57,14 @@ export default function MarketCapRefreshButton({ onRefreshed }: { onRefreshed: (
         if (!s.running) {
           stop();
           setRunning(false);
-          onRefreshed();
+          onVerified();
         }
       } catch {
         stop();
         setRunning(false);
       }
     }, 1000);
-  }, [onRefreshed, stop]);
+  }, [onVerified, stop]);
 
   const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
 
@@ -75,10 +73,9 @@ export default function MarketCapRefreshButton({ onRefreshed }: { onRefreshed: (
       type="button"
       onClick={start}
       disabled={running}
-      title={running ? message : "Fetch market caps (in EUR) for companies that don't have one yet, skipping out-of-coverage (UNSUBSCRIBED) exchanges. Also corrects the name from GuruFocus. Runs in the background; progress updates live."}
+      title={running ? message : "Verify every company's stored ISIN against OpenFIGI — flags ISINs that resolve to a DIFFERENT company (wrong-ISIN traps). Runs in the background (~a couple of minutes); fills the OpenFIGI column."}
       className="relative overflow-hidden px-3 py-2 rounded-lg text-sm font-medium bg-card border border-neutral-800/60 text-fg-muted hover:text-fg-strong transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-2"
     >
-      {/* Live progress fill — width tracks processed/total, behind the label. */}
       {running && (
         <span
           aria-hidden
@@ -91,9 +88,9 @@ export default function MarketCapRefreshButton({ onRefreshed }: { onRefreshed: (
         <span className="truncate max-w-[18rem]">
           {running
             ? total > 0
-              ? `Refreshing market caps… ${processed}/${total} (${pct}%)`
-              : (message || 'Refreshing market caps…')
-            : 'Refresh market caps'}
+              ? `Verifying ISINs… ${processed}/${total} (${pct}%)`
+              : (message || 'Verifying ISINs…')
+            : 'Verify OpenFIGI'}
         </span>
       </span>
     </button>

@@ -22,10 +22,10 @@ logger = logging.getLogger(__name__)
 # the frontend ApiUsageBadge (`LIMIT`). Resets at midnight EST on the 1st.
 MONTHLY_API_LIMIT = 20000
 
-US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX", "CBOE"}
+US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX", "CBOE", "OTCPK"}
 ASIA_EXCHANGES = {
     "TSE", "HKSE", "SHSE", "SSE", "SZSE", "TPE", "TWSE", "ROCO",
-    "XKRX", "NSE", "BSE", "SGX", "XKLS", "ISX", "BKK", "PHS",
+    "XKRX", "NSE", "BOM", "SGX", "XKLS", "ISX", "BKK", "PHS",
     "ASX", "NZSE", "JSE",
 }
 

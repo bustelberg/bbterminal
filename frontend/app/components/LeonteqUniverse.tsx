@@ -59,7 +59,15 @@ export default function LeonteqUniverse() {
 
   const [freezing, setFreezing] = useState(false);
   const [freezeResult, setFreezeResult] = useState<{ ok: boolean; message: string } | null>(null);
+  // Companies dropped from the freeze for a MISSING market cap (subscribed, so
+  // they SHOULD have one) — the data gap to fix then re-freeze.
+  const [missingMktCap, setMissingMktCap] = useState<
+    { company_id: number; company_name: string | null; ticker: string | null; exchange: string | null }[]
+  >([]);
   const [freezeCount, setFreezeCount] = useState(0); // bump → refresh frozen panel
+  // Minimum market cap (in € billions) a company needs to enter the frozen
+  // snapshot. Defaults to 1B; companies below it (or with no cap) are dropped.
+  const [minCapB, setMinCapB] = useState('1');
 
   const load = useCallback(async () => {
     try {
@@ -223,9 +231,11 @@ export default function LeonteqUniverse() {
     setFreezing(true);
     setFreezeResult(null);
     try {
-      const resp = await apiFetch(`${API_URL}/api/universe-templates/${TEMPLATE_KEY}/freeze`, {
-        method: 'POST',
-      });
+      const minEur = Math.max(0, parseFloat(minCapB) || 0) * 1e9;
+      const resp = await apiFetch(
+        `${API_URL}/api/universe-templates/${TEMPLATE_KEY}/freeze?min_market_cap_eur=${minEur}`,
+        { method: 'POST' },
+      );
       if (!resp.ok) {
         setFreezeResult({ ok: false, message: `Freeze failed (${resp.status})` });
         return;
@@ -234,18 +244,23 @@ export default function LeonteqUniverse() {
       // So /backtest's cached static-universe list re-fetches and shows it.
       invalidateCache('GET /api/static-universes');
       setFreezeCount((c) => c + 1); // refresh the frozen-universes panel
+      const missing = (j.missing_market_cap ?? []) as typeof missingMktCap;
+      setMissingMktCap(missing);
+      const floorB = j.min_market_cap_eur ? `€${(j.min_market_cap_eur / 1e9).toFixed(0)}B` : null;
       setFreezeResult({
         ok: true,
         message: j.created
-          ? `Created “${j.label}” — ${j.members_copied ?? 0} membership rows (${j.latest_membership_count ?? 0} names in the latest month). Now selectable in /backtest.`
-          : `“${j.label}” already exists for today — pick it in /backtest.`,
+          ? `Created “${j.label}” — ${j.members_copied ?? 0} companies${floorB ? ` (market-cap floor ${floorB} applied)` : ''}.`
+            + (missing.length ? ` ⚠ ${missing.length} dropped for a MISSING market cap — refresh market caps, then delete + re-freeze.` : '')
+            + ' Now selectable in /backtest.'
+          : `“${j.label}” already exists for today — delete it (panel below) to re-freeze with the current data + market-cap floor.`,
       });
     } catch (e) {
       setFreezeResult({ ok: false, message: e instanceof Error ? e.message : String(e) });
     } finally {
       setFreezing(false);
     }
-  }, [freezing]);
+  }, [freezing, minCapB]);
 
   const toggleSector = (name: string) => {
     setExpandedSectors((prev) => {
@@ -290,11 +305,27 @@ export default function LeonteqUniverse() {
             <Stat label="Last scraped" value={data ? fmtTimestamp(data.scraped_at) : '—'} />
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <label
+              className="flex items-center gap-1 text-xs text-fg-muted"
+              title="Minimum market cap (in € billions) a company needs to be frozen into the snapshot. Companies below it — or with no market cap — are dropped. Subscribed companies missing a cap are reported so you can fix them."
+            >
+              Min cap €
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={minCapB}
+                onChange={(e) => setMinCapB(e.target.value)}
+                disabled={freezing}
+                className="w-14 px-2 py-1 bg-page border border-neutral-700 rounded text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none disabled:opacity-50"
+              />
+              B
+            </label>
             <button
               type="button"
               onClick={() => void freezeSnapshot()}
               disabled={freezing || refreshing}
-              title="Create a dated, immutable snapshot of the CURRENT Leonteq universe — “LEONTEQ (as of <today>)”. The pipeline never changes it, so backtests against it are reproducible. It appears in the /backtest universe picker."
+              title="Create a dated, immutable snapshot of the CURRENT Leonteq universe — “LEONTEQ (as of <today>)” — filtered to companies at or above the min market cap. The pipeline never changes it, so backtests against it are reproducible."
               className="text-xs px-3 py-1.5 rounded-lg border border-neutral-700 text-fg-muted hover:bg-overlay/5 hover:text-fg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {freezing ? 'Freezing…' : 'Freeze snapshot'}
@@ -321,12 +352,34 @@ export default function LeonteqUniverse() {
             <span>{freezeResult.message}</span>
             <button
               type="button"
-              onClick={() => setFreezeResult(null)}
+              onClick={() => { setFreezeResult(null); setMissingMktCap([]); }}
               className="text-fg-faint hover:text-fg shrink-0"
               aria-label="Dismiss"
             >
               ×
             </button>
+          </div>
+        )}
+
+        {missingMktCap.length > 0 && (
+          <div className="rounded-lg border border-warn-500/30 bg-warn-500/5 px-4 py-3">
+            <p className="text-xs font-medium text-warn-300">
+              {missingMktCap.length} compan{missingMktCap.length === 1 ? 'y' : 'ies'} dropped — no market cap (but GuruFocus-covered, so they should have one).
+              Run <span className="font-mono">Refresh market caps</span> on /companies, then delete this snapshot and re-freeze.
+            </p>
+            <div className="mt-2 max-h-48 overflow-auto">
+              <table className="w-full text-xs">
+                <tbody>
+                  {missingMktCap.map((m) => (
+                    <tr key={m.company_id} className="border-b border-neutral-800/20">
+                      <td className="py-1 pr-3 font-mono text-fg-faint">{m.company_id}</td>
+                      <td className="py-1 pr-3 text-fg-soft">{m.company_name ?? '—'}</td>
+                      <td className="py-1 font-mono text-fg-muted">{m.exchange}:{m.ticker}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
