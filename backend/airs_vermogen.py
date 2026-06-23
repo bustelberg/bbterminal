@@ -38,8 +38,9 @@ _STATUS: dict = {
     "rendement_stored": 0,     # portfolios whose Rendement (ATT) was stored
     "vermogen_stored": 0,      # portfolios whose Vermogensoverzicht (VOLK) was stored
     "holdings_rows": 0,        # total holding rows stored
-    "crm_stored": None,        # True/False — CRM "Alle relaties" raw export stored this run
+    "crm_stored": None,        # True/False — CRM "Alle relaties" export stored this run
     "crm_bytes": 0,            # size of the stored raw CRM export
+    "crm_rows": 0,             # relations parsed into airs_crm_relatie this run
     "errors": [],
 }
 
@@ -127,6 +128,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
             "holdings_rows": 0,
             "crm_stored": None,
             "crm_bytes": 0,
+            "crm_rows": 0,
             "errors": [],
         })
 
@@ -167,15 +169,21 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
         # raw (base64) in airs_crm_relaties_raw, upserted per as-of date.
         _STATUS["message"] = "Downloading CRM Alle relaties…"
         crm_bytes = 0
+        crm_rows = 0
         crm_ok = False
         try:
+            from airs_crm import parse_crm_relaties, store_crm_relaties  # noqa: PLC0415
+
             raw = download_crm_relaties_sync()
+            # Raw blob (byte-for-byte re-download) …
             supabase.table("airs_crm_relaties_raw").upsert({
                 "as_of_date": tot,
                 "filename": f"crm_relaties_{tot}.xlsx",
                 "content_base64": base64.b64encode(raw).decode("ascii"),
                 "byte_size": len(raw),
             }, on_conflict="as_of_date").execute()
+            # … and the human-readable, queryable typed rows.
+            crm_rows = store_crm_relaties(tot, parse_crm_relaties(raw))
             crm_bytes, crm_ok = len(raw), True
         except Exception as e:
             _STATUS["errors"].append(f"CRM relaties: {type(e).__name__}: {e}")
@@ -191,10 +199,11 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
             "holdings_rows": holdings_total,
             "crm_stored": crm_ok,
             "crm_bytes": crm_bytes,
+            "crm_rows": crm_rows,
             "message": (
                 f"Rendement {rendement_ok}/{total}, Vermogensoverzicht {vermogen_ok}/{total} "
                 f"({holdings_total} holdings); CRM relaties "
-                + (f"{crm_bytes // 1024} KB" if crm_ok else "failed")
+                + (f"{crm_rows} relations ({crm_bytes // 1024} KB)" if crm_ok else "failed")
                 + (f"; {len(_STATUS['errors'])} report(s) failed" if _STATUS["errors"] else "")
             ),
         })
