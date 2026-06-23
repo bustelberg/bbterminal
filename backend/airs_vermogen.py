@@ -179,9 +179,11 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
 
 
 def get_status() -> dict:
-    """Current status + the persistent freshest stored snapshot date."""
+    """Current status + the persistent freshest snapshot: its date, distinct
+    portfolios, and total holding rows."""
     latest_date = None
-    distinct_portfolios = 0
+    portfolios = 0
+    holdings = 0
     try:
         resp = (
             supabase.table("airs_holding")
@@ -189,13 +191,32 @@ def get_status() -> dict:
         )
         if resp.data:
             latest_date = resp.data[0]["as_of_date"]
+            # Total holding rows at that date.
             cnt = (
                 supabase.table("airs_holding")
-                .select("portefeuille", count="exact")
+                .select("id", count="exact")
                 .eq("as_of_date", latest_date).limit(0).execute()
             )
-            distinct_portfolios = getattr(cnt, "count", 0) or 0
+            holdings = getattr(cnt, "count", 0) or 0
+            # Distinct portfolios — paginate the portefeuille column + dedupe
+            # (PostgREST has no DISTINCT count; the row set at one date is small).
+            seen: set[str] = set()
+            offset, page = 0, 1000
+            for _ in range(20):
+                rows = (
+                    supabase.table("airs_holding")
+                    .select("portefeuille").eq("as_of_date", latest_date)
+                    .range(offset, offset + page - 1).execute()
+                ).data or []
+                if not rows:
+                    break
+                seen.update(r["portefeuille"] for r in rows)
+                if len(rows) < page:
+                    break
+                offset += page
+            portfolios = len(seen)
     except Exception:
         pass
     return {**_STATUS, "latest_snapshot_date": latest_date,
-            "latest_snapshot_rows": distinct_portfolios}
+            "latest_snapshot_portfolios": portfolios,
+            "latest_snapshot_holdings": holdings}

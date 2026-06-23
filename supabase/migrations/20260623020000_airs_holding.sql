@@ -7,6 +7,10 @@
 -- (`parse_airs_excel`), the same parser the drag-drop path uses.
 
 CREATE TABLE IF NOT EXISTS airs_holding (
+    -- Surrogate PK: a portfolio can legitimately hold the SAME fund on two
+    -- lines (e.g. two tranches/lots), so (portfolio, date, name) is NOT unique.
+    -- Per-day dedup is by delete-then-insert per (portefeuille, as_of_date).
+    id                    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     portefeuille          text NOT NULL,
     as_of_date            date NOT NULL,
     holding_name          text NOT NULL,
@@ -18,8 +22,7 @@ CREATE TABLE IF NOT EXISTS airs_holding (
     ytd_return_eur        numeric,
     ytd_return_pct        numeric,            -- EUR basis
     ytd_return_local_pct  numeric,            -- currency-neutral (local)
-    retrieved_at          timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (portefeuille, as_of_date, holding_name)
+    retrieved_at          timestamptz NOT NULL DEFAULT now()
 );
 
 -- Common reads: "latest snapshot for a portfolio" and "everything as of a date".

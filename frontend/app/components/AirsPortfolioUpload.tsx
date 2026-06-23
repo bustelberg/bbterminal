@@ -593,7 +593,8 @@ type VermogenStatus = {
   holdings_rows: number;
   errors: string[];
   latest_snapshot_date: string | null;
-  latest_snapshot_rows: number;
+  latest_snapshot_portfolios: number;
+  latest_snapshot_holdings: number;
   next_run_at: string | null;
 };
 
@@ -646,7 +647,7 @@ function VermogenJobCard() {
         <div>
           <h2 className="text-sm font-medium text-fg-strong">Daily Vermogensoverzicht refresh</h2>
           <p className="text-[11px] text-fg-subtle mt-0.5">
-            Working days 11:00 Amsterdam · re-discovers the live portfolio list, stores each portfolio&apos;s holdings.
+            Working days 10:00 Amsterdam · re-discovers the live portfolio list, stores each portfolio&apos;s Rendement + Vermogensoverzicht.
             {s?.next_run_at && <> Next run <span className="font-mono text-fg-muted">{fmtDateTime(s.next_run_at)}</span>.</>}
           </p>
         </div>
@@ -684,7 +685,10 @@ function VermogenJobCard() {
             <span className="text-fg-faint">none</span>
           )}
           {s?.latest_snapshot_date && (
-            <span className="text-fg-faint"> · {s.latest_snapshot_rows} portfolio{s.latest_snapshot_rows === 1 ? '' : 's'}</span>
+            <span className="text-fg-faint">
+              {' '}· {s.latest_snapshot_portfolios} portfolio{s.latest_snapshot_portfolios === 1 ? '' : 's'}
+              {' '}· {s.latest_snapshot_holdings} holding{s.latest_snapshot_holdings === 1 ? '' : 's'}
+            </span>
           )}
         </div>
 

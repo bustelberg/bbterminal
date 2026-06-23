@@ -425,15 +425,15 @@ def register_scheduler(app) -> None:
             coalesce=True,
             misfire_grace_time=3600,
         )
-        # Daily AIRS Vermogensoverzicht refresh — working days (Mon–Fri) at
-        # 11:00 Amsterdam time. The per-job timezone makes APScheduler handle
-        # the CET/CEST DST shift; only weekday holidays aren't skipped (a
-        # holiday run just re-stores the prior close, harmless). Re-discovers
-        # the live AirSPMS portfolio list each run (it changes day-to-day) and
-        # stores each portfolio's holdings snapshot. Runs on its own thread.
+        # Daily AIRS refresh — working days (Mon–Fri) at 10:00 Amsterdam time.
+        # The per-job timezone makes APScheduler handle the CET/CEST DST shift;
+        # only weekday holidays aren't skipped (a holiday run just re-stores the
+        # prior close, harmless). Re-discovers the live AirSPMS portfolio list
+        # each run (it changes day-to-day) and stores each portfolio's Rendement
+        # + Vermogensoverzicht. Runs on its own thread.
         sched.add_job(
             _fire_airs_vermogen,
-            CronTrigger(day_of_week="mon-fri", hour=11, minute=0, timezone="Europe/Amsterdam"),
+            CronTrigger(day_of_week="mon-fri", hour=10, minute=0, timezone="Europe/Amsterdam"),
             id="airs_vermogen_refresh",
             replace_existing=True,
             coalesce=True,
