@@ -6,11 +6,11 @@
 -- One row per (portfolio, as_of_date, holding). Mirrors `portfolio.ParsedHolding`
 -- (`parse_airs_excel`), the same parser the drag-drop path uses.
 
+-- NOTE: this composite PK proved too strict (a portfolio can hold the same fund
+-- on two lines) — it's replaced by a surrogate `id` PK in the follow-up
+-- migration 20260623030000_airs_holding_surrogate_pk.sql. Kept as-is here to
+-- match what was already applied to prod.
 CREATE TABLE IF NOT EXISTS airs_holding (
-    -- Surrogate PK: a portfolio can legitimately hold the SAME fund on two
-    -- lines (e.g. two tranches/lots), so (portfolio, date, name) is NOT unique.
-    -- Per-day dedup is by delete-then-insert per (portefeuille, as_of_date).
-    id                    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     portefeuille          text NOT NULL,
     as_of_date            date NOT NULL,
     holding_name          text NOT NULL,
@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS airs_holding (
     ytd_return_eur        numeric,
     ytd_return_pct        numeric,            -- EUR basis
     ytd_return_local_pct  numeric,            -- currency-neutral (local)
-    retrieved_at          timestamptz NOT NULL DEFAULT now()
+    retrieved_at          timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (portefeuille, as_of_date, holding_name)
 );
 
 -- Common reads: "latest snapshot for a portfolio" and "everything as of a date".

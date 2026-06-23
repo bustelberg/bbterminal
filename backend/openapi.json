@@ -3694,6 +3694,47 @@
         ]
       }
     },
+    "/api/data/universe-history": {
+      "get": {
+        "description": "On-demand depth + gap check for ONE static universe's members: does every\ncompany have \u22651 year of price/volume history with no missing stretches?\n\nReturns, per metric (`price`/`volume`): `start` (earliest date across\nmembers), `covered`/`no_data` counts, `short` (members with <1yr history),\n`gaps` (members with a >14-day hole in the trailing year), and the worst\noffender of each (with its company). Heavier than the polled coverage\nendpoint (full-history scan), so it's its own button-triggered call.",
+        "operationId": "universe_history_api_data_universe_history_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "label",
+            "required": true,
+            "schema": {
+              "title": "Label",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Universe History",
+        "tags": [
+          "system"
+        ]
+      }
+    },
     "/api/earnings/portfolios": {
       "get": {
         "description": "All portfolios with their members + display labels.",

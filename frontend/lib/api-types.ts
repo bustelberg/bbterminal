@@ -1444,6 +1444,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/data/universe-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Universe History
+         * @description On-demand depth + gap check for ONE static universe's members: does every
+         *     company have ≥1 year of price/volume history with no missing stretches?
+         *
+         *     Returns, per metric (`price`/`volume`): `start` (earliest date across
+         *     members), `covered`/`no_data` counts, `short` (members with <1yr history),
+         *     `gaps` (members with a >14-day hole in the trailing year), and the worst
+         *     offender of each (with its company). Heavier than the polled coverage
+         *     endpoint (full-history scan), so it's its own button-triggered call.
+         */
+        get: operations["universe_history_api_data_universe_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/earnings/portfolios": {
         parameters: {
             query?: never;
@@ -5866,6 +5893,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    universe_history_api_data_universe_history_get: {
+        parameters: {
+            query: {
+                label: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

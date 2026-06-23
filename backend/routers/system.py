@@ -14,7 +14,7 @@ import os
 
 from fastapi import APIRouter, Response
 
-from deps import supabase
+from deps import fetch_in_chunks, supabase
 from ingest.api_usage import get_usage
 from routers._cache_headers import CACHE_PIPELINE
 
@@ -261,11 +261,12 @@ async def universe_coverage(response: Response):
     def _q() -> dict:
         from ingest.phases.planner import _latest_membership_company_ids  # noqa: PLC0415
 
-        # Frozen snapshots + template-managed universes — the tradable sets.
+        # STATIC (frozen) snapshots only — the reproducible, tradable sets. The
+        # live template universes (ACWI/Leonteq/LongEquity) are excluded.
         us = (
             supabase.table("universe")
-            .select("universe_id, label, frozen_from, template_key")
-            .or_("frozen_at.not.is.null,template_key.not.is.null")
+            .select("universe_id, label, frozen_from")
+            .not_.is_("frozen_at", "null")
             .execute()
         ).data or []
 
@@ -282,32 +283,174 @@ async def universe_coverage(response: Response):
         vol = _latest_metric_dates_for(all_cids, "volume")
         excluded = _excluded_company_ids()
 
-        out: list[dict] = []
+        # Per universe, find the company at the min (most-stale) and max
+        # (freshest) latest date for price + volume. Collect those companies to
+        # enrich with ticker/exchange/name in one batched lookup.
+        def _extremes(members: set[int], dates: dict[int, str]):
+            priced = [(c, dates[c]) for c in members if dates.get(c)]
+            if not priced:
+                return None, None, 0
+            lo = min(priced, key=lambda x: x[1])
+            hi = max(priced, key=lambda x: x[1])
+            return lo, hi, len(priced)
+
+        per_uid: dict[int, dict] = {}
+        extreme_cids: set[int] = set()
         for u in us:
             uid = int(u["universe_id"])
             members = members_by_uid.get(uid, set()) - excluded
             if not members:
                 continue
-            p_dates = [close[c] for c in members if close.get(c)]
-            v_dates = [vol[c] for c in members if vol.get(c)]
+            p_lo, p_hi, p_n = _extremes(members, close)
+            v_lo, v_hi, v_n = _extremes(members, vol)
+            per_uid[uid] = {"members": len(members), "p_lo": p_lo, "p_hi": p_hi,
+                            "p_n": p_n, "v_lo": v_lo, "v_hi": v_hi, "v_n": v_n}
+            for pair in (p_lo, p_hi, v_lo, v_hi):
+                if pair and pair[0] is not None:
+                    extreme_cids.add(pair[0])
+
+        info: dict[int, dict] = {}
+        for r in fetch_in_chunks(
+            list(extreme_cids),
+            lambda chunk: supabase.table("company")
+            .select("company_id, company_name, gurufocus_ticker, "
+                    "gurufocus_exchange:gurufocus_exchange(exchange_code)")
+            .in_("company_id", chunk).execute(),
+        ):
+            info[int(r["company_id"])] = {
+                "ticker": r.get("gurufocus_ticker"),
+                "exchange": (r.get("gurufocus_exchange") or {}).get("exchange_code"),
+                "company_name": r.get("company_name"),
+            }
+
+        def _co(pair):
+            """A min/max endpoint: the date + the company responsible for it."""
+            if not pair or pair[0] is None:
+                return None
+            cid, dt = pair
+            i = info.get(cid, {})
+            return {"date": dt, "company_id": cid, "ticker": i.get("ticker"),
+                    "exchange": i.get("exchange"), "company_name": i.get("company_name")}
+
+        out: list[dict] = []
+        for u in us:
+            uid = int(u["universe_id"])
+            ex = per_uid.get(uid)
+            if not ex:
+                continue
             out.append({
                 "universe_id": uid,
                 "label": u.get("label"),
                 "frozen_from": u.get("frozen_from"),
-                "template_key": u.get("template_key"),
-                "members": len(members),
-                "price": {
-                    "min": min(p_dates) if p_dates else None,
-                    "max": max(p_dates) if p_dates else None,
-                    "priced": len(p_dates),
-                },
-                "volume": {
-                    "min": min(v_dates) if v_dates else None,
-                    "max": max(v_dates) if v_dates else None,
-                    "priced": len(v_dates),
-                },
+                "members": ex["members"],
+                "price": {"min": _co(ex["p_lo"]), "max": _co(ex["p_hi"]), "priced": ex["p_n"]},
+                "volume": {"min": _co(ex["v_lo"]), "max": _co(ex["v_hi"]), "priced": ex["v_n"]},
             })
         out.sort(key=lambda x: (x.get("label") or "").lower())
         return {"universes": out}
+
+    return await asyncio.to_thread(_q)
+
+
+# A consecutive-day jump larger than this (in the trailing year) is treated as a
+# real data gap — weekends + holiday clusters stay well under it.
+_GAP_THRESHOLD_DAYS = 14
+
+
+@router.get("/api/data/universe-history")
+async def universe_history(label: str, response: Response):
+    """On-demand depth + gap check for ONE static universe's members: does every
+    company have ≥1 year of price/volume history with no missing stretches?
+
+    Returns, per metric (`price`/`volume`): `start` (earliest date across
+    members), `covered`/`no_data` counts, `short` (members with <1yr history),
+    `gaps` (members with a >14-day hole in the trailing year), and the worst
+    offender of each (with its company). Heavier than the polled coverage
+    endpoint (full-history scan), so it's its own button-triggered call."""
+    response.headers["Cache-Control"] = CACHE_PIPELINE
+
+    def _q() -> dict:
+        from datetime import date, timedelta  # noqa: PLC0415
+
+        from ingest.phases.planner import _latest_membership_company_ids  # noqa: PLC0415
+
+        u = (
+            supabase.table("universe").select("universe_id, label")
+            .eq("label", label).limit(1).execute()
+        ).data
+        if not u:
+            return {"label": label, "error": "universe not found", "members": 0}
+        uid = int(u[0]["universe_id"])
+        members = _latest_membership_company_ids(uid) - _excluded_company_ids()
+        since = (date.today() - timedelta(days=365)).isoformat()
+        result: dict = {"label": label, "members": len(members), "since": since}
+        if not members:
+            return result
+
+        cid_list = list(members)
+        # Coverage per company for each metric (chunked to ride the index).
+        cov_by_metric: dict[str, dict[int, dict]] = {}
+        for metric in ("close_price", "volume"):
+            cov: dict[int, dict] = {}
+            for i in range(0, len(cid_list), 400):
+                resp = supabase.rpc("company_metric_coverage_for", {
+                    "p_company_ids": cid_list[i:i + 400],
+                    "p_metric_code": metric, "p_since": since,
+                }).execute()
+                for r in resp.data or []:
+                    cov[int(r["company_id"])] = r
+            cov_by_metric[metric] = cov
+
+        # Enrich the worst offenders with ticker/exchange/name.
+        worst_cids: set[int] = set()
+        agg: dict[str, dict] = {}
+        for metric, key in (("close_price", "price"), ("volume", "volume")):
+            cov = cov_by_metric[metric]
+            starts = [r["earliest_target_date"] for r in cov.values() if r.get("earliest_target_date")]
+            short = [(c, r) for c, r in cov.items()
+                     if (r.get("earliest_target_date") or "9999-99-99") > since]
+            gaps = [(c, r) for c, r in cov.items() if (r.get("max_gap_days") or 0) > _GAP_THRESHOLD_DAYS]
+            worst_gap = max(gaps, key=lambda x: x[1]["max_gap_days"], default=None)
+            worst_short = max(short, key=lambda x: x[1].get("earliest_target_date") or "", default=None)
+            if worst_gap:
+                worst_cids.add(worst_gap[0])
+            if worst_short:
+                worst_cids.add(worst_short[0])
+            agg[key] = {
+                "start": min(starts) if starts else None,
+                "covered": len(cov),
+                "no_data": len(members) - len(cov),
+                "short": len(short),
+                "gaps": len(gaps),
+                "_worst_gap": worst_gap,
+                "_worst_short": worst_short,
+            }
+
+        info: dict[int, dict] = {}
+        for r in fetch_in_chunks(
+            list(worst_cids),
+            lambda chunk: supabase.table("company")
+            .select("company_id, company_name, gurufocus_ticker, "
+                    "gurufocus_exchange:gurufocus_exchange(exchange_code)")
+            .in_("company_id", chunk).execute(),
+        ):
+            info[int(r["company_id"])] = {
+                "ticker": r.get("gurufocus_ticker"),
+                "exchange": (r.get("gurufocus_exchange") or {}).get("exchange_code"),
+                "company_name": r.get("company_name"),
+            }
+
+        def _co(cid: int | None, extra: dict) -> dict | None:
+            if cid is None:
+                return None
+            return {"company_id": cid, **info.get(cid, {}), **extra}
+
+        for key in ("price", "volume"):
+            a = agg[key]
+            wg, ws = a.pop("_worst_gap"), a.pop("_worst_short")
+            a["worst_gap"] = _co(wg[0], {"gap_days": wg[1]["max_gap_days"]}) if wg else None
+            a["worst_short"] = _co(ws[0], {"earliest": ws[1].get("earliest_target_date")}) if ws else None
+            result[key] = a
+        return result
 
     return await asyncio.to_thread(_q)

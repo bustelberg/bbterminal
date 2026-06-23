@@ -40,19 +40,55 @@ type PriceCoverage = {
 };
 
 /** Per-universe price + volume freshness — from `/api/data/universe-coverage`.
- * Each tradable universe's min/max latest close-price and volume date across
- * its active members, with a per-universe manual refresh button. */
-type CoverageRange = { min: string | null; max: string | null; priced: number };
+ * For each STATIC (frozen) universe, the min (most-stale) / max (freshest)
+ * latest close-price and volume date across its active members, each with the
+ * company responsible, plus a per-universe manual refresh button. */
+type CoverageEndpoint = {
+  date: string;
+  company_id: number;
+  ticker: string | null;
+  exchange: string | null;
+  company_name: string | null;
+};
+type CoverageRange = { min: CoverageEndpoint | null; max: CoverageEndpoint | null; priced: number };
 type UniverseCoverageRow = {
   universe_id: number;
   label: string | null;
   frozen_from: string | null;
-  template_key: string | null;
   members: number;
   price: CoverageRange;
   volume: CoverageRange;
 };
 type UniverseCoverage = { universes: UniverseCoverageRow[] };
+
+/** On-demand depth + gap check — from `/api/data/universe-history?label=`. Per
+ * metric: earliest date, how many members have data / <1yr history / a >14-day
+ * hole in the trailing year, and the worst offender of each. */
+type CoverageWorst = {
+  company_id: number;
+  ticker: string | null;
+  exchange: string | null;
+  company_name: string | null;
+  gap_days?: number;
+  earliest?: string | null;
+};
+type HistoryMetric = {
+  start: string | null;
+  covered: number;
+  no_data: number;
+  short: number;
+  gaps: number;
+  worst_gap: CoverageWorst | null;
+  worst_short: CoverageWorst | null;
+};
+type UniverseHistory = {
+  label: string;
+  members: number;
+  since: string;
+  error?: string;
+  price?: HistoryMetric;
+  volume?: HistoryMetric;
+};
 
 /** Three independent operations of the split pipeline, stacked:
  *   1. Price update — re-prices the held companies + refreshes MTD (daily).
@@ -450,34 +486,170 @@ function CoverageLine({ label, c, tone, marked, onMark }: {
   );
 }
 
-/** One per-universe coverage row: label, member count, price + volume date
- * ranges, and a manual "Refresh" button that re-prices just that universe. */
-function UniverseCoverageRow({ u, running }: { u: UniverseCoverageRow; running: boolean }) {
-  const { run, pending } = useRunNow('universe_price_refresh', running, u.label ?? undefined);
-  const fmtRange = (r: CoverageRange) =>
-    r.min && r.max ? (r.min === r.max ? r.min : `${r.min} → ${r.max}`) : '—';
-  // Stale if the freshest member is behind the most recent expected close.
+/** One min/max endpoint: its date + the company responsible (ticker GuruFocus
+ * link + exchange; full name on hover). */
+function CovEnd({ e }: { e: CoverageEndpoint | null }) {
+  if (!e) return <span className="text-fg-faint">—</span>;
+  const href = e.ticker ? guruFocusUrl(e.ticker, e.exchange ?? '') : null;
   return (
-    <div className="flex items-center gap-2 flex-wrap py-1 border-b border-neutral-800/20 last:border-0">
-      <span className="text-fg-soft font-medium min-w-[150px] truncate" title={u.label ?? ''}>{u.label ?? '—'}</span>
-      <span className="text-fg-faint font-mono">{u.members}co</span>
-      <span className="text-fg-faint">·</span>
-      <span className="text-fg-muted">price</span>
-      <span className="font-mono text-fg-subtle">{fmtRange(u.price)}</span>
-      <span className="text-fg-faint">·</span>
-      <span className="text-fg-muted">vol</span>
-      <span className="font-mono text-fg-subtle">{fmtRange(u.volume)}</span>
-      <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); void run(); }}
-        disabled={pending || running}
-        title={`Re-fetch prices + volumes for every company in ${u.label} (within the monthly GuruFocus budget)`}
-        className="ml-auto text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted
-                   hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-40
-                   disabled:cursor-not-allowed transition-colors"
-      >
-        {pending ? 'Starting…' : 'Refresh'}
-      </button>
+    <span className="font-mono" title={e.company_name ?? ''}>
+      <span className="text-fg-subtle">{e.date}</span>{' '}
+      {href ? (
+        <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent-400 hover:text-accent-300">{e.ticker}</a>
+      ) : (
+        <span className="text-fg-soft">{e.ticker ?? '—'}</span>
+      )}
+      {e.exchange && <span className="text-fg-faint">·{e.exchange}</span>}
+    </span>
+  );
+}
+
+/** A depth/gap readout line for one metric: history start, members-with-data,
+ * <1yr count, gap count — green ✓ when complete, amber ⚠ otherwise. */
+function HistoryLine({ label, m, members }: { label: string; m: HistoryMetric; members: number }) {
+  const ok = m.no_data === 0 && m.short === 0 && m.gaps === 0;
+  const yr = (m.start ?? '') && m.start! <= new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap pl-1 text-[11px]">
+      <span className={ok ? 'text-pos-400' : 'text-warn-300'}>{ok ? '✓' : '⚠'}</span>
+      <span className="text-fg-muted w-9 shrink-0">{label}</span>
+      <span className="text-fg-subtle">from</span>
+      <span className={`font-mono ${yr ? 'text-fg-soft' : 'text-warn-300'}`}>{m.start ?? '—'}</span>
+      {m.no_data > 0 && <span className="text-warn-300">· {m.no_data} no data</span>}
+      <span className="text-fg-faint">· {m.covered}/{members} have data</span>
+      <span className={m.short > 0 ? 'text-warn-300' : 'text-fg-faint'}>· {m.short} &lt;1yr</span>
+      <span className={m.gaps > 0 ? 'text-warn-300' : 'text-fg-faint'}>
+        · {m.gaps} gaps{m.worst_gap ? ` (worst ${m.worst_gap.ticker ?? '?'} ${m.worst_gap.gap_days}d)` : ''}
+      </span>
+    </div>
+  );
+}
+
+/** One static-universe coverage block: label + member count + Check/Refresh,
+ * the latest-close & latest-volume freshness (min=most-stale → max=freshest,
+ * each with the company), an on-demand history depth/gap check, and — while
+ * THIS universe is refreshing — a live progress bar + the job's message. */
+function UniverseCoverageRow({ u, busy, progress, onTrigger }: {
+  u: UniverseCoverageRow;
+  busy: boolean;                // any universe refresh is running
+  progress: RunningJob | null;  // the running job, iff it's THIS universe
+  onTrigger: () => void;
+}) {
+  const { run, pending } = useRunNow('universe_price_refresh', busy, u.label ?? undefined);
+  const [hist, setHist] = useState<UniverseHistory | null>(null);
+  const [checking, setChecking] = useState(false);
+  const total = progress?.companies_total ?? 0;
+  const done = progress?.companies_processed ?? 0;
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+
+  const check = async () => {
+    if (checking || !u.label) return;
+    setChecking(true);
+    try {
+      const r = await apiFetch(`${API_URL}/api/data/universe-history?label=${encodeURIComponent(u.label)}`);
+      setHist(r.ok ? ((await r.json()) as UniverseHistory) : null);
+    } catch {
+      setHist(null);
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <div className="py-2 border-b border-neutral-800/20 last:border-0 space-y-1">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-fg-soft font-medium" title={u.label ?? ''}>{u.label ?? '—'}</span>
+        <span className="text-fg-faint font-mono">{u.members}co</span>
+        <div className="ml-auto flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); void check(); }}
+            disabled={checking}
+            title={`Check that every ${u.label} member has ≥1yr of price/volume history with no >14-day gaps`}
+            className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted
+                       hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-40
+                       disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+          >
+            {checking && <Spinner className="h-3 w-3" />}
+            {checking ? 'Checking…' : 'Check history'}
+          </button>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onTrigger(); void run(); }}
+            disabled={pending || busy}
+            title={`Re-fetch prices + volumes for every company in ${u.label} (within the monthly GuruFocus budget)`}
+            className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted
+                       hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-40
+                       disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+          >
+            {progress && <Spinner className="h-3 w-3" />}
+            {progress ? 'Refreshing…' : pending ? 'Starting…' : 'Refresh'}
+          </button>
+        </div>
+      </div>
+
+      {/* Freshness: latest close / volume, most-stale → freshest. */}
+      <div className="flex items-center gap-1.5 flex-wrap pl-1 text-[11px]">
+        <span className="text-fg-muted w-16 shrink-0">latest close</span>
+        <CovEnd e={u.price.min} /><span className="text-fg-faint">→</span><CovEnd e={u.price.max} />
+      </div>
+      <div className="flex items-center gap-1.5 flex-wrap pl-1 text-[11px]">
+        <span className="text-fg-muted w-16 shrink-0">latest vol</span>
+        <CovEnd e={u.volume.min} /><span className="text-fg-faint">→</span><CovEnd e={u.volume.max} />
+      </div>
+
+      {/* On-demand depth + gap check. */}
+      {hist?.price && <HistoryLine label="price" m={hist.price} members={hist.members} />}
+      {hist?.volume && <HistoryLine label="vol" m={hist.volume} members={hist.members} />}
+      {hist?.error && <div className="pl-1 text-[11px] text-neg-300">{hist.error}</div>}
+
+      {/* Live refresh progress (this universe). */}
+      {progress && (
+        <div className="pl-1 space-y-1 pt-0.5">
+          <div className="flex items-center gap-2">
+            <div className="flex-1 h-1.5 rounded-full bg-inset overflow-hidden">
+              <div className="h-full bg-accent-500 transition-all" style={{ width: `${total > 0 ? pct : 8}%` }} />
+            </div>
+            <span className="text-[11px] font-mono text-fg-faint shrink-0">{total > 0 ? `${done}/${total}` : '…'}</span>
+          </div>
+          <div className="text-[11px] text-accent-300">{progress.current_message ?? 'Queued — waiting for the pipeline…'}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The per-universe coverage list. Tracks which universe is mid-refresh so its
+ * row shows live progress — only one refresh runs at a time (the backend
+ * serializes the pipeline). Falls back to matching the running job's message on
+ * reload (its opening line names the universe). */
+function UniverseCoverageList({ universes, runningJob }: {
+  universes: UniverseCoverageRow[];
+  runningJob: RunningJob | null;
+}) {
+  const [refreshingLabel, setRefreshingLabel] = useState<string | null>(null);
+  useEffect(() => { if (!runningJob) setRefreshingLabel(null); }, [runningJob]);
+
+  const progressFor = (label: string | null): RunningJob | null => {
+    if (!runningJob || !label) return null;
+    if (refreshingLabel === label) return runningJob;
+    return (runningJob.current_message ?? '').includes(label) ? runningJob : null;
+  };
+
+  return (
+    <div className="space-y-1 pt-1 border-t border-neutral-800/30">
+      <div className="text-[10px] uppercase tracking-wide text-fg-faint">
+        Per static-universe coverage — most-stale (min) &amp; freshest (max) close-price &amp; volume date + the company responsible. Refresh re-fetches one universe within budget.
+      </div>
+      {universes.map((u) => (
+        <UniverseCoverageRow
+          key={u.universe_id}
+          u={u}
+          busy={!!runningJob}
+          progress={progressFor(u.label)}
+          onTrigger={() => setRefreshingLabel(u.label)}
+        />
+      ))}
     </div>
   );
 }
@@ -601,18 +773,10 @@ function FullPriceRefreshSection({
       )}
 
       {universeCoverage && universeCoverage.universes.length > 0 && (
-        <div className="space-y-1 pt-1 border-t border-neutral-800/30">
-          <div className="text-[10px] uppercase tracking-wide text-fg-faint">
-            Per-universe coverage — latest close-price &amp; volume date range across active members. Refresh re-fetches one universe within budget.
-          </div>
-          {universeCoverage.universes.map((u) => (
-            <UniverseCoverageRow
-              key={u.universe_id}
-              u={u}
-              running={!!universeRefreshRunning || !!running}
-            />
-          ))}
-        </div>
+        <UniverseCoverageList
+          universes={universeCoverage.universes}
+          runningJob={universeRefreshRunning ?? null}
+        />
       )}
 
       {running?.current_message && (
