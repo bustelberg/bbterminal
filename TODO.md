@@ -1,7 +1,47 @@
 # Open follow-ups — resume here
 
 Running list of unfinished / offered-but-not-built work, newest context first.
-Last updated **2026-06-15**. Delete items as they're done.
+Last updated **2026-06-23**. Delete items as they're done.
+
+---
+
+## 0. Per-company staleness flags — "stale price" / "stale volume" (do next)
+
+**Goal:** every company whose latest price and/or volume data is non-recent
+should be flagged **stale price** and/or **stale volume** (the two are
+*independent* — a company can be fresh on one and stale on the other), instead
+of one stuck name silently dragging a whole universe's "most-stale" line.
+
+**Why (the MASI case, 2026-06-23):** Masimo (`MASI`, cid 5344 local) showed as
+LEONTEQ's most-stale at 06-12 while everything else was 06-22. Verified against
+the **live GuruFocus API**: `MASI` *and* `NAS:MASI` both return history ending
+06-12 (last 179.95), and the `/summary` quote is also frozen (~06-13) — while
+AAPL/MSFT/NVDA/TGB all return 06-22. So GuruFocus's **API** is frozen for this
+one ticker even though their **website** shows newer prices. Our DB is correct;
+we can't pull newer data. But one upstream-frozen stock makes the universe look
+stale and makes "Refresh" look broken (it runs, re-fetches 06-12, nothing moves).
+
+**What to build:**
+- [ ] Compute per company the latest `target_date` for `close_price` and for
+      `volume` (source `gurufocus`), compare to the **global latest** close/volume
+      date (mirror the delisting sweep's "N trading days behind" idea in
+      `ingest/delisting.py`, but **non-destructive**). Beyond the threshold →
+      `stale_price_at` / `stale_volume_at` (two independent markers).
+- [ ] Keep distinct from the existing markers: `delisted_at` (dead/acquired),
+      `illiquid_at` (manual, rarely trades), `out_of_scope_at` (no GF coverage).
+      These new flags are **automatic + per-metric** and mean "still listed &
+      priceable but its GF feed has gone stale" (often upstream, e.g. MASI).
+- [ ] Surface on `/companies` (a **STALE PRICE** / **STALE VOL** badge, threaded
+      through `/api/companies` incl. the COPY path
+      `momentum/data/_pg.py::load_companies_via_copy`) and on the `/schedule`
+      coverage cards, so an upstream-frozen ticker reads as "stale feed", not
+      "our refresh failed".
+- [ ] Decide whether stale-flagged companies drop out of the universe
+      "most-stale" coverage measure (like `illiquid_at` does) so a single frozen
+      feed stops dominating the card. Auto-clear the flag once the feed catches up.
+- [ ] (Optional) flag "GuruFocus API frozen for this ticker" specifically — when
+      a fetch succeeds (200) but returns no rows newer than what we already have,
+      distinct from a 404/ticker-drift (see §2).
 
 ---
 
