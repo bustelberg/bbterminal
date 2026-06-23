@@ -214,6 +214,72 @@ async def airs_portfolio_download(
     }
 
 
+# ─── Vermogensoverzicht (holdings) — daily scheduled scrape + store ──────────
+
+
+@router.post("/api/airs/vermogen/refresh")
+async def airs_vermogen_refresh():
+    """Trigger the per-portfolio Vermogensoverzicht refresh now (the /airs-
+    portfolio "Refresh now" button). Re-discovers the live portfolio list, then
+    downloads + stores each portfolio's holdings. Runs in a daemon thread and
+    returns immediately; poll `/api/airs/vermogen/status` for progress."""
+    from airs_vermogen import _STATUS, run_airs_vermogen_refresh_sync  # noqa: PLC0415
+
+    if _STATUS.get("running"):
+        return {"status": "busy", "message": "A refresh is already running"}
+    threading.Thread(
+        target=run_airs_vermogen_refresh_sync,
+        kwargs={"triggered_by": "manual"},
+        daemon=True,
+        name="airs-vermogen-manual",
+    ).start()
+    return {"status": "started"}
+
+
+@router.get("/api/airs/vermogen/status")
+async def airs_vermogen_status():
+    """Status of the Vermogensoverzicht refresh job: in-flight progress, last
+    result, the freshest stored snapshot date, and the next scheduled run."""
+    from airs_vermogen import get_status  # noqa: PLC0415
+    from scheduler import list_scheduled_jobs  # noqa: PLC0415
+
+    status = await asyncio.to_thread(get_status)
+    next_run_at = None
+    for j in list_scheduled_jobs():
+        if j.get("id") == "airs_vermogen_refresh":
+            next_run_at = j.get("next_run_at")
+            break
+    return {**status, "next_run_at": next_run_at}
+
+
+@router.get("/api/airs/vermogen/{portfolio_name}")
+async def airs_vermogen_holdings(portfolio_name: str, as_of: str | None = None):
+    """Stored Vermogensoverzicht holdings for a portfolio — the latest snapshot
+    by default, or a specific `as_of` date. Returns `{portfolio_name,
+    as_of_date, holdings: [...]}` (holdings shaped like `/api/portfolios/parse`)."""
+    def _q() -> dict:
+        date_q = as_of
+        if not date_q:
+            latest = (
+                supabase.table("airs_holding")
+                .select("as_of_date").eq("portefeuille", portfolio_name)
+                .order("as_of_date", desc=True).limit(1).execute()
+            )
+            if not latest.data:
+                return {"portfolio_name": portfolio_name, "as_of_date": None, "holdings": []}
+            date_q = latest.data[0]["as_of_date"]
+        rows = (
+            supabase.table("airs_holding")
+            .select("holding_name, quantity, currency, weight, start_value_eur, "
+                    "current_value_eur, ytd_return_eur, ytd_return_pct, ytd_return_local_pct")
+            .eq("portefeuille", portfolio_name).eq("as_of_date", date_q)
+            .order("current_value_eur", desc=True).execute()
+        ).data or []
+        return {"portfolio_name": portfolio_name, "as_of_date": date_q, "holdings": rows}
+
+    return await asyncio.to_thread(_q)
+
+
 @router.post("/api/portfolios/parse")
 async def parse_portfolio(file: UploadFile = File(...)):
     content = await file.read()

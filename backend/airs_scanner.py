@@ -218,10 +218,13 @@ class _AirsSession:
 _session = _AirsSession()
 
 
-def download_portfolio_sync(portfolio_name: str, datum_van: str, datum_tot: str) -> bytes:
-    """Download ATT Excel report using the persistent session."""
+def _download_report_sync(
+    portfolio_name: str, datum_van: str, datum_tot: str, rapport_types: str,
+) -> bytes:
+    """Download one AirSPMS front-office report as XLS via the persistent
+    session. `rapport_types` selects the report (e.g. 'ATT' = Rendementen)."""
     params = urlencode({
-        "rapport_types": "ATT",
+        "rapport_types": rapport_types,
         "Portefeuille": portfolio_name,
         "datum_van": datum_van,
         "datum_tot": datum_tot,
@@ -236,6 +239,29 @@ def download_portfolio_sync(portfolio_name: str, datum_van: str, datum_tot: str)
         raise RuntimeError("Got HTML instead of Excel — session may have expired")
 
     return content
+
+
+def download_portfolio_sync(portfolio_name: str, datum_van: str, datum_tot: str) -> bytes:
+    """Download the ATT (Rendementen) Excel report via the persistent session."""
+    return _download_report_sync(portfolio_name, datum_van, datum_tot, "ATT")
+
+
+# AirSPMS `rapport_types` code for the Vermogensoverzicht (holdings) report —
+# 'VOLK', confirmed from a real download URL (cf. 'ATT' = Rendementen). Same
+# params as ATT (Portefeuille, datum_van, datum_tot, type=xls). Overridable via
+# AIRS_VERMOGEN_RAPPORT_TYPE if AirSPMS ever renames it.
+VERMOGEN_RAPPORT_TYPE = "VOLK"
+
+
+def download_vermogensoverzicht_sync(
+    portfolio_name: str, datum_van: str, datum_tot: str,
+) -> bytes:
+    """Download the Vermogensoverzicht (holdings) Excel report via the
+    persistent session. The bytes are parsed by `portfolio.parse_airs_excel`
+    (same parser as the drag-drop path). The report code is read at call time
+    so an env override takes effect on restart with no import-order gotcha."""
+    code = os.environ.get("AIRS_VERMOGEN_RAPPORT_TYPE", "").strip() or VERMOGEN_RAPPORT_TYPE
+    return _download_report_sync(portfolio_name, datum_van, datum_tot, code)
 
 
 # ─── Scanner (uses its own browser for DOM scraping) ──────────────────────────

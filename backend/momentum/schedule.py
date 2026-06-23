@@ -5,13 +5,16 @@ import the date math without pulling in the HTTP router (FastAPI, the
 backfill worker, the backtest stream). No I/O, no DB — just `datetime`.
 
 The smart daily pipeline fires every day at 05:00 UTC and rebalances a
-strategy when `next_due_at <= now`. `next_due_at` is stamped at 02:00 UTC on
-the rebalance date (intentionally BEFORE the 05:00 tick, so the strategy is
-always caught with margin — see `compute_next_due_at`). A strategy's rebalance
-lands on the first occurrence of its baked `rebalance_weekday` (Mon=0..Sun=6)
-in its period — e.g. monthly + weekday=0 → the first Monday of the month — and
-decides on the prior trading day's close (Friday for a Monday, since the
-Monday 05:00 UTC tick already has Friday's settled close). The grid is
+strategy when `next_due_at <= now`. A strategy's rebalance lands on the first
+occurrence of its baked `rebalance_weekday` (Mon=0..Sun=6) in its period — e.g.
+monthly + weekday=0 → the first Monday of the month — and is decided ENTIRELY
+by the prior trading day's close (Friday for a Monday): we both signal on and
+enter at that bar. So `next_due_at` is stamped at 02:00 UTC on the day AFTER
+that deciding close — the Saturday after Friday's settled close for a Monday
+rebalance — letting the tick fire ~2 days early with picks identical to running
+on the Monday itself (a mid-week grid's deciding bar is the day before, so it
+still fires on the grid date). `next_date`/the period the engine anchors to
+stays the rebalance day. The grid is
 anchored to Jan 2000 so bi-/quarterly periods land on the same calendar
 months the backtest engine uses (`momentum/backtest/dates.py`); the two
 pure-date helpers below mirror that module so importing it (and pandas)
@@ -90,14 +93,23 @@ def compute_next_due_at(
     weekday = rebalance_weekday if 0 <= rebalance_weekday <= 6 else 0
     if frequency == "daily":
         next_date = just_ran_date + timedelta(days=1)
-    elif frequency == "weekly":
+        return datetime.combine(next_date, time(2, 0), tzinfo=timezone.utc)
+    if frequency == "weekly":
         # Next `weekday` strictly after the run date.
         ahead = (weekday - just_ran_date.weekday()) % 7
         next_date = just_ran_date + timedelta(days=ahead or 7)
     else:
         stride = _STRIDE_BY_FREQUENCY.get(frequency, 1)
         next_date = _next_anchored_rebalance_date(just_ran_date, stride, weekday)
-    return datetime.combine(next_date, time(2, 0), tzinfo=timezone.utc)
+    # Fire the day after the DECIDING bar — the prior trading day's close
+    # (strict-< the rebalance date), which is the bar we both signal on and
+    # enter at. For a first-Monday rebalance that bar is Friday's close, settled
+    # by Saturday, so the daily tick fires ~2 days early with picks identical to
+    # running it on the Monday. For a mid-week grid the prior trading day is the
+    # day before, so `fire_date == next_date` (no shift). `next_date` itself
+    # stays the rebalance/grid date the engine anchors the period to.
+    fire_date = _expected_latest_trading_day(next_date) + timedelta(days=1)
+    return datetime.combine(fire_date, time(2, 0), tzinfo=timezone.utc)
 
 
 def _initial_next_due_at(

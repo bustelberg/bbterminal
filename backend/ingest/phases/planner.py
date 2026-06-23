@@ -270,6 +270,19 @@ def collect_universe_companies(due: list[StrategyPlan]) -> list[dict]:
     )
 
 
+def collect_universe_companies_by_label(label: str) -> list[dict]:
+    """Latest-month membership of the universe with this LABEL, as the
+    `[{cid,ticker,exchange}]` list `_run_prices_phase` expects. Empty when the
+    label resolves to no universe. Backs the manual per-universe price refresh."""
+    resp = (
+        supabase.table("universe").select("universe_id")
+        .eq("label", label).limit(1).execute()
+    )
+    if not resp.data:
+        return []
+    return _collect_companies_for_universe_ids({int(resp.data[0]["universe_id"])})
+
+
 def collect_template_universe_companies(template_keys: set[str]) -> list[dict]:
     """Pool the latest-month membership of the given template-managed universes
     (resolved via the template registry) into the price-phase company list.

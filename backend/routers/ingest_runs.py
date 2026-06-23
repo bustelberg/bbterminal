@@ -48,6 +48,7 @@ from ingest.phases import (
     _run_price_update_pipeline_sync,
     _run_rebalance_pipeline_sync,
     _run_smart_pipeline_sync,
+    _run_universe_price_refresh_pipeline_sync,
 )
 
 router = APIRouter(tags=["ingest"])
@@ -59,6 +60,7 @@ _VALID_JOB_NAMES = {
     "price_update",  # re-price the ~24 held companies + MTD snapshot
     "rebalance",     # rebalance the due strategies from a fresh universe
     "full_price_refresh",  # month-end: re-price ALL companies within budget
+    "universe_price_refresh",  # manual: re-price ONE universe's companies within budget
     # The dependency-driven daily tick — retained for the cron-revert path /
     # existing run history; no longer fired by the in-process scheduler.
     "smart_daily",
@@ -70,23 +72,29 @@ _VALID_JOB_NAMES = {
 }
 
 
-def _spawn_ingest(run_id: int, job_name: str) -> None:
+def _spawn_ingest(run_id: int, job_name: str, universe: str | None = None) -> None:
     """Dispatch by `job_name`. `price_update`/`rebalance` run the split
-    pipeline's two operations; `smart_daily` runs the legacy dependency-driven
-    pipeline; `manual`/`bootstrap` run the full refresh-all pipeline."""
+    pipeline's two operations; `universe_price_refresh` re-prices one universe
+    (the `universe` label is threaded to the op); `smart_daily` runs the legacy
+    dependency-driven pipeline; `manual`/`bootstrap` run the full refresh-all
+    pipeline."""
+    args: tuple = (run_id,)
     if job_name == "price_update":
         target = _run_price_update_pipeline_sync
     elif job_name == "rebalance":
         target = _run_rebalance_pipeline_sync
     elif job_name == "full_price_refresh":
         target = _run_full_price_refresh_pipeline_sync
+    elif job_name == "universe_price_refresh":
+        target = _run_universe_price_refresh_pipeline_sync
+        args = (run_id, universe or "")
     elif job_name == "smart_daily":
         target = _run_smart_pipeline_sync
     else:
         target = _run_pipeline_sync
     threading.Thread(
         target=target,
-        args=(run_id,),
+        args=args,
         daemon=True,
         name=f"pipeline-run-{run_id}",
     ).start()
@@ -129,18 +137,23 @@ async def cron_scheduled_refresh(
 
 
 @router.post("/api/ingest/scheduled-refresh/trigger")
-async def trigger_scheduled_refresh(job_name: str = "manual"):
+async def trigger_scheduled_refresh(job_name: str = "manual", universe: str | None = None):
     """Manual trigger from the /schedule UI's Run-now button. Same work
     as the cron path, just `triggered_by='manual'`. No cron-secret —
-    auth is enforced by the frontend proxy middleware in `frontend/proxy.ts`."""
+    auth is enforced by the frontend proxy middleware in `frontend/proxy.ts`.
+
+    Pass `universe=<label>` with `job_name=universe_price_refresh` to re-price
+    just that universe's companies (the per-universe coverage "Refresh" button)."""
     if job_name not in _VALID_JOB_NAMES:
         raise HTTPException(
             400,
             f"Unknown job_name {job_name!r}; expected one of {sorted(_VALID_JOB_NAMES)}",
         )
+    if job_name == "universe_price_refresh" and not universe:
+        raise HTTPException(400, "universe_price_refresh requires a `universe` label")
     run_id = await asyncio.to_thread(_create_run, job_name, "manual")
-    _spawn_ingest(run_id, job_name)
-    return {"run_id": run_id, "status": "running", "job_name": job_name}
+    _spawn_ingest(run_id, job_name, universe=universe)
+    return {"run_id": run_id, "status": "running", "job_name": job_name, "universe": universe}
 
 
 @router.get("/api/ingest/runs")

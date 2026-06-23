@@ -19,13 +19,31 @@ from .dates import _first_weekday_on_or_after
 from .indices import (
     _build_price_index,
     _build_volume_index,
-    _date_on_or_after,
-    _price_on_or_after,
     _price_on_or_before,
 )
 from .types import BacktestConfig, CurrentPortfolio, DailyPick, PeriodHolding
 
 _logger = logging.getLogger(__name__)
+
+
+def _prior_trading_day(d: date) -> date:
+    """Last weekday strictly before `d` (skips Sat/Sun). Holidays aren't
+    modelled — that errs toward 'the deciding bar is available', the same
+    convention the schedule's freshness reference uses."""
+    p = d - timedelta(days=1)
+    while p.weekday() >= 5:  # 5=Sat, 6=Sun
+        p -= timedelta(days=1)
+    return p
+
+
+def _next_month_start(d: date) -> date:
+    return date(d.year + 1, 1, 1) if d.month == 12 else date(d.year, d.month + 1, 1)
+
+
+def _prev_month_start(d: date) -> date:
+    first = date(d.year, d.month, 1)
+    prev_last = first - timedelta(days=1)
+    return date(prev_last.year, prev_last.month, 1)
 
 
 def _build_holding(
@@ -117,23 +135,33 @@ def run_current_portfolio(
             latest_data_date = pd.Timestamp(raw_max).date()
     except Exception:
         latest_data_date = None
-    anchor = today_d if latest_data_date is None else min(today_d, latest_data_date)
-
-    # Effective rebalance date = the chosen weekday's first occurrence in
-    # the current month (e.g. first Wednesday). If that rebalance hasn't
-    # happened yet relative to available data (`anchor`), the strategy is
-    # still holding the *previous* period's picks — so step back to the
-    # prior month's first-<weekday> rebalance. This makes "current picks"
-    # mean "what we actually hold right now", matching run_backtest's
-    # first-<weekday> grid rather than the literal 1st-of-month it used
-    # before — and avoids an empty portfolio when the rebalance day's
-    # close isn't in the DB yet.
-    this_month_start = date(today_d.year, today_d.month, 1)
-    rebalance_date = _first_weekday_on_or_after(this_month_start, weekday)
-    if rebalance_date > anchor:
-        prev_month_last = this_month_start - timedelta(days=1)
-        prev_month_start = date(prev_month_last.year, prev_month_last.month, 1)
-        rebalance_date = _first_weekday_on_or_after(prev_month_start, weekday)
+    # Effective rebalance date = the chosen weekday's first occurrence of a
+    # month (e.g. first Monday). A rebalance is DECIDABLE once the bar it trades
+    # on — the prior trading day's close (strict-< the rebalance date) — is in
+    # the loaded data; that same bar drives the signals. So the first Monday's
+    # rebalance becomes decidable from Friday's close (settled by Saturday).
+    # Pick the latest first-<weekday> that's decidable: step FORWARD while the
+    # next period already is (the early Saturday rebalance — picks identical to
+    # running on the Monday), and BACK while this one isn't yet (we still hold
+    # the prior period / can't price the deciding bar). Matches run_backtest's
+    # first-<weekday> grid and never produces an empty portfolio from a
+    # not-yet-settled rebalance-day close.
+    # The deciding bar must be in the data AND not in the future: bound by both
+    # the latest loaded close and `today`. On a real Saturday this is Friday's
+    # close (today=Sat ≥ Fri), so the upcoming Monday is decidable; before the
+    # deciding bar has settled it isn't, and we keep the prior period.
+    ldd = today_d if latest_data_date is None else min(today_d, latest_data_date)
+    rebalance_date = _first_weekday_on_or_after(
+        date(today_d.year, today_d.month, 1), weekday
+    )
+    while True:
+        nxt = _first_weekday_on_or_after(_next_month_start(rebalance_date), weekday)
+        if _prior_trading_day(nxt) <= ldd:
+            rebalance_date = nxt
+        else:
+            break
+    while _prior_trading_day(rebalance_date) > ldd:
+        rebalance_date = _first_weekday_on_or_after(_prev_month_start(rebalance_date), weekday)
     # The signal-cutoff + entry anchor for the locked-at-start holdings.
     month_start = rebalance_date
     month_key = rebalance_date.isoformat()[:7]
@@ -241,7 +269,14 @@ def run_current_portfolio(
 
     n_holdings = len(selected)
     weight = 1.0 / n_holdings
-    entry_ts = pd.Timestamp(month_start)
+    # Entry at the PRIOR trading day's close — the last bar STRICTLY BEFORE the
+    # rebalance date, which is the same bar the signals are computed from and
+    # where run_backtest enters. Anchoring here (not the rebalance-day close)
+    # makes the picks fully determined by that prior close, so the rebalance can
+    # be computed the moment it lands (Friday's close → fire Saturday) and the
+    # live entry matches the backtest's. `_price_on_or_before(rebalance_date − 1)`
+    # = the last close on/before the day before the rebalance = that prior bar.
+    prior_anchor = pd.Timestamp(month_start) - pd.Timedelta(days=1)
 
     holdings: list[PeriodHolding] = []
     latest_observed: pd.Timestamp | None = None
@@ -250,7 +285,8 @@ def run_current_portfolio(
         cid = int(row["company_id"])
         series = price_index.get(cid)
 
-        entry_price = _price_on_or_after(series, entry_ts) if series is not None else None
+        entry_pair = _price_on_or_before(series, prior_anchor) if series is not None else None
+        entry_price = entry_pair[0] if entry_pair is not None else None
         # Exit = latest available price in the EUR series.
         exit_price = float(series.iloc[-1]) if series is not None and len(series) > 0 else None
         exit_dt_ts = series.index[-1] if series is not None and len(series) > 0 else None
@@ -262,11 +298,13 @@ def run_current_portfolio(
             mtd_return = round((exit_price / entry_price - 1) * 100, 2)
 
         local_series = local_price_index.get(cid) if local_price_index is not None else None
-        entry_local = _price_on_or_after(local_series, entry_ts) if local_series is not None else None
+        entry_local_pair = _price_on_or_before(local_series, prior_anchor) if local_series is not None else None
+        entry_local = entry_local_pair[0] if entry_local_pair is not None else None
         exit_local = float(local_series.iloc[-1]) if local_series is not None and len(local_series) > 0 else None
 
         date_series = local_series if local_series is not None else series
-        entry_dt = _date_on_or_after(date_series, entry_ts) if date_series is not None else None
+        entry_dt_pair = _price_on_or_before(date_series, prior_anchor) if date_series is not None else None
+        entry_dt = entry_dt_pair[1].strftime("%Y-%m-%d") if entry_dt_pair is not None else None
         exit_dt = (
             date_series.index[-1].strftime("%Y-%m-%d")
             if date_series is not None and len(date_series) > 0

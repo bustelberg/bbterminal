@@ -26,6 +26,7 @@ from .pipeline import (
     _run_price_update_pipeline_sync,
     _run_rebalance_pipeline_sync,
     _run_smart_pipeline_sync,
+    _run_universe_price_refresh_pipeline_sync,
 )
 from .runlog import _create_run, _now_utc_iso, _update_run
 
@@ -37,5 +38,6 @@ __all__ = [
     "_run_price_update_pipeline_sync",
     "_run_rebalance_pipeline_sync",
     "_run_smart_pipeline_sync",
+    "_run_universe_price_refresh_pipeline_sync",
     "_update_run",
 ]

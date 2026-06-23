@@ -39,6 +39,21 @@ type PriceCoverage = {
   priced_companies: number;
 };
 
+/** Per-universe price + volume freshness — from `/api/data/universe-coverage`.
+ * Each tradable universe's min/max latest close-price and volume date across
+ * its active members, with a per-universe manual refresh button. */
+type CoverageRange = { min: string | null; max: string | null; priced: number };
+type UniverseCoverageRow = {
+  universe_id: number;
+  label: string | null;
+  frozen_from: string | null;
+  template_key: string | null;
+  members: number;
+  price: CoverageRange;
+  volume: CoverageRange;
+};
+type UniverseCoverage = { universes: UniverseCoverageRow[] };
+
 /** Three independent operations of the split pipeline, stacked:
  *   1. Price update — re-prices the held companies + refreshes MTD (daily).
  *   2. Rebalance    — rebalances strategies that are due, from a fresh
@@ -60,6 +75,7 @@ export default function SmartPipelineActivity() {
   // isn't cheap (+ is cached 1 min server-side), so poll it on a fixed slow
   // cadence rather than the 3s active interval.
   const { data: coverage } = usePollingFetch<PriceCoverage>(`${API_URL}/api/data/price-coverage`, 30000);
+  const { data: universeCoverage } = usePollingFetch<UniverseCoverage>(`${API_URL}/api/data/universe-coverage`, 30000);
   const loadError = upErr ?? heldErr;
   const nowMs = useNow(15000);
 
@@ -127,6 +143,8 @@ export default function SmartPipelineActivity() {
             schedulerOff={schedulerOff}
             usage={usage}
             coverage={coverage}
+            universeCoverage={universeCoverage}
+            universeRefreshRunning={running('universe_price_refresh')}
             nowMs={nowMs}
           />
         </>
@@ -135,21 +153,23 @@ export default function SmartPipelineActivity() {
   );
 }
 
-/** Trigger one split-pipeline operation via its Run-now button. */
-function useRunNow(job: string, busy: boolean) {
+/** Trigger one split-pipeline operation via its Run-now button. `universe`
+ * (a label) is appended for the per-universe price refresh. */
+function useRunNow(job: string, busy: boolean, universe?: string) {
   const [pending, setPending] = useState(false);
   const run = useCallback(async () => {
     if (pending || busy) return;
     setPending(true);
     try {
-      await apiFetch(`${API_URL}/api/ingest/scheduled-refresh/trigger?job_name=${job}`, { method: 'POST' });
+      const u = universe ? `&universe=${encodeURIComponent(universe)}` : '';
+      await apiFetch(`${API_URL}/api/ingest/scheduled-refresh/trigger?job_name=${job}${u}`, { method: 'POST' });
     } catch {
       // Polling surfaces the run (or its absence) — no inline error needed.
     } finally {
       // Leave a brief window so the run row appears before re-enabling.
       setTimeout(() => setPending(false), 1500);
     }
-  }, [job, pending, busy]);
+  }, [job, pending, busy, universe]);
   return { run, pending };
 }
 
@@ -430,8 +450,41 @@ function CoverageLine({ label, c, tone, marked, onMark }: {
   );
 }
 
+/** One per-universe coverage row: label, member count, price + volume date
+ * ranges, and a manual "Refresh" button that re-prices just that universe. */
+function UniverseCoverageRow({ u, running }: { u: UniverseCoverageRow; running: boolean }) {
+  const { run, pending } = useRunNow('universe_price_refresh', running, u.label ?? undefined);
+  const fmtRange = (r: CoverageRange) =>
+    r.min && r.max ? (r.min === r.max ? r.min : `${r.min} → ${r.max}`) : '—';
+  // Stale if the freshest member is behind the most recent expected close.
+  return (
+    <div className="flex items-center gap-2 flex-wrap py-1 border-b border-neutral-800/20 last:border-0">
+      <span className="text-fg-soft font-medium min-w-[150px] truncate" title={u.label ?? ''}>{u.label ?? '—'}</span>
+      <span className="text-fg-faint font-mono">{u.members}co</span>
+      <span className="text-fg-faint">·</span>
+      <span className="text-fg-muted">price</span>
+      <span className="font-mono text-fg-subtle">{fmtRange(u.price)}</span>
+      <span className="text-fg-faint">·</span>
+      <span className="text-fg-muted">vol</span>
+      <span className="font-mono text-fg-subtle">{fmtRange(u.volume)}</span>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); void run(); }}
+        disabled={pending || running}
+        title={`Re-fetch prices + volumes for every company in ${u.label} (within the monthly GuruFocus budget)`}
+        className="ml-auto text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted
+                   hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-40
+                   disabled:cursor-not-allowed transition-colors"
+      >
+        {pending ? 'Starting…' : 'Refresh'}
+      </button>
+    </div>
+  );
+}
+
 function FullPriceRefreshSection({
-  running, lastRun, nextRunAt, schedulerOff, usage, coverage, nowMs,
+  running, lastRun, nextRunAt, schedulerOff, usage, coverage, universeCoverage,
+  universeRefreshRunning, nowMs,
 }: {
   running: RunningJob | null;
   lastRun: IngestRun | null;
@@ -439,6 +492,8 @@ function FullPriceRefreshSection({
   schedulerOff: boolean;
   usage: ApiUsage | null | undefined;
   coverage: PriceCoverage | null | undefined;
+  universeCoverage: UniverseCoverage | null | undefined;
+  universeRefreshRunning: RunningJob | null;
   nowMs: number;
 }) {
   const total = running?.companies_total ?? 0;
@@ -542,6 +597,21 @@ function FullPriceRefreshSection({
             marked={coverage.oldest ? markedIlliquid.has(coverage.oldest.company_id) : false}
             onMark={coverage.oldest ? () => markIlliquid(coverage.oldest!.company_id) : undefined}
           />
+        </div>
+      )}
+
+      {universeCoverage && universeCoverage.universes.length > 0 && (
+        <div className="space-y-1 pt-1 border-t border-neutral-800/30">
+          <div className="text-[10px] uppercase tracking-wide text-fg-faint">
+            Per-universe coverage — latest close-price &amp; volume date range across active members. Refresh re-fetches one universe within budget.
+          </div>
+          {universeCoverage.universes.map((u) => (
+            <UniverseCoverageRow
+              key={u.universe_id}
+              u={u}
+              running={!!universeRefreshRunning || !!running}
+            />
+          ))}
         </div>
       )}
 

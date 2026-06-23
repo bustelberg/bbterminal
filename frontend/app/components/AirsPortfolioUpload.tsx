@@ -124,7 +124,7 @@ function PortfolioDetailView({ detail, onBack }: { detail: PortfolioDetail; onBa
         )}
       </div>
 
-      <div className="flex-1 overflow-auto px-8 py-4">
+      <div className="flex-1 overflow-auto px-8 py-4 space-y-4">
         <div className="bg-card rounded-xl border border-neutral-800/40 overflow-hidden">
           <div className="px-4 py-2 border-b border-neutral-800/40 flex items-center justify-end">
             <TableDownloadButton
@@ -163,6 +163,9 @@ function PortfolioDetailView({ detail, onBack }: { detail: PortfolioDetail; onBa
             </tbody>
           </table>
         </div>
+
+        {/* Vermogensoverzicht (holdings) — the latest stored snapshot. */}
+        <VermogenHoldingsCard portfolioName={detail.portfolio_name} />
       </div>
     </div>
   );
@@ -194,6 +197,10 @@ export default function AirsPortfolioUpload() {
   const [detail, setDetail] = useState<PortfolioDetail | null>(null);
   const [ytdMap, setYtdMap] = useState<Record<string, YtdState>>({});
   const [initialLoading, setInitialLoading] = useState(true);
+  // Phased message + elapsed seconds for the initial load, so a slow saved-
+  // portfolios query reads as "working" rather than a frozen spinner.
+  const [loadStage, setLoadStage] = useState('Connecting to broker data…');
+  const [loadElapsed, setLoadElapsed] = useState(0);
   const [sortKey, setSortKey] = useState<'portefeuille' | 'ytd' | 'asOf'>('portefeuille');
   const [sortAsc, setSortAsc] = useState(true);
   const [showZeroReturn, setShowZeroReturn] = useState(false);
@@ -246,13 +253,26 @@ export default function AirsPortfolioUpload() {
     }
   }, []);
 
+  // Tick the elapsed-seconds counter while the initial load runs.
+  useEffect(() => {
+    if (!initialLoading) return;
+    const t = setInterval(() => setLoadElapsed((e) => e + 1), 1000);
+    return () => clearInterval(t);
+  }, [initialLoading]);
+
   // Auto-load cached portfolios on mount
   useEffect(() => {
     (async () => {
       try {
+        setLoadStage('Loading saved portfolios…');
         const res = await apiFetch(`${API_URL}/api/airs/portfolios`);
-        if (!res.ok) return;
+        if (!res.ok) { setLoadStage("Couldn't load saved portfolios"); return; }
         const data: CachedPortfolio[] = await res.json();
+        setLoadStage(
+          data.length > 0
+            ? `Found ${data.length} saved portfolio${data.length === 1 ? '' : 's'} — loading returns…`
+            : 'No saved portfolios — start a scan',
+        );
         if (data.length > 0) {
           // Build portfolio list from cached data (no depotbank/client/naam in cache)
           const list: Portfolio[] = data.map((d) => ({
@@ -459,6 +479,9 @@ export default function AirsPortfolioUpload() {
       )}
 
       <div className="flex-1 overflow-auto px-8 py-6 space-y-6">
+        {/* Daily Vermogensoverzicht refresh job — status + manual trigger. */}
+        <VermogenJobCard />
+
         {/* Progress steps (fixed 4-step display) */}
         {steps && (
           <ProgressTimeline
@@ -541,11 +564,255 @@ export default function AirsPortfolioUpload() {
 
         {/* Initial loading */}
         {initialLoading && (
-          <div className="flex items-center justify-center py-20 gap-3 text-fg-muted">
-            <Spinner className="h-5 w-5" />
-            <span className="text-sm"><LoadingDots label="Loading portfolios" /></span>
+          <div className="flex flex-col items-center justify-center py-20 gap-2 text-fg-muted">
+            <div className="flex items-center gap-3">
+              <Spinner className="h-5 w-5" />
+              <span className="text-sm"><LoadingDots label={loadStage} /></span>
+            </div>
+            <span className="text-[11px] font-mono text-fg-faint">
+              {loadElapsed}s elapsed{loadElapsed >= 5 ? ' · the saved-portfolios query can take a few seconds' : ''}
+            </span>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+
+type VermogenStatus = {
+  running: boolean;
+  status: string | null;
+  message: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  triggered_by: string | null;
+  portfolios_found: number;
+  rendement_stored: number;
+  vermogen_stored: number;
+  holdings_rows: number;
+  errors: string[];
+  latest_snapshot_date: string | null;
+  latest_snapshot_rows: number;
+  next_run_at: string | null;
+};
+
+const fmtDateTime = (iso: string | null) =>
+  iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+
+/** Status + manual trigger for the daily Vermogensoverzicht (holdings) refresh —
+ * re-discovers the live AIRS portfolio list each working day at 11:00 Amsterdam
+ * and stores each portfolio's holdings snapshot. */
+function VermogenJobCard() {
+  const [s, setS] = useState<VermogenStatus | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [showErrors, setShowErrors] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await apiFetch(`${API_URL}/api/airs/vermogen/status`);
+      if (r.ok) setS((await r.json()) as VermogenStatus);
+    } catch {
+      /* polling reconciles */
+    }
+  }, []);
+
+  // Poll faster while a refresh is in flight, slower when idle.
+  useEffect(() => {
+    void load();
+    const ms = s?.running ? 3000 : 20000;
+    const t = setInterval(load, ms);
+    return () => clearInterval(t);
+  }, [load, s?.running]);
+
+  const refresh = useCallback(async () => {
+    if (starting || s?.running) return;
+    setStarting(true);
+    try {
+      await apiFetch(`${API_URL}/api/airs/vermogen/refresh`, { method: 'POST' });
+    } catch {
+      /* status poll surfaces the run */
+    } finally {
+      setTimeout(() => { setStarting(false); void load(); }, 1200);
+    }
+  }, [starting, s?.running, load]);
+
+  const running = !!s?.running;
+  const tone = s?.status === 'error' ? 'text-neg-300' : s?.status === 'ok' ? 'text-pos-400' : 'text-fg-subtle';
+
+  return (
+    <div className="bg-card rounded-xl border border-neutral-800/40">
+      <div className="px-5 py-3 border-b border-neutral-800/40 flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="text-sm font-medium text-fg-strong">Daily Vermogensoverzicht refresh</h2>
+          <p className="text-[11px] text-fg-subtle mt-0.5">
+            Working days 11:00 Amsterdam · re-discovers the live portfolio list, stores each portfolio&apos;s holdings.
+            {s?.next_run_at && <> Next run <span className="font-mono text-fg-muted">{fmtDateTime(s.next_run_at)}</span>.</>}
+          </p>
+        </div>
+        <button
+          onClick={refresh}
+          disabled={starting || running}
+          className="text-xs px-3 py-1.5 rounded-lg bg-accent-600 hover:bg-accent-500 text-fg-strong
+                     disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shrink-0"
+        >
+          {running && <Spinner className="h-3.5 w-3.5" />}
+          {running ? 'Refreshing…' : starting ? 'Starting…' : 'Refresh now'}
+        </button>
+      </div>
+
+      <div className="px-5 py-3 text-xs space-y-1.5">
+        {running ? (
+          <div className="text-accent-300 flex items-center gap-2">
+            <Spinner className="h-3 w-3" />
+            <span>{s?.message ?? 'Running…'}</span>
+          </div>
+        ) : s?.message ? (
+          <div className={tone}>
+            {s.message}
+            {s.finished_at && <span className="text-fg-faint"> · {fmtDateTime(s.finished_at)}</span>}
+          </div>
+        ) : (
+          <div className="text-fg-subtle">No refresh has run yet this session.</div>
+        )}
+
+        <div className="text-fg-subtle">
+          Latest stored snapshot:{' '}
+          {s?.latest_snapshot_date ? (
+            <span className="font-mono text-fg-soft">{s.latest_snapshot_date}</span>
+          ) : (
+            <span className="text-fg-faint">none</span>
+          )}
+          {s?.latest_snapshot_date && (
+            <span className="text-fg-faint"> · {s.latest_snapshot_rows} portfolio{s.latest_snapshot_rows === 1 ? '' : 's'}</span>
+          )}
+        </div>
+
+        {s && s.errors.length > 0 && (
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowErrors((v) => !v)}
+              className="text-neg-300 hover:text-neg-200 transition-colors"
+            >
+              {showErrors ? '▾' : '▸'} {s.errors.length} portfolio{s.errors.length === 1 ? '' : 's'} failed
+            </button>
+            {showErrors && (
+              <ul className="mt-1 ml-3 space-y-0.5 text-[11px] text-fg-subtle font-mono">
+                {s.errors.map((e, i) => <li key={i} className="truncate" title={e}>{e}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+type VermogenHolding = {
+  holding_name: string;
+  quantity: number | null;
+  currency: string | null;
+  weight: number | null;
+  start_value_eur: number | null;
+  current_value_eur: number | null;
+  ytd_return_eur: number | null;
+  ytd_return_pct: number | null;
+  ytd_return_local_pct: number | null;
+};
+type VermogenHoldings = {
+  portfolio_name: string;
+  as_of_date: string | null;
+  holdings: VermogenHolding[];
+};
+
+/** The stored Vermogensoverzicht (holdings) for one portfolio — its latest
+ * snapshot from `airs_holding`, kept fresh by the daily refresh job. */
+function VermogenHoldingsCard({ portfolioName }: { portfolioName: string }) {
+  const [data, setData] = useState<VermogenHoldings | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    apiFetch(`${API_URL}/api/airs/vermogen/${encodeURIComponent(portfolioName)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: VermogenHoldings | null) => { if (!cancelled) setData(d); })
+      .catch(() => { if (!cancelled) setData(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [portfolioName]);
+
+  const cols = useMemo<Column<VermogenHolding>[]>(() => [
+    { key: 'holding_name', header: 'Fonds', accessor: (h) => h.holding_name },
+    { key: 'quantity', header: 'Aantal', accessor: (h) => h.quantity },
+    { key: 'currency', header: 'Valuta', accessor: (h) => h.currency },
+    { key: 'weight', header: 'Weging (%)', accessor: (h) => (h.weight != null ? h.weight * 100 : null) },
+    { key: 'start_value_eur', header: 'Beginwaarde EUR', accessor: (h) => h.start_value_eur },
+    { key: 'current_value_eur', header: 'Huidige waarde EUR', accessor: (h) => h.current_value_eur },
+    { key: 'ytd_return_eur', header: 'YTD EUR', accessor: (h) => h.ytd_return_eur },
+    { key: 'ytd_return_pct', header: 'YTD % (EUR)', accessor: (h) => (h.ytd_return_pct != null ? h.ytd_return_pct * 100 : null) },
+    { key: 'ytd_return_local_pct', header: 'YTD % (lokaal)', accessor: (h) => (h.ytd_return_local_pct != null ? h.ytd_return_local_pct * 100 : null) },
+  ], []);
+
+  if (loading) {
+    return (
+      <div className="bg-card rounded-xl border border-neutral-800/40 px-5 py-4 text-sm text-fg-subtle">
+        <LoadingDots label="Loading Vermogensoverzicht" />
+      </div>
+    );
+  }
+  if (!data || data.holdings.length === 0) {
+    return (
+      <div className="bg-card rounded-xl border border-neutral-800/40 px-5 py-4 text-sm text-fg-subtle">
+        No stored Vermogensoverzicht yet — runs in the daily refresh, or hit &ldquo;Refresh now&rdquo;.
+      </div>
+    );
+  }
+  return (
+    <div className="bg-card rounded-xl border border-neutral-800/40 overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-neutral-800/40 flex items-center justify-between gap-3">
+        <h2 className="text-sm font-medium text-fg-muted">
+          Vermogensoverzicht — {data.holdings.length} holding{data.holdings.length === 1 ? '' : 's'}
+          {data.as_of_date && <span className="text-fg-faint font-normal"> · as of {data.as_of_date}</span>}
+        </h2>
+        <TableDownloadButton
+          rows={data.holdings}
+          columns={cols}
+          filename={`vermogensoverzicht_${data.portfolio_name}`}
+          title={`Download ${data.holdings.length} holdings as CSV / XLSX`}
+        />
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-neutral-800/60 text-fg-subtle text-xs">
+              <th className="px-4 py-3 text-left font-medium">Fonds</th>
+              <th className="px-3 py-3 text-right font-medium">Aantal</th>
+              <th className="px-3 py-3 text-left font-medium">Val</th>
+              <th className="px-3 py-3 text-right font-medium">Weging</th>
+              <th className="px-3 py-3 text-right font-medium">Beginwaarde EUR</th>
+              <th className="px-3 py-3 text-right font-medium">Huidige waarde EUR</th>
+              <th className="px-3 py-3 text-right font-medium">YTD %</th>
+              <th className="px-3 py-3 text-right font-medium">YTD % (lokaal)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.holdings.map((h, i) => (
+              <tr key={i} className="border-b border-neutral-800/30 hover:bg-overlay/[0.02] transition-colors">
+                <td className="px-4 py-2.5 text-fg font-medium">{h.holding_name}</td>
+                <td className="px-3 py-2.5 text-right text-fg-muted font-mono text-xs">{h.quantity != null ? h.quantity.toLocaleString('nl-NL') : '—'}</td>
+                <td className="px-3 py-2.5 text-left text-fg-faint font-mono text-xs">{h.currency ?? '—'}</td>
+                <td className="px-3 py-2.5 text-right text-fg-muted font-mono text-xs">{h.weight != null ? (h.weight * 100).toFixed(1) + '%' : '—'}</td>
+                <td className="px-3 py-2.5 text-right text-fg-muted font-mono text-xs">{fmtEur(h.start_value_eur)}</td>
+                <td className="px-3 py-2.5 text-right text-fg-soft font-mono text-xs">{fmtEur(h.current_value_eur)}</td>
+                <td className={`px-3 py-2.5 text-right font-mono text-xs font-medium ${returnColor(h.ytd_return_pct != null ? h.ytd_return_pct * 100 : null)}`}>{h.ytd_return_pct != null ? fmtPct(h.ytd_return_pct * 100) : '—'}</td>
+                <td className={`px-3 py-2.5 text-right font-mono text-xs ${returnColor(h.ytd_return_local_pct != null ? h.ytd_return_local_pct * 100 : null)}`}>{h.ytd_return_local_pct != null ? fmtPct(h.ytd_return_local_pct * 100) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

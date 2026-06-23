@@ -774,6 +774,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/vermogen/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Airs Vermogen Refresh
+         * @description Trigger the per-portfolio Vermogensoverzicht refresh now (the /airs-
+         *     portfolio "Refresh now" button). Re-discovers the live portfolio list, then
+         *     downloads + stores each portfolio's holdings. Runs in a daemon thread and
+         *     returns immediately; poll `/api/airs/vermogen/status` for progress.
+         */
+        post: operations["airs_vermogen_refresh_api_airs_vermogen_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/vermogen/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Vermogen Status
+         * @description Status of the Vermogensoverzicht refresh job: in-flight progress, last
+         *     result, the freshest stored snapshot date, and the next scheduled run.
+         */
+        get: operations["airs_vermogen_status_api_airs_vermogen_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/vermogen/{portfolio_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Vermogen Holdings
+         * @description Stored Vermogensoverzicht holdings for a portfolio — the latest snapshot
+         *     by default, or a specific `as_of` date. Returns `{portfolio_name,
+         *     as_of_date, holdings: [...]}` (holdings shaped like `/api/portfolios/parse`).
+         */
+        get: operations["airs_vermogen_holdings_api_airs_vermogen__portfolio_name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/delete-account": {
         parameters: {
             query?: never;
@@ -1342,6 +1408,34 @@ export interface paths {
          *     min) since the underlying aggregation isn't cheap.
          */
         get: operations["price_coverage_api_data_price_coverage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/data/universe-coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Universe Coverage
+         * @description Per-universe price + volume freshness: for each frozen snapshot and each
+         *     template-managed universe, the min/max LATEST close-price and volume date
+         *     across its active members. Surfaces, on the /schedule month-end refresh, how
+         *     fresh each tradable universe's data is — and which lag (the daily price
+         *     job only touches held names, so between rebalances the rest goes stale).
+         *
+         *     Returns `{universes: [{universe_id, label, frozen_from, template_key,
+         *     members, priced/volumed counts, price:{min,max}, volume:{min,max}}]}`,
+         *     ordered by label. Cached 1 min (the RPC scans are not cheap).
+         */
+        get: operations["universe_coverage_api_data_universe_coverage_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2252,6 +2346,9 @@ export interface paths {
          * @description Manual trigger from the /schedule UI's Run-now button. Same work
          *     as the cron path, just `triggered_by='manual'`. No cron-secret —
          *     auth is enforced by the frontend proxy middleware in `frontend/proxy.ts`.
+         *
+         *     Pass `universe=<label>` with `job_name=universe_price_refresh` to re-price
+         *     just that universe's companies (the per-universe coverage "Refresh" button).
          */
         post: operations["trigger_scheduled_refresh_api_ingest_scheduled_refresh_trigger_post"];
         delete?: never;
@@ -4880,6 +4977,79 @@ export interface operations {
             };
         };
     };
+    airs_vermogen_refresh_api_airs_vermogen_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    airs_vermogen_status_api_airs_vermogen_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    airs_vermogen_holdings_api_airs_vermogen__portfolio_name__get: {
+        parameters: {
+            query?: {
+                as_of?: string | null;
+            };
+            header?: never;
+            path: {
+                portfolio_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     delete_account_api_auth_delete_account_delete: {
         parameters: {
             query?: never;
@@ -5661,6 +5831,26 @@ export interface operations {
         };
     };
     price_coverage_api_data_price_coverage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    universe_coverage_api_data_universe_coverage_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -6961,6 +7151,7 @@ export interface operations {
         parameters: {
             query?: {
                 job_name?: string;
+                universe?: string | null;
             };
             header?: never;
             path?: never;

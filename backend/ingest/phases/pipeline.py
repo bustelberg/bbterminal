@@ -535,6 +535,54 @@ def _run_full_price_refresh_pipeline_sync(run_id: int) -> None:
     _finalize_run(run_id, accumulated_errors, log, tag="full_price_refresh")
 
 
+def _run_universe_price_refresh_pipeline_sync(run_id: int, universe_label: str) -> None:
+    """Manual per-universe price + volume refresh — re-fetch every company in
+    `universe_label`'s latest-month membership, bounded by the remaining monthly
+    GuruFocus quota per region (already-fresh companies short-circuit cheaply,
+    so the budget is spent on the laggards). Prices only — no
+    templates/prune/momentum. Serialized against the other ops via
+    `_PIPELINE_LOCK`. Backs the /schedule per-universe "Refresh" button."""
+    log = logging.getLogger(__name__)
+    accumulated_errors: list[str] = []
+
+    with _serialized(run_id):
+        from ingest.api_usage import remaining_budget  # noqa: PLC0415
+        from deps import supabase  # noqa: PLC0415
+
+        from .planner import collect_universe_companies_by_label  # noqa: PLC0415
+
+        _update_run(
+            run_id, current_phase="prices",
+            current_message=f"Collecting {universe_label} companies…",
+        )
+        try:
+            companies = collect_universe_companies_by_label(universe_label)
+            if not companies:
+                accumulated_errors.append(
+                    f"Universe {universe_label!r} resolved to no companies to refresh"
+                )
+            else:
+                budget = remaining_budget(supabase)
+                _update_run(
+                    run_id,
+                    current_message=(
+                        f"Refreshing {len(companies)} companies in {universe_label} — "
+                        f"budget left USA {budget.get('usa', 0)}, EU {budget.get('europe', 0)}, "
+                        f"Asia {budget.get('asia', 0)}…"
+                    ),
+                )
+                _run_prices_phase(
+                    run_id, accumulated_errors,
+                    companies_override=companies, budget_by_region=budget,
+                )
+        except Exception as e:
+            msg = f"Universe price refresh failed: {type(e).__name__}: {e}"
+            log.warning("[universe_price_refresh] run_id=%s %s", run_id, msg)
+            accumulated_errors.append(msg)
+
+    _finalize_run(run_id, accumulated_errors, log, tag="universe_price_refresh")
+
+
 def _finalize_run(run_id: int, accumulated_errors: list[str], log, *, tag: str) -> None:
     """Shared run-finalizer for the split orchestrators: marks `done`, sets
     `status` from whether any phase errored, and rolls the first few errors

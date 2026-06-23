@@ -299,8 +299,26 @@ def _run_momentum_phase(
             try:
                 ran_at = datetime.now(timezone.utc).replace(microsecond=0)
                 weekday = int(cfg.get("rebalance_weekday", 0) or 0)
+                # Advance the clock relative to the GRID date we rebalanced for
+                # (the snapshot's as_of_date), NOT `now`. When the tick fires
+                # early (Saturday, for the upcoming Monday) `now` is before the
+                # grid date, so computing "next after now" would re-pick the same
+                # grid date and re-rebalance every day until it. The grid date
+                # advances to the next period.
+                ref = ran_at
+                try:
+                    s = (
+                        supabase.table("current_picks_snapshot")
+                        .select("as_of_date").eq("snapshot_id", snapshot_id)
+                        .limit(1).execute()
+                    )
+                    grid_iso = (s.data or [{}])[0].get("as_of_date")
+                    if grid_iso:
+                        ref = datetime.fromisoformat(str(grid_iso)[:10]).replace(tzinfo=timezone.utc)
+                except Exception:
+                    pass
                 next_due = (
-                    _compute_next_due_at(frequency, ran_at, weekday).isoformat()
+                    _compute_next_due_at(frequency, ref, weekday).isoformat()
                     if frequency else None
                 )
                 supabase.table("scheduled_strategy").update({

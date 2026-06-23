@@ -199,3 +199,115 @@ async def price_coverage(response: Response):
             "priced_companies": len(latest_by_cid),
         }
     return await asyncio.to_thread(_q)
+
+
+def _latest_metric_dates_for(cids: set[int], metric_code: str) -> dict[int, str]:
+    """`{company_id: latest target_date}` for `metric_code`, scoped to `cids`,
+    via the `company_latest_metric_dates_for` RPC. Chunked (≤800 ids/call) so
+    each call rides the metric/company index and returns under the db-max-rows
+    cap."""
+    out: dict[int, str] = {}
+    cid_list = list(cids)
+    for i in range(0, len(cid_list), 800):
+        chunk = cid_list[i:i + 800]
+        resp = supabase.rpc(
+            "company_latest_metric_dates_for",
+            {"p_company_ids": chunk, "p_metric_code": metric_code},
+        ).execute()
+        for row in resp.data or []:
+            cid, d = row.get("company_id"), row.get("latest_target_date")
+            if cid is not None and d:
+                out[int(cid)] = str(d)[:10]
+    return out
+
+
+def _excluded_company_ids() -> set[int]:
+    """Companies excluded from freshness measures — delisted / out-of-scope /
+    illiquid (their perpetually-behind close isn't a valid freshness signal)."""
+    excluded: set[int] = set()
+    page, offset = 1000, 0
+    try:
+        for _ in range(20):
+            ex = (
+                supabase.table("company").select("company_id")
+                .or_("delisted_at.not.is.null,out_of_scope_at.not.is.null,illiquid_at.not.is.null")
+                .range(offset, offset + page - 1).execute()
+            ).data or []
+            if not ex:
+                break
+            for r in ex:
+                excluded.add(int(r["company_id"]))
+            if len(ex) < page:
+                break
+            offset += page
+    except Exception:
+        pass  # best-effort
+    return excluded
+
+
+@router.get("/api/data/universe-coverage")
+async def universe_coverage(response: Response):
+    """Per-universe price + volume freshness: for each frozen snapshot and each
+    template-managed universe, the min/max LATEST close-price and volume date
+    across its active members. Surfaces, on the /schedule month-end refresh, how
+    fresh each tradable universe's data is — and which lag (the daily price
+    job only touches held names, so between rebalances the rest goes stale).
+
+    Returns `{universes: [{universe_id, label, frozen_from, template_key,
+    members, priced/volumed counts, price:{min,max}, volume:{min,max}}]}`,
+    ordered by label. Cached 1 min (the RPC scans are not cheap)."""
+    response.headers["Cache-Control"] = CACHE_PIPELINE
+
+    def _q() -> dict:
+        from ingest.phases.planner import _latest_membership_company_ids  # noqa: PLC0415
+
+        # Frozen snapshots + template-managed universes — the tradable sets.
+        us = (
+            supabase.table("universe")
+            .select("universe_id, label, frozen_from, template_key")
+            .or_("frozen_at.not.is.null,template_key.not.is.null")
+            .execute()
+        ).data or []
+
+        members_by_uid: dict[int, set[int]] = {}
+        for u in us:
+            uid = int(u["universe_id"])
+            try:
+                members_by_uid[uid] = _latest_membership_company_ids(uid)
+            except Exception:
+                members_by_uid[uid] = set()
+        all_cids: set[int] = set().union(*members_by_uid.values()) if members_by_uid else set()
+
+        close = _latest_metric_dates_for(all_cids, "close_price")
+        vol = _latest_metric_dates_for(all_cids, "volume")
+        excluded = _excluded_company_ids()
+
+        out: list[dict] = []
+        for u in us:
+            uid = int(u["universe_id"])
+            members = members_by_uid.get(uid, set()) - excluded
+            if not members:
+                continue
+            p_dates = [close[c] for c in members if close.get(c)]
+            v_dates = [vol[c] for c in members if vol.get(c)]
+            out.append({
+                "universe_id": uid,
+                "label": u.get("label"),
+                "frozen_from": u.get("frozen_from"),
+                "template_key": u.get("template_key"),
+                "members": len(members),
+                "price": {
+                    "min": min(p_dates) if p_dates else None,
+                    "max": max(p_dates) if p_dates else None,
+                    "priced": len(p_dates),
+                },
+                "volume": {
+                    "min": min(v_dates) if v_dates else None,
+                    "max": max(v_dates) if v_dates else None,
+                    "priced": len(v_dates),
+                },
+            })
+        out.sort(key=lambda x: (x.get("label") or "").lower())
+        return {"universes": out}
+
+    return await asyncio.to_thread(_q)

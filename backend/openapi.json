@@ -2545,6 +2545,103 @@
         ]
       }
     },
+    "/api/airs/vermogen/refresh": {
+      "post": {
+        "description": "Trigger the per-portfolio Vermogensoverzicht refresh now (the /airs-\nportfolio \"Refresh now\" button). Re-discovers the live portfolio list, then\ndownloads + stores each portfolio's holdings. Runs in a daemon thread and\nreturns immediately; poll `/api/airs/vermogen/status` for progress.",
+        "operationId": "airs_vermogen_refresh_api_airs_vermogen_refresh_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Airs Vermogen Refresh",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/vermogen/status": {
+      "get": {
+        "description": "Status of the Vermogensoverzicht refresh job: in-flight progress, last\nresult, the freshest stored snapshot date, and the next scheduled run.",
+        "operationId": "airs_vermogen_status_api_airs_vermogen_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Airs Vermogen Status",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/vermogen/{portfolio_name}": {
+      "get": {
+        "description": "Stored Vermogensoverzicht holdings for a portfolio \u2014 the latest snapshot\nby default, or a specific `as_of` date. Returns `{portfolio_name,\nas_of_date, holdings: [...]}` (holdings shaped like `/api/portfolios/parse`).",
+        "operationId": "airs_vermogen_holdings_api_airs_vermogen__portfolio_name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_name",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "as_of",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As Of"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Vermogen Holdings",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/auth/delete-account": {
       "delete": {
         "description": "Delete the authenticated user's own account.",
@@ -3572,6 +3669,26 @@
           }
         },
         "summary": "Price Coverage",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/data/universe-coverage": {
+      "get": {
+        "description": "Per-universe price + volume freshness: for each frozen snapshot and each\ntemplate-managed universe, the min/max LATEST close-price and volume date\nacross its active members. Surfaces, on the /schedule month-end refresh, how\nfresh each tradable universe's data is \u2014 and which lag (the daily price\njob only touches held names, so between rebalances the rest goes stale).\n\nReturns `{universes: [{universe_id, label, frozen_from, template_key,\nmembers, priced/volumed counts, price:{min,max}, volume:{min,max}}]}`,\nordered by label. Cached 1 min (the RPC scans are not cheap).",
+        "operationId": "universe_coverage_api_data_universe_coverage_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Universe Coverage",
         "tags": [
           "system"
         ]
@@ -5417,7 +5534,7 @@
     },
     "/api/ingest/scheduled-refresh/trigger": {
       "post": {
-        "description": "Manual trigger from the /schedule UI's Run-now button. Same work\nas the cron path, just `triggered_by='manual'`. No cron-secret \u2014\nauth is enforced by the frontend proxy middleware in `frontend/proxy.ts`.",
+        "description": "Manual trigger from the /schedule UI's Run-now button. Same work\nas the cron path, just `triggered_by='manual'`. No cron-secret \u2014\nauth is enforced by the frontend proxy middleware in `frontend/proxy.ts`.\n\nPass `universe=<label>` with `job_name=universe_price_refresh` to re-price\njust that universe's companies (the per-universe coverage \"Refresh\" button).",
         "operationId": "trigger_scheduled_refresh_api_ingest_scheduled_refresh_trigger_post",
         "parameters": [
           {
@@ -5428,6 +5545,22 @@
               "default": "manual",
               "title": "Job Name",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "universe",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Universe"
             }
           }
         ],

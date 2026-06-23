@@ -350,6 +350,22 @@ def _fire_daily_sequence() -> None:
     threading.Thread(target=_seq, daemon=True, name="daily-pipeline").start()
 
 
+def _fire_airs_vermogen() -> None:
+    """APScheduler callable for the daily AIRS Vermogensoverzicht refresh. Runs
+    on its own daemon thread so the long Playwright scrape doesn't block the
+    scheduler worker. Re-discovers the live portfolio list + stores each
+    portfolio's holdings snapshot (see `airs_vermogen`)."""
+    def _run():
+        try:
+            from airs_vermogen import run_airs_vermogen_refresh_sync  # noqa: PLC0415
+            run_airs_vermogen_refresh_sync(triggered_by="auto")
+        except Exception as e:
+            _log.exception(
+                "[scheduler] airs_vermogen refresh failed: %s: %s", type(e).__name__, e,
+            )
+    threading.Thread(target=_run, daemon=True, name="airs-vermogen").start()
+
+
 def register_scheduler(app) -> None:
     """Attach the scheduler to the FastAPI lifecycle. Called once from
     `main.py` after the FastAPI() instance is created."""
@@ -405,6 +421,20 @@ def register_scheduler(app) -> None:
             CronTrigger(day="last", hour=12, minute=0, timezone="UTC"),
             args=["full_price_refresh"],
             id="month_end_price_refresh",
+            replace_existing=True,
+            coalesce=True,
+            misfire_grace_time=3600,
+        )
+        # Daily AIRS Vermogensoverzicht refresh — working days (Mon–Fri) at
+        # 11:00 Amsterdam time. The per-job timezone makes APScheduler handle
+        # the CET/CEST DST shift; only weekday holidays aren't skipped (a
+        # holiday run just re-stores the prior close, harmless). Re-discovers
+        # the live AirSPMS portfolio list each run (it changes day-to-day) and
+        # stores each portfolio's holdings snapshot. Runs on its own thread.
+        sched.add_job(
+            _fire_airs_vermogen,
+            CronTrigger(day_of_week="mon-fri", hour=11, minute=0, timezone="Europe/Amsterdam"),
+            id="airs_vermogen_refresh",
             replace_existing=True,
             coalesce=True,
             misfire_grace_time=3600,

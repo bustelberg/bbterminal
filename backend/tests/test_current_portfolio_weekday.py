@@ -63,11 +63,47 @@ def test_default_monday_is_the_as_of_date():
     assert cp.as_of_date == "2026-06-01"
 
 
-def test_before_first_rebalance_falls_back_to_prior_month():
+def test_before_deciding_bar_falls_back_to_prior_month():
     prices, universe = _data()
-    # today = Jun 2 (Tue), before the first Wednesday (Jun 3) → the
-    # strategy still holds May's pick. May 2026: Fri 1 → first Wed = May 6.
+    # today = Jun 1 (Mon), BEFORE the first Wednesday's deciding bar (Tue Jun 2's
+    # close isn't settled yet) → still holds May's pick. May 2026: Fri 1 → first
+    # Wed = May 6. With min(today, latest_data) the Jun-3 rebalance isn't yet
+    # decidable, so we step back.
     cp = run_current_portfolio(
-        _cfg(weekday=2), prices, universe, today=date(2026, 6, 2),
+        _cfg(weekday=2), prices, universe, today=date(2026, 6, 1),
     )
     assert cp.as_of_date == "2026-05-06"
+
+
+def test_fires_early_once_deciding_bar_is_in():
+    prices, universe = _data()
+    # The Saturday-rebalance case: today = Sat May 30, BEFORE the first Monday
+    # of June (Jun 1), but its deciding bar — Fri May 29's close — is already in.
+    # So we look ahead and produce the upcoming Jun 1 rebalance early, with picks
+    # identical to running it on the Monday.
+    cp = run_current_portfolio(
+        _cfg(weekday=0), prices, universe, today=date(2026, 5, 30),
+    )
+    assert cp.as_of_date == "2026-06-01"
+
+
+def test_saturday_run_reproduces_the_monday_run():
+    # The core guarantee: firing on Saturday (before the Jun 1 first Monday)
+    # produces the SAME picks + cost basis as running it on the Monday — the
+    # rebalance is fully determined by Friday's (May 29) close, which both runs
+    # see. Compare holdings identity + entry date/price (the cost basis).
+    prices, universe = _data()
+    sat = run_current_portfolio(_cfg(weekday=0), prices, universe, today=date(2026, 5, 30))
+    mon = run_current_portfolio(_cfg(weekday=0), prices, universe, today=date(2026, 6, 1))
+    assert sat.as_of_date == mon.as_of_date == "2026-06-01"
+
+    def _key(cp):
+        return sorted(
+            (h.company_id, h.entry_date, h.entry_price_eur, h.entry_price_local)
+            for h in cp.holdings
+        )
+    assert sat.holdings and _key(sat) == _key(mon)
+    # Entry is the prior trading day's close — STRICTLY before the Jun 1
+    # rebalance (real weekday-only data → Fri May 29; this synthetic helper is
+    # calendar-daily so it's May 31). The point: not the rebalance-day close.
+    assert all(h.entry_date is not None and h.entry_date < "2026-06-01" for h in sat.holdings)
