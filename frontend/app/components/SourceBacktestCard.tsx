@@ -27,10 +27,13 @@ type LoadedBacktest = {
 
 /** Cumulative return of a `(date, cum%)` series from `goLive` through the
  * end, rebased: `(1+endCum)/(1+baseCum) − 1`. `baseCum` is the cum at the
- * last point on/before go-live (or the curve's first point when go-live
- * precedes the data). Returns null for an empty series. The series'
- * `cum` is the run-to-date cumulative return; rebasing isolates the
- * go-live → latest slice. */
+ * last point STRICTLY BEFORE go-live — the cost basis is the prior trading
+ * day's close (we enter at the close of the day before the rebalance), so the
+ * since-go-live return must include the go-live day's own move. Anchoring
+ * on-or-before instead dropped that first day and read ~one day's return too
+ * high. Falls back to the curve's first point when go-live precedes the data.
+ * The series' `cum` is the run-to-date cumulative return; rebasing isolates
+ * the slice. */
 function rebasedReturn(
   series: { date: string; cum: number }[],
   goLive: string,
@@ -38,7 +41,7 @@ function rebasedReturn(
   if (series.length === 0) return null;
   let baseIdx = -1;
   for (let i = 0; i < series.length; i++) {
-    if (series[i].date <= goLive) baseIdx = i;
+    if (series[i].date < goLive) baseIdx = i;
     else break;
   }
   const base = baseIdx >= 0 ? series[baseIdx] : series[0];
