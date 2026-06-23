@@ -275,23 +275,40 @@ def _returns_from_backtest(
                 break
         return v
 
+    def cum_before(date_iso: str) -> float | None:
+        """Cumulative-return level at the last curve point STRICTLY before
+        `date_iso`. This is the period-boundary anchor the monthly-returns
+        chart uses (its month cell = lastCum(thisMonth) / lastCum(prevMonth)),
+        so MTD/YTD computed off it match the chart's month/year cells exactly —
+        the daily curve is the single basis."""
+        v: float | None = None
+        for dt, cum in pts:
+            if dt < date_iso:
+                v = cum
+            else:
+                break
+        return v
+
     def rel(a: float | None, b: float | None) -> float | None:
         if a is None or b is None:
             return None
         return round(((1 + a / 100.0) / (1 + b / 100.0) - 1) * 100.0, 2)
 
     # Anchor cumulative levels; when an anchor predates the curve, fall back
-    # to the curve's start (earliest data we have).
+    # to the curve's start (earliest data we have). MTD/YTD anchor STRICTLY
+    # before the month/year start (= the prior period's last close), matching
+    # how the monthly-returns chart chains its cells, so the header agrees with
+    # the chart to the cent. since-inception anchors AT the go-live date.
     curve_start_cum = pts[0][1]
     inc_cum = cum_at(inception_iso)
     if inc_cum is None:
         inc_cum = curve_start_cum
     year_start = today.replace(month=1, day=1).isoformat()
     month_start = today.replace(day=1).isoformat()
-    ytd_cum = cum_at(year_start)
+    ytd_cum = cum_before(year_start)
     if ytd_cum is None:
         ytd_cum = curve_start_cum
-    mtd_cum = cum_at(month_start)
+    mtd_cum = cum_before(month_start)
     if mtd_cum is None:
         mtd_cum = curve_start_cum
     return {
@@ -391,15 +408,13 @@ def _hydrate(rows: list[dict]) -> list[dict]:
             returns = _compute_period_returns(hist, today)
             since_inception_pct: float | None = None
             inception_date = str(r["start_date"])[:10] if r.get("start_date") else None
-            # MTD / YTD come from the snapshot walk (`_compute_period_returns`):
-            # its open-period anchor makes them equal the latest snapshot's
-            # `period_return_pct` — the exact number the holdings row shows (the
-            # open period IS the current month for a monthly cadence). Using the
-            # backtest-spliced curve here instead made the collapsed-row MTD
-            # disagree with the holdings (it anchors on the calendar-month start
-            # and folds in the prior period's tail / the rebalance step). The
-            # backtest curve is used ONLY for since-inception, which spans the
-            # pre-go-live history the live snapshots don't carry.
+            # MTD / YTD / since-inception are read off the strategy's daily
+            # equity curve (`_returns_from_backtest` → `_extended_curve`) — the
+            # SAME curve the monthly-returns chart renders — anchored at the
+            # period boundary the chart uses. So the header MTD/YTD equal the
+            # chart's month/year cells exactly: the daily curve is the single,
+            # most-granular basis. Falls back to the live-snapshot walk
+            # (`_compute_period_returns`) only when there's no backtest curve.
             if r.get("backtest_run_id") and inception_date:
                 try:
                     bt = _returns_from_backtest(
@@ -409,6 +424,11 @@ def _hydrate(rows: list[dict]) -> list[dict]:
                 except Exception:
                     bt = None
                 if bt:
+                    returns = {
+                        "mtd_return_pct": bt["mtd_return_pct"],
+                        "ytd_return_pct": bt["ytd_return_pct"],
+                        "as_of_date": bt["as_of_date"],
+                    }
                     since_inception_pct = bt["since_inception_pct"]
             last_snapshot = {
                 "snapshot_id": latest["snapshot_id"],
