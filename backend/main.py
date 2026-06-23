@@ -43,6 +43,7 @@ from routers import (
     momentum as _momentum_pkg,
     scheduled_strategies as _scheduled_strategies_router,
     system as _system_router,
+    timezone as _timezone_router,
     universe as _universe_router,
     universe_templates as _universe_templates_router,
 )
@@ -105,6 +106,7 @@ for _r in (
     _fee_config_router.router,
     _scheduled_strategies_router.router,
     _universe_templates_router.router,
+    _timezone_router.router,
     _admin_router.router,
     # Momentum splits into four sub-routers (signals, backtest_stream,
     # backtest_crud, current_picks); `routers.momentum.routers` is the

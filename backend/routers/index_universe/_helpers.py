@@ -68,22 +68,52 @@ def fetch_all_membership(
 
 
 def _enrich_tickers(rows: list[dict]) -> list[dict]:
-    """Add company_name + exchange + GuruFocus URL to ticker rows."""
+    """Join company info onto raw membership ticker rows.
+
+    Returns each company's display attributes — the same set the `/companies`
+    table shows — so a frozen-universe inspection (FrozenUniversesPanel) can
+    render Country / Sector / Mkt Cap / OpenFIGI columns identical to /companies.
+    `sector` is read from the membership row (it's stored per-universe); the
+    rest come from the `company` dimension. All fields are additive."""
     from ingest.gurufocus_url import gurufocus_url, pad_hkse_ticker  # noqa: PLC0415
+    from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
     company_ids = [r["company_id"] for r in rows if r["company_id"]]
     company_info: dict[int, dict] = {}
     for c in fetch_in_chunks(
         company_ids,
         lambda chunk: supabase.table("company").select(
-            "company_id, company_name, isin, gurufocus_ticker, gurufocus_exchange:gurufocus_exchange(exchange_code)"
+            "company_id, company_name, isin, gurufocus_ticker, "
+            "delisted_at, out_of_scope_at, out_of_scope_reason, "
+            "market_cap_eur, market_cap_date, market_cap_native, "
+            "market_cap_currency, market_cap_fx_rate, "
+            "openfigi_status, openfigi_name, openfigi_checked_at, "
+            "gurufocus_exchange:gurufocus_exchange("
+            "exchange_code, country:country(country_name))"
         ).in_("company_id", chunk).execute(),
     ):
         exch_info = c.get("gurufocus_exchange") or {}
+        country_info = exch_info.get("country") or {}
+        code = exch_info.get("exchange_code") or ""
         company_info[c["company_id"]] = {
             "company_name": c.get("company_name") or "",
             "isin": c.get("isin") or "",
-            "exchange": exch_info.get("exchange_code") or "",
+            "exchange": code,
             "gurufocus_ticker": c.get("gurufocus_ticker") or "",
+            "country": country_info.get("country_name"),
+            "delisted_at": c.get("delisted_at"),
+            "out_of_scope_at": c.get("out_of_scope_at"),
+            "out_of_scope_reason": c.get("out_of_scope_reason"),
+            "market_cap_eur": c.get("market_cap_eur"),
+            "market_cap_date": c.get("market_cap_date"),
+            "market_cap_native": c.get("market_cap_native"),
+            "market_cap_currency": c.get("market_cap_currency"),
+            "market_cap_fx_rate": c.get("market_cap_fx_rate"),
+            "openfigi_status": c.get("openfigi_status"),
+            "openfigi_name": c.get("openfigi_name"),
+            "openfigi_checked_at": c.get("openfigi_checked_at"),
+            # AU/NZ, Russia, Africa, LatAm are outside our GuruFocus subscription;
+            # flag them so an empty market cap reads as "unsubscribed" not "missing".
+            "gf_unsubscribed": not is_gf_subscribed_exchange(code),
         }
 
     result = []
@@ -104,6 +134,21 @@ def _enrich_tickers(rows: list[dict]) -> list[dict]:
             "isin": info.get("isin") or None,
             "exchange": exchange,
             "gurufocus_url": gurufocus_url(ticker, exchange),
+            # Sector is stored per-universe on the membership row.
+            "sector": r.get("sector"),
+            "country": info.get("country"),
+            "delisted_at": info.get("delisted_at"),
+            "out_of_scope_at": info.get("out_of_scope_at"),
+            "out_of_scope_reason": info.get("out_of_scope_reason"),
+            "market_cap_eur": info.get("market_cap_eur"),
+            "market_cap_date": info.get("market_cap_date"),
+            "market_cap_native": info.get("market_cap_native"),
+            "market_cap_currency": info.get("market_cap_currency"),
+            "market_cap_fx_rate": info.get("market_cap_fx_rate"),
+            "openfigi_status": info.get("openfigi_status"),
+            "openfigi_name": info.get("openfigi_name"),
+            "openfigi_checked_at": info.get("openfigi_checked_at"),
+            "gf_unsubscribed": info.get("gf_unsubscribed", False),
         })
     return result
 

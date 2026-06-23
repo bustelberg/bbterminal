@@ -31,6 +31,7 @@ import SectorTimelineChart from './momentum/SectorTimelineChart';
 import DailyReturnsHistograms from './momentum/DailyReturnsHistograms';
 import MarketHealthCard from './momentum/MarketHealthCard';
 import MonthlyReturnsHeatmap from './momentum/MonthlyReturnsHeatmap';
+import RebalanceDayReturnsCard from './momentum/RebalanceDayReturnsCard';
 import SignalWeightSliders from './momentum/SignalWeightSliders';
 import StrategyModeSelect from './momentum/StrategyModeSelect';
 import VariantAttribution from './momentum/VariantAttribution';
@@ -653,6 +654,8 @@ export default function MomentumBacktester() {
             <SectorTimelineChart result={displayResult} />
 
             <DailyReturnsHistograms result={displayResult} />
+
+            <RebalanceDayReturnsCard result={displayResult} />
 
             <MonthlyReturnsHeatmap result={displayResult} />
 

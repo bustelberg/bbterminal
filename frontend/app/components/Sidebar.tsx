@@ -37,6 +37,7 @@ const navItems: NavEntry[] = [
     ],
   },
   { href: '/fx-rates', label: 'FX Rates' },
+  { href: '/timezone', label: 'Trading Hours' },
   { href: '/airs-portfolio', label: 'AIRS Portfolio', userVisible: true },
   { href: '/request_gurufocus', label: 'Request GuruFocus' },
   { href: '/benchmarks', label: 'Benchmarks' },

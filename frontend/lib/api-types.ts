@@ -1111,9 +1111,11 @@ export interface paths {
         put?: never;
         /**
          * Refresh Market Caps
-         * @description Admin-only: (re)fetch every company's market cap from GuruFocus and store
-         *     the EUR snapshot. Spawns a background thread (the job takes ~an hour — one
-         *     GuruFocus call per company) and returns immediately; poll
+         * @description Admin-only: fetch market caps from GuruFocus for the companies that are
+         *     MISSING one, skipping UNSUBSCRIBED (out-of-coverage) exchanges — so it only
+         *     spends GuruFocus calls where there's actually a cap to get (much faster than
+         *     a full re-fetch). Stores the EUR snapshot + corrects the name. Spawns a
+         *     background thread and returns immediately; poll
          *     `/api/companies/market-cap/refresh/status`. No-op if already running.
          */
         post: operations["refresh_market_caps_api_companies_market_cap_refresh_post"];
@@ -2952,6 +2954,31 @@ export interface paths {
          *     alongside the live templates. Newest snapshot first.
          */
         get: operations["list_static_universes_api_static_universes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/timezone/exchanges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Timezone Exchanges
+         * @description Exchanges (with company counts) + their trading hours in Amsterdam time.
+         *
+         *     `universe` is a universe *label* (e.g. a frozen snapshot). Omit it to count
+         *     across every company in the DB. Sorted by Amsterdam winter close time so the
+         *     earliest-closing markets — whose previous-day close is available soonest in
+         *     our day — come first; exchanges with no hours data sort last.
+         */
+        get: operations["timezone_exchanges_api_timezone_exchanges_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -7876,6 +7903,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    timezone_exchanges_api_timezone_exchanges_get: {
+        parameters: {
+            query?: {
+                universe?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

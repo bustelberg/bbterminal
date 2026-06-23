@@ -3289,7 +3289,7 @@
     },
     "/api/companies/market-cap/refresh": {
       "post": {
-        "description": "Admin-only: (re)fetch every company's market cap from GuruFocus and store\nthe EUR snapshot. Spawns a background thread (the job takes ~an hour \u2014 one\nGuruFocus call per company) and returns immediately; poll\n`/api/companies/market-cap/refresh/status`. No-op if already running.",
+        "description": "Admin-only: fetch market caps from GuruFocus for the companies that are\nMISSING one, skipping UNSUBSCRIBED (out-of-coverage) exchanges \u2014 so it only\nspends GuruFocus calls where there's actually a cap to get (much faster than\na full re-fetch). Stores the EUR snapshot + corrects the name. Spawns a\nbackground thread and returns immediately; poll\n`/api/companies/market-cap/refresh/status`. No-op if already running.",
         "operationId": "refresh_market_caps_api_companies_market_cap_refresh_post",
         "responses": {
           "200": {
@@ -6582,6 +6582,48 @@
         "summary": "List Static Universes",
         "tags": [
           "universe-templates"
+        ]
+      }
+    },
+    "/api/timezone/exchanges": {
+      "get": {
+        "description": "Exchanges (with company counts) + their trading hours in Amsterdam time.\n\n`universe` is a universe *label* (e.g. a frozen snapshot). Omit it to count\nacross every company in the DB. Sorted by Amsterdam winter close time so the\nearliest-closing markets \u2014 whose previous-day close is available soonest in\nour day \u2014 come first; exchanges with no hours data sort last.",
+        "operationId": "timezone_exchanges_api_timezone_exchanges_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "universe",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Universe",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Timezone Exchanges",
+        "tags": [
+          "timezone"
         ]
       }
     },

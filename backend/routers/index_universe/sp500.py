@@ -214,7 +214,7 @@ async def index_universe_tickers(index: str = "SP500", month: str = ""):
             return []
         universe_id = u_resp.data[0]["universe_id"]
         rows = fetch_all_membership(
-            universe_id, "universe_ticker, company_id",
+            universe_id, "universe_ticker, company_id, sector",
             month=month, order="universe_ticker",
         )
         # Map universe_ticker -> ticker for _enrich_tickers compatibility.

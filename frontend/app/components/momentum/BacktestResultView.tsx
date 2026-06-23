@@ -10,6 +10,7 @@ import EquityCurveCard from './EquityCurveCard';
 import FeeWaterfallPanel from './FeeWaterfallPanel';
 import MarketHealthCard from './MarketHealthCard';
 import MonthlyHoldingsTable, { type ScoringConfig } from './MonthlyHoldingsTable';
+import RebalanceDayReturnsCard from './RebalanceDayReturnsCard';
 import SectorTimelineChart from './SectorTimelineChart';
 import type { SavedRun } from './types';
 
@@ -133,6 +134,7 @@ export default function BacktestResultView({
       <MarketHealthCard result={result} defaultCollapsed={defaultCollapsed} />
       <SectorTimelineChart result={result} markerDate={markerDate} defaultCollapsed={defaultCollapsed} />
       <DailyReturnsHistograms result={result} defaultCollapsed={defaultCollapsed} />
+      <RebalanceDayReturnsCard result={result} defaultCollapsed={defaultCollapsed} />
       <MonthlyReturnsHeatmap
         result={result}
         markerDate={markerDate}

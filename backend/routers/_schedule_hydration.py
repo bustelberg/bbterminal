@@ -159,9 +159,8 @@ def _splice_snapshot_tail(
     backtest_pts: list[tuple[str, float]],
     snap_curve: list[tuple[str, float]],
 ) -> tuple[str | None, list[dict]]:
-    """Graft the live forward tail onto the (frozen) backtest daily curve so
-    a strategy's monthly-returns + equity views stay current with the latest
-    priced day.
+    """Graft the LIVE held-basket curve onto the (frozen) backtest daily curve,
+    with live data taking precedence from where it begins (≈ go-live).
 
     `backtest_pts` — the backtest curve as
     ``[(YYYY-MM-DD, cumulative_return_pct), ...]`` (any order).
@@ -172,46 +171,51 @@ def _splice_snapshot_tail(
     lags the price-update snapshots.
 
     Returns ``(cutover_date, tail_points)``:
-      * `cutover_date` — the first forward date. The caller keeps backtest
-        points strictly before it and appends `tail_points`. None when
-        there's nothing to splice (no curve, or live data no fresher than
-        the backtest curve's end).
+      * `cutover_date` — the live curve's FIRST day. The caller keeps backtest
+        points strictly before it and appends `tail_points`. None only when
+        there's nothing to splice (an empty curve on either side).
       * `tail_points` — ``[{"date", "cumulative_return_pct"}, ...]`` on the
         SAME cumulative scale as the backtest curve.
 
-    Only snapshot points dated AFTER the backtest curve's last day extend
-    it, and their RELATIVE move from that boundary is grafted on — so a
-    level mismatch between the two independently-computed curves never shows
-    at the join."""
+    The live curve REPLACES the backtest curve from its first day onward: the
+    backtest is hypothetical *context* for the pre-go-live history, but once a
+    strategy is live the held basket is what actually happened — even on
+    calendar days the saved backtest happens to cover. The whole live curve is
+    rebased to continue from the backtest's cumulative level AT the cutover, so
+    no level mismatch shows at the join.
+
+    (Previously only snapshot points dated AFTER the backtest curve's last day
+    were grafted. When a saved backtest's horizon ran past go-live, the go-live
+    month then showed the backtest's curve instead of the real basket — the
+    cause of the /schedule monthly-returns vs holdings-period-return mismatch.)"""
     if not backtest_pts or not snap_curve:
         return None, []
     bt = sorted(backtest_pts, key=lambda p: p[0])
-    bt_last_date, bt_last_cum = bt[-1]
     sc = sorted(snap_curve, key=lambda p: p[0])
 
-    forward = [(d, e) for d, e in sc if d > bt_last_date]
-    if not forward:
-        return None, []
-
-    # Snapshot equity at the backtest boundary: last point on/before it,
-    # else the first snapshot point (curve begins after the boundary).
-    anchor_eq: float | None = None
-    for d, e in sc:
-        if d <= bt_last_date:
-            anchor_eq = e
-        else:
-            break
-    if anchor_eq is None:
-        anchor_eq = sc[0][1]
+    # Cut over to the live curve at its first day (≈ go-live) — that's where
+    # the real held basket begins and supersedes the backtest.
+    cutover_date = sc[0][0]
+    anchor_eq = sc[0][1]
     if anchor_eq <= 0:
         return None, []
 
-    rebase = (1.0 + bt_last_cum / 100.0) / anchor_eq
+    # Backtest cumulative level at the cutover: the last backtest point on/before
+    # it (so the live curve continues seamlessly from there). Falls back to the
+    # backtest's start when the live curve predates the backtest entirely.
+    bt_cum_at_cut = bt[0][1]
+    for d, cum in bt:
+        if d <= cutover_date:
+            bt_cum_at_cut = cum
+        else:
+            break
+
+    rebase = (1.0 + bt_cum_at_cut / 100.0) / anchor_eq
     tail = [
         {"date": d, "cumulative_return_pct": round((e * rebase - 1.0) * 100.0, 6)}
-        for d, e in forward
+        for d, e in sc
     ]
-    return forward[0][0], tail
+    return cutover_date, tail
 
 
 def _extended_curve(
@@ -226,8 +230,14 @@ def _extended_curve(
     if not bt_pts:
         return []
     snap_curve, _, _ = _walk_snapshot_curve(snapshots or [])
-    _, tail = _splice_snapshot_tail(bt_pts, snap_curve)
-    return bt_pts + [(p["date"], p["cumulative_return_pct"]) for p in tail]
+    cutover, tail = _splice_snapshot_tail(bt_pts, snap_curve)
+    if not cutover or not tail:
+        return bt_pts
+    # Keep backtest points strictly before the cutover; the live tail supersedes
+    # the curve from go-live on (it may start before the backtest's end, so we
+    # must drop the overlapping backtest tail — not just append).
+    kept = [(d, c) for d, c in bt_pts if d < cutover]
+    return kept + [(p["date"], p["cumulative_return_pct"]) for p in tail]
 
 
 def _returns_from_backtest(

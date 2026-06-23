@@ -8,6 +8,9 @@ import { API_URL } from '../../lib/apiUrl';
 import type { Column } from '../../lib/tableExport';
 import TableDownloadButton from './TableDownloadButton';
 import LoadingDots from './LoadingDots';
+import InfoTip from './universe/InfoTip';
+import OpenFigiBadge from './company/OpenFigiBadge';
+import { fmtMktCapEur, fmtMktCapNative } from './company/format';
 
 /**
  * Uniform "frozen universes" panel shared by every universe page (/sp500,
@@ -32,6 +35,8 @@ type FrozenSnapshot = {
   latest_membership_count: number;
 };
 type MonthEntry = { target_month: string; count: number };
+// Mirrors the company attributes the /companies table shows, so the inspection
+// view below can render the same Country / Sector / Mkt Cap / OpenFIGI columns.
 type TickerEntry = {
   ticker: string;
   company_id: number | null;
@@ -39,6 +44,17 @@ type TickerEntry = {
   isin: string | null;
   exchange: string | null;
   gurufocus_url: string;
+  sector?: string | null;
+  country?: string | null;
+  market_cap_eur?: number | null;
+  market_cap_date?: string | null;
+  market_cap_native?: number | null;
+  market_cap_currency?: string | null;
+  market_cap_fx_rate?: number | null;
+  gf_unsubscribed?: boolean;
+  openfigi_status?: string | null;
+  openfigi_name?: string | null;
+  openfigi_checked_at?: string | null;
 };
 
 export default function FrozenUniversesPanel({
@@ -168,16 +184,22 @@ export default function FrozenUniversesPanel({
           t.ticker.toLowerCase().includes(filter.toLowerCase()) ||
           (t.company_name || '').toLowerCase().includes(filter.toLowerCase()) ||
           (t.isin || '').toLowerCase().includes(filter.toLowerCase()) ||
-          (t.exchange || '').toLowerCase().includes(filter.toLowerCase()))
+          (t.exchange || '').toLowerCase().includes(filter.toLowerCase()) ||
+          (t.country || '').toLowerCase().includes(filter.toLowerCase()) ||
+          (t.sector || '').toLowerCase().includes(filter.toLowerCase()))
       : tickers
   ), [tickers, filter]);
 
   const exportColumns = useMemo<Column<TickerEntry>[]>(() => [
+    { key: 'company_id', header: 'Company ID', accessor: (t) => t.company_id ?? '' },
+    { key: 'company_name', header: 'Company', accessor: (t) => t.company_name ?? '' },
     { key: 'ticker', header: 'Ticker', accessor: (t) => t.ticker },
     { key: 'exchange', header: 'Exchange', accessor: (t) => t.exchange ?? '' },
     { key: 'isin', header: 'ISIN', accessor: (t) => t.isin ?? '' },
-    { key: 'company_id', header: 'Company ID', accessor: (t) => t.company_id ?? '' },
-    { key: 'company_name', header: 'Company', accessor: (t) => t.company_name ?? '' },
+    { key: 'openfigi_status', header: 'OpenFIGI', accessor: (t) => t.openfigi_status ?? '' },
+    { key: 'country', header: 'Country', accessor: (t) => t.country ?? '' },
+    { key: 'sector', header: 'Sector', accessor: (t) => t.sector ?? '' },
+    { key: 'market_cap_eur', header: 'Mkt Cap (EUR)', accessor: (t) => t.market_cap_eur ?? '' },
     { key: 'gurufocus_url', header: 'GuruFocus URL', accessor: (t) => t.gurufocus_url },
   ], []);
 
@@ -301,13 +323,20 @@ export default function FrozenUniversesPanel({
               <div className="px-5 py-8 text-center text-fg-subtle text-sm"><LoadingDots label="Loading" /></div>
             ) : (
               <table className="w-full text-sm">
+                {/* Column order mirrors the /companies table so the two views
+                    read the same; this is read-only so there's no Actions
+                    column and the universe-membership column is implicit. */}
                 <thead className="sticky top-0 bg-card">
                   <tr className="text-left text-xs text-fg-subtle border-b border-neutral-800/40">
                     <th className="px-5 py-2.5 font-medium w-12">#</th>
-                    <th className="px-3 py-2.5 font-medium">Ticker</th>
-                    <th className="px-3 py-2.5 font-medium">Exchange</th>
-                    <th className="px-3 py-2.5 font-medium">ISIN</th>
                     <th className="px-3 py-2.5 font-medium">Company</th>
+                    <th className="px-3 py-2.5 font-medium w-24">Ticker</th>
+                    <th className="px-3 py-2.5 font-medium w-24">Exchange</th>
+                    <th className="px-3 py-2.5 font-medium w-36">ISIN</th>
+                    <th className="px-3 py-2.5 font-medium w-28" title="OpenFIGI verification of the stored ISIN — does it resolve to this company, or a different one (wrong-ISIN trap)?">OpenFIGI</th>
+                    <th className="px-3 py-2.5 font-medium w-32">Country</th>
+                    <th className="px-3 py-2.5 font-medium w-40">Sector</th>
+                    <th className="px-3 py-2.5 font-medium text-right w-28">Mkt Cap</th>
                     <th className="px-3 py-2.5 font-medium">GuruFocus</th>
                   </tr>
                 </thead>
@@ -315,10 +344,39 @@ export default function FrozenUniversesPanel({
                   {filteredTickers.map((t, i) => (
                     <tr key={`${t.ticker}-${t.company_id ?? i}`} className="border-b border-neutral-800/20 hover:bg-overlay/[0.02]">
                       <td className="px-5 py-2.5 text-fg-faint font-mono">{i + 1}</td>
+                      <td className="px-3 py-2.5 text-fg-soft">{t.company_name || '—'}</td>
                       <td className="px-3 py-2.5 text-fg-strong font-mono font-medium">{t.ticker || '—'}</td>
                       <td className="px-3 py-2.5 text-fg-muted font-mono text-xs">{t.exchange || '—'}</td>
                       <td className="px-3 py-2.5 text-fg-muted font-mono text-xs">{t.isin || '—'}</td>
-                      <td className="px-3 py-2.5 text-fg-soft">{t.company_name || '—'}</td>
+                      <td className="px-3 py-2.5">
+                        <OpenFigiBadge status={t.openfigi_status} name={t.openfigi_name} checkedAt={t.openfigi_checked_at} />
+                      </td>
+                      <td className="px-3 py-2.5 text-fg-muted">{t.country || '—'}</td>
+                      <td className="px-3 py-2.5 text-fg-muted text-xs">{t.sector || '—'}</td>
+                      <td className="px-3 py-2.5 text-right font-mono text-xs text-fg-muted whitespace-nowrap">
+                        {t.market_cap_eur != null ? (
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <span>{fmtMktCapEur(t.market_cap_eur)}</span>
+                            <InfoTip
+                              text={[
+                                t.market_cap_date ? `As of ${t.market_cap_date}.` : null,
+                                t.market_cap_native != null && t.market_cap_currency && t.market_cap_currency !== 'EUR'
+                                  ? `Native ${fmtMktCapNative(t.market_cap_native, t.market_cap_currency)}, converted at ${t.market_cap_fx_rate} ${t.market_cap_currency}/EUR (ECB rate) → ${fmtMktCapEur(t.market_cap_eur)}.`
+                                  : 'Quoted in EUR — no FX conversion.',
+                              ].filter(Boolean).join(' ')}
+                            />
+                          </span>
+                        ) : t.gf_unsubscribed ? (
+                          <span
+                            className="px-1.5 py-0.5 text-[10px] font-medium bg-warn-500/15 text-warn-300 border border-warn-500/30 rounded cursor-help"
+                            title={`${t.exchange ?? 'This exchange'} is outside our GuruFocus subscription (India, AU/NZ, Russia, Africa, LatAm) — no market-cap / price / ISIN data is available for this listing.`}
+                          >
+                            UNSUBSCRIBED
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
                       <td className="px-3 py-2.5">
                         <a href={t.gurufocus_url} target="_blank" rel="noopener noreferrer" className="text-xs text-accent-400 hover:text-accent-300 transition-colors">
                           View

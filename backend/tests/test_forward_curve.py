@@ -67,34 +67,27 @@ def test_splice_empty_inputs():
     assert _splice_snapshot_tail([], [("2026-06-12", 1.1)]) == (None, [])
 
 
-def test_splice_no_forward_points():
-    # Snapshot curve no fresher than the backtest end → nothing to splice.
-    bt = [("2026-06-02", 10.0)]
-    snap = [("2026-05-01", 1.0), ("2026-06-02", 1.05)]
-    assert _splice_snapshot_tail(bt, snap) == (None, [])
-
-
-def test_splice_grafts_relative_move_onto_curve_end():
-    # Backtest ends 2026-06-02 at +10%. Snapshot curve is anchored at 06-02
-    # (equity 1.05) and runs to 06-12 (equity 1.05 * 1.04 = 1.092). The
-    # spliced tail should reflect the +4% RELATIVE move on top of +10%.
+def test_splice_grafts_whole_live_curve_from_its_start():
+    # Backtest ends 2026-06-02 at +10%. The live curve begins at 06-02 (its
+    # first day = the cutover) and runs to 06-12 with a +4% move. The whole
+    # live curve grafts on, rebased to continue from the +10% backtest level.
     bt = [("2026-05-01", 5.0), ("2026-06-02", 10.0)]
     snap = [
-        ("2026-05-01", 1.00),
-        ("2026-06-02", 1.05),    # anchor (level differs from backtest — ignored)
-        ("2026-06-12", 1.092),   # +4% vs the anchor
+        ("2026-06-02", 1.00),    # cutover; rebased to the backtest's +10%
+        ("2026-06-12", 1.04),    # +4% vs the cutover
     ]
     cutover, tail = _splice_snapshot_tail(bt, snap)
-    assert cutover == "2026-06-12"
-    assert len(tail) == 1
-    assert tail[0]["date"] == "2026-06-12"
-    # 1.10 * (1.092 / 1.05) - 1 = 1.10 * 1.04 - 1 = 0.144 → 14.4%
-    assert abs(tail[0]["cumulative_return_pct"] - 14.4) < 1e-6
+    assert cutover == "2026-06-02"
+    assert [p["date"] for p in tail] == ["2026-06-02", "2026-06-12"]
+    assert abs(tail[0]["cumulative_return_pct"] - 10.0) < 1e-6
+    # 1.10 * (1.04 / 1.00) - 1 = 0.144 → 14.4%
+    assert abs(tail[1]["cumulative_return_pct"] - 14.4) < 1e-6
 
 
 def test_splice_anchors_at_first_point_when_curve_starts_after_backtest():
-    # No snapshot point on/before the backtest end → anchor at the first
-    # snapshot point; only strictly-later points form the tail.
+    # Live curve starts strictly after the backtest end — the common case
+    # (backtest saved before go-live). Cutover = the live curve's first day;
+    # it's rebased to the backtest's last level.
     bt = [("2026-06-02", 10.0)]
     snap = [("2026-06-05", 1.00), ("2026-06-12", 1.02)]
     cutover, tail = _splice_snapshot_tail(bt, snap)
@@ -106,8 +99,30 @@ def test_splice_anchors_at_first_point_when_curve_starts_after_backtest():
     assert abs(tail[1]["cumulative_return_pct"] - 12.2) < 1e-6
 
 
+def test_splice_live_replaces_overlapping_backtest_tail():
+    # REGRESSION: the saved backtest's horizon ran PAST go-live (through
+    # 06-15), so its curve overlaps the live month. The live held basket
+    # (go-live 06-01, +4% by 06-12) must take precedence from go-live — its
+    # month reads as the basket's real return, not the backtest's +12%.
+    bt = [("2026-05-01", 5.0), ("2026-06-15", 12.0)]
+    snaps = [
+        _snap("rebalance", "2026-06-01", 0.0, as_of="2026-06-01"),
+        _snap("price_update", "2026-06-12", 4.0, as_of="2026-06-01"),
+    ]
+    snap_curve, _, _ = _walk_snapshot_curve(snaps)
+    cutover, tail = _splice_snapshot_tail(bt, snap_curve)
+    # Cut over at go-live, rebased to the backtest level on 06-01 (the 05-01
+    # point, +5% — the 06-15 backtest point is superseded by the live curve).
+    assert cutover == "2026-06-01"
+    assert abs(tail[0]["cumulative_return_pct"] - 5.0) < 1e-6
+    # 1.05 * 1.04 - 1 = 0.092 → +9.2%. The June calendar move off this curve is
+    # 1.092 / 1.05 - 1 = +4% — exactly the held basket's period return.
+    assert abs(tail[-1]["cumulative_return_pct"] - 9.2) < 1e-6
+
+
 def test_splice_end_to_end_from_snapshots():
     # The realistic path: walk snapshots → splice onto the backtest curve.
+    # Backtest ends 06-02; the live curve opens 06-01 and supersedes it.
     bt = [("2026-05-01", 5.0), ("2026-06-02", 10.0)]
     snaps = [
         _snap("rebalance", "2026-06-01", 0.0, as_of="2026-06-01"),
@@ -115,7 +130,8 @@ def test_splice_end_to_end_from_snapshots():
     ]
     snap_curve, _, _ = _walk_snapshot_curve(snaps)
     cutover, tail = _splice_snapshot_tail(bt, snap_curve)
-    assert cutover == "2026-06-12"
-    # Anchor = snapshot equity at/<= 06-02 → the 06-01 rebalance point (1.0).
-    # 06-12 equity = 1.04 → spliced cum = 1.10 * 1.04 - 1 = 14.4%.
-    assert abs(tail[-1]["cumulative_return_pct"] - 14.4) < 1e-6
+    assert cutover == "2026-06-01"
+    # Rebased to the backtest level at go-live (05-01 = +5%); the basket's +4%
+    # over June → 1.05 * 1.04 - 1 = +9.2%. (Old behaviour kept the backtest's
+    # 06-02 +10% and stacked +4% on top → a too-high 14.4%.)
+    assert abs(tail[-1]["cumulative_return_pct"] - 9.2) < 1e-6
