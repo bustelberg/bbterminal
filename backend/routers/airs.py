@@ -280,6 +280,46 @@ async def airs_vermogen_holdings(portfolio_name: str, as_of: str | None = None):
     return await asyncio.to_thread(_q)
 
 
+@router.get("/api/airs/crm-relaties")
+async def airs_crm_relaties():
+    """The latest stored CRM 'Alle relaties' export, parsed on the fly from the
+    raw .xls in `airs_crm_relaties_raw` into a generic `{columns, rows}` table
+    (whatever columns the export has). Empty until the daily job has run it."""
+    import base64 as _b64  # noqa: PLC0415
+
+    def _q() -> dict:
+        latest = (
+            supabase.table("airs_crm_relaties_raw")
+            .select("as_of_date, filename, content_base64, byte_size, retrieved_at")
+            .order("as_of_date", desc=True).limit(1).execute()
+        ).data
+        if not latest:
+            return {"as_of_date": None, "columns": [], "rows": [], "row_count": 0}
+        r = latest[0]
+        raw = _b64.b64decode(r["content_base64"])
+        try:
+            df = pd.read_excel(io.BytesIO(raw), engine="xlrd")  # AIRS exports .xls (BIFF)
+        except Exception:
+            df = pd.read_excel(io.BytesIO(raw))  # fall back to pandas auto-detect (.xlsx)
+        columns = [str(c) for c in df.columns]
+        # to_json handles NaN→null, dates→iso, numpy→native; round-trip to plain dicts.
+        import json as _json  # noqa: PLC0415
+        rows = _json.loads(df.to_json(orient="records", date_format="iso"))
+        return {
+            "as_of_date": r["as_of_date"],
+            "retrieved_at": r.get("retrieved_at"),
+            "byte_size": r.get("byte_size"),
+            "columns": columns,
+            "rows": rows,
+            "row_count": len(rows),
+        }
+
+    try:
+        return await asyncio.to_thread(_q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to parse CRM relaties: {e}")
+
+
 @router.post("/api/portfolios/parse")
 async def parse_portfolio(file: UploadFile = File(...)):
     content = await file.read()

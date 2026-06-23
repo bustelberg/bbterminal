@@ -38,6 +38,8 @@ _STATUS: dict = {
     "rendement_stored": 0,     # portfolios whose Rendement (ATT) was stored
     "vermogen_stored": 0,      # portfolios whose Vermogensoverzicht (VOLK) was stored
     "holdings_rows": 0,        # total holding rows stored
+    "crm_stored": None,        # True/False — CRM "Alle relaties" raw export stored this run
+    "crm_bytes": 0,            # size of the stored raw CRM export
     "errors": [],
 }
 
@@ -102,8 +104,10 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
     if not _LOCK.acquire(blocking=False):
         return {"status": "busy", "message": "An AIRS refresh is already running"}
     try:
+        import base64  # noqa: PLC0415
+
         from airs_scanner import (  # noqa: PLC0415
-            download_portfolio_sync, download_vermogensoverzicht_sync,
+            download_crm_relaties_sync, download_portfolio_sync, download_vermogensoverzicht_sync,
         )
         from portfolio import parse_airs_excel  # noqa: PLC0415
         from routers.airs import _parse_att_excel, _save_performance_to_db  # noqa: PLC0415
@@ -121,6 +125,8 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
             "rendement_stored": 0,
             "vermogen_stored": 0,
             "holdings_rows": 0,
+            "crm_stored": None,
+            "crm_bytes": 0,
             "errors": [],
         })
 
@@ -157,17 +163,38 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
                 _STATUS["errors"].append(f"{name} (Vermogensoverzicht): {type(e).__name__}: {e}")
                 _log.warning("[airs_vermogen] %s Vermogensoverzicht failed: %s: %s", name, type(e).__name__, e)
 
+        # CRM → Relaties → Alle relaties: one global Excel export per run, stored
+        # raw (base64) in airs_crm_relaties_raw, upserted per as-of date.
+        _STATUS["message"] = "Downloading CRM Alle relaties…"
+        crm_bytes = 0
+        crm_ok = False
+        try:
+            raw = download_crm_relaties_sync()
+            supabase.table("airs_crm_relaties_raw").upsert({
+                "as_of_date": tot,
+                "filename": f"crm_relaties_{tot}.xlsx",
+                "content_base64": base64.b64encode(raw).decode("ascii"),
+                "byte_size": len(raw),
+            }, on_conflict="as_of_date").execute()
+            crm_bytes, crm_ok = len(raw), True
+        except Exception as e:
+            _STATUS["errors"].append(f"CRM relaties: {type(e).__name__}: {e}")
+            _log.warning("[airs_vermogen] CRM relaties failed: %s: %s", type(e).__name__, e)
+
         total = len(names)
-        any_stored = rendement_ok or vermogen_ok
+        any_stored = rendement_ok or vermogen_ok or crm_ok
         _STATUS.update({
             "finished_at": datetime.now(timezone.utc).isoformat(),
             "status": "ok" if any_stored else "error",
             "rendement_stored": rendement_ok,
             "vermogen_stored": vermogen_ok,
             "holdings_rows": holdings_total,
+            "crm_stored": crm_ok,
+            "crm_bytes": crm_bytes,
             "message": (
                 f"Rendement {rendement_ok}/{total}, Vermogensoverzicht {vermogen_ok}/{total} "
-                f"({holdings_total} holdings)"
+                f"({holdings_total} holdings); CRM relaties "
+                + (f"{crm_bytes // 1024} KB" if crm_ok else "failed")
                 + (f"; {len(_STATUS['errors'])} report(s) failed" if _STATUS["errors"] else "")
             ),
         })

@@ -2,6 +2,7 @@ import os
 import queue
 import threading
 from urllib.parse import urlencode
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
 
@@ -154,6 +155,28 @@ def _login(page):
 
 # ─── Persistent session for fast downloads ────────────────────────────────────
 
+class AirsHttpResponse:
+    """A captured response from the persistent session — body bytes plus the
+    metadata needed to diagnose a non-Excel reply (HTTP status, content-type,
+    final URL after any redirect)."""
+
+    __slots__ = ("body", "status", "content_type", "url")
+
+    def __init__(self, body: bytes, status: int, content_type: str, url: str):
+        self.body = body
+        self.status = status
+        self.content_type = content_type
+        self.url = url
+
+
+def _looks_like_html(body: bytes) -> bool:
+    """Heuristic: does this response body start with an HTML document marker?
+    Covers `<!doctype html>`, a bare `<html>`, and a leading `<?xml`/BOM-then-tag
+    that some PHP error pages emit."""
+    head = body[:512].lstrip().lower()
+    return head.startswith((b"<!doctype", b"<html", b"<!--", b"<head", b"<?php"))
+
+
 class _AirsSession:
     """Keeps a single Playwright browser on a dedicated thread for authenticated requests."""
 
@@ -187,32 +210,82 @@ class _AirsSession:
             pw = browser = page = None
 
         while True:
-            url, result_q = self._queue.get()
+            job, result_q = self._queue.get()
             try:
                 ensure_logged_in()
-                resp = page.request.get(url)
-                body = resp.body()
+                resp = job(page)
 
-                # If we got HTML back (session expired), re-login once
-                if body[:15].lower().startswith(b"<!doctype"):
+                # If we got HTML back (session expired / login bounce), re-login
+                # once and re-run the job from scratch.
+                if _looks_like_html(resp.body):
                     close_session()
                     ensure_logged_in()
-                    resp = page.request.get(url)
-                    body = resp.body()
+                    resp = job(page)
 
-                result_q.put(("ok", body))
+                result_q.put(("ok", resp))
             except Exception as e:
                 close_session()
                 result_q.put(("error", e))
 
-    def get(self, url: str) -> bytes:
-        """Thread-safe GET. Submits work to the dedicated Playwright thread."""
+    def _submit(self, job) -> AirsHttpResponse:
+        """Run `job(page) -> AirsHttpResponse` on the dedicated Playwright thread
+        and return its result (or re-raise the worker's exception)."""
         result_q: queue.Queue = queue.Queue()
-        self._queue.put((url, result_q))
+        self._queue.put((job, result_q))
         status, value = result_q.get()
         if status == "error":
             raise value
         return value
+
+    def get_response(self, url: str) -> AirsHttpResponse:
+        """Thread-safe GET returning the full response (body + metadata)."""
+        def job(page) -> AirsHttpResponse:
+            resp = page.request.get(url)
+            return AirsHttpResponse(
+                body=resp.body(),
+                status=resp.status,
+                content_type=(resp.headers or {}).get("content-type", ""),
+                url=resp.url,
+            )
+        return self._submit(job)
+
+    def get(self, url: str) -> bytes:
+        """Thread-safe GET returning just the body bytes (back-compat)."""
+        return self.get_response(url).body
+
+    def download_via_form(
+        self, page_url: str, xls_link_selector: str, timeout_ms: int = 25000,
+    ) -> AirsHttpResponse:
+        """Open `page_url`, click the "Naar XLS" export link (which runs the
+        page's own onclick → sets a hidden `toXls=1` and submits `editForm`), and
+        capture the resulting file download. This faithfully replays the manual
+        click — the export is a FORM SUBMIT, not a fetchable URL.
+
+        Returns the downloaded bytes on success; on a timeout (no download fired —
+        the submit produced an inline page, e.g. a login bounce or an error) it
+        returns that page's HTML so the caller can diagnose (and the worker's
+        re-login-on-HTML retry kicks in)."""
+        def job(page) -> AirsHttpResponse:
+            page.goto(page_url, wait_until="domcontentloaded")
+            link = page.locator(xls_link_selector).first
+            if link.count() == 0:
+                # No export control on the page we landed on — almost always the
+                # login/forbidden page. Return its HTML for the diagnostic path.
+                html = (page.content() or "").encode("utf-8", "replace")
+                return AirsHttpResponse(html, 200, "text/html", page.url)
+            try:
+                with page.expect_download(timeout=timeout_ms) as dl_info:
+                    link.click()
+                download = dl_info.value
+                with open(download.path(), "rb") as fh:
+                    body = fh.read()
+                return AirsHttpResponse(
+                    body, 200, "application/vnd.ms-excel", download.url or page_url,
+                )
+            except PlaywrightTimeoutError:
+                html = (page.content() or "").encode("utf-8", "replace")
+                return AirsHttpResponse(html, 200, "text/html", page.url)
+        return self._submit(job)
 
 
 _session = _AirsSession()
@@ -262,6 +335,85 @@ def download_vermogensoverzicht_sync(
     so an env override takes effect on restart with no import-order gotcha."""
     code = os.environ.get("AIRS_VERMOGEN_RAPPORT_TYPE", "").strip() or VERMOGEN_RAPPORT_TYPE
     return _download_report_sync(portfolio_name, datum_van, datum_tot, code)
+
+
+# CRM → Relaties → Alle relaties Excel export. There is NO direct export URL —
+# the "Naar XLS" button runs an onclick that sets a hidden `toXls=1` field on the
+# `editForm` and submits it (a POST). So we open the list page and click that
+# link, capturing the download (see `_AirsSession.download_via_form`).
+#   - AIRS_CRM_RELATIES_URL overrides the list page to open.
+#   - AIRS_CRM_XLS_SELECTOR overrides the export-link selector (default matches
+#     the <a> whose <img src=".../xls.gif"> is the "Naar XLS" icon).
+CRM_RELATIES_PATH = "/CRM_nawList.php?sql=all"
+CRM_XLS_LINK_SELECTOR = "a:has(img[src*='xls'])"
+
+
+def _html_title(text: str) -> str:
+    """Best-effort <title> extraction from an HTML string."""
+    import re  # noqa: PLC0415
+
+    m = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
+    return m.group(1).strip() if m else "<no title>"
+
+
+def _classify_html_page(text: str) -> str:
+    """Guess WHAT kind of HTML page we got back, so the error says where to look."""
+    low = text.lower()
+    if any(n in low for n in ("403 forbidden", "access denied", "attention required")):
+        return ("a 403 / access-denied gateway page — this server's egress IP may "
+                "not be on the AirSPMS allowlist")
+    if ('id="username"' in low or 'name="username"' in low
+            or 'id="password"' in low or "login.php" in low):
+        return ("the LOGIN page — the session expired and the silent re-login also "
+                "failed (check BROKER_USERNAME / BROKER_PASSWORD)")
+    if "crm_nawlist" in low or "relatie" in low or "nawlist" in low:
+        return ("the CRM relaties LIST page (HTML) — the 'Naar XLS' export click "
+                "didn't yield a file download. The export link selector may not "
+                "match (override AIRS_CRM_XLS_SELECTOR) or the form submit didn't "
+                "trigger a download")
+    return "an unrecognised HTML page (not the Excel export)"
+
+
+def _describe_non_excel(resp: "AirsHttpResponse") -> str:
+    """Build an expressive, single-line diagnostic for a CRM reply that wasn't
+    the expected .xls — what URL we hit, the HTTP status / content-type, the page
+    title, our best guess at what the page is, and a body excerpt."""
+    text = resp.body.decode("utf-8", "replace")
+    title = _html_title(text)
+    kind = _classify_html_page(text)
+    # A compact, whitespace-collapsed body excerpt so logs stay one-ish line.
+    excerpt = " ".join(text.split())[:300]
+    return (
+        f"requested_url={resp.url!r} http_status={resp.status} "
+        f"content_type={resp.content_type!r} bytes={len(resp.body)} "
+        f"page_title={title!r} — looks like {kind}. body_excerpt={excerpt!r}"
+    )
+
+
+def download_crm_relaties_sync() -> bytes:
+    """Download the CRM 'Alle relaties' Excel export via the persistent session.
+    Opens the list page and clicks its "Naar XLS" button (a form submit — there's
+    no fetchable export URL), then returns the raw file bytes (stored unparsed).
+    Raises with an expressive diagnostic if the result isn't Excel (login bounce /
+    IP block / page changed) or is too small — so the failure says *where* it
+    went wrong."""
+    path = (os.environ.get("AIRS_CRM_RELATIES_URL", "").strip() or CRM_RELATIES_PATH)
+    if not path.startswith(("http://", "https://")):
+        path = f"{BASE_URL}/{path.lstrip('/')}"
+    selector = os.environ.get("AIRS_CRM_XLS_SELECTOR", "").strip() or CRM_XLS_LINK_SELECTOR
+    resp = _session.download_via_form(path, selector)
+    content = resp.body
+
+    if len(content) < 100:
+        raise RuntimeError(
+            f"CRM relaties response too small ({len(content)} bytes) — "
+            f"{_describe_non_excel(resp)}"
+        )
+    if _looks_like_html(content):
+        raise RuntimeError(
+            "CRM relaties returned HTML, not Excel. " + _describe_non_excel(resp)
+        )
+    return content
 
 
 # ─── Scanner (uses its own browser for DOM scraping) ──────────────────────────

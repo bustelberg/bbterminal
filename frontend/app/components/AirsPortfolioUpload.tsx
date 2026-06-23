@@ -482,6 +482,9 @@ export default function AirsPortfolioUpload() {
         {/* Daily Vermogensoverzicht refresh job — status + manual trigger. */}
         <VermogenJobCard />
 
+        {/* CRM "Alle relaties" — the latest stored export, rendered as a table. */}
+        <CrmRelatiesCard />
+
         {/* Progress steps (fixed 4-step display) */}
         {steps && (
           <ProgressTimeline
@@ -591,6 +594,8 @@ type VermogenStatus = {
   rendement_stored: number;
   vermogen_stored: number;
   holdings_rows: number;
+  crm_stored: boolean | null;
+  crm_bytes: number;
   errors: string[];
   latest_snapshot_date: string | null;
   latest_snapshot_portfolios: number;
@@ -692,6 +697,17 @@ function VermogenJobCard() {
           )}
         </div>
 
+        {s && s.crm_stored !== null && (
+          <div className="text-fg-subtle">
+            CRM Alle relaties:{' '}
+            {s.crm_stored ? (
+              <span className="text-pos-400">✓ stored ({Math.round(s.crm_bytes / 1024)} KB raw)</span>
+            ) : (
+              <span className="text-neg-300">failed</span>
+            )}
+          </div>
+        )}
+
         {s && s.errors.length > 0 && (
           <div>
             <button
@@ -708,6 +724,140 @@ function VermogenJobCard() {
             )}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+
+type CrmRelaties = {
+  as_of_date: string | null;
+  retrieved_at?: string | null;
+  byte_size?: number | null;
+  columns: string[];
+  rows: Record<string, string | number | boolean | null>[];
+  row_count: number;
+};
+
+/** The latest stored CRM "Alle relaties" export, rendered as a generic table.
+ * Columns are whatever the export had — the backend parses the raw .xls on the
+ * fly into `{columns, rows}` (GET /api/airs/crm-relaties). Empty until the daily
+ * refresh job has successfully downloaded + stored an export. */
+function CrmRelatiesCard() {
+  const [data, setData] = useState<CrmRelaties | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    apiFetch(`${API_URL}/api/airs/crm-relaties`)
+      .then(async (r) => {
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          throw new Error(body.detail ?? `HTTP ${r.status}`);
+        }
+        return r.json() as Promise<CrmRelaties>;
+      })
+      .then((d) => { if (!cancelled) { setData(d); setError(null); } })
+      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const cols = useMemo<Column<Record<string, string | number | boolean | null>>[]>(
+    () => (data?.columns ?? []).map((c) => ({ key: c, header: c, accessor: (r) => r[c] ?? null })),
+    [data?.columns],
+  );
+
+  const filteredRows = useMemo(() => {
+    const rows = data?.rows ?? [];
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((row) =>
+      Object.values(row).some((v) => v != null && String(v).toLowerCase().includes(q)),
+    );
+  }, [data?.rows, query]);
+
+  if (loading) {
+    return (
+      <div className="bg-card rounded-xl border border-neutral-800/40 px-5 py-4 text-sm text-fg-subtle">
+        <LoadingDots label="Loading CRM relaties" />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="bg-card rounded-xl border border-neutral-800/40 px-5 py-4 text-sm text-neg-300">
+        Could not load CRM relaties: {error}
+      </div>
+    );
+  }
+  if (!data || data.row_count === 0) {
+    return (
+      <div className="bg-card rounded-xl border border-neutral-800/40 px-5 py-4 text-sm text-fg-subtle">
+        No CRM relaties stored yet — it&apos;s downloaded by the daily refresh, or hit &ldquo;Refresh now&rdquo; above.
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-card rounded-xl border border-neutral-800/40 overflow-hidden">
+      <div className="px-5 py-3 border-b border-neutral-800/40 flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="text-sm font-medium text-fg-strong">
+            CRM Alle relaties — {filteredRows.length}
+            {filteredRows.length !== data.row_count && <> of {data.row_count}</>} relation{data.row_count === 1 ? '' : 's'}
+          </h2>
+          {data.as_of_date && (
+            <p className="text-[11px] text-fg-subtle mt-0.5">
+              As of <span className="font-mono text-fg-muted">{data.as_of_date}</span>
+              {data.byte_size != null && <> · {Math.round(data.byte_size / 1024)} KB raw</>}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Filter…"
+            className="bg-page border border-neutral-700 rounded-lg px-3 py-1.5 text-xs w-44
+                       focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 focus:outline-none"
+          />
+          <TableDownloadButton
+            rows={filteredRows}
+            columns={cols}
+            filename="crm_alle_relaties"
+            title={`Download ${filteredRows.length} relations as CSV / XLSX`}
+          />
+        </div>
+      </div>
+      <div className="overflow-auto max-h-[32rem]">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 bg-card">
+            <tr className="border-b border-neutral-800/60 text-fg-subtle text-xs">
+              {data.columns.map((c) => (
+                <th key={c} className="px-3 py-2.5 text-left font-medium whitespace-nowrap">{c}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filteredRows.map((row, i) => (
+              <tr key={i} className="border-b border-neutral-800/30 hover:bg-overlay/[0.02] transition-colors">
+                {data.columns.map((c) => {
+                  const v = row[c];
+                  return (
+                    <td key={c} className="px-3 py-2 text-fg-soft whitespace-nowrap">
+                      {v == null || v === '' ? <span className="text-fg-faint">—</span> : String(v)}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
