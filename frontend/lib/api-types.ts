@@ -2974,9 +2974,10 @@ export interface paths {
          * @description Exchanges (with company counts) + their trading hours in Amsterdam time.
          *
          *     `universe` is a universe *label* (e.g. a frozen snapshot). Omit it to count
-         *     across every company in the DB. Sorted by Amsterdam winter close time so the
-         *     earliest-closing markets — whose previous-day close is available soonest in
-         *     our day — come first; exchanges with no hours data sort last.
+         *     across every company in the DB. Sorted by Amsterdam CEST (summer) open time,
+         *     earliest to latest — so the markets opening first in our day lead — with the
+         *     day-rollover honoured (a previous-day open like New Zealand's sorts ahead of
+         *     a same-day one); exchanges with no hours data sort last.
          */
         get: operations["timezone_exchanges_api_timezone_exchanges_get"];
         put?: never;
