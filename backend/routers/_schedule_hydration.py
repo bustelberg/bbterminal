@@ -391,10 +391,15 @@ def _hydrate(rows: list[dict]) -> list[dict]:
             returns = _compute_period_returns(hist, today)
             since_inception_pct: float | None = None
             inception_date = str(r["start_date"])[:10] if r.get("start_date") else None
-            # Prefer returns from the backtest equity curve (anchored at
-            # go-live) — the live snapshots are too thin for a meaningful
-            # MTD/YTD. Falls back to the live-snapshot walk when there's no
-            # backtest run or curve.
+            # MTD / YTD come from the snapshot walk (`_compute_period_returns`):
+            # its open-period anchor makes them equal the latest snapshot's
+            # `period_return_pct` — the exact number the holdings row shows (the
+            # open period IS the current month for a monthly cadence). Using the
+            # backtest-spliced curve here instead made the collapsed-row MTD
+            # disagree with the holdings (it anchors on the calendar-month start
+            # and folds in the prior period's tail / the rebalance step). The
+            # backtest curve is used ONLY for since-inception, which spans the
+            # pre-go-live history the live snapshots don't carry.
             if r.get("backtest_run_id") and inception_date:
                 try:
                     bt = _returns_from_backtest(
@@ -404,11 +409,6 @@ def _hydrate(rows: list[dict]) -> list[dict]:
                 except Exception:
                     bt = None
                 if bt:
-                    returns = {
-                        "mtd_return_pct": bt["mtd_return_pct"],
-                        "ytd_return_pct": bt["ytd_return_pct"],
-                        "as_of_date": bt["as_of_date"],
-                    }
                     since_inception_pct = bt["since_inception_pct"]
             last_snapshot = {
                 "snapshot_id": latest["snapshot_id"],
