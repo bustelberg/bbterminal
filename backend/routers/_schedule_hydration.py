@@ -7,6 +7,7 @@ snapshot history by `_compute_period_returns`). Pure read-side: queries
 """
 from __future__ import annotations
 
+import bisect
 from datetime import date
 
 from deps import fetch_in_chunks, supabase
@@ -155,6 +156,107 @@ def _load_backtest_pts(backtest_run_id: int) -> list[tuple[str, float]]:
     return pts
 
 
+def _open_basket_live_curve(backtest_run_id: int) -> list[tuple[str, float]]:
+    """Dense DAILY equity curve (base 1.0) of the strategy's OPEN-period basket:
+    the source backtest's last-period holdings, re-priced EVERY trading day in
+    EUR from their entry through the latest available close.
+
+    Same basis as the Portfolio holdings table's open-period reprice
+    (`repriceOpenPeriod`): per-holding `price_eur / entry_price_eur`, weighted-
+    mean on the long side minus the short side. This is the single source that
+    fills the daily-returns chart past the backtest's saved end — the backtest
+    curve freezes on its save date and the per-snapshot tail only had a point
+    per price-update, leaving multi-day gaps (e.g. Jun 12 → Jun 22). Marking the
+    held basket from daily closes gives a point per trading day, and its open
+    month equals the holdings table's figure by construction.
+
+    Returns `[(date, equity), ...]`; empty when the run/holdings/prices are
+    unavailable (caller falls back to the sparse snapshot walk)."""
+    from routers.momentum.backtest_crud import load_backtest_result_sync  # noqa: PLC0415
+
+    res = load_backtest_result_sync(backtest_run_id)
+    monthly = (res or {}).get("monthly_records") or []
+    if not monthly:
+        return []
+    holdings = (monthly[-1].get("holdings") or [])
+
+    def _side(want: str) -> list[tuple[int, float, float]]:
+        out = []
+        for h in holdings:
+            cid, entry = h.get("company_id"), h.get("entry_price_eur")
+            if cid is None or not entry:
+                continue
+            if (h.get("side") or "long") != want:
+                continue
+            w = h.get("weight")
+            out.append((int(cid), float(entry), float(w) if w else 1.0))
+        return out
+
+    longs, shorts = _side("long"), _side("short")
+    if not longs and not shorts:
+        return []
+    cids = [c for c, _, _ in (*longs, *shorts)]
+    entry_dates = [str(h["entry_date"])[:10] for h in holdings if h.get("entry_date")]
+    start_iso = min(entry_dates) if entry_dates else str(monthly[-1].get("date"))[:10]
+
+    from datetime import date as _date  # noqa: PLC0415
+
+    from momentum.data import (  # noqa: PLC0415
+        convert_prices_to_eur, load_all_prices, load_company_currency, load_fx_rates,
+    )
+    try:
+        start = _date.fromisoformat(start_iso)
+    except ValueError:
+        return []
+    today = date.today()
+    local_df = load_all_prices(supabase, cids, start, today)
+    if local_df.empty:
+        return []
+    cur = load_company_currency(supabase, cids)
+    currencies = sorted({c for c in cur.values() if c})
+    fx = load_fx_rates(supabase, currencies, start, today) if currencies else {}
+    eur_df, _ = convert_prices_to_eur(local_df, cur, fx)
+    if eur_df.empty:
+        return []
+
+    # Per-cid sorted (date, price_eur) for an asof (last-on-or-before) lookup.
+    px: dict[int, tuple[list[str], list[float]]] = {}
+    for cid, group in eur_df.groupby("company_id"):
+        g = group.sort_values("target_date")
+        ds = [d.isoformat() if hasattr(d, "isoformat") else str(d)[:10] for d in g["target_date"]]
+        px[int(cid)] = (ds, [float(p) for p in g["price"]])
+    all_days = sorted({d for ds, _ in px.values() for d in ds})
+    if not all_days:
+        return []
+
+    def _asof(cid: int, day: str) -> float | None:
+        pair = px.get(cid)
+        if not pair:
+            return None
+        ds, ps = pair
+        i = bisect.bisect_right(ds, day) - 1
+        return ps[i] if i >= 0 else None
+
+    def _side_ret(side: list[tuple[int, float, float]], day: str) -> float | None:
+        num = wsum = 0.0
+        for cid, entry, w in side:
+            p = _asof(cid, day)
+            if p is None or entry <= 0:
+                continue
+            num += w * (p / entry - 1.0)
+            wsum += w
+        return (num / wsum) if wsum > 0 else None
+
+    curve: list[tuple[str, float]] = []
+    for d in all_days:
+        lr = _side_ret(longs, d) if longs else None
+        sr = _side_ret(shorts, d) if shorts else None
+        if lr is None and sr is None:
+            continue
+        curve.append((d, 1.0 + (lr or 0.0) - (sr or 0.0)))
+    return curve
+
+
 def _splice_snapshot_tail(
     backtest_pts: list[tuple[str, float]],
     snap_curve: list[tuple[str, float]],
@@ -229,7 +331,12 @@ def _extended_curve(
     bt_pts = _load_backtest_pts(backtest_run_id)
     if not bt_pts:
         return []
-    snap_curve, _, _ = _walk_snapshot_curve(snapshots or [])
+    # Prefer the dense daily open-basket curve (a point per trading day, matches
+    # the holdings table's open-period figure); fall back to the sparse
+    # per-snapshot walk only when the basket can't be re-priced.
+    snap_curve = _open_basket_live_curve(backtest_run_id)
+    if not snap_curve:
+        snap_curve, _, _ = _walk_snapshot_curve(snapshots or [])
     cutover, tail = _splice_snapshot_tail(bt_pts, snap_curve)
     if not cutover or not tail:
         return bt_pts
@@ -332,7 +439,9 @@ def build_live_curve(backtest_run_id: int, snapshots: list[dict]) -> dict | None
     bt_pts = _load_backtest_pts(backtest_run_id)
     if not bt_pts:
         return None
-    snap_curve, _, _ = _walk_snapshot_curve(snapshots or [])
+    snap_curve = _open_basket_live_curve(backtest_run_id)
+    if not snap_curve:
+        snap_curve, _, _ = _walk_snapshot_curve(snapshots or [])
     cutover_date, tail = _splice_snapshot_tail(bt_pts, snap_curve)
     if not cutover_date or not tail:
         return None

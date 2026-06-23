@@ -10,7 +10,11 @@ it, on the backtest's cumulative-return scale.
 """
 from __future__ import annotations
 
+import pandas as pd
+
+import routers.momentum.backtest_crud as _bc
 from routers._schedule_hydration import (
+    _open_basket_live_curve,
     _splice_snapshot_tail,
     _walk_snapshot_curve,
 )
@@ -135,3 +139,44 @@ def test_splice_end_to_end_from_snapshots():
     # over June → 1.05 * 1.04 - 1 = +9.2%. (Old behaviour kept the backtest's
     # 06-02 +10% and stacked +4% on top → a too-high 14.4%.)
     assert abs(tail[-1]["cumulative_return_pct"] - 9.2) < 1e-6
+
+
+# ── _open_basket_live_curve (dense daily open-basket mark) ──────────────────
+
+def test_open_basket_live_curve_dense_and_matches_reprice(monkeypatch):
+    # Two equal-weight long holdings entered 2026-05-29; priced every trading
+    # day. The curve must have a point PER trading day (fills the gap the sparse
+    # snapshot tail left) and its endpoint must equal the weighted mean of
+    # price_eur/entry_price_eur — the SAME basis as the holdings table's reprice.
+    from datetime import date as _date
+    import momentum.data as md
+
+    holdings = [
+        {"company_id": 1, "entry_price_eur": 100.0, "weight": 0.5, "side": "long", "entry_date": "2026-05-29"},
+        {"company_id": 2, "entry_price_eur": 50.0, "weight": 0.5, "side": "long", "entry_date": "2026-05-29"},
+    ]
+    monkeypatch.setattr(_bc, "load_backtest_result_sync",
+                        lambda rid: {"monthly_records": [{"date": "2026-06-01", "holdings": holdings}]})
+    eur = pd.DataFrame([
+        {"company_id": 1, "target_date": _date(2026, 5, 29), "price": 100.0},
+        {"company_id": 2, "target_date": _date(2026, 5, 29), "price": 50.0},
+        {"company_id": 1, "target_date": _date(2026, 6, 1), "price": 110.0},
+        {"company_id": 2, "target_date": _date(2026, 6, 1), "price": 50.0},
+        {"company_id": 1, "target_date": _date(2026, 6, 2), "price": 121.0},
+        {"company_id": 2, "target_date": _date(2026, 6, 2), "price": 55.0},
+    ])
+    monkeypatch.setattr(md, "load_all_prices", lambda *a, **k: eur)
+    monkeypatch.setattr(md, "load_company_currency", lambda *a, **k: {})
+    monkeypatch.setattr(md, "load_fx_rates", lambda *a, **k: {})
+    monkeypatch.setattr(md, "convert_prices_to_eur", lambda *a, **k: (eur, None))
+
+    curve = _open_basket_live_curve(99)
+    assert [d for d, _ in curve] == ["2026-05-29", "2026-06-01", "2026-06-02"]
+    assert abs(curve[0][1] - 1.0) < 1e-9
+    assert abs(curve[1][1] - 1.05) < 1e-9      # mean(1.10, 1.00)
+    assert abs(curve[-1][1] - 1.155) < 1e-9    # mean(1.21, 1.10) → +15.5% endpoint
+
+
+def test_open_basket_live_curve_empty_without_run(monkeypatch):
+    monkeypatch.setattr(_bc, "load_backtest_result_sync", lambda rid: None)
+    assert _open_basket_live_curve(1) == []
