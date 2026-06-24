@@ -77,7 +77,7 @@ export default function DialogHost() {
             <div className="text-sm font-semibold text-fg-strong mb-1">{open.title}</div>
           )}
           <div className="text-sm text-fg-soft whitespace-pre-wrap flex items-start gap-2">
-            {open.kind === 'loading' && <Spinner size={14} className="mt-0.5 shrink-0" />}
+            {open.kind === 'loading' && <Spinner className="h-3.5 w-3.5 mt-0.5 shrink-0 text-accent-400" />}
             <span>{open.message}</span>
           </div>
           {open.kind === 'prompt' && (

@@ -717,6 +717,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/crm-relaties": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Crm Relaties
+         * @description The latest stored CRM 'Alle relaties' export, parsed on the fly from the
+         *     raw .xls in `airs_crm_relaties_raw` into a generic `{columns, rows}` table
+         *     (whatever columns the export has). Empty until the daily job has run it.
+         */
+        get: operations["airs_crm_relaties_api_airs_crm_relaties_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/portfolio/{portfolio_name}": {
         parameters: {
             query?: never;
@@ -1463,6 +1485,38 @@ export interface paths {
          *     endpoint (full-history scan), so it's its own button-triggered call.
          */
         get: operations["universe_history_api_data_universe_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/data/universe-staleness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Universe Staleness
+         * @description Per-company price/volume freshness for ONE universe — so a manual
+         *     'Refresh' can be VERIFIED: which members are up-to-date and which we
+         *     failed to get recent data for.
+         *
+         *     A member is **flagged** when its latest close OR volume is missing, or is
+         *     more than `stale_after` trading days behind the freshest close in the
+         *     universe (the market's last good day). Members marked delisted /
+         *     out-of-scope / illiquid are reported separately as **excluded** — they're
+         *     expected-stale, not refresh failures, and don't set the freshness bar.
+         *
+         *     Returns `{universe_id, label, frozen_from, members, reference_date,
+         *     stale_after, counts:{fresh,flagged,excluded}, companies:[…]}`, companies
+         *     sorted worst-first (no-data → most-stale → fresh).
+         */
+        get: operations["universe_staleness_api_data_universe_staleness_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2376,6 +2430,9 @@ export interface paths {
          *
          *     Pass `universe=<label>` with `job_name=universe_price_refresh` to re-price
          *     just that universe's companies (the per-universe coverage "Refresh" button).
+         *     Pass a JSON body `{"company_ids": [...]}` with `job_name=companies_price_refresh`
+         *     to re-price only those companies (the "Refresh stale" button after Inspect
+         *     freshness).
          */
         post: operations["trigger_scheduled_refresh_api_ingest_scheduled_refresh_trigger_post"];
         delete?: never;
@@ -3821,6 +3878,11 @@ export interface components {
             /** File */
             file: string;
         };
+        /** Body_trigger_scheduled_refresh_api_ingest_scheduled_refresh_trigger_post */
+        Body_trigger_scheduled_refresh_api_ingest_scheduled_refresh_trigger_post: {
+            /** Company Ids */
+            company_ids?: number[] | null;
+        };
         /** BuildUniverseRequest */
         BuildUniverseRequest: {
             /** End Month */
@@ -4929,6 +4991,26 @@ export interface operations {
             };
         };
     };
+    airs_crm_relaties_api_airs_crm_relaties_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     airs_portfolio_download_api_airs_portfolio__portfolio_name__get: {
         parameters: {
             query?: {
@@ -5901,6 +5983,38 @@ export interface operations {
         parameters: {
             query: {
                 label: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    universe_staleness_api_data_universe_staleness_get: {
+        parameters: {
+            query: {
+                universe_id: number;
+                stale_after?: number;
             };
             header?: never;
             path?: never;
@@ -7215,7 +7329,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["Body_trigger_scheduled_refresh_api_ingest_scheduled_refresh_trigger_post"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

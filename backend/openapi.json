@@ -262,6 +262,26 @@
         "title": "Body_parse_portfolio_api_portfolios_parse_post",
         "type": "object"
       },
+      "Body_trigger_scheduled_refresh_api_ingest_scheduled_refresh_trigger_post": {
+        "properties": {
+          "company_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Ids"
+          }
+        },
+        "title": "Body_trigger_scheduled_refresh_api_ingest_scheduled_refresh_trigger_post",
+        "type": "object"
+      },
       "BuildUniverseRequest": {
         "properties": {
           "end_month": {
@@ -2423,6 +2443,26 @@
         ]
       }
     },
+    "/api/airs/crm-relaties": {
+      "get": {
+        "description": "The latest stored CRM 'Alle relaties' export, parsed on the fly from the\nraw .xls in `airs_crm_relaties_raw` into a generic `{columns, rows}` table\n(whatever columns the export has). Empty until the daily job has run it.",
+        "operationId": "airs_crm_relaties_api_airs_crm_relaties_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Airs Crm Relaties",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/portfolio/{portfolio_name}": {
       "get": {
         "description": "Return performance data. Serves from DB cache unless refresh=true or no cache.",
@@ -3730,6 +3770,57 @@
           }
         },
         "summary": "Universe History",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/data/universe-staleness": {
+      "get": {
+        "description": "Per-company price/volume freshness for ONE universe \u2014 so a manual\n'Refresh' can be VERIFIED: which members are up-to-date and which we\nfailed to get recent data for.\n\nA member is **flagged** when its latest close OR volume is missing, or is\nmore than `stale_after` trading days behind the freshest close in the\nuniverse (the market's last good day). Members marked delisted /\nout-of-scope / illiquid are reported separately as **excluded** \u2014 they're\nexpected-stale, not refresh failures, and don't set the freshness bar.\n\nReturns `{universe_id, label, frozen_from, members, reference_date,\nstale_after, counts:{fresh,flagged,excluded}, companies:[\u2026]}`, companies\nsorted worst-first (no-data \u2192 most-stale \u2192 fresh).",
+        "operationId": "universe_staleness_api_data_universe_staleness_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "universe_id",
+            "required": true,
+            "schema": {
+              "title": "Universe Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "stale_after",
+            "required": false,
+            "schema": {
+              "default": 3,
+              "title": "Stale After",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Universe Staleness",
         "tags": [
           "system"
         ]
@@ -5575,7 +5666,7 @@
     },
     "/api/ingest/scheduled-refresh/trigger": {
       "post": {
-        "description": "Manual trigger from the /schedule UI's Run-now button. Same work\nas the cron path, just `triggered_by='manual'`. No cron-secret \u2014\nauth is enforced by the frontend proxy middleware in `frontend/proxy.ts`.\n\nPass `universe=<label>` with `job_name=universe_price_refresh` to re-price\njust that universe's companies (the per-universe coverage \"Refresh\" button).",
+        "description": "Manual trigger from the /schedule UI's Run-now button. Same work\nas the cron path, just `triggered_by='manual'`. No cron-secret \u2014\nauth is enforced by the frontend proxy middleware in `frontend/proxy.ts`.\n\nPass `universe=<label>` with `job_name=universe_price_refresh` to re-price\njust that universe's companies (the per-universe coverage \"Refresh\" button).\nPass a JSON body `{\"company_ids\": [...]}` with `job_name=companies_price_refresh`\nto re-price only those companies (the \"Refresh stale\" button after Inspect\nfreshness).",
         "operationId": "trigger_scheduled_refresh_api_ingest_scheduled_refresh_trigger_post",
         "parameters": [
           {
@@ -5605,6 +5696,15 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_trigger_scheduled_refresh_api_ingest_scheduled_refresh_trigger_post"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {

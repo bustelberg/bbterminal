@@ -169,6 +169,15 @@ export default function SavedRunsDropdown({
     setSelectedIds(new Set());
   };
 
+  // Select-all toggle: all selected → clear; otherwise → select every run.
+  const allSelected = savedRuns.length > 0 && selectedIds.size === savedRuns.length;
+  const someSelected = selectedIds.size > 0 && !allSelected;
+  const toggleSelectAll = () => {
+    setSelectedIds((prev) =>
+      prev.size === savedRuns.length ? new Set() : new Set(savedRuns.map((r) => r.run_id)),
+    );
+  };
+
   return (
     <div className="relative" ref={ref}>
       <button
@@ -185,27 +194,41 @@ export default function SavedRunsDropdown({
       </button>
       {open && (
         <div className="absolute right-0 mt-1 w-max min-w-[280px] max-w-[90vw] bg-card border border-neutral-700 rounded-lg shadow-xl z-50 max-h-96 overflow-auto">
-          {selectedIds.size > 0 && (
+          {savedRuns.length > 0 && (
             <div className="sticky top-0 z-10 bg-elevated border-b border-neutral-700 px-3 py-2 flex items-center justify-between gap-2">
-              <span className="text-xs text-fg-soft">{selectedIds.size} selected</span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedIds(new Set())}
-                  className="text-[11px] text-fg-subtle hover:text-fg-soft px-2 py-1 rounded transition-colors"
-                >
-                  clear
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleBulkDelete()}
-                  disabled={bulkDeleting}
-                  className="text-[11px] font-medium px-2 py-1 rounded bg-neg-500/15 text-neg-300 border border-neg-500/30 hover:bg-neg-500/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
-                >
-                  {bulkDeleting && <Spinner size={12} />}
-                  Delete {selectedIds.size}
-                </button>
-              </div>
+              <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                  onChange={toggleSelectAll}
+                  className="accent-accent-500 w-3.5 h-3.5 shrink-0 cursor-pointer"
+                />
+                <span className="text-[11px] text-fg-soft">
+                  {allSelected ? 'Deselect all' : 'Select all'}
+                </span>
+              </label>
+              {selectedIds.size > 0 && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-fg-soft">{selectedIds.size} selected</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedIds(new Set())}
+                    className="text-[11px] text-fg-subtle hover:text-fg-soft px-2 py-1 rounded transition-colors"
+                  >
+                    clear
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleBulkDelete()}
+                    disabled={bulkDeleting}
+                    className="text-[11px] font-medium px-2 py-1 rounded bg-neg-500/15 text-neg-300 border border-neg-500/30 hover:bg-neg-500/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+                  >
+                    {bulkDeleting && <Spinner size={12} />}
+                    Delete {selectedIds.size}
+                  </button>
+                </div>
+              )}
             </div>
           )}
           {savedRuns.map((r) => {

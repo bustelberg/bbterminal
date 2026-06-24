@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Spinner from '../Spinner';
 import LoadingDots from '../LoadingDots';
 import { API_URL } from '../../../lib/apiUrl';
@@ -88,6 +88,36 @@ type UniverseHistory = {
   error?: string;
   price?: HistoryMetric;
   volume?: HistoryMetric;
+};
+
+/** Per-company freshness breakdown for ONE universe — from
+ * `/api/data/universe-staleness?universe_id=`. Lets a manual refresh be
+ * verified: which members are up to date (`fresh`), which we failed to get
+ * recent price/volume for (`flagged`), and which are expected-stale markers
+ * (`excluded` — delisted / out-of-scope / illiquid). */
+type StalenessCompany = {
+  company_id: number;
+  ticker: string | null;
+  exchange: string | null;
+  company_name: string | null;
+  latest_close: string | null;
+  latest_volume: string | null;
+  close_days_behind: number | null;
+  volume_days_behind: number | null;
+  price_stale: boolean;
+  volume_stale: boolean;
+  marker: 'delisted' | 'out_of_scope' | 'illiquid' | null;
+  status: 'fresh' | 'flagged' | 'excluded';
+};
+type UniverseStaleness = {
+  universe_id: number;
+  label: string | null;
+  frozen_from: string | null;
+  members: number;
+  reference_date: string | null;
+  stale_after: number;
+  counts: { fresh: number; flagged: number; excluded: number };
+  companies: StalenessCompany[];
 };
 
 /** Three independent operations of the split pipeline, stacked:
@@ -525,10 +555,87 @@ function HistoryLine({ label, m, members }: { label: string; m: HistoryMetric; m
   );
 }
 
+/** One company row in the freshness breakdown: ticker·exchange, name, and the
+ * latest close / volume date with trading-days-behind (or "no data"). */
+function FreshnessRow({ c }: { c: StalenessCompany }) {
+  const dateCell = (d: string | null, behind: number | null, stale: boolean) => {
+    if (!d) return <span className="text-neg-300">no data</span>;
+    return (
+      <span className={stale ? 'text-warn-300' : 'text-fg-faint'}>
+        {d}{behind != null && behind > 0 ? ` (−${behind}d)` : ''}
+      </span>
+    );
+  };
+  return (
+    <div className="flex items-center gap-2 py-0.5 text-[11px]">
+      <span className="font-mono text-fg-soft shrink-0 w-28 truncate" title={`${c.ticker ?? '?'}·${c.exchange ?? '?'}`}>
+        {c.ticker ?? '?'}<span className="text-fg-faint">·{c.exchange ?? '?'}</span>
+      </span>
+      <span className="text-fg-muted truncate flex-1 min-w-0" title={c.company_name ?? ''}>{c.company_name ?? '—'}</span>
+      <span className="font-mono shrink-0 w-24 text-right">{dateCell(c.latest_close, c.close_days_behind, c.price_stale)}</span>
+      <span className="font-mono shrink-0 w-24 text-right">{dateCell(c.latest_volume, c.volume_days_behind, c.volume_stale)}</span>
+      <span className="text-[10px] uppercase text-fg-faint shrink-0 w-16 text-right">{c.marker ? c.marker.replace('_', ' ') : ''}</span>
+    </div>
+  );
+}
+
+/** A collapsible group of company rows (Flagged / Fresh / Excluded), with a
+ * sticky column header and a scroll cap so a 1,400-name fresh list stays sane. */
+function FreshnessGroup({ title, color, rows, defaultOpen }: {
+  title: string; color: string; rows: StalenessCompany[]; defaultOpen: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  if (rows.length === 0) return null;
+  return (
+    <div className="pt-1">
+      <button type="button" onClick={() => setOpen((o) => !o)}
+        className={`text-[11px] font-medium flex items-center gap-1 ${color}`}>
+        <span className="font-mono">{open ? '▾' : '▸'}</span>
+        {title} ({rows.length})
+      </button>
+      {open && (
+        <div className="mt-1 max-h-56 overflow-auto border border-neutral-800/30 rounded-lg px-2 py-1">
+          <div className="flex items-center gap-2 py-0.5 text-[10px] uppercase tracking-wide text-fg-faint sticky top-0 bg-card z-10">
+            <span className="w-28 shrink-0">ticker·exch</span>
+            <span className="flex-1 min-w-0">company</span>
+            <span className="w-24 text-right shrink-0">close</span>
+            <span className="w-24 text-right shrink-0">vol</span>
+            <span className="w-16 shrink-0" />
+          </div>
+          {rows.map((c) => <FreshnessRow key={c.company_id} c={c} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The on-demand per-company freshness panel for one universe. Lists FLAGGED
+ * (missing / stale price or volume), FRESH (up to date), and EXCLUDED
+ * (delisted / out-of-scope / illiquid — expected stale) members. */
+function StalenessDetail({ detail }: { detail: UniverseStaleness }) {
+  const flagged = detail.companies.filter((c) => c.status === 'flagged');
+  const fresh = detail.companies.filter((c) => c.status === 'fresh');
+  const excluded = detail.companies.filter((c) => c.status === 'excluded');
+  return (
+    <div className="space-y-0.5">
+      <div className="text-[11px] text-fg-muted flex flex-wrap gap-x-2 gap-y-0.5">
+        <span className="text-pos-300">{detail.counts.fresh} fresh</span>
+        <span className={detail.counts.flagged > 0 ? 'text-warn-300' : 'text-fg-faint'}>{detail.counts.flagged} flagged</span>
+        {detail.counts.excluded > 0 && <span className="text-fg-faint">{detail.counts.excluded} excluded</span>}
+        <span className="text-fg-faint">· vs {detail.reference_date ?? '—'} · &gt;{detail.stale_after} trading-days behind = stale</span>
+      </div>
+      <FreshnessGroup title="Flagged — missing / stale price or volume" color="text-warn-300" rows={flagged} defaultOpen />
+      <FreshnessGroup title="Fresh — up to date" color="text-pos-300" rows={fresh} defaultOpen={false} />
+      <FreshnessGroup title="Excluded — delisted / out-of-scope / illiquid (expected stale)" color="text-fg-faint" rows={excluded} defaultOpen={false} />
+    </div>
+  );
+}
+
 /** One static-universe coverage block: label + member count + Check/Refresh,
  * the latest-close & latest-volume freshness (min=most-stale → max=freshest,
- * each with the company), an on-demand history depth/gap check, and — while
- * THIS universe is refreshing — a live progress bar + the job's message. */
+ * each with the company), an on-demand history depth/gap check, an on-demand
+ * per-company freshness breakdown (Inspect freshness), and — while THIS
+ * universe is refreshing — a live progress bar + the job's message. */
 function UniverseCoverageRow({ u, busy, progress, onTrigger }: {
   u: UniverseCoverageRow;
   busy: boolean;                // any universe refresh is running
@@ -538,6 +645,12 @@ function UniverseCoverageRow({ u, busy, progress, onTrigger }: {
   const { run, pending } = useRunNow('universe_price_refresh', busy, u.label ?? undefined);
   const [hist, setHist] = useState<UniverseHistory | null>(null);
   const [checking, setChecking] = useState(false);
+  const [detail, setDetail] = useState<UniverseStaleness | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [detailErr, setDetailErr] = useState<string | null>(null);
+  const [showDetail, setShowDetail] = useState(false);
+  // "Flag if > N trading days behind" — lower it to catch the 1-day laggards.
+  const [staleAfter, setStaleAfter] = useState(3);
   const total = progress?.companies_total ?? 0;
   const done = progress?.companies_processed ?? 0;
   const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
@@ -554,6 +667,124 @@ function UniverseCoverageRow({ u, busy, progress, onTrigger }: {
       setChecking(false);
     }
   };
+
+  const loadDetail = useCallback(async (threshold: number = staleAfter) => {
+    setLoadingDetail(true);
+    setDetailErr(null);
+    try {
+      const r = await apiFetch(`${API_URL}/api/data/universe-staleness?universe_id=${u.universe_id}&stale_after=${threshold}`);
+      if (r.ok) setDetail((await r.json()) as UniverseStaleness);
+      else { setDetail(null); setDetailErr(`${r.status}`); }
+    } catch (e) {
+      setDetail(null);
+      setDetailErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoadingDetail(false);
+    }
+  }, [u.universe_id, staleAfter]);
+
+  const toggleDetail = () => {
+    setShowDetail((s) => {
+      const next = !s;
+      if (next && !detail && !loadingDetail) void loadDetail();
+      return next;
+    });
+  };
+
+  // Change the staleness threshold and re-classify (re-fetch with the new
+  // value immediately so we don't read stale state).
+  const changeThreshold = (n: number) => {
+    if (n === staleAfter) return;
+    setStaleAfter(n);
+    if (showDetail) void loadDetail(n);
+  };
+
+  // Re-price ONLY the flagged (stale) companies — far cheaper than the whole
+  // universe. We track the spawned run by id and poll it to completion so the
+  // outcome is always reported inline (the job can finish between the parent's
+  // 3s polls, so the shared progress bar alone isn't reliable for 1 company).
+  type StaleRun = {
+    runId: number;
+    status: string;            // running | ok | error
+    message: string | null;
+    prices: number;
+    volumes: number;
+    forbidden: number;
+    errors: number;
+    errorSummary: string | null;
+  };
+  const [staleRun, setStaleRun] = useState<StaleRun | null>(null);
+  const refreshingStale = staleRun?.status === 'running';
+  const flaggedIds = detail?.companies.filter((c) => c.status === 'flagged').map((c) => c.company_id) ?? [];
+
+  const refreshStale = async () => {
+    if (refreshingStale || busy || flaggedIds.length === 0) return;
+    onTrigger();
+    setStaleRun({ runId: -1, status: 'running', message: 'Starting…', prices: 0, volumes: 0, forbidden: 0, errors: 0, errorSummary: null });
+    try {
+      const r = await apiFetch(`${API_URL}/api/ingest/scheduled-refresh/trigger?job_name=companies_price_refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company_ids: flaggedIds }),
+      });
+      if (!r.ok) {
+        const t = await r.text().catch(() => '');
+        setStaleRun({ runId: -1, status: 'error', message: null, prices: 0, volumes: 0, forbidden: 0, errors: 0, errorSummary: `${r.status} ${t.slice(0, 200)}` });
+        return;
+      }
+      const j = (await r.json()) as { run_id?: number };
+      if (j.run_id == null) {
+        setStaleRun({ runId: -1, status: 'error', message: null, prices: 0, volumes: 0, forbidden: 0, errors: 0, errorSummary: 'No run id returned' });
+        return;
+      }
+      setStaleRun({ runId: j.run_id, status: 'running', message: 'Queued — waiting for the pipeline…', prices: 0, volumes: 0, forbidden: 0, errors: 0, errorSummary: null });
+    } catch (e) {
+      setStaleRun({ runId: -1, status: 'error', message: null, prices: 0, volumes: 0, forbidden: 0, errors: 0, errorSummary: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  // Poll the spawned run until it reaches a terminal state, then reload the
+  // breakdown so the flagged/fresh split reflects the freshly-fetched prices.
+  const staleRunId = staleRun?.runId ?? null;
+  const stalePolling = staleRun?.status === 'running' && (staleRun?.runId ?? -1) >= 0;
+  useEffect(() => {
+    if (staleRunId == null || staleRunId < 0 || !stalePolling) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const r = await apiFetch(`${API_URL}/api/ingest/runs/${staleRunId}`);
+        if (cancelled || !r.ok) return;
+        const row = await r.json() as Record<string, unknown>;
+        if (cancelled) return;
+        const status = (row.status as string) ?? 'running';
+        setStaleRun((prev) => (prev && prev.runId === staleRunId ? {
+          ...prev,
+          status,
+          message: (row.current_message as string) ?? prev.message,
+          prices: (row.prices_refreshed as number) ?? prev.prices,
+          volumes: (row.volumes_refreshed as number) ?? prev.volumes,
+          forbidden: (row.forbidden_count as number) ?? prev.forbidden,
+          errors: (row.error_count as number) ?? prev.errors,
+          errorSummary: (row.error_summary as string) ?? prev.errorSummary,
+        } : prev));
+        if (status !== 'running') void loadDetail();
+      } catch {
+        // transient — keep polling
+      }
+    };
+    void tick();
+    const id = setInterval(tick, 2000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [staleRunId, stalePolling, loadDetail]);
+
+  // Auto-reload the breakdown when THIS universe's refresh finishes, so the
+  // flagged/fresh split reflects the freshly-fetched prices without a click.
+  const wasRefreshing = useRef(false);
+  useEffect(() => {
+    const now = !!progress;
+    if (wasRefreshing.current && !now && showDetail) void loadDetail();
+    wasRefreshing.current = now;
+  }, [progress, showDetail, loadDetail]);
 
   return (
     <div className="py-2 border-b border-neutral-800/20 last:border-0 space-y-1">
@@ -572,6 +803,18 @@ function UniverseCoverageRow({ u, busy, progress, onTrigger }: {
           >
             {checking && <Spinner className="h-3 w-3" />}
             {checking ? 'Checking…' : 'Check history'}
+          </button>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); toggleDetail(); }}
+            disabled={loadingDetail}
+            title={`List every ${u.label} member's latest price/volume date — flagged (stale) vs fresh`}
+            className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted
+                       hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-40
+                       disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+          >
+            {loadingDetail && <Spinner className="h-3 w-3" />}
+            {showDetail ? 'Hide freshness' : 'Inspect freshness'}
           </button>
           <button
             type="button"
@@ -602,6 +845,72 @@ function UniverseCoverageRow({ u, busy, progress, onTrigger }: {
       {hist?.price && <HistoryLine label="price" m={hist.price} members={hist.members} />}
       {hist?.volume && <HistoryLine label="vol" m={hist.volume} members={hist.members} />}
       {hist?.error && <div className="pl-1 text-[11px] text-neg-300">{hist.error}</div>}
+
+      {/* On-demand per-company freshness breakdown (flagged vs fresh). */}
+      {showDetail && (
+        <div className="pl-1 pt-0.5">
+          {loadingDetail && !detail ? (
+            <div className="text-[11px] text-fg-faint flex items-center gap-1.5"><Spinner className="h-3 w-3" /> Loading freshness…</div>
+          ) : detailErr ? (
+            <div className="text-[11px] text-neg-300">Failed to load freshness: {detailErr}</div>
+          ) : detail ? (
+            <div className="space-y-1">
+              <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+                <span className="text-fg-faint">Flag if &gt;</span>
+                {[0, 1, 2, 3, 5].map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); changeThreshold(n); }}
+                    className={`px-1.5 py-0.5 rounded transition-colors ${
+                      n === staleAfter
+                        ? 'bg-accent-500/20 text-accent-200 border border-accent-500/40'
+                        : 'text-fg-muted border border-neutral-700 hover:border-accent-500/50'
+                    }`}
+                  >
+                    {n}d
+                  </button>
+                ))}
+                <span className="text-fg-faint">trading days behind</span>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {detail.counts.flagged > 0 && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); void refreshStale(); }}
+                    disabled={refreshingStale || busy}
+                    title={`Re-fetch prices + volumes for ONLY the ${detail.counts.flagged} flagged compan${detail.counts.flagged === 1 ? 'y' : 'ies'} (within budget)`}
+                    className="text-[11px] px-2 py-0.5 rounded-lg border border-warn-500/40 text-warn-300
+                               hover:bg-warn-500/10 disabled:opacity-40 disabled:cursor-not-allowed
+                               transition-colors flex items-center gap-1.5"
+                  >
+                    {refreshingStale && <Spinner className="h-3 w-3" />}
+                    {refreshingStale ? 'Refreshing…' : `Refresh ${detail.counts.flagged} stale`}
+                  </button>
+                )}
+                {staleRun && (
+                  staleRun.status === 'running' ? (
+                    <span className="text-[11px] text-accent-300 flex items-center gap-1.5">
+                      <Spinner className="h-3 w-3" />{staleRun.message ?? 'Refreshing…'}
+                    </span>
+                  ) : staleRun.status === 'error' ? (
+                    <span className="text-[11px] text-neg-300">✗ Refresh failed: {staleRun.errorSummary ?? staleRun.message ?? 'unknown error'}</span>
+                  ) : (
+                    <span className={`text-[11px] ${staleRun.errors || staleRun.forbidden ? 'text-warn-300' : 'text-pos-300'}`}>
+                      ✓ Refreshed {staleRun.prices} price / {staleRun.volumes} volume series
+                      {staleRun.forbidden ? `, ${staleRun.forbidden} forbidden` : ''}
+                      {staleRun.errors ? `, ${staleRun.errors} errors` : ''}
+                      {` · ${detail.counts.flagged} still flagged`}
+                      {detail.counts.flagged > 0 ? ' (GuruFocus has no newer data — consider Mark illiquid / delisted)' : ''}
+                    </span>
+                  )
+                )}
+              </div>
+              <StalenessDetail detail={detail} />
+            </div>
+          ) : null}
+        </div>
+      )}
 
       {/* Live refresh progress (this universe). */}
       {progress && (

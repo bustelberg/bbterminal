@@ -37,12 +37,13 @@ import asyncio
 import threading
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Body, Header, HTTPException
 
 from common.cron import verify_cron_secret
 from deps import supabase
 from ingest.phases import (
     _create_run,
+    _run_companies_price_refresh_pipeline_sync,
     _run_full_price_refresh_pipeline_sync,
     _run_pipeline_sync,
     _run_price_update_pipeline_sync,
@@ -61,6 +62,7 @@ _VALID_JOB_NAMES = {
     "rebalance",     # rebalance the due strategies from a fresh universe
     "full_price_refresh",  # month-end: re-price ALL companies within budget
     "universe_price_refresh",  # manual: re-price ONE universe's companies within budget
+    "companies_price_refresh",  # manual: re-price an EXPLICIT company-id set (the flagged stale laggards)
     # The dependency-driven daily tick — retained for the cron-revert path /
     # existing run history; no longer fired by the in-process scheduler.
     "smart_daily",
@@ -72,10 +74,16 @@ _VALID_JOB_NAMES = {
 }
 
 
-def _spawn_ingest(run_id: int, job_name: str, universe: str | None = None) -> None:
+def _spawn_ingest(
+    run_id: int,
+    job_name: str,
+    universe: str | None = None,
+    company_ids: list[int] | None = None,
+) -> None:
     """Dispatch by `job_name`. `price_update`/`rebalance` run the split
     pipeline's two operations; `universe_price_refresh` re-prices one universe
-    (the `universe` label is threaded to the op); `smart_daily` runs the legacy
+    (the `universe` label is threaded to the op); `companies_price_refresh`
+    re-prices the explicit `company_ids` set; `smart_daily` runs the legacy
     dependency-driven pipeline; `manual`/`bootstrap` run the full refresh-all
     pipeline."""
     args: tuple = (run_id,)
@@ -88,6 +96,9 @@ def _spawn_ingest(run_id: int, job_name: str, universe: str | None = None) -> No
     elif job_name == "universe_price_refresh":
         target = _run_universe_price_refresh_pipeline_sync
         args = (run_id, universe or "")
+    elif job_name == "companies_price_refresh":
+        target = _run_companies_price_refresh_pipeline_sync
+        args = (run_id, company_ids or [])
     elif job_name == "smart_daily":
         target = _run_smart_pipeline_sync
     else:
@@ -137,13 +148,20 @@ async def cron_scheduled_refresh(
 
 
 @router.post("/api/ingest/scheduled-refresh/trigger")
-async def trigger_scheduled_refresh(job_name: str = "manual", universe: str | None = None):
+async def trigger_scheduled_refresh(
+    job_name: str = "manual",
+    universe: str | None = None,
+    company_ids: list[int] | None = Body(default=None, embed=True),
+):
     """Manual trigger from the /schedule UI's Run-now button. Same work
     as the cron path, just `triggered_by='manual'`. No cron-secret —
     auth is enforced by the frontend proxy middleware in `frontend/proxy.ts`.
 
     Pass `universe=<label>` with `job_name=universe_price_refresh` to re-price
-    just that universe's companies (the per-universe coverage "Refresh" button)."""
+    just that universe's companies (the per-universe coverage "Refresh" button).
+    Pass a JSON body `{"company_ids": [...]}` with `job_name=companies_price_refresh`
+    to re-price only those companies (the "Refresh stale" button after Inspect
+    freshness)."""
     if job_name not in _VALID_JOB_NAMES:
         raise HTTPException(
             400,
@@ -151,9 +169,14 @@ async def trigger_scheduled_refresh(job_name: str = "manual", universe: str | No
         )
     if job_name == "universe_price_refresh" and not universe:
         raise HTTPException(400, "universe_price_refresh requires a `universe` label")
+    if job_name == "companies_price_refresh" and not company_ids:
+        raise HTTPException(400, "companies_price_refresh requires a non-empty `company_ids` list")
     run_id = await asyncio.to_thread(_create_run, job_name, "manual")
-    _spawn_ingest(run_id, job_name, universe=universe)
-    return {"run_id": run_id, "status": "running", "job_name": job_name, "universe": universe}
+    _spawn_ingest(run_id, job_name, universe=universe, company_ids=company_ids)
+    return {
+        "run_id": run_id, "status": "running", "job_name": job_name,
+        "universe": universe, "company_count": len(company_ids or []),
+    }
 
 
 @router.get("/api/ingest/runs")
@@ -238,6 +261,16 @@ _JOB_META: dict[str, dict[str, str]] = {
         "label": "Price catch-up",
         "description": "one-shot — held prices fell behind while down",
         "cadence": "one-shot",
+    },
+    "universe_price_refresh": {
+        "label": "Universe price refresh",
+        "description": "re-prices one universe's companies within budget",
+        "cadence": "on demand",
+    },
+    "companies_price_refresh": {
+        "label": "Stale-company refresh",
+        "description": "re-prices only the flagged stale companies within budget",
+        "cadence": "on demand",
     },
     "manual": {
         "label": "Manual run",

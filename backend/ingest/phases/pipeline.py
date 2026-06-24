@@ -583,6 +583,54 @@ def _run_universe_price_refresh_pipeline_sync(run_id: int, universe_label: str) 
     _finalize_run(run_id, accumulated_errors, log, tag="universe_price_refresh")
 
 
+def _run_companies_price_refresh_pipeline_sync(run_id: int, company_ids: list[int]) -> None:
+    """Manual targeted price + volume refresh of an EXPLICIT company set — the
+    'Refresh stale' button (after Inspect freshness) re-fetches ONLY the flagged
+    laggards instead of the whole universe, so it's cheap on the GuruFocus quota.
+    Bounded by the remaining monthly budget per region; prices only — no
+    templates/prune/momentum. Serialized against the other ops via
+    `_PIPELINE_LOCK`."""
+    log = logging.getLogger(__name__)
+    accumulated_errors: list[str] = []
+
+    with _serialized(run_id):
+        from ingest.api_usage import remaining_budget  # noqa: PLC0415
+        from deps import supabase  # noqa: PLC0415
+
+        from .planner import collect_companies_by_ids  # noqa: PLC0415
+
+        _update_run(
+            run_id, current_phase="prices",
+            current_message=f"Collecting {len(company_ids)} flagged companies to refresh…",
+        )
+        try:
+            companies = collect_companies_by_ids(company_ids)
+            if not companies:
+                accumulated_errors.append(
+                    "No fetchable companies in the requested set (missing ticker/exchange?)"
+                )
+            else:
+                budget = remaining_budget(supabase)
+                _update_run(
+                    run_id,
+                    current_message=(
+                        f"Refreshing {len(companies)} flagged companies — budget left "
+                        f"USA {budget.get('usa', 0)}, EU {budget.get('europe', 0)}, "
+                        f"Asia {budget.get('asia', 0)}…"
+                    ),
+                )
+                _run_prices_phase(
+                    run_id, accumulated_errors,
+                    companies_override=companies, budget_by_region=budget,
+                )
+        except Exception as e:
+            msg = f"Targeted price refresh failed: {type(e).__name__}: {e}"
+            log.warning("[companies_price_refresh] run_id=%s %s", run_id, msg)
+            accumulated_errors.append(msg)
+
+    _finalize_run(run_id, accumulated_errors, log, tag="companies_price_refresh")
+
+
 def _finalize_run(run_id: int, accumulated_errors: list[str], log, *, tag: str) -> None:
     """Shared run-finalizer for the split orchestrators: marks `done`, sets
     `status` from whether any phase errored, and rolls the first few errors

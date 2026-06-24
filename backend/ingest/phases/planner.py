@@ -233,9 +233,15 @@ def _collect_companies_for_universe_ids(universe_ids: set[int]) -> list[dict]:
     company_ids: set[int] = set()
     for uid in universe_ids:
         company_ids |= _latest_membership_company_ids(uid)
+    return _companies_rows_for_ids(company_ids)
+
+
+def _companies_rows_for_ids(company_ids: set[int]) -> list[dict]:
+    """The `[{cid,ticker,exchange}]` list `_run_prices_phase` expects, for an
+    explicit company-id set. Companies missing a ticker or exchange are skipped
+    (un-fetchable)."""
     if not company_ids:
         return []
-
     out: list[dict] = []
     for r in fetch_in_chunks(
         list(company_ids),
@@ -257,6 +263,13 @@ def _collect_companies_for_universe_ids(universe_ids: set[int]) -> list[dict]:
             "exchange": exch,
         })
     return out
+
+
+def collect_companies_by_ids(company_ids: list[int]) -> list[dict]:
+    """The `[{cid,ticker,exchange}]` list `_run_prices_phase` expects, for an
+    EXPLICIT set of company ids (deduped; un-fetchable rows skipped). Backs the
+    manual 'refresh just the stale companies' button on /schedule."""
+    return _companies_rows_for_ids({int(c) for c in company_ids})
 
 
 def collect_universe_companies(due: list[StrategyPlan]) -> list[dict]:

@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+from datetime import date
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, HTTPException, Response
 
 from deps import fetch_in_chunks, supabase
 from ingest.api_usage import get_usage
@@ -348,6 +349,140 @@ async def universe_coverage(response: Response):
             })
         out.sort(key=lambda x: (x.get("label") or "").lower())
         return {"universes": out}
+
+    return await asyncio.to_thread(_q)
+
+
+@router.get("/api/data/universe-staleness")
+async def universe_staleness(
+    response: Response,
+    universe_id: int,
+    stale_after: int = 3,
+):
+    """Per-company price/volume freshness for ONE universe — so a manual
+    'Refresh' can be VERIFIED: which members are up-to-date and which we
+    failed to get recent data for.
+
+    A member is **flagged** when its latest close OR volume is missing, or is
+    more than `stale_after` trading days behind the freshest close in the
+    universe (the market's last good day). Members marked delisted /
+    out-of-scope / illiquid are reported separately as **excluded** — they're
+    expected-stale, not refresh failures, and don't set the freshness bar.
+
+    Returns `{universe_id, label, frozen_from, members, reference_date,
+    stale_after, counts:{fresh,flagged,excluded}, companies:[…]}`, companies
+    sorted worst-first (no-data → most-stale → fresh)."""
+    response.headers["Cache-Control"] = CACHE_PIPELINE
+
+    def _q() -> dict:
+        from ingest.phases.planner import _latest_membership_company_ids  # noqa: PLC0415
+        from ingest.staleness import trading_days_between  # noqa: PLC0415
+
+        urow = (
+            supabase.table("universe")
+            .select("universe_id, label, frozen_from")
+            .eq("universe_id", universe_id).limit(1).execute()
+        ).data
+        if not urow:
+            raise HTTPException(404, f"Universe {universe_id} not found")
+        u = urow[0]
+
+        members = _latest_membership_company_ids(universe_id)
+        base = {
+            "universe_id": universe_id, "label": u.get("label"),
+            "frozen_from": u.get("frozen_from"), "members": len(members),
+            "stale_after": stale_after,
+        }
+        if not members:
+            return {**base, "reference_date": None,
+                    "counts": {"fresh": 0, "flagged": 0, "excluded": 0},
+                    "companies": []}
+
+        close = _latest_metric_dates_for(members, "close_price")
+        vol = _latest_metric_dates_for(members, "volume")
+
+        # Company attributes + price-status markers, one batched lookup.
+        info: dict[int, dict] = {}
+        for r in fetch_in_chunks(
+            list(members),
+            lambda chunk: supabase.table("company")
+            .select("company_id, company_name, gurufocus_ticker, "
+                    "gurufocus_exchange:gurufocus_exchange(exchange_code), "
+                    "delisted_at, out_of_scope_at, illiquid_at")
+            .in_("company_id", chunk).execute(),
+        ):
+            info[int(r["company_id"])] = r
+
+        def _marker(r: dict) -> str | None:
+            if r.get("delisted_at"):
+                return "delisted"
+            if r.get("out_of_scope_at"):
+                return "out_of_scope"
+            if r.get("illiquid_at"):
+                return "illiquid"
+            return None
+
+        # Reference = freshest close among NON-excluded members (so a frozen
+        # delisted close can't masquerade as "the market's latest day").
+        reference_str = max(
+            (close[c] for c in members if close.get(c) and not _marker(info.get(c, {}))),
+            default=None,
+        )
+        ref_date: date | None = None
+        if reference_str:
+            try:
+                ref_date = date.fromisoformat(reference_str[:10])
+            except ValueError:
+                ref_date = None
+
+        def _behind(dstr: str | None) -> int | None:
+            if not dstr or ref_date is None:
+                return None
+            try:
+                return trading_days_between(date.fromisoformat(dstr[:10]), ref_date)
+            except ValueError:
+                return None
+
+        companies: list[dict] = []
+        n_fresh = n_flagged = n_excluded = 0
+        for c in members:
+            r = info.get(c, {})
+            lc, lv = close.get(c), vol.get(c)
+            cb, vb = _behind(lc), _behind(lv)
+            price_stale = lc is None or (cb is not None and cb > stale_after)
+            volume_stale = lv is None or (vb is not None and vb > stale_after)
+            marker = _marker(r)
+            if marker:
+                status, n_excluded = "excluded", n_excluded + 1
+            elif price_stale or volume_stale:
+                status, n_flagged = "flagged", n_flagged + 1
+            else:
+                status, n_fresh = "fresh", n_fresh + 1
+            companies.append({
+                "company_id": c,
+                "ticker": r.get("gurufocus_ticker"),
+                "exchange": (r.get("gurufocus_exchange") or {}).get("exchange_code"),
+                "company_name": r.get("company_name"),
+                "latest_close": lc,
+                "latest_volume": lv,
+                "close_days_behind": cb,
+                "volume_days_behind": vb,
+                "price_stale": price_stale,
+                "volume_stale": volume_stale,
+                "marker": marker,
+                "status": status,
+            })
+
+        # Worst-first within each bucket: no-data (None → treat as most stale),
+        # then largest days-behind, so the names needing attention float up.
+        bucket = {"flagged": 0, "excluded": 1, "fresh": 2}
+        companies.sort(key=lambda x: (
+            bucket[x["status"]],
+            -(x["close_days_behind"] if x["close_days_behind"] is not None else 10_000),
+        ))
+        return {**base, "reference_date": reference_str,
+                "counts": {"fresh": n_fresh, "flagged": n_flagged, "excluded": n_excluded},
+                "companies": companies}
 
     return await asyncio.to_thread(_q)
 
