@@ -231,7 +231,13 @@ $stagedTables = @($upsertOrder.ToArray() | Where-Object { $_ -ne 'metric_data' }
 Write-Host "  $($allTables.Count) tables; upsert order resolved." -ForegroundColor Green
 
 # Per-company signature for metric_data (price data only; recorded_at excluded).
+# The leading `SET statement_timeout = 0;` disables the per-statement timeout for
+# THIS query's session: it's a full ~26M-row GROUP BY, and on an IO-throttled prod
+# it can exceed the default timeout. Done inline (not just via PGOPTIONS) because
+# a managed pooler may ignore startup options. The `SET` emits a "SET" status line
+# that Get-MdSignatures skips (it isn't a pipe-delimited data row).
 $mdSigSql = @"
+SET statement_timeout = 0;
 SELECT company_id, count(*), coalesce(sum(numeric_value),0)::text, coalesce(max(target_date)::text,''), coalesce(min(target_date)::text,'')
 FROM metric_data GROUP BY company_id
 "@
@@ -239,7 +245,10 @@ function Get-MdSignatures([scriptblock]$runner) {
     $map = @{}
     foreach ($r in (& $runner $mdSigSql)) {
         $p = $r -split '\|'
-        $map[[int]$p[0]] = "$($p[1])|$($p[2])|$($p[3])|$($p[4])"
+        if ($p.Length -lt 5) { continue }            # skip the 'SET' tag + blank lines
+        $cid = 0
+        if (-not [int]::TryParse($p[0], [ref]$cid)) { continue }
+        $map[$cid] = "$($p[1])|$($p[2])|$($p[3])|$($p[4])"
     }
     return $map
 }
@@ -326,7 +335,12 @@ Write-Host "  staged." -ForegroundColor Green
 
 # ---- [5] UPSERT parent->child -----------------------------------------------
 Write-Host "[5] Upserting (insert + update by PK)..."
+$nStaged = $stagedTables.Count
+$tIdx = 0
 foreach ($t in $stagedTables) {
+    $tIdx++
+    Write-Host ("  [{0,2}/{1}] {2,-30} " -f $tIdx, $nStaged, $t) -NoNewline
+    $swTbl = [System.Diagnostics.Stopwatch]::StartNew()
     $cols   = $colsByTable[$t]
     $pk     = $pkByTable[$t]
     $collist = ($cols -join ', ')
@@ -354,21 +368,32 @@ foreach ($t in $stagedTables) {
         }
     }
     $ov = if ($alwaysIdentity.ContainsKey($t)) { 'OVERRIDING SYSTEM VALUE ' } else { '' }
-    Invoke-Prod "INSERT INTO public.$t ($collist) ${ov}SELECT $collist FROM clone_stg.$t $conflict;" | Out-Null
+    Invoke-Prod "SET statement_timeout = 0; INSERT INTO public.$t ($collist) ${ov}SELECT $collist FROM clone_stg.$t $conflict;" | Out-Null
+    Write-Host ("done ({0:N1}s)" -f $swTbl.Elapsed.TotalSeconds) -ForegroundColor Green
 }
-Write-Host "  upserted." -ForegroundColor Green
+Write-Host "  all $nStaged tables upserted." -ForegroundColor Green
 
 # ---- [6] metric_data differential -------------------------------------------
 Write-Host "[6] Diffing metric_data per company (full scan both sides)..."
+Write-Host "  scanning LOCAL metric_data signatures (full ~26M-row GROUP BY)... " -NoNewline
+$swSig = [System.Diagnostics.Stopwatch]::StartNew()
 $localSig = Get-MdSignatures ${function:Invoke-Local}
+Write-Host ("done ({0} companies, {1:N0}s)" -f $localSig.Count, $swSig.Elapsed.TotalSeconds) -ForegroundColor Green
+Write-Host "  scanning PROD metric_data signatures (full ~26M-row GROUP BY)... " -NoNewline
+$swSig = [System.Diagnostics.Stopwatch]::StartNew()
 $prodSig  = Get-MdSignatures ${function:Invoke-Prod}
+Write-Host ("done ({0} companies, {1:N0}s)" -f $prodSig.Count, $swSig.Elapsed.TotalSeconds) -ForegroundColor Green
 $resync   = @($localSig.Keys | Where-Object { $prodSig[$_] -ne $localSig[$_] })
 $prodOnly = @($prodSig.Keys  | Where-Object { -not $localSig.ContainsKey($_) })
 Write-Host "  $($resync.Count) companies to re-copy, $($prodOnly.Count) prod-only to delete."
 
 $mdCols = ($colsByTable['metric_data'] -join ', ')
 $done = 0
+$nChunks = [math]::Ceiling($resync.Count / $CompanyChunk)
+$ci = 0
 for ($i = 0; $i -lt $resync.Count; $i += $CompanyChunk) {
+    $ci++
+    $swBatch = [System.Diagnostics.Stopwatch]::StartNew()
     $chunk = $resync[$i..([math]::Min($i + $CompanyChunk - 1, $resync.Count - 1))]
     $arr = $chunk -join ','
     docker exec $Container psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "\copy (SELECT $mdCols FROM metric_data WHERE company_id = ANY('{$arr}'::int[])) TO '/tmp/clone_md.dat'"
@@ -376,12 +401,12 @@ for ($i = 0; $i -lt $resync.Count; $i += $CompanyChunk) {
     $sql = "SET statement_timeout = 0;`nBEGIN;`nDELETE FROM public.metric_data WHERE company_id = ANY('{$arr}'::int[]);`n\copy public.metric_data ($mdCols) FROM '/tmp/clone_md.dat'`nCOMMIT;`n"
     Invoke-ProdScript $sql
     $done += $chunk.Count
-    Write-Host "    metric_data: re-copied $done/$($resync.Count) companies..."
+    Write-Host ("    batch {0}/{1}: re-copied {2}/{3} companies ({4:N1}s)" -f $ci, $nChunks, $done, $resync.Count, $swBatch.Elapsed.TotalSeconds)
 }
 if ($prodOnly.Count -gt 0) {
     for ($i = 0; $i -lt $prodOnly.Count; $i += $CompanyChunk) {
         $chunk = $prodOnly[$i..([math]::Min($i + $CompanyChunk - 1, $prodOnly.Count - 1))]
-        Invoke-Prod "DELETE FROM public.metric_data WHERE company_id = ANY('{$($chunk -join ',')}'::int[]);" | Out-Null
+        Invoke-Prod "SET statement_timeout = 0; DELETE FROM public.metric_data WHERE company_id = ANY('{$($chunk -join ',')}'::int[]);" | Out-Null
     }
     Write-Host "    deleted prod-only metric_data for $($prodOnly.Count) companies."
 }
@@ -393,7 +418,7 @@ foreach ($t in $deleteOrder) {
     if ($t -eq 'metric_data') { continue }
     $pk = $pkByTable[$t]
     $cond = (($pk | ForEach-Object { "s.$_ = p.$_" }) -join ' AND ')
-    Invoke-Prod "DELETE FROM public.$t p WHERE NOT EXISTS (SELECT 1 FROM clone_stg.$t s WHERE $cond);" | Out-Null
+    Invoke-Prod "SET statement_timeout = 0; DELETE FROM public.$t p WHERE NOT EXISTS (SELECT 1 FROM clone_stg.$t s WHERE $cond);" | Out-Null
 }
 Invoke-Prod "DROP SCHEMA IF EXISTS clone_stg CASCADE;" | Out-Null
 docker exec $Container bash -c "rm -f /tmp/clone_*.dat" | Out-Null

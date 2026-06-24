@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import bisect
+import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
@@ -147,6 +148,151 @@ async def delete_portfolio(portfolio_id: int):
     def _q():
         supabase.table("earnings_portfolio").delete().eq("id", portfolio_id).execute()
         return {"deleted": True}
+    return await asyncio.to_thread(_q)
+
+
+# ── AIRS import (Vermogensoverzicht → earnings portfolio) ────────────────────
+#
+# Import a stored AIRS portfolio's holdings (the daily Vermogensoverzicht in
+# `airs_holding`) as an earnings portfolio. AIRS exports only the fund NAME (no
+# ticker/ISIN), so each "Fonds" is fuzzy-matched (rapidfuzz) to a company for the
+# user to confirm / change / drop, then saved via the normal create endpoint.
+
+_NAME_SUFFIXES = {
+    "inc", "incorporated", "corp", "corporation", "co", "company", "ltd",
+    "limited", "plc", "ag", "nv", "sa", "se", "spa", "oyj", "ab", "asa", "as",
+    "group", "holding", "holdings", "lp", "llc", "ord", "the",
+}
+
+
+def _normalize_name(s: str | None) -> str:
+    """Match key for a company / fund name: lowercased, punctuation -> space,
+    whitespace collapsed, trailing corporate-form tokens stripped (so
+    'Advanced Micro Devices' == 'Advanced Micro Devices Inc'). Falls back to the
+    punctuation-stripped form if stripping removes everything."""
+    if not s:
+        return ""
+    n = re.sub(r"[^\w\s]", " ", s.lower())
+    n = re.sub(r"\s+", " ", n).strip()
+    tokens = n.split()
+    while tokens and tokens[0] == "the":
+        tokens.pop(0)
+    while tokens and tokens[-1] in _NAME_SUFFIXES:
+        tokens.pop()
+    return " ".join(tokens) if tokens else n
+
+
+def _load_companies_for_match() -> list[dict]:
+    """All companies as `[{company_id, company_name, ticker, exchange}]` for
+    name matching (paginated to bypass the PostgREST row cap)."""
+    from deps import paginate  # noqa: PLC0415
+
+    out: list[dict] = []
+    for r in paginate(
+        lambda lo, hi: supabase.table("company")
+        .select("company_id, company_name, gurufocus_ticker, "
+                "gurufocus_exchange:gurufocus_exchange(exchange_code)")
+        .range(lo, hi).execute()
+    ):
+        out.append({
+            "company_id": r["company_id"],
+            "company_name": r.get("company_name"),
+            "ticker": r.get("gurufocus_ticker"),
+            "exchange": (r.get("gurufocus_exchange") or {}).get("exchange_code"),
+        })
+    return out
+
+
+def _match_names(names: list[str], companies: list[dict]) -> dict[str, list[dict]]:
+    """For each holding name, the top company candidates by fuzzy score (0-100).
+    Uses rapidfuzz WRatio over normalized names; ties broken by score order."""
+    from rapidfuzz import fuzz, process  # noqa: PLC0415
+
+    choices = {c["company_id"]: _normalize_name(c["company_name"] or c.get("ticker"))
+               for c in companies}
+    info = {c["company_id"]: c for c in companies}
+    out: dict[str, list[dict]] = {}
+    for name in names:
+        if name in out:
+            continue
+        q = _normalize_name(name)
+        cands: list[dict] = []
+        if q:
+            for _, score, cid in process.extract(q, choices, scorer=fuzz.WRatio, limit=6):
+                c = info[cid]
+                cands.append({
+                    "company_id": cid, "name": c["company_name"],
+                    "ticker": c["ticker"], "exchange": c["exchange"],
+                    "score": round(float(score), 1),
+                })
+        out[name] = cands
+    return out
+
+
+def _latest_airs_date(portfolio_name: str) -> str | None:
+    latest = (
+        supabase.table("airs_holding").select("as_of_date")
+        .eq("portefeuille", portfolio_name).order("as_of_date", desc=True)
+        .limit(1).execute()
+    ).data
+    return latest[0]["as_of_date"] if latest else None
+
+
+@router.get("/api/earnings/airs-portfolios")
+async def list_airs_portfolios():
+    """Available AIRS Vermogensoverzicht portfolios to import — one entry per
+    `portefeuille` (its latest snapshot date + holding count) for the /earnings
+    'Import from AIRS' picker."""
+    def _q():
+        rows = (
+            supabase.table("airs_holding")
+            .select("portefeuille, as_of_date")
+            .order("as_of_date", desc=True)
+            .execute()
+        ).data or []
+        seen: dict[str, dict] = {}
+        for r in rows:
+            p = r["portefeuille"]
+            if p not in seen:
+                seen[p] = {"portfolio_name": p, "as_of_date": r["as_of_date"], "holdings": 0}
+            if r["as_of_date"] == seen[p]["as_of_date"]:
+                seen[p]["holdings"] += 1
+        return sorted(seen.values(), key=lambda x: (x["portfolio_name"] or "").lower())
+    return await asyncio.to_thread(_q)
+
+
+@router.get("/api/earnings/airs-portfolios/{portfolio_name}/match")
+async def match_airs_portfolio(portfolio_name: str, as_of: str | None = None):
+    """Pull an AIRS portfolio's holdings (latest snapshot, or `as_of`) and
+    fuzzy-match each Fonds name to a company for the import review UI. Returns
+    each holding's AIRS value/weight, the best company match (None when even the
+    best score is weak), and a shortlist of alternatives to pick from."""
+    def _q():
+        date_q = as_of or _latest_airs_date(portfolio_name)
+        if not date_q:
+            return {"portfolio_name": portfolio_name, "as_of_date": None, "rows": []}
+        holdings = (
+            supabase.table("airs_holding")
+            .select("holding_name, currency, weight, current_value_eur")
+            .eq("portefeuille", portfolio_name).eq("as_of_date", date_q)
+            .order("current_value_eur", desc=True).execute()
+        ).data or []
+        matches = _match_names([h["holding_name"] for h in holdings], _load_companies_for_match())
+        rows = []
+        for h in holdings:
+            cands = matches.get(h["holding_name"], [])
+            # Default-select the top candidate only when it's a confident match;
+            # weak best scores start unmatched so the user must pick.
+            best = cands[0] if cands and cands[0]["score"] >= 75 else None
+            rows.append({
+                "holding_name": h["holding_name"],
+                "currency": h.get("currency"),
+                "current_value_eur": h.get("current_value_eur"),
+                "weight": h.get("weight"),
+                "match": best,
+                "candidates": cands,
+            })
+        return {"portfolio_name": portfolio_name, "as_of_date": date_q, "rows": rows}
     return await asyncio.to_thread(_q)
 
 
@@ -560,6 +706,42 @@ def _universe_sector_map(label: str) -> dict[int, str]:
     return out
 
 
+def _company_sector_map(cids: list[int]) -> dict[int, str]:
+    """`{company_id: sector}` for the given cids using each company's OWN sector
+    classification — the same `company_sector_with_source` RPC the /companies
+    page shows (Leonteq-preferred, else the most recent month from any universe).
+
+    Used as the attribution sector FALLBACK: a holding outside the chosen
+    reference sector-universe still gets its real sector instead of dropping into
+    'Unclassified'. Best-effort — a failure (e.g. RPC missing on an un-migrated
+    prod) just yields no fallback. The RPC returns one row per company (DISTINCT
+    ON), so paginate the full set and keep the ones we need."""
+    want = set(cids)
+    out: dict[int, str] = {}
+    if not want:
+        return out
+    try:
+        offset, page = 0, 1000
+        for _ in range(50):
+            resp = (
+                supabase.rpc("company_sector_with_source")
+                .range(offset, offset + page - 1).execute()
+            )
+            rows = resp.data or []
+            if not rows:
+                break
+            for r in rows:
+                cid, sec = r.get("company_id"), r.get("sector")
+                if cid in want and sec:
+                    out[int(cid)] = sec
+            if len(rows) < page or len(out) >= len(want):
+                break
+            offset += page
+    except Exception:
+        pass  # best-effort fallback; missing → 'Unclassified' as before
+    return out
+
+
 def _asof_price(series: list[tuple[str, float]], date: str) -> float | None:
     """Latest EUR price on or before `date` (series sorted ascending)."""
     if not series:
@@ -709,9 +891,35 @@ async def portfolio_attribution(
             p_start = _asof_price(series, f"{yr - 1}-12-31")
             ret[cid] = (p_end / p_start - 1.0) if (p_start and p_end and p_start != 0) else None
 
+        # Reference sector taxonomy = the chosen universe's membership sectors;
+        # fall back to each company's OWN sector for holdings outside it, so an
+        # imported portfolio full of non-universe names still attributes instead
+        # of collapsing into 'Unclassified'.
         sector_by_cid = _universe_sector_map(universe)
+        own_sector = _company_sector_map(cids)
         def sector_of(cid):
-            return sector_by_cid.get(cid) or "Unclassified"
+            return sector_by_cid.get(cid) or own_sector.get(cid) or "Unclassified"
+
+        def members_detail(members, normed):
+            """Per-holding rows for the 'show holdings' view: normalized weight,
+            resolved sector, one-year return (None = no price coverage), priced
+            flag. Sorted weight-desc."""
+            nw = {cid: w for cid, w in normed}
+            rows = [
+                {
+                    "company_id": m["company_id"],
+                    "ticker": m.get("ticker"),
+                    "name": m.get("name"),
+                    "weight": round(nw.get(m["company_id"], 0.0), 6),
+                    "sector": sector_of(m["company_id"]),
+                    "ret": (round(ret.get(m["company_id"]), 4)
+                            if ret.get(m["company_id"]) is not None else None),
+                    "priced": ret.get(m["company_id"]) is not None,
+                }
+                for m in members
+            ]
+            rows.sort(key=lambda x: -x["weight"])
+            return rows
 
         wa_s, ra_s = _portfolio_sectors(wa, sector_of, ret)
         wb_s, rb_s = _portfolio_sectors(wb, sector_of, ret)
@@ -741,6 +949,8 @@ async def portfolio_attribution(
         b_name = _basket_name(b_kind, b)
         sa, sb = side(wa_s, ra_s), side(wb_s, rb_s)
         sa["name"], sb["name"] = a_name, b_name
+        sa["members"] = members_detail(pa, wa)
+        sb["members"] = members_detail(pb, wb)
         return {
             "year": yr,
             "universe": universe,

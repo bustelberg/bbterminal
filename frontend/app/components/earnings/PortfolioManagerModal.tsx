@@ -4,6 +4,7 @@ import { useState } from 'react';
 
 import { dialog } from '../../../lib/dialog';
 import Spinner from '../Spinner';
+import AirsImportPanel from './AirsImportPanel';
 import CompanyPicker from './CompanyPicker';
 import type { Company } from './types';
 import type { Portfolio, PortfolioMemberInput } from './usePortfolios';
@@ -40,6 +41,7 @@ export default function PortfolioManagerModal({
   const [busyId, setBusyId] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
 
   const weightSum = rows.reduce((s, r) => s + (r.weight || 0), 0);
 
@@ -129,7 +131,17 @@ export default function PortfolioManagerModal({
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-800/60">
           <h2 className="text-fg-strong font-semibold">Portfolios</h2>
-          <button onClick={onClose} className="text-fg-subtle hover:text-fg-strong transition-colors text-xl leading-none px-2">×</button>
+          <div className="flex items-center gap-2">
+            {!importing && (
+              <button
+                onClick={() => { setImporting(true); setErr(null); setNotice(null); }}
+                className="text-xs px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 hover:border-accent-500/50 transition-colors"
+              >
+                Import from AIRS
+              </button>
+            )}
+            <button onClick={onClose} className="text-fg-subtle hover:text-fg-strong transition-colors text-xl leading-none px-2">×</button>
+          </div>
         </div>
 
         {err && (
@@ -139,6 +151,19 @@ export default function PortfolioManagerModal({
           <div className="mx-5 mt-4 text-sm text-pos-300 bg-pos-500/10 border border-pos-500/20 rounded-lg px-3 py-2">{notice} ✓</div>
         )}
 
+        {importing ? (
+          <AirsImportPanel
+            companies={companies}
+            onImport={(nm, importedRows) => {
+              setEditingId(null);
+              setName(nm);
+              setRows(importedRows);
+              setImporting(false);
+              setNotice('Imported — review the weights below, then Create');
+            }}
+            onCancel={() => setImporting(false)}
+          />
+        ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 p-5">
           {/* Existing portfolios */}
           <div className="space-y-2">
@@ -220,6 +245,7 @@ export default function PortfolioManagerModal({
             </div>
           </div>
         </div>
+        )}
       </div>
     </div>
   );

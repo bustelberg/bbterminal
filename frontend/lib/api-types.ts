@@ -1525,6 +1525,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/earnings/airs-portfolios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Airs Portfolios
+         * @description Available AIRS Vermogensoverzicht portfolios to import — one entry per
+         *     `portefeuille` (its latest snapshot date + holding count) for the /earnings
+         *     'Import from AIRS' picker.
+         */
+        get: operations["list_airs_portfolios_api_earnings_airs_portfolios_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/airs-portfolios/{portfolio_name}/match": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Match Airs Portfolio
+         * @description Pull an AIRS portfolio's holdings (latest snapshot, or `as_of`) and
+         *     fuzzy-match each Fonds name to a company for the import review UI. Returns
+         *     each holding's AIRS value/weight, the best company match (None when even the
+         *     best score is weak), and a shortlist of alternatives to pick from.
+         */
+        get: operations["match_airs_portfolio_api_earnings_airs_portfolios__portfolio_name__match_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/earnings/portfolios": {
         parameters: {
             query?: never;
@@ -6023,6 +6068,59 @@ export interface operations {
             };
             header?: never;
             path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_airs_portfolios_api_earnings_airs_portfolios_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    match_airs_portfolio_api_earnings_airs_portfolios__portfolio_name__match_get: {
+        parameters: {
+            query?: {
+                as_of?: string | null;
+            };
+            header?: never;
+            path: {
+                portfolio_name: string;
+            };
             cookie?: never;
         };
         requestBody?: never;

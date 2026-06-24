@@ -3827,6 +3827,83 @@
         ]
       }
     },
+    "/api/earnings/airs-portfolios": {
+      "get": {
+        "description": "Available AIRS Vermogensoverzicht portfolios to import \u2014 one entry per\n`portefeuille` (its latest snapshot date + holding count) for the /earnings\n'Import from AIRS' picker.",
+        "operationId": "list_airs_portfolios_api_earnings_airs_portfolios_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Airs Portfolios",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/airs-portfolios/{portfolio_name}/match": {
+      "get": {
+        "description": "Pull an AIRS portfolio's holdings (latest snapshot, or `as_of`) and\nfuzzy-match each Fonds name to a company for the import review UI. Returns\neach holding's AIRS value/weight, the best company match (None when even the\nbest score is weak), and a shortlist of alternatives to pick from.",
+        "operationId": "match_airs_portfolio_api_earnings_airs_portfolios__portfolio_name__match_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_name",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "as_of",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As Of"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Match Airs Portfolio",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
     "/api/earnings/portfolios": {
       "get": {
         "description": "All portfolios with their members + display labels.",

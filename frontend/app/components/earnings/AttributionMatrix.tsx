@@ -9,10 +9,20 @@ import Spinner from '../Spinner';
 import { chartTheme } from '../../../lib/chartTheme';
 import type { Basket } from './usePortfolios';
 
+type Member = {
+  company_id: number;
+  ticker: string | null;
+  name: string | null;
+  weight: number;
+  sector: string;
+  ret: number | null;
+  priced: boolean;
+};
 type Side = {
   name: string | null;
   sector_weights: Record<string, number>;
   sector_returns: Record<string, number | null>;
+  members?: Member[];
 };
 type AttributionResult = {
   year: number;
@@ -50,6 +60,7 @@ export default function AttributionMatrix({ basketA, basketB }: { basketA: Baske
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [showDetail, setShowDetail] = useState(false);
+  const [showHoldings, setShowHoldings] = useState(false);
 
   const years = useMemo(() => Array.from({ length: currentYear - 2014 }, (_, i) => currentYear - i), [currentYear]);
 
@@ -150,13 +161,22 @@ export default function AttributionMatrix({ basketA, basketB }: { basketA: Baske
             Sectors: {data.universe}.
           </p>
 
-          <button
-            type="button"
-            onClick={() => setShowDetail((v) => !v)}
-            className="text-xs text-accent-400 hover:text-accent-300 transition-colors"
-          >
-            {showDetail ? 'Hide' : 'Show'} per-sector weights & returns
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={() => setShowDetail((v) => !v)}
+              className="text-xs text-accent-400 hover:text-accent-300 transition-colors"
+            >
+              {showDetail ? 'Hide' : 'Show'} per-sector weights & returns
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowHoldings((v) => !v)}
+              className="text-xs text-accent-400 hover:text-accent-300 transition-colors"
+            >
+              {showHoldings ? 'Hide' : 'Show'} holdings
+            </button>
+          </div>
           {showDetail && (
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
@@ -181,6 +201,39 @@ export default function AttributionMatrix({ basketA, basketB }: { basketA: Baske
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {showHoldings && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {([data.a, data.b] as const).map((side, idx) => {
+                const members = side.members ?? [];
+                const unpriced = members.filter((mm) => !mm.priced).length;
+                return (
+                  <div key={idx} className="rounded-lg border border-neutral-800/40 overflow-hidden">
+                    <div className="px-3 py-2 border-b border-neutral-800/40 flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium truncate" style={{ color: idx === 0 ? C_A : C_B }}>{side.name}</span>
+                      <span className="text-fg-faint text-[11px] shrink-0">
+                        {members.length} holdings{unpriced > 0 ? <span className="text-warn-300"> · {unpriced} no price</span> : ''}
+                      </span>
+                    </div>
+                    <div className="max-h-72 overflow-y-auto divide-y divide-neutral-800/20">
+                      {members.map((mm) => (
+                        <div key={mm.company_id} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+                          <span className="font-mono text-accent-400 w-14 shrink-0 truncate" title={mm.ticker ?? ''}>{mm.ticker ?? '?'}</span>
+                          <span className="text-fg-soft flex-1 min-w-0 truncate" title={mm.name ?? ''}>{mm.name ?? '—'}</span>
+                          <span className="text-fg-faint w-28 truncate text-right hidden lg:inline" title={mm.sector}>{mm.sector}</span>
+                          <span className="font-mono text-fg-muted w-12 text-right">{(mm.weight * 100).toFixed(1)}%</span>
+                          <span className={`font-mono w-16 text-right ${mm.priced ? retCls(mm.ret) : 'text-warn-300'}`} title={mm.priced ? '' : 'No price coverage for this year — counts as 0% in the matrix'}>
+                            {mm.priced ? pct(mm.ret) : 'no price'}
+                          </span>
+                        </div>
+                      ))}
+                      {members.length === 0 && <div className="px-3 py-2 text-fg-subtle text-xs">No holdings.</div>}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </>
