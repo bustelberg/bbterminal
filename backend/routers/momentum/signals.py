@@ -26,7 +26,7 @@ from pydantic import BaseModel
 
 from deps import supabase
 from momentum.data import load_all_prices, load_all_volumes, load_universe
-from momentum.signals import PRICE_SIGNAL_DEFS
+from momentum.signals import EXTRA_SIGNAL_DEFS, PRICE_SIGNAL_DEFS, TREND_SIGNAL_DEFS
 from routers._cache_headers import CACHE_STATIC
 
 router = APIRouter(tags=["momentum"])
@@ -34,12 +34,22 @@ router = APIRouter(tags=["momentum"])
 
 @router.get("/api/momentum/signals")
 async def get_momentum_signals(response: Response):
-    """Available signal definitions + the category buckets used by scoring."""
-    # Signal defs are code-defined (PRICE_SIGNAL_DEFS in momentum.signals) and
-    # only change with a backend deploy -- safe to cache aggressively.
+    """Available signal definitions + the category buckets used by scoring.
+
+    `signals`/`categories` are the classic Momentum pillars (price+volume).
+    `extra_signals`/`extra_categories` add the trend-quality pillar that the
+    MomentumExtra strategy activates — the frontend shows those only when the
+    MomentumExtra strategy is selected."""
+    # Signal defs are code-defined (momentum.signals) and only change with a
+    # backend deploy -- safe to cache aggressively.
     response.headers["Cache-Control"] = CACHE_STATIC
     from momentum.scoring import _get_category_keys
-    return {"signals": PRICE_SIGNAL_DEFS, "categories": list(_get_category_keys().keys())}
+    return {
+        "signals": PRICE_SIGNAL_DEFS,
+        "categories": list(_get_category_keys().keys()),
+        "extra_signals": TREND_SIGNAL_DEFS,
+        "extra_categories": list(_get_category_keys(EXTRA_SIGNAL_DEFS).keys()),
+    }
 
 
 class SignalBreakdownRequest(BaseModel):

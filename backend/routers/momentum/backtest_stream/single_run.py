@@ -20,7 +20,7 @@ from momentum.backtest import (
     run_current_portfolio,
     run_multi_trial_backtest,
 )
-from momentum.signals import PRICE_SIGNAL_DEFS
+from momentum.scoring import signal_defs_for_mode
 
 from .._helpers import (
     backtest_strategy_hash as _backtest_strategy_hash,
@@ -51,7 +51,10 @@ async def run_single(
     config = BacktestConfig.from_dict({
         "start_date": req.start_date,
         "end_date": req.end_date,
-        "signal_weights": req.signal_weights or {s["key"]: s["default_weight"] for s in PRICE_SIGNAL_DEFS},
+        "signal_weights": req.signal_weights or {
+            s["key"]: s["default_weight"]
+            for s in signal_defs_for_mode(req.selection_mode)
+        },
         "category_weights": req.category_weights,
         "top_n_sectors": req.top_n_sectors,
         "top_n_per_sector": req.top_n_per_sector,

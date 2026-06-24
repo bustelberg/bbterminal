@@ -284,18 +284,23 @@ def load_companies_via_copy() -> list[dict] | None:
 
 def load_latest_close_dates_via_copy(company_ids: list[int]) -> dict[int, str] | None:
     """Latest `close_price` `target_date` per company, for a SMALL set of
-    company ids (e.g. a strategy's ~24 held names) — a single indexed
-    `GROUP BY max(target_date)` via COPY. Returns `{company_id: 'YYYY-MM-DD'}`
-    (companies with no close_price are simply absent), or `None` for the
-    PostgREST fall-back. Replaces the full-table `company_latest_close_price_dates`
-    RPC for the held-companies freshness view, which times out on the whole
-    metric_data table."""
+    company ids (e.g. a strategy's ~24 held names). Returns
+    `{company_id: 'YYYY-MM-DD'}` (companies with no close_price are simply
+    absent), or `None` for the PostgREST fall-back.
+
+    Uses a per-company lateral `ORDER BY target_date DESC LIMIT 1` (a "loose
+    index scan") so the PK index seeks straight to each company's latest row --
+    one row read per company. The old `GROUP BY max(target_date)` read EVERY
+    date row per company; close_price is 100% source 'gurufocus', so the source
+    filter is a no-op that just unlocks the single-seek index path."""
     if not _db_url() or not company_ids:
         return None
     sql = (
-        "COPY (SELECT company_id, max(target_date)::text FROM metric_data "
-        "WHERE metric_code = 'close_price' AND company_id = ANY(%s) "
-        "GROUP BY company_id) TO STDOUT WITH (FORMAT csv)"
+        "COPY (SELECT cid AS company_id, l.d::text FROM unnest(%s::int[]) AS cid "
+        "CROSS JOIN LATERAL (SELECT md.target_date AS d FROM metric_data md "
+        "WHERE md.company_id = cid AND md.metric_code = 'close_price' "
+        "AND md.source_code = 'gurufocus' ORDER BY md.target_date DESC LIMIT 1) l) "
+        "TO STDOUT WITH (FORMAT csv)"
     )
     buf = _run_copy(sql, (list(company_ids),))
     if buf is None:
@@ -320,14 +325,18 @@ def load_latest_close_prices_via_copy(
     close_price are absent), or `None` for the PostgREST fall-back. The value
     is the raw GuruFocus close in the security's native trading currency (no
     FX conversion). Sibling of `load_latest_close_dates_via_copy`, returning
-    the value alongside the date for the held-companies panel."""
+    the value alongside the date for the held-companies panel.
+
+    Per-company lateral `ORDER BY target_date DESC LIMIT 1` (one row read per
+    company) instead of `DISTINCT ON` over each company's full date range."""
     if not _db_url() or not company_ids:
         return None
     sql = (
-        "COPY (SELECT DISTINCT ON (company_id) company_id, target_date::text, "
-        "numeric_value FROM metric_data "
-        "WHERE metric_code = 'close_price' AND company_id = ANY(%s) "
-        "ORDER BY company_id, target_date DESC) TO STDOUT WITH (FORMAT csv)"
+        "COPY (SELECT cid AS company_id, l.d::text, l.v FROM unnest(%s::int[]) AS cid "
+        "CROSS JOIN LATERAL (SELECT md.target_date AS d, md.numeric_value AS v "
+        "FROM metric_data md WHERE md.company_id = cid AND md.metric_code = 'close_price' "
+        "AND md.source_code = 'gurufocus' ORDER BY md.target_date DESC LIMIT 1) l) "
+        "TO STDOUT WITH (FORMAT csv)"
     )
     buf = _run_copy(sql, (list(company_ids),))
     if buf is None:
@@ -347,17 +356,22 @@ def load_latest_close_prices_via_copy(
 
 
 def load_all_latest_close_dates_via_copy() -> dict[int, str] | None:
-    """Latest `close_price` `target_date` for EVERY company — a single
-    `GROUP BY max(target_date)` over the whole `metric_data` table via COPY.
-    Returns `{company_id: 'YYYY-MM-DD'}` (companies with no close are absent),
-    or `None` for the fall-back. The PostgREST RPC equivalent
-    (`company_latest_close_price_dates`) times out on the full table; the
-    direct-Postgres GROUP BY is indexed + fast. Used by the delisting sweep."""
+    """Latest `close_price` `target_date` for EVERY company via COPY. Returns
+    `{company_id: 'YYYY-MM-DD'}` (companies with no close are absent), or `None`
+    for the fall-back. Used by the delisting sweep (runs every pipeline tick).
+
+    A per-company lateral `ORDER BY target_date DESC LIMIT 1` over the `company`
+    table: one indexed row-read per company (~2.4k seeks) instead of the old
+    `GROUP BY max(target_date)` that scanned the whole ~13M-row close_price range
+    (~2.3 GB, the prior delisting-sweep IO hog). close_price is 100% source
+    'gurufocus', so the source filter only narrows to the single-seek index path."""
     if not _db_url():
         return None
     sql = (
-        "COPY (SELECT company_id, max(target_date)::text FROM metric_data "
-        "WHERE metric_code = 'close_price' GROUP BY company_id) "
+        "COPY (SELECT c.company_id, l.d::text FROM company c "
+        "CROSS JOIN LATERAL (SELECT md.target_date AS d FROM metric_data md "
+        "WHERE md.company_id = c.company_id AND md.metric_code = 'close_price' "
+        "AND md.source_code = 'gurufocus' ORDER BY md.target_date DESC LIMIT 1) l) "
         "TO STDOUT WITH (FORMAT csv)"
     )
     buf = _run_copy(sql, ())

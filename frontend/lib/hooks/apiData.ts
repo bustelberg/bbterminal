@@ -121,13 +121,21 @@ async function _fetchCompanies(): Promise<CompanyRow[]> {
   return (await r.json()) as CompanyRow[];
 }
 
-async function _fetchMomentumSignals(): Promise<{ signals: SignalDef[]; categories: string[] }> {
+async function _fetchMomentumSignals(): Promise<{
+  signals: SignalDef[];
+  categories: string[];
+  extraSignals: SignalDef[];
+  extraCategories: string[];
+}> {
   const r = await apiFetch(`${API_URL}/api/momentum/signals`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const d = await r.json();
   return {
     signals: (d.signals ?? []) as SignalDef[],
     categories: (d.categories ?? []) as string[],
+    // MomentumExtra's trend pillar — empty on older backends.
+    extraSignals: (d.extra_signals ?? []) as SignalDef[],
+    extraCategories: (d.extra_categories ?? d.categories ?? []) as string[],
   };
 }
 

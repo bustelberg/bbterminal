@@ -45,7 +45,7 @@ export function useVariantsBundle({
 
   const {
     selectionMode, maxCompanies, topSectors, topPerSector, grouping,
-    startDate, endDate, minPriceScore, weights, categoryWeights,
+    startDate, endDate, minPriceScore, activeWeights, activeCategoryWeights,
     randomSeed, nTrials, rebalanceWeekday,
   } = config;
   const {
@@ -115,14 +115,16 @@ export function useVariantsBundle({
       start_date: `${startDate}-01`,
       end_date: `${endDate}-01`,
     };
-    if (selectionMode === 'momentum') {
+    if (selectionMode === 'momentum' || selectionMode === 'momentum_extra') {
       const baseMs = minPriceScore.trim() === '' ? null : Number(minPriceScore);
       // Variant `min_price_score === null` means "explicit OFF" (sweep
       // axis entered "none"/"off"); undefined means "inherit base".
       runConfig.min_price_score =
         v.min_price_score === undefined ? baseMs : v.min_price_score;
-      runConfig.signal_weights = weights;
-      runConfig.category_weights = categoryWeights;
+      // Active-only weights: MomentumExtra includes the trend pillar; classic
+      // Momentum stays price+volume (so the scheduled run is byte-identical).
+      runConfig.signal_weights = activeWeights;
+      runConfig.category_weights = activeCategoryWeights;
     }
     if (selectionMode === 'random') {
       runConfig.random_seed = randomSeed;
@@ -283,8 +285,8 @@ export function useVariantsBundle({
           config: {
             start_date: `${startDate}-01`,
             end_date: `${endDate}-01`,
-            signal_weights: weights,
-            category_weights: categoryWeights,
+            signal_weights: activeWeights,
+            category_weights: activeCategoryWeights,
             top_n_sectors: topSectors,
             top_n_per_sector: topPerSector,
             min_price_score: minPriceScore.trim() === '' ? null : Number(minPriceScore),

@@ -31,6 +31,7 @@ from ..scoring import (
     random_select,
     score_universe,
     select_from_scored,
+    signal_defs_for_mode,
 )
 from .indices import _price_on_or_after, _price_on_or_before
 from .types import (
@@ -941,6 +942,7 @@ def compute_selection_period(
                 signals_df,
                 config.signal_weights,
                 config.category_weights,
+                signal_defs_for_mode(config.selection_mode),
             )
 
         def _sel(direction: str, *, with_min_score: bool):

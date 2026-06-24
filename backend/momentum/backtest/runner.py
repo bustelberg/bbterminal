@@ -42,7 +42,7 @@ from .types import (
     BacktestSummary,
     PeriodRecord,
 )
-from ..scoring import score_universe
+from ..scoring import score_universe, signal_defs_for_mode
 
 
 def _early_empty_record(
@@ -302,6 +302,10 @@ def run_backtest(
         if config.selection_mode == "random"
         else None
     )
+    # Pillars to score: price+volume for classic Momentum, +trend for
+    # MomentumExtra. Constant for the whole run (selection_mode is a base-config
+    # field), so resolve once and reuse for every period's scoring.
+    signal_defs = signal_defs_for_mode(config.selection_mode)
 
     for i, period_date in enumerate(periods[:-1]):  # last period has no forward return
         next_period = periods[i + 1]
@@ -465,6 +469,7 @@ def run_backtest(
                     signals_df,
                     config.signal_weights,
                     config.category_weights,
+                    signal_defs,
                 )
                 if score_cache is not None:
                     score_cache[period_date] = scored_df

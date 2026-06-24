@@ -137,6 +137,33 @@ ORDER BY tc.table_name, kcu.ordinal_position
     if (-not $pkByTable.ContainsKey($p[0])) { $pkByTable[$p[0]] = New-Object System.Collections.ArrayList }
     [void]$pkByTable[$p[0]].Add($p[1])
 }
+# Secondary UNIQUE constraints (NOT the PK) -> used to pre-clear prod rows that
+# collide on a unique key with an incoming local row but whose own PK is gone
+# from local (diverged ids for the same logical row -- e.g. a frozen universe
+# re-frozen independently on prod under a different universe_id but the same
+# label). Without clearing them first the by-PK upsert tries to INSERT and trips
+# the unique constraint (universe_label_key).
+$uniqByTable = @{}
+$uniqAccum = @{}   # "table|constraint" -> ArrayList(cols)
+foreach ($r in Invoke-Local @"
+SELECT tc.table_name, tc.constraint_name, kcu.column_name
+FROM information_schema.table_constraints tc
+JOIN information_schema.key_column_usage kcu
+  ON tc.constraint_name=kcu.constraint_name AND tc.table_schema=kcu.table_schema
+WHERE tc.constraint_type='UNIQUE' AND tc.table_schema='public'
+ORDER BY tc.table_name, tc.constraint_name, kcu.ordinal_position
+"@) {
+    $p = $r -split '\|', 3
+    $key = "$($p[0])|$($p[1])"
+    if (-not $uniqAccum.ContainsKey($key)) { $uniqAccum[$key] = New-Object System.Collections.ArrayList }
+    [void]$uniqAccum[$key].Add($p[2])
+}
+foreach ($key in $uniqAccum.Keys) {
+    $tbl = ($key -split '\|', 2)[0]
+    if (-not $uniqByTable.ContainsKey($tbl)) { $uniqByTable[$tbl] = New-Object System.Collections.ArrayList }
+    [void]$uniqByTable[$tbl].Add(@($uniqAccum[$key].ToArray()))
+}
+
 # FK edges child -> parent (within public, self-refs ignored).
 $parentsByTable = @{}
 foreach ($t in $allTables) { $parentsByTable[$t] = New-Object System.Collections.ArrayList }
@@ -304,6 +331,21 @@ foreach ($t in $stagedTables) {
         $conflict = "ON CONFLICT ($pklist) DO UPDATE SET $setlist"
     } else {
         $conflict = "ON CONFLICT ($pklist) DO NOTHING"
+    }
+    # Pre-clear stale prod rows that collide on a secondary UNIQUE key with an
+    # incoming local row but whose PK is gone from local (diverged ids for the
+    # same logical row). Without this the INSERT below trips the unique
+    # constraint (e.g. universe.label for a snapshot re-frozen on prod under a
+    # different universe_id). The "PK gone from local" guard means we only touch
+    # rows step [7] would delete anyway; FK ON DELETE CASCADE/SET NULL cleans
+    # their dependents. A NULL unique value never matches (p.col = s.col is NULL),
+    # so multi-NULL columns like template_key are correctly left alone.
+    if ($uniqByTable.ContainsKey($t)) {
+        $pkMatch = (($pk | ForEach-Object { "k.$_ = p.$_" }) -join ' AND ')
+        foreach ($ucols in $uniqByTable[$t]) {
+            $uMatch = (($ucols | ForEach-Object { "p.$_ = s.$_" }) -join ' AND ')
+            Invoke-Prod "DELETE FROM public.$t p USING clone_stg.$t s WHERE $uMatch AND NOT EXISTS (SELECT 1 FROM clone_stg.$t k WHERE $pkMatch);" | Out-Null
+        }
     }
     $ov = if ($alwaysIdentity.ContainsKey($t)) { 'OVERRIDING SYSTEM VALUE ' } else { '' }
     Invoke-Prod "INSERT INTO public.$t ($collist) ${ov}SELECT $collist FROM clone_stg.$t $conflict;" | Out-Null

@@ -34,7 +34,7 @@ from momentum.backtest import (
     run_backtest,
     run_multi_trial_backtest,
 )
-from momentum.signals import PRICE_SIGNAL_DEFS
+from momentum.scoring import signal_defs_for_mode
 
 from ..signals import warm_breakdown_panel_cache
 from .benchmarks import fetch_benchmark_price_index
@@ -391,8 +391,9 @@ async def run_variants_sweep(
         and score_cache_by_combo
     ):
         from momentum.scoring import score_universe  # noqa: PLC0415
+        _signal_defs = signal_defs_for_mode(req.selection_mode)
         _sig_weights = req.signal_weights or {
-            s["key"]: s["default_weight"] for s in PRICE_SIGNAL_DEFS
+            s["key"]: s["default_weight"] for s in _signal_defs
         }
         _cat_weights = req.category_weights
 
@@ -422,7 +423,7 @@ async def run_variants_sweep(
             if filtered.empty:
                 return combo_inner, period_date_inner, None
             filtered["sector"] = filtered["company_id"].map(sector_map_inner)
-            scored = score_universe(filtered, _sig_weights, _cat_weights)
+            scored = score_universe(filtered, _sig_weights, _cat_weights, _signal_defs)
             return combo_inner, period_date_inner, scored
 
         # Build (combo, period_date, panel, eligible, sector_map) tasks
@@ -580,7 +581,10 @@ async def run_variants_sweep(
             v_config = BacktestConfig.from_dict({
                 "start_date": req.start_date,
                 "end_date": req.end_date,
-                "signal_weights": req.signal_weights or {s["key"]: s["default_weight"] for s in PRICE_SIGNAL_DEFS},
+                "signal_weights": req.signal_weights or {
+                    s["key"]: s["default_weight"]
+                    for s in signal_defs_for_mode(req.selection_mode)
+                },
                 "category_weights": req.category_weights,
                 "top_n_sectors": v_top_sectors,
                 "top_n_per_sector": v_top_per_sector,

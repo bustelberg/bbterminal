@@ -441,6 +441,8 @@ class TestSignalsPanelParity:
             "mom_12_1", "mom_6m", "volatility_adjusted_return_6m",
             "drawdown_from_recent_high_pct", "above_200ma",
             "vol_20d_vs_60d", "vol_trend_3m",
+            # Trend-quality pillar (MomentumExtra) — same per-cutoff/panel parity.
+            "trend_continuity", "pct_up_days_6m", "rsi_headroom",
         ]
 
         for c in cutoffs:

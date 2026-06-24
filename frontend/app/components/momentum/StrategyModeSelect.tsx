@@ -28,9 +28,10 @@ export default function StrategyModeSelect({
         value={selectionMode}
         onChange={(e) => setSelectionMode(e.target.value as SelectionMode)}
         className="bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
-        title="Momentum ranks the universe by signal score. Random picks sectors/stocks at random (noise-floor baseline). All holds every eligible name in the universe equal-weighted (index-proxy benchmark). Sector ETF ranks sectors via stock-aggregate momentum then holds the mapped sector ETF for each picked sector — set the mapping on /benchmarks."
+        title="Momentum ranks the universe by signal score (price + volume pillars). MomentumExtra adds a third trend-quality pillar (trend continuity, up-day consistency, RSI overbought guard). Random picks sectors/stocks at random (noise-floor baseline). All holds every eligible name in the universe equal-weighted (index-proxy benchmark). Sector ETF ranks sectors via stock-aggregate momentum then holds the mapped sector ETF for each picked sector — set the mapping on /benchmarks."
       >
         <option value="momentum">Momentum</option>
+        <option value="momentum_extra">MomentumExtra (+ trend pillar)</option>
         <option value="random">Random (baseline)</option>
         <option value="all">All universe (index proxy)</option>
         <option value="sector_etf">Sector ETF (per-sector benchmark)</option>

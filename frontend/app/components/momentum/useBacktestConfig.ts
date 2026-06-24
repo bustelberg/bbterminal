@@ -18,7 +18,7 @@ import { useEffect, useState } from 'react';
 import { useMomentumSignals } from '../../../lib/hooks/apiData';
 import type { SignalDef } from './types';
 
-export type SelectionMode = 'momentum' | 'random' | 'all' | 'sector_etf';
+export type SelectionMode = 'momentum' | 'momentum_extra' | 'random' | 'all' | 'sector_etf';
 export type Grouping = 'sector' | 'industry';
 
 export type UseBacktestConfigResult = ReturnType<typeof useBacktestConfig>;
@@ -29,6 +29,8 @@ export function useBacktestConfig() {
   const [signalDefs, setSignalDefs] = useState<SignalDef[]>([]);
   const [weights, setWeights] = useState<Record<string, number>>({});
   const [categories, setCategories] = useState<string[]>([]);
+  // Categories incl. the MomentumExtra "trend" pillar (price+volume+trend).
+  const [extraCategories, setExtraCategories] = useState<string[]>([]);
   const [categoryWeights, setCategoryWeights] = useState<Record<string, number>>({});
 
   // Date range is independent of the selected universe (universes are now
@@ -70,23 +72,51 @@ export function useBacktestConfig() {
     // a derived useMemo) — same shape, and same lint suppression, as
     // useSectorEtfs.
     /* eslint-disable react-hooks/set-state-in-effect */
-    const defs = signalsData.signals;
+    // Load ALL signal defs (price+volume + the MomentumExtra trend pillar) and
+    // seed their default weights — so switching to MomentumExtra has the trend
+    // sliders ready. The request builder only SENDS the active strategy's
+    // signals/categories, so carrying the extras here is harmless for Momentum.
+    const defs = [...signalsData.signals, ...(signalsData.extraSignals ?? [])];
     setSignalDefs(defs);
     const w: Record<string, number> = {};
     defs.forEach((s) => (w[s.key] = s.default_weight));
     setWeights(w);
     const cats = signalsData.categories;
+    const extraCats = signalsData.extraCategories?.length ? signalsData.extraCategories : cats;
     setCategories(cats);
+    setExtraCategories(extraCats);
     const cw: Record<string, number> = {};
-    cats.forEach((c) => (cw[c] = 50));
+    extraCats.forEach((c) => (cw[c] = 50));
     setCategoryWeights(cw);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [signalsData]);
+
+  // The pillars active for the selected strategy: MomentumExtra adds "trend".
+  const activeCategories = selectionMode === 'momentum_extra' ? extraCategories : categories;
+
+  // Weights filtered to the active pillars — what gets SENT to the backend.
+  // Filtering category_weights is what keeps classic Momentum byte-identical:
+  // leaking the trend key in would change the price/volume normalization split.
+  // (The full `weights`/`categoryWeights` maps stay editable for the sliders.)
+  const _activeCats = new Set(activeCategories);
+  const _activeSignalKeys = new Set(
+    signalDefs.filter((d) => _activeCats.has(d.group ?? 'price')).map((d) => d.key),
+  );
+  const activeWeights: Record<string, number> = Object.fromEntries(
+    Object.entries(weights).filter(([k]) => _activeSignalKeys.has(k)),
+  );
+  const activeCategoryWeights: Record<string, number> = Object.fromEntries(
+    Object.entries(categoryWeights).filter(([c]) => _activeCats.has(c)),
+  );
 
   return {
     signalDefs,
     weights, setWeights,
     categories,
+    extraCategories,
+    activeCategories,
+    activeWeights,
+    activeCategoryWeights,
     categoryWeights, setCategoryWeights,
     startDate, setStartDate,
     endDate, setEndDate,

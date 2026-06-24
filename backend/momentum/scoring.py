@@ -10,7 +10,15 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-from .signals import PRICE_SIGNAL_DEFS
+from .signals import EXTRA_SIGNAL_DEFS, PRICE_SIGNAL_DEFS
+
+
+def signal_defs_for_mode(selection_mode: str) -> list[dict]:
+    """The signal-def list whose `group` tags define the scoring pillars for a
+    strategy. MomentumExtra activates the third "trend" pillar; every other mode
+    uses the classic price+volume defs, so their scoring is byte-identical."""
+    return EXTRA_SIGNAL_DEFS if selection_mode == "momentum_extra" else PRICE_SIGNAL_DEFS
+
 
 # "top" = best sectors / best names per sector (long bucket).
 # "bottom" = worst sectors / worst names per sector (short bucket for
@@ -55,24 +63,33 @@ def _score_category(
     return df
 
 
-def _get_category_keys() -> dict[str, list[str]]:
-    """Build {category: [signal_keys]} from PRICE_SIGNAL_DEFS."""
+def _get_category_keys(signal_defs: list[dict] | None = None) -> dict[str, list[str]]:
+    """Build {category: [signal_keys]} from the given signal defs (default:
+    the classic price+volume PRICE_SIGNAL_DEFS)."""
     cats: dict[str, list[str]] = {}
-    for s in PRICE_SIGNAL_DEFS:
+    for s in (signal_defs if signal_defs is not None else PRICE_SIGNAL_DEFS):
         group = s.get("group", "price")
         cats.setdefault(group, []).append(s["key"])
     return cats
 
 
 def extract_category_scores(row: pd.Series) -> dict[str, float | None]:
-    """Per-category 0-100 scores off a scored row, rounded to 1dp. None for
-    any category whose `score_<cat>` column is absent or NaN. Shared by the
-    period + current-portfolio holding builders (the `score_<cat>` columns are
-    produced by `compute_category_scores`)."""
+    """Per-category 0-100 scores off a scored row, rounded to 1dp. Always
+    reports the classic price+volume pillars (None when their `score_<cat>`
+    column is absent or NaN), plus any extra `score_<cat>` columns the row
+    carries — so MomentumExtra rows surface `trend` automatically. Shared by the
+    period + current-portfolio holding builders."""
+    cats = list(_get_category_keys().keys())  # price, volume — always reported
+    for col in row.index:
+        if isinstance(col, str) and col.startswith("score_"):
+            cat = col[len("score_"):]
+            if cat not in cats:
+                cats.append(cat)
     out: dict[str, float | None] = {}
-    for cat in _get_category_keys():
+    for cat in cats:
         col = f"score_{cat}"
-        out[cat] = round(float(row[col]), 1) if col in row.index and pd.notna(row[col]) else None
+        val = row[col] if col in row.index else None
+        out[cat] = round(float(val), 1) if (val is not None and pd.notna(val)) else None
     return out
 
 
@@ -80,12 +97,13 @@ def compute_category_scores(
     df: pd.DataFrame,
     signal_weights: dict[str, float],
     category_weights: dict[str, float] | None = None,
+    signal_defs: list[dict] | None = None,
 ) -> pd.DataFrame:
     """Score each company per category (0-100), then compute a weighted final score.
 
     Adds columns: score_price, score_volume, ..., momentum_score (final).
     """
-    cats = _get_category_keys()
+    cats = _get_category_keys(signal_defs)
 
     if category_weights is None:
         # Default: equal weight per category
@@ -137,20 +155,24 @@ def score_universe(
     signals_df: pd.DataFrame,
     signal_weights: dict[str, float],
     category_weights: dict[str, float] | None = None,
+    signal_defs: list[dict] | None = None,
 ) -> pd.DataFrame:
     """The score-half of `score_and_select`: append per-category scores
     + `momentum_score` to every row of `signals_df`. Pure function of
-    (signals_df, signal_weights, category_weights) — the result is
-    safe to cache across any variants that share those inputs (which,
+    (signals_df, signal_weights, category_weights, signal_defs) — the result
+    is safe to cache across any variants that share those inputs (which,
     in practice, is every variant in a sweep, since `signal_weights`
     and `category_weights` come from the base request and don't vary
     per variant).
+
+    `signal_defs` selects which pillars score (default price+volume; pass
+    EXTRA_SIGNAL_DEFS for MomentumExtra's trend pillar).
 
     For long-short strategies the same scored frame feeds both the
     top and bottom selections — no need to rescore between them."""
     if signals_df.empty:
         return signals_df
-    return compute_category_scores(signals_df, signal_weights, category_weights)
+    return compute_category_scores(signals_df, signal_weights, category_weights, signal_defs)
 
 
 def select_from_scored(
@@ -233,6 +255,7 @@ def score_and_select(
     category_weights: dict[str, float] | None = None,
     direction: SelectionDirection = "top",
     min_price_score: float | None = None,
+    signal_defs: list[dict] | None = None,
 ) -> pd.DataFrame:
     """Convenience wrapper combining `score_universe` + `select_from_scored`
     for callers that don't manage a score cache (single-run path, tests,
@@ -241,7 +264,7 @@ def score_and_select(
     Variant sweeps should use the split form directly so the score pass
     is cached across variants — see `_period.compute_selection_period`
     for the runner's cache-aware call site."""
-    scored = score_universe(signals_df, signal_weights, category_weights)
+    scored = score_universe(signals_df, signal_weights, category_weights, signal_defs)
     return select_from_scored(
         scored,
         top_n_sectors=top_n_sectors,

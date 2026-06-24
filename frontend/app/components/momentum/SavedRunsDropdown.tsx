@@ -48,6 +48,8 @@ function describeBacktestParams(cfg: Record<string, unknown> | undefined): strin
       parts.push('all-universe');
     } else if (mode === 'sector_etf') {
       parts.push('sector-ETF');
+    } else if (mode === 'momentum_extra') {
+      parts.push('MomentumExtra');
     } else {
       parts.push(mode);
     }

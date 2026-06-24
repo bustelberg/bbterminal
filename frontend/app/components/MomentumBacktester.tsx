@@ -69,6 +69,7 @@ export default function MomentumBacktester() {
     signalDefs,
     weights, setWeights,
     categories,
+    activeCategories,
     categoryWeights, setCategoryWeights,
     startDate, setStartDate,
     endDate, setEndDate,
@@ -536,12 +537,12 @@ export default function MomentumBacktester() {
                 min_price_score=off) — comma-separate two or more values
                 to sweep across them. */}
 
-            {selectionMode === 'momentum' && (
+            {(selectionMode === 'momentum' || selectionMode === 'momentum_extra') && (
               <SignalWeightSliders
                 signalDefs={signalDefs}
                 weights={weights}
                 setWeights={setWeights}
-                categories={categories}
+                categories={activeCategories}
                 categoryWeights={categoryWeights}
                 setCategoryWeights={setCategoryWeights}
               />

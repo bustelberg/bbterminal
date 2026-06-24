@@ -2894,6 +2894,11 @@ export interface paths {
         /**
          * Get Momentum Signals
          * @description Available signal definitions + the category buckets used by scoring.
+         *
+         *     `signals`/`categories` are the classic Momentum pillars (price+volume).
+         *     `extra_signals`/`extra_categories` add the trend-quality pillar that the
+         *     MomentumExtra strategy activates — the frontend shows those only when the
+         *     MomentumExtra strategy is selected.
          */
         get: operations["get_momentum_signals_api_momentum_signals_get"];
         put?: never;
@@ -3840,7 +3845,7 @@ export interface components {
              * @default momentum
              * @enum {string}
              */
-            selection_mode?: "momentum" | "random" | "all" | "sector_etf";
+            selection_mode?: "momentum" | "momentum_extra" | "random" | "all" | "sector_etf";
             /** Signal Weights */
             signal_weights?: {
                 [key: string]: number;

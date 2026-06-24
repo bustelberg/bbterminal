@@ -129,19 +129,26 @@ type UniverseStaleness = {
  * Run-now button, and detail. */
 export default function SmartPipelineActivity() {
   // Poll fast (3s) only while a run is in flight so progress updates live;
-  // back off to 15s when idle.
+  // back off to 30s when idle. Idle is the common case (nobody's running
+  // anything), and these light status endpoints barely change then -- a slower
+  // idle cadence cuts continuous Supabase load with no real UX cost (a scheduled
+  // run is still detected within ~30s, after which polling jumps to 3s).
   const [active, setActive] = useState(true);
-  const interval = active ? 3000 : 15000;
+  const interval = active ? 3000 : 30000;
   const { data: upcoming, error: upErr } = usePollingFetch<ScheduleUpcoming>(`${API_URL}/api/schedule/upcoming`, interval);
   const { data: held, error: heldErr } = usePollingFetch<HeldCompaniesResponse>(`${API_URL}/api/scheduled-strategies/held-companies`, interval);
   const { data: strategies } = usePollingFetch<ScheduledStrategy[]>(`${API_URL}/api/scheduled-strategies`, interval);
   const { data: recentRuns } = usePollingFetch<IngestRun[]>(`${API_URL}/api/ingest/runs?limit=20`, interval);
   const { data: usage } = usePollingFetch<ApiUsage>(`${API_URL}/api/usage`, interval);
-  // Coverage drives the freshest/most-stale display. The underlying aggregation
-  // isn't cheap (+ is cached 1 min server-side), so poll it on a fixed slow
-  // cadence rather than the 3s active interval.
-  const { data: coverage } = usePollingFetch<PriceCoverage>(`${API_URL}/api/data/price-coverage`, 30000);
-  const { data: universeCoverage } = usePollingFetch<UniverseCoverage>(`${API_URL}/api/data/universe-coverage`, 30000);
+  // Coverage drives the freshest/most-stale display. Its aggregation is the
+  // HEAVY part of this page (RPC scans over metric_data dates + every frozen
+  // universe's membership), and it only changes when a price refresh runs. So
+  // poll it briskly only while a run is active; when idle, drop to every 5 min
+  // -- the coverage can't move without a run, so polling it 120x/hr idle is pure
+  // wasted Disk IO.
+  const coverageInterval = active ? 30000 : 300000;
+  const { data: coverage } = usePollingFetch<PriceCoverage>(`${API_URL}/api/data/price-coverage`, coverageInterval);
+  const { data: universeCoverage } = usePollingFetch<UniverseCoverage>(`${API_URL}/api/data/universe-coverage`, coverageInterval);
   const loadError = upErr ?? heldErr;
   const nowMs = useNow(15000);
 

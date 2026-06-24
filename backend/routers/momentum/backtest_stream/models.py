@@ -88,7 +88,7 @@ class BacktestRequest(BaseModel):
     # value never silently routes through a default branch downstream
     # (e.g. an unknown `mode` quietly behaving like "backtest"). New
     # variants need to be added here AND wherever the value is consumed.
-    selection_mode: Literal["momentum", "random", "all", "sector_etf"] = "momentum"
+    selection_mode: Literal["momentum", "momentum_extra", "random", "all", "sector_etf"] = "momentum"
     random_seed: int | None = None  # only used when selection_mode == "random"
     n_trials: int = 1  # >1 only valid with selection_mode=="random"; aggregates mean ± std
     # Required when selection_mode == "sector_etf": maps sector name → benchmark_id.

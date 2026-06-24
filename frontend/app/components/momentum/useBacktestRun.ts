@@ -28,7 +28,7 @@ export function useBacktestRun({
   eligibleVariants: VariantParams[];
 }) {
   const {
-    startDate, endDate, weights, categoryWeights, topSectors, topPerSector,
+    startDate, endDate, activeWeights, activeCategoryWeights, topSectors, topPerSector,
     maxCompanies, minPriceScore, selectionMode, randomSeed, nTrials,
     noCache, rebalanceWeekday,
   } = config;
@@ -47,8 +47,8 @@ export function useBacktestRun({
       {
         start_date: `${startDate}-01`,
         end_date: `${endDate}-01`,
-        signal_weights: weights,
-        category_weights: categoryWeights,
+        signal_weights: activeWeights,
+        category_weights: activeCategoryWeights,
         top_n_sectors: topSectors,
         top_n_per_sector: topPerSector,
         max_companies: maxCompanies,

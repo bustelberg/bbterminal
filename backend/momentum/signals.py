@@ -135,7 +135,7 @@ def _compute_volume_signals(vol_series: pd.Series) -> dict:
 
 
 def _compute_single_company_signals(series: pd.Series) -> dict:
-    """Compute all price signals for a single company's price series."""
+    """Compute all price + trend signals for a single company's price series."""
     if series.empty:
         return {}
 
@@ -154,13 +154,23 @@ def _compute_single_company_signals(series: pd.Series) -> dict:
         if past_12m_price != 0:
             mom_12_1 = round((float(series_skip_last.iloc[-1]) / past_12m_price - 1) * 100, 2)
 
-    return {
+    out: dict = {
         "mom_12_1": mom_12_1,
         "mom_6m": _mom_return(series, 6),
         "volatility_adjusted_return_6m": _volatility_adjusted_return(series, n_months=6, vol_lookback_days=126),
         "drawdown_from_recent_high_pct": _drawdown_from_recent_high_pct(series, lookback_days=252),
         "above_200ma": 1 if price_now > ma_200 else 0,
     }
+    # Trend-quality signals (group="trend"). Computed via the SAME rolling
+    # builder the vectorized panel uses, then read at the last bar — so the
+    # per-cutoff and panel paths are byte-identical (validated in test_signals).
+    trend = _trend_panel(series)
+    if not trend.empty:
+        last = trend.iloc[-1]
+        for k in _TREND_SIGNAL_COLUMNS:
+            v = last.get(k)
+            out[k] = float(v) if pd.notna(v) else None
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +188,21 @@ PRICE_SIGNAL_DEFS: list[dict] = [
     {"key": "vol_20d_vs_60d", "label": "Volume Surge", "description": "Ratio of 20-day average volume to 60-day average volume. Values above 1.0 indicate rising interest and conviction behind price moves. Confirms momentum rather than low-volume drift.", "default_weight": 1, "group": "volume"},
     {"key": "vol_trend_3m", "label": "Volume Trend 3M", "description": "Percentage change in average daily volume: current month vs 3 months ago. Positive = growing institutional attention. Stocks with rising volume alongside price momentum tend to sustain their trends.", "default_weight": 1, "group": "volume"},
 ]
+
+
+# Trend-quality pillar — price-derived "how the return was earned" signals.
+# NOT part of PRICE_SIGNAL_DEFS, so scoring only sees the "trend" category when
+# a caller explicitly passes EXTRA_SIGNAL_DEFS (the MomentumExtra strategy).
+# That keeps the classic Momentum strategy mathematically untouched.
+TREND_SIGNAL_DEFS: list[dict] = [
+    {"key": "trend_continuity", "label": "Trend Continuity", "description": "'Frog-in-the-pan' information discreteness: sign(6M return) × (% up-days − % down-days) over the last ~6 months. Higher = a winner grinding higher on many small up-days (continuous information → momentum tends to persist) rather than a few big jumps.", "default_weight": 2, "group": "trend"},
+    {"key": "pct_up_days_6m", "label": "Up-Day Consistency", "description": "Fraction of up-days over the last ~6 months (×100). A smooth, steady climb scores higher than a jumpy one — a magnitude-agnostic measure of trend quality that complements raw return.", "default_weight": 2, "group": "trend"},
+    {"key": "rsi_headroom", "label": "RSI Headroom", "description": "Overbought guard: −max(0, RSI(14) − 50). Names with RSI above 50 are penalized (more so the more extended); RSI ≤ 50 is neutral. Keeps the strategy from chasing the most-stretched names near a blow-off top.", "default_weight": 1, "group": "trend"},
+]
+
+# Price + volume + trend — passed to the scoring engine for the MomentumExtra
+# strategy so its `_get_category_keys` discovers the third "trend" pillar.
+EXTRA_SIGNAL_DEFS: list[dict] = PRICE_SIGNAL_DEFS + TREND_SIGNAL_DEFS
 
 
 # ---------------------------------------------------------------------------
@@ -298,15 +323,82 @@ def _asof_values(series: pd.Series, targets: pd.DatetimeIndex) -> np.ndarray:
     return out
 
 
+_TREND_SIGNAL_COLUMNS = ("trend_continuity", "pct_up_days_6m", "rsi_headroom")
+
+
+def _trend_panel(series: pd.Series) -> pd.DataFrame:
+    """Trend-quality signals as rolling time series — the shared source of
+    truth for both the per-cutoff (`_compute_single_company_signals`) and the
+    vectorized-panel (`_build_price_signal_panel`) paths, so they stay
+    byte-identical (validated in test_signals.py). All windows are trailing
+    and the 6M anchor is an as-of lookback, so the value at bar `t` depends only
+    on data up to and including `t` — computing on the full series vs. on
+    `series[:t]` yields the same row.
+
+      - trend_continuity: sign(6M return) × (%up − %down) over 126 trading days.
+      - pct_up_days_6m:    %up-days over 126 trading days × 100.
+      - rsi_headroom:      −max(0, RSI(14) − 50)  (overbought guard).
+    """
+    idx = series.index
+    if len(series) < 20:
+        return pd.DataFrame(index=idx, columns=list(_TREND_SIGNAL_COLUMNS), dtype="float64")
+
+    rets = series.pct_change()
+    pos_frac = (rets > 0).astype(float).rolling(126, min_periods=20).mean()
+    neg_frac = (rets < 0).astype(float).rolling(126, min_periods=20).mean()
+    pct_up = np.round(pos_frac.values * 100.0, 2)
+
+    # 6-month cumulative-return sign via asof(t-6m) — matches mom_6m's anchor.
+    targets_6m = idx - pd.DateOffset(months=6)
+    num_6m = _asof_values(series, targets_6m)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        cum6 = np.where((num_6m > 0) & ~np.isnan(num_6m), series.values / num_6m - 1.0, np.nan)
+    sign6 = np.sign(cum6)
+    pf, nf = pos_frac.values, neg_frac.values
+    continuity = np.where(
+        (~np.isnan(sign6)) & (sign6 != 0) & ~np.isnan(pf) & ~np.isnan(nf),
+        sign6 * (pf - nf),
+        np.nan,
+    )
+    continuity = np.round(continuity, 4)
+
+    # RSI(14), simple-average gains/losses. min_periods=14 → NaN until a full
+    # 14-bar window clear of the leading pct_change NaN (the per-cutoff guard
+    # mirrors this), so the two paths agree.
+    up = rets.clip(lower=0)
+    down = (-rets).clip(lower=0)
+    avg_up = up.rolling(14, min_periods=14).mean().values
+    avg_down = down.rolling(14, min_periods=14).mean().values
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rs = np.where(avg_down > 0, avg_up / avg_down, np.nan)
+        rsi = np.where(avg_down == 0, 100.0, 100.0 - 100.0 / (1.0 + rs))
+    rsi = np.where(np.isnan(avg_up) | np.isnan(avg_down), np.nan, rsi)
+    rsi_headroom = np.where(np.isnan(rsi), np.nan, -np.maximum(0.0, rsi - 50.0))
+    rsi_headroom = np.round(rsi_headroom, 2)
+
+    return pd.DataFrame(
+        {
+            "trend_continuity": continuity,
+            "pct_up_days_6m": pct_up,
+            "rsi_headroom": rsi_headroom,
+        },
+        index=idx,
+    )
+
+
 def _build_price_signal_panel(series: pd.Series) -> pd.DataFrame:
-    """Compute all price signals as time series.
+    """Compute all price + trend signals as time series.
 
     Returned DataFrame has the same index as `series` and one column per
     signal. Each row [d] holds the signal values that `_compute_single_company_signals`
     would return if called on `series[series.index <= d]`.
     """
     if len(series) < 20:
-        return pd.DataFrame(index=series.index, columns=list(_PRICE_SIGNAL_COLUMNS), dtype="float64")
+        return pd.DataFrame(
+            index=series.index,
+            columns=list(_PRICE_SIGNAL_COLUMNS) + list(_TREND_SIGNAL_COLUMNS),
+            dtype="float64",
+        )
 
     idx = series.index
 
@@ -372,7 +464,7 @@ def _build_price_signal_panel(series: pd.Series) -> pd.DataFrame:
         (series_vals > ma_200).astype(float),
     )
 
-    return pd.DataFrame(
+    price_panel = pd.DataFrame(
         {
             "mom_12_1": mom_12_1,
             "mom_6m": mom_6m,
@@ -382,6 +474,9 @@ def _build_price_signal_panel(series: pd.Series) -> pd.DataFrame:
         },
         index=idx,
     )
+    # Append the trend-quality columns so the panel row carries every signal
+    # (the scoring engine only activates them for the MomentumExtra strategy).
+    return pd.concat([price_panel, _trend_panel(series)], axis=1)
 
 
 def _build_volume_signal_panel(vol_series: pd.Series) -> pd.DataFrame:

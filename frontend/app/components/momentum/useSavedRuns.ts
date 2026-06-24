@@ -78,8 +78,12 @@ export function useSavedRuns({
       const cfg = data.config ?? {};
       if (cfg.start_date) setStartDate(cfg.start_date.slice(0, 7));
       if (cfg.end_date) setEndDate(cfg.end_date.slice(0, 7));
-      if (cfg.signal_weights) setWeights(cfg.signal_weights);
-      if (cfg.category_weights) setCategoryWeights(cfg.category_weights);
+      // Merge over the seeded defaults rather than replace, so loading a
+      // classic-Momentum run keeps the trend pillar's default weights intact —
+      // otherwise switching that loaded run to MomentumExtra would find the
+      // trend sliders empty.
+      if (cfg.signal_weights) setWeights((prev) => ({ ...prev, ...cfg.signal_weights }));
+      if (cfg.category_weights) setCategoryWeights((prev) => ({ ...prev, ...cfg.category_weights }));
       if (cfg.top_n_sectors) setTopSectors(cfg.top_n_sectors);
       if (cfg.top_n_per_sector) setTopPerSector(cfg.top_n_per_sector);
       // Saved runs from before the grouping feature have no `grouping`
@@ -95,6 +99,7 @@ export function useSavedRuns({
       if (
         cfg.selection_mode === 'random'
         || cfg.selection_mode === 'momentum'
+        || cfg.selection_mode === 'momentum_extra'
         || cfg.selection_mode === 'all'
         || cfg.selection_mode === 'sector_etf'
       ) setSelectionMode(cfg.selection_mode);

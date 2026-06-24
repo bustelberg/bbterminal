@@ -163,6 +163,7 @@
             "default": "momentum",
             "enum": [
               "momentum",
+              "momentum_extra",
               "random",
               "all",
               "sector_etf"
@@ -6505,7 +6506,7 @@
     },
     "/api/momentum/signals": {
       "get": {
-        "description": "Available signal definitions + the category buckets used by scoring.",
+        "description": "Available signal definitions + the category buckets used by scoring.\n\n`signals`/`categories` are the classic Momentum pillars (price+volume).\n`extra_signals`/`extra_categories` add the trend-quality pillar that the\nMomentumExtra strategy activates \u2014 the frontend shows those only when the\nMomentumExtra strategy is selected.",
         "operationId": "get_momentum_signals_api_momentum_signals_get",
         "responses": {
           "200": {

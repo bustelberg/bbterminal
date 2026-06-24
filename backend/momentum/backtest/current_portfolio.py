@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 import pandas as pd
 
-from ..scoring import extract_category_scores, score_and_select
+from ..scoring import extract_category_scores, score_and_select, signal_defs_for_mode
 from ..signals import compute_signals_panel
 from .dates import _first_weekday_on_or_after
 from .indices import (
@@ -256,6 +256,7 @@ def run_current_portfolio(
         top_n_per_sector=config.top_n_per_sector,
         category_weights=config.category_weights,
         min_price_score=config.min_price_score,
+        signal_defs=signal_defs_for_mode(config.selection_mode),
     )
     t_month_start_select_elapsed = time.perf_counter() - t_month_start_select
 
@@ -363,6 +364,7 @@ def run_current_portfolio(
             top_n_per_sector=config.top_n_per_sector,
             category_weights=config.category_weights,
             min_price_score=config.min_price_score,
+            signal_defs=signal_defs_for_mode(config.selection_mode),
         )
         t_daily_select_total += time.perf_counter() - t_select
         if daily_selected.empty:
