@@ -82,7 +82,13 @@ if ($ProdDbUrl -notmatch '^(?<prefix>postgres(?:ql)?://[^:@/]+):(?<pw>[^@]+)@(?<
 }
 $prodPassword = $Matches.pw
 $prodUrlNoPw  = "$($Matches.prefix)@$($Matches.rest)"
-$prodEnv      = @('-e', "PGPASSWORD=$prodPassword")
+# PGOPTIONS statement_timeout=0: the metric_data re-copy (+ delete-missing) move
+# millions of rows per batch. Prod's default per-statement timeout cancels a big
+# COPY mid-stream (rolls back, so it's safe -- but the clone never finishes). A
+# clone is a deliberate bulk maintenance op, so disable the timeout for its
+# sessions. (Session pooler forwards startup options; if a managed setup strips
+# them, the explicit `SET statement_timeout = 0;` in the step-6 script still wins.)
+$prodEnv      = @('-e', "PGPASSWORD=$prodPassword", '-e', 'PGOPTIONS=-c statement_timeout=0')
 $migDir       = Join-Path (Split-Path $PSScriptRoot -Parent) 'supabase/migrations'
 
 # ---- psql helpers -----------------------------------------------------------
@@ -367,7 +373,7 @@ for ($i = 0; $i -lt $resync.Count; $i += $CompanyChunk) {
     $arr = $chunk -join ','
     docker exec $Container psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "\copy (SELECT $mdCols FROM metric_data WHERE company_id = ANY('{$arr}'::int[])) TO '/tmp/clone_md.dat'"
     if ($LASTEXITCODE -ne 0) { throw "local metric_data dump failed." }
-    $sql = "BEGIN;`nDELETE FROM public.metric_data WHERE company_id = ANY('{$arr}'::int[]);`n\copy public.metric_data ($mdCols) FROM '/tmp/clone_md.dat'`nCOMMIT;`n"
+    $sql = "SET statement_timeout = 0;`nBEGIN;`nDELETE FROM public.metric_data WHERE company_id = ANY('{$arr}'::int[]);`n\copy public.metric_data ($mdCols) FROM '/tmp/clone_md.dat'`nCOMMIT;`n"
     Invoke-ProdScript $sql
     $done += $chunk.Count
     Write-Host "    metric_data: re-copied $done/$($resync.Count) companies..."
