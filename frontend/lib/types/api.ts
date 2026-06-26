@@ -37,6 +37,18 @@ export type BuildUniverseRequest = components['schemas']['BuildUniverseRequest']
 export type DeriveUniverseRequest = components['schemas']['DeriveUniverseRequest'];
 export type CreateBenchmarkRequest = components['schemas']['CreateBenchmarkRequest'];
 export type UpdateBenchmarkSectorRequest = components['schemas']['UpdateBenchmarkSectorRequest'];
+
+// ── Diversifier (correlation + blend analysis) ───────────────────────
+export type CorrelationRequest = components['schemas']['CorrelationRequest'];
+export type CorrelationResponse = components['schemas']['CorrelationResponse'];
+export type DiversifierResult = components['schemas']['DiversifierResult'];
+export type DiversifierStrategyStats = components['schemas']['StrategyStats'];
+export type ResolveNameResponse = components['schemas']['ResolveNameResponse'];
+export type BacktestStats = components['schemas']['BacktestStats'];
+export type OptimizeResponse = components['schemas']['OptimizeResponse'];
+export type AssetWeight = components['schemas']['AssetWeight'];
+export type DrawdownInfo = components['schemas']['DrawdownInfo'];
+export type YearStat = components['schemas']['YearStat'];
 export type ExchangeFeeIn = components['schemas']['ExchangeFeeIn'];
 export type LongEquitySaveUniverseRequest = components['schemas']['LongEquitySaveUniverseRequest'];
 export type RecomputeRequest = components['schemas']['RecomputeRequest'];

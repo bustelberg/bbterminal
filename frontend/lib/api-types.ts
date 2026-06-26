@@ -2879,6 +2879,97 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/momentum/diversifier/correlation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Correlation
+         * @description Correlate a saved backtest's monthly returns against each selected
+         *     ETF and return the Sharpe-optimal blend per ETF, sorted by correlation
+         *     ascending (lowest = best diversifier first).
+         */
+        post: operations["correlation_api_momentum_diversifier_correlation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/momentum/diversifier/optimize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Optimize
+         * @description Find the long-only weights across the strategy + the selected ETFs that
+         *     maximize the chosen objective (Sharpe/Sortino), and report the before vs
+         *     after stats plus the full weight breakdown. Runs over the common window
+         *     where every selected ETF has data.
+         */
+        post: operations["optimize_api_momentum_diversifier_optimize_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/momentum/diversifier/resolve-name": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve Name
+         * @description Best-effort display name + currency for an ETF ticker, read from
+         *     GuruFocus's stock summary (ETFs resolve on the `/stock/{ticker}` path —
+         *     there is no separate `/etf` API endpoint). Falls back to the ticker
+         *     itself so the caller always gets a usable name.
+         */
+        get: operations["resolve_name_api_momentum_diversifier_resolve_name_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/momentum/diversifier/strategy-stats/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Strategy Stats
+         * @description The selected backtest's saved headline stats (Sharpe/Sortino/annualized
+         *     return/max drawdown), so the page can show the baseline as soon as a run
+         *     is picked. For a variant bundle without a chosen variant, returns the
+         *     available variant keys instead so the UI can prompt up front.
+         */
+        get: operations["strategy_stats_api_momentum_diversifier_strategy_stats__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/momentum/prices-at": {
         parameters: {
             query?: never;
@@ -3804,6 +3895,15 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AssetWeight */
+        AssetWeight: {
+            /** Label */
+            label: string;
+            /** Name */
+            name?: string | null;
+            /** Weight */
+            weight: number;
+        };
         /** BacktestRequest */
         BacktestRequest: {
             /** Category Weights */
@@ -3923,6 +4023,38 @@ export interface components {
             /** Vol Target */
             vol_target?: number | null;
         };
+        /**
+         * BacktestStats
+         * @description The selected backtest's headline figures, read from its SAVED summary
+         *     (the same numbers shown on /backtest) — so the page can display the
+         *     baseline you're trying to beat the moment a run is picked.
+         */
+        BacktestStats: {
+            /** Annualized Return Pct */
+            annualized_return_pct?: number | null;
+            /** Available Variant Keys */
+            available_variant_keys?: string[] | null;
+            /** Max Drawdown Pct */
+            max_drawdown_pct?: number | null;
+            /** Months */
+            months?: number | null;
+            /** Name */
+            name: string;
+            /** Period From */
+            period_from?: string | null;
+            /** Period To */
+            period_to?: string | null;
+            /** Run Id */
+            run_id: number;
+            /** Sharpe Ratio */
+            sharpe_ratio?: number | null;
+            /** Sortino Ratio */
+            sortino_ratio?: number | null;
+            /** Total Return Pct */
+            total_return_pct?: number | null;
+            /** Variant Key */
+            variant_key?: string | null;
+        };
         /** Body_parse_portfolio_api_portfolios_parse_post */
         Body_parse_portfolio_api_portfolios_parse_post: {
             /** File */
@@ -3949,6 +4081,36 @@ export interface components {
             max_companies?: number;
             /** Start Month */
             start_month: string;
+        };
+        /** CorrelationRequest */
+        CorrelationRequest: {
+            /** Backtest Run Id */
+            backtest_run_id: number;
+            /** Benchmark Ids */
+            benchmark_ids: number[];
+            /**
+             * Max Etf Weight Pct
+             * @default 50
+             */
+            max_etf_weight_pct?: number;
+            /**
+             * Objective
+             * @default sharpe
+             */
+            objective?: string;
+            /**
+             * Risk Free Rate Pct
+             * @default 0
+             */
+            risk_free_rate_pct?: number;
+            /** Variant Key */
+            variant_key?: string | null;
+        };
+        /** CorrelationResponse */
+        CorrelationResponse: {
+            /** Results */
+            results: components["schemas"]["DiversifierResult"][];
+            strategy: components["schemas"]["StrategyStats"];
         };
         /** CreateBenchmarkRequest */
         CreateBenchmarkRequest: {
@@ -3985,6 +4147,15 @@ export interface components {
              */
             role?: string;
         };
+        /** CurvePoint */
+        CurvePoint: {
+            /** After */
+            after: number;
+            /** Before */
+            before: number;
+            /** Date */
+            date: string;
+        };
         /** DeriveUniverseRequest */
         DeriveUniverseRequest: {
             /** Base Universe Id */
@@ -3997,6 +4168,69 @@ export interface components {
             };
             /** Label */
             label?: string | null;
+        };
+        /** DiversifierResult */
+        DiversifierResult: {
+            /** Benchmark Id */
+            benchmark_id: number;
+            /** Blend Ann Return */
+            blend_ann_return?: number | null;
+            /** Blend Ann Vol */
+            blend_ann_vol?: number | null;
+            /** Blend Sharpe */
+            blend_sharpe?: number | null;
+            /** Blend Sortino */
+            blend_sortino?: number | null;
+            /**
+             * Blend Weight
+             * @default 0
+             */
+            blend_weight?: number;
+            /** Correlation */
+            correlation?: number | null;
+            /** Etf Ann Return */
+            etf_ann_return?: number | null;
+            /** Etf Ann Vol */
+            etf_ann_vol?: number | null;
+            /** Etf Sharpe */
+            etf_sharpe?: number | null;
+            /** Etf Sortino */
+            etf_sortino?: number | null;
+            /** Name */
+            name: string;
+            /** Overlap From */
+            overlap_from?: string | null;
+            /** Overlap Months */
+            overlap_months: number;
+            /** Overlap To */
+            overlap_to?: string | null;
+            /** Sharpe Lift */
+            sharpe_lift?: number | null;
+            /** Sortino Lift */
+            sortino_lift?: number | null;
+            /** Strategy Ann Return */
+            strategy_ann_return?: number | null;
+            /** Strategy Ann Vol */
+            strategy_ann_vol?: number | null;
+            /** Strategy Sharpe */
+            strategy_sharpe?: number | null;
+            /** Strategy Sortino */
+            strategy_sortino?: number | null;
+            /** Ticker */
+            ticker: string;
+        };
+        /** DrawdownInfo */
+        DrawdownInfo: {
+            /** Depth Pct */
+            depth_pct: number;
+            /** Length Months */
+            length_months: number;
+            /** Peak Date */
+            peak_date: string;
+            /** Recovery Date */
+            recovery_date?: string | null;
+            /** Trough Date */
+            trough_date: string;
         };
         /** ExchangeFeeIn */
         ExchangeFeeIn: {
@@ -4061,6 +4295,68 @@ export interface components {
             /** Start Date */
             start_date?: string | null;
         };
+        /** MonthStatInfo */
+        MonthStatInfo: {
+            /** Month */
+            month: string;
+            /** Return After */
+            return_after: number;
+            /** Return Before */
+            return_before: number;
+        };
+        /** OptimizeRequest */
+        OptimizeRequest: {
+            /** Backtest Run Id */
+            backtest_run_id: number;
+            /** Benchmark Ids */
+            benchmark_ids: number[];
+            /**
+             * Max Total Etf Weight Pct
+             * @default 50
+             */
+            max_total_etf_weight_pct?: number;
+            /**
+             * Objective
+             * @default sharpe
+             */
+            objective?: string;
+            /**
+             * Risk Free Rate Pct
+             * @default 0
+             */
+            risk_free_rate_pct?: number;
+            /** Variant Key */
+            variant_key?: string | null;
+        };
+        /** OptimizeResponse */
+        OptimizeResponse: {
+            after: components["schemas"]["PortfolioStats"];
+            /** Annual */
+            annual: components["schemas"]["YearStat"][];
+            before: components["schemas"]["PortfolioStats"];
+            /** Curve */
+            curve: components["schemas"]["CurvePoint"][];
+            /** Drawdowns After */
+            drawdowns_after: components["schemas"]["DrawdownInfo"][];
+            /** Drawdowns Before */
+            drawdowns_before: components["schemas"]["DrawdownInfo"][];
+            /** Limited By */
+            limited_by?: string | null;
+            /** Months */
+            months: number;
+            /** Objective */
+            objective: string;
+            /** Period From */
+            period_from?: string | null;
+            /** Period To */
+            period_to?: string | null;
+            /** Weights */
+            weights: components["schemas"]["AssetWeight"][];
+            /** Ytd After */
+            ytd_after?: number | null;
+            /** Ytd Before */
+            ytd_before?: number | null;
+        };
         /** PortfolioCreate */
         PortfolioCreate: {
             /**
@@ -4077,6 +4373,21 @@ export interface components {
             company_id: number;
             /** Weight */
             weight?: number | null;
+        };
+        /** PortfolioStats */
+        PortfolioStats: {
+            /** Ann Return */
+            ann_return?: number | null;
+            /** Ann Vol */
+            ann_vol?: number | null;
+            /** Median Month */
+            median_month?: number | null;
+            /** Sharpe */
+            sharpe?: number | null;
+            /** Sortino */
+            sortino?: number | null;
+            /** Win Rate */
+            win_rate?: number | null;
         };
         /** PortfolioUpdate */
         PortfolioUpdate: {
@@ -4099,6 +4410,15 @@ export interface components {
         RenameCurrentPicksRequest: {
             /** Name */
             name?: string | null;
+        };
+        /** ResolveNameResponse */
+        ResolveNameResponse: {
+            /** Currency */
+            currency?: string | null;
+            /** Name */
+            name: string;
+            /** Ticker */
+            ticker: string;
         };
         /** SaveBacktestRequest */
         SaveBacktestRequest: {
@@ -4194,6 +4514,29 @@ export interface components {
             /** Universe Label */
             universe_label?: string | null;
         };
+        /** StrategyStats */
+        StrategyStats: {
+            /** Ann Return */
+            ann_return?: number | null;
+            /** Ann Vol */
+            ann_vol?: number | null;
+            /** Months */
+            months: number;
+            /** Name */
+            name: string;
+            /** Period From */
+            period_from?: string | null;
+            /** Period To */
+            period_to?: string | null;
+            /** Run Id */
+            run_id: number;
+            /** Sharpe */
+            sharpe?: number | null;
+            /** Sortino */
+            sortino?: number | null;
+            /** Variant Key */
+            variant_key?: string | null;
+        };
         /** UniverseRenameRequest */
         UniverseRenameRequest: {
             /** New Label */
@@ -4258,6 +4601,24 @@ export interface components {
             universe_label?: string | null;
             /** Vol Target */
             vol_target?: number | null;
+        };
+        /** YearStat */
+        YearStat: {
+            /**
+             * Months
+             * @default []
+             */
+            months?: components["schemas"]["MonthStatInfo"][];
+            /** Return After */
+            return_after?: number | null;
+            /** Return Before */
+            return_before?: number | null;
+            /** Vol After */
+            vol_after?: number | null;
+            /** Vol Before */
+            vol_before?: number | null;
+            /** Year */
+            year: number;
         };
         /** _GfCompanyNameBody */
         _GfCompanyNameBody: {
@@ -7995,6 +8356,136 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    correlation_api_momentum_diversifier_correlation_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CorrelationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CorrelationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    optimize_api_momentum_diversifier_optimize_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OptimizeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OptimizeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_name_api_momentum_diversifier_resolve_name_get: {
+        parameters: {
+            query: {
+                ticker: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolveNameResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    strategy_stats_api_momentum_diversifier_strategy_stats__run_id__get: {
+        parameters: {
+            query?: {
+                variant_key?: string | null;
+            };
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestStats"];
                 };
             };
             /** @description Validation Error */

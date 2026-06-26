@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
   Make prod's 'public' schema an EXACT clone of local, transferring only what
-  differs (fast differential sync). Non-destructive to auth/storage/keys.
+  differs (fast differential sync). Non-destructive to auth/keys; also mirrors
+  the backtest-results Storage bucket.
 
 .DESCRIPTION
   Unlike copy-local-to-prod.ps1 (which DROPs prod's public schema and restores
@@ -21,6 +22,20 @@
        (prod fetches the same prices independently with different timestamps;
        including it would force a full re-copy every run).
     5. Verifies row counts + the metric_data signature afterwards.
+
+  Storage: the `backtest-results` bucket is mirrored too (objects missing on
+  prod are uploaded, prod-only objects deleted) so each `backtest_run` row's
+  `result_path` blob travels with it -- otherwise a freshly-cloned row 404s on
+  read (`GET /api/momentum/backtests/{id}` then degrades to result=null). Needs
+  a prod service key + storage URL (see below); if either is absent the storage
+  step warns and skips while the DB clone still completes. auth.users / API keys
+  are still untouched.
+
+  Storage creds: local read from backend/.env.local (SUPABASE_URL +
+  SUPABASE_SERVICE_KEY). Prod from $env:PROD_SERVICE_KEY and (optional)
+  $env:PROD_SUPABASE_URL -- the latter auto-derives to https://<ref>.supabase.co
+  from PROD_DB_URL's `postgres.<ref>` user. Put PROD_SERVICE_KEY in
+  scripts/.env.local alongside PROD_DB_URL.
 
   End result: prod public schema + data is an exact clone of local (modulo the
   recorded_at audit timestamp on metric_data rows whose price data already
@@ -89,7 +104,39 @@ $prodUrlNoPw  = "$($Matches.prefix)@$($Matches.rest)"
 # sessions. (Session pooler forwards startup options; if a managed setup strips
 # them, the explicit `SET statement_timeout = 0;` in the step-6 script still wins.)
 $prodEnv      = @('-e', "PGPASSWORD=$prodPassword", '-e', 'PGOPTIONS=-c statement_timeout=0')
-$migDir       = Join-Path (Split-Path $PSScriptRoot -Parent) 'supabase/migrations'
+$repoRoot     = Split-Path $PSScriptRoot -Parent
+$migDir       = Join-Path $repoRoot 'supabase/migrations'
+
+# ---- storage sync creds (backtest-results bucket) ---------------------------
+# The DB clone copies `backtest_run` rows (incl. their `result_path`) but NOT
+# the Storage objects those paths reference -- so a freshly-cloned prod has rows
+# whose blob 404s. Step [7c] mirrors the bucket over the Storage REST API; it
+# needs a Storage endpoint + service key on each side. The DB clone still runs
+# if these are absent (the storage step warns + skips).
+# TLS 1.2 for the https prod Storage calls (PS 5.1 defaults can negotiate down).
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
+function Read-EnvFile([string]$path) {
+    $h = @{}
+    if (Test-Path $path) {
+        Get-Content $path | ForEach-Object {
+            if ($_ -match '^\s*#' -or $_ -match '^\s*$') { return }
+            if ($_ -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*$') {
+                $h[$Matches[1]] = $Matches[2] -replace '^"(.*)"$','$1' -replace "^'(.*)'$",'$1'
+            }
+        }
+    }
+    return $h
+}
+$backendEnv      = Read-EnvFile (Join-Path $repoRoot 'backend/.env.local')
+$LocalStorageUrl = if ($env:LOCAL_SUPABASE_URL) { $env:LOCAL_SUPABASE_URL } elseif ($backendEnv['SUPABASE_URL']) { $backendEnv['SUPABASE_URL'] } else { 'http://127.0.0.1:54321' }
+$LocalServiceKey = if ($env:LOCAL_SERVICE_KEY) { $env:LOCAL_SERVICE_KEY } else { $backendEnv['SUPABASE_SERVICE_KEY'] }
+# Prod Storage endpoint: explicit override, else derive https://<ref>.supabase.co
+# from the pooler user `postgres.<ref>` in PROD_DB_URL.
+$prodRef         = if ($ProdDbUrl -match 'postgres(?:ql)?://postgres\.([a-z0-9]+):') { $Matches[1] } else { $null }
+$ProdStorageUrl  = if ($env:PROD_SUPABASE_URL) { $env:PROD_SUPABASE_URL.TrimEnd('/') } elseif ($prodRef) { "https://$prodRef.supabase.co" } else { $null }
+$ProdServiceKey  = $env:PROD_SERVICE_KEY
+$StorageBucket   = 'backtest-results'
+$StorageSyncEnabled = [bool]($LocalServiceKey -and $ProdServiceKey -and $ProdStorageUrl)
 
 # ---- psql helpers -----------------------------------------------------------
 # Each returns rows as string[]; fields are pipe-delimited (-F'|'), tuples-only
@@ -108,6 +155,80 @@ function Invoke-Prod([string]$sql) {
 function Invoke-ProdScript([string]$script) {
     $script | docker exec -i @prodEnv $Container psql $prodUrlNoPw -v ON_ERROR_STOP=1 -f -
     if ($LASTEXITCODE -ne 0) { throw "prod script failed (see output above)." }
+}
+
+# ---- storage helpers (backtest-results bucket) ------------------------------
+# Object names live in each side's `storage.objects` (queryable over psql); the
+# bytes live in the Storage backend (reachable only over the Storage REST API).
+# So we diff names via psql, then move bytes over HTTP. The blobs are gzipped
+# JSON; the backend reader is gzip-magic-based (not content-encoding-based), so
+# byte-fidelity through the proxy is all that matters -- we don't re-set the
+# content-encoding metadata on the prod copy.
+function Get-BucketObjectNames([scriptblock]$Query) {
+    return @(& $Query "SELECT name FROM storage.objects WHERE bucket_id='$StorageBucket' AND name IS NOT NULL")
+}
+function Invoke-StorageMirror([switch]$DryRunOnly) {
+    if (-not $StorageSyncEnabled) {
+        Write-Host "  SKIPPED: storage sync needs local + prod service keys and a prod storage URL." -ForegroundColor Yellow
+        Write-Host "  Set PROD_SERVICE_KEY (and PROD_SUPABASE_URL if not auto-derivable) in scripts/.env.local;" -ForegroundColor Yellow
+        Write-Host "  local creds come from backend/.env.local. backtest_run result blobs were NOT mirrored." -ForegroundColor Yellow
+        return
+    }
+    $local    = Get-BucketObjectNames ${function:Invoke-Local}
+    $prod     = Get-BucketObjectNames ${function:Invoke-Prod}
+    $prodSet  = @{}; foreach ($n in $prod)  { $prodSet[$n]  = $true }
+    $localSet = @{}; foreach ($n in $local) { $localSet[$n] = $true }
+    $toUpload = @($local | Where-Object { -not $prodSet.ContainsKey($_) })
+    $toDelete = @($prod  | Where-Object { -not $localSet.ContainsKey($_) })
+    Write-Host ("  bucket '$StorageBucket': {0} local, {1} prod -> {2} to upload, {3} prod-only to delete." -f $local.Count, $prod.Count, $toUpload.Count, $toDelete.Count) -ForegroundColor Cyan
+    if ($DryRunOnly) { return }
+    if ($toUpload.Count -eq 0 -and $toDelete.Count -eq 0) { Write-Host "  storage already in sync." -ForegroundColor Green; return }
+
+    # The Supabase API gateway (Kong) authenticates on the `apikey` header; the
+    # underlying Storage service reads `Authorization`. BOTH are required -- with
+    # only Authorization, Kong routes the call as anon and a private bucket reads
+    # back as "Bucket not found".
+    $localHdr = @{ Authorization = "Bearer $LocalServiceKey"; apikey = $LocalServiceKey }
+    $prodHdr  = @{ Authorization = "Bearer $ProdServiceKey";  apikey = $ProdServiceKey }
+
+    # Ensure the prod bucket exists (private), idempotent (400/409 = exists).
+    try {
+        Invoke-WebRequest -Method Post -Uri "$ProdStorageUrl/storage/v1/bucket" `
+            -Headers ($prodHdr + @{ 'Content-Type' = 'application/json' }) `
+            -Body (ConvertTo-Json @{ id = $StorageBucket; name = $StorageBucket; public = $false }) `
+            -UseBasicParsing -ErrorAction Stop | Out-Null
+        Write-Host "  created prod bucket '$StorageBucket'." -ForegroundColor Green
+    } catch { }
+
+    $tmp = Join-Path $env:TEMP 'clone_storage_obj.bin'
+    $up = 0
+    foreach ($name in $toUpload) {
+        $encName = [Uri]::EscapeDataString($name)
+        Invoke-WebRequest -Method Get -Uri "$LocalStorageUrl/storage/v1/object/$StorageBucket/$encName" `
+            -Headers $localHdr -OutFile $tmp -UseBasicParsing -ErrorAction Stop
+        Invoke-WebRequest -Method Post -Uri "$ProdStorageUrl/storage/v1/object/$StorageBucket/$encName" `
+            -Headers ($prodHdr + @{ 'x-upsert' = 'true'; 'Content-Type' = 'application/json' }) `
+            -InFile $tmp -UseBasicParsing -ErrorAction Stop | Out-Null
+        $up++
+        if ($up % 25 -eq 0) { Write-Host "    uploaded $up/$($toUpload.Count)..." }
+    }
+    if (Test-Path $tmp) { Remove-Item $tmp -Force }
+    if ($toUpload.Count -gt 0) { Write-Host "  uploaded $up object(s) to prod." -ForegroundColor Green }
+
+    if ($toDelete.Count -gt 0) {
+        # Bulk delete: DELETE /storage/v1/object/{bucket} with {prefixes:[...]}.
+        # Build the JSON array by hand so a single name still serializes as [..].
+        $prefixesJson = ($toDelete | ForEach-Object { '"' + ($_ -replace '\\','\\' -replace '"','\"') + '"' }) -join ','
+        $body = "{`"prefixes`":[$prefixesJson]}"
+        try {
+            Invoke-WebRequest -Method Delete -Uri "$ProdStorageUrl/storage/v1/object/$StorageBucket" `
+                -Headers ($prodHdr + @{ 'Content-Type' = 'application/json' }) `
+                -Body $body -UseBasicParsing -ErrorAction Stop | Out-Null
+            Write-Host "  deleted $($toDelete.Count) prod-only object(s)." -ForegroundColor Green
+        } catch {
+            Write-Host "  WARNING: prod-only object delete failed (orphans remain): $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
 }
 
 # ---- preflight --------------------------------------------------------------
@@ -272,6 +393,8 @@ if ($DryRun) {
         $est = [int](Invoke-Local ("SELECT count(*) FROM metric_data WHERE company_id = ANY('{{{0}}}'::int[])" -f ($resync -join ',')))
         Write-Host "  ~ $est metric_data rows would transfer." -ForegroundColor Cyan
     }
+    Write-Host "  storage (backtest-results bucket):"
+    Invoke-StorageMirror -DryRunOnly
     Write-Host "DRY RUN complete in $([math]::Round($swAll.Elapsed.TotalSeconds,1))s. No changes made." -ForegroundColor Green
     exit 0
 }
@@ -283,7 +406,8 @@ if (-not $Force) {
     Write-Host "  - apply any missing migrations + align the tracker"
     Write-Host "  - upsert + delete-missing on $($stagedTables.Count) tables"
     Write-Host "  - differentially re-copy only changed-company metric_data rows"
-    Write-Host "  (auth.users / storage / API keys are NOT touched)"
+    Write-Host "  - mirror the backtest-results Storage bucket$(if (-not $StorageSyncEnabled) { ' (SKIPPED -- no prod service key)' })"
+    Write-Host "  (auth.users / API keys are NOT touched)"
     Write-Host ""
     if ((Read-Host "Type 'YES' to proceed") -ne 'YES') { Write-Host "Aborted." -ForegroundColor Yellow; exit 0 }
 }
@@ -434,6 +558,12 @@ foreach ($s in $seqResets) {
     Invoke-Prod "SELECT setval('$seq', GREATEST(COALESCE((SELECT MAX($col) FROM public.$tbl),0),1));" | Out-Null
 }
 Write-Host "  done." -ForegroundColor Green
+
+# ---- [7c] mirror the backtest-results Storage bucket ------------------------
+# Upload local blobs missing on prod + delete prod-only blobs, so each cloned
+# `backtest_run.result_path` resolves (no out-of-band 404 on read).
+Write-Host "[7c] Mirroring '$StorageBucket' Storage bucket..."
+Invoke-StorageMirror
 
 # ---- [8] verify -------------------------------------------------------------
 Write-Host "[8] Verifying..."

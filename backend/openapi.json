@@ -1,6 +1,35 @@
 {
   "components": {
     "schemas": {
+      "AssetWeight": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "weight": {
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "label",
+          "weight"
+        ],
+        "title": "AssetWeight",
+        "type": "object"
+      },
       "BacktestRequest": {
         "properties": {
           "category_weights": {
@@ -249,6 +278,138 @@
         "title": "BacktestRequest",
         "type": "object"
       },
+      "BacktestStats": {
+        "description": "The selected backtest's headline figures, read from its SAVED summary\n(the same numbers shown on /backtest) \u2014 so the page can display the\nbaseline you're trying to beat the moment a run is picked.",
+        "properties": {
+          "annualized_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annualized Return Pct"
+          },
+          "available_variant_keys": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available Variant Keys"
+          },
+          "max_drawdown_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Drawdown Pct"
+          },
+          "months": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Months"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "period_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period From"
+          },
+          "period_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period To"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "integer"
+          },
+          "sharpe_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe Ratio"
+          },
+          "sortino_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sortino Ratio"
+          },
+          "total_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Return Pct"
+          },
+          "variant_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant Key"
+          }
+        },
+        "required": [
+          "run_id",
+          "name"
+        ],
+        "title": "BacktestStats",
+        "type": "object"
+      },
       "Body_parse_portfolio_api_portfolios_parse_post": {
         "properties": {
           "file": {
@@ -309,6 +470,73 @@
           "end_month"
         ],
         "title": "BuildUniverseRequest",
+        "type": "object"
+      },
+      "CorrelationRequest": {
+        "properties": {
+          "backtest_run_id": {
+            "title": "Backtest Run Id",
+            "type": "integer"
+          },
+          "benchmark_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Benchmark Ids",
+            "type": "array"
+          },
+          "max_etf_weight_pct": {
+            "default": 50.0,
+            "title": "Max Etf Weight Pct",
+            "type": "number"
+          },
+          "objective": {
+            "default": "sharpe",
+            "title": "Objective",
+            "type": "string"
+          },
+          "risk_free_rate_pct": {
+            "default": 0.0,
+            "title": "Risk Free Rate Pct",
+            "type": "number"
+          },
+          "variant_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant Key"
+          }
+        },
+        "required": [
+          "backtest_run_id",
+          "benchmark_ids"
+        ],
+        "title": "CorrelationRequest",
+        "type": "object"
+      },
+      "CorrelationResponse": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/DiversifierResult"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "strategy": {
+            "$ref": "#/components/schemas/StrategyStats"
+          }
+        },
+        "required": [
+          "strategy",
+          "results"
+        ],
+        "title": "CorrelationResponse",
         "type": "object"
       },
       "CreateBenchmarkRequest": {
@@ -391,6 +619,29 @@
         "title": "CreateUserRequest",
         "type": "object"
       },
+      "CurvePoint": {
+        "properties": {
+          "after": {
+            "title": "After",
+            "type": "number"
+          },
+          "before": {
+            "title": "Before",
+            "type": "number"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "date",
+          "before",
+          "after"
+        ],
+        "title": "CurvePoint",
+        "type": "object"
+      },
       "DeriveUniverseRequest": {
         "properties": {
           "base_universe_id": {
@@ -430,6 +681,265 @@
           "filter_config"
         ],
         "title": "DeriveUniverseRequest",
+        "type": "object"
+      },
+      "DiversifierResult": {
+        "properties": {
+          "benchmark_id": {
+            "title": "Benchmark Id",
+            "type": "integer"
+          },
+          "blend_ann_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blend Ann Return"
+          },
+          "blend_ann_vol": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blend Ann Vol"
+          },
+          "blend_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blend Sharpe"
+          },
+          "blend_sortino": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blend Sortino"
+          },
+          "blend_weight": {
+            "default": 0.0,
+            "title": "Blend Weight",
+            "type": "number"
+          },
+          "correlation": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correlation"
+          },
+          "etf_ann_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etf Ann Return"
+          },
+          "etf_ann_vol": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etf Ann Vol"
+          },
+          "etf_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etf Sharpe"
+          },
+          "etf_sortino": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etf Sortino"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "overlap_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap From"
+          },
+          "overlap_months": {
+            "title": "Overlap Months",
+            "type": "integer"
+          },
+          "overlap_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap To"
+          },
+          "sharpe_lift": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe Lift"
+          },
+          "sortino_lift": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sortino Lift"
+          },
+          "strategy_ann_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Ann Return"
+          },
+          "strategy_ann_vol": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Ann Vol"
+          },
+          "strategy_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Sharpe"
+          },
+          "strategy_sortino": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Sortino"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          }
+        },
+        "required": [
+          "benchmark_id",
+          "ticker",
+          "name",
+          "overlap_months"
+        ],
+        "title": "DiversifierResult",
+        "type": "object"
+      },
+      "DrawdownInfo": {
+        "properties": {
+          "depth_pct": {
+            "title": "Depth Pct",
+            "type": "number"
+          },
+          "length_months": {
+            "title": "Length Months",
+            "type": "integer"
+          },
+          "peak_date": {
+            "title": "Peak Date",
+            "type": "string"
+          },
+          "recovery_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Date"
+          },
+          "trough_date": {
+            "title": "Trough Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "depth_pct",
+          "peak_date",
+          "trough_date",
+          "length_months"
+        ],
+        "title": "DrawdownInfo",
         "type": "object"
       },
       "ExchangeFeeIn": {
@@ -614,6 +1124,197 @@
         "title": "LongEquitySaveUniverseRequest",
         "type": "object"
       },
+      "MonthStatInfo": {
+        "properties": {
+          "month": {
+            "title": "Month",
+            "type": "string"
+          },
+          "return_after": {
+            "title": "Return After",
+            "type": "number"
+          },
+          "return_before": {
+            "title": "Return Before",
+            "type": "number"
+          }
+        },
+        "required": [
+          "month",
+          "return_before",
+          "return_after"
+        ],
+        "title": "MonthStatInfo",
+        "type": "object"
+      },
+      "OptimizeRequest": {
+        "properties": {
+          "backtest_run_id": {
+            "title": "Backtest Run Id",
+            "type": "integer"
+          },
+          "benchmark_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Benchmark Ids",
+            "type": "array"
+          },
+          "max_total_etf_weight_pct": {
+            "default": 50.0,
+            "title": "Max Total Etf Weight Pct",
+            "type": "number"
+          },
+          "objective": {
+            "default": "sharpe",
+            "title": "Objective",
+            "type": "string"
+          },
+          "risk_free_rate_pct": {
+            "default": 0.0,
+            "title": "Risk Free Rate Pct",
+            "type": "number"
+          },
+          "variant_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant Key"
+          }
+        },
+        "required": [
+          "backtest_run_id",
+          "benchmark_ids"
+        ],
+        "title": "OptimizeRequest",
+        "type": "object"
+      },
+      "OptimizeResponse": {
+        "properties": {
+          "after": {
+            "$ref": "#/components/schemas/PortfolioStats"
+          },
+          "annual": {
+            "items": {
+              "$ref": "#/components/schemas/YearStat"
+            },
+            "title": "Annual",
+            "type": "array"
+          },
+          "before": {
+            "$ref": "#/components/schemas/PortfolioStats"
+          },
+          "curve": {
+            "items": {
+              "$ref": "#/components/schemas/CurvePoint"
+            },
+            "title": "Curve",
+            "type": "array"
+          },
+          "drawdowns_after": {
+            "items": {
+              "$ref": "#/components/schemas/DrawdownInfo"
+            },
+            "title": "Drawdowns After",
+            "type": "array"
+          },
+          "drawdowns_before": {
+            "items": {
+              "$ref": "#/components/schemas/DrawdownInfo"
+            },
+            "title": "Drawdowns Before",
+            "type": "array"
+          },
+          "limited_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limited By"
+          },
+          "months": {
+            "title": "Months",
+            "type": "integer"
+          },
+          "objective": {
+            "title": "Objective",
+            "type": "string"
+          },
+          "period_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period From"
+          },
+          "period_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period To"
+          },
+          "weights": {
+            "items": {
+              "$ref": "#/components/schemas/AssetWeight"
+            },
+            "title": "Weights",
+            "type": "array"
+          },
+          "ytd_after": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ytd After"
+          },
+          "ytd_before": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ytd Before"
+          }
+        },
+        "required": [
+          "objective",
+          "months",
+          "weights",
+          "before",
+          "after",
+          "curve",
+          "drawdowns_before",
+          "drawdowns_after",
+          "annual"
+        ],
+        "title": "OptimizeResponse",
+        "type": "object"
+      },
       "PortfolioCreate": {
         "properties": {
           "members": {
@@ -657,6 +1358,78 @@
           "company_id"
         ],
         "title": "PortfolioMemberIn",
+        "type": "object"
+      },
+      "PortfolioStats": {
+        "properties": {
+          "ann_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ann Return"
+          },
+          "ann_vol": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ann Vol"
+          },
+          "median_month": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Month"
+          },
+          "sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe"
+          },
+          "sortino": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sortino"
+          },
+          "win_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Win Rate"
+          }
+        },
+        "title": "PortfolioStats",
         "type": "object"
       },
       "PortfolioUpdate": {
@@ -738,6 +1511,35 @@
           }
         },
         "title": "RenameCurrentPicksRequest",
+        "type": "object"
+      },
+      "ResolveNameResponse": {
+        "properties": {
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker",
+          "name"
+        ],
+        "title": "ResolveNameResponse",
         "type": "object"
       },
       "SaveBacktestRequest": {
@@ -1021,6 +1823,106 @@
         "title": "SignalBreakdownRequest",
         "type": "object"
       },
+      "StrategyStats": {
+        "properties": {
+          "ann_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ann Return"
+          },
+          "ann_vol": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ann Vol"
+          },
+          "months": {
+            "title": "Months",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "period_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period From"
+          },
+          "period_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period To"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "integer"
+          },
+          "sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe"
+          },
+          "sortino": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sortino"
+          },
+          "variant_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant Key"
+          }
+        },
+        "required": [
+          "run_id",
+          "name",
+          "months"
+        ],
+        "title": "StrategyStats",
+        "type": "object"
+      },
       "UniverseRenameRequest": {
         "properties": {
           "new_label": {
@@ -1283,6 +2185,71 @@
           "strategy_type"
         ],
         "title": "VariantSpec",
+        "type": "object"
+      },
+      "YearStat": {
+        "properties": {
+          "months": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/MonthStatInfo"
+            },
+            "title": "Months",
+            "type": "array"
+          },
+          "return_after": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return After"
+          },
+          "return_before": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Before"
+          },
+          "vol_after": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vol After"
+          },
+          "vol_before": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vol Before"
+          },
+          "year": {
+            "title": "Year",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "year"
+        ],
+        "title": "YearStat",
         "type": "object"
       },
       "_GfCompanyNameBody": {
@@ -6474,6 +7441,192 @@
         "summary": "Refresh Current Picks Mtd",
         "tags": [
           "momentum"
+        ]
+      }
+    },
+    "/api/momentum/diversifier/correlation": {
+      "post": {
+        "description": "Correlate a saved backtest's monthly returns against each selected\nETF and return the Sharpe-optimal blend per ETF, sorted by correlation\nascending (lowest = best diversifier first).",
+        "operationId": "correlation_api_momentum_diversifier_correlation_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrelationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorrelationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Correlation",
+        "tags": [
+          "diversifier"
+        ]
+      }
+    },
+    "/api/momentum/diversifier/optimize": {
+      "post": {
+        "description": "Find the long-only weights across the strategy + the selected ETFs that\nmaximize the chosen objective (Sharpe/Sortino), and report the before vs\nafter stats plus the full weight breakdown. Runs over the common window\nwhere every selected ETF has data.",
+        "operationId": "optimize_api_momentum_diversifier_optimize_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptimizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Optimize",
+        "tags": [
+          "diversifier"
+        ]
+      }
+    },
+    "/api/momentum/diversifier/resolve-name": {
+      "get": {
+        "description": "Best-effort display name + currency for an ETF ticker, read from\nGuruFocus's stock summary (ETFs resolve on the `/stock/{ticker}` path \u2014\nthere is no separate `/etf` API endpoint). Falls back to the ticker\nitself so the caller always gets a usable name.",
+        "operationId": "resolve_name_api_momentum_diversifier_resolve_name_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ticker",
+            "required": true,
+            "schema": {
+              "title": "Ticker",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveNameResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Name",
+        "tags": [
+          "diversifier"
+        ]
+      }
+    },
+    "/api/momentum/diversifier/strategy-stats/{run_id}": {
+      "get": {
+        "description": "The selected backtest's saved headline stats (Sharpe/Sortino/annualized\nreturn/max drawdown), so the page can show the baseline as soon as a run\nis picked. For a variant bundle without a chosen variant, returns the\navailable variant keys instead so the UI can prompt up front.",
+        "operationId": "strategy_stats_api_momentum_diversifier_strategy_stats__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "variant_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Variant Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestStats"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Strategy Stats",
+        "tags": [
+          "diversifier"
         ]
       }
     },

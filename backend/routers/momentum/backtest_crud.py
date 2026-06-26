@@ -349,16 +349,20 @@ async def load_backtest(run_id: int):
                 lambda: supabase.storage.from_(_RESULT_BUCKET).download(path)
             )
         except Exception as e:
-            log.error(
-                "[backtest_crud] storage download failed for run_id=%s path=%s: %s: %s",
+            # A missing/unfetchable blob is a known artifact of cloning the
+            # `public` schema to prod without the Storage bucket (the
+            # `backtest_run` row crosses over, its `result_path` object does
+            # not). Degrade gracefully — return the row with `result: null`
+            # (same shape the legacy in-row path produces) so the frontend and
+            # the /schedule hydration path keep working — rather than 500ing
+            # the whole saved-run view. Logged as a warning for visibility.
+            log.warning(
+                "[backtest_crud] storage download failed for run_id=%s path=%s: "
+                "%s: %s — returning row with result=null (blob missing/unfetchable).",
                 run_id, path, type(e).__name__, e,
             )
-            raise HTTPException(
-                500,
-                f"Backtest row exists but its result blob could not be fetched from "
-                f"storage ({type(e).__name__}: {e}). The object may have been "
-                f"deleted out-of-band.",
-            ) from e
+            row["result"] = None
+            return row
         try:
             result = _decode_result_payload(raw)
         except Exception as e:
