@@ -3,6 +3,11 @@
     "schemas": {
       "AssetWeight": {
         "properties": {
+          "group": {
+            "default": "etf",
+            "title": "Group",
+            "type": "string"
+          },
           "label": {
             "title": "Label",
             "type": "string"
@@ -1011,6 +1016,66 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HoldingStateInfo": {
+        "properties": {
+          "band_pct": {
+            "title": "Band Pct",
+            "type": "number"
+          },
+          "breached": {
+            "title": "Breached",
+            "type": "boolean"
+          },
+          "current_pct": {
+            "title": "Current Pct",
+            "type": "number"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "return_since_inception_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Since Inception Pct"
+          },
+          "target_pct": {
+            "title": "Target Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "label",
+          "group",
+          "target_pct",
+          "current_pct",
+          "band_pct",
+          "breached"
+        ],
+        "title": "HoldingStateInfo",
+        "type": "object"
+      },
       "ImpersonateRequest": {
         "properties": {
           "target_user_id": {
@@ -1160,15 +1225,28 @@
             "title": "Benchmark Ids",
             "type": "array"
           },
-          "max_total_etf_weight_pct": {
-            "default": 50.0,
-            "title": "Max Total Etf Weight Pct",
+          "bond_ids": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Bond Ids",
+            "type": "array"
+          },
+          "core_weight_pct": {
+            "default": 60.0,
+            "title": "Core Weight Pct",
             "type": "number"
           },
           "objective": {
             "default": "sharpe",
             "title": "Objective",
             "type": "string"
+          },
+          "rebalance_band_pct": {
+            "default": 10.0,
+            "title": "Rebalance Band Pct",
+            "type": "number"
           },
           "risk_free_rate_pct": {
             "default": 0.0,
@@ -1271,6 +1349,30 @@
             ],
             "title": "Period To"
           },
+          "rebalance_count": {
+            "default": 0,
+            "title": "Rebalance Count",
+            "type": "integer"
+          },
+          "rebalance_dates": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Rebalance Dates",
+            "type": "array"
+          },
+          "rebalance_freq_months": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rebalance Freq Months"
+          },
           "weights": {
             "items": {
               "$ref": "#/components/schemas/AssetWeight"
@@ -1358,6 +1460,171 @@
           "company_id"
         ],
         "title": "PortfolioMemberIn",
+        "type": "object"
+      },
+      "PortfolioSaveRequest": {
+        "properties": {
+          "backtest_run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backtest Run Id"
+          },
+          "holdings": {
+            "items": {
+              "$ref": "#/components/schemas/SimHolding"
+            },
+            "title": "Holdings",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "risk_free_rate_pct": {
+            "default": 0.0,
+            "title": "Risk Free Rate Pct",
+            "type": "number"
+          },
+          "scheduled_strategy_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled Strategy Id"
+          },
+          "variant_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant Key"
+          }
+        },
+        "required": [
+          "name",
+          "holdings"
+        ],
+        "title": "PortfolioSaveRequest",
+        "type": "object"
+      },
+      "PortfolioStateResponse": {
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "enough_data": {
+            "title": "Enough Data",
+            "type": "boolean"
+          },
+          "holdings": {
+            "items": {
+              "$ref": "#/components/schemas/HoldingStateInfo"
+            },
+            "title": "Holdings",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "inception_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inception Date"
+          },
+          "last_rebalance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Rebalance"
+          },
+          "mtd_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mtd Return Pct"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "rebalance_needed": {
+            "title": "Rebalance Needed",
+            "type": "boolean"
+          },
+          "result": {
+            "$ref": "#/components/schemas/OptimizeResponse"
+          },
+          "since_inception_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since Inception Pct"
+          },
+          "ytd_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ytd Return Pct"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "enough_data",
+          "rebalance_needed",
+          "holdings",
+          "result"
+        ],
+        "title": "PortfolioStateResponse",
         "type": "object"
       },
       "PortfolioStats": {
@@ -1627,6 +1894,91 @@
         "title": "SaveBacktestRequest",
         "type": "object"
       },
+      "SavedPortfolio": {
+        "properties": {
+          "backtest_run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backtest Run Id"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "holdings": {
+            "items": {
+              "$ref": "#/components/schemas/SimHolding"
+            },
+            "title": "Holdings",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "risk_free_rate_pct": {
+            "default": 0.0,
+            "title": "Risk Free Rate Pct",
+            "type": "number"
+          },
+          "scheduled": {
+            "default": false,
+            "title": "Scheduled",
+            "type": "boolean"
+          },
+          "scheduled_strategy_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled Strategy Id"
+          },
+          "strategy_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Name"
+          },
+          "variant_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant Key"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "holdings",
+          "created_at"
+        ],
+        "title": "SavedPortfolio",
+        "type": "object"
+      },
       "ScheduledStrategyCreate": {
         "description": "Body for POST. `config` is the full BacktestRequest payload (we\ndon't re-validate it here; the pipeline drives it through\n`BacktestRequest(**config)` and surfaces any failure as a per-\nstrategy error in the run's templates_summary).\n\n`backtest_run_id` is REQUIRED. Every scheduled strategy must\noriginate from a backtested variant \u2014 that gives /schedule a\npersistent equity-curve / monthly-history record to anchor the\nlive snapshots against. The manual-add flow has been retired.",
         "properties": {
@@ -1821,6 +2173,72 @@
           "as_of_date"
         ],
         "title": "SignalBreakdownRequest",
+        "type": "object"
+      },
+      "SimHolding": {
+        "properties": {
+          "band_pct": {
+            "default": 10.0,
+            "title": "Band Pct",
+            "type": "number"
+          },
+          "benchmark_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Id"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "weight_pct"
+        ],
+        "title": "SimHolding",
+        "type": "object"
+      },
+      "SimulateRequest": {
+        "properties": {
+          "backtest_run_id": {
+            "title": "Backtest Run Id",
+            "type": "integer"
+          },
+          "holdings": {
+            "items": {
+              "$ref": "#/components/schemas/SimHolding"
+            },
+            "title": "Holdings",
+            "type": "array"
+          },
+          "risk_free_rate_pct": {
+            "default": 0.0,
+            "title": "Risk Free Rate Pct",
+            "type": "number"
+          },
+          "variant_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant Key"
+          }
+        },
+        "required": [
+          "backtest_run_id",
+          "holdings"
+        ],
+        "title": "SimulateRequest",
         "type": "object"
       },
       "StrategyStats": {
@@ -7528,6 +7946,183 @@
         ]
       }
     },
+    "/api/momentum/diversifier/portfolios": {
+      "get": {
+        "description": "List saved diversified portfolios (newest first). `scheduled=true` \u2192\nonly live-tracked ones (a scheduled-strategy base); `false` \u2192 only backtest-\nbased; omit for all.",
+        "operationId": "list_portfolios_api_momentum_diversifier_portfolios_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scheduled",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scheduled"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SavedPortfolio"
+                  },
+                  "title": "Response List Portfolios Api Momentum Diversifier Portfolios Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Portfolios",
+        "tags": [
+          "diversifier"
+        ]
+      },
+      "post": {
+        "description": "Persist a named diversified portfolio (overlay over a base backtest or a\nlive scheduled strategy).",
+        "operationId": "save_portfolio_api_momentum_diversifier_portfolios_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioSaveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedPortfolio"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Portfolio",
+        "tags": [
+          "diversifier"
+        ]
+      }
+    },
+    "/api/momentum/diversifier/portfolios/{portfolio_id}": {
+      "delete": {
+        "operationId": "delete_portfolio_api_momentum_diversifier_portfolios__portfolio_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Portfolio",
+        "tags": [
+          "diversifier"
+        ]
+      }
+    },
+    "/api/momentum/diversifier/portfolios/{portfolio_id}/state": {
+      "get": {
+        "description": "A saved portfolio's CURRENT drifted weights + whether a rebalance is due,\nplus the full backtest card (before/after) over the common window.",
+        "operationId": "portfolio_state_api_momentum_diversifier_portfolios__portfolio_id__state_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioStateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Portfolio State",
+        "tags": [
+          "diversifier"
+        ]
+      }
+    },
     "/api/momentum/diversifier/resolve-name": {
       "get": {
         "description": "Best-effort display name + currency for an ETF ticker, read from\nGuruFocus's stock summary (ETFs resolve on the `/stock/{ticker}` path \u2014\nthere is no separate `/etf` API endpoint). Falls back to the ticker\nitself so the caller always gets a usable name.",
@@ -7566,6 +8161,48 @@
           }
         },
         "summary": "Resolve Name",
+        "tags": [
+          "diversifier"
+        ]
+      }
+    },
+    "/api/momentum/diversifier/simulate": {
+      "post": {
+        "description": "Backtest a HAND-SPECIFIED portfolio: fixed target weights + a per-holding\nrebalance band (reset all to target when ANY holding drifts outside its\nband). Returns the same shape as /optimize \u2014 before (strategy alone) vs\nafter (the rebalanced manual portfolio) \u2014 over the common window.",
+        "operationId": "simulate_api_momentum_diversifier_simulate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Simulate",
         "tags": [
           "diversifier"
         ]

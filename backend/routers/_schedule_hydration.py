@@ -302,12 +302,19 @@ def _splice_snapshot_tail(
     if anchor_eq <= 0:
         return None, []
 
-    # Backtest cumulative level at the cutover: the last backtest point on/before
-    # it (so the live curve continues seamlessly from there). Falls back to the
-    # backtest's start when the live curve predates the backtest entirely.
+    # Backtest cumulative level the live curve continues from: the last backtest
+    # point STRICTLY BEFORE the cutover (the prior period's close). The live
+    # basket ENTERS on the cutover day with no return yet (its first point ≈ eq
+    # 1.0), so it must continue from the day-before close — NOT the cutover-day
+    # backtest level. With a dense daily backtest curve (a point ON the cutover
+    # day), anchoring on/before would fold that day's BACKTEST move into the
+    # rebase, leaking it into MTD/YTD (anchored at the prior period close) and
+    # making them disagree with the holdings open-period return — the exact
+    # mismatch this splice exists to prevent. Falls back to the backtest's start
+    # when the live curve predates the backtest entirely.
     bt_cum_at_cut = bt[0][1]
     for d, cum in bt:
-        if d <= cutover_date:
+        if d < cutover_date:
             bt_cum_at_cut = cum
         else:
             break

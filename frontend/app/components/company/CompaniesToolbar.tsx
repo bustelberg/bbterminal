@@ -39,14 +39,32 @@ export default function CompaniesToolbar({
     clearFilters, hasActiveFilters,
   } = filters;
 
+  // Every company field is exported by default; the download picker lets the
+  // user untick any they don't want. Numbers stay numeric (Excel treats them
+  // as numbers, not text); nulls render blank.
   const exportColumns = useMemo<Column<Company>[]>(() => [
     { key: 'company_id', header: 'ID', accessor: (c) => c.company_id },
     { key: 'company_name', header: 'Name', accessor: (c) => c.company_name ?? '' },
     { key: 'gurufocus_ticker', header: 'Ticker', accessor: (c) => c.gurufocus_ticker },
     { key: 'gurufocus_exchange', header: 'Exchange', accessor: (c) => c.gurufocus_exchange },
+    { key: 'isin', header: 'ISIN', accessor: (c) => c.isin ?? '' },
     { key: 'country', header: 'Country', accessor: (c) => c.country ?? '' },
     { key: 'sector', header: 'Sector', accessor: (c) => c.sector ?? '' },
+    { key: 'sector_source', header: 'Sector source', accessor: (c) => c.sector_source ?? '' },
     { key: 'universes', header: 'Memberships', accessor: (c) => (c.universes ?? []).join(' | ') },
+    { key: 'market_cap_eur', header: 'Market cap (EUR)', accessor: (c) => c.market_cap_eur ?? null },
+    { key: 'market_cap_native', header: 'Market cap (native)', accessor: (c) => c.market_cap_native ?? null },
+    { key: 'market_cap_currency', header: 'Market cap currency', accessor: (c) => c.market_cap_currency ?? '' },
+    { key: 'market_cap_fx_rate', header: 'FX rate (per EUR)', accessor: (c) => c.market_cap_fx_rate ?? null },
+    { key: 'market_cap_date', header: 'Market cap date', accessor: (c) => c.market_cap_date ?? '' },
+    { key: 'gf_unsubscribed', header: 'GF unsubscribed', accessor: (c) => (c.gf_unsubscribed ? 'yes' : '') },
+    { key: 'openfigi_status', header: 'OpenFIGI status', accessor: (c) => c.openfigi_status ?? '' },
+    { key: 'openfigi_name', header: 'OpenFIGI name', accessor: (c) => c.openfigi_name ?? '' },
+    { key: 'openfigi_checked_at', header: 'OpenFIGI checked', accessor: (c) => c.openfigi_checked_at ?? '' },
+    { key: 'delisted_at', header: 'Delisted at', accessor: (c) => c.delisted_at ?? '' },
+    { key: 'out_of_scope_at', header: 'Out of scope at', accessor: (c) => c.out_of_scope_at ?? '' },
+    { key: 'out_of_scope_reason', header: 'Out of scope reason', accessor: (c) => c.out_of_scope_reason ?? '' },
+    { key: 'gurufocus_lookup_failed_at', header: 'GF lookup failed at', accessor: (c) => c.gurufocus_lookup_failed_at ?? '' },
     { key: 'gurufocus_url', header: 'GuruFocus URL', accessor: (c) => guruFocusUrl(c.gurufocus_ticker, c.gurufocus_exchange) },
   ], []);
 
@@ -117,6 +135,7 @@ export default function CompaniesToolbar({
           columns={exportColumns}
           filename="companies"
           title={`Download ${rows.length} companies as CSV / XLSX`}
+          confirmNoun="companies"
         />
       </div>
     </div>

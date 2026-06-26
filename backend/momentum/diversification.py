@@ -382,41 +382,167 @@ class PortfolioOptimization:
     annual: list[YearStats]
     ytd_before: float | None
     ytd_after: float | None
+    # Drift-and-rebalance: starting from the target weights, the strategy is
+    # trimmed back to its start weight whenever it grows past the threshold.
+    rebalance_count: int
+    rebalance_dates: list[str]
+    rebalance_freq_months: float | None   # avg months between rebalances
 
 
-def optimize_portfolio(
-    strategy_by_month: dict[str, float],
-    etfs: list[tuple[str, dict[str, float]]],
-    rf_annual: float = 0.0,
-    objective: str = "sharpe",
-    max_total_etf: float = 0.5,
-    n_samples: int = 4000,
-    seed: int = 0,
+def _simulate_rebalance(
+    months: list[str],
+    R: np.ndarray,
+    target: np.ndarray,
+    core_idx: np.ndarray,
+    center: float,
+    band: float,
+) -> tuple[list[float], list[str]]:
+    """Drift-and-rebalance the target portfolio month by month within a band.
+
+    Start at `target`; each month earn `w · r`, let the weights drift with
+    returns, then renormalize. The CORE total (the sum of `core_idx` weights —
+    the strategy + bonds) starts at `center`; whenever it drifts OUTSIDE the
+    symmetric band [center - band, center + band] (the core grew after
+    outperforming the diversifiers, or shrank after lagging), reset all weights
+    back to `target` and record the rebalance month. Returns (monthly portfolio
+    returns, rebalance months)."""
+    lower, upper = center - band, center + band
+    w = target.copy()
+    rets: list[float] = []
+    rebalances: list[str] = []
+    for t in range(R.shape[0]):
+        r = R[t]
+        rets.append(float(w @ r))
+        w = w * (1.0 + r)
+        s = w.sum()
+        if s > 0:
+            w = w / s
+        core_w = float(w[core_idx].sum())
+        if core_w < lower or core_w > upper:
+            w = target.copy()
+            rebalances.append(months[t])
+    return rets, rebalances
+
+
+def _polish_simplex(e: np.ndarray, eval_fn) -> np.ndarray:
+    """Coordinate-ascent on a simplex vector `e` (sums to 1): shuffle weight
+    between element pairs in shrinking steps, keeping any improvement.
+    `eval_fn(candidate)` returns the score to maximize."""
+    best = e.copy()
+    best_sc = eval_fn(best)
+    step = 0.25
+    while step > 1e-4:
+        improved = True
+        while improved:
+            improved = False
+            for i in range(len(best)):
+                for j in range(len(best)):
+                    if i == j or best[i] <= 0:
+                        continue
+                    c = best.copy()
+                    d = min(step, c[i])
+                    c[i] -= d
+                    c[j] += d
+                    sc = eval_fn(c)
+                    if sc > best_sc + 1e-12:
+                        best, best_sc, improved = c, sc, True
+        step /= 2
+    return best
+
+
+def _cum_curve(rets: list[float]) -> list[float]:
+    """Cumulative-return-% curve from a monthly return series."""
+    out: list[float] = []
+    eq = 1.0
+    for r in rets:
+        eq *= 1.0 + float(r)
+        out.append(round((eq - 1.0) * 100.0, 4))
+    return out
+
+
+def _assemble_optimization(
+    names: list[str],
+    common: list[str],
+    target: np.ndarray,
+    before_rets: list[float],
+    after_rets: list[float],
+    rebalance_dates: list[str],
+    limited_by: str | None,
+    rf_annual: float,
 ) -> PortfolioOptimization:
-    """Find long-only weights over {strategy} ∪ {etfs} that maximize the
-    `objective` ("sharpe"/"sortino") of the blended monthly return series.
+    """Build the full PortfolioOptimization result (stats, curves, drawdowns,
+    per-year table, rebalance info) from already-computed return series. Shared
+    by the optimizer and the manual-portfolio backtester."""
+    annual = annual_breakdown(list(common), before_rets, after_rets) if common else []
+    n_months = len(common)
+    return PortfolioOptimization(
+        assets=names,
+        weights=[round(float(x), 4) for x in target],
+        months=n_months,
+        period_from=common[0] if common else None,
+        period_to=common[-1] if common else None,
+        limited_by=limited_by,
+        before=annualized_stats(before_rets, rf_annual),
+        after=annualized_stats(after_rets, rf_annual),
+        curve_months=list(common),
+        curve_before=_cum_curve(before_rets),
+        curve_after=_cum_curve(after_rets),
+        drawdowns_before=top_drawdowns(list(common), before_rets, 40),
+        drawdowns_after=top_drawdowns(list(common), after_rets, 40),
+        annual=annual,
+        ytd_before=annual[-1].return_before if annual else None,
+        ytd_after=annual[-1].return_after if annual else None,
+        rebalance_count=len(rebalance_dates),
+        rebalance_dates=rebalance_dates,
+        rebalance_freq_months=(n_months / len(rebalance_dates)) if rebalance_dates else None,
+    )
 
-    Constraints: weights ≥ 0, sum to 1, and the ETF sleeve (everything but
-    the strategy) is capped at `max_total_etf` — so the strategy stays the
-    core holding unless the cap is raised to 1.0. The optimization runs over
-    the COMMON window where every asset has data (the shortest-history ETF
-    bounds it; `limited_by` reports which).
 
-    Method: random-simplex sampling (ETF sleeve total ~U(0, cap), split via
-    Dirichlet) seeded deterministically, then coordinate-ascent polish in
-    shrinking steps. No scipy needed, and robust for Sortino's non-convex
-    surface. `before`/`after` are the strategy-alone vs optimized stats over
-    the same window so the lift is apples-to-apples.
-    """
-    names = ["Strategy"] + [n for n, _ in etfs]
-    series = [strategy_by_month] + [s for _, s in etfs]
+def _simulate_with_bands(
+    months: list[str], R: np.ndarray, target: np.ndarray, bands: np.ndarray,
+) -> tuple[list[float], list[str]]:
+    """Drift-and-rebalance a fixed-weight portfolio: reset ALL weights to target
+    whenever ANY holding drifts more than its own band away from its target
+    weight (a band of 0 means that holding never triggers)."""
+    w = target.copy()
+    rets: list[float] = []
+    rebalances: list[str] = []
+    for t in range(R.shape[0]):
+        r = R[t]
+        rets.append(float(w @ r))
+        w = w * (1.0 + r)
+        s = w.sum()
+        if s > 0:
+            w = w / s
+        breach = any(
+            bands[i] > 0 and abs(w[i] - target[i]) > bands[i] + 1e-12 for i in range(len(w))
+        )
+        if breach:
+            w = target.copy()
+            rebalances.append(months[t])
+    return rets, rebalances
+
+
+def simulate_portfolio(
+    holdings: list[tuple[str, dict[str, float], float, float]],
+    rf_annual: float = 0.0,
+) -> PortfolioOptimization:
+    """Backtest a HAND-SPECIFIED portfolio. `holdings` is
+    `[(label, monthly_returns, weight, band), …]` with the STRATEGY first
+    (label "Strategy"). Weights are normalized to sum to 1; each holding has its
+    own rebalance band (any-breach → reset all to target). `before` is the
+    strategy alone; `after` is the drift-rebalanced manual portfolio."""
+    names = [h[0] for h in holdings]
+    series = [h[1] for h in holdings]
+    raw_w = np.array([h[2] for h in holdings], dtype=float)
+    bands = np.array([h[3] for h in holdings], dtype=float)
+    total = raw_w.sum()
+    target = (raw_w / total) if total > 0 else raw_w
     common = sorted(set.intersection(*[set(s) for s in series])) if series else []
 
-    # Which asset's earliest month bounds the common start (info for the UI).
     limited_by = None
     if common:
-        starts = [(min(s) if s else None, nm) for s, nm in zip(series, names)]
-        starts = [(mn, nm) for mn, nm in starts if mn is not None]
+        starts = [(min(s), nm) for s, nm in zip(series, names) if s]
         if starts:
             bound_month, bound_name = max(starts, key=lambda t: t[0])
             if bound_month == common[0] and bound_name != "Strategy":
@@ -426,80 +552,271 @@ def optimize_portfolio(
     base_w = np.zeros(n_assets)
     base_w[0] = 1.0
     R = np.array([[s[m] for s in series] for m in common], dtype=float) if common else np.empty((0, n_assets))
+    before_rets = (R @ base_w).tolist() if common else []
+    if common and R.shape[0] >= 2:
+        after_rets, rebalance_dates = _simulate_with_bands(list(common), R, target, bands)
+    else:
+        after_rets = (R @ target).tolist() if common else []
+        rebalance_dates = []
+    return _assemble_optimization(
+        names, list(common), target, before_rets, after_rets, rebalance_dates, limited_by, rf_annual,
+    )
 
-    def stats_of(w: np.ndarray) -> Stats:
-        return annualized_stats((R @ w).tolist(), rf_annual)
+
+@dataclass
+class HoldingState:
+    label: str
+    target: float       # target weight (fraction)
+    current: float      # current drifted weight (fraction)
+    band: float         # rebalance band (fraction)
+    breached: bool      # is the current weight outside its band right now?
+
+
+@dataclass
+class PortfolioState:
+    enough_data: bool
+    as_of: str | None             # latest month the drift was computed through
+    last_rebalance: str | None    # most recent month a band-rebalance fired
+    rebalance_needed: bool         # does any holding currently breach its band?
+    holdings: list[HoldingState]
+
+
+def portfolio_current_state(
+    holdings: list[tuple[str, dict[str, float], float, float]],
+) -> PortfolioState:
+    """Where a saved portfolio's weights sit TODAY (the latest common month) and
+    whether a rebalance is due. Drifts the target weights month by month with a
+    band-rebalance (any holding outside its band → reset to target) — but does
+    NOT reset on the final month, so the returned `current` weights show the live
+    drift and `breached` flags whether you'd need to rebalance now."""
+    names = [h[0] for h in holdings]
+    series = [h[1] for h in holdings]
+    raw_w = np.array([h[2] for h in holdings], dtype=float)
+    bands = np.array([h[3] for h in holdings], dtype=float)
+    total = raw_w.sum()
+    target = (raw_w / total) if total > 0 else raw_w
+    common = sorted(set.intersection(*[set(s) for s in series])) if series else []
+    if not common:
+        return PortfolioState(False, None, None, False, [])
+
+    R = np.array([[s[m] for s in series] for m in common], dtype=float)
+    w = target.copy()
+    last_rebalance = None
+    n = len(common)
+    for t in range(n):
+        w = w * (1.0 + R[t])
+        s = w.sum()
+        if s > 0:
+            w = w / s
+        breach = any(
+            bands[i] > 0 and abs(w[i] - target[i]) > bands[i] + 1e-12 for i in range(len(w))
+        )
+        if breach and t < n - 1:        # never auto-reset on the last bar
+            w = target.copy()
+            last_rebalance = common[t]
+
+    breached = [
+        bool(bands[i] > 0 and abs(w[i] - target[i]) > bands[i] + 1e-12) for i in range(len(w))
+    ]
+    return PortfolioState(
+        enough_data=True,
+        as_of=common[-1],
+        last_rebalance=last_rebalance,
+        rebalance_needed=any(breached),
+        holdings=[
+            HoldingState(names[i], float(target[i]), float(w[i]), float(bands[i]), breached[i])
+            for i in range(len(names))
+        ],
+    )
+
+
+def _compound_pct(rets: list[float]) -> float | None:
+    """Compounded total return (%) of a monthly return series. None if empty."""
+    if not rets:
+        return None
+    eq = 1.0
+    for r in rets:
+        eq *= 1.0 + float(r)
+    return round((eq - 1.0) * 100.0, 2)
+
+
+def rets_from_cum(cum_pct: list[float]) -> list[float]:
+    """Inverse of `_cum_curve`: per-period returns from a cumulative-% curve."""
+    out: list[float] = []
+    prev = 0.0
+    for c in cum_pct:
+        out.append((1.0 + c / 100.0) / (1.0 + prev / 100.0) - 1.0)
+        prev = c
+    return out
+
+
+def _since_inception(month: str, inception_iso: str) -> bool:
+    """Is the calendar month ('YYYY-MM') on/after the inception date? A month is
+    counted from its FIRST day, so go-live 2026-05-30 starts at June (May's bar
+    mostly predates it), matching the holdings open-period anchor."""
+    inc = (inception_iso or "")[:10]
+    return (not inc) or (f"{month}-01" >= inc)
+
+
+@dataclass
+class CalendarReturns:
+    mtd_pct: float | None
+    ytd_pct: float | None
+    since_inception_pct: float | None
+
+
+def blended_calendar_returns(
+    months: list[str], after_rets: list[float], inception_iso: str,
+) -> CalendarReturns:
+    """MTD / YTD / since-inception from a blended MONTHLY return series.
+    `months` are 'YYYY-MM' ascending, `after_rets[i]` the blend's return that
+    month. MTD = the latest month; YTD = the latest month's calendar year;
+    since-inception = months on/after the go-live date (`_since_inception`)."""
+    if not months:
+        return CalendarReturns(None, None, None)
+    last = months[-1]
+    year = last[:4]
+    pairs = list(zip(months, after_rets))
+    return CalendarReturns(
+        mtd_pct=_compound_pct([r for m, r in pairs if m == last]),
+        ytd_pct=_compound_pct([r for m, r in pairs if m >= f"{year}-01"]),
+        since_inception_pct=_compound_pct([r for m, r in pairs if _since_inception(m, inception_iso)]),
+    )
+
+
+def component_return_since(
+    returns: dict[str, float], months: list[str], inception_iso: str,
+) -> float | None:
+    """A single holding's compounded return over the since-inception months —
+    so each sleeve's gain can be eyeballed against its actual price move."""
+    return _compound_pct([returns[m] for m in months if m in returns and _since_inception(m, inception_iso)])
+
+
+def optimize_portfolio(
+    strategy_by_month: dict[str, float],
+    etfs: list[tuple[str, dict[str, float]]],
+    bonds: list[tuple[str, dict[str, float]]] | None = None,
+    rf_annual: float = 0.0,
+    objective: str = "sharpe",
+    core_pct: float = 0.6,
+    rebalance_band: float = 0.1,
+    n_samples: int = 4000,
+    seed: int = 0,
+) -> PortfolioOptimization:
+    """Optimize a 3-group portfolio, then drift-and-rebalance it.
+
+    Three groups:
+      * **Core** (`core_pct`, e.g. 0.60): the Strategy + the `bonds`, split
+        optimally — the strategy can take 0…core and bonds fill the rest (edge
+        cases: all-strategy or all-bonds within the core).
+      * **Diversifier sleeve** (`1 - core_pct`, e.g. 0.40): the `etfs`
+        (gold/USD/…), split optimally among themselves.
+      * (If there are no diversifier ETFs the core becomes the whole book.)
+
+    The split that maximizes the `objective` ("sharpe"/"sortino") is the target.
+    Then the portfolio drifts with returns and is rebalanced back to target
+    whenever the CORE total (strategy + bonds) leaves the band
+    `[core_pct ± rebalance_band]` (e.g. ±0.10 → reset whenever it leaves
+    50–70%). `before` is strategy-alone; `after` is the drift-rebalanced mix;
+    `rebalance_*` report the events. Runs over the COMMON window where every
+    selected asset has data.
+
+    Method: random sampling (strategy/bond split + Dirichlet sleeves), seeded
+    deterministically, coordinate-ascent polish, then one rebalance simulation
+    with the winning weights. No scipy; robust for Sortino.
+    """
+    bonds = bonds or []
+    nb, ne = len(bonds), len(etfs)
+    names = ["Strategy"] + [n for n, _ in bonds] + [n for n, _ in etfs]
+    series = [strategy_by_month] + [s for _, s in bonds] + [s for _, s in etfs]
+    common = sorted(set.intersection(*[set(s) for s in series])) if series else []
+
+    # Which asset's earliest month bounds the common start (info for the UI).
+    limited_by = None
+    if common:
+        starts = [(min(s), nm) for s, nm in zip(series, names) if s]
+        if starts:
+            bound_month, bound_name = max(starts, key=lambda t: t[0])
+            if bound_month == common[0] and bound_name != "Strategy":
+                limited_by = bound_name
+
+    n_assets = len(names)
+    base_w = np.zeros(n_assets)
+    base_w[0] = 1.0   # strategy-alone benchmark
+    R = np.array([[s[m] for s in series] for m in common], dtype=float) if common else np.empty((0, n_assets))
+
+    # Group index layout: [strategy, bonds…, etfs…]. The core = strategy+bonds.
+    core_idx = np.arange(0, 1 + nb)
+    eff_core = core_pct if ne > 0 else 1.0   # no diversifiers ⇒ core is the book
+    sleeve = 1.0 - eff_core
+
+    def build(strat_frac: float, bond_e: np.ndarray, etf_e: np.ndarray) -> np.ndarray:
+        w = np.zeros(n_assets)
+        w[0] = eff_core * strat_frac                       # strategy
+        if nb > 0:
+            w[1:1 + nb] = bond_e * (eff_core * (1.0 - strat_frac))   # bonds fill core
+        if ne > 0:
+            w[1 + nb:] = etf_e * sleeve                     # diversifier sleeve
+        return w
 
     def score(w: np.ndarray) -> float:
-        st = stats_of(w)
+        st = annualized_stats((R @ w).tolist(), rf_annual)
         m = st.sortino if objective == "sortino" else st.sharpe
         return m if m is not None else -np.inf
 
-    before = stats_of(base_w)
-    best_w = base_w.copy()
+    target = base_w.copy()
 
-    k = len(etfs)
-    if k > 0 and R.shape[0] >= 2:
-        best_score = score(best_w)
+    if common and R.shape[0] >= 2 and (nb > 0 or ne > 0):
         rng = np.random.default_rng(seed)
+        # Strategy's share of the core: free when bonds exist, else it takes
+        # the whole core.
+        best_frac = 1.0 if nb == 0 else 0.5
+        best_bond_e = np.full(nb, 1.0 / nb) if nb else np.empty(0)
+        best_etf_e = np.full(ne, 1.0 / ne) if ne else np.empty(0)
+        best_score = score(build(best_frac, best_bond_e, best_etf_e))
+
         for _ in range(n_samples):
-            t = rng.uniform(0.0, max_total_etf)
-            etf_w = (np.array([t]) if k == 1 else rng.dirichlet(np.ones(k)) * t)
-            w = np.concatenate([[1.0 - etf_w.sum()], etf_w])
-            sc = score(w)
+            frac = 1.0 if nb == 0 else float(rng.uniform(0.0, 1.0))
+            be = (np.array([1.0]) if nb == 1 else rng.dirichlet(np.ones(nb))) if nb else np.empty(0)
+            ee = (np.array([1.0]) if ne == 1 else rng.dirichlet(np.ones(ne))) if ne else np.empty(0)
+            sc = score(build(frac, be, ee))
             if sc > best_score:
-                best_score, best_w = sc, w
+                best_score, best_frac, best_bond_e, best_etf_e = sc, frac, be, ee
 
-        # Coordinate-ascent polish: shuffle weight between asset pairs in
-        # shrinking steps, keeping any improvement that respects the cap.
-        step = max_total_etf / 4 if max_total_etf > 0 else 0.0
-        while step > 1e-4:
-            improved = True
-            while improved:
-                improved = False
-                for i in range(n_assets):
-                    for j in range(n_assets):
-                        if i == j or best_w[i] <= 0:
-                            continue
-                        w = best_w.copy()
-                        d = min(step, w[i])
-                        w[i] -= d
-                        w[j] += d
-                        if w[1:].sum() <= max_total_etf + 1e-9 and (w >= -1e-9).all():
-                            sc = score(w)
-                            if sc > best_score + 1e-12:
-                                best_score, best_w, improved = sc, w, True
-            step /= 2
-
-    def _cum_curve(rets: np.ndarray) -> list[float]:
-        out: list[float] = []
-        eq = 1.0
-        for r in rets:
-            eq *= 1.0 + float(r)
-            out.append(round((eq - 1.0) * 100.0, 4))
-        return out
+        # Polish the strategy/bond split (1-D), then each sleeve internally.
+        if nb > 0:
+            step = 0.25
+            while step > 1e-4:
+                improved = True
+                while improved:
+                    improved = False
+                    for d in (step, -step):
+                        f = min(1.0, max(0.0, best_frac + d))
+                        sc = score(build(f, best_bond_e, best_etf_e))
+                        if sc > best_score + 1e-12:
+                            best_frac, best_score, improved = f, sc, True
+                step /= 2
+        if nb > 1:
+            best_bond_e = _polish_simplex(best_bond_e, lambda be: score(build(best_frac, be, best_etf_e)))
+        if ne > 1:
+            best_etf_e = _polish_simplex(best_etf_e, lambda ee: score(build(best_frac, best_bond_e, ee)))
+        target = build(best_frac, best_bond_e, best_etf_e)
 
     before_rets = (R @ base_w).tolist() if common else []
-    after_rets = (R @ best_w).tolist() if common else []
-    annual = annual_breakdown(list(common), before_rets, after_rets) if common else []
-    weights = [round(float(x), 4) for x in best_w]
-    return PortfolioOptimization(
-        assets=names,
-        weights=weights,
-        months=len(common),
-        period_from=common[0] if common else None,
-        period_to=common[-1] if common else None,
-        limited_by=limited_by,
-        before=before,
-        after=stats_of(best_w),
-        curve_months=list(common),
-        curve_before=_cum_curve(R @ base_w) if common else [],
-        curve_after=_cum_curve(R @ best_w) if common else [],
-        drawdowns_before=top_drawdowns(list(common), before_rets, 40),
-        drawdowns_after=top_drawdowns(list(common), after_rets, 40),
-        annual=annual,
-        ytd_before=annual[-1].return_before if annual else None,
-        ytd_after=annual[-1].return_after if annual else None,
+    # The realistic "after": hold the target, drift, reset to target whenever
+    # the core (strategy+bonds) leaves its band. Only meaningful when there's a
+    # diversifier sleeve for the core to drift against — else hold the static
+    # target.
+    if common and ne > 0 and rebalance_band > 0:
+        after_rets, rebalance_dates = _simulate_rebalance(
+            list(common), R, target, core_idx, eff_core, rebalance_band
+        )
+    else:
+        after_rets = (R @ target).tolist() if common else []
+        rebalance_dates = []
+
+    return _assemble_optimization(
+        names, list(common), target, before_rets, after_rets, rebalance_dates, limited_by, rf_annual,
     )
 
 

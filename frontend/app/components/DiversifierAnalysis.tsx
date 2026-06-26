@@ -4,11 +4,13 @@ import { Fragment, useState } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
 } from 'recharts';
-import { dialog } from '../../lib/dialog';
 import { chartTheme } from '../../lib/chartTheme';
 import LoadingDots from './LoadingDots';
+import BenchmarkSection from './diversifier/BenchmarkSection';
+import ManualPortfolioSection from './diversifier/ManualPortfolioSection';
+import SavedPortfoliosSection from './diversifier/SavedPortfoliosSection';
 import { useDiversifier } from './diversifier/useDiversifier';
-import type { CorrelationResponse, DiversifierResult, DrawdownInfo, OptimizeResponse } from '../../lib/types/api';
+import type { AssetWeight, CorrelationResponse, DiversifierResult, DrawdownInfo, OptimizeResponse } from '../../lib/types/api';
 
 const fmtPct = (v: number | null | undefined, dp = 1) =>
   v == null ? '—' : `${(v * 100).toFixed(dp)}%`;
@@ -32,7 +34,6 @@ function corrClass(c: number | null): string {
 
 export default function DiversifierAnalysis() {
   const d = useDiversifier();
-  const [tickerInput, setTickerInput] = useState('');
 
   const canRun = d.selectedRunId != null && d.selectedEtfIds.size > 0 && !d.running;
 
@@ -100,16 +101,30 @@ export default function DiversifierAnalysis() {
               />
             </div>
             <div className="w-28">
-              <label className="text-fg-subtle text-xs block mb-1" title="Minimum weight kept in your strategy; the ETF sleeve gets at most the rest (100 − this). 0 = optimizer chooses freely.">
-                Min strategy %
+              <label className="text-fg-subtle text-xs block mb-1" title="Strategy's weight; the diversifier sleeve (100 − this) is optimized across the selected funds. 100 = strategy alone.">
+                Start strategy %
               </label>
               <input
                 type="number"
                 step="5"
                 min={0}
                 max={100}
-                value={d.minStrategyPct}
-                onChange={(e) => d.setMinStrategyPct(Number(e.target.value))}
+                value={d.startStrategyPct}
+                onChange={(e) => d.setStartStrategyPct(Number(e.target.value))}
+                className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
+              />
+            </div>
+            <div className="w-28">
+              <label className="text-fg-subtle text-xs block mb-1" title="Symmetric rebalance band: when the strategy drifts more than this many points from its start weight (above OR below), reset to start. e.g. start 60 ± 10 → reset whenever it leaves 50–70%.">
+                Rebalance band ±%
+              </label>
+              <input
+                type="number"
+                step="5"
+                min={0}
+                max={50}
+                value={d.rebalanceBandPct}
+                onChange={(e) => d.setRebalanceBandPct(Number(e.target.value))}
                 className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
               />
             </div>
@@ -141,7 +156,7 @@ export default function DiversifierAnalysis() {
             <button
               onClick={d.runOptimize}
               disabled={d.selectedRunId == null || d.selectedEtfIds.size === 0 || d.optimizing}
-              title="Find the best weights across your strategy + all selected ETFs at once"
+              title="Optimize the diversifier sleeve around your strategy, with a drift-rebalance band"
               className="px-4 py-2 rounded-lg text-sm font-medium border border-accent-500 text-accent-400 hover:bg-accent-600/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {d.optimizing ? <LoadingDots /> : 'Optimize portfolio'}
@@ -163,126 +178,73 @@ export default function DiversifierAnalysis() {
           )}
         </div>
 
-        {/* ── ETF universe ──────────────────────────────────────────── */}
-        <div className="bg-card rounded-xl border border-neutral-800/40 p-5">
-          <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
-            <h3 className="text-fg-muted text-xs font-medium uppercase tracking-wider">
-              ETFs {d.selectedEtfIds.size > 0 && <span className="text-accent-400">· {d.selectedEtfIds.size} selected</span>}
-            </h3>
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-1.5 text-xs text-fg-muted" title="Keep only ETFs whose history starts before Jan 1 of this year — young funds shorten the optimizer's common window">
-                Require history before
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={4}
-                  placeholder="e.g. 2010"
-                  value={d.cutoffYear}
-                  onChange={(e) => d.setCutoffYear(e.target.value)}
-                  className="w-24 bg-page border border-neutral-700 rounded px-2 py-1 text-xs font-mono text-fg-strong focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none placeholder-fg-faint"
-                />
-                {d.cutoffYear && (
-                  <button onClick={() => d.setCutoffYear('')} className="text-fg-subtle hover:text-fg-strong" title="Clear filter">✕</button>
-                )}
-              </label>
-              {d.visibleEtfs.length > 0 && (
-                <button
-                  onClick={d.toggleSelectAll}
-                  className="text-xs font-medium text-accent-400 hover:text-accent-500 transition-colors"
-                >
-                  {d.visibleEtfs.every((e) => d.selectedEtfIds.has(e.benchmark_id)) ? 'Clear all' : 'Select all'}
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-end gap-3 mb-4">
-            <div>
-              <label className="text-fg-subtle text-xs block mb-1">Ticker (from the GuruFocus ETF URL)</label>
-              <input
-                value={tickerInput}
-                onChange={(e) => setTickerInput(e.target.value)}
-                placeholder="e.g. DEM"
-                className="bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono w-40 focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none placeholder-fg-faint"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    d.addEtf(tickerInput);
-                    setTickerInput('');
-                  }
-                }}
-              />
-            </div>
-            <button
-              onClick={() => { d.addEtf(tickerInput); setTickerInput(''); }}
-              disabled={d.adding || !tickerInput.trim()}
-              className="px-4 py-2 rounded-lg text-sm font-medium bg-accent-600 hover:bg-accent-500 text-fg-strong transition-colors disabled:opacity-40"
-            >
-              {d.adding ? <LoadingDots /> : 'Add & fetch prices'}
-            </button>
-          </div>
-
-          {d.etfs.length === 0 ? (
-            <p className="text-sm text-fg-subtle">{d.loadingLists ? 'Loading…' : 'No ETFs yet — add one above.'}</p>
-          ) : d.visibleEtfs.length === 0 ? (
-            <p className="text-sm text-fg-subtle">No ETFs with history before {d.cutoffYear}. Adjust the filter.</p>
-          ) : (
-            <div className="overflow-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-fg-subtle text-xs border-b border-neutral-800/60">
-                    <th className="text-left font-medium py-2 px-2 w-8"></th>
-                    <th className="text-left font-medium py-2 px-2">Ticker</th>
-                    <th className="text-left font-medium py-2 px-2">Name</th>
-                    <th className="text-left font-medium py-2 px-2">Prices from</th>
-                    <th className="text-left font-medium py-2 px-2">Prices to</th>
-                    <th className="text-right font-medium py-2 px-2"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {d.visibleEtfs.map((e) => (
-                    <tr key={e.benchmark_id} className="group border-b border-neutral-800/40 hover:bg-overlay/[0.02]">
-                      <td className="py-2.5 px-2">
-                        <input
-                          type="checkbox"
-                          checked={d.selectedEtfIds.has(e.benchmark_id)}
-                          onChange={() => d.toggleEtf(e.benchmark_id)}
-                          className="accent-accent-500 w-4 h-4 cursor-pointer"
-                        />
-                      </td>
-                      <td className="py-2.5 px-2 font-mono text-fg-strong">{e.ticker}</td>
-                      <td className="py-2.5 px-2 text-fg">{e.name}</td>
-                      <td className="py-2.5 px-2 font-mono text-fg-muted">{e.price_from ?? '—'}</td>
-                      <td className="py-2.5 px-2 font-mono text-fg-muted">{e.price_to ?? '—'}</td>
-                      <td className="py-2.5 px-2 text-right whitespace-nowrap">
-                        <button
-                          onClick={() => d.refreshEtf(e.benchmark_id)}
-                          disabled={d.busyEtfId === e.benchmark_id}
-                          className="opacity-0 group-hover:opacity-100 text-xs text-fg-muted hover:text-accent-400 transition-all disabled:opacity-50 mr-3"
-                        >
-                          {d.busyEtfId === e.benchmark_id ? '…' : 'Refresh'}
-                        </button>
-                        <button
-                          onClick={async () => {
-                            if (await dialog.confirm(`Delete ETF "${e.ticker}"?`, { destructive: true, confirmLabel: 'Delete' })) {
-                              d.deleteEtf(e.benchmark_id);
-                            }
-                          }}
-                          disabled={d.busyEtfId === e.benchmark_id}
-                          className="opacity-0 group-hover:opacity-100 text-xs text-fg-muted hover:text-neg-400 transition-all disabled:opacity-50"
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+        {/* Shared history filter. */}
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1.5 text-xs text-fg-muted" title="Keep only funds whose history starts before Jan 1 of this year — young funds shorten the optimizer's common window">
+            Require history before
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={4}
+              placeholder="e.g. 2010"
+              value={d.cutoffYear}
+              onChange={(e) => d.setCutoffYear(e.target.value)}
+              className="w-24 bg-page border border-neutral-700 rounded px-2 py-1 text-xs font-mono text-fg-strong focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none placeholder-fg-faint"
+            />
+            {d.cutoffYear && (
+              <button onClick={() => d.setCutoffYear('')} className="text-fg-subtle hover:text-fg-strong" title="Clear filter">✕</button>
+            )}
+          </label>
         </div>
+
+        {/* ── Funds (ETFs & bonds, treated the same) ────────────────── */}
+        <BenchmarkSection
+          title="Funds (ETFs & bonds)"
+          hint="Add any GuruFocus-priced fund by ticker; all selected funds are optimized into the diversifier sleeve."
+          rows={d.visibleEtfs}
+          selectedIds={d.selectedEtfIds}
+          onToggle={d.toggleEtf}
+          onSelectAll={d.toggleSelectAll}
+          accent="accent"
+          onAdd={(t) => d.addEtf(t)}
+          adding={d.adding}
+          addPlaceholder="e.g. GLD"
+          onRefresh={d.refreshEtf}
+          onDelete={d.deleteEtf}
+          busyId={d.busyEtfId}
+          emptyText={d.cutoffYear ? `No funds with history before ${d.cutoffYear}.` : 'No funds yet — add one above.'}
+          loading={d.loadingLists}
+        />
 
         {/* ── Portfolio optimization ────────────────────────────────── */}
         {d.optimizeResult && <OptimizeCard result={d.optimizeResult} />}
+
+        {/* ── Manual portfolio backtest (below the optimizer) ───────── */}
+        {d.selectedRunId != null && (
+          <ManualPortfolioSection
+            funds={d.etfs.filter((e) => d.selectedEtfIds.has(e.benchmark_id))}
+            weights={d.manualWeights}
+            defaults={d.manualDefaults}
+            onChange={d.setManualField}
+            onReset={d.resetManualWeights}
+            onRun={d.runSimulate}
+            running={d.simulating}
+            canRun={!d.simulating}
+            onSave={d.savePortfolio}
+            saving={d.savingPortfolio}
+            scheduledStrategies={d.scheduledStrategies}
+            onSchedule={d.scheduleLivePortfolio}
+          />
+        )}
+        {d.manualResult && <OptimizeCard result={d.manualResult} title="Portfolio backtest · manual weights" />}
+
+        {/* ── Saved portfolios (named overlays, on-demand state) ────── */}
+        <SavedPortfoliosSection
+          portfolios={d.savedPortfolios}
+          state={d.portfolioState}
+          onView={d.viewPortfolioState}
+          onDelete={d.deletePortfolio}
+        />
 
         {/* ── Per-ETF correlation results ───────────────────────────── */}
         {d.result && <ResultsCard result={d.result} />}
@@ -340,9 +302,29 @@ function DrawdownTable({ title, rows, accent }: { title: string; rows: DrawdownI
   );
 }
 
-function OptimizeCard({ result: r }: { result: OptimizeResponse }) {
-  const sorted = [...r.weights].sort((a, b) => b.weight - a.weight);
+function WeightBreakdown({ weights }: { weights: AssetWeight[] }) {
+  const sorted = [...weights].sort((a, b) => b.weight - a.weight);
+  return (
+    <div className="space-y-1.5">
+      {sorted.map((w) => (
+        <div key={w.label} className="flex items-center gap-3">
+          <div className="w-28 shrink-0 text-sm">
+            <span className={`font-mono ${w.group === 'strategy' ? 'text-accent-400 font-medium' : 'text-fg-strong'}`}>{w.label}</span>
+          </div>
+          <div className="flex-1 h-5 bg-inset rounded overflow-hidden">
+            <div className={`h-full ${w.group === 'strategy' ? 'bg-accent-500/70' : 'bg-pos-500/50'}`} style={{ width: `${Math.max(w.weight * 100, w.weight > 0 ? 1 : 0)}%` }} />
+          </div>
+          <div className="w-14 shrink-0 text-right font-mono text-sm text-fg-strong">{(w.weight * 100).toFixed(1)}%</div>
+          <div className="hidden md:block w-56 shrink-0 truncate text-xs text-fg-subtle">{w.name ?? ''}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function OptimizeCard({ result: r, title }: { result: OptimizeResponse; title?: string }) {
   const objLabel = r.objective === 'sortino' ? 'Sortino' : 'Sharpe';
+  const heading = title ?? `Optimized portfolio · maximizing ${objLabel}`;
   // Log scale plots the growth multiple (1 + cum%/100) — always positive — so
   // the early years stay visible against a strategy that's up many-fold.
   const [logScale, setLogScale] = useState(true);
@@ -367,7 +349,7 @@ function OptimizeCard({ result: r }: { result: OptimizeResponse }) {
     <div className="bg-card rounded-xl border border-accent-500/30 p-5">
       <div className="flex items-baseline justify-between mb-3">
         <h3 className="text-accent-400 text-xs font-medium uppercase tracking-wider">
-          Optimized portfolio · maximizing {objLabel}
+          {heading}
         </h3>
         <span className="text-fg-subtle text-xs">
           {r.months} mo · {r.period_from}–{r.period_to}
@@ -489,27 +471,8 @@ function OptimizeCard({ result: r }: { result: OptimizeResponse }) {
         </div>
       )}
 
-      {/* Weight breakdown */}
-      <div className="space-y-1.5">
-        {sorted.map((w) => (
-          <div key={w.label} className="flex items-center gap-3">
-            <div className="w-28 shrink-0 text-sm">
-              <span className={`font-mono ${w.label === 'Strategy' ? 'text-accent-400 font-medium' : 'text-fg-strong'}`}>{w.label}</span>
-            </div>
-            <div className="flex-1 h-5 bg-inset rounded overflow-hidden">
-              <div
-                className={`h-full ${w.label === 'Strategy' ? 'bg-accent-500/70' : 'bg-pos-500/50'}`}
-                style={{ width: `${Math.max(w.weight * 100, w.weight > 0 ? 1 : 0)}%` }}
-              />
-            </div>
-            <div className="w-14 shrink-0 text-right font-mono text-sm text-fg-strong">{(w.weight * 100).toFixed(1)}%</div>
-            {/* Always reserve the name column so every bar track (flex-1) has
-                the same width — the Strategy row has no name and would
-                otherwise stretch its bar into this space. */}
-            <div className="hidden md:block w-56 shrink-0 truncate text-xs text-fg-subtle">{w.name ?? ''}</div>
-          </div>
-        ))}
-      </div>
+      {/* Weight breakdown, grouped: Core (strategy + bonds) then Diversifiers */}
+      <WeightBreakdown weights={r.weights} />
 
       {/* Top-10 worst drawdowns: strategy alone vs optimized */}
       {(r.drawdowns_before.length > 0 || r.drawdowns_after.length > 0) && (
@@ -522,11 +485,32 @@ function OptimizeCard({ result: r }: { result: OptimizeResponse }) {
         </div>
       )}
 
-      <p className="text-xs text-fg-subtle mt-4 leading-relaxed">
-        Long-only weights summing to 100%, found by maximizing {objLabel} over the common window where every selected
-        ETF has data{r.limited_by ? ` (bounded by ${r.limited_by})` : ''}. Your strategy is held at ≥ your Min strategy %
-        (lower it to 0% to let the optimizer choose freely). A 100% Strategy result means no ETF mix beat your
-        strategy alone on {objLabel} over this window.
+      {/* Rebalance frequency */}
+      <div className="mt-4 rounded-lg bg-inset/60 border border-neutral-800/40 px-4 py-3 text-sm">
+        {(r.rebalance_count ?? 0) > 0 ? (
+          <span className="text-fg">
+            Strategy reset to {((r.weights.find((w) => w.group === 'strategy')?.weight ?? 0) * 100).toFixed(0)}% <span className="font-mono text-fg-strong">{r.rebalance_count}×</span> over {r.months} months
+            {r.rebalance_freq_months != null && <> — about <span className="font-mono text-fg-strong">once every {r.rebalance_freq_months.toFixed(1)} months</span></>}.
+            {(r.rebalance_dates ?? []).length > 0 && (
+              <span className="block text-xs text-fg-subtle mt-1 font-mono">{(r.rebalance_dates ?? []).join(' · ')}</span>
+            )}
+          </span>
+        ) : (
+          <span className="text-fg-muted">The strategy never left its rebalance band over this window — no rebalances needed.</span>
+        )}
+      </div>
+
+      <p className="text-xs text-fg-subtle mt-3 leading-relaxed">
+        {r.objective === 'manual' ? (
+          <>These are your hand-set target weights, reset whenever any holding drifts outside its band.</>
+        ) : (
+          <>The strategy starts at your Start strategy %; the diversifier sleeve (the rest) is split {objLabel}-optimally
+            across the selected funds, then reset to target whenever the <span className="font-medium">strategy weight</span> drifts
+            more than ± the Rebalance band.</>
+        )}{' '}
+        <span className="font-medium">After</span> is this drift-rebalanced portfolio over the common window where every
+        selected fund has data{r.limited_by ? ` (bounded by ${r.limited_by})` : ''};
+        {' '}<span className="font-medium">Before</span> is your strategy alone.
       </p>
     </div>
   );

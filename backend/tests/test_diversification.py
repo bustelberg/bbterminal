@@ -6,17 +6,77 @@ import math
 import numpy as np
 
 from momentum.diversification import (
+    _simulate_rebalance,
     align,
     annual_breakdown,
     analyze_pair,
     annualized_stats,
+    blended_calendar_returns,
+    component_return_since,
     monthly_records_to_returns,
     optimal_blend,
     optimize_portfolio,
     pearson,
+    portfolio_current_state,
     prices_to_monthly_returns,
+    rets_from_cum,
+    simulate_portfolio,
     top_drawdowns,
 )
+
+
+class TestCalendarReturns:
+    MONTHS = ["2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"]
+    RETS = [0.05, 0.10, 0.05, 0.03, 0.04, 0.02, -0.0098]
+
+    def test_mtd_is_latest_month(self):
+        cal = blended_calendar_returns(self.MONTHS, self.RETS, "2026-05-30")
+        assert abs(cal.mtd_pct - (-0.98)) < 0.01
+
+    def test_since_inception_excludes_partial_start_month(self):
+        # Go-live 2026-05-30 → May's bar (mostly pre-inception) is excluded, so
+        # since-inception == the June return == MTD.
+        cal = blended_calendar_returns(self.MONTHS, self.RETS, "2026-05-30")
+        assert abs(cal.since_inception_pct - cal.mtd_pct) < 1e-9
+
+    def test_inception_at_month_start_includes_that_month(self):
+        cal = blended_calendar_returns(self.MONTHS, self.RETS, "2026-05-01")
+        # May (+2%) and June (-0.98%) compound: 1.02 * 0.9902 - 1.
+        assert abs(cal.since_inception_pct - ((1.02 * 0.9902 - 1) * 100)) < 0.01
+
+    def test_ytd_compounds_calendar_year_only(self):
+        cal = blended_calendar_returns(self.MONTHS, self.RETS, "2026-05-30")
+        eq = 1.0
+        for r in self.RETS[1:]:   # Jan..Jun (Dec 2025 excluded)
+            eq *= 1 + r
+        assert abs(cal.ytd_pct - (eq - 1) * 100) < 0.01
+
+    def test_empty(self):
+        cal = blended_calendar_returns([], [], "2026-01-01")
+        assert cal.mtd_pct is None and cal.ytd_pct is None and cal.since_inception_pct is None
+
+
+class TestComponentReturnSince:
+    def test_compounds_only_since_inception(self):
+        series = {"2026-04": 0.10, "2026-05": 0.02, "2026-06": -0.0098}
+        months = ["2026-04", "2026-05", "2026-06"]
+        # Inception end-of-May → only June counts.
+        assert abs(component_return_since(series, months, "2026-05-30") - (-0.98)) < 0.01
+        # No inception → all three compound.
+        full = (1.10 * 1.02 * 0.9902 - 1) * 100
+        assert abs(component_return_since(series, months, "") - full) < 0.01
+
+
+class TestRetsFromCum:
+    def test_inverse_of_cum_curve(self):
+        rets = [0.05, -0.02, 0.03]
+        cum = []
+        eq = 1.0
+        for r in rets:
+            eq *= 1 + r
+            cum.append(round((eq - 1) * 100, 4))
+        back = rets_from_cum(cum)
+        assert all(abs(a - b) < 1e-6 for a, b in zip(back, rets))
 
 
 class TestPricesToMonthlyReturns:
@@ -177,49 +237,203 @@ class TestOptimizePortfolio:
             out[f"{y:04d}-{m:02d}"] = v
         return out
 
-    def test_anticorrelated_diversifier_gets_weight(self):
+    def test_strategy_pinned_and_sleeve_fills_rest(self):
         n = 60
         strat = self._months([(0.03 if i % 2 == 0 else -0.005) for i in range(n)])
         anti = self._months([(-0.005 if i % 2 == 0 else 0.03) for i in range(n)])
-        opt = optimize_portfolio(strat, [("ANTI", anti)], objective="sharpe", max_total_etf=0.5)
+        opt = optimize_portfolio(strat, [("ANTI", anti)], core_pct=0.6, rebalance_band=0.1)
         assert opt.assets == ["Strategy", "ANTI"]
-        assert abs(sum(opt.weights) - 1.0) < 1e-6
-        # The anti-correlated sleeve cuts vol hard → it takes meaningful weight
-        # (up to the cap) and Sharpe rises vs strategy-alone.
-        assert opt.weights[1] > 0.1
-        assert opt.after.sharpe > opt.before.sharpe
+        # No bonds: strategy = core (0.6); the ETF sleeve gets the rest (0.4).
+        assert math.isclose(opt.weights[0], 0.6, abs_tol=1e-6)
+        assert math.isclose(sum(opt.weights[1:]), 0.4, abs_tol=1e-6)
 
-    def test_useless_etf_stays_near_zero(self):
-        rng = np.random.default_rng(1)
-        n = 60
-        strat = self._months((0.02 + 0.01 * rng.standard_normal(n)).tolist())
-        junk = self._months((0.06 * rng.standard_normal(n)).tolist())  # zero-mean noise
-        opt = optimize_portfolio(strat, [("JUNK", junk)], objective="sharpe", max_total_etf=0.5)
-        assert opt.weights[1] < 0.1
-        assert opt.after.sharpe >= opt.before.sharpe - 1e-9   # never worse than baseline
-
-    def test_etf_sleeve_cap_respected(self):
+    def test_optimizer_prefers_better_sleeve_etf(self):
+        # ANTI diversifies (anti-correlated); SAME is a clone of the strategy
+        # (no benefit). The sleeve should tilt toward ANTI.
         n = 60
         strat = self._months([(0.03 if i % 2 == 0 else -0.005) for i in range(n)])
         anti = self._months([(-0.005 if i % 2 == 0 else 0.03) for i in range(n)])
-        opt = optimize_portfolio(strat, [("ANTI", anti)], max_total_etf=0.2)
-        assert sum(opt.weights[1:]) <= 0.2 + 1e-6
+        same = self._months([(0.03 if i % 2 == 0 else -0.005) for i in range(n)])
+        opt = optimize_portfolio(strat, [("ANTI", anti), ("SAME", same)], core_pct=0.4)
+        wmap = dict(zip(opt.assets, opt.weights))
+        assert wmap["ANTI"] > wmap["SAME"]
+
+    def test_bonds_share_the_core(self):
+        # Strategy + BOND form the 0.6 core; the ETF sleeve is 0.4.
+        n = 60
+        strat = self._months([(0.03 if i % 2 == 0 else -0.005) for i in range(n)])
+        bond = self._months([0.004] * n)
+        etf = self._months([(0.02 if i % 3 == 0 else -0.003) for i in range(n)])
+        opt = optimize_portfolio(strat, [("ETF", etf)], bonds=[("BOND", bond)], core_pct=0.6)
+        assert opt.assets == ["Strategy", "BOND", "ETF"]
+        # Core (strategy + bond) sums to 0.6; the diversifier sleeve to 0.4.
+        assert math.isclose(opt.weights[0] + opt.weights[1], 0.6, abs_tol=1e-6)
+        assert math.isclose(opt.weights[2], 0.4, abs_tol=1e-6)
+
+    def test_all_bond_when_strategy_is_bad(self):
+        # A high-vol, zero-mean strategy vs a steady positive bond: for Sharpe
+        # the core should tilt heavily to the bond (strategy share near 0).
+        rng = np.random.default_rng(2)
+        n = 60
+        strat = self._months((0.08 * rng.standard_normal(n)).tolist())   # junk
+        bond = self._months([0.005] * n)                                  # steady
+        etf = self._months([0.004] * n)
+        opt = optimize_portfolio(strat, [("ETF", etf)], bonds=[("BOND", bond)], core_pct=0.6)
+        assert opt.weights[0] < opt.weights[1]   # bond > strategy within the core
+
+    def test_rebalance_fires_when_core_grows(self):
+        # Strategy compounds fast, ETF flat → the core drifts up past the band.
+        n = 48
+        strat = self._months([0.08] * n)   # +8%/mo
+        flat = self._months([0.0] * n)
+        opt = optimize_portfolio(strat, [("FLAT", flat)], core_pct=0.6, rebalance_band=0.1)
+        assert opt.rebalance_count > 0
+        assert opt.rebalance_freq_months is not None and opt.rebalance_freq_months > 0
+        assert len(opt.rebalance_dates) == opt.rebalance_count
+
+    def test_core_100_is_strategy_alone(self):
+        n = 24
+        strat = self._months([(0.03 if i % 2 == 0 else -0.01) for i in range(n)])
+        etf = self._months([0.01] * n)
+        opt = optimize_portfolio(strat, [("X", etf)], core_pct=1.0)
+        assert math.isclose(opt.weights[0], 1.0, abs_tol=1e-9)
+        assert opt.rebalance_count == 0
 
     def test_common_window_and_limited_by(self):
         # Strategy spans 2010-01.., ETF starts a year later -> window starts at
         # the ETF's first month and `limited_by` names it.
         strat = self._months([0.01] * 36, start_idx=0)            # 2010-01 .. 2012-12
         etf = self._months([0.02] * 24, start_idx=12)             # 2011-01 .. 2012-12
-        opt = optimize_portfolio(strat, [("LATE", etf)], max_total_etf=0.5)
+        opt = optimize_portfolio(strat, [("LATE", etf)], core_pct=0.6)
         assert opt.period_from == "2011-01"
         assert opt.months == 24
         assert opt.limited_by == "LATE"
 
     def test_no_etfs_is_strategy_only(self):
         strat = self._months([0.01, 0.02, -0.01, 0.03])
-        opt = optimize_portfolio(strat, [], max_total_etf=0.5)
+        opt = optimize_portfolio(strat, [], core_pct=0.6)
         assert opt.weights == [1.0]
+        assert opt.rebalance_count == 0
         assert opt.after.sharpe == opt.before.sharpe
+
+
+class TestSimulatePortfolio:
+    def _months(self, vals, start_idx=0):
+        out = {}
+        for i, v in enumerate(vals):
+            idx = start_idx + i
+            y, m = 2010 + idx // 12, idx % 12 + 1
+            out[f"{y:04d}-{m:02d}"] = v
+        return out
+
+    def test_normalizes_and_holds_target(self):
+        n = 36
+        strat = self._months([0.01] * n)
+        gld = self._months([0.0] * n)
+        # 60/20/20 but passed as 6/2/2 — should normalize. Flat returns → no drift.
+        opt = simulate_portfolio([
+            ("Strategy", strat, 6, 0.10),
+            ("GLD", gld, 2, 0.10),
+            ("UUP", self._months([0.0] * n), 2, 0.10),
+        ])
+        assert opt.assets == ["Strategy", "GLD", "UUP"]
+        assert math.isclose(opt.weights[0], 0.6, abs_tol=1e-6)
+        assert math.isclose(opt.weights[1], 0.2, abs_tol=1e-6)
+        assert opt.rebalance_count == 0   # nothing drifts
+
+    def test_rebalances_on_band_breach(self):
+        # Strategy compounds fast vs flat funds → its weight breaches the band.
+        n = 48
+        strat = self._months([0.08] * n)
+        flat = self._months([0.0] * n)
+        opt = simulate_portfolio([
+            ("Strategy", strat, 60, 0.10),
+            ("GLD", flat, 40, 0.10),
+        ])
+        assert opt.rebalance_count > 0
+        # `after` is the rebalanced portfolio; `before` is strategy alone.
+        assert opt.before.ann_return is not None and opt.after.ann_return is not None
+
+    def test_zero_band_never_triggers(self):
+        n = 24
+        strat = self._months([0.05] * n)
+        flat = self._months([0.0] * n)
+        opt = simulate_portfolio([("Strategy", strat, 60, 0.0), ("X", flat, 40, 0.0)])
+        assert opt.rebalance_count == 0
+
+
+class TestPortfolioCurrentState:
+    def _months(self, vals, start_idx=0):
+        out = {}
+        for i, v in enumerate(vals):
+            idx = start_idx + i
+            y, m = 2010 + idx // 12, idx % 12 + 1
+            out[f"{y:04d}-{m:02d}"] = v
+        return out
+
+    def test_no_drift_no_rebalance(self):
+        n = 12
+        st = portfolio_current_state([
+            ("Strategy", self._months([0.0] * n), 60, 0.10),
+            ("GLD", self._months([0.0] * n), 40, 0.10),
+        ])
+        assert st.enough_data and not st.rebalance_needed
+        assert math.isclose(st.holdings[0].current, 0.6, abs_tol=1e-6)
+        assert st.as_of == self._months([0.0] * n).popitem()[0] or st.as_of is not None
+
+    def test_drift_breaches_and_flags_rebalance(self):
+        # Strategy keeps outgrowing the flat fund → on the final month it's drifted
+        # past its band, so a rebalance is flagged.
+        n = 6
+        st = portfolio_current_state([
+            ("Strategy", self._months([0.2] * n), 60, 0.10),
+            ("GLD", self._months([0.0] * n), 40, 0.10),
+        ])
+        assert st.enough_data
+        # Strategy is the breached one (drifted above 70%).
+        assert st.holdings[0].current > 0.70
+        assert st.holdings[0].breached and st.rebalance_needed
+
+    def test_empty_when_no_overlap(self):
+        st = portfolio_current_state([
+            ("Strategy", {"2010-01": 0.01}, 60, 0.10),
+            ("GLD", {"2020-01": 0.01}, 40, 0.10),
+        ])
+        assert not st.enough_data
+
+
+class TestSimulateRebalance:
+    CORE = np.array([0])   # core = strategy only (no bonds) in these tests
+
+    def test_triggers_when_core_grows_above_band(self):
+        months = [f"2020-{m:02d}" for m in range(1, 13)]
+        R = np.array([[0.2, 0.0]] * 12)   # strategy +20%/mo, ETF flat → core drifts up
+        rets, rebals = _simulate_rebalance(months, R, np.array([0.6, 0.4]), self.CORE, 0.6, 0.1)
+        assert len(rets) == 12
+        assert len(rebals) >= 1
+
+    def test_triggers_when_core_drops_below_band(self):
+        months = [f"2020-{m:02d}" for m in range(1, 13)]
+        R = np.array([[-0.2, 0.0]] * 12)  # strategy -20%/mo, ETF flat → core drifts down
+        _rets, rebals = _simulate_rebalance(months, R, np.array([0.6, 0.4]), self.CORE, 0.6, 0.1)
+        assert len(rebals) >= 1
+
+    def test_no_trigger_inside_band(self):
+        months = ["2020-01", "2020-02"]
+        R = np.array([[0.0, 0.0], [0.0, 0.0]])   # no drift → stays at center
+        rets, rebals = _simulate_rebalance(months, R, np.array([0.6, 0.4]), self.CORE, 0.6, 0.1)
+        assert rebals == []
+        assert all(abs(x) < 1e-12 for x in rets)
+
+    def test_core_spans_strategy_plus_bonds(self):
+        # Core = strategy + bond (indices 0,1); ETF index 2 is the sleeve.
+        # Strategy+bond grow, ETF flat → the COMBINED core drifts above the band.
+        months = [f"2020-{m:02d}" for m in range(1, 13)]
+        R = np.array([[0.2, 0.2, 0.0]] * 12)
+        _rets, rebals = _simulate_rebalance(
+            months, R, np.array([0.3, 0.3, 0.4]), np.array([0, 1]), 0.6, 0.1
+        )
+        assert len(rebals) >= 1
 
 
 class TestAnnualBreakdown:

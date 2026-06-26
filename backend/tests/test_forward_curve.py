@@ -10,11 +10,15 @@ it, on the backtest's cumulative-return scale.
 """
 from __future__ import annotations
 
+from datetime import date
+
 import pandas as pd
 
+import routers._schedule_hydration as _H
 import routers.momentum.backtest_crud as _bc
 from routers._schedule_hydration import (
     _open_basket_live_curve,
+    _returns_from_backtest,
     _splice_snapshot_tail,
     _walk_snapshot_curve,
 )
@@ -72,20 +76,23 @@ def test_splice_empty_inputs():
 
 
 def test_splice_grafts_whole_live_curve_from_its_start():
-    # Backtest ends 2026-06-02 at +10%. The live curve begins at 06-02 (its
-    # first day = the cutover) and runs to 06-12 with a +4% move. The whole
-    # live curve grafts on, rebased to continue from the +10% backtest level.
+    # The live curve begins ON 2026-06-02 (its first day = the cutover) and runs
+    # to 06-12 with a +4% move. The live basket ENTERS on the cutover day with no
+    # return yet, so it rebases to the last backtest point STRICTLY BEFORE the
+    # cutover (05-01, +5%) — the cutover-day backtest point is superseded by the
+    # live curve, so its move must NOT be folded in (that's what would make MTD
+    # disagree with the holdings open-period return).
     bt = [("2026-05-01", 5.0), ("2026-06-02", 10.0)]
     snap = [
-        ("2026-06-02", 1.00),    # cutover; rebased to the backtest's +10%
+        ("2026-06-02", 1.00),    # cutover; rebased to the prior backtest close (+5%)
         ("2026-06-12", 1.04),    # +4% vs the cutover
     ]
     cutover, tail = _splice_snapshot_tail(bt, snap)
     assert cutover == "2026-06-02"
     assert [p["date"] for p in tail] == ["2026-06-02", "2026-06-12"]
-    assert abs(tail[0]["cumulative_return_pct"] - 10.0) < 1e-6
-    # 1.10 * (1.04 / 1.00) - 1 = 0.144 → 14.4%
-    assert abs(tail[1]["cumulative_return_pct"] - 14.4) < 1e-6
+    assert abs(tail[0]["cumulative_return_pct"] - 5.0) < 1e-6
+    # 1.05 * (1.04 / 1.00) - 1 = 0.092 → +9.2%
+    assert abs(tail[1]["cumulative_return_pct"] - 9.2) < 1e-6
 
 
 def test_splice_anchors_at_first_point_when_curve_starts_after_backtest():
@@ -122,6 +129,44 @@ def test_splice_live_replaces_overlapping_backtest_tail():
     # 1.05 * 1.04 - 1 = 0.092 → +9.2%. The June calendar move off this curve is
     # 1.092 / 1.05 - 1 = +4% — exactly the held basket's period return.
     assert abs(tail[-1]["cumulative_return_pct"] - 9.2) < 1e-6
+
+
+def test_splice_anchors_before_cutover_with_dense_backtest():
+    # REGRESSION (MTD/YTD vs holdings open-period mismatch): a DENSE daily
+    # backtest curve has a point ON the cutover (go-live) day. The live basket
+    # ENTERS that day with no return yet, so it must continue from the level the
+    # DAY BEFORE — not the cutover-day backtest close (which would fold that
+    # day's backtest move into MTD/YTD).
+    bt = [
+        ("2026-05-29", 10.0),
+        ("2026-05-30", 11.0),
+        ("2026-06-01", 13.0),   # backtest's go-live-day point (a +~1.8% day)
+        ("2026-06-02", 14.0),
+    ]
+    snap = [("2026-06-01", 1.00), ("2026-06-25", 0.9902)]   # basket -0.98% over June
+    cutover, tail = _splice_snapshot_tail(bt, snap)
+    assert cutover == "2026-06-01"
+    t = {p["date"]: p["cumulative_return_pct"] for p in tail}
+    # Anchored at 05-30 (+11%), NOT the cutover-day 06-01 (+13%).
+    assert abs(t["2026-06-01"] - 11.0) < 1e-6
+    # 06-25 = 1.11 * 0.9902 - 1 → +9.91%.
+    assert abs(t["2026-06-25"] - ((1.11 * 0.9902 - 1) * 100)) < 1e-4
+
+
+def test_mtd_matches_open_period_return_with_dense_backtest(monkeypatch):
+    # End-to-end: with a dense backtest, the MTD off `_returns_from_backtest`
+    # must equal the live basket's June return (the holdings open-period figure,
+    # -0.98%) — NOT inflated by the backtest's go-live-day move.
+    bt = [("2026-05-29", 10.0), ("2026-05-30", 11.0), ("2026-06-01", 13.0), ("2026-06-25", 14.0)]
+    snap = [("2026-06-01", 1.00), ("2026-06-25", 0.9902)]
+    cutover, tail = _splice_snapshot_tail(bt, snap)
+    kept = [(d, c) for d, c in bt if d < cutover]
+    curve = kept + [(p["date"], p["cumulative_return_pct"]) for p in tail]
+    monkeypatch.setattr(_H, "_extended_curve", lambda rid, snaps: curve)
+    r = _returns_from_backtest(1, "2026-06-01", date(2026, 6, 25), [])
+    assert abs(r["mtd_return_pct"] - (-0.98)) < 0.01
+    # YTD anchors before Jan 1 → curve start (+10%): 1.0991/1.10 - 1 = -0.08%.
+    assert r["ytd_return_pct"] is not None
 
 
 def test_splice_end_to_end_from_snapshots():

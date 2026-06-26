@@ -2,6 +2,7 @@
 
 import SmartPipelineActivity from './schedule/SmartPipelineActivity';
 import ScheduledStrategiesCard from './schedule/ScheduledStrategiesCard';
+import DiversifiedPortfoliosCard from './schedule/DiversifiedPortfoliosCard';
 import { useScheduledStrategies } from './schedule/useScheduledStrategies';
 
 // Two sections only:
@@ -45,6 +46,11 @@ export default function Schedule() {
 
         {/* Scheduled strategies — the user's pinned strategies. */}
         <ScheduledStrategiesCard sched={sched} />
+
+        {/* Diversified portfolios — live overlays (strategy + ETFs + bands)
+            built on a scheduled strategy. Its own lane; created from the
+            diversifier page. Renders nothing when there are none. */}
+        <DiversifiedPortfoliosCard />
 
         {/* Smart pipeline activity — the automation that supports them:
             what's running now, when the next daily tick fires, and the

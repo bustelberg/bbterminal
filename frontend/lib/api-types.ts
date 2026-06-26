@@ -2924,6 +2924,71 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/momentum/diversifier/portfolios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Portfolios
+         * @description List saved diversified portfolios (newest first). `scheduled=true` →
+         *     only live-tracked ones (a scheduled-strategy base); `false` → only backtest-
+         *     based; omit for all.
+         */
+        get: operations["list_portfolios_api_momentum_diversifier_portfolios_get"];
+        put?: never;
+        /**
+         * Save Portfolio
+         * @description Persist a named diversified portfolio (overlay over a base backtest or a
+         *     live scheduled strategy).
+         */
+        post: operations["save_portfolio_api_momentum_diversifier_portfolios_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/momentum/diversifier/portfolios/{portfolio_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Portfolio */
+        delete: operations["delete_portfolio_api_momentum_diversifier_portfolios__portfolio_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/momentum/diversifier/portfolios/{portfolio_id}/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Portfolio State
+         * @description A saved portfolio's CURRENT drifted weights + whether a rebalance is due,
+         *     plus the full backtest card (before/after) over the common window.
+         */
+        get: operations["portfolio_state_api_momentum_diversifier_portfolios__portfolio_id__state_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/momentum/diversifier/resolve-name": {
         parameters: {
             query?: never;
@@ -2941,6 +3006,29 @@ export interface paths {
         get: operations["resolve_name_api_momentum_diversifier_resolve_name_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/momentum/diversifier/simulate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Simulate
+         * @description Backtest a HAND-SPECIFIED portfolio: fixed target weights + a per-holding
+         *     rebalance band (reset all to target when ANY holding drifts outside its
+         *     band). Returns the same shape as /optimize — before (strategy alone) vs
+         *     after (the rebalanced manual portfolio) — over the common window.
+         */
+        post: operations["simulate_api_momentum_diversifier_simulate_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3897,6 +3985,11 @@ export interface components {
     schemas: {
         /** AssetWeight */
         AssetWeight: {
+            /**
+             * Group
+             * @default etf
+             */
+            group?: string;
             /** Label */
             label: string;
             /** Name */
@@ -4258,6 +4351,25 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** HoldingStateInfo */
+        HoldingStateInfo: {
+            /** Band Pct */
+            band_pct: number;
+            /** Breached */
+            breached: boolean;
+            /** Current Pct */
+            current_pct: number;
+            /** Group */
+            group: string;
+            /** Label */
+            label: string;
+            /** Name */
+            name?: string | null;
+            /** Return Since Inception Pct */
+            return_since_inception_pct?: number | null;
+            /** Target Pct */
+            target_pct: number;
+        };
         /** ImpersonateRequest */
         ImpersonateRequest: {
             /** Target User Id */
@@ -4311,15 +4423,25 @@ export interface components {
             /** Benchmark Ids */
             benchmark_ids: number[];
             /**
-             * Max Total Etf Weight Pct
-             * @default 50
+             * Bond Ids
+             * @default []
              */
-            max_total_etf_weight_pct?: number;
+            bond_ids?: number[];
+            /**
+             * Core Weight Pct
+             * @default 60
+             */
+            core_weight_pct?: number;
             /**
              * Objective
              * @default sharpe
              */
             objective?: string;
+            /**
+             * Rebalance Band Pct
+             * @default 10
+             */
+            rebalance_band_pct?: number;
             /**
              * Risk Free Rate Pct
              * @default 0
@@ -4350,6 +4472,18 @@ export interface components {
             period_from?: string | null;
             /** Period To */
             period_to?: string | null;
+            /**
+             * Rebalance Count
+             * @default 0
+             */
+            rebalance_count?: number;
+            /**
+             * Rebalance Dates
+             * @default []
+             */
+            rebalance_dates?: string[];
+            /** Rebalance Freq Months */
+            rebalance_freq_months?: number | null;
             /** Weights */
             weights: components["schemas"]["AssetWeight"][];
             /** Ytd After */
@@ -4373,6 +4507,50 @@ export interface components {
             company_id: number;
             /** Weight */
             weight?: number | null;
+        };
+        /** PortfolioSaveRequest */
+        PortfolioSaveRequest: {
+            /** Backtest Run Id */
+            backtest_run_id?: number | null;
+            /** Holdings */
+            holdings: components["schemas"]["SimHolding"][];
+            /** Name */
+            name: string;
+            /**
+             * Risk Free Rate Pct
+             * @default 0
+             */
+            risk_free_rate_pct?: number;
+            /** Scheduled Strategy Id */
+            scheduled_strategy_id?: number | null;
+            /** Variant Key */
+            variant_key?: string | null;
+        };
+        /** PortfolioStateResponse */
+        PortfolioStateResponse: {
+            /** As Of */
+            as_of?: string | null;
+            /** Enough Data */
+            enough_data: boolean;
+            /** Holdings */
+            holdings: components["schemas"]["HoldingStateInfo"][];
+            /** Id */
+            id: number;
+            /** Inception Date */
+            inception_date?: string | null;
+            /** Last Rebalance */
+            last_rebalance?: string | null;
+            /** Mtd Return Pct */
+            mtd_return_pct?: number | null;
+            /** Name */
+            name: string;
+            /** Rebalance Needed */
+            rebalance_needed: boolean;
+            result: components["schemas"]["OptimizeResponse"];
+            /** Since Inception Pct */
+            since_inception_pct?: number | null;
+            /** Ytd Return Pct */
+            ytd_return_pct?: number | null;
         };
         /** PortfolioStats */
         PortfolioStats: {
@@ -4442,6 +4620,35 @@ export interface components {
             universe_daily_records?: unknown[] | null;
             /** Variants */
             variants?: unknown[] | null;
+        };
+        /** SavedPortfolio */
+        SavedPortfolio: {
+            /** Backtest Run Id */
+            backtest_run_id?: number | null;
+            /** Created At */
+            created_at: string;
+            /** Holdings */
+            holdings: components["schemas"]["SimHolding"][];
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /**
+             * Risk Free Rate Pct
+             * @default 0
+             */
+            risk_free_rate_pct?: number;
+            /**
+             * Scheduled
+             * @default false
+             */
+            scheduled?: boolean;
+            /** Scheduled Strategy Id */
+            scheduled_strategy_id?: number | null;
+            /** Strategy Name */
+            strategy_name?: string | null;
+            /** Variant Key */
+            variant_key?: string | null;
         };
         /**
          * ScheduledStrategyCreate
@@ -4513,6 +4720,32 @@ export interface components {
             } | null;
             /** Universe Label */
             universe_label?: string | null;
+        };
+        /** SimHolding */
+        SimHolding: {
+            /**
+             * Band Pct
+             * @default 10
+             */
+            band_pct?: number;
+            /** Benchmark Id */
+            benchmark_id?: number | null;
+            /** Weight Pct */
+            weight_pct: number;
+        };
+        /** SimulateRequest */
+        SimulateRequest: {
+            /** Backtest Run Id */
+            backtest_run_id: number;
+            /** Holdings */
+            holdings: components["schemas"]["SimHolding"][];
+            /**
+             * Risk Free Rate Pct
+             * @default 0
+             */
+            risk_free_rate_pct?: number;
+            /** Variant Key */
+            variant_key?: string | null;
         };
         /** StrategyStats */
         StrategyStats: {
@@ -8435,6 +8668,132 @@ export interface operations {
             };
         };
     };
+    list_portfolios_api_momentum_diversifier_portfolios_get: {
+        parameters: {
+            query?: {
+                scheduled?: boolean | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedPortfolio"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_portfolio_api_momentum_diversifier_portfolios_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortfolioSaveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedPortfolio"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_portfolio_api_momentum_diversifier_portfolios__portfolio_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    portfolio_state_api_momentum_diversifier_portfolios__portfolio_id__state_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioStateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     resolve_name_api_momentum_diversifier_resolve_name_get: {
         parameters: {
             query: {
@@ -8453,6 +8812,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResolveNameResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    simulate_api_momentum_diversifier_simulate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SimulateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OptimizeResponse"];
                 };
             };
             /** @description Validation Error */

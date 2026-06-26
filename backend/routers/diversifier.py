@@ -100,12 +100,19 @@ class ResolveNameResponse(BaseModel):
 
 class OptimizeRequest(BaseModel):
     backtest_run_id: int
+    # Diversifier ETFs (gold/USD/…) — the "sleeve" group.
     benchmark_ids: list[int]
+    # Bonds — share the CORE bucket with the strategy. Default none.
+    bond_ids: list[int] = []
     variant_key: str | None = None
     risk_free_rate_pct: float = 0.0
     objective: str = "sharpe"
-    # Cap on the TOTAL ETF sleeve (strategy keeps the rest). 100 = unconstrained.
-    max_total_etf_weight_pct: float = 50.0
+    # Core bucket (strategy + bonds) weight; the diversifier sleeve gets the
+    # rest. 100 = no diversifier sleeve (strategy + bonds are the whole book).
+    core_weight_pct: float = 60.0
+    # Symmetric rebalance band: reset to target when the CORE total drifts more
+    # than this many points from its start weight (above OR below).
+    rebalance_band_pct: float = 10.0
 
 
 class PortfolioStats(BaseModel):
@@ -121,6 +128,7 @@ class AssetWeight(BaseModel):
     label: str            # "Strategy" or the ETF ticker
     name: str | None = None
     weight: float         # 0..1
+    group: str = "etf"    # "strategy" | "bond" | "etf"
 
 
 class CurvePoint(BaseModel):
@@ -167,6 +175,9 @@ class OptimizeResponse(BaseModel):
     annual: list[YearStat]            # per-year return + vol, before/after
     ytd_before: float | None = None   # current-year return, strategy alone
     ytd_after: float | None = None    # current-year return, optimized
+    rebalance_count: int = 0          # # of strategy-trim rebalances over the window
+    rebalance_dates: list[str] = []   # months a rebalance fired
+    rebalance_freq_months: float | None = None   # avg months between rebalances
 
 
 class BacktestStats(BaseModel):
@@ -358,6 +369,70 @@ async def correlation(req: CorrelationRequest):
     return CorrelationResponse(strategy=strategy_stats, results=results)
 
 
+def _build_optimize_response(opt, objective: str, group_of, name_of) -> OptimizeResponse:
+    """Map a PortfolioOptimization (from the optimizer OR the manual backtester)
+    to the wire OptimizeResponse. `group_of(label)`/`name_of(label)` resolve the
+    per-asset group + display name."""
+    def _stats(s) -> PortfolioStats:
+        return PortfolioStats(
+            ann_return=s.ann_return, ann_vol=s.ann_vol, sharpe=s.sharpe, sortino=s.sortino,
+            median_month=s.median_month, win_rate=s.win_rate,
+        )
+
+    weights = [
+        AssetWeight(
+            label=label,
+            name=None if label == "Strategy" else name_of(label),
+            weight=w,
+            group=group_of(label),
+        )
+        for label, w in zip(opt.assets, opt.weights)
+    ]
+    curve = [
+        CurvePoint(date=m, before=b, after=a)
+        for m, b, a in zip(opt.curve_months, opt.curve_before, opt.curve_after)
+    ]
+
+    def _dds(items) -> list[DrawdownInfo]:
+        return [
+            DrawdownInfo(
+                depth_pct=d.depth_pct, peak_date=d.peak_date, trough_date=d.trough_date,
+                recovery_date=d.recovery_date, length_months=d.length_months,
+            )
+            for d in items
+        ]
+
+    return OptimizeResponse(
+        objective=objective,
+        months=opt.months,
+        period_from=opt.period_from,
+        period_to=opt.period_to,
+        limited_by=opt.limited_by,
+        weights=weights,
+        before=_stats(opt.before),
+        after=_stats(opt.after),
+        curve=curve,
+        drawdowns_before=_dds(opt.drawdowns_before),
+        drawdowns_after=_dds(opt.drawdowns_after),
+        annual=[
+            YearStat(
+                year=y.year, return_before=y.return_before, return_after=y.return_after,
+                vol_before=y.vol_before, vol_after=y.vol_after,
+                months=[
+                    MonthStatInfo(month=m.month, return_before=m.return_before, return_after=m.return_after)
+                    for m in y.months
+                ],
+            )
+            for y in opt.annual
+        ],
+        ytd_before=opt.ytd_before,
+        ytd_after=opt.ytd_after,
+        rebalance_count=opt.rebalance_count,
+        rebalance_dates=opt.rebalance_dates,
+        rebalance_freq_months=opt.rebalance_freq_months,
+    )
+
+
 @router.post("/api/momentum/diversifier/optimize", response_model=OptimizeResponse)
 async def optimize(req: OptimizeRequest):
     """Find the long-only weights across the strategy + the selected ETFs that
@@ -382,91 +457,393 @@ async def optimize(req: OptimizeRequest):
         raise HTTPException(422, "The selected backtest has fewer than 2 completed months.")
 
     rf = req.risk_free_rate_pct / 100.0
-    cap = max(0.0, min(req.max_total_etf_weight_pct, 100.0)) / 100.0
+    core_pct = max(0.0, min(req.core_weight_pct, 100.0)) / 100.0
+    rebalance_band = max(0.0, min(req.rebalance_band_pct, 100.0)) / 100.0
 
+    all_ids = list(dict.fromkeys([*req.benchmark_ids, *req.bond_ids]))
     meta_resp = await asyncio.to_thread(
         lambda: supabase.table("benchmark")
         .select("benchmark_id, ticker, name")
-        .in_("benchmark_id", req.benchmark_ids or [-1])
+        .in_("benchmark_id", all_ids or [-1])
         .execute()
     )
     meta = {m["benchmark_id"]: m for m in (meta_resp.data or [])}
 
-    # Preserve the caller's selection order; label series by ticker.
-    etf_series: list[tuple[str, dict]] = []
     ticker_to_name: dict[str, str] = {"Strategy": await _run_name(req.backtest_run_id)}
-    for bid in req.benchmark_ids:
-        m = meta.get(bid)
-        if not m:
-            continue
-        prices = await _load_benchmark_prices(bid)
-        etf_series.append((m["ticker"], div.prices_to_monthly_returns(prices)))
-        ticker_to_name[m["ticker"]] = m["name"]
+    bond_tickers: set[str] = set()
+
+    async def _series_for(ids: list[int], is_bond: bool) -> list[tuple[str, dict]]:
+        out: list[tuple[str, dict]] = []
+        for bid in ids:
+            m = meta.get(bid)
+            if not m:
+                continue
+            prices = await _load_benchmark_prices(bid)
+            out.append((m["ticker"], div.prices_to_monthly_returns(prices)))
+            ticker_to_name[m["ticker"]] = m["name"]
+            if is_bond:
+                bond_tickers.add(m["ticker"])
+        return out
+
+    etf_series = await _series_for(req.benchmark_ids, is_bond=False)
+    bond_series = await _series_for(req.bond_ids, is_bond=True)
 
     opt = div.optimize_portfolio(
-        strategy_returns, etf_series, rf_annual=rf, objective=req.objective, max_total_etf=cap,
+        strategy_returns, etf_series, bonds=bond_series, rf_annual=rf, objective=req.objective,
+        core_pct=core_pct, rebalance_band=rebalance_band,
     )
 
-    weights = [
-        AssetWeight(
-            label=label,
-            name=None if label == "Strategy" else ticker_to_name.get(label),
-            weight=w,
+    def _group(label: str) -> str:
+        if label == "Strategy":
+            return "strategy"
+        return "bond" if label in bond_tickers else "etf"
+
+    return _build_optimize_response(opt, req.objective, _group, ticker_to_name.get)
+
+
+class SimHolding(BaseModel):
+    benchmark_id: int | None = None   # None = the strategy
+    weight_pct: float                 # target weight (need not sum to 100 — normalized)
+    band_pct: float = 10.0            # rebalance when it drifts ± this from target
+
+
+class SimulateRequest(BaseModel):
+    backtest_run_id: int
+    variant_key: str | None = None
+    risk_free_rate_pct: float = 0.0
+    holdings: list[SimHolding]        # include the strategy (benchmark_id = null)
+
+
+@router.post("/api/momentum/diversifier/simulate", response_model=OptimizeResponse)
+async def simulate(req: SimulateRequest):
+    """Backtest a HAND-SPECIFIED portfolio: fixed target weights + a per-holding
+    rebalance band (reset all to target when ANY holding drifts outside its
+    band). Returns the same shape as /optimize — before (strategy alone) vs
+    after (the rebalanced manual portfolio) — over the common window."""
+    result = await asyncio.to_thread(load_backtest_result_sync, req.backtest_run_id)
+    if not result:
+        raise HTTPException(404, "Backtest result not available (missing run or its result blob).")
+
+    _summary, monthly, ambiguous = _select_scope(result, req.variant_key)
+    if ambiguous is not None:
+        raise HTTPException(
+            400,
+            detail={"error": "This backtest is a variant bundle; choose a variant.", "available_variant_keys": ambiguous},
         )
-        for label, w in zip(opt.assets, opt.weights)
-    ]
+    strategy_returns = div.monthly_records_to_returns(monthly)
+    if len(strategy_returns) < 2:
+        raise HTTPException(422, "The selected backtest has fewer than 2 completed months.")
 
-    def _stats(s) -> PortfolioStats:
-        return PortfolioStats(
-            ann_return=s.ann_return, ann_vol=s.ann_vol, sharpe=s.sharpe, sortino=s.sortino,
-            median_month=s.median_month, win_rate=s.win_rate,
+    rf = req.risk_free_rate_pct / 100.0
+    holdings, name_of = await _assemble_holdings(
+        strategy_returns, await _run_name(req.backtest_run_id), req.holdings
+    )
+    opt = div.simulate_portfolio(holdings, rf_annual=rf)
+    return _build_optimize_response(
+        opt, "manual", lambda lbl: "strategy" if lbl == "Strategy" else "etf", name_of.get,
+    )
+
+
+def _scheduled_strategy_monthly_returns(
+    strategy_id: int,
+) -> tuple[dict[str, float], str, str | None, str | None]:
+    """A scheduled strategy's LIVE monthly returns (backtest + live tail) + its
+    name + inception (go-live) date + as-of (latest priced) date. Reuses the
+    exact extended curve behind /api/admin/schedules/{id}/performance, converted
+    equity → monthly returns."""
+    from routers._schedule_hydration import _extended_curve  # noqa: PLC0415
+    from routers.admin import _load_strategy_row, _strategy_snapshots  # noqa: PLC0415
+
+    strat = _load_strategy_row(strategy_id)
+    run_id = strat.get("backtest_run_id")
+    name = strat.get("name") or f"Strategy #{strategy_id}"
+    inception = (
+        str(strat["start_date"])[:10] if strat.get("start_date")
+        else str(strat.get("created_at") or "")[:10]
+    ) or None
+    if not run_id:
+        return {}, name, inception, None
+    curve = _extended_curve(int(run_id), _strategy_snapshots(strategy_id))   # [(date, cum_pct)]
+    equity = [(d, 1.0 + c / 100.0) for d, c in curve]                        # equity series
+    as_of = curve[-1][0] if curve else None
+    return div.prices_to_monthly_returns(equity), name, inception, as_of
+
+
+async def _assemble_holdings(
+    strategy_returns: dict, strategy_name: str, sim_holdings: list,
+) -> tuple[list[tuple[str, dict, float, float]], dict[str, str]]:
+    """Build `[(label, monthly_returns, weight, band_fraction), …]` (strategy
+    first) + a label→name map from a list of SimHoldings. Loads each fund's
+    monthly returns from its benchmark prices."""
+    strat_h = next((h for h in sim_holdings if h.benchmark_id is None), None)
+    if strat_h is None:
+        raise HTTPException(422, "Include the strategy holding (benchmark_id = null) with a weight.")
+    fund_hs = [h for h in sim_holdings if h.benchmark_id is not None]
+    meta_resp = await asyncio.to_thread(
+        lambda: supabase.table("benchmark")
+        .select("benchmark_id, ticker, name")
+        .in_("benchmark_id", [h.benchmark_id for h in fund_hs] or [-1])
+        .execute()
+    )
+    meta = {m["benchmark_id"]: m for m in (meta_resp.data or [])}
+    name_of: dict[str, str] = {"Strategy": strategy_name}
+    holdings: list[tuple[str, dict, float, float]] = [
+        ("Strategy", strategy_returns, strat_h.weight_pct, max(0.0, strat_h.band_pct) / 100.0),
+    ]
+    for h in fund_hs:
+        m = meta.get(h.benchmark_id)
+        if not m:
+            continue
+        prices = await _load_benchmark_prices(h.benchmark_id)
+        holdings.append((m["ticker"], div.prices_to_monthly_returns(prices), h.weight_pct, max(0.0, h.band_pct) / 100.0))
+        name_of[m["ticker"]] = m["name"]
+    return holdings, name_of
+
+
+# --------------------------------------------------------------------------- #
+# Saved "diversified portfolios" — a named overlay (strategy + funds + bands)
+# built on top of a base backtest. Save / list / delete + an on-demand "state"
+# (current drifted weights + whether a rebalance is due).
+# --------------------------------------------------------------------------- #
+_PORTFOLIO_TABLE = "diversified_portfolio"
+
+
+class PortfolioSaveRequest(BaseModel):
+    name: str
+    # Exactly one base: a saved backtest (on-demand mode) OR a scheduled
+    # strategy (live-tracked, shows on /schedule).
+    backtest_run_id: int | None = None
+    scheduled_strategy_id: int | None = None
+    variant_key: str | None = None
+    risk_free_rate_pct: float = 0.0
+    holdings: list[SimHolding]   # include the strategy (benchmark_id = null)
+
+
+class SavedPortfolio(BaseModel):
+    id: int
+    name: str
+    backtest_run_id: int | None = None
+    scheduled_strategy_id: int | None = None
+    variant_key: str | None = None
+    risk_free_rate_pct: float = 0.0
+    holdings: list[SimHolding]
+    created_at: str
+    strategy_name: str | None = None   # resolved base name (backtest or strategy)
+    scheduled: bool = False            # live-tracked (scheduled_strategy_id set)?
+
+
+class HoldingStateInfo(BaseModel):
+    label: str
+    name: str | None = None
+    group: str
+    target_pct: float
+    current_pct: float
+    band_pct: float
+    breached: bool
+    # The sleeve's own compounded return over the since-inception window — so
+    # the strategy + each ETF's gain can be eyeballed against its price move.
+    return_since_inception_pct: float | None = None
+
+
+class PortfolioStateResponse(BaseModel):
+    id: int
+    name: str
+    enough_data: bool
+    as_of: str | None = None            # latest priced date (e.g. 2026-06-25)
+    inception_date: str | None = None   # go-live date the since-inception spans
+    last_rebalance: str | None = None
+    rebalance_needed: bool
+    # Blended-portfolio calendar returns (the same anchoring as a scheduled
+    # strategy's performance header).
+    mtd_return_pct: float | None = None
+    ytd_return_pct: float | None = None
+    since_inception_pct: float | None = None
+    holdings: list[HoldingStateInfo]    # only ACTUAL holdings (0%-target dropped)
+    result: OptimizeResponse   # full backtest card (before/after stats, curve, …)
+
+
+def _portfolio_row_to_model(row: dict, strategy_name: str | None = None) -> SavedPortfolio:
+    return SavedPortfolio(
+        id=row["id"],
+        name=row["name"],
+        backtest_run_id=row.get("backtest_run_id"),
+        scheduled_strategy_id=row.get("scheduled_strategy_id"),
+        variant_key=row.get("variant_key"),
+        risk_free_rate_pct=row.get("risk_free_rate_pct") or 0.0,
+        holdings=[SimHolding(**h) for h in (row.get("holdings") or [])],
+        created_at=str(row.get("created_at")),
+        strategy_name=strategy_name,
+        scheduled=row.get("scheduled_strategy_id") is not None,
+    )
+
+
+async def _scheduled_strategy_name(strategy_id: int) -> str | None:
+    resp = await asyncio.to_thread(
+        lambda: supabase.table("scheduled_strategy").select("name").eq("id", strategy_id).limit(1).execute()
+    )
+    return (resp.data or [{}])[0].get("name")
+
+
+async def _portfolio_strategy_returns(p: dict) -> tuple[dict, str, str | None, str | None]:
+    """A saved portfolio's strategy monthly returns + display name + inception
+    (go-live) + as-of date — from its scheduled strategy (LIVE) when set, else
+    its base backtest. For backtest mode inception is None (since-inception spans
+    the whole curve) and as-of is the last month."""
+    sid = p.get("scheduled_strategy_id")
+    if sid is not None:
+        returns, name, inception, as_of = await asyncio.to_thread(
+            _scheduled_strategy_monthly_returns, int(sid)
         )
+        if len(returns) < 2:
+            raise HTTPException(422, "The base scheduled strategy has too little live history yet.")
+        return returns, name, inception, as_of
+    rid = p.get("backtest_run_id")
+    if not rid:
+        raise HTTPException(422, "Portfolio has no base strategy.")
+    blob = await asyncio.to_thread(load_backtest_result_sync, int(rid))
+    if not blob:
+        raise HTTPException(404, "Base backtest result not available (missing run or blob).")
+    _summary, monthly, ambiguous = _select_scope(blob, p.get("variant_key"))
+    if ambiguous is not None:
+        raise HTTPException(422, "Base backtest is an unresolved variant bundle.")
+    returns = div.monthly_records_to_returns(monthly)
+    if len(returns) < 2:
+        raise HTTPException(422, "Base backtest has fewer than 2 completed months.")
+    return returns, await _run_name(int(rid)), None, (max(returns) if returns else None)
 
-    curve = [
-        CurvePoint(date=m, before=b, after=a)
-        for m, b, a in zip(opt.curve_months, opt.curve_before, opt.curve_after)
-    ]
 
-    def _dds(items) -> list[DrawdownInfo]:
-        return [
-            DrawdownInfo(
-                depth_pct=d.depth_pct,
-                peak_date=d.peak_date,
-                trough_date=d.trough_date,
-                recovery_date=d.recovery_date,
-                length_months=d.length_months,
+@router.post("/api/momentum/diversifier/portfolios", response_model=SavedPortfolio)
+async def save_portfolio(req: PortfolioSaveRequest):
+    """Persist a named diversified portfolio (overlay over a base backtest or a
+    live scheduled strategy)."""
+    if not any(h.benchmark_id is None for h in req.holdings):
+        raise HTTPException(422, "Include the strategy holding (benchmark_id = null).")
+    if (req.backtest_run_id is None) == (req.scheduled_strategy_id is None):
+        raise HTTPException(422, "Provide exactly one of backtest_run_id or scheduled_strategy_id.")
+    row = {
+        "name": req.name.strip() or "Untitled portfolio",
+        "backtest_run_id": req.backtest_run_id,
+        "scheduled_strategy_id": req.scheduled_strategy_id,
+        "variant_key": req.variant_key,
+        "risk_free_rate_pct": req.risk_free_rate_pct,
+        "holdings": [h.model_dump() for h in req.holdings],
+    }
+    resp = await asyncio.to_thread(lambda: supabase.table(_PORTFOLIO_TABLE).insert(row).execute())
+    if not resp.data:
+        raise HTTPException(500, "Failed to save portfolio")
+    name = (
+        await _scheduled_strategy_name(req.scheduled_strategy_id)
+        if req.scheduled_strategy_id is not None
+        else await _run_name(req.backtest_run_id)
+    )
+    return _portfolio_row_to_model(resp.data[0], strategy_name=name)
+
+
+@router.get("/api/momentum/diversifier/portfolios", response_model=list[SavedPortfolio])
+async def list_portfolios(scheduled: bool | None = None):
+    """List saved diversified portfolios (newest first). `scheduled=true` →
+    only live-tracked ones (a scheduled-strategy base); `false` → only backtest-
+    based; omit for all."""
+    resp = await asyncio.to_thread(
+        lambda: supabase.table(_PORTFOLIO_TABLE).select("*").order("created_at", desc=True).execute()
+    )
+    rows = resp.data or []
+    if scheduled is True:
+        rows = [r for r in rows if r.get("scheduled_strategy_id") is not None]
+    elif scheduled is False:
+        rows = [r for r in rows if r.get("scheduled_strategy_id") is None]
+
+    run_ids = list({r["backtest_run_id"] for r in rows if r.get("backtest_run_id")})
+    sched_ids = list({r["scheduled_strategy_id"] for r in rows if r.get("scheduled_strategy_id")})
+    bt_names: dict[int, str] = {}
+    sc_names: dict[int, str] = {}
+    if run_ids:
+        nresp = await asyncio.to_thread(
+            lambda: supabase.table("backtest_run").select("run_id, name").in_("run_id", run_ids).execute()
+        )
+        bt_names = {n["run_id"]: n["name"] for n in (nresp.data or [])}
+    if sched_ids:
+        sresp = await asyncio.to_thread(
+            lambda: supabase.table("scheduled_strategy").select("id, name").in_("id", sched_ids).execute()
+        )
+        sc_names = {n["id"]: n["name"] for n in (sresp.data or [])}
+
+    def _name(r: dict) -> str | None:
+        if r.get("scheduled_strategy_id") is not None:
+            return sc_names.get(r["scheduled_strategy_id"])
+        return bt_names.get(r.get("backtest_run_id"))
+
+    return [_portfolio_row_to_model(r, strategy_name=_name(r)) for r in rows]
+
+
+@router.delete("/api/momentum/diversifier/portfolios/{portfolio_id}")
+async def delete_portfolio(portfolio_id: int):
+    resp = await asyncio.to_thread(
+        lambda: supabase.table(_PORTFOLIO_TABLE).delete().eq("id", portfolio_id).execute()
+    )
+    if not resp.data:
+        raise HTTPException(404, "Portfolio not found")
+    return {"ok": True}
+
+
+@router.get(
+    "/api/momentum/diversifier/portfolios/{portfolio_id}/state",
+    response_model=PortfolioStateResponse,
+)
+async def portfolio_state(portfolio_id: int):
+    """A saved portfolio's CURRENT drifted weights + whether a rebalance is due,
+    plus the full backtest card (before/after) over the common window."""
+    presp = await asyncio.to_thread(
+        lambda: supabase.table(_PORTFOLIO_TABLE).select("*").eq("id", portfolio_id).limit(1).execute()
+    )
+    if not presp.data:
+        raise HTTPException(404, "Portfolio not found")
+    p = presp.data[0]
+
+    strategy_returns, strategy_name, inception, as_of = await _portfolio_strategy_returns(p)
+    sim_holdings = [SimHolding(**h) for h in (p.get("holdings") or [])]
+    holdings, name_of = await _assemble_holdings(strategy_returns, strategy_name, sim_holdings)
+
+    state = div.portfolio_current_state(holdings)
+    rf = (p.get("risk_free_rate_pct") or 0.0) / 100.0
+    opt = div.simulate_portfolio(holdings, rf_annual=rf)
+    result = _build_optimize_response(
+        opt, "manual", lambda lbl: "strategy" if lbl == "Strategy" else "etf", name_of.get,
+    )
+
+    # Blended-portfolio calendar returns off the realized (band-rebalanced) curve.
+    months = list(opt.curve_months or [])
+    after_rets = div.rets_from_cum(list(opt.curve_after or []))
+    cal = div.blended_calendar_returns(months, after_rets, inception or "")
+    # Each sleeve's own gain over the since-inception window (price-verification).
+    comp_ret = {label: div.component_return_since(series, months, inception or "") for label, series, *_ in holdings}
+
+    return PortfolioStateResponse(
+        id=p["id"],
+        name=p["name"],
+        enough_data=state.enough_data,
+        as_of=as_of or state.as_of,
+        inception_date=inception,
+        last_rebalance=state.last_rebalance,
+        rebalance_needed=state.rebalance_needed,
+        mtd_return_pct=cal.mtd_pct,
+        ytd_return_pct=cal.ytd_pct,
+        since_inception_pct=cal.since_inception_pct,
+        holdings=[
+            HoldingStateInfo(
+                label=h.label,
+                name=None if h.label == "Strategy" else name_of.get(h.label),
+                group="strategy" if h.label == "Strategy" else "etf",
+                target_pct=h.target * 100.0,
+                current_pct=h.current * 100.0,
+                band_pct=h.band * 100.0,
+                breached=h.breached,
+                return_since_inception_pct=comp_ret.get(h.label),
             )
-            for d in items
-        ]
-
-    return OptimizeResponse(
-        objective=req.objective,
-        months=opt.months,
-        period_from=opt.period_from,
-        period_to=opt.period_to,
-        limited_by=opt.limited_by,
-        weights=weights,
-        before=_stats(opt.before),
-        after=_stats(opt.after),
-        curve=curve,
-        drawdowns_before=_dds(opt.drawdowns_before),
-        drawdowns_after=_dds(opt.drawdowns_after),
-        annual=[
-            YearStat(
-                year=y.year,
-                return_before=y.return_before,
-                return_after=y.return_after,
-                vol_before=y.vol_before,
-                vol_after=y.vol_after,
-                months=[
-                    MonthStatInfo(month=m.month, return_before=m.return_before, return_after=m.return_after)
-                    for m in y.months
-                ],
-            )
-            for y in opt.annual
+            for h in state.holdings
+            if h.target > 1e-9          # only ACTUAL holdings (drop 0%-target sleeves)
         ],
-        ytd_before=opt.ytd_before,
-        ytd_after=opt.ytd_after,
+        result=result,
     )
 
 
