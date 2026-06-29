@@ -25,7 +25,7 @@ import asyncio
 import logging
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from deps import fetch_in_chunks, supabase
@@ -40,6 +40,14 @@ _log = logging.getLogger(__name__)
 router = APIRouter(tags=["schedule"])
 
 FREQUENCIES = ("daily", "weekly", "monthly", "bimonthly", "quarterly")
+
+
+def _is_admin(request: Request) -> bool:
+    """True when the verified caller is an admin (the auth middleware stamps
+    `request.state.auth`). Non-admins get the read-only, `user_visible`-only
+    view of the schedule."""
+    info = getattr(request.state, "auth", None) or {}
+    return info.get("role") == "admin"
 
 
 # ─── Pydantic shapes ──────────────────────────────────────────────
@@ -68,6 +76,9 @@ class ScheduledStrategyPatch(BaseModel):
     enabled: bool | None = None
     # Rename the strategy. Whitespace-trimmed; empty/blank is rejected.
     name: str | None = None
+    # Admin-only: expose this strategy on the read-only /schedule view for
+    # non-admin users. Off by default (schedule starts empty for users).
+    user_visible: bool | None = None
     # Configurable go-live date (red dashed marker + live cutoff). A
     # present `start_date` sets it; `clear_start_date=True` resets it to
     # NULL (fall back to created_at). They're mutually exclusive — a
@@ -135,7 +146,7 @@ def create_scheduled_strategy_row(
 
 
 @router.get("/api/scheduled-strategies/held-companies")
-async def list_held_companies():
+async def list_held_companies(request: Request):
     """Pooled set of companies currently held across every enabled
     scheduled strategy. Drives the /schedule "Misc jobs → Currently held
     companies" panel — gives the user full transparency over which
@@ -178,14 +189,19 @@ async def list_held_companies():
           }]
         }
     """
+    admin = _is_admin(request)
+
     def _query() -> dict:
-        # Step 1 — every enabled scheduled strategy.
-        strat_resp = (
+        # Step 1 — every enabled scheduled strategy (non-admins: only the
+        # ones flagged user_visible, matching their read-only schedule view).
+        strat_q = (
             supabase.table("scheduled_strategy")
             .select("id, name")
             .eq("enabled", True)
-            .execute()
         )
+        if not admin:
+            strat_q = strat_q.eq("user_visible", True)
+        strat_resp = strat_q.execute()
         strategies = strat_resp.data or []
         if not strategies:
             return {"total_companies": 0, "total_strategies": 0, "companies": []}
@@ -422,17 +438,17 @@ async def list_held_companies():
 
 
 @router.get("/api/scheduled-strategies")
-async def list_scheduled_strategies():
-    """Every scheduled strategy, newest first by created_at desc, with
-    its last snapshot summary attached."""
+async def list_scheduled_strategies(request: Request):
+    """Every scheduled strategy with its last-snapshot summary. Admins see all;
+    non-admins (the read-only /schedule view) see only `user_visible` ones —
+    so the page starts empty until an admin opts strategies in."""
+    admin = _is_admin(request)
+
     def _query() -> list[dict]:
-        resp = (
-            supabase.table("scheduled_strategy")
-            .select("*")
-            .order("created_at")
-            .execute()
-        )
-        return _hydrate(resp.data or [])
+        q = supabase.table("scheduled_strategy").select("*").order("created_at")
+        if not admin:
+            q = q.eq("user_visible", True)
+        return _hydrate(q.execute().data or [])
     return await asyncio.to_thread(_query)
 
 
@@ -481,13 +497,15 @@ async def patch_scheduled_strategy(strategy_id: int, body: ScheduledStrategyPatc
         update_dict["start_date"] = None
     elif body.start_date is not None:
         update_dict["start_date"] = body.start_date.isoformat()
+    if body.user_visible is not None:
+        update_dict["user_visible"] = body.user_visible
     # `updated_at` is always present — require at least one real field so a
     # no-op PATCH is a clear 400 rather than a silent timestamp bump.
     if len(update_dict) == 1:
         raise HTTPException(
             400,
             "Nothing to update (pass `enabled`, `name`, `start_date`, "
-            "or `clear_start_date`).",
+            "`clear_start_date`, or `user_visible`).",
         )
 
     def _update() -> dict:
@@ -544,11 +562,12 @@ async def delete_scheduled_strategy(strategy_id: int):
 
 
 @router.get("/api/scheduled-strategies/{strategy_id}/runs")
-async def list_strategy_runs(strategy_id: int, limit: int = 50):
+async def list_strategy_runs(strategy_id: int, request: Request, limit: int = 50):
     """Run history for one scheduled strategy. Joins via the new
     `current_picks_snapshot.scheduled_strategy_id` FK so it stays clean
     even after schema-evolution churn on adjacent tables."""
     limit = max(1, min(200, limit))
+    admin = _is_admin(request)
 
     def _query() -> dict:
         sched_resp = (
@@ -561,6 +580,9 @@ async def list_strategy_runs(strategy_id: int, limit: int = 50):
         if not sched_resp.data:
             raise HTTPException(404, f"Scheduled strategy #{strategy_id} not found")
         sched = sched_resp.data[0]
+        # Non-admins may only open a strategy an admin flagged user_visible.
+        if not admin and not sched.get("user_visible"):
+            raise HTTPException(403, "Not available")
 
         snap_resp = (
             supabase.table("current_picks_snapshot")

@@ -7,7 +7,7 @@ import { isAuthBypassEnabled } from '@/lib/authBypass'
 // prefix-with-trailing-slash so subroutes are also allowed when needed.
 // `/forbidden` is here so blocked attempts can render the "no access"
 // page without bouncing into another redirect loop.
-const USER_ALLOWED_PATHS: readonly string[] = ['/', '/earnings', '/companies', '/airs-portfolio', '/forbidden']
+const USER_ALLOWED_PATHS: readonly string[] = ['/', '/earnings', '/schedule', '/forbidden']
 // Paths that are accessible to anyone — including not-yet-logged-in users
 // (auth flow) and the home page (which any authenticated user can see).
 const PUBLIC_PATH_PREFIXES: readonly string[] = ['/login', '/set-password', '/auth/']

@@ -67,6 +67,7 @@ export default function ScheduledStrategyDetail({
   initialData,
   onLoaded,
   onMutated,
+  readOnly = false,
 }: {
   strategyId: number;
   /** Parent-supplied cache hit. When non-null we render immediately and
@@ -76,6 +77,9 @@ export default function ScheduledStrategyDetail({
    * cache. */
   onLoaded?: (data: StrategyRunHistory) => void;
   onMutated?: () => void;
+  /** Non-admin view: hide the go-live date editor (mutation); the curve +
+   * holdings stay visible read-only. */
+  readOnly?: boolean;
 }) {
   const [data, setData] = useState<StrategyRunHistory | null>(initialData ?? null);
   // Only show the spinner on a cold load. Cache hits render the previous
@@ -178,6 +182,7 @@ export default function ScheduledStrategyDetail({
         const isCustom = data.start_date != null;
         return (
           <>
+            {!readOnly && (
             <div className="flex items-center flex-wrap gap-x-3 gap-y-1.5 text-xs">
               <span className="text-fg-muted">Go-live date</span>
               <DatePartsPicker
@@ -205,6 +210,7 @@ export default function ScheduledStrategyDetail({
               )}
               {savingStartDate && <span className="text-[11px] text-accent-300">saving…</span>}
             </div>
+            )}
 
             {/* Source backtest — the variant's full equity curve, sector
                 timeline + per-month holdings, exactly as on /backtest, with

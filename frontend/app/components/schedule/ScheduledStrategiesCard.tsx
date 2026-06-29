@@ -10,7 +10,7 @@ import type { UseScheduledStrategiesResult } from './useScheduledStrategies';
  * the pipeline keeps up to date. All state + mutations live in
  * `useScheduledStrategies`; the parent owns the hook (so it can render the
  * page-level error banner) and threads the result down here. */
-export default function ScheduledStrategiesCard({ sched }: { sched: UseScheduledStrategiesResult }) {
+export default function ScheduledStrategiesCard({ sched, readOnly = false }: { sched: UseScheduledStrategiesResult; readOnly?: boolean }) {
   const {
     strategies,
     strategiesLoading,
@@ -22,6 +22,7 @@ export default function ScheduledStrategiesCard({ sched }: { sched: UseScheduled
     renameStrategy,
     removeStrategy,
     removeAllStrategies,
+    setUserVisible,
   } = sched;
 
   return (
@@ -29,7 +30,7 @@ export default function ScheduledStrategiesCard({ sched }: { sched: UseScheduled
       <div className="px-5 py-3 border-b border-neutral-800/40 flex items-center justify-between">
         <h3 className="text-sm font-medium text-fg-strong">Scheduled strategies</h3>
         <div className="flex items-center gap-2 shrink-0">
-          {strategies.length > 0 && (
+          {!readOnly && strategies.length > 0 && (
             <button
               type="button"
               onClick={() => void removeAllStrategies()}
@@ -46,7 +47,9 @@ export default function ScheduledStrategiesCard({ sched }: { sched: UseScheduled
         <div className="px-5 py-5 text-sm text-fg-subtle"><LoadingDots label="Loading" /></div>
       ) : strategies.length === 0 ? (
         <div className="px-5 py-6 text-sm text-fg-subtle">
-          No strategies scheduled yet. Strategies must originate from a backtested variant: run a sweep on <a href="/backtest" className="text-accent-300 hover:text-accent-200 underline">/backtest</a>, then click <span className="text-fg-soft">+ Schedule</span> on any OK variant row in the Variants table.
+          {readOnly
+            ? 'No strategies have been shared with you yet.'
+            : (<>No strategies scheduled yet. Strategies must originate from a backtested variant: run a sweep on <a href="/backtest" className="text-accent-300 hover:text-accent-200 underline">/backtest</a>, then click <span className="text-fg-soft">+ Schedule</span> on any OK variant row in the Variants table.</>)}
         </div>
       ) : (
         <div className="divide-y divide-neutral-800/30">
@@ -142,22 +145,38 @@ export default function ScheduledStrategiesCard({ sched }: { sched: UseScheduled
                       )}
                     </div>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => void renameStrategy(s.id, s.name || `Strategy #${s.id}`)}
-                    className="text-xs px-2 py-1 rounded-lg text-fg-muted hover:bg-overlay/5 hover:text-fg transition-colors"
-                    title="Rename strategy"
-                  >
-                    Rename
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void removeStrategy(s.id)}
-                    className="text-xs px-2 py-1 rounded-lg text-neg-300 hover:bg-neg-500/10 transition-colors"
-                    title="Remove from schedule"
-                  >
-                    ×
-                  </button>
+                  {!readOnly && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void setUserVisible(s.id, !s.user_visible)}
+                        className={`text-[10px] px-2 py-1 rounded-lg border transition-colors ${
+                          s.user_visible
+                            ? 'bg-pos-500/10 text-pos-300 border-pos-500/30 hover:bg-pos-500/20'
+                            : 'text-fg-muted border-neutral-700 hover:bg-overlay/5'
+                        }`}
+                        title="Toggle whether non-admin users can see this strategy on the read-only /schedule view"
+                      >
+                        {s.user_visible ? '✓ Visible to user' : 'Hidden from user'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void renameStrategy(s.id, s.name || `Strategy #${s.id}`)}
+                        className="text-xs px-2 py-1 rounded-lg text-fg-muted hover:bg-overlay/5 hover:text-fg transition-colors"
+                        title="Rename strategy"
+                      >
+                        Rename
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void removeStrategy(s.id)}
+                        className="text-xs px-2 py-1 rounded-lg text-neg-300 hover:bg-neg-500/10 transition-colors"
+                        title="Remove from schedule"
+                      >
+                        ×
+                      </button>
+                    </>
+                  )}
                 </div>
                 {isExpanded && (
                   <ScheduledStrategyDetail
@@ -165,6 +184,7 @@ export default function ScheduledStrategiesCard({ sched }: { sched: UseScheduled
                     initialData={historyCache.get(s.id) ?? null}
                     onLoaded={(d) => cacheRunHistory(s.id, d)}
                     onMutated={() => void loadStrategies()}
+                    readOnly={readOnly}
                   />
                 )}
               </div>

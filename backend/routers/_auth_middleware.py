@@ -53,16 +53,21 @@ _PUBLIC_PREFIXES: tuple[str, ...] = (
 _SELF_AUTH_PREFIXES: tuple[str, ...] = ("/api/auth/",)
 
 # Reads any AUTHENTICATED user may make — the API behind the non-admin pages.
+# `/api/companies` stays readable because the user-visible Earnings dashboard
+# depends on it (the /companies PAGE itself is blocked for users in proxy.ts).
+# `/api/scheduled-strategies` is readable so the read-only /schedule page works;
+# the list endpoint filters to `user_visible` strategies for non-admins, and
+# every mutation under it stays admin-only (not in the write tier below).
 _USER_READ_PREFIXES: tuple[str, ...] = (
     "/api/companies",
     "/api/earnings",
-    "/api/airs",
     "/api/usage",
+    "/api/scheduled-strategies",
 )
 
 # Writes any AUTHENTICATED user may make — the mutations those pages need.
 # (Earnings refresh is handled separately by `_is_earnings_refresh`.)
-_USER_WRITE_PREFIXES: tuple[str, ...] = ("/api/portfolios/parse",)
+_USER_WRITE_PREFIXES: tuple[str, ...] = ()
 
 
 def _is_earnings_refresh(path: str) -> bool:
@@ -111,6 +116,11 @@ async def enforce_api_auth(
 
     if info is None:
         return JSONResponse({"detail": "Authentication required"}, status_code=401)
+
+    # Expose the verified identity so routers can role-filter without
+    # re-verifying the token (e.g. /scheduled-strategies returns only
+    # `user_visible` rows to non-admins). Set for admins too.
+    request.state.auth = info
 
     # Admins can do anything.
     if info.get("role") == "admin":

@@ -3278,8 +3278,9 @@ export interface paths {
         };
         /**
          * List Scheduled Strategies
-         * @description Every scheduled strategy, newest first by created_at desc, with
-         *     its last snapshot summary attached.
+         * @description Every scheduled strategy with its last-snapshot summary. Admins see all;
+         *     non-admins (the read-only /schedule view) see only `user_visible` ones —
+         *     so the page starts empty until an admin opts strategies in.
          */
         get: operations["list_scheduled_strategies_api_scheduled_strategies_get"];
         put?: never;
@@ -4855,6 +4856,8 @@ export interface components {
             name?: string | null;
             /** Start Date */
             start_date?: string | null;
+            /** User Visible */
+            user_visible?: boolean | null;
         };
         /** ScreenRequest */
         ScreenRequest: {

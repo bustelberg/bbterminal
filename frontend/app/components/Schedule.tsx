@@ -4,6 +4,7 @@ import SmartPipelineActivity from './schedule/SmartPipelineActivity';
 import ScheduledStrategiesCard from './schedule/ScheduledStrategiesCard';
 import DiversifiedPortfoliosCard from './schedule/DiversifiedPortfoliosCard';
 import { useScheduledStrategies } from './schedule/useScheduledStrategies';
+import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
 
 // Two sections only:
 //   1. Scheduled strategies — the strategies the user has pinned.
@@ -19,6 +20,9 @@ import { useScheduledStrategies } from './schedule/useScheduledStrategies';
 export default function Schedule() {
   const sched = useScheduledStrategies();
   const { error, setError, latestPriceDate } = sched;
+  // Non-admins get a read-only view: only the strategies an admin flagged
+  // visible, with no mutation controls and none of the admin automation cards.
+  const isAdmin = useIsAdmin();
 
   return (
     <div className="min-h-screen bg-page text-fg">
@@ -26,7 +30,9 @@ export default function Schedule() {
         <div>
           <h1 className="text-xl font-semibold text-fg-strong">Schedule</h1>
           <p className="text-sm text-fg-subtle mt-1">
-            Your scheduled strategies and the automation that keeps just them up to date.
+            {isAdmin
+              ? 'Your scheduled strategies and the automation that keeps just them up to date.'
+              : 'The scheduled strategies shared with you (read-only).'}
           </p>
         </div>
         {latestPriceDate && (
@@ -44,19 +50,18 @@ export default function Schedule() {
           </div>
         )}
 
-        {/* Scheduled strategies — the user's pinned strategies. */}
-        <ScheduledStrategiesCard sched={sched} />
+        {/* Scheduled strategies — the user's pinned strategies. Read-only for
+            non-admins (controls hidden; list already filtered server-side). */}
+        <ScheduledStrategiesCard sched={sched} readOnly={!isAdmin} />
 
-        {/* Diversified portfolios — live overlays (strategy + ETFs + bands)
-            built on a scheduled strategy. Its own lane; created from the
-            diversifier page. Renders nothing when there are none. */}
-        <DiversifiedPortfoliosCard />
-
-        {/* Smart pipeline activity — the automation that supports them:
-            what's running now, when the next daily tick fires, and the
-            derived plan (which universes it refreshes, which strategies
-            are due, scoped counts, errors). */}
-        <SmartPipelineActivity />
+        {/* Admin-only lanes: live diversified-portfolio overlays + the pipeline
+            automation. Hidden from the read-only user view. */}
+        {isAdmin && (
+          <>
+            <DiversifiedPortfoliosCard />
+            <SmartPipelineActivity />
+          </>
+        )}
       </div>
     </div>
   );

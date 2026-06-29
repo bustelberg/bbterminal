@@ -2376,6 +2376,17 @@
               }
             ],
             "title": "Start Date"
+          },
+          "user_visible": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Visible"
           }
         },
         "title": "ScheduledStrategyPatch",
@@ -8941,7 +8952,7 @@
         ]
       },
       "get": {
-        "description": "Every scheduled strategy, newest first by created_at desc, with\nits last snapshot summary attached.",
+        "description": "Every scheduled strategy with its last-snapshot summary. Admins see all;\nnon-admins (the read-only /schedule view) see only `user_visible` ones \u2014\nso the page starts empty until an admin opts strategies in.",
         "operationId": "list_scheduled_strategies_api_scheduled_strategies_get",
         "responses": {
           "200": {

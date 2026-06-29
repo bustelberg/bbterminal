@@ -96,6 +96,8 @@ export type ScheduledStrategy = {
   frequency: 'daily' | 'weekly' | 'monthly' | 'bimonthly' | 'quarterly' | null;
   config: Record<string, unknown>;
   enabled: boolean;
+  // Admin-set: visible to non-admin users on the read-only /schedule view.
+  user_visible?: boolean;
   created_at: string;
   updated_at: string;
   last_run_at: string | null;

@@ -90,6 +90,15 @@ class TestM1_ReadsRequireAuth:
     def test_non_admin_read_of_admin_path_is_403(self, monkeypatch):
         assert _run(monkeypatch, "GET", "/api/admin/health", "user") == (403, False)
 
+    def test_scheduled_strategies_read_allowed_for_user(self, monkeypatch):
+        # The read-only /schedule view: users may GET (the endpoint filters to
+        # user_visible rows); writes stay admin-only (see TestWriteTiers).
+        assert _run(monkeypatch, "GET", "/api/scheduled-strategies", "user") == (200, True)
+
+    def test_airs_read_now_admin_only(self, monkeypatch):
+        # The AIRS page is admin-only now, so its API left the user read tier.
+        assert _run(monkeypatch, "GET", "/api/airs/scan", "user") == (403, False)
+
 
 class TestH1_EarningsRefreshNeedsAuth:
     def test_unauthenticated_refresh_is_401(self, monkeypatch):
@@ -107,8 +116,13 @@ class TestWriteTiers:
         # /api/companies is a user READ surface but not a user WRITE one.
         assert _run(monkeypatch, "POST", "/api/companies", "user") == (403, False)
 
-    def test_portfolio_parse_allowed_for_user(self, monkeypatch):
-        assert _run(monkeypatch, "POST", "/api/portfolios/parse", "user") == (200, True)
+    def test_portfolio_parse_now_admin_only(self, monkeypatch):
+        # The AIRS upload page is admin-only now; its write left the user tier.
+        assert _run(monkeypatch, "POST", "/api/portfolios/parse", "user") == (403, False)
+
+    def test_scheduled_strategies_write_is_admin_only(self, monkeypatch):
+        # Users get read-only schedule: mutations stay admin-only.
+        assert _run(monkeypatch, "POST", "/api/scheduled-strategies", "user") == (403, False)
 
     def test_admin_may_write_anything(self, monkeypatch):
         assert _run(monkeypatch, "POST", "/api/momentum/backtest", "admin") == (200, True)

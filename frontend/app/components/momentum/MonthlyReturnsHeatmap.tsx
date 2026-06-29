@@ -24,7 +24,7 @@ function tint(v: number | undefined, scale: number): CSSProperties {
   return { ...base, background: `color-mix(in srgb, ${c} ${pct}%, transparent)`, color: 'var(--color-fg-strong)' };
 }
 
-const fmt = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}`;
+const fmt = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
 const monthLabel = (ym: string) => {
   const [y, m] = ym.split('-');
   return `${MONTHS[Number(m) - 1]} ${y}`;

@@ -644,21 +644,22 @@ export default function MomentumBacktester() {
               loadedRunId={activeVariantResult ? null : loadedRunId}
               savedRuns={savedRuns}
               activeStrategyLabel={activeStrategyLabel}
+              defaultCollapsed
             />
 
-            <FeeWaterfallPanel result={displayResult} />
+            <FeeWaterfallPanel result={displayResult} defaultCollapsed />
 
             {/* Only renders when the active variant used the regime filter
                 (records carry a market_health score); otherwise null. */}
-            <MarketHealthCard result={displayResult} />
+            <MarketHealthCard result={displayResult} defaultCollapsed />
 
-            <SectorTimelineChart result={displayResult} />
+            <SectorTimelineChart result={displayResult} defaultCollapsed />
 
-            <DailyReturnsHistograms result={displayResult} />
+            <DailyReturnsHistograms result={displayResult} defaultCollapsed />
 
-            <RebalanceDayReturnsCard result={displayResult} />
+            <RebalanceDayReturnsCard result={displayResult} defaultCollapsed />
 
-            <MonthlyReturnsHeatmap result={displayResult} />
+            <MonthlyReturnsHeatmap result={displayResult} defaultCollapsed />
 
             <MonthlyHoldingsTable
               result={displayResult}
@@ -666,6 +667,7 @@ export default function MomentumBacktester() {
               exchangeByCompany={exchangeByCompany}
               isinByCompany={isinByCompany}
               scoringConfig={scoringConfig}
+              defaultCollapsed
             />
 
             {/* Auto-save status. Variant sweeps + single-strategy runs are

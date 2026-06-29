@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { API_URL } from '../../../lib/apiUrl';
 import { apiFetch } from '../../../lib/apiFetch';
 import { dialog } from '../../../lib/dialog';
-import { invalidateStaticUniverses, useStaticUniverses } from '../../../lib/hooks/apiData';
+import { invalidateStaticUniverses, useStaticUniverses, type UniverseTemplate } from '../../../lib/hooks/apiData';
 import LoadingDots from '../LoadingDots';
 
 type MemberRow = {
@@ -56,10 +56,11 @@ export default function IsinComparer() {
   const [pruneMsg, setPruneMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<CompareResult | null>(null);
-  // Local override of the dropdown member counts after a prune (the cached
-  // /api/static-universes count is stale until the next page mount), keyed by
-  // the universe value (template_key).
-  const [memberCountOverride, setMemberCountOverride] = useState<Record<string, number>>({});
+  // Freshly-refetched universe list after a prune — the cached
+  // `useStaticUniverses` value (and its member counts) is stale until the next
+  // page mount, so we refetch here and render the dropdown from this when set.
+  const [universesFresh, setUniversesFresh] = useState<UniverseTemplate[] | null>(null);
+  const universeOptions = universesFresh ?? universes ?? [];
 
   const onFile = useCallback(async (file: File | null) => {
     if (!file) return;
@@ -145,10 +146,13 @@ export default function IsinComparer() {
         throw new Error(typeof d.detail === 'string' ? d.detail : `HTTP ${res.status}`);
       }
       const out = await res.json();
-      // Reflect the new member count in the dropdown immediately + drop the
-      // shared cache so other pages refetch fresh.
-      setMemberCountOverride((prev) => ({ ...prev, [result.universe_label]: out.remaining_member_count }));
+      // Refresh the dropdown's member counts (the cached list is now stale) and
+      // drop the shared cache so other pages refetch fresh on their next mount.
       invalidateStaticUniverses();
+      try {
+        const ures = await apiFetch(`${API_URL}/api/static-universes`);
+        if (ures.ok) setUniversesFresh(await ures.json());
+      } catch { /* non-fatal — the result summary still shows the live count */ }
       await runCompare();
       setPruneMsg(`Dropped ${out.dropped} — ${out.remaining_member_count} members remain in ${result.universe_label}.`);
     } catch (e) {
@@ -221,9 +225,9 @@ export default function IsinComparer() {
                 className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
               >
                 <option value="">{universesLoading ? 'Loading…' : 'Select a universe…'}</option>
-                {(universes ?? []).map((u) => (
+                {universeOptions.map((u) => (
                   <option key={u.template_key} value={u.template_key}>
-                    {u.label || u.template_key} ({memberCountOverride[u.template_key] ?? u.latest_membership_count} members)
+                    {u.label || u.template_key} ({u.latest_membership_count} members)
                   </option>
                 ))}
               </select>

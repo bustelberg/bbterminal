@@ -192,6 +192,25 @@ export function useVariantsBundle({
         );
         return;
       }
+
+      // Single-strategy run: the auto-saved bundle holds exactly this one
+      // variant, and the single-run backtest we just saved (named
+      // `enteredName`) carries the identical data — so the bundle is a
+      // redundant duplicate. Drop it and point the page at the freshly-named
+      // run, so the user ends up with ONE saved backtest under the proper name
+      // rather than the ugly auto-save name PLUS a new one. Multi-variant
+      // sweeps keep their bundle (it holds the other variants).
+      const okCount = Object.values(momentumStore.get().variants)
+        .filter((o) => o?.status === 'ok').length;
+      const bundleRunId = momentumStore.get().loadedRunId;
+      if (okCount === 1 && bundleRunId != null && bundleRunId !== backtest_run_id) {
+        try {
+          await apiFetch(`${API_URL}/api/momentum/backtests/${bundleRunId}`, { method: 'DELETE' });
+        } catch { /* non-fatal — worst case the auto-saved bundle lingers */ }
+        if (backtest_run_id != null) momentumStore.set({ loadedRunId: backtest_run_id });
+      }
+      loadSavedRuns();
+
       await dialog.alert(
         `"${enteredName}" added to /schedule. The full backtest history is preserved; the next pipeline tick will start appending live snapshots.`,
         { title: 'Variant scheduled' },

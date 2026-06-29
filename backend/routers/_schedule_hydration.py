@@ -388,6 +388,7 @@ def _returns_from_backtest(
     inception_iso: str,
     today: date,
     snapshots: list[dict] | None = None,
+    clamp_calendar_to_inception: bool = True,
 ) -> dict | None:
     """MTD / YTD / since-inception returns read off the strategy's full
     equity curve (`_extended_curve`), anchored at the go-live date.
@@ -451,19 +452,22 @@ def _returns_from_backtest(
         inc_cum = curve_start_cum
     year_start = today.replace(month=1, day=1).isoformat()
     month_start = today.replace(day=1).isoformat()
-    # Clamp the MTD/YTD anchors to the go-live date: when the strategy went
-    # live INSIDE the current year/month, measure from go-live (the
-    # since-inception anchor) instead of the calendar boundary — otherwise the
-    # window would include the pre-go-live backtest curve (e.g. a strategy
-    # launched in May would report the backtest's Jan→May gains in its YTD).
+    # Clamp the MTD/YTD anchors to the go-live date ONLY when an explicit
+    # go-live was set (`clamp_calendar_to_inception`). Then a strategy launched
+    # mid-period measures live-only — it never reports the pre-go-live backtest
+    # curve in its MTD/YTD (e.g. a May go-live wouldn't show the backtest's
+    # Jan→May gains in YTD). When no go-live is set (anchor defaulted to
+    # created_at), DON'T clamp: use the full calendar month/year off the daily
+    # curve, so the header MTD/YTD equal the monthly-returns chart's cells
+    # (which never clamp the cell value).
     inc = (inception_iso or "")[:10]
-    if inc and inc >= year_start:
+    if clamp_calendar_to_inception and inc and inc >= year_start:
         ytd_cum = inc_cum
     else:
         ytd_cum = cum_before(year_start)
         if ytd_cum is None:
             ytd_cum = curve_start_cum
-    if inc and inc >= month_start:
+    if clamp_calendar_to_inception and inc and inc >= month_start:
         mtd_cum = inc_cum
     else:
         mtd_cum = cum_before(month_start)
@@ -567,7 +571,17 @@ def _hydrate(rows: list[dict]) -> list[dict]:
         if latest:
             returns = _compute_period_returns(hist, today)
             since_inception_pct: float | None = None
-            inception_date = str(r["start_date"])[:10] if r.get("start_date") else None
+            # Go-live anchor: the configured `start_date`, else `created_at`
+            # (the SAME default the detail view + equity-curve marker use). We
+            # default here — rather than gating on `start_date` — so the header
+            # MTD/YTD always come from the daily equity curve below, matching
+            # the monthly-returns chart. Without this default, no-go-live-date
+            # strategies fell back to the sparse snapshot walk, whose MTD
+            # disagreed with the chart's current-month cell.
+            inception_date = (
+                str(r["start_date"])[:10] if r.get("start_date")
+                else (str(r["created_at"])[:10] if r.get("created_at") else None)
+            )
             # MTD / YTD / since-inception are read off the strategy's daily
             # equity curve (`_returns_from_backtest` → `_extended_curve`) — the
             # SAME curve the monthly-returns chart renders — anchored at the
@@ -580,6 +594,9 @@ def _hydrate(rows: list[dict]) -> list[dict]:
                     bt = _returns_from_backtest(
                         int(r["backtest_run_id"]), inception_date, today,
                         snapshots=hist,
+                        # Live-only clamp only when the user set an explicit
+                        # go-live; otherwise full calendar (matches the chart).
+                        clamp_calendar_to_inception=bool(r.get("start_date")),
                     )
                 except Exception:
                     bt = None
@@ -609,6 +626,7 @@ def _hydrate(rows: list[dict]) -> list[dict]:
             "frequency": r.get("frequency"),
             "config": r.get("config") or {},
             "enabled": r.get("enabled", True),
+            "user_visible": bool(r.get("user_visible")),
             "created_at": r.get("created_at"),
             "updated_at": r.get("updated_at"),
             # Configurable go-live date (red dashed equity-curve marker +

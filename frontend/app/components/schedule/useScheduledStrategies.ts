@@ -132,6 +132,27 @@ export function useScheduledStrategies() {
     }
   }, [expandedStrategyId, loadStrategies]);
 
+  /** Admin: toggle whether non-admin users can see this strategy on the
+   * read-only /schedule view. Optimistic, reverts on error. */
+  const setUserVisible = useCallback(async (id: number, value: boolean) => {
+    setStrategies((prev) => prev.map((s) => (s.id === id ? { ...s, user_visible: value } : s)));
+    try {
+      const r = await apiFetch(`${API_URL}/api/scheduled-strategies/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_visible: value }),
+      });
+      if (!r.ok) {
+        const body = await r.text().catch(() => '');
+        setError(`Visibility update failed: ${r.status} ${body.slice(0, 200)}`);
+        await loadStrategies();
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      await loadStrategies();
+    }
+  }, [loadStrategies]);
+
   const removeAllStrategies = useCallback(async () => {
     const count = strategies.length;
     if (count === 0) return;
@@ -169,5 +190,6 @@ export function useScheduledStrategies() {
     renameStrategy,
     removeStrategy,
     removeAllStrategies,
+    setUserVisible,
   };
 }

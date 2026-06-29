@@ -62,21 +62,60 @@ export default function CurrentPortfolioCard({ snapshotId }: { snapshotId: numbe
   );
   const fxConverters = useFxConverters(etfCurrencies);
 
+  // Per-holding derived values — all in EUR so the card is internally
+  // consistent AND its Total lines up with the strategy-row MTD header (which
+  // is the EUR daily-curve return). Start (€) at the entry rate, End (€) marked
+  // to market at today's rate, the EUR return between them, and the drifted
+  // current weight (driven by the EUR return).
   const rows = useMemo(() => {
     const holdings = snap?.holdings ?? [];
-    // Drifted (current) weights: each starts at its target and grows by its
-    // own return over the period, renormalized so the book sums to 100%.
-    const factors = holdings.map((h) => (h.weight ?? 0) * (1 + (h.forward_return_pct ?? 0) / 100));
-    const total = factors.reduce((a, b) => a + b, 0) || 1;
-    return holdings
-      .map((h, i) => ({
-        h,
-        target: (h.weight ?? 0) * 100,
-        current: (factors[i] / total) * 100,
-      }))
-      // Always sorted by current (drifted) weight, descending.
+    const derived = holdings.map((h) => {
+      const isEtf = (h.company_id ?? 0) < 0;
+      const ccy = resolveCcy(h);
+      const isEur = ccy === '' || ccy === 'EUR';
+      const entryDate = h.entry_date ? String(h.entry_date).slice(0, 10) : null;
+      const endDate = h.exit_date
+        ? String(h.exit_date).slice(0, 10)
+        : (snap?.latest_price_date ? String(snap.latest_price_date).slice(0, 10) : null);
+      // Start (€): stocks keep the engine's stored entry EUR; an ETF converts
+      // its native entry price at the entry-date rate; EUR passes through.
+      let startEur: number | null;
+      if (isEur) startEur = h.entry_price_local ?? h.entry_price_eur ?? null;
+      else if (isEtf) {
+        const conv = fxConverters.get(ccy);
+        startEur = conv && h.entry_price_local != null && entryDate
+          ? conv(h.entry_price_local, entryDate)
+          : (h.entry_price_eur ?? null);
+      } else startEur = h.entry_price_eur ?? null;
+      const startFx = startEur != null && h.entry_price_local ? startEur / h.entry_price_local : (isEur ? 1 : null);
+      const endRate = fxRate.get(ccy || 'EUR');
+      const endFx = isEur ? 1 : (endRate ? 1 / endRate : null);
+      const endEur = (h.exit_price_local != null && endFx != null) ? h.exit_price_local * endFx : (h.exit_price_eur ?? null);
+      // EUR return since entry; fall back to the stored (local) return only
+      // when EUR can't be resolved (foreign asset we haven't converted).
+      const eurReturn = startEur != null && endEur != null && startEur > 0
+        ? (endEur / startEur - 1) * 100
+        : (h.forward_return_pct ?? null);
+      const weight = h.weight ?? 0;
+      return { h, isEtf, ccy, isEur, entryDate, endDate, startEur, endEur, startFx, endFx, eurReturn, weight, target: weight * 100 };
+    });
+    // Drifted (current) weights from the EUR return, renormalized to 100%.
+    const totalFactor = derived.reduce((a, d) => a + d.weight * (1 + (d.eurReturn ?? 0) / 100), 0) || 1;
+    return derived
+      .map((d) => ({ ...d, current: (d.weight * (1 + (d.eurReturn ?? 0) / 100) / totalFactor) * 100 }))
       .sort((a, b) => b.current - a.current);
-  }, [snap]);
+  }, [snap, resolveCcy, fxConverters, fxRate]);
+
+  // Total portfolio performance since entry: each holding's EUR return weighted
+  // by its target weight (same EUR basis as the strategy-row MTD header).
+  const totalReturn = useMemo(() => {
+    let wsum = 0;
+    let rsum = 0;
+    for (const d of rows) {
+      if (d.eurReturn != null) { rsum += d.eurReturn * d.weight; wsum += d.weight; }
+    }
+    return wsum > 0 ? rsum / wsum : null;
+  }, [rows]);
 
   if (snapshotId == null) return null;
   if (loading) {
@@ -98,7 +137,17 @@ export default function CurrentPortfolioCard({ snapshotId }: { snapshotId: numbe
   return (
     <div className="bg-card border border-neutral-800/40 rounded-xl p-5">
       <div className="flex items-baseline justify-between mb-3 flex-wrap gap-2">
-        <h3 className="text-sm font-semibold text-fg-strong">Current portfolio</h3>
+        <div className="flex items-baseline gap-3 flex-wrap">
+          <h3 className="text-sm font-semibold text-fg-strong">Current portfolio</h3>
+          {totalReturn != null && (
+            <span className="text-sm" title="Weighted EUR return of the held portfolio since it was entered">
+              <span className="text-fg-subtle text-xs">Total (€) </span>
+              <span className={`font-mono font-semibold ${totalReturn >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
+                {totalReturn >= 0 ? '+' : ''}{totalReturn.toFixed(2)}%
+              </span>
+            </span>
+          )}
+        </div>
         <span className="text-xs text-fg-subtle font-mono">
           {rows.length} holdings · held since {String(snap.as_of_date).slice(0, 10)}
           {snap.latest_price_date && <> · as of {String(snap.latest_price_date).slice(0, 10)}</>}
@@ -121,53 +170,16 @@ export default function CurrentPortfolioCard({ snapshotId }: { snapshotId: numbe
               <th className="text-right font-medium py-2 px-2" title="Latest FX rate (EUR per 1 unit of the local currency) — refreshed daily from the FX sync">End FX→€</th>
               <th className="text-right font-medium py-2 px-2 border-l border-neutral-800/40" title="Entry price converted to EUR at the entry rate">Start (€)</th>
               <th className="text-right font-medium py-2 px-2" title="Latest close converted to EUR at today's rate (updates daily)">End (€)</th>
-              <th className="text-right font-medium py-2 pl-2 border-l border-neutral-800/40" title="Return since this position was entered">Return</th>
+              <th className="text-right font-medium py-2 pl-2 border-l border-neutral-800/40" title="EUR return since this position was entered (local price move × FX move)">Return (€)</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ h, target, current }) => {
+            {rows.map((row) => {
+              const { h, target, current, isEtf, ccy, entryDate, endDate, startEur, endEur, startFx, endFx, eurReturn } = row;
               const exchRaw = exchangeByCompany.get(h.company_id) ?? '';
               const exch = displayExchange(exchRaw, h.ticker);
               const isin = isinByCompany.get(h.company_id) ?? isinByBenchmark.get(h.company_id) ?? '';
               const href = guruFocusUrl(h.ticker, exchRaw);
-              const isEtf = (h.company_id ?? 0) < 0;
-              const ccyU = resolveCcy(h);
-              const ccy = ccyU;
-              const isEur = ccyU === '' || ccyU === 'EUR';
-              // As-of dates: Start columns reflect the entry trading day; End
-              // columns reflect the latest priced day (snapshot-wide fallback).
-              const entryDate = h.entry_date ? String(h.entry_date).slice(0, 10) : null;
-              const endDate = h.exit_date
-                ? String(h.exit_date).slice(0, 10)
-                : (snap.latest_price_date ? String(snap.latest_price_date).slice(0, 10) : null);
-              // Start (€): stocks keep the engine's stored entry EUR (reliable);
-              // an ETF converts its native entry price at the entry-date rate
-              // (its stored EUR is unconverted when the currency was set late),
-              // falling back to the stored value until FX history loads.
-              let startEur: number | null;
-              if (isEur) {
-                startEur = h.entry_price_local ?? h.entry_price_eur ?? null;
-              } else if (isEtf) {
-                const conv = fxConverters.get(ccyU);
-                if (conv && h.entry_price_local != null && entryDate) {
-                  startEur = conv(h.entry_price_local, entryDate);
-                } else {
-                  startEur = h.entry_price_eur ?? null;
-                }
-              } else {
-                startEur = h.entry_price_eur ?? null;
-              }
-              // Start FX = EUR per 1 local unit, from that entry conversion.
-              const startFx = startEur != null && h.entry_price_local
-                ? startEur / h.entry_price_local
-                : (isEur ? 1 : null);
-              // End FX = the latest stored rate (updates daily); End (€) marked
-              // to market at it, else the snapshot's stored EUR exit.
-              const endRate = fxRate.get(ccyU || 'EUR');
-              const endFx = isEur ? 1 : (endRate ? 1 / endRate : null);
-              const endEur = (h.exit_price_local != null && endFx != null)
-                ? h.exit_price_local * endFx
-                : h.exit_price_eur;
               return (
                 <tr key={`${h.side ?? 'long'}-${h.company_id}`} className="border-b border-neutral-800/30 hover:bg-overlay/[0.02]">
                   <td className="py-2 pr-2 font-mono whitespace-nowrap">
@@ -194,8 +206,8 @@ export default function CurrentPortfolioCard({ snapshotId }: { snapshotId: numbe
                   </td>
                   <td className="py-2 px-2 text-right font-mono text-fg-muted whitespace-nowrap border-l border-neutral-800/40">{fmtPrice(startEur)}<AsOfTip date={entryDate} /></td>
                   <td className="py-2 px-2 text-right font-mono text-fg whitespace-nowrap">{fmtPrice(endEur)}<AsOfTip date={endDate} /></td>
-                  <td className={`py-2 pl-2 text-right font-mono border-l border-neutral-800/40 ${h.forward_return_pct != null ? (h.forward_return_pct >= 0 ? 'text-pos-400' : 'text-neg-400') : 'text-fg-faint'}`}>
-                    {fmtPct(h.forward_return_pct)}
+                  <td className={`py-2 pl-2 text-right font-mono border-l border-neutral-800/40 ${eurReturn != null ? (eurReturn >= 0 ? 'text-pos-400' : 'text-neg-400') : 'text-fg-faint'}`}>
+                    {fmtPct(eurReturn)}
                   </td>
                 </tr>
               );
