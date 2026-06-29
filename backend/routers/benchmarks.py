@@ -34,12 +34,22 @@ class CreateBenchmarkRequest(BaseModel):
     ticker: str
     name: str
     sector: str | None = None
+    # ISIN for the ETF/bond. Optional — used to show the ISIN column on
+    # /schedule for ETF holdings (which carry a negative company_id and so
+    # can't resolve an ISIN from the `company` table).
+    isin: str | None = None
+    # Native trading currency (ISO code, e.g. USD/EUR). Auto-detected from
+    # GuruFocus on add; shown on /schedule next to the ETF's local price.
+    currency: str | None = None
 
 
-class UpdateBenchmarkSectorRequest(BaseModel):
-    # `null` clears the sector tag; a string sets it. Empty string also
-    # treated as clear so the frontend doesn't need a separate clear path.
-    sector: str | None
+class UpdateBenchmarkRequest(BaseModel):
+    # Partial update: only the fields present in the request body are
+    # applied (resolved via `model_fields_set`). For each, an empty string
+    # is treated as "clear" (→ NULL) so the frontend needs no separate path.
+    sector: str | None = None
+    isin: str | None = None
+    currency: str | None = None
 
 
 async def _bulk_upsert_prices(benchmark_id: int, parsed: list[tuple[date, float]]) -> int:
@@ -70,7 +80,7 @@ async def list_benchmarks():
     """List all benchmarks with price date range and sector tag."""
     resp = await asyncio.to_thread(
         lambda: supabase.table("benchmark")
-        .select("benchmark_id, ticker, name, sector, created_at")
+        .select("benchmark_id, ticker, name, sector, isin, currency, created_at")
         .order("name")
         .execute()
     )
@@ -126,6 +136,12 @@ async def create_benchmark(req: CreateBenchmarkRequest):
     sector_clean = (req.sector or "").strip() or None
     if sector_clean:
         row["sector"] = sector_clean
+    isin_clean = (req.isin or "").strip().upper() or None
+    if isin_clean:
+        row["isin"] = isin_clean
+    currency_clean = (req.currency or "").strip().upper() or None
+    if currency_clean:
+        row["currency"] = currency_clean
     resp = await asyncio.to_thread(
         lambda: supabase.table("benchmark").insert(row).execute()
     )
@@ -172,22 +188,32 @@ async def delete_benchmark(benchmark_id: int):
 
 
 @router.patch("/api/benchmarks/{benchmark_id}")
-async def update_benchmark_sector(benchmark_id: int, req: UpdateBenchmarkSectorRequest):
-    """Set or clear the GICS sector tag on a benchmark. The DB has a
-    partial unique index on sector so only one benchmark can carry each
-    sector at a time."""
-    sector_clean = (req.sector or "").strip() or None
+async def update_benchmark(benchmark_id: int, req: UpdateBenchmarkRequest):
+    """Partial update of a benchmark's `sector` and/or `isin`. Only the
+    fields present in the request body are touched (empty string → clear).
+    The DB has a partial unique index on sector so only one benchmark can
+    carry each sector at a time."""
+    provided = req.model_fields_set
+    update: dict = {}
+    if "sector" in provided:
+        update["sector"] = (req.sector or "").strip() or None
+    if "isin" in provided:
+        update["isin"] = (req.isin or "").strip().upper() or None
+    if "currency" in provided:
+        update["currency"] = (req.currency or "").strip().upper() or None
+    if not update:
+        raise HTTPException(400, "Nothing to update (pass `sector`, `isin`, and/or `currency`).")
     try:
         resp = await asyncio.to_thread(
             lambda: supabase.table("benchmark")
-            .update({"sector": sector_clean})
+            .update(update)
             .eq("benchmark_id", benchmark_id)
             .execute()
         )
     except Exception as e:
         msg = str(e)
         if "benchmark_sector_unique" in msg or "duplicate" in msg.lower():
-            raise HTTPException(409, f"Another benchmark already tags sector '{sector_clean}'")
+            raise HTTPException(409, f"Another benchmark already tags sector '{update.get('sector')}'")
         raise
     if not resp.data:
         raise HTTPException(404, "Benchmark not found")

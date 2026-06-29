@@ -560,6 +560,28 @@
       },
       "CreateBenchmarkRequest": {
         "properties": {
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -1177,6 +1199,95 @@
         "title": "IndicatorRequest",
         "type": "object"
       },
+      "IsinCompareRequest": {
+        "properties": {
+          "isins": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Isins",
+            "type": "array"
+          },
+          "universe_label": {
+            "title": "Universe Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "universe_label",
+          "isins"
+        ],
+        "title": "IsinCompareRequest",
+        "type": "object"
+      },
+      "IsinCompareResponse": {
+        "properties": {
+          "csv_isin_count": {
+            "title": "Csv Isin Count",
+            "type": "integer"
+          },
+          "csv_isins_not_in_universe": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Csv Isins Not In Universe",
+            "type": "array"
+          },
+          "in_universe_not_in_csv": {
+            "items": {
+              "$ref": "#/components/schemas/MemberRow"
+            },
+            "title": "In Universe Not In Csv",
+            "type": "array"
+          },
+          "intersection": {
+            "items": {
+              "$ref": "#/components/schemas/MemberRow"
+            },
+            "title": "Intersection",
+            "type": "array"
+          },
+          "matched_count": {
+            "title": "Matched Count",
+            "type": "integer"
+          },
+          "target_month": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Month"
+          },
+          "universe_label": {
+            "title": "Universe Label",
+            "type": "string"
+          },
+          "universe_member_count": {
+            "title": "Universe Member Count",
+            "type": "integer"
+          },
+          "unmatched_count": {
+            "title": "Unmatched Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "universe_label",
+          "universe_member_count",
+          "csv_isin_count",
+          "matched_count",
+          "unmatched_count",
+          "intersection",
+          "in_universe_not_in_csv",
+          "csv_isins_not_in_universe"
+        ],
+        "title": "IsinCompareResponse",
+        "type": "object"
+      },
       "LongEquitySaveUniverseRequest": {
         "properties": {
           "description": {
@@ -1225,6 +1336,63 @@
           }
         },
         "title": "LongEquitySaveUniverseRequest",
+        "type": "object"
+      },
+      "MemberRow": {
+        "properties": {
+          "company_id": {
+            "title": "Company Id",
+            "type": "integer"
+          },
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          }
+        },
+        "required": [
+          "company_id"
+        ],
+        "title": "MemberRow",
         "type": "object"
       },
       "MonthStatInfo": {
@@ -1766,6 +1934,50 @@
           }
         },
         "title": "PortfolioUpdate",
+        "type": "object"
+      },
+      "PruneRequest": {
+        "properties": {
+          "drop_company_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Drop Company Ids",
+            "type": "array"
+          },
+          "universe_label": {
+            "title": "Universe Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "universe_label",
+          "drop_company_ids"
+        ],
+        "title": "PruneRequest",
+        "type": "object"
+      },
+      "PruneResponse": {
+        "properties": {
+          "dropped": {
+            "title": "Dropped",
+            "type": "integer"
+          },
+          "remaining_member_count": {
+            "title": "Remaining Member Count",
+            "type": "integer"
+          },
+          "universe_label": {
+            "title": "Universe Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "universe_label",
+          "dropped",
+          "remaining_member_count"
+        ],
+        "title": "PruneResponse",
         "type": "object"
       },
       "RecomputeRequest": {
@@ -2451,8 +2663,30 @@
         "title": "UniverseRenameRequest",
         "type": "object"
       },
-      "UpdateBenchmarkSectorRequest": {
+      "UpdateBenchmarkRequest": {
         "properties": {
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
           "sector": {
             "anyOf": [
               {
@@ -2465,10 +2699,7 @@
             "title": "Sector"
           }
         },
-        "required": [
-          "sector"
-        ],
-        "title": "UpdateBenchmarkSectorRequest",
+        "title": "UpdateBenchmarkRequest",
         "type": "object"
       },
       "UpdateCompanyRequest": {
@@ -4597,8 +4828,8 @@
         ]
       },
       "patch": {
-        "description": "Set or clear the GICS sector tag on a benchmark. The DB has a\npartial unique index on sector so only one benchmark can carry each\nsector at a time.",
-        "operationId": "update_benchmark_sector_api_benchmarks__benchmark_id__patch",
+        "description": "Partial update of a benchmark's `sector` and/or `isin`. Only the\nfields present in the request body are touched (empty string \u2192 clear).\nThe DB has a partial unique index on sector so only one benchmark can\ncarry each sector at a time.",
+        "operationId": "update_benchmark_api_benchmarks__benchmark_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -4614,7 +4845,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateBenchmarkSectorRequest"
+                "$ref": "#/components/schemas/UpdateBenchmarkRequest"
               }
             }
           },
@@ -4640,7 +4871,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Update Benchmark Sector",
+        "summary": "Update Benchmark",
         "tags": [
           "benchmarks"
         ]
@@ -7288,6 +7519,89 @@
         "summary": "Trigger Scheduled Refresh",
         "tags": [
           "ingest"
+        ]
+      }
+    },
+    "/api/isin-compare": {
+      "post": {
+        "operationId": "isin_compare_api_isin_compare_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IsinCompareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IsinCompareResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Isin Compare",
+        "tags": [
+          "universe"
+        ]
+      }
+    },
+    "/api/isin-compare/prune": {
+      "post": {
+        "description": "Drop the given companies from a universe's membership \u2014 used to prune a\nuniverse down to the CSV intersection (remove the members not in the\nuploaded list). Deletes the `universe_membership` rows across every stored\nmonth of that universe, so the companies leave the universe entirely.\nDestructive + admin-gated; the frontend confirms first.",
+        "operationId": "prune_universe_api_isin_compare_prune_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PruneRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PruneResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Prune Universe",
+        "tags": [
+          "universe"
         ]
       }
     },

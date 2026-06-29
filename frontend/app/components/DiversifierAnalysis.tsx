@@ -10,6 +10,7 @@ import BenchmarkSection from './diversifier/BenchmarkSection';
 import ManualPortfolioSection from './diversifier/ManualPortfolioSection';
 import SavedPortfoliosSection from './diversifier/SavedPortfoliosSection';
 import { useDiversifier } from './diversifier/useDiversifier';
+import { useFxCurrencies } from '../../lib/hooks/apiData';
 import type { AssetWeight, CorrelationResponse, DiversifierResult, DrawdownInfo, OptimizeResponse } from '../../lib/types/api';
 
 const fmtPct = (v: number | null | undefined, dp = 1) =>
@@ -34,6 +35,7 @@ function corrClass(c: number | null): string {
 
 export default function DiversifierAnalysis() {
   const d = useDiversifier();
+  const fxCurrencies = useFxCurrencies();
 
   const canRun = d.selectedRunId != null && d.selectedEtfIds.size > 0 && !d.running;
 
@@ -206,11 +208,14 @@ export default function DiversifierAnalysis() {
           onToggle={d.toggleEtf}
           onSelectAll={d.toggleSelectAll}
           accent="accent"
-          onAdd={(t) => d.addEtf(t)}
+          onAdd={(t, isin) => d.addEtf(t, { isin })}
           adding={d.adding}
           addPlaceholder="e.g. GLD"
           onRefresh={d.refreshEtf}
           onDelete={d.deleteEtf}
+          onSetIsin={d.setBenchmarkIsin}
+          onSetCurrency={d.setBenchmarkCurrency}
+          currencyOptions={fxCurrencies}
           busyId={d.busyEtfId}
           emptyText={d.cutoffYear ? `No funds with history before ${d.cutoffYear}.` : 'No funds yet — add one above.'}
           loading={d.loadingLists}

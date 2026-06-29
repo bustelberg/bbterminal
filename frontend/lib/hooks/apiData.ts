@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { API_URL } from '../apiUrl';
 import { apiFetch } from '../apiFetch';
-import { getCachedOrFetch, peekCache } from './fetchCache';
+import { getCachedOrFetch, invalidateCache, peekCache } from './fetchCache';
 import { DEFAULT_FEE_CONFIG, type FeeConfig } from '../../app/components/momentum/feeModel';
 
 // Shape returned by `GET /api/universe-templates`.
@@ -32,6 +32,7 @@ export type Benchmark = {
   ticker: string;
   name?: string | null;
   sector?: string | null;
+  isin?: string | null;
   currency?: string | null;
 };
 
@@ -88,7 +89,12 @@ const KEYS = {
   momentumSignals: 'GET /api/momentum/signals',
   exchangeFees: 'GET /api/exchange-fees',
   feeConfig: 'GET /api/fee-config',
+  fxLatest: 'GET /api/fx/latest',
 } as const;
+
+/** One row of `GET /api/fx/latest` — the freshest stored rate per currency.
+ * `rate` is ECB convention: units of `currency` per 1 EUR (EUR = value / rate). */
+export type FxLatestRow = { currency: string; rate: number; date?: string };
 
 async function _fetchUniverseTemplates(): Promise<UniverseTemplate[]> {
   const r = await apiFetch(`${API_URL}/api/universe-templates`);
@@ -143,6 +149,13 @@ async function _fetchExchangeFees(): Promise<ExchangeFeeRow[]> {
   const r = await apiFetch(`${API_URL}/api/exchange-fees`);
   if (!r.ok) return [];
   return (await r.json()) as ExchangeFeeRow[];
+}
+
+async function _fetchFxLatest(): Promise<FxLatestRow[]> {
+  const r = await apiFetch(`${API_URL}/api/fx/latest`);
+  if (!r.ok) return [];
+  const d = await r.json();
+  return (d.rates ?? []) as FxLatestRow[];
 }
 
 async function _fetchFeeConfig(): Promise<FeeConfig> {
@@ -200,11 +213,52 @@ function _buildHook<T>(
 
 export const useUniverseTemplates = _buildHook(KEYS.universeTemplates, _fetchUniverseTemplates);
 export const useStaticUniverses = _buildHook(KEYS.staticUniverses, _fetchStaticUniverses);
+
+/** Drop the cached `/api/static-universes` list so the next mount refetches
+ * fresh member counts — call after a mutation that changes a universe's
+ * membership (e.g. pruning it on the ISIN-compare page). */
+export function invalidateStaticUniverses(): void {
+  invalidateCache(KEYS.staticUniverses);
+}
 export const useBenchmarks = _buildHook(KEYS.benchmarks, _fetchBenchmarks);
 export const useCompanies = _buildHook(KEYS.companies, _fetchCompanies);
 export const useMomentumSignals = _buildHook(KEYS.momentumSignals, _fetchMomentumSignals);
 export const useExchangeFees = _buildHook(KEYS.exchangeFees, _fetchExchangeFees);
+export const useFxLatest = _buildHook(KEYS.fxLatest, _fetchFxLatest);
 const _useFeeConfigRaw = _buildHook(KEYS.feeConfig, _fetchFeeConfig);
+
+/**
+ * Derived hook: `Map<currency, rate>` of the latest stored FX rate per
+ * currency (ECB convention — units per 1 EUR; EUR maps to 1). Updates daily as
+ * the FX sync rolls new rows in. Used to mark holdings to market in EUR.
+ */
+export function useFxRateMap(): Map<string, number> {
+  const { data } = useFxLatest();
+  return useMemo(() => {
+    const m = new Map<string, number>([['EUR', 1]]);
+    for (const r of data ?? []) {
+      if (r.currency && r.rate) m.set(r.currency.toUpperCase(), r.rate);
+    }
+    return m;
+  }, [data]);
+}
+
+/**
+ * Derived hook: the sorted list of currencies we hold FX rates for (EUR
+ * first), for the diversifier's ETF/bond currency dropdown — so the user
+ * only picks currencies the app can actually convert to EUR.
+ */
+export function useFxCurrencies(): string[] {
+  const { data } = useFxLatest();
+  return useMemo(() => {
+    const rest = new Set<string>();
+    for (const r of data ?? []) {
+      const c = (r.currency || '').toUpperCase();
+      if (c && c !== 'EUR') rest.add(c);
+    }
+    return ['EUR', ...Array.from(rest).sort()];
+  }, [data]);
+}
 
 /**
  * The global fee config (Leonteq + Bustelberg parameters) backing the
@@ -269,6 +323,44 @@ export function useCompanyIsinMap(): Map<number, string> {
     for (const c of data ?? []) {
       const isin = (c.isin ?? '').trim();
       if (isin) m.set(c.company_id, isin);
+    }
+    return m;
+  }, [data]);
+}
+
+/**
+ * Derived hook: ISINs for ETF/bond benchmarks, keyed by the NEGATIVE
+ * company_id the holdings carry (`-benchmark_id`, the engine-wide convention
+ * for ETF holdings). Merged alongside `useCompanyIsinMap` so the /schedule
+ * holdings tables resolve an ISIN for both stocks (positive id) and ETF/bond
+ * sleeves (negative id). Benchmarks with no ISIN are absent from the map.
+ */
+export function useBenchmarkIsinMap(): Map<number, string> {
+  const { data } = useBenchmarks();
+  return useMemo(() => {
+    const m = new Map<number, string>();
+    for (const b of data ?? []) {
+      const isin = (b.isin ?? '').trim();
+      if (isin) m.set(-b.benchmark_id, isin);
+    }
+    return m;
+  }, [data]);
+}
+
+/**
+ * Derived hook: ETF/bond trading currency, keyed by the NEGATIVE company_id the
+ * holdings carry (`-benchmark_id`). Lets the /schedule holdings tables resolve
+ * an ETF's currency from the LIVE benchmark row — so a currency set after the
+ * strategy was scheduled is respected immediately (the snapshot's stored
+ * holding currency may predate it).
+ */
+export function useBenchmarkCurrencyMap(): Map<number, string> {
+  const { data } = useBenchmarks();
+  return useMemo(() => {
+    const m = new Map<number, string>();
+    for (const b of data ?? []) {
+      const cur = (b.currency ?? '').trim().toUpperCase();
+      if (cur) m.set(-b.benchmark_id, cur);
     }
     return m;
   }, [data]);

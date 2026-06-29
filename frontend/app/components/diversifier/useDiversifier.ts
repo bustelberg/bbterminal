@@ -25,6 +25,8 @@ export type Etf = {
   ticker: string;
   name: string;
   sector: string | null;
+  isin: string | null;
+  currency: string | null;
   price_from: string | null;
   price_to: string | null;
 };
@@ -182,25 +184,33 @@ export function useDiversifier() {
    * With `{ select: true }` the freshly-added fund is also dropped into the
    * mix (selected) — used by the manual-backtest "Add to mix" control. */
   const addEtf = useCallback(
-    async (rawTicker: string, opts?: { select?: boolean }) => {
+    async (rawTicker: string, opts?: { select?: boolean; isin?: string; currency?: string }) => {
       const ticker = rawTicker.trim().toUpperCase();
       if (!ticker) return;
       setAdding(true);
       setError(null);
       try {
         let name = ticker;
+        let resolvedCurrency: string | undefined;
         try {
           const nameRes = await apiFetch(
             `${API_URL}/api/momentum/diversifier/resolve-name?ticker=${encodeURIComponent(ticker)}`,
           );
-          if (nameRes.ok) name = (await nameRes.json()).name || ticker;
+          if (nameRes.ok) {
+            const d = await nameRes.json();
+            name = d.name || ticker;
+            resolvedCurrency = (d.currency || '').trim().toUpperCase() || undefined;
+          }
         } catch {
           /* name resolution is best-effort; fall back to the ticker */
         }
+        const isin = (opts?.isin || '').trim().toUpperCase() || undefined;
+        // Prefer an explicitly-typed currency, else GuruFocus's auto-detected one.
+        const currency = ((opts?.currency || '').trim().toUpperCase() || resolvedCurrency) || undefined;
         const res = await trackedFetch(`Adding ${ticker}`, `${API_URL}/api/benchmarks`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ticker, name }),
+          body: JSON.stringify({ ticker, name, isin, currency }),
         });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
@@ -237,6 +247,52 @@ export function useDiversifier() {
       setError(`Refresh failed: ${e instanceof Error ? e.message : e}`);
     }
     setBusyEtfId(null);
+  }, []);
+
+  /** Set/clear the ISIN on a benchmark (ETF/bond). Empty string clears it.
+   * Reloads the list so the new ISIN reflects everywhere (incl. /schedule). */
+  const setBenchmarkIsin = useCallback(async (id: number, isin: string) => {
+    setError(null);
+    // Optimistic local update so the input doesn't flicker back to the old value.
+    setEtfs((prev) => prev.map((e) => (e.benchmark_id === id ? { ...e, isin: isin.trim().toUpperCase() || null } : e)));
+    try {
+      const res = await apiFetch(`${API_URL}/api/benchmarks/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isin: isin.trim().toUpperCase() }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}`);
+      }
+    } catch (e) {
+      setError(`Couldn't set ISIN: ${e instanceof Error ? e.message : e}`);
+      // Reload to revert the optimistic change on failure.
+      const etfRes = await apiFetch(`${API_URL}/api/benchmarks`);
+      if (etfRes.ok) setEtfs(await etfRes.json());
+    }
+  }, []);
+
+  /** Set/clear the native currency on a benchmark (ETF/bond). Empty clears. */
+  const setBenchmarkCurrency = useCallback(async (id: number, currency: string) => {
+    setError(null);
+    const clean = currency.trim().toUpperCase();
+    setEtfs((prev) => prev.map((e) => (e.benchmark_id === id ? { ...e, currency: clean || null } : e)));
+    try {
+      const res = await apiFetch(`${API_URL}/api/benchmarks/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currency: clean }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}`);
+      }
+    } catch (e) {
+      setError(`Couldn't set currency: ${e instanceof Error ? e.message : e}`);
+      const etfRes = await apiFetch(`${API_URL}/api/benchmarks`);
+      if (etfRes.ok) setEtfs(await etfRes.json());
+    }
   }, []);
 
   const deleteEtf = useCallback(async (id: number) => {
@@ -601,6 +657,8 @@ export function useDiversifier() {
     adding,
     refreshEtf,
     deleteEtf,
+    setBenchmarkIsin,
+    setBenchmarkCurrency,
     busyEtfId,
     runCorrelation,
     running,

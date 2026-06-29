@@ -39,6 +39,7 @@ from routers import (
     index_universe as _index_universe_router,
     indicators as _indicators_router,
     ingest_runs as _ingest_runs_router,
+    isin_compare as _isin_compare_router,
     leonteq as _leonteq_router,
     longequity as _longequity_router,
     momentum as _momentum_pkg,
@@ -109,6 +110,7 @@ for _r in (
     _scheduled_strategies_router.router,
     _universe_templates_router.router,
     _timezone_router.router,
+    _isin_compare_router.router,
     _admin_router.router,
     # Momentum splits into four sub-routers (signals, backtest_stream,
     # backtest_crud, current_picks); `routers.momentum.routers` is the

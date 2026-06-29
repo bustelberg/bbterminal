@@ -6,6 +6,7 @@ import LoadingDots from './LoadingDots';
 import DatePartsPicker from './DatePartsPicker';
 import { apiFetch } from '../../lib/apiFetch';
 import { StrategyConfigDetail } from './schedule/StrategyConfigDetail';
+import CurrentPortfolioCard from './schedule/CurrentPortfolioCard';
 import type { IngestRun } from './schedule/types';
 
 import { API_URL } from '../../lib/apiUrl';
@@ -154,6 +155,10 @@ export default function ScheduledStrategyDetail({
 
   return (
     <div className="px-5 py-4 bg-sidebar border-t border-neutral-800/30 space-y-4">
+      {/* Current live portfolio — the most actionable view, shown first: what
+          you hold, target vs drifted weight, the rebalance action, and ISIN. */}
+      <CurrentPortfolioCard snapshotId={data.runs?.[0]?.snapshot_id ?? null} />
+
       {/* Strategy params (collapsible — verbose enough to want to hide
           unless the user is checking what's actually scheduled). */}
       <div>

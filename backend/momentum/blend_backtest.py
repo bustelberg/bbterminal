@@ -40,6 +40,7 @@ class OverlayEtf:
     weight: float                      # target weight as a fraction (0..1)
     band: float                        # rebalance band as a fraction (0..1)
     prices: list[tuple[str, float]]    # [(YYYY-MM-DD, price), …] ascending
+    currency: str | None = None        # native trading currency (display only)
 
 
 def _asof_price(dates: list[str], prices: list[float], day: str) -> float | None:
@@ -72,12 +73,20 @@ def _period_bounds(rec: dict, next_rec: dict | None) -> tuple[str | None, str | 
 def _etf_holding(etf: OverlayEtf, entry_price: float | None, exit_price: float | None,
                  entry_date: str | None, exit_date: str | None) -> dict:
     """An ETF holding dict in the engine's PeriodHolding shape, with the
-    NEGATIVE-company_id convention so it can't collide with a real company."""
+    NEGATIVE-company_id convention so it can't collide with a real company.
+
+    The EUR price fields are populated 1:1 with the local price ONLY when the
+    benchmark trades in EUR (or its currency is unknown — the prior
+    treat-as-EUR behaviour). For a known foreign currency they're left null so
+    the /schedule EUR + FX columns honestly read "—" rather than implying a
+    1.00 rate we haven't actually applied (a real FX pass is a follow-up)."""
     ret = (
         (exit_price / entry_price - 1.0) * 100.0
         if entry_price and exit_price and entry_price > 0
         else None
     )
+    ccy = (etf.currency or "").strip().upper() or None
+    eur_ok = ccy in (None, "EUR")
     return {
         "company_id": -etf.benchmark_id,
         "ticker": etf.ticker,
@@ -87,11 +96,11 @@ def _etf_holding(etf: OverlayEtf, entry_price: float | None, exit_price: float |
         "category_scores": {},
         "weight": round(etf.weight, 4),
         "forward_return_pct": ret,
-        "currency": None,
+        "currency": ccy,
         "entry_price_local": entry_price,
         "exit_price_local": exit_price,
-        "entry_price_eur": entry_price,   # benchmark prices are treated currency-agnostically
-        "exit_price_eur": exit_price,
+        "entry_price_eur": entry_price if eur_ok else None,
+        "exit_price_eur": exit_price if eur_ok else None,
         "entry_date": entry_date,
         "exit_date": exit_date,
         "side": "long",
@@ -103,13 +112,13 @@ def _etf_holding(etf: OverlayEtf, entry_price: float | None, exit_price: float |
 def make_etf_holding(
     benchmark_id: int, ticker: str, name: str, sector: str | None, weight: float,
     entry_price: float | None, exit_price: float | None,
-    entry_date: str | None, exit_date: str | None,
+    entry_date: str | None, exit_date: str | None, currency: str | None = None,
 ) -> dict:
     """Public builder for one ETF holding dict (negative-company_id shape).
     Used by the live rebalance path in `ingest/phases/momentum.py`."""
     e = OverlayEtf(
         benchmark_id=benchmark_id, ticker=ticker, name=name, sector=sector,
-        weight=weight, band=0.0, prices=[],
+        weight=weight, band=0.0, prices=[], currency=currency,
     )
     return _etf_holding(e, entry_price, exit_price, entry_date, exit_date)
 

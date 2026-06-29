@@ -36,7 +36,7 @@ export type ScreenRequest = components['schemas']['ScreenRequest'];
 export type BuildUniverseRequest = components['schemas']['BuildUniverseRequest'];
 export type DeriveUniverseRequest = components['schemas']['DeriveUniverseRequest'];
 export type CreateBenchmarkRequest = components['schemas']['CreateBenchmarkRequest'];
-export type UpdateBenchmarkSectorRequest = components['schemas']['UpdateBenchmarkSectorRequest'];
+export type UpdateBenchmarkRequest = components['schemas']['UpdateBenchmarkRequest'];
 
 // ── Diversifier (correlation + blend analysis) ───────────────────────
 export type CorrelationRequest = components['schemas']['CorrelationRequest'];

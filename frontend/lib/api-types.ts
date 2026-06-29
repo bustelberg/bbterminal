@@ -1041,12 +1041,13 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Update Benchmark Sector
-         * @description Set or clear the GICS sector tag on a benchmark. The DB has a
-         *     partial unique index on sector so only one benchmark can carry each
-         *     sector at a time.
+         * Update Benchmark
+         * @description Partial update of a benchmark's `sector` and/or `isin`. Only the
+         *     fields present in the request body are touched (empty string → clear).
+         *     The DB has a partial unique index on sector so only one benchmark can
+         *     carry each sector at a time.
          */
-        patch: operations["update_benchmark_sector_api_benchmarks__benchmark_id__patch"];
+        patch: operations["update_benchmark_api_benchmarks__benchmark_id__patch"];
         trace?: never;
     };
     "/api/benchmarks/{benchmark_id}/prices": {
@@ -2480,6 +2481,47 @@ export interface paths {
          *     freshness).
          */
         post: operations["trigger_scheduled_refresh_api_ingest_scheduled_refresh_trigger_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/isin-compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Isin Compare */
+        post: operations["isin_compare_api_isin_compare_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/isin-compare/prune": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Prune Universe
+         * @description Drop the given companies from a universe's membership — used to prune a
+         *     universe down to the CSV intersection (remove the members not in the
+         *     uploaded list). Deletes the `universe_membership` rows across every stored
+         *     month of that universe, so the companies leave the universe entirely.
+         *     Destructive + admin-gated; the frontend confirms first.
+         */
+        post: operations["prune_universe_api_isin_compare_prune_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4233,6 +4275,10 @@ export interface components {
         };
         /** CreateBenchmarkRequest */
         CreateBenchmarkRequest: {
+            /** Currency */
+            currency?: string | null;
+            /** Isin */
+            isin?: string | null;
             /** Name */
             name: string;
             /** Sector */
@@ -4442,6 +4488,34 @@ export interface components {
             /** To Date */
             to_date?: string | null;
         };
+        /** IsinCompareRequest */
+        IsinCompareRequest: {
+            /** Isins */
+            isins: string[];
+            /** Universe Label */
+            universe_label: string;
+        };
+        /** IsinCompareResponse */
+        IsinCompareResponse: {
+            /** Csv Isin Count */
+            csv_isin_count: number;
+            /** Csv Isins Not In Universe */
+            csv_isins_not_in_universe: string[];
+            /** In Universe Not In Csv */
+            in_universe_not_in_csv: components["schemas"]["MemberRow"][];
+            /** Intersection */
+            intersection: components["schemas"]["MemberRow"][];
+            /** Matched Count */
+            matched_count: number;
+            /** Target Month */
+            target_month?: string | null;
+            /** Universe Label */
+            universe_label: string;
+            /** Universe Member Count */
+            universe_member_count: number;
+            /** Unmatched Count */
+            unmatched_count: number;
+        };
         /** LongEquitySaveUniverseRequest */
         LongEquitySaveUniverseRequest: {
             /** Description */
@@ -4452,6 +4526,19 @@ export interface components {
             name?: string | null;
             /** Start Date */
             start_date?: string | null;
+        };
+        /** MemberRow */
+        MemberRow: {
+            /** Company Id */
+            company_id: number;
+            /** Company Name */
+            company_name?: string | null;
+            /** Exchange */
+            exchange?: string | null;
+            /** Isin */
+            isin?: string | null;
+            /** Ticker */
+            ticker?: string | null;
         };
         /** MonthStatInfo */
         MonthStatInfo: {
@@ -4619,6 +4706,22 @@ export interface components {
             members?: components["schemas"]["PortfolioMemberIn"][] | null;
             /** Name */
             name?: string | null;
+        };
+        /** PruneRequest */
+        PruneRequest: {
+            /** Drop Company Ids */
+            drop_company_ids: number[];
+            /** Universe Label */
+            universe_label: string;
+        };
+        /** PruneResponse */
+        PruneResponse: {
+            /** Dropped */
+            dropped: number;
+            /** Remaining Member Count */
+            remaining_member_count: number;
+            /** Universe Label */
+            universe_label: string;
         };
         /** RecomputeRequest */
         RecomputeRequest: {
@@ -4841,10 +4944,14 @@ export interface components {
             /** New Label */
             new_label: string;
         };
-        /** UpdateBenchmarkSectorRequest */
-        UpdateBenchmarkSectorRequest: {
+        /** UpdateBenchmarkRequest */
+        UpdateBenchmarkRequest: {
+            /** Currency */
+            currency?: string | null;
+            /** Isin */
+            isin?: string | null;
             /** Sector */
-            sector: string | null;
+            sector?: string | null;
         };
         /** UpdateCompanyRequest */
         UpdateCompanyRequest: {
@@ -6186,7 +6293,7 @@ export interface operations {
             };
         };
     };
-    update_benchmark_sector_api_benchmarks__benchmark_id__patch: {
+    update_benchmark_api_benchmarks__benchmark_id__patch: {
         parameters: {
             query?: never;
             header?: never;
@@ -6197,7 +6304,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UpdateBenchmarkSectorRequest"];
+                "application/json": components["schemas"]["UpdateBenchmarkRequest"];
             };
         };
         responses: {
@@ -8105,6 +8212,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    isin_compare_api_isin_compare_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IsinCompareRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IsinCompareResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prune_universe_api_isin_compare_prune_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PruneRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PruneResponse"];
                 };
             };
             /** @description Validation Error */

@@ -400,9 +400,12 @@ def _returns_from_backtest(
     - YTD  = from the start of the current calendar year
     - since-inception = from the go-live date (`inception_iso`)
 
-    MTD/YTD are calendar-anchored and independent of the go-live date; only
-    since-inception moves when the go-live date changes. Returns None when
-    the run has no curve."""
+    MTD/YTD are calendar-anchored BUT clamped to never reach earlier than the
+    go-live date: a strategy is only "real" from go-live on, and the curve
+    before that is the hypothetical backtest. So a strategy launched mid-year
+    reports a YTD of just its live performance (not the backtest's Jan→launch
+    gains); for a strategy live since a prior year the calendar anchors apply
+    unchanged. Returns None when the run has no curve."""
     pts = _extended_curve(backtest_run_id, snapshots or [])
     if not pts:
         return None
@@ -448,12 +451,24 @@ def _returns_from_backtest(
         inc_cum = curve_start_cum
     year_start = today.replace(month=1, day=1).isoformat()
     month_start = today.replace(day=1).isoformat()
-    ytd_cum = cum_before(year_start)
-    if ytd_cum is None:
-        ytd_cum = curve_start_cum
-    mtd_cum = cum_before(month_start)
-    if mtd_cum is None:
-        mtd_cum = curve_start_cum
+    # Clamp the MTD/YTD anchors to the go-live date: when the strategy went
+    # live INSIDE the current year/month, measure from go-live (the
+    # since-inception anchor) instead of the calendar boundary — otherwise the
+    # window would include the pre-go-live backtest curve (e.g. a strategy
+    # launched in May would report the backtest's Jan→May gains in its YTD).
+    inc = (inception_iso or "")[:10]
+    if inc and inc >= year_start:
+        ytd_cum = inc_cum
+    else:
+        ytd_cum = cum_before(year_start)
+        if ytd_cum is None:
+            ytd_cum = curve_start_cum
+    if inc and inc >= month_start:
+        mtd_cum = inc_cum
+    else:
+        mtd_cum = cum_before(month_start)
+        if mtd_cum is None:
+            mtd_cum = curve_start_cum
     return {
         "mtd_return_pct": rel(latest_cum, mtd_cum),
         "ytd_return_pct": rel(latest_cum, ytd_cum),

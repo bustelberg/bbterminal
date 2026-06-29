@@ -43,6 +43,7 @@ const navItems: NavEntry[] = [
   { href: '/request_gurufocus', label: 'Request GuruFocus' },
   { href: '/benchmarks', label: 'Benchmarks' },
   { href: '/companies', label: 'Companies', userVisible: true },
+  { href: '/isin-compare', label: 'ISIN Compare' },
   { href: '/schedule', label: 'Schedule' },
   { href: '/fees', label: 'Fees' },
   { href: '/api', label: 'API' },

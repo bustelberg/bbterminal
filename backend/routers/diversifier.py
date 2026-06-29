@@ -970,7 +970,7 @@ async def schedule_as_strategy(req: ScheduleAsStrategyRequest):
     bids = [int(h.benchmark_id) for h in etf_hs]
     meta_resp = await asyncio.to_thread(
         lambda: supabase.table("benchmark")
-        .select("benchmark_id, ticker, name, sector")
+        .select("benchmark_id, ticker, name, sector, currency")
         .in_("benchmark_id", bids)
         .execute()
     )
@@ -997,6 +997,7 @@ async def schedule_as_strategy(req: ScheduleAsStrategyRequest):
             weight=norm_pct / 100.0,
             band=max(0.0, float(h.band_pct or 0.0)) / 100.0,
             prices=prices,
+            currency=m.get("currency"),
         ))
         overlay_config.append({
             "benchmark_id": bid,

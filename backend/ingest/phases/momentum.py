@@ -412,7 +412,7 @@ def _apply_etf_overlay_to_snapshot(snapshot_id: int, etf_overlay: list[dict]) ->
     bids = [int(o["benchmark_id"]) for o in overlay]
     meta_resp = (
         supabase.table("benchmark")
-        .select("benchmark_id, ticker, name, sector")
+        .select("benchmark_id, ticker, name, sector, currency")
         .in_("benchmark_id", bids)
         .execute()
     )
@@ -457,6 +457,7 @@ def _apply_etf_overlay_to_snapshot(snapshot_id: int, etf_overlay: list[dict]) ->
             exit_price=_asof(bid, latest),
             entry_date=as_of or None,
             exit_date=latest or None,
+            currency=m.get("currency"),
         ))
 
     merged = scale_stock_weights(stock_holdings, strat_w) + etf_holdings
