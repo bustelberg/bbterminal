@@ -20,6 +20,7 @@ the DB loads and the variant/shape plumbing.
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -881,3 +882,158 @@ async def strategy_stats(run_id: int, variant_key: str | None = None):
         period_from=months[0] if months else None,
         period_to=months[-1] if months else None,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Schedule a backtest (vanilla or + ETF overlay) as a NEW standalone scheduled
+# strategy — it appears in /schedule's "Scheduled strategies" list and is
+# rebalanced by the pipeline. A blended variant carries an `etf_overlay` on its
+# config + is seeded from a blended `backtest_run`, so the ETFs show as real
+# holdings (with weights) and the backtested Sharpe/Sortino/curve reflect them.
+# --------------------------------------------------------------------------- #
+class ScheduleAsStrategyRequest(BaseModel):
+    name: str
+    backtest_run_id: int
+    variant_key: str | None = None
+    frequency: str
+    risk_free_rate_pct: float = 0.0
+    # The diversifier's holdings list: the strategy sleeve (benchmark_id = null)
+    # + each ETF. Weights are normalized so strategy + ETFs sum to 100%.
+    holdings: list[SimHolding]
+    start_date: date | None = None
+
+
+async def _load_run_config(run_id: int) -> dict | None:
+    resp = await asyncio.to_thread(
+        lambda: supabase.table("backtest_run")
+        .select("config")
+        .eq("run_id", run_id)
+        .limit(1)
+        .execute()
+    )
+    if not resp.data:
+        return None
+    return resp.data[0].get("config") or {}
+
+
+@router.post("/api/momentum/diversifier/schedule-as-strategy")
+async def schedule_as_strategy(req: ScheduleAsStrategyRequest):
+    """Create a new scheduled strategy from a saved backtest. With no ETF
+    holdings it's a plain momentum schedule (identical to /backtest's
+    "+ Schedule"); with ETFs it's a BLEND — the momentum sleeve scaled to its
+    weight + the ETFs at theirs, reset on each grid rebalance. Rejects variant
+    bundles (a scheduled strategy needs a single-variant config)."""
+    from routers import scheduled_strategies as sched  # noqa: PLC0415
+    from routers._schedule_hydration import _hydrate  # noqa: PLC0415
+    from routers.momentum.backtest_crud import (  # noqa: PLC0415
+        SaveBacktestRequest, save_backtest,
+    )
+
+    if req.frequency not in sched.FREQUENCIES:
+        raise HTTPException(
+            400, f"Unknown frequency {req.frequency!r}; expected one of {list(sched.FREQUENCIES)}"
+        )
+    if not req.name.strip():
+        raise HTTPException(400, "name must be non-empty")
+    strat_h = next((h for h in req.holdings if h.benchmark_id is None), None)
+    if strat_h is None:
+        raise HTTPException(422, "Include the strategy holding (benchmark_id = null) with a weight.")
+
+    source_config = await _load_run_config(req.backtest_run_id)
+    if source_config is None:
+        raise HTTPException(404, "Backtest run not found.")
+    result = await asyncio.to_thread(load_backtest_result_sync, req.backtest_run_id)
+    if not result:
+        raise HTTPException(404, "Backtest result not available (missing run or its result blob).")
+    if result.get("variants") or result.get("kind") == "variants":
+        raise HTTPException(
+            400,
+            "This backtest is a variant bundle. Schedule a single-variant backtest first "
+            "(save one variant from /backtest), then diversify + schedule it.",
+        )
+
+    etf_hs = [h for h in req.holdings if h.benchmark_id is not None and (h.weight_pct or 0) > 0]
+    base_config = {k: v for k, v in source_config.items() if k not in ("variants", "n_trials")}
+
+    # ── Vanilla (no ETFs): schedule the existing backtest run directly. ──
+    if not etf_hs:
+        def _create_vanilla() -> dict:
+            row = sched.create_scheduled_strategy_row(
+                req.name, req.frequency, base_config, req.backtest_run_id, req.start_date,
+            )
+            return _hydrate([row])[0]
+        return await asyncio.to_thread(_create_vanilla)
+
+    # ── Blended: build + save a blended backtest_run, then schedule it. ──
+    from momentum import blend_backtest as bb  # noqa: PLC0415
+
+    bids = [int(h.benchmark_id) for h in etf_hs]
+    meta_resp = await asyncio.to_thread(
+        lambda: supabase.table("benchmark")
+        .select("benchmark_id, ticker, name, sector")
+        .in_("benchmark_id", bids)
+        .execute()
+    )
+    meta = {m["benchmark_id"]: m for m in (meta_resp.data or [])}
+
+    # Normalize so the strategy sleeve + ETFs sum to 100%.
+    total_pct = float(strat_h.weight_pct) + sum(float(h.weight_pct) for h in etf_hs)
+    if total_pct <= 0:
+        raise HTTPException(422, "Total weight must be positive.")
+    strat_w = float(strat_h.weight_pct) / total_pct
+
+    overlay_etfs: list[bb.OverlayEtf] = []
+    overlay_config: list[dict] = []
+    for h in etf_hs:
+        bid = int(h.benchmark_id)
+        m = meta.get(bid) or {}
+        prices = await _load_benchmark_prices(bid)
+        norm_pct = float(h.weight_pct) / total_pct * 100.0
+        overlay_etfs.append(bb.OverlayEtf(
+            benchmark_id=bid,
+            ticker=m.get("ticker") or f"BM{bid}",
+            name=m.get("name") or m.get("ticker") or f"Benchmark {bid}",
+            sector=m.get("sector"),
+            weight=norm_pct / 100.0,
+            band=max(0.0, float(h.band_pct or 0.0)) / 100.0,
+            prices=prices,
+        ))
+        overlay_config.append({
+            "benchmark_id": bid,
+            "weight_pct": round(norm_pct, 6),
+            "band_pct": float(h.band_pct or 0.0),
+        })
+
+    rf = req.risk_free_rate_pct / 100.0
+    blended = await asyncio.to_thread(
+        bb.build_blended_result, result, overlay_etfs, strat_w, rf
+    )
+    if not blended.get("monthly_records"):
+        raise HTTPException(
+            422,
+            "No overlapping history between the strategy and the selected ETFs — "
+            "the blend has no periods to backtest.",
+        )
+
+    blend_name = f"{req.name.strip()} (blend)"
+    saved = await save_backtest(SaveBacktestRequest(
+        name=blend_name,
+        config={**base_config, "etf_overlay": overlay_config},
+        summary=blended["summary"],
+        monthly_records=blended["monthly_records"],
+        daily_records=blended["daily_records"],
+        universe_daily_records=blended.get("universe_daily_records") or [],
+        universe=blended.get("universe") or [],
+    ))
+    blended_run_id = saved.get("run_id")
+    if not blended_run_id:
+        raise HTTPException(500, "Failed to save the blended backtest.")
+
+    def _create_blended() -> dict:
+        row = sched.create_scheduled_strategy_row(
+            req.name, req.frequency,
+            {**base_config, "etf_overlay": overlay_config},
+            int(blended_run_id), req.start_date,
+        )
+        return _hydrate([row])[0]
+    return await asyncio.to_thread(_create_blended)

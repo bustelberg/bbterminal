@@ -66,6 +66,20 @@
             "title": "End Date",
             "type": "string"
           },
+          "etf_overlay": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/EtfOverlayHolding"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etf Overlay"
+          },
           "force_recompute": {
             "default": false,
             "title": "Force Recompute",
@@ -945,6 +959,30 @@
           "length_months"
         ],
         "title": "DrawdownInfo",
+        "type": "object"
+      },
+      "EtfOverlayHolding": {
+        "description": "One diversifier ETF held alongside the momentum sleeve in a blended\nscheduled strategy. `benchmark_id` is a `benchmark` row; `weight_pct` is\nits target portfolio weight; the strategy (momentum) sleeve takes\n`100 - sum(weight_pct)`. `band_pct` is the symmetric drift band used only\nas a 'rebalance due' alert on /schedule \u2014 rebalances ride the momentum\ngrid (the blend resets to target on each grid rebalance), never off-grid.",
+        "properties": {
+          "band_pct": {
+            "default": 10.0,
+            "title": "Band Pct",
+            "type": "number"
+          },
+          "benchmark_id": {
+            "title": "Benchmark Id",
+            "type": "integer"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "benchmark_id",
+          "weight_pct"
+        ],
+        "title": "EtfOverlayHolding",
         "type": "object"
       },
       "ExchangeFeeIn": {
@@ -1977,6 +2015,65 @@
           "created_at"
         ],
         "title": "SavedPortfolio",
+        "type": "object"
+      },
+      "ScheduleAsStrategyRequest": {
+        "properties": {
+          "backtest_run_id": {
+            "title": "Backtest Run Id",
+            "type": "integer"
+          },
+          "frequency": {
+            "title": "Frequency",
+            "type": "string"
+          },
+          "holdings": {
+            "items": {
+              "$ref": "#/components/schemas/SimHolding"
+            },
+            "title": "Holdings",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "risk_free_rate_pct": {
+            "default": 0.0,
+            "title": "Risk Free Rate Pct",
+            "type": "number"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Date"
+          },
+          "variant_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant Key"
+          }
+        },
+        "required": [
+          "name",
+          "backtest_run_id",
+          "frequency",
+          "holdings"
+        ],
+        "title": "ScheduleAsStrategyRequest",
         "type": "object"
       },
       "ScheduledStrategyCreate": {
@@ -8161,6 +8258,46 @@
           }
         },
         "summary": "Resolve Name",
+        "tags": [
+          "diversifier"
+        ]
+      }
+    },
+    "/api/momentum/diversifier/schedule-as-strategy": {
+      "post": {
+        "description": "Create a new scheduled strategy from a saved backtest. With no ETF\nholdings it's a plain momentum schedule (identical to /backtest's\n\"+ Schedule\"); with ETFs it's a BLEND \u2014 the momentum sleeve scaled to its\nweight + the ETFs at theirs, reset on each grid rebalance. Rejects variant\nbundles (a scheduled strategy needs a single-variant config).",
+        "operationId": "schedule_as_strategy_api_momentum_diversifier_schedule_as_strategy_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleAsStrategyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Schedule As Strategy",
         "tags": [
           "diversifier"
         ]

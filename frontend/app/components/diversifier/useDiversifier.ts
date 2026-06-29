@@ -3,8 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { API_URL } from '../../../lib/apiUrl';
 import { apiFetch } from '../../../lib/apiFetch';
+import { dialog } from '../../../lib/dialog';
 import { trackedFetch } from '../../../lib/loading';
 import type { BacktestStats, CorrelationResponse, OptimizeResponse, PortfolioStateResponse, SavedPortfolio } from '../../../lib/types/api';
+
+/** Pipeline rebalance cadences a scheduled strategy can take (backend FREQUENCIES). */
+export const SCHEDULE_FREQUENCIES = ['daily', 'weekly', 'monthly', 'bimonthly', 'quarterly'] as const;
+export type ScheduleFrequency = (typeof SCHEDULE_FREQUENCIES)[number];
 
 /** A saved backtest as the list endpoint returns it (metadata + config). */
 export type SavedBacktest = {
@@ -72,6 +77,8 @@ export function useDiversifier() {
   const [savingPortfolio, setSavingPortfolio] = useState(false);
   // Scheduled strategies — the live bases a portfolio can be scheduled against.
   const [scheduledStrategies, setScheduledStrategies] = useState<{ id: number; name: string | null }[]>([]);
+  // Rebalance cadence for "Schedule as variant" (creates a NEW scheduled strategy).
+  const [scheduleFreq, setScheduleFreq] = useState<ScheduleFrequency>('monthly');
   const [error, setError] = useState<string | null>(null);
 
   const loadSavedPortfolios = useCallback(async () => {
@@ -171,9 +178,11 @@ export function useDiversifier() {
     });
   }, [visibleEtfs]);
 
-  /** Add a benchmark by ticker (resolving its name from GuruFocus first). */
+  /** Add a benchmark by ticker (resolving its name from GuruFocus first).
+   * With `{ select: true }` the freshly-added fund is also dropped into the
+   * mix (selected) — used by the manual-backtest "Add to mix" control. */
   const addEtf = useCallback(
-    async (rawTicker: string) => {
+    async (rawTicker: string, opts?: { select?: boolean }) => {
       const ticker = rawTicker.trim().toUpperCase();
       if (!ticker) return;
       setAdding(true);
@@ -197,7 +206,11 @@ export function useDiversifier() {
           const data = await res.json().catch(() => ({}));
           throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}`);
         }
+        const created = await res.json().catch(() => null);
         await loadLists();
+        if (opts?.select && created && typeof created.benchmark_id === 'number') {
+          setSelectedEtfIds((prev) => new Set(prev).add(created.benchmark_id));
+        }
       } catch (e) {
         setError(`Add failed: ${e instanceof Error ? e.message : e}`);
       }
@@ -467,6 +480,43 @@ export function useDiversifier() {
     setSavingPortfolio(false);
   }, [riskFreePct, buildHoldings, loadSavedPortfolios]);
 
+  /** Schedule the current backtest (+ any selected ETFs) as a NEW standalone
+   * scheduled strategy — it appears in /schedule's "Scheduled strategies" list
+   * and is rebalanced by the pipeline. With no ETFs selected it's a vanilla
+   * momentum schedule; with ETFs it's a blend (the momentum sleeve + the ETFs
+   * at their weights, reset on each grid rebalance). */
+  const scheduleAsStrategy = useCallback(async (name: string) => {
+    if (selectedRunId == null || !name.trim()) return;
+    setSavingPortfolio(true);
+    setError(null);
+    try {
+      const res = await trackedFetch('Scheduling strategy', `${API_URL}/api/momentum/diversifier/schedule-as-strategy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          backtest_run_id: selectedRunId,
+          variant_key: variantKey,
+          frequency: scheduleFreq,
+          risk_free_rate_pct: riskFreePct,
+          holdings: buildHoldings(),
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}`);
+      }
+      await loadSavedPortfolios();
+      await dialog.alert(
+        `"${name.trim()}" was scheduled. Find it on /schedule under "Scheduled strategies"; the pipeline starts tracking it on the next tick.`,
+        { title: 'Scheduled' },
+      );
+    } catch (e) {
+      setError(`Schedule failed: ${e instanceof Error ? e.message : e}`);
+    }
+    setSavingPortfolio(false);
+  }, [selectedRunId, variantKey, scheduleFreq, riskFreePct, buildHoldings, loadSavedPortfolios]);
+
   const deletePortfolio = useCallback(async (id: number) => {
     setError(null);
     try {
@@ -573,5 +623,9 @@ export function useDiversifier() {
     portfolioState,
     scheduledStrategies,
     scheduleLivePortfolio,
+    // schedule as a new standalone strategy (vanilla or blended)
+    scheduleFreq,
+    setScheduleFreq,
+    scheduleAsStrategy,
   };
 }

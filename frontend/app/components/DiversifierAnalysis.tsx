@@ -232,8 +232,13 @@ export default function DiversifierAnalysis() {
             canRun={!d.simulating}
             onSave={d.savePortfolio}
             saving={d.savingPortfolio}
-            scheduledStrategies={d.scheduledStrategies}
-            onSchedule={d.scheduleLivePortfolio}
+            scheduleFreq={d.scheduleFreq}
+            onScheduleFreqChange={d.setScheduleFreq}
+            onScheduleAsNew={d.scheduleAsStrategy}
+            availableFunds={d.etfs.filter((e) => !d.selectedEtfIds.has(e.benchmark_id))}
+            onAddFund={d.toggleEtf}
+            onAddByTicker={(t) => d.addEtf(t, { select: true })}
+            adding={d.adding}
           />
         )}
         {d.manualResult && <OptimizeCard result={d.manualResult} title="Portfolio backtest · manual weights" />}
@@ -328,11 +333,11 @@ function OptimizeCard({ result: r, title }: { result: OptimizeResponse; title?: 
   // Log scale plots the growth multiple (1 + cum%/100) — always positive — so
   // the early years stay visible against a strategy that's up many-fold.
   const [logScale, setLogScale] = useState(true);
-  // Track COLLAPSED years (empty by default → all years expanded, including
-  // on a fresh optimize run).
-  const [collapsedYears, setCollapsedYears] = useState<Set<number>>(new Set());
+  // Track EXPANDED years (empty by default → all years collapsed; click a
+  // year to reveal its months, matching the section hint).
+  const [expandedYears, setExpandedYears] = useState<Set<number>>(new Set());
   const toggleYear = (year: number) =>
-    setCollapsedYears((prev) => {
+    setExpandedYears((prev) => {
       const next = new Set(prev);
       if (next.has(year)) next.delete(year);
       else next.add(year);
@@ -441,7 +446,7 @@ function OptimizeCard({ result: r, title }: { result: OptimizeResponse; title?: 
               </thead>
               <tbody>
                 {r.annual.map((y) => {
-                  const open = !collapsedYears.has(y.year);
+                  const open = expandedYears.has(y.year);
                   return (
                     <Fragment key={y.year}>
                       <tr className="border-b border-neutral-800/40 hover:bg-overlay/[0.02] cursor-pointer" onClick={() => toggleYear(y.year)}>

@@ -2,7 +2,7 @@
 
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import type { BacktestResult, PeriodRecord } from '../../../lib/stores/momentum';
+import type { BacktestResult, Holding, PeriodRecord } from '../../../lib/stores/momentum';
 import { API_URL } from '../../../lib/apiUrl';
 import { apiFetch } from '../../../lib/apiFetch';
 import type { Column } from '../../../lib/tableExport';
@@ -57,6 +57,23 @@ type Props = {
   /** Start collapsed (the /schedule strategy detail collapses every card). */
   defaultCollapsed?: boolean;
 };
+
+/** Current (drifted) weights for a period's holdings, keyed by
+ * `${side}-${company_id}` (the row key). Each holding starts at its target
+ * (initial) weight and drifts by its own EUR return over the period
+ * (End € ÷ Start €, i.e. `1 + forward_return_pct/100`); the result is
+ * renormalized to sum to 1. Holdings with no return yet keep their nominal
+ * value (factor 1). Long/short sides are normalized together (a long-only or
+ * blended book is the common case). */
+function driftedWeights(holdings: Holding[]): Map<string, number> {
+  const factors = holdings.map((h) => (h.weight ?? 0) * (1 + (h.forward_return_pct ?? 0) / 100));
+  const total = factors.reduce((a, b) => a + b, 0);
+  const m = new Map<string, number>();
+  holdings.forEach((h, i) => {
+    m.set(`${h.side ?? 'long'}-${h.company_id}`, total > 0 ? factors[i] / total : 0);
+  });
+  return m;
+}
 
 /** "Monthly Portfolios" card: one row per rebalance month, expandable to
  * show that month's holdings with per-stock returns and FX details. Owns
@@ -293,6 +310,8 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
     sector: string;
     category_scores: Record<string, number | null>;
     score: number;
+    weight: number | null;          // initial (target) weight at rebalance
+    current_weight: number | null;  // drifted weight by period EUR return
     entry_price_local: number | null;
     exit_price_local: number | null;
     currency: string;
@@ -305,6 +324,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
   const flatHoldings = useMemo<FlatHolding[]>(() => {
     const out: FlatHolding[] = [];
     for (const r of result.monthly_records) {
+      const cur = driftedWeights(r.holdings);
       for (const h of r.holdings) {
         out.push({
           period: r.date,
@@ -318,6 +338,8 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
           sector: h.sector ?? '',
           category_scores: h.category_scores ?? {},
           score: h.score,
+          weight: h.weight ?? null,
+          current_weight: cur.get(`${h.side ?? 'long'}-${h.company_id}`) ?? null,
           entry_price_local: h.entry_price_local ?? null,
           exit_price_local: h.exit_price_local ?? null,
           currency: h.currency ?? '',
@@ -355,6 +377,8 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
     }
     cols.push(
       { key: 'total_score', header: 'Total score', accessor: (r) => r.score },
+      { key: 'init_weight_pct', header: 'Initial weight (%)', accessor: (r) => (r.weight != null ? r.weight * 100 : null) },
+      { key: 'cur_weight_pct', header: 'Current weight (%)', accessor: (r) => (r.current_weight != null ? r.current_weight * 100 : null) },
       { key: 'currency', header: 'Currency', accessor: (r) => r.currency },
       { key: 'entry_price_local', header: 'Start (local)', accessor: (r) => r.entry_price_local },
       { key: 'exit_price_local', header: 'End (local)', accessor: (r) => r.exit_price_local },
@@ -425,7 +449,9 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
             </tr>
           </thead>
           <tbody>
-            {displayRows.map(({ row: r, key: rowKey, label: rowLabel, turnoverDate: rowTurnover }) => (
+            {displayRows.map(({ row: r, key: rowKey, label: rowLabel, turnoverDate: rowTurnover }) => {
+              const curWeightByKey = driftedWeights(r.holdings);
+              return (
               <Fragment key={rowKey}>
                 <tr
                   className={`group border-b border-neutral-800/20 hover:bg-overlay/[0.02] cursor-pointer transition-colors ${rowLabel ? 'border-l-2 border-l-neg-500/60' : ''}`}
@@ -579,6 +605,12 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
                               Total<CellInfoTip>Weighted combination of the category scores. Selection ranks by this.</CellInfoTip>
                             </th>
                             <th className="text-right py-1 font-medium pl-4">
+                              Init wt<CellInfoTip>Target portfolio weight at the rebalance (period start). Plain momentum picks are equal-weighted; a blended (diversified) strategy scales the stock sleeve and adds the ETF weights (so e.g. ~3.3% per stock + 20% per ETF).</CellInfoTip>
+                            </th>
+                            <th className="text-right py-1 font-medium">
+                              Cur wt<CellInfoTip>Current (drifted) weight = the initial weight grown by this holding&apos;s EUR return over the period (End € ÷ Start €), renormalized so the book sums to 100%. Winners drift above their target, losers below — this is what you&apos;d trim/top-up at the next rebalance.</CellInfoTip>
+                            </th>
+                            <th className="text-right py-1 font-medium pl-4">
                               Start (local)<CellInfoTip>Entry price in local currency at the first trading day of this period.</CellInfoTip>
                             </th>
                             <th className="text-right py-1 font-medium">
@@ -718,6 +750,15 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
                                   ))}
                                   <td className="text-right py-1.5 text-fg-strong font-mono font-medium">{h.score.toFixed(1)}</td>
                                   <td className="text-right py-1.5 text-fg-muted font-mono pl-4">
+                                    {h.weight != null ? `${(h.weight * 100).toFixed(1)}%` : '—'}
+                                  </td>
+                                  <td className="text-right py-1.5 font-mono text-fg">
+                                    {(() => {
+                                      const cur = curWeightByKey.get(`${h.side ?? 'long'}-${h.company_id}`);
+                                      return cur != null ? `${(cur * 100).toFixed(1)}%` : '—';
+                                    })()}
+                                  </td>
+                                  <td className="text-right py-1.5 text-fg-muted font-mono pl-4">
                                     {fmtPrice(h.entry_price_local)}
                                     {h.currency && <span className="text-fg-faint text-[10px] ml-1">{h.currency}</span>}
                                     {h.entry_date && (
@@ -842,7 +883,8 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
                   </tr>
                 )}
               </Fragment>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

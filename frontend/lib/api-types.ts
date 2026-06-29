@@ -3012,6 +3012,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/momentum/diversifier/schedule-as-strategy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Schedule As Strategy
+         * @description Create a new scheduled strategy from a saved backtest. With no ETF
+         *     holdings it's a plain momentum schedule (identical to /backtest's
+         *     "+ Schedule"); with ETFs it's a BLEND — the momentum sleeve scaled to its
+         *     weight + the ETFs at theirs, reset on each grid rebalance. Rejects variant
+         *     bundles (a scheduled strategy needs a single-variant config).
+         */
+        post: operations["schedule_as_strategy_api_momentum_diversifier_schedule_as_strategy_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/momentum/diversifier/simulate": {
         parameters: {
             query?: never;
@@ -4018,6 +4042,8 @@ export interface components {
              * @default 2026-01-01
              */
             end_date?: string;
+            /** Etf Overlay */
+            etf_overlay?: components["schemas"]["EtfOverlayHolding"][] | null;
             /**
              * Force Recompute
              * @default false
@@ -4324,6 +4350,26 @@ export interface components {
             recovery_date?: string | null;
             /** Trough Date */
             trough_date: string;
+        };
+        /**
+         * EtfOverlayHolding
+         * @description One diversifier ETF held alongside the momentum sleeve in a blended
+         *     scheduled strategy. `benchmark_id` is a `benchmark` row; `weight_pct` is
+         *     its target portfolio weight; the strategy (momentum) sleeve takes
+         *     `100 - sum(weight_pct)`. `band_pct` is the symmetric drift band used only
+         *     as a 'rebalance due' alert on /schedule — rebalances ride the momentum
+         *     grid (the blend resets to target on each grid rebalance), never off-grid.
+         */
+        EtfOverlayHolding: {
+            /**
+             * Band Pct
+             * @default 10
+             */
+            band_pct?: number;
+            /** Benchmark Id */
+            benchmark_id: number;
+            /** Weight Pct */
+            weight_pct: number;
         };
         /** ExchangeFeeIn */
         ExchangeFeeIn: {
@@ -4647,6 +4693,26 @@ export interface components {
             scheduled_strategy_id?: number | null;
             /** Strategy Name */
             strategy_name?: string | null;
+            /** Variant Key */
+            variant_key?: string | null;
+        };
+        /** ScheduleAsStrategyRequest */
+        ScheduleAsStrategyRequest: {
+            /** Backtest Run Id */
+            backtest_run_id: number;
+            /** Frequency */
+            frequency: string;
+            /** Holdings */
+            holdings: components["schemas"]["SimHolding"][];
+            /** Name */
+            name: string;
+            /**
+             * Risk Free Rate Pct
+             * @default 0
+             */
+            risk_free_rate_pct?: number;
+            /** Start Date */
+            start_date?: string | null;
             /** Variant Key */
             variant_key?: string | null;
         };
@@ -8812,6 +8878,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResolveNameResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    schedule_as_strategy_api_momentum_diversifier_schedule_as_strategy_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleAsStrategyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

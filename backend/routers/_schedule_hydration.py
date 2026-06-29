@@ -195,7 +195,11 @@ def _open_basket_live_curve(backtest_run_id: int) -> list[tuple[str, float]]:
     longs, shorts = _side("long"), _side("short")
     if not longs and not shorts:
         return []
-    cids = [c for c, _, _ in (*longs, *shorts)]
+    # Companies price from metric_data (+FX→EUR); ETF overlay holdings carry a
+    # NEGATIVE company_id (= -benchmark_id) and price from benchmark_price
+    # (currency-agnostic — the daily return ratio price/entry is unit-free).
+    cids = [c for c, _, _ in (*longs, *shorts) if c > 0]
+    bids = [-c for c, _, _ in (*longs, *shorts) if c < 0]
     entry_dates = [str(h["entry_date"])[:10] for h in holdings if h.get("entry_date")]
     start_iso = min(entry_dates) if entry_dates else str(monthly[-1].get("date"))[:10]
 
@@ -209,22 +213,47 @@ def _open_basket_live_curve(backtest_run_id: int) -> list[tuple[str, float]]:
     except ValueError:
         return []
     today = date.today()
-    local_df = load_all_prices(supabase, cids, start, today)
-    if local_df.empty:
-        return []
-    cur = load_company_currency(supabase, cids)
-    currencies = sorted({c for c in cur.values() if c})
-    fx = load_fx_rates(supabase, currencies, start, today) if currencies else {}
-    eur_df, _ = convert_prices_to_eur(local_df, cur, fx)
-    if eur_df.empty:
-        return []
 
-    # Per-cid sorted (date, price_eur) for an asof (last-on-or-before) lookup.
+    # Per-cid sorted (date, price) for an asof (last-on-or-before) lookup.
+    # Companies are EUR-converted; ETF benchmarks are kept in native price
+    # (only their return ratio is used, which is currency-agnostic).
     px: dict[int, tuple[list[str], list[float]]] = {}
-    for cid, group in eur_df.groupby("company_id"):
-        g = group.sort_values("target_date")
-        ds = [d.isoformat() if hasattr(d, "isoformat") else str(d)[:10] for d in g["target_date"]]
-        px[int(cid)] = (ds, [float(p) for p in g["price"]])
+    if cids:
+        local_df = load_all_prices(supabase, cids, start, today)
+        if not local_df.empty:
+            cur = load_company_currency(supabase, cids)
+            currencies = sorted({c for c in cur.values() if c})
+            fx = load_fx_rates(supabase, currencies, start, today) if currencies else {}
+            eur_df, _ = convert_prices_to_eur(local_df, cur, fx)
+            for cid, group in eur_df.groupby("company_id"):
+                g = group.sort_values("target_date")
+                ds = [d.isoformat() if hasattr(d, "isoformat") else str(d)[:10] for d in g["target_date"]]
+                px[int(cid)] = (ds, [float(p) for p in g["price"]])
+
+    # ETF overlay holdings (negative cid) — daily benchmark closes, keyed by
+    # the same negative cid the holdings carry.
+    for bid in bids:
+        rows: list[dict] = []
+        offset = 0
+        while True:
+            resp = (
+                supabase.table("benchmark_price")
+                .select("target_date, price")
+                .eq("benchmark_id", bid)
+                .gte("target_date", start.isoformat())
+                .order("target_date")
+                .range(offset, offset + 999)
+                .execute()
+            )
+            batch = resp.data or []
+            rows.extend(batch)
+            if len(batch) < 1000:
+                break
+            offset += 1000
+        if rows:
+            ds = [str(r["target_date"])[:10] for r in rows]
+            px[-bid] = (ds, [float(r["price"]) for r in rows])
+
     all_days = sorted({d for ds, _ in px.values() for d in ds})
     if not all_days:
         return []

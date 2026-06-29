@@ -71,8 +71,17 @@ def compute_and_save_price_update(
     # Fetch the latest close-price observation for every holding's
     # company_id in one batched query. We `order desc` and pick the
     # first hit per cid in-process — Postgres has no efficient
-    # DISTINCT ON via PostgREST.
-    cids = [h.get("company_id") for h in holdings if h.get("company_id") is not None]
+    # DISTINCT ON via PostgREST. ETF/benchmark holdings carry a NEGATIVE
+    # company_id (= -benchmark_id; the engine-wide convention) and are
+    # priced from `benchmark_price` instead of `metric_data`.
+    cids = [
+        h.get("company_id") for h in holdings
+        if h.get("company_id") is not None and h.get("company_id") > 0
+    ]
+    bids = [
+        -h["company_id"] for h in holdings
+        if h.get("company_id") is not None and h["company_id"] < 0
+    ]
     latest_by_cid: dict[int, dict] = {}
     # Chunk to stay under the PostgREST URL-length window (see fetch_in_chunks).
     for r in fetch_in_chunks(
@@ -88,6 +97,20 @@ def compute_and_save_price_update(
         if cid not in latest_by_cid:
             latest_by_cid[cid] = r
 
+    # Latest benchmark close per benchmark_id (for ETF overlay holdings).
+    latest_by_bid: dict[int, dict] = {}
+    for r in fetch_in_chunks(
+        bids,
+        lambda chunk: supabase.table("benchmark_price")
+        .select("benchmark_id, target_date, price")
+        .in_("benchmark_id", chunk)
+        .order("target_date", desc=True)
+        .execute(),
+    ):
+        bid = r["benchmark_id"]
+        if bid not in latest_by_bid:
+            latest_by_bid[bid] = r
+
     updated_holdings: list[dict] = []
     weighted_return_sum = 0.0
     total_weight = 0.0
@@ -97,7 +120,16 @@ def compute_and_save_price_update(
         cid = h.get("company_id")
         entry_local = h.get("entry_price_local")
         weight = float(h.get("weight") or 0.0)
-        latest = latest_by_cid.get(cid)
+        # Resolve the latest close: companies from metric_data, ETFs (negative
+        # company_id) from benchmark_price (uniform {target_date, value} shape).
+        if cid is not None and cid < 0:
+            bp = latest_by_bid.get(-cid)
+            latest = (
+                {"target_date": bp["target_date"], "numeric_value": bp["price"]}
+                if bp else None
+            )
+        else:
+            latest = latest_by_cid.get(cid)
         if latest and entry_local:
             current_local = float(latest["numeric_value"])
             target_d = str(latest["target_date"])[:10]

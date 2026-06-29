@@ -332,6 +332,24 @@ def _run_momentum_phase(
                     run_id, strategy_name, type(e).__name__, e,
                 )
 
+            # Blended variant: append the ETF overlay holdings (negative
+            # company_id) to the freshly-rebalanced stock picks, scale the
+            # stock weights to the strategy sleeve, and recompute the
+            # blended period return. The daily price_update job re-prices
+            # both companies and ETFs thereafter.
+            if cfg.get("etf_overlay"):
+                try:
+                    new_count = _apply_etf_overlay_to_snapshot(
+                        int(snapshot_id), cfg["etf_overlay"]
+                    )
+                    if new_count is not None:
+                        holdings_count = new_count
+                except Exception as e:
+                    log.warning(
+                        "[pipeline.momentum] run_id=%s strategy=%s ETF overlay failed: %s: %s",
+                        run_id, strategy_name, type(e).__name__, e,
+                    )
+
             entry["snapshot_id"] = snapshot_id
             entry["holdings_count"] = holdings_count
             entry["latest_price_date"] = latest_price_date
@@ -360,6 +378,105 @@ def _run_momentum_phase(
         raise RuntimeError(
             f"{len(errors)} of {total} strategies failed: " + " | ".join(errors[:3])
         )
+
+
+def _apply_etf_overlay_to_snapshot(snapshot_id: int, etf_overlay: list[dict]) -> int | None:
+    """Rewrite a freshly-rebalanced snapshot's holdings to the BLEND: scale the
+    momentum stock picks to the strategy sleeve and append one ETF holding
+    (negative company_id) per overlay entry, priced from `benchmark_price`
+    (entry at the rebalance `as_of_date`, exit at `latest_price_date`). Recompute
+    `period_return_pct` as the weighted blend. Returns the new holdings count
+    (None if there's nothing to do)."""
+    import bisect  # noqa: PLC0415
+
+    from momentum.blend_backtest import make_etf_holding, scale_stock_weights  # noqa: PLC0415
+
+    overlay = [o for o in (etf_overlay or []) if o.get("benchmark_id")]
+    if not overlay:
+        return None
+    snap_resp = (
+        supabase.table("current_picks_snapshot")
+        .select("holdings, as_of_date, latest_price_date")
+        .eq("snapshot_id", snapshot_id)
+        .limit(1)
+        .execute()
+    )
+    if not snap_resp.data:
+        return None
+    snap = snap_resp.data[0]
+    # Already blended (idempotent) — bail if any ETF holding is present.
+    stock_holdings = [h for h in (snap.get("holdings") or []) if (h.get("company_id") or 0) >= 0]
+    as_of = str(snap.get("as_of_date") or "")[:10]
+    latest = str(snap.get("latest_price_date") or as_of)[:10]
+
+    bids = [int(o["benchmark_id"]) for o in overlay]
+    meta_resp = (
+        supabase.table("benchmark")
+        .select("benchmark_id, ticker, name, sector")
+        .in_("benchmark_id", bids)
+        .execute()
+    )
+    meta = {m["benchmark_id"]: m for m in (meta_resp.data or [])}
+
+    # Daily benchmark closes per id, for as-of (last-on-or-before) lookups.
+    px: dict[int, tuple[list[str], list[float]]] = {}
+    for bid in bids:
+        rows = (
+            supabase.table("benchmark_price")
+            .select("target_date, price")
+            .eq("benchmark_id", bid)
+            .lte("target_date", latest or as_of)
+            .order("target_date")
+            .execute()
+        ).data or []
+        if rows:
+            px[bid] = ([str(r["target_date"])[:10] for r in rows], [float(r["price"]) for r in rows])
+
+    def _asof(bid: int, day: str) -> float | None:
+        pair = px.get(bid)
+        if not pair or not day:
+            return None
+        ds, ps = pair
+        i = bisect.bisect_right(ds, day) - 1
+        return ps[i] if i >= 0 else None
+
+    total_etf_pct = sum(float(o.get("weight_pct") or 0.0) for o in overlay)
+    strat_w = max(0.0, 1.0 - total_etf_pct / 100.0)
+
+    etf_holdings: list[dict] = []
+    for o in overlay:
+        bid = int(o["benchmark_id"])
+        m = meta.get(bid) or {}
+        etf_holdings.append(make_etf_holding(
+            benchmark_id=bid,
+            ticker=m.get("ticker") or f"BM{bid}",
+            name=m.get("name") or m.get("ticker") or f"Benchmark {bid}",
+            sector=m.get("sector"),
+            weight=float(o.get("weight_pct") or 0.0) / 100.0,
+            entry_price=_asof(bid, as_of),
+            exit_price=_asof(bid, latest),
+            entry_date=as_of or None,
+            exit_date=latest or None,
+        ))
+
+    merged = scale_stock_weights(stock_holdings, strat_w) + etf_holdings
+
+    # Weighted blended period return (same basis as compute_and_save_price_update).
+    wsum = 0.0
+    rsum = 0.0
+    for h in merged:
+        fr = h.get("forward_return_pct")
+        w = float(h.get("weight") or 0.0)
+        if fr is not None:
+            rsum += fr * w
+            wsum += w
+    period_return = (rsum / wsum) if wsum > 0 else None
+
+    supabase.table("current_picks_snapshot").update({
+        "holdings": merged,
+        "period_return_pct": period_return,
+    }).eq("snapshot_id", snapshot_id).execute()
+    return len(merged)
 
 
 def _dedupe_price_update(strategy_id: int, new_snapshot_id: int, new_row: dict) -> int | None:

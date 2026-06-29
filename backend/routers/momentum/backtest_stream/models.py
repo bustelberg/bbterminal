@@ -59,6 +59,19 @@ class VariantSpec(BaseModel):
     regime_floor: float | None = None
 
 
+class EtfOverlayHolding(BaseModel):
+    """One diversifier ETF held alongside the momentum sleeve in a blended
+    scheduled strategy. `benchmark_id` is a `benchmark` row; `weight_pct` is
+    its target portfolio weight; the strategy (momentum) sleeve takes
+    `100 - sum(weight_pct)`. `band_pct` is the symmetric drift band used only
+    as a 'rebalance due' alert on /schedule — rebalances ride the momentum
+    grid (the blend resets to target on each grid rebalance), never off-grid.
+    """
+    benchmark_id: int
+    weight_pct: float
+    band_pct: float = 10.0
+
+
 class BacktestRequest(BaseModel):
     start_date: str = _DEFAULT_START
     end_date: str = _DEFAULT_END  # also used as data cutoff — no data newer than this
@@ -144,3 +157,13 @@ class BacktestRequest(BaseModel):
     # `{frequency}__{strategy_type}`. Sweeps are backtest-only; combining
     # `variants` with `mode="current_portfolio"` is rejected.
     variants: list[VariantSpec] | None = None
+    # When set, this strategy is a BLEND: the momentum sleeve is scaled to
+    # (100 - sum(weight_pct)) and these ETFs are held at their weights,
+    # reset to target on each grid rebalance. Absent ⇒ vanilla momentum.
+    # Consumed by the scheduled-pipeline rebalance branch
+    # (ingest/phases/momentum.py) which appends the ETF holdings after the
+    # momentum stream produces the stock picks; the backtest seed is the
+    # blended `backtest_run` built by momentum/blend_backtest.py. ETF
+    # holdings carry a NEGATIVE company_id (= -benchmark_id), the existing
+    # convention sector-ETF mode uses.
+    etf_overlay: list[EtfOverlayHolding] | None = None

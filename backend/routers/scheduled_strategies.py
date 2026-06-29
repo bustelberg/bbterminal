@@ -81,6 +81,56 @@ class ScheduledStrategyPatch(BaseModel):
     # snapshots already produced. Re-create the strategy to change it.
 
 
+# ─── Shared creation helper ───────────────────────────────────────
+
+
+def create_scheduled_strategy_row(
+    name: str,
+    frequency: str,
+    config: dict,
+    backtest_run_id: int,
+    start_date: date | None = None,
+) -> dict:
+    """Insert a new `scheduled_strategy` row + seed its first snapshot from the
+    source backtest's last period, and return the raw inserted row.
+
+    Shared by the HTTP `add_scheduled_strategy` endpoint and the Diversifier's
+    `schedule-as-strategy` flow (which schedules a blended momentum+ETF
+    backtest). Sets `next_due_at` to the next date on the rebalance grid
+    (`_initial_next_due_at`, stamped 02:00 UTC) so the entry runs on the next
+    eligible daily tick. The seed is best-effort: a failure leaves the strategy
+    with backtest-only history until its first live rebalance."""
+    weekday = int((config or {}).get("rebalance_weekday", 0) or 0)
+    next_due = _initial_next_due_at(frequency, weekday).isoformat()
+    insert_row: dict = {
+        "name": name.strip(),
+        "frequency": frequency,
+        "config": config,
+        "enabled": True,
+        "next_due_at": next_due,
+        "backtest_run_id": backtest_run_id,
+    }
+    if start_date is not None:
+        insert_row["start_date"] = start_date.isoformat()
+    try:
+        resp = supabase.table("scheduled_strategy").insert(insert_row).execute()
+    except Exception as e:
+        raise HTTPException(500, f"Insert failed: {type(e).__name__}: {e}")
+    if not resp.data:
+        raise HTTPException(500, "Insert returned no row")
+    new_row = resp.data[0]
+    try:
+        _seed_snapshot_from_backtest(
+            int(new_row["id"]), backtest_run_id, name.strip(), config,
+        )
+    except Exception as e:
+        _log.warning(
+            "[add] strategy=%s seed failed: %s: %s",
+            new_row.get("id"), type(e).__name__, e,
+        )
+    return new_row
+
+
 # ─── Endpoints ────────────────────────────────────────────────────
 
 
@@ -402,45 +452,13 @@ async def add_scheduled_strategy(body: ScheduledStrategyCreate):
         raise HTTPException(400, "config must be a non-empty object")
 
     def _insert() -> dict:
-        weekday = int((body.config or {}).get("rebalance_weekday", 0) or 0)
-        next_due = _initial_next_due_at(body.frequency, weekday).isoformat()
-        insert_row: dict = {
-            "name": body.name.strip(),
-            "frequency": body.frequency,
-            "config": body.config,
-            "enabled": True,
-            "next_due_at": next_due,
-            "backtest_run_id": body.backtest_run_id,
-        }
-        if body.start_date is not None:
-            insert_row["start_date"] = body.start_date.isoformat()
-        try:
-            resp = (
-                supabase.table("scheduled_strategy")
-                .insert(insert_row)
-                .execute()
-            )
-        except Exception as e:
-            raise HTTPException(500, f"Insert failed: {type(e).__name__}: {e}")
-        if not resp.data:
-            raise HTTPException(500, "Insert returned no row")
-        new_row = resp.data[0]
         # Seed the current holdings from the saved backtest's last period so
         # the daily price refresh can track them immediately — no off-cycle
         # rebalance needed. The next universe reprice + re-selection happens
-        # at `next_due_at` (the next grid rebalance). Best-effort: a seed
-        # failure leaves the strategy with backtest-only history until its
-        # first live rebalance, which is the prior behaviour.
-        try:
-            _seed_snapshot_from_backtest(
-                int(new_row["id"]), body.backtest_run_id,
-                body.name.strip(), body.config,
-            )
-        except Exception as e:
-            _log.warning(
-                "[add] strategy=%s seed failed: %s: %s",
-                new_row.get("id"), type(e).__name__, e,
-            )
+        # at `next_due_at` (the next grid rebalance).
+        new_row = create_scheduled_strategy_row(
+            body.name, body.frequency, body.config, body.backtest_run_id, body.start_date,
+        )
         return _hydrate([new_row])[0]
     return await asyncio.to_thread(_insert)
 
