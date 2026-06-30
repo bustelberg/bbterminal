@@ -214,16 +214,21 @@ def compute_and_save_price_update(
     for h in holdings:
         new_h = dict(h)
         cid = h.get("company_id")
+        is_etf = cid is not None and cid < 0
         entry_local = h.get("entry_price_local")
         ccy = _hold_ccy(h)
         entry_date_iso = str(h.get("entry_date") or rebal.get("as_of_date") or "")[:10]
-        # Entry EUR: trust the rebalance's stored EUR mark for companies; for ETF
-        # overlay holdings (no stored EUR) derive it from the benchmark local +
-        # entry-date FX, and persist it so the card has a consistent EUR basis.
+        # Entry EUR basis. Companies keep their rebalance EUR mark (set with a
+        # proper conversion). ETFs ALWAYS re-derive from the benchmark local +
+        # entry-date FX: a stored ETF entry_price_eur can be a stale pre-FX
+        # pass-through (the local price recorded AS EUR before the currency fix),
+        # and mixing that unconverted entry with the now-converted exit corrupts
+        # the return. Derive-if-missing for everyone else.
         entry_eur = h.get("entry_price_eur")
-        if not entry_eur or entry_eur <= 0:
-            entry_eur = _to_eur(entry_local, ccy, entry_date_iso, fx_rates)
-            if entry_eur is not None:
+        if is_etf or not entry_eur or entry_eur <= 0:
+            derived = _to_eur(entry_local, ccy, entry_date_iso, fx_rates)
+            if derived is not None:
+                entry_eur = derived
                 new_h["entry_price_eur"] = round(entry_eur, 4)
         # Resolve the latest close: companies from metric_data, ETFs (negative
         # company_id) from benchmark_price (uniform {target_date, value} shape).
@@ -235,18 +240,25 @@ def compute_and_save_price_update(
             )
         else:
             latest = latest_by_cid.get(cid)
-        if latest and entry_local and entry_eur and entry_eur > 0:
+        # Refresh the LOCAL price + exit date from the latest close UNCONDITIONALLY
+        # (only needs `latest` + `entry_local`). It used to also require a usable
+        # `entry_eur`, so a holding whose EUR basis couldn't be computed — e.g. an
+        # ETF hit by the '$'/None currency bug — was skipped ENTIRELY and its price
+        # FROZE at the last good re-price while the company holdings kept updating.
+        # The EUR mark + EUR return are best-effort on top: use them when both ends
+        # convert, else fall back to the local return so the holding never freezes.
+        if latest and entry_local:
             current_local = float(latest["numeric_value"])
             target_d = str(latest["target_date"])[:10]
             new_h["exit_price_local"] = current_local
             new_h["exit_date"] = target_d
             current_eur = _to_eur(current_local, ccy, target_d, fx_rates)
-            if current_eur is not None:
+            if current_eur is not None and entry_eur and entry_eur > 0:
                 new_h["exit_price_eur"] = round(current_eur, 4)
                 ret = (current_eur / float(entry_eur) - 1) * 100.0
             else:
-                # FX unavailable for this currency — fall back to the local
-                # return rather than dropping the holding from the aggregate.
+                # No usable EUR basis — keep the price current and report the
+                # local return rather than dropping the holding from the aggregate.
                 ret = ((current_local - float(entry_local)) / float(entry_local)) * 100.0
             new_h["forward_return_pct"] = round(ret, 2)
             if latest_price_date is None or target_d > latest_price_date:
