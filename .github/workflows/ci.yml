@@ -536,12 +536,13 @@ jobs:
             /api/gurufocus/exchanges
             /api/gurufocus/exchange-currencies
             /api/airs/scan
-            # Require a query param the empty CI DB has no valid value for
-            # (the probe sends none → deterministic 4xx).
-            /api/acwi/announcement-detail      # needs ?url=
-            /api/index-universe/tickers        # needs ?month=
-            /api/longequity/companies          # needs ?target_date=
-            /api/earnings/portfolios/attribution  # needs ?a=&b=
+            # Endpoints with a REQUIRED query param are auto-skipped by the jq
+            # filter below (they 4xx without a fixture-specific value the empty CI
+            # DB can't provide). Only list one here if its param is OPTIONAL in the
+            # OpenAPI spec (so the auto-skip misses it) yet the endpoint still needs
+            # it — e.g. /api/index-universe/tickers, whose ?month= is defaulted in
+            # the spec but returns 4xx without a real value.
+            /api/index-universe/tickers        # needs ?month= (optional in spec)
             # SSE that fans out ~2k detail lookups to GuruFocus (needs an
             # API key; slow/flaky without one).
             /api/acwi/fetch-all-details
@@ -569,6 +570,11 @@ jobs:
                 | select(.key as $p | $excl_paths | index($p) | not)
                 | select(.value.get != null)
                 | select((.value.get.tags // []) as $t | $excl_tags | map(. as $x | $t | index($x)) | any | not)
+                # Auto-skip GETs with a REQUIRED query param — the probe sends
+                # none, so they deterministically 4xx (e.g. universe-history needs
+                # ?label=, resolve-name needs ?ticker=). New required-param
+                # endpoints are then handled with no EXCLUDE edit.
+                | select([(.value.get.parameters // [])[] | select(.in == "query" and .required == true)] | length == 0)
                 | .key
                 ' | sort -u
           )
