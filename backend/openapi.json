@@ -7954,7 +7954,7 @@
         ]
       },
       "get": {
-        "description": "Full backtest payload for one run. Two source paths, transparent to\nthe caller:\n\n  * `result_path` populated \u2192 download the gzipped JSON from the\n    `backtest-results` Storage bucket and decode.\n  * `result_path` null \u2192 use the in-row `result` JSONB (legacy rows\n    written before the storage move).\n\nCompacted daily-curve fields are re-expanded back to the verbose\n`[{date, cumulative_return_pct}, ...]` shape so the frontend can\nkeep treating saved runs identically to in-memory ones.",
+        "description": "Full backtest payload for one run. Two source paths, transparent to\nthe caller:\n\n  * `result_path` populated \u2192 download the gzipped JSON from the\n    `backtest-results` Storage bucket and decode.\n  * `result_path` null \u2192 use the in-row `result` JSONB (legacy rows\n    written before the storage move).\n\nCompacted daily-curve fields are re-expanded back to the verbose\n`[{date, cumulative_return_pct}, ...]` shape so the frontend can\nkeep treating saved runs identically to in-memory ones.\n\nAdmin-only by default, BUT a non-admin (the read-only /schedule view) may\nload a backtest that is the SOURCE of a `user_visible` scheduled strategy \u2014\nso the strategy-detail equity curve renders for them. The auth gate\nallow-lists this exact GET path; the `user_visible` link is the actual\nauthorization (any other run \u2192 403, never reveals a standalone saved run).",
         "operationId": "load_backtest_api_momentum_backtests__run_id__get",
         "parameters": [
           {
@@ -8155,7 +8155,7 @@
         ]
       },
       "get": {
-        "description": "Full snapshot for one id, including holdings.",
+        "description": "Full snapshot for one id, including holdings.\n\nAdmin-only by default, BUT a non-admin (the read-only /schedule view) may\nread a snapshot that belongs to a `user_visible` scheduled strategy \u2014 so the\nstrategy-detail \"Current portfolio\" card loads for them. The auth gate\nallow-lists this exact GET path; the `user_visible` join is the actual\nauthorization (any other snapshot \u2192 403, never reveals holdings).",
         "operationId": "get_current_picks_api_momentum_current_picks__snapshot_id__get",
         "parameters": [
           {

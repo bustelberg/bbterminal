@@ -34,10 +34,11 @@ import json
 import logging
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from deps import supabase
+from routers._authz import is_admin_request
 
 log = logging.getLogger(__name__)
 
@@ -318,8 +319,22 @@ async def list_backtests():
     return resp.data or []
 
 
+def _backtest_backs_user_visible_strategy(run_id: int) -> bool:
+    """True when some `user_visible` scheduled strategy was created from this
+    backtest run (`scheduled_strategy.backtest_run_id == run_id`)."""
+    r = (
+        supabase.table("scheduled_strategy")
+        .select("id")
+        .eq("backtest_run_id", run_id)
+        .eq("user_visible", True)
+        .limit(1)
+        .execute()
+    )
+    return bool(r.data)
+
+
 @router.get("/api/momentum/backtests/{run_id}")
-async def load_backtest(run_id: int):
+async def load_backtest(run_id: int, request: Request):
     """Full backtest payload for one run. Two source paths, transparent to
     the caller:
 
@@ -330,7 +345,16 @@ async def load_backtest(run_id: int):
 
     Compacted daily-curve fields are re-expanded back to the verbose
     `[{date, cumulative_return_pct}, ...]` shape so the frontend can
-    keep treating saved runs identically to in-memory ones."""
+    keep treating saved runs identically to in-memory ones.
+
+    Admin-only by default, BUT a non-admin (the read-only /schedule view) may
+    load a backtest that is the SOURCE of a `user_visible` scheduled strategy —
+    so the strategy-detail equity curve renders for them. The auth gate
+    allow-lists this exact GET path; the `user_visible` link is the actual
+    authorization (any other run → 403, never reveals a standalone saved run)."""
+    if not is_admin_request(request):
+        if not await asyncio.to_thread(_backtest_backs_user_visible_strategy, run_id):
+            raise HTTPException(403, "Admin role required")
     resp = await asyncio.to_thread(
         lambda: supabase.table("backtest_run")
         .select("*")

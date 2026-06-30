@@ -2804,6 +2804,12 @@ export interface paths {
          *     Compacted daily-curve fields are re-expanded back to the verbose
          *     `[{date, cumulative_return_pct}, ...]` shape so the frontend can
          *     keep treating saved runs identically to in-memory ones.
+         *
+         *     Admin-only by default, BUT a non-admin (the read-only /schedule view) may
+         *     load a backtest that is the SOURCE of a `user_visible` scheduled strategy —
+         *     so the strategy-detail equity curve renders for them. The auth gate
+         *     allow-lists this exact GET path; the `user_visible` link is the actual
+         *     authorization (any other run → 403, never reveals a standalone saved run).
          */
         get: operations["load_backtest_api_momentum_backtests__run_id__get"];
         put?: never;
@@ -2882,6 +2888,12 @@ export interface paths {
         /**
          * Get Current Picks
          * @description Full snapshot for one id, including holdings.
+         *
+         *     Admin-only by default, BUT a non-admin (the read-only /schedule view) may
+         *     read a snapshot that belongs to a `user_visible` scheduled strategy — so the
+         *     strategy-detail "Current portfolio" card loads for them. The auth gate
+         *     allow-lists this exact GET path; the `user_visible` join is the actual
+         *     authorization (any other snapshot → 403, never reveals holdings).
          */
         get: operations["get_current_picks_api_momentum_current_picks__snapshot_id__get"];
         put?: never;

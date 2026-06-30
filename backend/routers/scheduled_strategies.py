@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from deps import fetch_in_chunks, supabase
 from momentum.schedule import _expected_latest_trading_day, _initial_next_due_at
 
+from ._authz import is_admin_request
 from ._schedule_backfill import reset_stale_backfills  # noqa: F401 — re-exported for main.py
 from ._schedule_hydration import _hydrate, build_live_curve
 from ._schedule_snapshots import _seed_snapshot_from_backtest
@@ -45,9 +46,9 @@ FREQUENCIES = ("daily", "weekly", "monthly", "bimonthly", "quarterly")
 def _is_admin(request: Request) -> bool:
     """True when the verified caller is an admin (the auth middleware stamps
     `request.state.auth`). Non-admins get the read-only, `user_visible`-only
-    view of the schedule."""
-    info = getattr(request.state, "auth", None) or {}
-    return info.get("role") == "admin"
+    view of the schedule. Delegates to the shared `is_admin_request` so the
+    "view as regular user" semantics stay identical across endpoints."""
+    return is_admin_request(request)
 
 
 # ─── Pydantic shapes ──────────────────────────────────────────────

@@ -43,6 +43,26 @@ def _is_hardcoded_admin_email(email: str | None) -> bool:
     return h in _ADMIN_EMAIL_HASHES
 
 
+def _resolve_role(role: str | None, email: str | None) -> str:
+    """Effective role for a verified user. An EXPLICIT role always wins —
+    only a missing/blank role (an account predating the signup trigger, or
+    one whose role was wiped) falls back to the hardcoded-admin-email
+    allowlist.
+
+    Critically, an explicit `role == "user"` is an INTENTIONAL demotion
+    (e.g. an admin's second account used to exercise the non-admin UI) and
+    must NOT be overridden by the allowlist — otherwise the backend serves
+    admin data to an account the frontend correctly renders as a regular
+    user (the `app_metadata.role` the frontend reads stays "user"),
+    desyncing the two and e.g. leaking admin-only scheduled strategies into
+    the read-only /schedule view."""
+    if role:
+        return role
+    if _is_hardcoded_admin_email(email):
+        return "admin"
+    return "user"
+
+
 # In-process verification cache: token → (expiry_monotonic, {id,email,role}).
 # The API auth gate runs on every request (including high-frequency polling
 # reads), so without this every poll would round-trip to GoTrue. A short TTL
@@ -72,9 +92,7 @@ def verify_token(authorization: str) -> dict | None:
         return None
     role = (getattr(user, "app_metadata", None) or {}).get("role")
     email = getattr(user, "email", None)
-    if role != "admin" and _is_hardcoded_admin_email(email):
-        role = "admin"
-    info = {"id": user.id, "email": email, "role": role or "user"}
+    info = {"id": user.id, "email": email, "role": _resolve_role(role, email)}
     _TOKEN_CACHE[token] = (now + _TOKEN_CACHE_TTL, info)
     return info
 
@@ -96,7 +114,7 @@ def _require_admin(authorization: str) -> dict:
         raise HTTPException(401, "Invalid token — no user found")
     role = (getattr(user, "app_metadata", None) or {}).get("role")
     email = getattr(user, "email", None)
-    if role != "admin" and not _is_hardcoded_admin_email(email):
+    if _resolve_role(role, email) != "admin":
         raise HTTPException(403, "Admin role required")
     return {"id": user.id, "email": email, "role": "admin"}
 

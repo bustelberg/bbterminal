@@ -262,6 +262,11 @@ _JOB_META: dict[str, dict[str, str]] = {
         "description": "one-shot — held prices fell behind while down",
         "cadence": "one-shot",
     },
+    "price_update_retry": {
+        "label": "Stale-price retry",
+        "description": "one-shot — held prices still stale (publish lag); re-prices a few hours later",
+        "cadence": "one-shot",
+    },
     "universe_price_refresh": {
         "label": "Universe price refresh",
         "description": "re-prices one universe's companies within budget",

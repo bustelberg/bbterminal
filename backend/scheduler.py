@@ -62,6 +62,20 @@ _BOOTSTRAP_DELAY_SECONDS = 30
 # "consider this row orphaned" cutoff for `_reap_orphan_runs` below.
 _PIPELINE_STALE_AFTER_SECONDS = 3600
 
+# ── Stale held-price retry ─────────────────────────────────────────
+# After a price-update, GuruFocus may not yet have published the prior
+# session's closes (the slower EU EOD feeds especially). Rather than wait a
+# full day for the next 05:00 UTC tick, re-run the held-price refresh a few
+# hours later to pick them up. Bounded per UTC day so a genuinely
+# unpublishable name (market holiday, illiquid stock) can't loop forever —
+# once the day's budget is spent the next daily tick takes over.
+_PRICE_RETRY_DELAY_HOURS = float(os.environ.get("PRICE_RETRY_DELAY_HOURS", "3"))
+_PRICE_RETRY_MAX_PER_DAY = int(os.environ.get("PRICE_RETRY_MAX_PER_DAY", "3"))
+_price_retry_lock = threading.Lock()
+# UTC-date ISO string → retries scheduled so far that day. Pruned to a single
+# key (today's) on each schedule so it never grows.
+_price_retry_counts: dict[str, int] = {}
+
 
 def _reap_orphan_runs() -> None:
     """Mark any `ingest_run` row stuck in `status='running'` for longer
@@ -348,6 +362,86 @@ def _fire_daily_sequence() -> None:
                 )
 
     threading.Thread(target=_seq, daemon=True, name="daily-pipeline").start()
+
+
+def _fire_price_update_retry() -> None:
+    """One-shot stale-held-price retry fired by APScheduler. Runs a fresh
+    `price_update` op in its own daemon thread; that op's completion hook
+    (`maybe_schedule_price_retry`) chains the NEXT retry if it's STILL stale
+    and the day's budget allows. Never raises into the scheduler thread."""
+    def _run() -> None:
+        from ingest.phases import (  # noqa: PLC0415 — avoid import cycle
+            _create_run,
+            _run_price_update_pipeline_sync,
+        )
+        try:
+            run_id = _create_run("price_update", "auto")
+            _log.warning("[scheduler] stale-price retry → price_update run_id=%s", run_id)
+            _run_price_update_pipeline_sync(run_id)
+        except Exception as e:
+            _log.exception(
+                "[scheduler] stale-price retry failed: %s: %s", type(e).__name__, e,
+            )
+
+    threading.Thread(target=_run, daemon=True, name="price-retry").start()
+
+
+def maybe_schedule_price_retry(*, reason: str = "") -> None:
+    """Schedule a one-shot held-price retry `_PRICE_RETRY_DELAY_HOURS` out when
+    the enabled strategies' held prices are STILL stale after a price-update.
+
+    Called at the end of every `price_update` op (daily tick, startup catch-up,
+    AND manual Run-now) so any path that leaves held prices behind gets the
+    auto-retry. No-op when prices are fresh, the scheduler is disabled
+    (CI / DISABLE_SCHEDULER), or today's retry budget (`_PRICE_RETRY_MAX_PER_DAY`)
+    is spent — at which point the next 05:00 UTC tick takes over. The retry
+    re-runs the whole price-update, but the per-company freshness short-circuit
+    in `_run_prices_phase` means only the actually-stale names hit GuruFocus.
+
+    Best-effort — never raises into the caller."""
+    try:
+        if _scheduler is None or _PRICE_RETRY_MAX_PER_DAY <= 0:
+            return
+        # Publish-lag check (held name behind the GLOBAL latest close), NOT the
+        # calendar-day `_held_prices_stale` the kickstart uses — otherwise the
+        # normal "today's close isn't out yet" state would trigger a retry every
+        # single day. See `held_prices_lagging`.
+        from ingest.phases.prices import held_prices_lagging  # noqa: PLC0415
+        if not held_prices_lagging():
+            return
+        today = datetime.now(timezone.utc).date().isoformat()
+        with _price_retry_lock:
+            used = _price_retry_counts.get(today, 0)
+            if used >= _PRICE_RETRY_MAX_PER_DAY:
+                _log.info(
+                    "[scheduler] held prices still stale but today's retry budget "
+                    "(%s) is spent — waiting for the next daily tick",
+                    _PRICE_RETRY_MAX_PER_DAY,
+                )
+                return
+            # Keep only today's key so the dict can't grow unbounded.
+            _price_retry_counts.clear()
+            attempt = used + 1
+            _price_retry_counts[today] = attempt
+        run_at = datetime.now(timezone.utc) + timedelta(hours=_PRICE_RETRY_DELAY_HOURS)
+        _scheduler.add_job(
+            _fire_price_update_retry,
+            DateTrigger(run_date=run_at),
+            id="price_update_retry",
+            replace_existing=True,
+            coalesce=True,
+            misfire_grace_time=3600,
+        )
+        _log.warning(
+            "[scheduler] held prices stale%s — retry %s/%s scheduled at %s",
+            f" ({reason})" if reason else "", attempt, _PRICE_RETRY_MAX_PER_DAY,
+            run_at.isoformat(),
+        )
+    except Exception as e:
+        _log.warning(
+            "[scheduler] maybe_schedule_price_retry failed: %s: %s",
+            type(e).__name__, e,
+        )
 
 
 def _fire_airs_vermogen() -> None:

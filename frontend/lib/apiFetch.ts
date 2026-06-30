@@ -59,6 +59,16 @@ export function clearApiFetchTokenCache(): void {
   _cachedTokenExpiresAt = 0;
 }
 
+/** True when the admin "view as regular user" preview is active (the
+ * `view_as=user` cookie set by the Sidebar toggle). The cookie lives on the
+ * frontend origin and isn't sent cross-origin to the backend, so we forward
+ * it as an `X-View-As` header instead — letting role-filtered endpoints
+ * (e.g. /scheduled-strategies) preview the genuine user view. */
+function _isViewingAsUser(): boolean {
+  return typeof document !== 'undefined'
+    && document.cookie.split('; ').some((c) => c.startsWith('view_as=user'));
+}
+
 export async function apiFetch(
   url: string,
   init: RequestInit = {},
@@ -67,6 +77,9 @@ export async function apiFetch(
   const headers = new Headers(init.headers || {});
   if (token && !headers.has('authorization') && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${token}`);
+  }
+  if (_isViewingAsUser() && !headers.has('x-view-as')) {
+    headers.set('X-View-As', 'user');
   }
   return fetch(url, { ...init, headers });
 }

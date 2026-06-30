@@ -17,9 +17,11 @@ from __future__ import annotations
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 
 from deps import fetch_in_chunks, supabase
 
+from ..staleness import trading_days_between
 from .runlog import _now_utc_iso, _update_run
 
 # Concurrency cap — same as self_heal. GuruFocus is rate-limit-sensitive
@@ -409,11 +411,12 @@ def _checkpoint(run_id: int, snap: dict, total: int | None = None) -> None:
     )
 
 
-def _collect_held_companies(run_id: int) -> list[dict]:
-    """Pool company_ids across the latest snapshot of every enabled
-    scheduled strategy. Returns the list shape `_run_prices_phase`
-    expects: `[{"cid", "ticker", "exchange"}]`. Duplicates across
-    strategies collapse into a single entry."""
+def _collect_held_company_ids() -> set[int]:
+    """Pool the company_ids in the latest snapshot of every ENABLED scheduled
+    strategy — the union of all instruments currently held across the schedule.
+    Negative ids (synthetic ETF-overlay holdings, priced from `benchmark_price`,
+    not GuruFocus) are dropped. Shared by the held-price refresh and the
+    stale-price retry probe."""
     strat_resp = (
         supabase.table("scheduled_strategy")
         .select("id")
@@ -422,7 +425,7 @@ def _collect_held_companies(run_id: int) -> list[dict]:
     )
     sched_ids = [r["id"] for r in (strat_resp.data or [])]
     if not sched_ids:
-        return []
+        return set()
 
     snap_resp = (
         supabase.table("current_picks_snapshot")
@@ -440,9 +443,17 @@ def _collect_held_companies(run_id: int) -> list[dict]:
         seen.add(sid)
         for h in (s.get("holdings") or []):
             cid = h.get("company_id")
-            if cid is not None:
+            if cid is not None and int(cid) >= 0:
                 company_ids.add(int(cid))
+    return company_ids
 
+
+def _collect_held_companies(run_id: int) -> list[dict]:
+    """Pool company_ids across the latest snapshot of every enabled
+    scheduled strategy. Returns the list shape `_run_prices_phase`
+    expects: `[{"cid", "ticker", "exchange"}]`. Duplicates across
+    strategies collapse into a single entry."""
+    company_ids = _collect_held_company_ids()
     if not company_ids:
         return []
 
@@ -469,3 +480,104 @@ def _collect_held_companies(run_id: int) -> list[dict]:
             "exchange": exch,
         })
     return out
+
+
+def _latest_close_dates_all() -> dict[int, str]:
+    """`company_id → latest close-price date (YYYY-MM-DD)` for every company,
+    via the `company_latest_close_price_dates` RPC (same source the prices
+    phase sorts on + `/api/data/price-coverage`). Paginated past the
+    PostgREST 1000-row cap. Empty dict on error / no data."""
+    latest_by_cid: dict[int, str] = {}
+    page, offset = 1000, 0
+    for _ in range(20):
+        try:
+            resp = (
+                supabase.rpc("company_latest_close_price_dates", {})
+                .range(offset, offset + page - 1)
+                .execute()
+            )
+        except Exception as e:
+            logging.getLogger(__name__).warning(
+                "[prices] latest-close RPC failed: %s: %s", type(e).__name__, e,
+            )
+            return {}
+        batch = resp.data or []
+        if not batch:
+            break
+        for row in batch:
+            cid = row.get("company_id")
+            d = row.get("latest_target_date")
+            if cid is not None and d:
+                latest_by_cid[int(cid)] = str(d)[:10]
+        if len(batch) < page:
+            break
+        offset += page
+    return latest_by_cid
+
+
+def _price_status_excluded_ids(cids: set[int]) -> set[int]:
+    """Of `cids`, those marked delisted / out-of-scope / illiquid — companies
+    whose latest close lags BY DESIGN (they're not actively priced), so they
+    must not count as "stale held prices" worth retrying."""
+    if not cids:
+        return set()
+    excluded: set[int] = set()
+    for r in fetch_in_chunks(
+        list(cids),
+        lambda chunk: supabase.table("company")
+        .select("company_id, delisted_at, out_of_scope_at, illiquid_at")
+        .in_("company_id", chunk)
+        .execute(),
+    ):
+        if r.get("delisted_at") or r.get("out_of_scope_at") or r.get("illiquid_at"):
+            excluded.add(int(r["company_id"]))
+    return excluded
+
+
+def held_prices_lagging() -> bool:
+    """True when ≥1 ACTIVELY-priced held instrument's latest close is behind the
+    freshest close in the DB — i.e. GuruFocus has published the latest session
+    for the pack but not yet for this name (publish lag), so a retry can pick it
+    up.
+
+    Staleness is anchored to the GLOBAL latest close, NOT the calendar day. That
+    matters: at the 05:00 UTC tick today's close isn't published yet, so EVERY
+    name — including the freshest — sits one session back; a calendar check would
+    call that "stale" every day. Against the global latest, the normal state is
+    "0 behind the pack" (not lagging); only a name that fell behind the
+    still-advancing pack is flagged. A total GuruFocus outage freezes the whole
+    pack together (everyone 0 behind) → no false retries, same property the
+    delisting sweep relies on. Held names marked delisted/out-of-scope/illiquid
+    are skipped (they lag by design). Best-effort — any probe failure returns
+    False (no retry) rather than raising."""
+    try:
+        held = _collect_held_company_ids()
+        if not held:
+            return False
+        latest_by_cid = _latest_close_dates_all()
+        if not latest_by_cid:
+            return False
+        try:
+            global_latest = date.fromisoformat(max(latest_by_cid.values()))
+        except ValueError:
+            return False
+        excluded = _price_status_excluded_ids(held)
+        for cid in held:
+            if cid in excluded:
+                continue
+            d = latest_by_cid.get(cid)
+            if not d:
+                # Held + active + no close data at all → definitely refetch.
+                return True
+            try:
+                latest = date.fromisoformat(d)
+            except ValueError:
+                continue
+            if trading_days_between(latest, global_latest) >= 1:
+                return True
+        return False
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            "[prices] held_prices_lagging probe failed: %s: %s", type(e).__name__, e,
+        )
+        return False

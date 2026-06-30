@@ -29,6 +29,7 @@ token gets 401; an authenticated non-admin hitting an admin path gets 403.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Awaitable, Callable
 
 from fastapi import Request
@@ -58,16 +59,37 @@ _SELF_AUTH_PREFIXES: tuple[str, ...] = ("/api/auth/",)
 # `/api/scheduled-strategies` is readable so the read-only /schedule page works;
 # the list endpoint filters to `user_visible` strategies for non-admins, and
 # every mutation under it stays admin-only (not in the write tier below).
+# `/api/fx/` + `/api/benchmarks` are read-only reference data the read-only
+# /schedule strategy-detail card needs (EUR/FX conversion + the ETF overlay's
+# benchmark identity) — low-sensitivity reads, mutations stay admin-only.
 _USER_READ_PREFIXES: tuple[str, ...] = (
     "/api/companies",
     "/api/earnings",
     "/api/usage",
     "/api/scheduled-strategies",
+    "/api/fx/",
+    "/api/benchmarks",
 )
 
 # Writes any AUTHENTICATED user may make — the mutations those pages need.
 # (Earnings refresh is handled separately by `_is_earnings_refresh`.)
 _USER_WRITE_PREFIXES: tuple[str, ...] = ()
+
+# Specific GET-by-id resources a non-admin may read so the read-only /schedule
+# strategy-detail panel loads its current portfolio + source backtest. These
+# live under the otherwise admin-only `/api/momentum/*` namespace, so they're
+# allow-listed by EXACT pattern (not prefix — that would also expose the
+# list-all + sibling routes). The endpoints themselves then authorize the
+# specific id, returning the resource only when it belongs to a `user_visible`
+# scheduled strategy (see `get_current_picks` / `load_backtest`).
+_USER_GET_RESOURCE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^/api/momentum/current-picks/\d+$"),
+    re.compile(r"^/api/momentum/backtests/\d+$"),
+)
+
+
+def _is_user_get_resource(path: str) -> bool:
+    return any(p.match(path) for p in _USER_GET_RESOURCE_PATTERNS)
 
 
 def _is_earnings_refresh(path: str) -> bool:
@@ -130,7 +152,10 @@ async def enforce_api_auth(
     if request.method in _WRITE_METHODS:
         allowed = _starts_with_any(path, _USER_WRITE_PREFIXES) or _is_earnings_refresh(path)
     else:
-        allowed = _starts_with_any(path, _USER_READ_PREFIXES)
+        allowed = (
+            _starts_with_any(path, _USER_READ_PREFIXES)
+            or _is_user_get_resource(path)
+        )
 
     if not allowed:
         return JSONResponse({"detail": "Admin role required"}, status_code=403)

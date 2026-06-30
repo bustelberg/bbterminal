@@ -391,6 +391,21 @@ def _run_price_update_pipeline_sync(run_id: int) -> None:
 
     _finalize_run(run_id, accumulated_errors, log, tag="price_update")
 
+    # If GuruFocus still hadn't published some held names' latest close (publish
+    # lag — common for the slower EU EOD feeds at the 05:00 UTC tick), don't
+    # wait a whole day: schedule a one-shot retry a few hours out. Bounded per
+    # day inside the scheduler. Lazy import + best-effort so a scheduler-less
+    # context (CI, DISABLE_SCHEDULER, unit tests) is a silent no-op and can
+    # never fail the run.
+    try:
+        from scheduler import maybe_schedule_price_retry  # noqa: PLC0415
+        maybe_schedule_price_retry(reason="after price_update")
+    except Exception as e:
+        log.warning(
+            "[price_update] run_id=%s stale-price retry hook failed: %s: %s",
+            run_id, type(e).__name__, e,
+        )
+
 
 def _run_rebalance_pipeline_sync(run_id: int) -> None:
     """Operation 2 of the split pipeline — rebalance the DUE scheduled

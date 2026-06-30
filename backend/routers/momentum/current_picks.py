@@ -23,11 +23,12 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from common.cron import verify_cron_secret
 from deps import supabase
+from routers._authz import is_admin_request
 from ingest.prices import ensure_prices_for_company
 from momentum.data import (
     convert_prices_to_eur,
@@ -64,9 +65,27 @@ async def list_current_picks():
     return resp.data or []
 
 
+def _strategy_is_user_visible(strategy_id: int) -> bool:
+    """True when scheduled strategy `strategy_id` is flagged `user_visible`."""
+    r = (
+        supabase.table("scheduled_strategy")
+        .select("user_visible")
+        .eq("id", strategy_id)
+        .limit(1)
+        .execute()
+    )
+    return bool(r.data and r.data[0].get("user_visible"))
+
+
 @router.get("/api/momentum/current-picks/{snapshot_id}")
-async def get_current_picks(snapshot_id: int):
-    """Full snapshot for one id, including holdings."""
+async def get_current_picks(snapshot_id: int, request: Request):
+    """Full snapshot for one id, including holdings.
+
+    Admin-only by default, BUT a non-admin (the read-only /schedule view) may
+    read a snapshot that belongs to a `user_visible` scheduled strategy — so the
+    strategy-detail "Current portfolio" card loads for them. The auth gate
+    allow-lists this exact GET path; the `user_visible` join is the actual
+    authorization (any other snapshot → 403, never reveals holdings)."""
     resp = await asyncio.to_thread(
         lambda: supabase.table("current_picks_snapshot")
         .select("*")
@@ -76,7 +95,12 @@ async def get_current_picks(snapshot_id: int):
     )
     if not resp.data:
         raise HTTPException(404, "Snapshot not found")
-    return resp.data[0]
+    row = resp.data[0]
+    if not is_admin_request(request):
+        sid = row.get("scheduled_strategy_id")
+        if sid is None or not await asyncio.to_thread(_strategy_is_user_visible, sid):
+            raise HTTPException(403, "Admin role required")
+    return row
 
 
 @router.delete("/api/momentum/current-picks/{snapshot_id}")

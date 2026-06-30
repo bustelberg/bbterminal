@@ -95,6 +95,43 @@ class TestM1_ReadsRequireAuth:
         # user_visible rows); writes stay admin-only (see TestWriteTiers).
         assert _run(monkeypatch, "GET", "/api/scheduled-strategies", "user") == (200, True)
 
+    def test_fx_and_benchmarks_reads_allowed_for_user(self, monkeypatch):
+        # Reference data the read-only /schedule portfolio card needs (FX
+        # conversion + ETF benchmark identity).
+        assert _run(monkeypatch, "GET", "/api/fx/latest", "user") == (200, True)
+        assert _run(monkeypatch, "GET", "/api/benchmarks", "user") == (200, True)
+
+
+class TestScheduleDetailResourceReads:
+    """The read-only /schedule strategy-detail panel loads its current
+    portfolio + source backtest from two otherwise-admin `/api/momentum/*`
+    GET-by-id routes. Those EXACT paths are allow-listed for users (the
+    endpoints then authorize the id via `user_visible`); the list-all + write
+    forms stay admin-only."""
+
+    def test_current_picks_by_id_read_allowed_for_user(self, monkeypatch):
+        assert _run(monkeypatch, "GET", "/api/momentum/current-picks/42", "user") == (200, True)
+
+    def test_backtest_by_id_read_allowed_for_user(self, monkeypatch):
+        assert _run(monkeypatch, "GET", "/api/momentum/backtests/107", "user") == (200, True)
+
+    def test_current_picks_list_still_admin_only(self, monkeypatch):
+        # The bare list (no id) would leak every snapshot — not allow-listed.
+        assert _run(monkeypatch, "GET", "/api/momentum/current-picks", "user") == (403, False)
+
+    def test_backtests_list_still_admin_only(self, monkeypatch):
+        assert _run(monkeypatch, "GET", "/api/momentum/backtests", "user") == (403, False)
+
+    def test_current_picks_subroute_still_admin_only(self, monkeypatch):
+        # e.g. /{id}/refresh-mtd must not be reachable via the id allow-list.
+        assert _run(monkeypatch, "GET", "/api/momentum/current-picks/42/refresh-mtd", "user") == (403, False)
+
+    def test_current_picks_by_id_write_still_admin_only(self, monkeypatch):
+        assert _run(monkeypatch, "DELETE", "/api/momentum/current-picks/42", "user") == (403, False)
+
+    def test_resource_read_still_needs_auth(self, monkeypatch):
+        assert _run(monkeypatch, "GET", "/api/momentum/backtests/107", None) == (401, False)
+
     def test_airs_read_now_admin_only(self, monkeypatch):
         # The AIRS page is admin-only now, so its API left the user read tier.
         assert _run(monkeypatch, "GET", "/api/airs/scan", "user") == (403, False)
