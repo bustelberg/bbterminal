@@ -1612,6 +1612,11 @@
             ],
             "title": "Search Restarts"
           },
+          "seed": {
+            "default": 0,
+            "title": "Seed",
+            "type": "integer"
+          },
           "variant_key": {
             "anyOf": [
               {

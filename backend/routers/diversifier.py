@@ -123,6 +123,9 @@ class OptimizeRequest(BaseModel):
     # use the tuned default (OPTIMIZER_RESTARTS); higher = lower chance of missing
     # the global optimum, at more runtime. Deterministic for a given value.
     search_restarts: int | None = None
+    # RNG seed for the random restarts. Fixed by default so runs are reproducible;
+    # change it to probe whether a different start finds a better local optimum.
+    seed: int = 0
 
 
 class PortfolioStats(BaseModel):
@@ -581,7 +584,7 @@ async def optimize(req: OptimizeRequest):
 
     opt = div.optimize_portfolio(
         strategy_returns, etf_series, bonds=bond_series, rf_annual=rf, objective=req.objective,
-        core_min=core_min, core_max=core_max, search_restarts=req.search_restarts,
+        core_min=core_min, core_max=core_max, search_restarts=req.search_restarts, seed=req.seed,
     )
 
     def _group(label: str) -> str:

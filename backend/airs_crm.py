@@ -129,10 +129,14 @@ def parse_crm_relaties(raw: bytes) -> list[dict]:
 
 
 def store_crm_relaties(as_of: str, rows: list[dict]) -> int:
-    """Replace the `as_of` snapshot in airs_crm_relatie with `rows` (delete-then-
-    insert, so a relation that dropped out doesn't linger). Rows without a
+    """OVERWRITE airs_crm_relatie with `rows`: wipe the WHOLE table (EVERY prior
+    snapshot date, not just `as_of`) then insert, so it always holds exactly the
+    latest CRM 'Alle relaties' export and old data never lingers. Rows without a
     `crm_id` are skipped, and duplicate crm_ids are de-duped (last wins) so the
-    (as_of_date, crm_id) primary key can't collide. Returns rows stored."""
+    (as_of_date, crm_id) primary key can't collide. Returns rows stored.
+
+    Guard: if nothing parsed (`payload` empty — e.g. a transient download/parse
+    failure), the table is left UNTOUCHED rather than wiped to empty."""
     by_id: dict[int, dict] = {}
     for row in rows:
         cid = row.get("crm_id")
@@ -140,8 +144,33 @@ def store_crm_relaties(as_of: str, rows: list[dict]) -> int:
             continue
         by_id[cid] = {**row, "as_of_date": as_of}
     payload = list(by_id.values())
+    if not payload:
+        return 0   # don't wipe good data on an empty/failed parse
 
-    supabase.table("airs_crm_relatie").delete().eq("as_of_date", as_of).execute()
+    # Full overwrite: delete every existing row (any date), then insert.
+    supabase.table("airs_crm_relatie").delete().gte("as_of_date", "1000-01-01").execute()
     for i in range(0, len(payload), 200):
         supabase.table("airs_crm_relatie").insert(payload[i:i + 200]).execute()
     return len(payload)
+
+
+def run_crm_relaties_refresh_sync() -> dict:
+    """Download the CRM 'Alle relaties' export from AirSPMS and OVERWRITE
+    airs_crm_relatie with the fresh snapshot (+ refresh the raw .xlsx blob in
+    airs_crm_relaties_raw for byte-for-byte re-download). Blocking (Playwright +
+    DB) — call from a thread. Returns {ok, as_of, rows, bytes}. Used by the daily
+    11:00 scheduler job AND the AIRS 'Refresh now' bundle."""
+    import base64  # noqa: PLC0415
+
+    from airs_scanner import download_crm_relaties_sync  # noqa: PLC0415
+
+    as_of = date.today().isoformat()
+    raw = download_crm_relaties_sync()
+    supabase.table("airs_crm_relaties_raw").upsert({
+        "as_of_date": as_of,
+        "filename": f"crm_relaties_{as_of}.xlsx",
+        "content_base64": base64.b64encode(raw).decode("ascii"),
+        "byte_size": len(raw),
+    }, on_conflict="as_of_date").execute()
+    rows = store_crm_relaties(as_of, parse_crm_relaties(raw))
+    return {"ok": True, "as_of": as_of, "rows": rows, "bytes": len(raw)}

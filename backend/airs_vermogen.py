@@ -105,10 +105,8 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
     if not _LOCK.acquire(blocking=False):
         return {"status": "busy", "message": "An AIRS refresh is already running"}
     try:
-        import base64  # noqa: PLC0415
-
         from airs_scanner import (  # noqa: PLC0415
-            download_crm_relaties_sync, download_portfolio_sync, download_vermogensoverzicht_sync,
+            download_portfolio_sync, download_vermogensoverzicht_sync,
         )
         from portfolio import parse_airs_excel  # noqa: PLC0415
         from routers.airs import _parse_att_excel, _save_performance_to_db  # noqa: PLC0415
@@ -165,26 +163,18 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
                 _STATUS["errors"].append(f"{name} (Vermogensoverzicht): {type(e).__name__}: {e}")
                 _log.warning("[airs_vermogen] %s Vermogensoverzicht failed: %s: %s", name, type(e).__name__, e)
 
-        # CRM → Relaties → Alle relaties: one global Excel export per run, stored
-        # raw (base64) in airs_crm_relaties_raw, upserted per as-of date.
+        # CRM → Relaties → Alle relaties: one global export, OVERWRITING
+        # airs_crm_relatie with the latest snapshot (shared with the dedicated
+        # 11:00 daily CRM job — see airs_crm.run_crm_relaties_refresh_sync).
         _STATUS["message"] = "Downloading CRM Alle relaties…"
         crm_bytes = 0
         crm_rows = 0
         crm_ok = False
         try:
-            from airs_crm import parse_crm_relaties, store_crm_relaties  # noqa: PLC0415
+            from airs_crm import run_crm_relaties_refresh_sync  # noqa: PLC0415
 
-            raw = download_crm_relaties_sync()
-            # Raw blob (byte-for-byte re-download) …
-            supabase.table("airs_crm_relaties_raw").upsert({
-                "as_of_date": tot,
-                "filename": f"crm_relaties_{tot}.xlsx",
-                "content_base64": base64.b64encode(raw).decode("ascii"),
-                "byte_size": len(raw),
-            }, on_conflict="as_of_date").execute()
-            # … and the human-readable, queryable typed rows.
-            crm_rows = store_crm_relaties(tot, parse_crm_relaties(raw))
-            crm_bytes, crm_ok = len(raw), True
+            res = run_crm_relaties_refresh_sync()
+            crm_rows, crm_bytes, crm_ok = res["rows"], res["bytes"], True
         except Exception as e:
             _STATUS["errors"].append(f"CRM relaties: {type(e).__name__}: {e}")
             _log.warning("[airs_vermogen] CRM relaties failed: %s: %s", type(e).__name__, e)

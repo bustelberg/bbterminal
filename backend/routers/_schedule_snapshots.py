@@ -17,6 +17,26 @@ from deps import fetch_in_chunks, supabase
 
 _log = logging.getLogger(__name__)
 
+# Currency symbols → ISO codes. ETF/benchmark currency is sometimes stored as a
+# raw symbol ('$') instead of the ISO code the fx_rate table keys on ('USD'), so
+# `fx_rates.get('$')` misses → the holding's EUR marks come back blank. Normalize
+# before the FX lookup so '$' converts like 'USD'.
+_CCY_SYMBOLS = {
+    "$": "USD", "US$": "USD", "USD$": "USD",
+    "€": "EUR", "£": "GBP", "¥": "JPY",
+    "C$": "CAD", "CA$": "CAD", "A$": "AUD", "HK$": "HKD", "CHF": "CHF",
+}
+
+
+def _normalize_currency(raw: str | None) -> str | None:
+    """Map a currency symbol/code to its ISO code ('$' → 'USD'); pass real ISO
+    codes through; None/empty → None. Unknown symbols are returned uppercased so
+    the FX lookup fails gracefully (→ None) rather than mis-converting."""
+    if not raw:
+        return None
+    s = str(raw).strip().upper()
+    return _CCY_SYMBOLS.get(s, s) or None
+
 
 def _fx_asof(series: "pd.Series | None", day_iso: str) -> float | None:
     """Last FX rate on or before `day_iso` (units of the currency per 1 EUR);
@@ -142,6 +162,21 @@ def compute_and_save_price_update(
         if bid not in latest_by_bid:
             latest_by_bid[bid] = r
 
+    # ETF currency from the `benchmark` table (the AUTHORITATIVE ISO code). The
+    # `currency` stored on the holding is unreliable — often None or a raw symbol
+    # like '$' — which left ETF EUR marks blank (the '$' case) or silently
+    # unconverted as if EUR (the None case). Prefer the benchmark row's code.
+    ccy_by_bid: dict[int, str] = {}
+    for r in fetch_in_chunks(
+        bids,
+        lambda chunk: supabase.table("benchmark")
+        .select("benchmark_id, currency")
+        .in_("benchmark_id", chunk)
+        .execute(),
+    ):
+        if r.get("currency"):
+            ccy_by_bid[r["benchmark_id"]] = r["currency"]
+
     # FX setup so the re-price is in EUR (matching the rebalance path + the
     # rest of the EUR-reported UI). The OLD code computed `forward_return_pct`
     # straight off LOCAL prices ((exit_local-entry_local)/entry_local), so after
@@ -159,7 +194,10 @@ def compute_and_save_price_update(
     def _hold_ccy(h: dict) -> str | None:
         cid = h.get("company_id")
         if cid is not None and cid < 0:
-            return (h.get("currency") or "").upper() or None  # ETF: benchmark ccy
+            # ETF: the benchmark table's ISO code first, else normalize whatever
+            # the holding stored ('$' → USD). Both pass through _normalize_currency
+            # so a symbol never silently breaks the FX lookup.
+            return _normalize_currency(ccy_by_bid.get(-cid) or h.get("currency"))
         return ccy_by_cid.get(int(cid)) if cid is not None else None
 
     entry_dates = [str(h["entry_date"])[:10] for h in holdings if h.get("entry_date")]

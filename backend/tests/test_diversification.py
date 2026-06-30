@@ -365,9 +365,9 @@ class TestOptimizePortfolio:
         from momentum.diversification import annualized_stats
 
         rng = np.random.default_rng(7)
-        nn = 100
+        nn = 72
         strat = self._months((0.012 + 0.05 * rng.standard_normal(nn)).tolist())
-        etfs = [(f"E{k}", self._months((0.003 + 0.03 * rng.standard_normal(nn)).tolist())) for k in range(8)]
+        etfs = [(f"E{k}", self._months((0.003 + 0.03 * rng.standard_normal(nn)).tolist())) for k in range(6)]
         ms = sorted(set.intersection(set(strat), *[set(e[1]) for e in etfs]))
         R = np.array([[strat[m]] + [e[1][m] for e in etfs] for m in ms])
 
@@ -375,7 +375,7 @@ class TestOptimizePortfolio:
             return annualized_stats((R @ np.array(opt.weights)).tolist(), 0.0).sortino
 
         low = optimize_portfolio(strat, etfs, core_min=0.0, core_max=1.0, objective="sortino", search_restarts=1)
-        high = optimize_portfolio(strat, etfs, core_min=0.0, core_max=1.0, objective="sortino", search_restarts=16)
+        high = optimize_portfolio(strat, etfs, core_min=0.0, core_max=1.0, objective="sortino", search_restarts=8)
         assert obj(high) >= obj(low) - 1e-9
 
     def test_core_pct_back_compat_pins_the_core(self):

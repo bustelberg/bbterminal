@@ -36,12 +36,17 @@ _ZERO_TOL = 1e-12
 # search is a discrete hill-climb that can land in a local optimum; each restart
 # is another seeded random starting sleeve, and we keep the best — so MORE
 # restarts is monotonic (can only match or beat fewer) and never hurts except in
-# runtime. Empirically (random 8–14 ETF instances vs a 48-restart reference) the
-# objective plateaus by here, so this gives a very low chance of missing the
-# global optimum while keeping a full [0,100] search at ~1–2s. Deterministic:
-# the RNG is reseeded per core-weight (seed + cw), so same inputs + same restarts
-# ⇒ identical weights, every run.
-OPTIMIZER_RESTARTS = 12
+# runtime (each ≈ one extra ascent per core-weight: ~1.2s at 12 ETFs over a full
+# [0,100] search). Empirically (random instances vs a 32-restart reference): by 8
+# restarts the search hits the global optimum in EVERY ≤10-ETF instance; a very
+# busy 14-ETF book may still land ~1-in-10 on a near-optimum, but only by a
+# 0.001–0.004-Sortino hair (the objective is flat near its max — practically the
+# same portfolio). So 8 makes a meaningful miss very unlikely while keeping the
+# typical case ≈ 4–6s; crank it up (e.g. 16) via `search_restarts` for certainty
+# on a large book. Override per call via `optimize_portfolio(search_restarts=…)`.
+# Deterministic: the RNG is reseeded per core-weight (seed + cw), so same inputs
+# + same restarts ⇒ identical weights.
+OPTIMIZER_RESTARTS = 8
 
 
 def prices_to_monthly_returns(prices: list[tuple[object, float]]) -> dict[str, float]:

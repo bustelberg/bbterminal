@@ -4650,6 +4650,11 @@ export interface components {
             risk_free_rate_pct?: number;
             /** Search Restarts */
             search_restarts?: number | null;
+            /**
+             * Seed
+             * @default 0
+             */
+            seed?: number;
             /** Variant Key */
             variant_key?: string | null;
         };

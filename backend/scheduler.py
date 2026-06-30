@@ -488,6 +488,24 @@ def _fire_airs_vermogen() -> None:
     threading.Thread(target=_run, daemon=True, name="airs-vermogen").start()
 
 
+def _fire_crm_relaties() -> None:
+    """APScheduler callable for the daily CRM 'Alle relaties' refresh (11:00
+    Amsterdam, every day). Downloads the export + OVERWRITES airs_crm_relatie
+    with the latest snapshot. Own daemon thread so the Playwright scrape doesn't
+    block the scheduler worker."""
+    def _run():
+        try:
+            from airs_crm import run_crm_relaties_refresh_sync  # noqa: PLC0415
+            res = run_crm_relaties_refresh_sync()
+            _log.info("[scheduler] CRM relaties refresh — %s relations (%s KB)",
+                      res.get("rows"), (res.get("bytes") or 0) // 1024)
+        except Exception as e:
+            _log.exception(
+                "[scheduler] CRM relaties refresh failed: %s: %s", type(e).__name__, e,
+            )
+    threading.Thread(target=_run, daemon=True, name="crm-relaties").start()
+
+
 def register_scheduler(app) -> None:
     """Attach the scheduler to the FastAPI lifecycle. Called once from
     `main.py` after the FastAPI() instance is created."""
@@ -557,6 +575,19 @@ def register_scheduler(app) -> None:
             _fire_airs_vermogen,
             CronTrigger(day_of_week="mon-fri", hour=10, minute=0, timezone="Europe/Amsterdam"),
             id="airs_vermogen_refresh",
+            replace_existing=True,
+            coalesce=True,
+            misfire_grace_time=3600,
+        )
+        # Daily CRM "Alle relaties" refresh — EVERY day at 11:00 Amsterdam time.
+        # Downloads the export and OVERWRITES airs_crm_relatie with the latest
+        # snapshot (full table replace, not a per-date accumulation). Dedicated
+        # job (separate from the portfolio refresh) so the CRM table is reliably
+        # fresh daily; its own thread for the Playwright scrape.
+        sched.add_job(
+            _fire_crm_relaties,
+            CronTrigger(day_of_week="mon-sun", hour=11, minute=0, timezone="Europe/Amsterdam"),
+            id="crm_relaties_refresh",
             replace_existing=True,
             coalesce=True,
             misfire_grace_time=3600,

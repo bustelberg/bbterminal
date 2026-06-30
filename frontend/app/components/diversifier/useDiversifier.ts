@@ -64,6 +64,13 @@ export function useDiversifier() {
   // Optional index/ETF to COMPARE the optimized portfolio against (its per-year
   // return/vol + Sharpe/Sortino are returned alongside; not part of the book).
   const [compareBenchmarkId, setCompareBenchmarkId] = useState<number | null>(null);
+  // Optimizer search thoroughness: coordinate-ascent restarts per strategy-weight
+  // step. Higher = lower chance of missing the global optimum, but slower.
+  // Matches the backend default (OPTIMIZER_RESTARTS).
+  const [searchRestarts, setSearchRestarts] = useState(8);
+  // RNG seed for the optimizer's restarts. Fixed → reproducible; bump it to see
+  // if a different start finds a better solution (rarely does at 8 restarts).
+  const [searchSeed, setSearchSeed] = useState(0);
 
   const [adding, setAdding] = useState(false);
   const [busyEtfId, setBusyEtfId] = useState<number | null>(null);
@@ -376,6 +383,8 @@ export function useDiversifier() {
           core_weight_min_pct: coreMinPct,
           core_weight_max_pct: coreMaxPct,
           compare_benchmark_id: compareBenchmarkId,
+          search_restarts: searchRestarts,
+          seed: searchSeed,
         }),
       });
       if (!res.ok) {
@@ -388,11 +397,16 @@ export function useDiversifier() {
         throw new Error(typeof detail === 'string' ? detail : `HTTP ${res.status}`);
       }
       setOptimizeResult(await res.json());
+      // Auto-apply the optimizer's weights to the manual backtest: clearing the
+      // per-field overrides makes the inputs fall back to `manualDefaults`, which
+      // mirrors the optimizer's EXACT weights (see below). So a fresh optimize
+      // populates the manual table with the optimized portfolio, ready to tweak.
+      setManualWeights({});
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
     setOptimizing(false);
-  }, [selectedRunId, selectedEtfIds, variantKey, riskFreePct, coreMinPct, coreMaxPct, objective, compareBenchmarkId]);
+  }, [selectedRunId, selectedEtfIds, variantKey, riskFreePct, coreMinPct, coreMaxPct, objective, compareBenchmarkId, searchRestarts, searchSeed]);
 
   /** Set one holding's target weight or band (manual-portfolio section). */
   const setManualField = useCallback((key: string, field: 'weight' | 'band', val: number) => {
@@ -402,47 +416,35 @@ export function useDiversifier() {
     }));
   }, []);
 
-  /** Default manual weights: strategy at the start %, and the ETF sleeve
-   * (100 − start) split across the selected funds — by the optimizer's
-   * proportions when available, else evenly — each ROUNDED to the nearest 10
-   * while still summing to the sleeve (largest-remainder apportionment). e.g.
-   * GLD 22 / UUP 18 → 20 / 20. Bands default to 10. These show in the inputs;
-   * user edits (manualWeights) override per field. */
+  /** Default manual weights shown in the Portfolio-backtest inputs (user edits in
+   * `manualWeights` override per field). After an optimize they mirror the
+   * optimizer's EXACT weights (2.5% grid) so the manual table IS the optimized
+   * portfolio, ready to backtest/tweak. Before any optimize: strategy at the
+   * range midpoint, sleeve split evenly. Bands default to 10. */
   const manualDefaults = useMemo(() => {
-    // Seed the strategy weight from the optimizer's chosen value when present
-    // (so the manual table starts as "edit the optimizer's answer"); else the
-    // midpoint of the searched range.
-    const optStrat = optimizeResult?.weights.find((w) => w.group === 'strategy')?.weight;
-    const stratPct = optStrat != null ? Math.round(optStrat * 100) : Math.round((coreMinPct + coreMaxPct) / 2);
-    const out: Record<string, { weight: number; band: number }> = {
-      strategy: { weight: stratPct, band: 10 },
-    };
     const ids = [...selectedEtfIds];
-    if (ids.length === 0) return out;
-    const units = Math.max(0, Math.round((100 - stratPct) / 10));   // 10%-blocks for the sleeve
-    const tickerToId = new Map(etfs.map((e) => [e.ticker, e.benchmark_id]));
-    // Proportions: optimizer weights if present (and non-zero), else even.
-    let props = ids.map((id) => ({ id, w: 0 }));
+    const pct = (w: number) => Math.round(w * 1000) / 10;   // 0.375 → 37.5 (1 dp)
     if (optimizeResult) {
-      const byId = new Map<number, number>();
+      // Seed every selected fund + strategy at 0, then write the optimizer's
+      // exact weight onto each (an ETF it zeroed stays 0). Keyed by benchmark_id
+      // (the strategy by "strategy"), matching the manual inputs.
+      const out: Record<string, { weight: number; band: number }> = {
+        strategy: { weight: 0, band: 10 },
+      };
+      for (const id of ids) out[String(id)] = { weight: 0, band: 10 };
       for (const w of optimizeResult.weights) {
-        if (w.group === 'strategy') continue;
-        const id = tickerToId.get(w.label);
-        if (id != null) byId.set(id, w.weight);
+        const key = w.group === 'strategy' ? 'strategy' : (w.benchmark_id != null ? String(w.benchmark_id) : null);
+        if (key && key in out) out[key] = { weight: pct(w.weight), band: 10 };
       }
-      props = ids.map((id) => ({ id, w: byId.get(id) ?? 0 }));
+      return out;
     }
-    if (props.every((p) => p.w === 0)) props = ids.map((id) => ({ id, w: 1 }));
-    // Largest-remainder: hand out `units` 10%-blocks by proportion.
-    const total = props.reduce((a, p) => a + p.w, 0) || 1;
-    const exact = props.map((p) => (p.w / total) * units);
-    const alloc = exact.map((x) => Math.floor(x));
-    let rem = units - alloc.reduce((a, b) => a + b, 0);
-    const order = exact.map((x, i) => ({ i, frac: x - Math.floor(x) })).sort((a, b) => b.frac - a.frac);
-    for (let k = 0; rem > 0 && order.length; k++, rem--) alloc[order[k % order.length].i] += 1;
-    props.forEach((p, i) => { out[String(p.id)] = { weight: alloc[i] * 10, band: 10 }; });
+    const stratPct = Math.round((coreMinPct + coreMaxPct) / 2);
+    const out: Record<string, { weight: number; band: number }> = { strategy: { weight: stratPct, band: 10 } };
+    if (ids.length === 0) return out;
+    const each = Math.round(((100 - stratPct) / ids.length) * 10) / 10;   // even split, 1 dp
+    ids.forEach((id) => { out[String(id)] = { weight: each, band: 10 }; });
     return out;
-  }, [coreMinPct, coreMaxPct, selectedEtfIds, optimizeResult, etfs]);
+  }, [coreMinPct, coreMaxPct, selectedEtfIds, optimizeResult]);
 
   /** Clear all manual overrides (revert the inputs to the defaults). */
   const resetManualWeights = useCallback(() => setManualWeights({}), []);
@@ -668,6 +670,10 @@ export function useDiversifier() {
     setCoreMaxPct,
     compareBenchmarkId,
     setCompareBenchmarkId,
+    searchRestarts,
+    setSearchRestarts,
+    searchSeed,
+    setSearchSeed,
     objective,
     setObjective,
     // actions

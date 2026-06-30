@@ -161,6 +161,33 @@ export default function DiversifierAnalysis() {
                 ))}
               </select>
             </div>
+            <div className="w-28">
+              <label className="text-fg-subtle text-xs block mb-1" title="How many seeded restarts the optimizer runs per strategy-weight step. Higher = lower chance of missing the global optimum, but slower (~1s each with many ETFs). Deterministic for a given value — same settings always give the same result.">
+                Search restarts
+              </label>
+              <input
+                type="number"
+                step="1"
+                min={1}
+                max={32}
+                value={d.searchRestarts}
+                onChange={(e) => d.setSearchRestarts(Math.max(1, Math.min(32, Math.round(Number(e.target.value)) || 1)))}
+                className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
+              />
+            </div>
+            <div className="w-24">
+              <label className="text-fg-subtle text-xs block mb-1" title="RNG seed for the optimizer's random restarts. Fixed → fully reproducible (same settings = same result). Change it to probe whether a different starting point finds a better solution — at the default restarts it almost never does.">
+                Seed
+              </label>
+              <input
+                type="number"
+                step="1"
+                min={0}
+                value={d.searchSeed}
+                onChange={(e) => d.setSearchSeed(Math.max(0, Math.round(Number(e.target.value)) || 0))}
+                className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
+              />
+            </div>
             <button
               onClick={d.runCorrelation}
               disabled={!canRun}
