@@ -267,6 +267,11 @@ _JOB_META: dict[str, dict[str, str]] = {
         "description": "one-shot — held prices still stale (publish lag); re-prices a few hours later",
         "cadence": "one-shot",
     },
+    "fx_sync": {
+        "label": "FX rate sync",
+        "description": "pulls the latest ECB / pegged / Yahoo rates so every currency stays current",
+        "cadence": "Weekdays 16:30 UTC",
+    },
     "universe_price_refresh": {
         "label": "Universe price refresh",
         "description": "re-prices one universe's companies within budget",

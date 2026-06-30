@@ -52,15 +52,18 @@ export function useDiversifier() {
   // History cutoff YEAR: keep only ETFs whose history starts BEFORE Jan 1 of
   // this year (first price < {year}-01-01) — young funds otherwise shorten the
   // optimizer's common window. Empty = no filter.
-  const [cutoffYear, setCutoffYearState] = useState('2008');
+  const [cutoffYear, setCutoffYearState] = useState('2017');
 
   const [riskFreePct, setRiskFreePct] = useState(2);
-  // Strategy is held at this weight; the diversifier sleeve (1 − this) is
-  // optimized across the selected funds. Reset to target whenever the strategy
-  // drifts more than `rebalanceBandPct` away (above or below).
-  const [startStrategyPct, setStartStrategyPct] = useState(60);
-  const [rebalanceBandPct, setRebalanceBandPct] = useState(10);
-  const [objective, setObjective] = useState<'sharpe' | 'sortino'>('sharpe');
+  // The optimizer searches the strategy/core weight over [min, max] on a 2.5%
+  // grid; the diversifier sleeve (1 − strategy) is optimized across the funds.
+  // The chosen portfolio is rebalanced back to target every month.
+  const [coreMinPct, setCoreMinPct] = useState(0);
+  const [coreMaxPct, setCoreMaxPct] = useState(100);
+  const [objective, setObjective] = useState<'sharpe' | 'sortino'>('sortino');
+  // Optional index/ETF to COMPARE the optimized portfolio against (its per-year
+  // return/vol + Sharpe/Sortino are returned alongside; not part of the book).
+  const [compareBenchmarkId, setCompareBenchmarkId] = useState<number | null>(null);
 
   const [adding, setAdding] = useState(false);
   const [busyEtfId, setBusyEtfId] = useState<number | null>(null);
@@ -253,8 +256,15 @@ export function useDiversifier() {
    * Reloads the list so the new ISIN reflects everywhere (incl. /schedule). */
   const setBenchmarkIsin = useCallback(async (id: number, isin: string) => {
     setError(null);
+    const clean = isin.trim().toUpperCase() || null;
     // Optimistic local update so the input doesn't flicker back to the old value.
-    setEtfs((prev) => prev.map((e) => (e.benchmark_id === id ? { ...e, isin: isin.trim().toUpperCase() || null } : e)));
+    setEtfs((prev) => prev.map((e) => (e.benchmark_id === id ? { ...e, isin: clean } : e)));
+    // Reflect it in any optimizer / manual result that holds this benchmark, so
+    // editing the ISIN on a result row updates in place (no re-run needed).
+    const patchResult = (r: OptimizeResponse | null): OptimizeResponse | null =>
+      r ? { ...r, weights: r.weights.map((w) => (w.benchmark_id === id ? { ...w, isin: clean } : w)) } : r;
+    setOptimizeResult(patchResult);
+    setManualResult(patchResult);
     try {
       const res = await apiFetch(`${API_URL}/api/benchmarks/${id}`, {
         method: 'PATCH',
@@ -325,7 +335,7 @@ export function useDiversifier() {
           benchmark_ids: [...selectedEtfIds],
           variant_key: variantKey,
           risk_free_rate_pct: riskFreePct,
-          max_etf_weight_pct: 100 - startStrategyPct,
+          max_etf_weight_pct: 100 - coreMinPct,
           objective,
         }),
       });
@@ -345,7 +355,7 @@ export function useDiversifier() {
       setError(e instanceof Error ? e.message : String(e));
     }
     setRunning(false);
-  }, [selectedRunId, selectedEtfIds, variantKey, riskFreePct, startStrategyPct, objective]);
+  }, [selectedRunId, selectedEtfIds, variantKey, riskFreePct, coreMinPct, objective]);
 
   /** Optimize the strategy + diversifier sleeve, maximizing the objective with
    * a drift-rebalance band. */
@@ -363,8 +373,9 @@ export function useDiversifier() {
           variant_key: variantKey,
           risk_free_rate_pct: riskFreePct,
           objective,
-          core_weight_pct: startStrategyPct,
-          rebalance_band_pct: rebalanceBandPct,
+          core_weight_min_pct: coreMinPct,
+          core_weight_max_pct: coreMaxPct,
+          compare_benchmark_id: compareBenchmarkId,
         }),
       });
       if (!res.ok) {
@@ -381,7 +392,7 @@ export function useDiversifier() {
       setError(e instanceof Error ? e.message : String(e));
     }
     setOptimizing(false);
-  }, [selectedRunId, selectedEtfIds, variantKey, riskFreePct, startStrategyPct, rebalanceBandPct, objective]);
+  }, [selectedRunId, selectedEtfIds, variantKey, riskFreePct, coreMinPct, coreMaxPct, objective, compareBenchmarkId]);
 
   /** Set one holding's target weight or band (manual-portfolio section). */
   const setManualField = useCallback((key: string, field: 'weight' | 'band', val: number) => {
@@ -398,12 +409,17 @@ export function useDiversifier() {
    * GLD 22 / UUP 18 → 20 / 20. Bands default to 10. These show in the inputs;
    * user edits (manualWeights) override per field. */
   const manualDefaults = useMemo(() => {
+    // Seed the strategy weight from the optimizer's chosen value when present
+    // (so the manual table starts as "edit the optimizer's answer"); else the
+    // midpoint of the searched range.
+    const optStrat = optimizeResult?.weights.find((w) => w.group === 'strategy')?.weight;
+    const stratPct = optStrat != null ? Math.round(optStrat * 100) : Math.round((coreMinPct + coreMaxPct) / 2);
     const out: Record<string, { weight: number; band: number }> = {
-      strategy: { weight: startStrategyPct, band: 10 },
+      strategy: { weight: stratPct, band: 10 },
     };
     const ids = [...selectedEtfIds];
     if (ids.length === 0) return out;
-    const units = Math.max(0, Math.round((100 - startStrategyPct) / 10));   // 10%-blocks for the sleeve
+    const units = Math.max(0, Math.round((100 - stratPct) / 10));   // 10%-blocks for the sleeve
     const tickerToId = new Map(etfs.map((e) => [e.ticker, e.benchmark_id]));
     // Proportions: optimizer weights if present (and non-zero), else even.
     let props = ids.map((id) => ({ id, w: 0 }));
@@ -426,7 +442,7 @@ export function useDiversifier() {
     for (let k = 0; rem > 0 && order.length; k++, rem--) alloc[order[k % order.length].i] += 1;
     props.forEach((p, i) => { out[String(p.id)] = { weight: alloc[i] * 10, band: 10 }; });
     return out;
-  }, [startStrategyPct, selectedEtfIds, optimizeResult, etfs]);
+  }, [coreMinPct, coreMaxPct, selectedEtfIds, optimizeResult, etfs]);
 
   /** Clear all manual overrides (revert the inputs to the defaults). */
   const resetManualWeights = useCallback(() => setManualWeights({}), []);
@@ -646,10 +662,12 @@ export function useDiversifier() {
     // params
     riskFreePct,
     setRiskFreePct,
-    startStrategyPct,
-    setStartStrategyPct,
-    rebalanceBandPct,
-    setRebalanceBandPct,
+    coreMinPct,
+    setCoreMinPct,
+    coreMaxPct,
+    setCoreMaxPct,
+    compareBenchmarkId,
+    setCompareBenchmarkId,
     objective,
     setObjective,
     // actions

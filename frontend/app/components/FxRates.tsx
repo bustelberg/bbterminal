@@ -39,6 +39,38 @@ type HistoryPoint = {
   rate: number;
 };
 
+/** Trading days (Mon–Fri) that `date` is behind `anchor`. 0 when `date` is on
+ * or after the anchor (i.e. as fresh as the freshest rate we have). */
+function tradingDaysBehind(date: string | undefined, anchor: string): number {
+  if (!date || !anchor || date >= anchor) return 0;
+  let days = 0;
+  const cur = new Date(`${date}T00:00:00Z`);
+  const end = new Date(`${anchor}T00:00:00Z`);
+  while (cur < end) {
+    cur.setUTCDate(cur.getUTCDate() + 1);
+    const dow = cur.getUTCDay();
+    if (dow >= 1 && dow <= 5) days += 1;
+  }
+  return days;
+}
+
+// A currency within this many trading days of the freshest rate counts as up to
+// date. ECB publishes once a day (~16:00 CET) while the USD-pegged / Yahoo feeds
+// can already be a day ahead, so a 1-day skew is normal, not staleness.
+const FX_FRESH_TOLERANCE = 1;
+
+/** Freshness styling for a per-currency rate date, measured against the freshest
+ * date any currency has (so a genuinely lagging currency stands out). */
+function freshnessFor(date: string | undefined, freshest: string): {
+  behind: number; text: string; dot: string; label: string;
+} {
+  if (!date) return { behind: -1, text: 'text-fg-faint', dot: 'bg-neutral-600', label: '—' };
+  const behind = tradingDaysBehind(date, freshest);
+  if (behind <= FX_FRESH_TOLERANCE) return { behind, text: 'text-pos-400', dot: 'bg-pos-500', label: 'up to date' };
+  if (behind <= 4) return { behind, text: 'text-warn-400', dot: 'bg-warn-500', label: `${behind}d behind` };
+  return { behind, text: 'text-neg-400', dot: 'bg-neg-500', label: `${behind}d behind` };
+}
+
 function FxHistoryChart({ currency, history, loading, refreshing, onClose }: {
   currency: string;
   history: HistoryPoint[];
@@ -300,7 +332,22 @@ export default function FxRates() {
     () => Object.fromEntries(latestRates.map(r => [r.currency, r])),
     [latestRates],
   );
-  const rateDate = latestRates[0]?.date ?? '';
+  // The freshest date any currency has — the bar each row is measured against.
+  // (NB: the old `latestRates[0]?.date` showed the FIRST currency alphabetically,
+  // which is often a stale pegged one — misleading.)
+  const freshestDate = useMemo(
+    () => latestRates.reduce((m, r) => (r.date && r.date > m ? r.date : m), ''),
+    [latestRates],
+  );
+  const freshnessOf = useCallback(
+    (date: string | undefined) => freshnessFor(date, freshestDate),
+    [freshestDate],
+  );
+  const currentCount = useMemo(
+    () => latestRates.filter(r => tradingDaysBehind(r.date, freshestDate) <= FX_FRESH_TOLERANCE).length,
+    [latestRates, freshestDate],
+  );
+  const rateDate = freshestDate;
 
   // Flatten the on-screen rate table (EUR + covered ACWI + missing) into
   // a single export. Status mirrors the column label: base / ecb /
@@ -313,6 +360,8 @@ export default function FxRates() {
     eur_per_unit: number | null;
     acwi_holdings: number;
     status: string;
+    updated: string | null;
+    days_behind: number | null;
   };
   const exportRows = useMemo<RateExportRow[]>(() => {
     const ci = (code: string) => coverage?.currency_info?.[code] ?? { name: code, country: '' };
@@ -325,6 +374,8 @@ export default function FxRates() {
         eur_per_unit: 1,
         acwi_holdings: coverage?.currency_counts['EUR'] ?? 0,
         status: 'base',
+        updated: null,
+        days_behind: null,
       },
     ];
     for (const c of coverage?.covered ?? []) {
@@ -337,6 +388,8 @@ export default function FxRates() {
         eur_per_unit: r ? 1 / r.rate : null,
         acwi_holdings: coverage?.currency_counts[c] ?? 0,
         status: r?.source ?? 'ecb',
+        updated: r?.date ?? null,
+        days_behind: r?.date ? tradingDaysBehind(r.date, freshestDate) : null,
       });
     }
     for (const c of coverage?.missing ?? []) {
@@ -348,10 +401,12 @@ export default function FxRates() {
         eur_per_unit: null,
         acwi_holdings: coverage?.currency_counts[c] ?? 0,
         status: 'missing',
+        updated: null,
+        days_behind: null,
       });
     }
     return out;
-  }, [coverage, rateMap]);
+  }, [coverage, rateMap, freshestDate]);
   const exportColumns = useMemo<Column<RateExportRow>[]>(() => [
     { key: 'currency', header: 'Currency', accessor: (r) => r.currency },
     { key: 'name', header: 'Name', accessor: (r) => r.name },
@@ -360,7 +415,9 @@ export default function FxRates() {
     { key: 'eur_per_unit', header: 'Inverse (EUR per 1)', accessor: (r) => r.eur_per_unit },
     { key: 'acwi_holdings', header: 'ACWI Holdings', accessor: (r) => r.acwi_holdings },
     { key: 'status', header: 'Status', accessor: (r) => r.status },
-    { key: 'as_of', header: 'As of', accessor: () => rateDate },
+    { key: 'updated', header: 'Updated', accessor: (r) => r.updated },
+    { key: 'days_behind', header: 'Trading days behind freshest', accessor: (r) => r.days_behind },
+    { key: 'as_of', header: 'Freshest rate date', accessor: () => rateDate },
   ], [rateDate]);
 
   if (loading) {
@@ -388,6 +445,21 @@ export default function FxRates() {
   const eurCount = coverage?.eur_count ?? 0;
   const convertibleCount = coveredCount + eurCount;
   const convertiblePct = totalAcwi > 0 ? ((convertibleCount / totalAcwi) * 100).toFixed(1) : '0';
+
+  // The "Updated" cell: the rate's date + a coloured freshness dot (green =
+  // up to date, amber/red = lagging the freshest rate). Renders "—" for a
+  // currency with no stored rate.
+  const renderUpdated = (date?: string) => {
+    const f = freshnessOf(date);
+    return (
+      <td className="px-4 py-2.5 text-right whitespace-nowrap">
+        <span className="inline-flex items-center gap-1.5 justify-end" title={date ? `${date} · ${f.label}` : 'no rate available'}>
+          <span className={`inline-block w-1.5 h-1.5 rounded-full ${f.dot}`} aria-hidden="true" />
+          <span className={`font-mono text-xs ${f.text}`}>{date ?? '—'}</span>
+        </span>
+      </td>
+    );
+  };
 
   return (
     <div className="px-8 py-5 space-y-6">
@@ -473,7 +545,14 @@ export default function FxRates() {
         <div className="px-5 py-3 border-b border-neutral-800/40 flex items-center justify-between">
           <h2 className="text-sm font-medium text-fg-strong">Latest ECB Rates vs EUR</h2>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-fg-subtle">as of {rateDate}</span>
+            <span className="text-xs text-fg-subtle">
+              freshest <span className="font-mono text-fg-soft">{freshestDate || '—'}</span>
+              {latestRates.length > 0 && (
+                <span className={`ml-2 ${currentCount === latestRates.length ? 'text-pos-400' : 'text-warn-400'}`}>
+                  {currentCount}/{latestRates.length} up to date
+                </span>
+              )}
+            </span>
             <TableDownloadButton
               rows={exportRows}
               columns={exportColumns}
@@ -493,6 +572,7 @@ export default function FxRates() {
                 <th className="text-right px-4 py-2.5 font-medium">Inverse (EUR per 1)</th>
                 <th className="text-right px-4 py-2.5 font-medium">ACWI Holdings</th>
                 <th className="text-center px-4 py-2.5 font-medium">Status</th>
+                <th className="text-right px-4 py-2.5 font-medium" title="Date of this currency's latest stored rate, and how far it lags the freshest rate">Updated</th>
                 <th className="text-left px-4 py-2.5 font-medium"></th>
               </tr>
             </thead>
@@ -506,6 +586,7 @@ export default function FxRates() {
                 <td className="px-4 py-2.5 text-right font-mono text-fg-soft">1.0000</td>
                 <td className="px-4 py-2.5 text-right font-mono text-fg-soft">{coverage?.currency_counts['EUR'] ?? 0}</td>
                 <td className="px-4 py-2.5 text-center"><span className="text-pos-400 text-xs">base</span></td>
+                <td className="px-4 py-2.5 text-right text-xs text-fg-faint">—</td>
                 <td className="px-4 py-2.5"></td>
               </tr>
               {/* ACWI currencies with ECB rates */}
@@ -522,6 +603,7 @@ export default function FxRates() {
                     <td className="px-4 py-2.5 text-center">
                       <span className="text-pos-400 text-xs">{r?.source === 'pegged' ? 'pegged' : r?.source === 'yahoo' ? 'yahoo' : 'ecb'}</span>
                     </td>
+                    {renderUpdated(r?.date)}
                     <td className="px-4 py-2.5">
                       <button
                         onClick={() => loadHistory(c)}
@@ -543,6 +625,7 @@ export default function FxRates() {
                   <td className="px-4 py-2.5 text-right font-mono text-fg-subtle">-</td>
                   <td className="px-4 py-2.5 text-right font-mono text-fg-soft">{coverage.currency_counts[c] ?? 0}</td>
                   <td className="px-4 py-2.5 text-center"><span className="text-neg-400 text-xs">missing</span></td>
+                  <td className="px-4 py-2.5 text-right text-xs text-fg-faint">—</td>
                   <td className="px-4 py-2.5"></td>
                 </tr>
               ))}
@@ -556,6 +639,7 @@ export default function FxRates() {
                   <td className="px-4 py-2.5 text-right font-mono text-fg-subtle">{(1 / r.rate).toFixed(4)}</td>
                   <td className="px-4 py-2.5 text-right font-mono text-fg-faint">0</td>
                   <td className="px-4 py-2.5 text-center"><span className="text-fg-faint text-xs">ecb only</span></td>
+                  {renderUpdated(r.date)}
                   <td className="px-4 py-2.5">
                     <button
                       onClick={() => loadHistory(r.currency)}

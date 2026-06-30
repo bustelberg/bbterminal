@@ -102,33 +102,31 @@ export default function DiversifierAnalysis() {
                 className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
               />
             </div>
-            <div className="w-28">
-              <label className="text-fg-subtle text-xs block mb-1" title="Strategy's weight; the diversifier sleeve (100 − this) is optimized across the selected funds. 100 = strategy alone.">
-                Start strategy %
+            <div>
+              <label className="text-fg-subtle text-xs block mb-1" title="The optimizer searches the strategy weight over this range on a 2.5% grid (the diversifier sleeve = 100 − strategy is split among the funds, also in 2.5% steps). Set min = max to pin it.">
+                Strategy weight % (min–max)
               </label>
-              <input
-                type="number"
-                step="5"
-                min={0}
-                max={100}
-                value={d.startStrategyPct}
-                onChange={(e) => d.setStartStrategyPct(Number(e.target.value))}
-                className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
-              />
-            </div>
-            <div className="w-28">
-              <label className="text-fg-subtle text-xs block mb-1" title="Symmetric rebalance band: when the strategy drifts more than this many points from its start weight (above OR below), reset to start. e.g. start 60 ± 10 → reset whenever it leaves 50–70%.">
-                Rebalance band ±%
-              </label>
-              <input
-                type="number"
-                step="5"
-                min={0}
-                max={50}
-                value={d.rebalanceBandPct}
-                onChange={(e) => d.setRebalanceBandPct(Number(e.target.value))}
-                className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
-              />
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  step="2.5"
+                  min={0}
+                  max={100}
+                  value={d.coreMinPct}
+                  onChange={(e) => d.setCoreMinPct(Number(e.target.value))}
+                  className="w-20 bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
+                />
+                <span className="text-fg-subtle text-xs">to</span>
+                <input
+                  type="number"
+                  step="2.5"
+                  min={0}
+                  max={100}
+                  value={d.coreMaxPct}
+                  onChange={(e) => d.setCoreMaxPct(Number(e.target.value))}
+                  className="w-20 bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
+                />
+              </div>
             </div>
             <div>
               <label className="text-fg-subtle text-xs block mb-1" title="Which metric the blend optimizer maximizes">
@@ -147,6 +145,21 @@ export default function DiversifierAnalysis() {
                   </button>
                 ))}
               </div>
+            </div>
+            <div>
+              <label className="text-fg-subtle text-xs block mb-1" title="An index/ETF to compare the optimized portfolio against over the same window — its per-year return + vol and overall Sharpe/Sortino show alongside. Not part of the portfolio.">
+                Compare vs
+              </label>
+              <select
+                value={d.compareBenchmarkId ?? ''}
+                onChange={(e) => d.setCompareBenchmarkId(e.target.value ? Number(e.target.value) : null)}
+                className="bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none max-w-[14rem]"
+              >
+                <option value="">None</option>
+                {d.etfs.map((e) => (
+                  <option key={e.benchmark_id} value={e.benchmark_id}>{e.ticker} · {e.name}</option>
+                ))}
+              </select>
             </div>
             <button
               onClick={d.runCorrelation}
@@ -222,7 +235,7 @@ export default function DiversifierAnalysis() {
         />
 
         {/* ── Portfolio optimization ────────────────────────────────── */}
-        {d.optimizeResult && <OptimizeCard result={d.optimizeResult} />}
+        {d.optimizeResult && <OptimizeCard result={d.optimizeResult} onSetIsin={d.setBenchmarkIsin} />}
 
         {/* ── Manual portfolio backtest (below the optimizer) ───────── */}
         {d.selectedRunId != null && (
@@ -246,7 +259,7 @@ export default function DiversifierAnalysis() {
             adding={d.adding}
           />
         )}
-        {d.manualResult && <OptimizeCard result={d.manualResult} title="Portfolio backtest · manual weights" />}
+        {d.manualResult && <OptimizeCard result={d.manualResult} title="Portfolio backtest · manual weights" onSetIsin={d.setBenchmarkIsin} />}
 
         {/* ── Saved portfolios (named overlays, on-demand state) ────── */}
         <SavedPortfoliosSection
@@ -263,7 +276,7 @@ export default function DiversifierAnalysis() {
   );
 }
 
-function StatPair({ label, before, after, dp = 2 }: { label: string; before: number | null | undefined; after: number | null | undefined; dp?: number }) {
+function StatPair({ label, before, after, bench, benchLabel, dp = 2 }: { label: string; before: number | null | undefined; after: number | null | undefined; bench?: number | null; benchLabel?: string; dp?: number }) {
   const lift = before != null && after != null ? after - before : null;
   return (
     <div className="flex flex-col">
@@ -276,6 +289,11 @@ function StatPair({ label, before, after, dp = 2 }: { label: string; before: num
           <span className={`ml-2 ${lift > 0 ? 'text-pos-400' : 'text-neg-400'}`}>{fmtSigned(lift, dp)}</span>
         )}
       </span>
+      {benchLabel && (
+        <span className="font-mono text-xs text-warn-400/90 mt-0.5" title={`${benchLabel} (benchmark)`}>
+          {benchLabel} {fmtNum(bench, dp)}
+        </span>
+      )}
     </div>
   );
 }
@@ -312,8 +330,18 @@ function DrawdownTable({ title, rows, accent }: { title: string; rows: DrawdownI
   );
 }
 
-function WeightBreakdown({ weights }: { weights: AssetWeight[] }) {
-  const sorted = [...weights].sort((a, b) => b.weight - a.weight);
+function WeightBreakdown({ weights, onSetIsin }: {
+  weights: AssetWeight[];
+  /** Save an ISIN to a result ETF's benchmark (PATCH /api/benchmarks/{id}).
+   * When provided, ETF rows get an inline ISIN editor. */
+  onSetIsin?: (benchmarkId: number, isin: string) => void;
+}) {
+  // Hide the funds the optimizer gave (effectively) zero weight — they only
+  // clutter the allocation. Threshold matches the 1-decimal display, so a row
+  // is hidden exactly when it would render as "0.0%".
+  const shown = weights.filter((w) => w.weight * 100 >= 0.05);
+  const hidden = weights.length - shown.length;
+  const sorted = [...shown].sort((a, b) => b.weight - a.weight);
   return (
     <div className="space-y-1.5">
       {sorted.map((w) => (
@@ -325,14 +353,42 @@ function WeightBreakdown({ weights }: { weights: AssetWeight[] }) {
             <div className={`h-full ${w.group === 'strategy' ? 'bg-accent-500/70' : 'bg-pos-500/50'}`} style={{ width: `${Math.max(w.weight * 100, w.weight > 0 ? 1 : 0)}%` }} />
           </div>
           <div className="w-14 shrink-0 text-right font-mono text-sm text-fg-strong">{(w.weight * 100).toFixed(1)}%</div>
-          <div className="hidden md:block w-56 shrink-0 truncate text-xs text-fg-subtle">{w.name ?? ''}</div>
+          {/* ISIN — editable for ETF rows (writes to the benchmark in the DB) */}
+          <div className="hidden sm:block w-36 shrink-0">
+            {w.benchmark_id != null && onSetIsin ? (
+              <input
+                key={`${w.benchmark_id}-${w.isin ?? ''}`}
+                defaultValue={w.isin ?? ''}
+                placeholder="add ISIN"
+                title="Edit this ETF's ISIN — saved to its benchmark on Enter / blur"
+                className="w-full bg-page border border-neutral-700 rounded px-2 py-0.5 text-xs font-mono text-fg-strong focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none placeholder-fg-faint"
+                onKeyDown={(ev) => { if (ev.key === 'Enter') (ev.target as HTMLInputElement).blur(); }}
+                onBlur={(ev) => {
+                  const v = ev.target.value.trim().toUpperCase();
+                  if (v !== (w.isin ?? '')) onSetIsin(w.benchmark_id as number, v);
+                }}
+              />
+            ) : (
+              <span className="text-xs font-mono text-fg-faint">{w.isin ?? ''}</span>
+            )}
+          </div>
+          <div className="hidden lg:block w-48 shrink-0 truncate text-xs text-fg-subtle">{w.name ?? ''}</div>
         </div>
       ))}
+      {hidden > 0 && (
+        <p className="text-xs text-fg-subtle pt-1">
+          {hidden} fund{hidden === 1 ? '' : 's'} at 0% hidden
+        </p>
+      )}
     </div>
   );
 }
 
-function OptimizeCard({ result: r, title }: { result: OptimizeResponse; title?: string }) {
+function OptimizeCard({ result: r, title, onSetIsin }: {
+  result: OptimizeResponse;
+  title?: string;
+  onSetIsin?: (benchmarkId: number, isin: string) => void;
+}) {
   const objLabel = r.objective === 'sortino' ? 'Sortino' : 'Sharpe';
   const heading = title ?? `Optimized portfolio · maximizing ${objLabel}`;
   // Log scale plots the growth multiple (1 + cum%/100) — always positive — so
@@ -355,6 +411,10 @@ function OptimizeCard({ result: r, title }: { result: OptimizeResponse; title?: 
     beforeG: 1 + p.before / 100,
     afterG: 1 + p.after / 100,
   }));
+  // Compare-benchmark lookups (per-year stats + per-month returns), if selected.
+  const bench = r.benchmark ?? null;
+  const benchYear = new Map((bench?.annual ?? []).map((y) => [y.year, y]));
+  const benchMonthly = bench?.monthly ?? {};
   return (
     <div className="bg-card rounded-xl border border-accent-500/30 p-5">
       <div className="flex items-baseline justify-between mb-3">
@@ -367,15 +427,16 @@ function OptimizeCard({ result: r, title }: { result: OptimizeResponse; title?: 
         </span>
       </div>
 
-      {/* Before → after */}
+      {/* Before → after (→ benchmark). Each stat shows strategy → optimized, with
+          the compare-benchmark value beneath when one is selected. */}
       <div className="flex flex-wrap gap-x-10 gap-y-3 mb-5">
-        <StatPair label="Sharpe" before={r.before.sharpe} after={r.after.sharpe} />
-        <StatPair label="Sortino" before={r.before.sortino} after={r.after.sortino} />
-        <StatPair label="Ann. return" before={r.before.ann_return != null ? r.before.ann_return * 100 : null} after={r.after.ann_return != null ? r.after.ann_return * 100 : null} dp={1} />
-        <StatPair label="Vol" before={r.before.ann_vol != null ? r.before.ann_vol * 100 : null} after={r.after.ann_vol != null ? r.after.ann_vol * 100 : null} dp={1} />
-        <StatPair label="YTD" before={r.ytd_before != null ? r.ytd_before * 100 : null} after={r.ytd_after != null ? r.ytd_after * 100 : null} dp={1} />
-        <StatPair label="Median month" before={r.before.median_month != null ? r.before.median_month * 100 : null} after={r.after.median_month != null ? r.after.median_month * 100 : null} dp={2} />
-        <StatPair label="Win rate (mo)" before={r.before.win_rate != null ? r.before.win_rate * 100 : null} after={r.after.win_rate != null ? r.after.win_rate * 100 : null} dp={0} />
+        <StatPair label="Sharpe" before={r.before.sharpe} after={r.after.sharpe} bench={bench?.stats.sharpe} benchLabel={bench?.ticker} />
+        <StatPair label="Sortino" before={r.before.sortino} after={r.after.sortino} bench={bench?.stats.sortino} benchLabel={bench?.ticker} />
+        <StatPair label="Ann. return" before={r.before.ann_return != null ? r.before.ann_return * 100 : null} after={r.after.ann_return != null ? r.after.ann_return * 100 : null} bench={bench?.stats.ann_return != null ? bench.stats.ann_return * 100 : null} benchLabel={bench?.ticker} dp={1} />
+        <StatPair label="Vol" before={r.before.ann_vol != null ? r.before.ann_vol * 100 : null} after={r.after.ann_vol != null ? r.after.ann_vol * 100 : null} bench={bench?.stats.ann_vol != null ? bench.stats.ann_vol * 100 : null} benchLabel={bench?.ticker} dp={1} />
+        <StatPair label="YTD" before={r.ytd_before != null ? r.ytd_before * 100 : null} after={r.ytd_after != null ? r.ytd_after * 100 : null} bench={bench?.ytd != null ? bench.ytd * 100 : null} benchLabel={bench?.ticker} dp={1} />
+        <StatPair label="Median month" before={r.before.median_month != null ? r.before.median_month * 100 : null} after={r.after.median_month != null ? r.after.median_month * 100 : null} bench={bench?.stats.median_month != null ? bench.stats.median_month * 100 : null} benchLabel={bench?.ticker} dp={2} />
+        <StatPair label="Win rate (mo)" before={r.before.win_rate != null ? r.before.win_rate * 100 : null} after={r.after.win_rate != null ? r.after.win_rate * 100 : null} bench={bench?.stats.win_rate != null ? bench.stats.win_rate * 100 : null} benchLabel={bench?.ticker} dp={0} />
       </div>
 
       {/* Before/after equity curve over the common window */}
@@ -445,8 +506,10 @@ function OptimizeCard({ result: r, title }: { result: OptimizeResponse; title?: 
                   <th className="text-left font-medium py-1.5 pr-2">Year</th>
                   <th className="text-right font-medium py-1.5 px-2">Return strat</th>
                   <th className="text-right font-medium py-1.5 px-2 text-accent-400/80">Return opt</th>
+                  {bench && <th className="text-right font-medium py-1.5 px-2 text-warn-400/90">Return {bench.ticker}</th>}
                   <th className="text-right font-medium py-1.5 px-2 border-l border-neutral-800/40">Vol strat</th>
-                  <th className="text-right font-medium py-1.5 pl-2 text-accent-400/80">Vol opt</th>
+                  <th className="text-right font-medium py-1.5 px-2 text-accent-400/80">Vol opt</th>
+                  {bench && <th className="text-right font-medium py-1.5 pl-2 text-warn-400/90">Vol {bench.ticker}</th>}
                 </tr>
               </thead>
               <tbody>
@@ -460,16 +523,20 @@ function OptimizeCard({ result: r, title }: { result: OptimizeResponse; title?: 
                         </td>
                         <td className={`py-1.5 px-2 text-right font-mono ${pnlClass(y.return_before)}`}>{fmtSignedPct(y.return_before)}</td>
                         <td className={`py-1.5 px-2 text-right font-mono ${pnlClass(y.return_after)}`}>{fmtSignedPct(y.return_after)}</td>
+                        {bench && <td className={`py-1.5 px-2 text-right font-mono ${pnlClass(benchYear.get(y.year)?.ret ?? null)}`}>{fmtSignedPct(benchYear.get(y.year)?.ret ?? null)}</td>}
                         <td className="py-1.5 px-2 text-right font-mono text-fg-muted border-l border-neutral-800/40">{y.vol_before != null ? `${(y.vol_before * 100).toFixed(1)}%` : '—'}</td>
-                        <td className="py-1.5 pl-2 text-right font-mono text-fg-muted">{y.vol_after != null ? `${(y.vol_after * 100).toFixed(1)}%` : '—'}</td>
+                        <td className="py-1.5 px-2 text-right font-mono text-fg-muted">{y.vol_after != null ? `${(y.vol_after * 100).toFixed(1)}%` : '—'}</td>
+                        {bench && <td className="py-1.5 pl-2 text-right font-mono text-warn-400/90">{(() => { const v = benchYear.get(y.year)?.vol; return v != null ? `${(v * 100).toFixed(1)}%` : '—'; })()}</td>}
                       </tr>
                       {open && (y.months ?? []).map((m) => (
                         <tr key={m.month} className="border-b border-neutral-800/20 bg-overlay/[0.015]">
                           <td className="py-1 pr-2 pl-5 font-mono text-xs text-fg-subtle">{m.month}</td>
                           <td className={`py-1 px-2 text-right font-mono text-xs ${pnlClass(m.return_before)}`}>{fmtSignedPct(m.return_before)}</td>
                           <td className={`py-1 px-2 text-right font-mono text-xs ${pnlClass(m.return_after)}`}>{fmtSignedPct(m.return_after)}</td>
+                          {bench && <td className={`py-1 px-2 text-right font-mono text-xs ${pnlClass(benchMonthly[m.month] ?? null)}`}>{fmtSignedPct(benchMonthly[m.month] ?? null)}</td>}
                           <td className="border-l border-neutral-800/40"></td>
                           <td></td>
+                          {bench && <td></td>}
                         </tr>
                       ))}
                     </Fragment>
@@ -482,7 +549,7 @@ function OptimizeCard({ result: r, title }: { result: OptimizeResponse; title?: 
       )}
 
       {/* Weight breakdown, grouped: Core (strategy + bonds) then Diversifiers */}
-      <WeightBreakdown weights={r.weights} />
+      <WeightBreakdown weights={r.weights} onSetIsin={onSetIsin} />
 
       {/* Top-10 worst drawdowns: strategy alone vs optimized */}
       {(r.drawdowns_before.length > 0 || r.drawdowns_after.length > 0) && (
@@ -495,31 +562,35 @@ function OptimizeCard({ result: r, title }: { result: OptimizeResponse; title?: 
         </div>
       )}
 
-      {/* Rebalance frequency */}
+      {/* Rebalance cadence */}
       <div className="mt-4 rounded-lg bg-inset/60 border border-neutral-800/40 px-4 py-3 text-sm">
-        {(r.rebalance_count ?? 0) > 0 ? (
-          <span className="text-fg">
-            Strategy reset to {((r.weights.find((w) => w.group === 'strategy')?.weight ?? 0) * 100).toFixed(0)}% <span className="font-mono text-fg-strong">{r.rebalance_count}×</span> over {r.months} months
-            {r.rebalance_freq_months != null && <> — about <span className="font-mono text-fg-strong">once every {r.rebalance_freq_months.toFixed(1)} months</span></>}.
-            {(r.rebalance_dates ?? []).length > 0 && (
-              <span className="block text-xs text-fg-subtle mt-1 font-mono">{(r.rebalance_dates ?? []).join(' · ')}</span>
-            )}
-          </span>
+        {r.objective === 'manual' ? (
+          (r.rebalance_count ?? 0) > 0 ? (
+            <span className="text-fg">
+              Reset to target <span className="font-mono text-fg-strong">{r.rebalance_count}×</span> over {r.months} months
+              {r.rebalance_freq_months != null && <> — about <span className="font-mono text-fg-strong">once every {r.rebalance_freq_months.toFixed(1)} months</span></>}.
+              {(r.rebalance_dates ?? []).length > 0 && (
+                <span className="block text-xs text-fg-subtle mt-1 font-mono">{(r.rebalance_dates ?? []).join(' · ')}</span>
+              )}
+            </span>
+          ) : (
+            <span className="text-fg-muted">No holding left its band over this window — no rebalances needed.</span>
+          )
         ) : (
-          <span className="text-fg-muted">The strategy never left its rebalance band over this window — no rebalances needed.</span>
+          <span className="text-fg">Rebalanced <span className="font-medium text-fg-strong">monthly</span> back to the target weights — weights drift with prices during the month, then reset to target each month.</span>
         )}
       </div>
 
       <p className="text-xs text-fg-subtle mt-3 leading-relaxed">
         {r.objective === 'manual' ? (
-          <>These are your hand-set target weights, reset whenever any holding drifts outside its band.</>
+          <>These are your hand-set target weights, reset whenever any holding drifts outside its band.{' '}
+            <span className="font-medium">After</span> is that band-rebalanced portfolio</>
         ) : (
-          <>The strategy starts at your Start strategy %; the diversifier sleeve (the rest) is split {objLabel}-optimally
-            across the selected funds, then reset to target whenever the <span className="font-medium">strategy weight</span> drifts
-            more than ± the Rebalance band.</>
+          <>The strategy weight is searched within your min–max range; the diversifier sleeve (the rest) is split {objLabel}-optimally
+            across the selected funds (every weight a multiple of 2.5%), and the portfolio is rebalanced back to those weights every month.{' '}
+            <span className="font-medium">After</span> is that monthly-rebalanced blend</>
         )}{' '}
-        <span className="font-medium">After</span> is this drift-rebalanced portfolio over the common window where every
-        selected fund has data{r.limited_by ? ` (bounded by ${r.limited_by})` : ''};
+        over the common window where every selected fund has data{r.limited_by ? ` (bounded by ${r.limited_by})` : ''};
         {' '}<span className="font-medium">Before</span> is your strategy alone.
       </p>
     </div>

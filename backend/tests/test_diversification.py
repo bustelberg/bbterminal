@@ -241,7 +241,7 @@ class TestOptimizePortfolio:
         n = 60
         strat = self._months([(0.03 if i % 2 == 0 else -0.005) for i in range(n)])
         anti = self._months([(-0.005 if i % 2 == 0 else 0.03) for i in range(n)])
-        opt = optimize_portfolio(strat, [("ANTI", anti)], core_pct=0.6, rebalance_band=0.1)
+        opt = optimize_portfolio(strat, [("ANTI", anti)], core_pct=0.6)
         assert opt.assets == ["Strategy", "ANTI"]
         # No bonds: strategy = core (0.6); the ETF sleeve gets the rest (0.4).
         assert math.isclose(opt.weights[0], 0.6, abs_tol=1e-6)
@@ -281,15 +281,25 @@ class TestOptimizePortfolio:
         opt = optimize_portfolio(strat, [("ETF", etf)], bonds=[("BOND", bond)], core_pct=0.6)
         assert opt.weights[0] < opt.weights[1]   # bond > strategy within the core
 
-    def test_rebalance_fires_when_core_grows(self):
-        # Strategy compounds fast, ETF flat → the core drifts up past the band.
+    def test_after_is_the_monthly_rebalanced_static_blend(self):
+        # The optimizer's portfolio is rebalanced back to target EVERY month, so
+        # `after` is the fixed-weight (static) blend of the chosen weights — no
+        # drift/band events — and it equals exactly the objective the optimizer
+        # maximized.
+        from momentum.diversification import annualized_stats
+
         n = 48
-        strat = self._months([0.08] * n)   # +8%/mo
-        flat = self._months([0.0] * n)
-        opt = optimize_portfolio(strat, [("FLAT", flat)], core_pct=0.6, rebalance_band=0.1)
-        assert opt.rebalance_count > 0
-        assert opt.rebalance_freq_months is not None and opt.rebalance_freq_months > 0
-        assert len(opt.rebalance_dates) == opt.rebalance_count
+        strat = self._months([(0.04 if i % 2 == 0 else -0.01) for i in range(n)])
+        div = self._months([(0.01 if i % 3 == 0 else -0.002) for i in range(n)])
+        opt = optimize_portfolio(strat, [("DIV", div)], core_pct=0.6)
+        assert opt.rebalance_count == 0      # monthly rebalance → no band events
+        assert opt.rebalance_dates == []
+        # `after` is the static blend of opt.weights, reconstructed independently.
+        ms = sorted(set(strat) & set(div))
+        R = np.array([[strat[m], div[m]] for m in ms])
+        st = annualized_stats((R @ np.array(opt.weights)).tolist(), 0.0)
+        assert math.isclose(opt.after.sharpe, st.sharpe, rel_tol=1e-9)
+        assert math.isclose(opt.after.sortino, st.sortino, rel_tol=1e-9)
 
     def test_core_100_is_strategy_alone(self):
         n = 24
@@ -315,6 +325,34 @@ class TestOptimizePortfolio:
         assert opt.weights == [1.0]
         assert opt.rebalance_count == 0
         assert opt.after.sharpe == opt.before.sharpe
+
+    def test_weights_are_on_the_2p5_grid(self):
+        # Every weight must be a multiple of 2.5% (discrete search), and sum to 1.
+        n = 60
+        strat = self._months([(0.03 if i % 2 == 0 else -0.005) for i in range(n)])
+        anti = self._months([(-0.005 if i % 2 == 0 else 0.03) for i in range(n)])
+        gold = self._months([(0.01 if i % 3 == 0 else -0.002) for i in range(n)])
+        opt = optimize_portfolio(strat, [("ANTI", anti), ("GOLD", gold)], core_min=0.4, core_max=0.6)
+        for w in opt.weights:
+            assert abs(round(w / 0.025) - w / 0.025) < 1e-9, f"{w} not on the 2.5% grid"
+        assert math.isclose(sum(opt.weights), 1.0, abs_tol=1e-9)
+
+    def test_core_range_is_respected(self):
+        # With no bonds the core == the strategy weight; it must land inside
+        # [core_min, core_max] (on the grid), not be pinned to a single value.
+        n = 60
+        strat = self._months([(0.03 if i % 2 == 0 else -0.005) for i in range(n)])
+        anti = self._months([(-0.005 if i % 2 == 0 else 0.03) for i in range(n)])
+        opt = optimize_portfolio(strat, [("ANTI", anti)], core_min=0.30, core_max=0.50)
+        assert 0.30 - 1e-9 <= opt.weights[0] <= 0.50 + 1e-9
+
+    def test_core_pct_back_compat_pins_the_core(self):
+        # The legacy single `core_pct` still pins the core (min == max).
+        n = 60
+        strat = self._months([(0.03 if i % 2 == 0 else -0.005) for i in range(n)])
+        anti = self._months([(-0.005 if i % 2 == 0 else 0.03) for i in range(n)])
+        opt = optimize_portfolio(strat, [("ANTI", anti)], core_pct=0.575)
+        assert math.isclose(opt.weights[0], 0.575, abs_tol=1e-9)  # 0.575 = 23×2.5%
 
 
 class TestSimulatePortfolio:

@@ -9,21 +9,22 @@ import { dialog } from '../../lib/dialog';
 import { useClickOutside } from '../../lib/hooks/useClickOutside';
 import { API_URL } from '../../lib/apiUrl';
 import { apiFetch } from '../../lib/apiFetch';
+import { isUserAllowedPath } from '../../lib/userAllowedPaths';
 
-type NavItem = { href: string; label: string; userVisible?: true };
+type NavItem = { href: string; label: string };
 // A collapsible group: its `href` (if set) makes the header itself a link;
 // `children` are indented sub-pages shown when expanded.
-type NavSection = { label: string; href?: string; userVisible?: true; children: NavItem[] };
+type NavSection = { label: string; href?: string; children: NavItem[] };
 type NavEntry = NavItem | NavSection;
 
 const isSection = (e: NavEntry): e is NavSection => 'children' in e;
 
-// Items marked `userVisible: true` are shown to regular users; everything
-// else is admin-only (and to admins viewing as a regular user via the
-// "View as user" toggle, only the userVisible items show).
+// Which items a regular user (or an admin in "view as user" mode) sees is
+// derived from `isUserAllowedPath` — the SAME allow-list the route gate
+// (`proxy.ts`) enforces — so the nav can never show a page the user can't open.
 const navItems: NavEntry[] = [
-  { href: '/', label: 'Welcome', userVisible: true },
-  { href: '/earnings', label: 'Earnings Dashboard', userVisible: true },
+  { href: '/', label: 'Welcome' },
+  { href: '/earnings', label: 'Earnings Dashboard' },
   { href: '/backtest', label: 'Backtest' },
   { href: '/diversifier', label: 'Diversifier' },
   { href: '/regime-detector', label: 'Regime Detector' },
@@ -44,7 +45,7 @@ const navItems: NavEntry[] = [
   { href: '/benchmarks', label: 'Benchmarks' },
   { href: '/companies', label: 'Companies' },
   { href: '/isin-compare', label: 'ISIN Compare' },
-  { href: '/schedule', label: 'Schedule', userVisible: true },
+  { href: '/schedule', label: 'Schedule' },
   { href: '/fees', label: 'Fees' },
   { href: '/api', label: 'API' },
   { href: '/network', label: 'Network' },
@@ -423,12 +424,15 @@ export default function Sidebar({ initialUser }: Props) {
   const visibleNav: NavEntry[] = navItems
     .map((e): NavEntry | null => {
       if (isSection(e)) {
-        if (!isAdminView && !e.userVisible) return null;
-        const children = e.children.filter((c) => isAdminView || c.userVisible);
+        const children = e.children.filter((c) => isAdminView || isUserAllowedPath(c.href));
+        const sectionAllowed = isAdminView
+          || (e.href ? isUserAllowedPath(e.href) : false)
+          || children.length > 0;
+        if (!sectionAllowed) return null;
         if (children.length === 0 && !e.href) return null;
         return { ...e, children };
       }
-      return isAdminView || e.userVisible ? e : null;
+      return isAdminView || isUserAllowedPath(e.href) ? e : null;
     })
     .filter((e): e is NavEntry => e !== null);
 

@@ -692,39 +692,163 @@ def component_return_since(
     return _compound_pct([returns[m] for m in months if m in returns and _since_inception(m, inception_iso)])
 
 
+def _grid_optimize_weights(
+    R: np.ndarray, n_assets: int, nb: int, ne: int,
+    core_min: float, core_max: float, grid: float,
+    objective: str, rf_annual: float, seed: int, restarts: int = 2,
+) -> np.ndarray:
+    """Discrete-grid weight search: find the weights (each a multiple of `grid`,
+    e.g. 2.5%) that maximize the objective, with the CORE bucket (strategy +
+    bonds) constrained to the inclusive range ``[core_min, core_max]``.
+
+    Method: loop the core-bucket weight over its grid; for each, coordinate-ascend
+    by moving ONE `grid` unit at a time WITHIN a group (so the core total stays
+    fixed) — strategy↔bonds inside the core, ETF↔ETF inside the sleeve — from an
+    even split plus a couple of seeded random restarts. Returns the best weight
+    vector (sums to 1). The objective is the fixed-weight (monthly-rebalanced)
+    blend's risk-adjusted return — which is EXACTLY the realized portfolio, since
+    rebalancing back to these weights every month makes each month's return
+    `target · monthly_return`. So the optimized number and the reported `after`
+    are the same quantity (no static-vs-rebalanced gap)."""
+    total_u = int(round(1.0 / grid))
+    core_idx = list(range(0, 1 + nb))            # strategy + bonds
+    sleeve_idx = list(range(1 + nb, n_assets))   # diversifier ETFs
+    lo_u = max(0, int(round(core_min / grid)))
+    hi_u = min(total_u, int(round(core_max / grid)))
+    if lo_u > hi_u:
+        lo_u = hi_u = max(0, min(total_u, int(round(core_min / grid))))
+    if ne == 0:                                  # no sleeve ⇒ the core is the book
+        lo_u = hi_u = total_u
+
+    def score_u(u: list[int]) -> float:
+        st = annualized_stats((R @ (np.asarray(u, dtype=float) * grid)).tolist(), rf_annual)
+        m = st.sortino if objective == "sortino" else st.sharpe
+        return m if m is not None else -np.inf
+
+    def fill_even(u: list[int], idxs: list[int], total: int) -> None:
+        if not idxs:
+            return
+        base, rem = divmod(total, len(idxs))
+        for k, idx in enumerate(idxs):
+            u[idx] = base + (1 if k < rem else 0)
+
+    def fill_random(u: list[int], idxs: list[int], total: int, rng) -> None:
+        if not idxs:
+            return
+        draw = rng.multinomial(total, np.full(len(idxs), 1.0 / len(idxs)))
+        for k, idx in enumerate(idxs):
+            u[idx] = int(draw[k])
+
+    def ascend(u: list[int]) -> tuple[list[int], float]:
+        cur = score_u(u)
+        improved = True
+        while improved:
+            improved = False
+            for grp in (core_idx, sleeve_idx):   # within-group moves keep the core sum fixed
+                if len(grp) < 2:
+                    continue
+                for i in grp:
+                    for j in grp:
+                        if i == j or u[i] == 0:
+                            continue
+                        u[i] -= 1
+                        u[j] += 1
+                        sc = score_u(u)
+                        if sc > cur + 1e-12:
+                            cur, improved = sc, True
+                        else:
+                            u[i] += 1
+                            u[j] -= 1
+        return u, cur
+
+    best_w = None
+    best_sc = -np.inf
+    for cw in range(lo_u, hi_u + 1):
+        sleeve_total = total_u - cw
+        if ne == 0 and sleeve_total != 0:
+            continue
+        # Reseed PER core-value so each candidate strategy weight is searched
+        # identically regardless of the [core_min, core_max] window — a wider
+        # range is then always a superset and can never score worse than a
+        # narrower one (no confusing non-monotonicity).
+        rng = np.random.default_rng(seed + cw)
+        inits: list[list[int]] = []
+        even = [0] * n_assets
+        fill_even(even, core_idx, cw)
+        fill_even(even, sleeve_idx, sleeve_total)
+        inits.append(even)
+        for _ in range(restarts):
+            ru = [0] * n_assets
+            fill_random(ru, core_idx, cw, rng)
+            fill_random(ru, sleeve_idx, sleeve_total, rng)
+            inits.append(ru)
+        for ini in inits:
+            u, sc = ascend(list(ini))
+            # `best_w is None` always takes the first valid constraint-respecting
+            # allocation, so a degenerate all-tie case (constant returns →
+            # undefined Sharpe everywhere) still honours [core_min, core_max].
+            if best_w is None or sc > best_sc:
+                best_sc, best_w = sc, np.asarray(u, dtype=float) * grid
+    if best_w is None:
+        best_w = np.zeros(n_assets)
+        best_w[0] = 1.0
+    return best_w
+
+
 def optimize_portfolio(
     strategy_by_month: dict[str, float],
     etfs: list[tuple[str, dict[str, float]]],
     bonds: list[tuple[str, dict[str, float]]] | None = None,
     rf_annual: float = 0.0,
     objective: str = "sharpe",
-    core_pct: float = 0.6,
-    rebalance_band: float = 0.1,
+    core_pct: float | None = None,
+    core_min: float | None = None,
+    core_max: float | None = None,
+    grid: float = 0.025,
     n_samples: int = 4000,
     seed: int = 0,
 ) -> PortfolioOptimization:
-    """Optimize a 3-group portfolio, then drift-and-rebalance it.
+    """Optimize a 3-group portfolio on a DISCRETE weight grid, MONTHLY-rebalanced.
 
     Three groups:
-      * **Core** (`core_pct`, e.g. 0.60): the Strategy + the `bonds`, split
-        optimally — the strategy can take 0…core and bonds fill the rest (edge
-        cases: all-strategy or all-bonds within the core).
-      * **Diversifier sleeve** (`1 - core_pct`, e.g. 0.40): the `etfs`
-        (gold/USD/…), split optimally among themselves.
+      * **Core** — the Strategy + the `bonds`. Its total weight is SEARCHED over
+        the inclusive range ``[core_min, core_max]`` (so you bound how much the
+        strategy gets; with no bonds the core IS the strategy). Within the core,
+        strategy↔bonds is split optimally.
+      * **Diversifier sleeve** (`1 − core`): the `etfs` (gold/USD/…), split
+        optimally among themselves.
       * (If there are no diversifier ETFs the core becomes the whole book.)
 
-    The split that maximizes the `objective` ("sharpe"/"sortino") is the target.
-    Then the portfolio drifts with returns and is rebalanced back to target
-    whenever the CORE total (strategy + bonds) leaves the band
-    `[core_pct ± rebalance_band]` (e.g. ±0.10 → reset whenever it leaves
-    50–70%). `before` is strategy-alone; `after` is the drift-rebalanced mix;
-    `rebalance_*` report the events. Runs over the COMMON window where every
-    selected asset has data.
+    Every weight is a multiple of `grid` (default 0.025 = 2.5%) — a discrete grid,
+    not a continuum. The portfolio is rebalanced back to the target weights EVERY
+    month, so each month's realized return is `target · monthly_return` (the
+    fixed-weight blend); `after` is that monthly-rebalanced blend. Because the
+    optimizer's objective IS that same blend, the optimized number and `after`
+    are the SAME quantity — so `after` can never come out worse than an achievable
+    alternative (e.g. the strategy alone, when 100% is in range). `before` is
+    strategy-alone. Runs over the COMMON window where every selected asset has
+    data. `rebalance_*` on the result are empty (rebalancing is monthly, fixed).
 
-    Method: random sampling (strategy/bond split + Dirichlet sleeves), seeded
-    deterministically, coordinate-ascent polish, then one rebalance simulation
-    with the winning weights. No scipy; robust for Sortino.
-    """
+    `core_pct` is a back-compat convenience: when `core_min`/`core_max` are
+    omitted it pins the core to that single value (equivalent to
+    `core_min == core_max == core_pct`); the default is 0.6.
+
+    Method: coordinate-ascent on the unit grid (within-group 2.5% moves) from an
+    even split + seeded random restarts, looped over the core-weight grid. No
+    scipy; deterministic; robust for Sortino. `n_samples` is unused (kept for
+    signature stability)."""
+    if core_min is None and core_max is None:
+        base = core_pct if core_pct is not None else 0.6
+        core_min = core_max = base
+    elif core_min is None:
+        core_min = core_max
+    elif core_max is None:
+        core_max = core_min
+    core_min = max(0.0, min(1.0, core_min))
+    core_max = max(0.0, min(1.0, core_max))
+    if core_min > core_max:
+        core_min, core_max = core_max, core_min
+
     bonds = bonds or []
     nb, ne = len(bonds), len(etfs)
     names = ["Strategy"] + [n for n, _ in bonds] + [n for n, _ in etfs]
@@ -745,75 +869,20 @@ def optimize_portfolio(
     base_w[0] = 1.0   # strategy-alone benchmark
     R = np.array([[s[m] for s in series] for m in common], dtype=float) if common else np.empty((0, n_assets))
 
-    # Group index layout: [strategy, bonds…, etfs…]. The core = strategy+bonds.
-    core_idx = np.arange(0, 1 + nb)
-    eff_core = core_pct if ne > 0 else 1.0   # no diversifiers ⇒ core is the book
-    sleeve = 1.0 - eff_core
-
-    def build(strat_frac: float, bond_e: np.ndarray, etf_e: np.ndarray) -> np.ndarray:
-        w = np.zeros(n_assets)
-        w[0] = eff_core * strat_frac                       # strategy
-        if nb > 0:
-            w[1:1 + nb] = bond_e * (eff_core * (1.0 - strat_frac))   # bonds fill core
-        if ne > 0:
-            w[1 + nb:] = etf_e * sleeve                     # diversifier sleeve
-        return w
-
-    def score(w: np.ndarray) -> float:
-        st = annualized_stats((R @ w).tolist(), rf_annual)
-        m = st.sortino if objective == "sortino" else st.sharpe
-        return m if m is not None else -np.inf
-
     target = base_w.copy()
-
     if common and R.shape[0] >= 2 and (nb > 0 or ne > 0):
-        rng = np.random.default_rng(seed)
-        # Strategy's share of the core: free when bonds exist, else it takes
-        # the whole core.
-        best_frac = 1.0 if nb == 0 else 0.5
-        best_bond_e = np.full(nb, 1.0 / nb) if nb else np.empty(0)
-        best_etf_e = np.full(ne, 1.0 / ne) if ne else np.empty(0)
-        best_score = score(build(best_frac, best_bond_e, best_etf_e))
-
-        for _ in range(n_samples):
-            frac = 1.0 if nb == 0 else float(rng.uniform(0.0, 1.0))
-            be = (np.array([1.0]) if nb == 1 else rng.dirichlet(np.ones(nb))) if nb else np.empty(0)
-            ee = (np.array([1.0]) if ne == 1 else rng.dirichlet(np.ones(ne))) if ne else np.empty(0)
-            sc = score(build(frac, be, ee))
-            if sc > best_score:
-                best_score, best_frac, best_bond_e, best_etf_e = sc, frac, be, ee
-
-        # Polish the strategy/bond split (1-D), then each sleeve internally.
-        if nb > 0:
-            step = 0.25
-            while step > 1e-4:
-                improved = True
-                while improved:
-                    improved = False
-                    for d in (step, -step):
-                        f = min(1.0, max(0.0, best_frac + d))
-                        sc = score(build(f, best_bond_e, best_etf_e))
-                        if sc > best_score + 1e-12:
-                            best_frac, best_score, improved = f, sc, True
-                step /= 2
-        if nb > 1:
-            best_bond_e = _polish_simplex(best_bond_e, lambda be: score(build(best_frac, be, best_etf_e)))
-        if ne > 1:
-            best_etf_e = _polish_simplex(best_etf_e, lambda ee: score(build(best_frac, best_bond_e, ee)))
-        target = build(best_frac, best_bond_e, best_etf_e)
+        target = _grid_optimize_weights(
+            R, n_assets, nb, ne, core_min, core_max, grid, objective, rf_annual, seed,
+        )
 
     before_rets = (R @ base_w).tolist() if common else []
-    # The realistic "after": hold the target, drift, reset to target whenever
-    # the core (strategy+bonds) leaves its band. Only meaningful when there's a
-    # diversifier sleeve for the core to drift against — else hold the static
-    # target.
-    if common and ne > 0 and rebalance_band > 0:
-        after_rets, rebalance_dates = _simulate_rebalance(
-            list(common), R, target, core_idx, eff_core, rebalance_band
-        )
-    else:
-        after_rets = (R @ target).tolist() if common else []
-        rebalance_dates = []
+    # The portfolio is rebalanced back to `target` EVERY month (first trading day),
+    # so each month's realized return is `target · monthly_return` — i.e. the
+    # fixed-weight blend. (Weights drift intra-month with prices, but the monthly
+    # data resets them.) `after` is therefore the static blend; no band/drift
+    # simulation, and it equals exactly the objective the optimizer maximized.
+    after_rets = (R @ target).tolist() if common else []
+    rebalance_dates: list[str] = []
 
     return _assemble_optimization(
         names, list(common), target, before_rets, after_rets, rebalance_dates, limited_by, rf_annual,

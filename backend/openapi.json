@@ -3,10 +3,32 @@
     "schemas": {
       "AssetWeight": {
         "properties": {
+          "benchmark_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Id"
+          },
           "group": {
             "default": "etf",
             "title": "Group",
             "type": "string"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
           },
           "label": {
             "title": "Label",
@@ -427,6 +449,96 @@
           "name"
         ],
         "title": "BacktestStats",
+        "type": "object"
+      },
+      "BenchmarkCompare": {
+        "description": "A comparison index/ETF measured over the portfolio's common window.",
+        "properties": {
+          "annual": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BenchmarkYear"
+            },
+            "title": "Annual",
+            "type": "array"
+          },
+          "benchmark_id": {
+            "title": "Benchmark Id",
+            "type": "integer"
+          },
+          "monthly": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "default": {},
+            "title": "Monthly",
+            "type": "object"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/PortfolioStats"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          },
+          "ytd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ytd"
+          }
+        },
+        "required": [
+          "benchmark_id",
+          "ticker",
+          "name",
+          "stats"
+        ],
+        "title": "BenchmarkCompare",
+        "type": "object"
+      },
+      "BenchmarkYear": {
+        "properties": {
+          "ret": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ret"
+          },
+          "vol": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vol"
+          },
+          "year": {
+            "title": "Year",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "year"
+        ],
+        "title": "BenchmarkYear",
         "type": "object"
       },
       "Body_parse_portfolio_api_portfolios_parse_post": {
@@ -1439,20 +1551,42 @@
             "title": "Bond Ids",
             "type": "array"
           },
-          "core_weight_pct": {
-            "default": 60.0,
-            "title": "Core Weight Pct",
+          "compare_benchmark_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compare Benchmark Id"
+          },
+          "core_weight_max_pct": {
+            "default": 100.0,
+            "title": "Core Weight Max Pct",
             "type": "number"
+          },
+          "core_weight_min_pct": {
+            "default": 0.0,
+            "title": "Core Weight Min Pct",
+            "type": "number"
+          },
+          "core_weight_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Core Weight Pct"
           },
           "objective": {
-            "default": "sharpe",
+            "default": "sortino",
             "title": "Objective",
             "type": "string"
-          },
-          "rebalance_band_pct": {
-            "default": 10.0,
-            "title": "Rebalance Band Pct",
-            "type": "number"
           },
           "risk_free_rate_pct": {
             "default": 0.0,
@@ -1492,6 +1626,16 @@
           },
           "before": {
             "$ref": "#/components/schemas/PortfolioStats"
+          },
+          "benchmark": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchmarkCompare"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "curve": {
             "items": {

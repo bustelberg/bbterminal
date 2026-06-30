@@ -444,6 +444,34 @@ def maybe_schedule_price_retry(*, reason: str = "") -> None:
         )
 
 
+def _fire_fx_sync() -> None:
+    """Daily ECB FX sync — keeps EVERY fetchable currency's `fx_rate` current.
+    The daily pipeline only syncs the currencies the held strategies actually
+    use (as a side effect of the momentum backtest stream), so unused ACWI
+    currencies would otherwise go stale on the /fx-rates page. Idempotent +
+    cheap: `sync_fx_rates_to_db` fetches only the gap since each currency's last
+    stored date. Own daemon thread; never raises into the scheduler."""
+    def _run() -> None:
+        try:
+            from datetime import date as _date  # noqa: PLC0415
+
+            from deps import supabase  # noqa: PLC0415
+            from fx_rates import ECB_CURRENCIES, _USD_PEGS  # noqa: PLC0415
+            from momentum.data import sync_fx_rates_to_db  # noqa: PLC0415
+
+            currencies = list(ECB_CURRENCIES) + list(_USD_PEGS.keys()) + ["TWD"]
+            status = sync_fx_rates_to_db(supabase, currencies, _date(2000, 1, 1), _date.today())
+            synced = sum(1 for s in status.values() if s.get("status") == "synced")
+            errors = sum(1 for s in status.values() if s.get("status") == "error")
+            _log.info(
+                "[scheduler] fx sync done: %s/%s currencies updated, %s errors",
+                synced, len(status), errors,
+            )
+        except Exception as e:
+            _log.exception("[scheduler] fx sync failed: %s: %s", type(e).__name__, e)
+    threading.Thread(target=_run, daemon=True, name="fx-sync").start()
+
+
 def _fire_airs_vermogen() -> None:
     """APScheduler callable for the daily AIRS Vermogensoverzicht refresh. Runs
     on its own daemon thread so the long Playwright scrape doesn't block the
@@ -529,6 +557,18 @@ def register_scheduler(app) -> None:
             _fire_airs_vermogen,
             CronTrigger(day_of_week="mon-fri", hour=10, minute=0, timezone="Europe/Amsterdam"),
             id="airs_vermogen_refresh",
+            replace_existing=True,
+            coalesce=True,
+            misfire_grace_time=3600,
+        )
+        # Daily ECB FX sync — weekdays 16:30 UTC, after the ECB ~16:00 CET
+        # reference-rate publication, so the `fx_rate` table (and the /fx-rates
+        # page) shows EVERY currency current, not just the held ones the daily
+        # pipeline happens to sync. Idempotent + cheap (fetches only the gap).
+        sched.add_job(
+            _fire_fx_sync,
+            CronTrigger(day_of_week="mon-fri", hour=16, minute=30, timezone="UTC"),
+            id="fx_sync",
             replace_existing=True,
             coalesce=True,
             misfire_grace_time=3600,

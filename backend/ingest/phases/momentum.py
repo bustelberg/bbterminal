@@ -462,16 +462,10 @@ def _apply_etf_overlay_to_snapshot(snapshot_id: int, etf_overlay: list[dict]) ->
 
     merged = scale_stock_weights(stock_holdings, strat_w) + etf_holdings
 
-    # Weighted blended period return (same basis as compute_and_save_price_update).
-    wsum = 0.0
-    rsum = 0.0
-    for h in merged:
-        fr = h.get("forward_return_pct")
-        w = float(h.get("weight") or 0.0)
-        if fr is not None:
-            rsum += fr * w
-            wsum += w
-    period_return = (rsum / wsum) if wsum > 0 else None
+    # Blended period return via the SINGLE source of truth (weighted per-holding
+    # `forward_return_pct`) — identical basis to compute_and_save_price_update.
+    from momentum.portfolio_math import portfolio_eur_return_pct  # noqa: PLC0415
+    period_return = portfolio_eur_return_pct(merged)
 
     supabase.table("current_picks_snapshot").update({
         "holdings": merged,

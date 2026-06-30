@@ -4070,11 +4070,15 @@ export interface components {
     schemas: {
         /** AssetWeight */
         AssetWeight: {
+            /** Benchmark Id */
+            benchmark_id?: number | null;
             /**
              * Group
              * @default etf
              */
             group?: string;
+            /** Isin */
+            isin?: string | null;
             /** Label */
             label: string;
             /** Name */
@@ -4234,6 +4238,42 @@ export interface components {
             total_return_pct?: number | null;
             /** Variant Key */
             variant_key?: string | null;
+        };
+        /**
+         * BenchmarkCompare
+         * @description A comparison index/ETF measured over the portfolio's common window.
+         */
+        BenchmarkCompare: {
+            /**
+             * Annual
+             * @default []
+             */
+            annual?: components["schemas"]["BenchmarkYear"][];
+            /** Benchmark Id */
+            benchmark_id: number;
+            /**
+             * Monthly
+             * @default {}
+             */
+            monthly?: {
+                [key: string]: number;
+            };
+            /** Name */
+            name: string;
+            stats: components["schemas"]["PortfolioStats"];
+            /** Ticker */
+            ticker: string;
+            /** Ytd */
+            ytd?: number | null;
+        };
+        /** BenchmarkYear */
+        BenchmarkYear: {
+            /** Ret */
+            ret?: number | null;
+            /** Vol */
+            vol?: number | null;
+            /** Year */
+            year: number;
         };
         /** Body_parse_portfolio_api_portfolios_parse_post */
         Body_parse_portfolio_api_portfolios_parse_post: {
@@ -4579,21 +4619,25 @@ export interface components {
              * @default []
              */
             bond_ids?: number[];
+            /** Compare Benchmark Id */
+            compare_benchmark_id?: number | null;
             /**
-             * Core Weight Pct
-             * @default 60
+             * Core Weight Max Pct
+             * @default 100
              */
-            core_weight_pct?: number;
+            core_weight_max_pct?: number;
+            /**
+             * Core Weight Min Pct
+             * @default 0
+             */
+            core_weight_min_pct?: number;
+            /** Core Weight Pct */
+            core_weight_pct?: number | null;
             /**
              * Objective
-             * @default sharpe
+             * @default sortino
              */
             objective?: string;
-            /**
-             * Rebalance Band Pct
-             * @default 10
-             */
-            rebalance_band_pct?: number;
             /**
              * Risk Free Rate Pct
              * @default 0
@@ -4608,6 +4652,7 @@ export interface components {
             /** Annual */
             annual: components["schemas"]["YearStat"][];
             before: components["schemas"]["PortfolioStats"];
+            benchmark?: components["schemas"]["BenchmarkCompare"] | null;
             /** Curve */
             curve: components["schemas"]["CurvePoint"][];
             /** Drawdowns After */

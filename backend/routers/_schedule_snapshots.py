@@ -172,14 +172,11 @@ def compute_and_save_price_update(
     fx_rates = load_fx_rates(supabase, currencies, fx_start, date.today())
 
     updated_holdings: list[dict] = []
-    weighted_return_sum = 0.0
-    total_weight = 0.0
     latest_price_date: str | None = None
     for h in holdings:
         new_h = dict(h)
         cid = h.get("company_id")
         entry_local = h.get("entry_price_local")
-        weight = float(h.get("weight") or 0.0)
         ccy = _hold_ccy(h)
         entry_date_iso = str(h.get("entry_date") or rebal.get("as_of_date") or "")[:10]
         # Entry EUR: trust the rebalance's stored EUR mark for companies; for ETF
@@ -216,11 +213,14 @@ def compute_and_save_price_update(
             new_h["forward_return_pct"] = round(ret, 2)
             if latest_price_date is None or target_d > latest_price_date:
                 latest_price_date = target_d
-            weighted_return_sum += ret * weight
-            total_weight += weight
         updated_holdings.append(new_h)
 
-    portfolio_return = weighted_return_sum / total_weight if total_weight > 0 else None
+    # Period return via the SINGLE source of truth — the weighted per-holding
+    # `forward_return_pct` (see `momentum.portfolio_math`). Keeps the stored
+    # `period_return_pct` exactly equal to the weighted mean of the per-row
+    # returns the card displays, so the card Total + header MTD can't diverge.
+    from momentum.portfolio_math import portfolio_eur_return_pct  # noqa: PLC0415
+    portfolio_return = portfolio_eur_return_pct(updated_holdings)
 
     new_row = {
         "triggered_by": "auto",

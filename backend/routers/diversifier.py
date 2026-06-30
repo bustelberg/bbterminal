@@ -107,13 +107,18 @@ class OptimizeRequest(BaseModel):
     bond_ids: list[int] = []
     variant_key: str | None = None
     risk_free_rate_pct: float = 0.0
-    objective: str = "sharpe"
-    # Core bucket (strategy + bonds) weight; the diversifier sleeve gets the
-    # rest. 100 = no diversifier sleeve (strategy + bonds are the whole book).
-    core_weight_pct: float = 60.0
-    # Symmetric rebalance band: reset to target when the CORE total drifts more
-    # than this many points from its start weight (above OR below).
-    rebalance_band_pct: float = 10.0
+    objective: str = "sortino"
+    # Core bucket (strategy + bonds) weight. The optimizer SEARCHES it over
+    # [min, max] on a 2.5% grid (min == max pins it); the diversifier sleeve gets
+    # the rest. 100 = no sleeve (strategy + bonds are the whole book). The legacy
+    # single `core_weight_pct` is still accepted (treated as min == max) and wins
+    # over the range when present.
+    core_weight_pct: float | None = None
+    core_weight_min_pct: float = 0.0
+    core_weight_max_pct: float = 100.0
+    # Optional index/ETF to COMPARE against (not part of the portfolio) — its
+    # per-year return + vol and overall Sharpe/Sortino are returned alongside.
+    compare_benchmark_id: int | None = None
 
 
 class PortfolioStats(BaseModel):
@@ -130,6 +135,11 @@ class AssetWeight(BaseModel):
     name: str | None = None
     weight: float         # 0..1
     group: str = "etf"    # "strategy" | "bond" | "etf"
+    # The underlying benchmark row (None for the strategy sleeve) + its stored
+    # ISIN, so the optimizer-result UI can show + edit the ISIN inline (PATCH
+    # /api/benchmarks/{id}) without a second lookup.
+    benchmark_id: int | None = None
+    isin: str | None = None
 
 
 class CurvePoint(BaseModel):
@@ -161,6 +171,24 @@ class YearStat(BaseModel):
     months: list[MonthStatInfo] = []     # per-month returns within the year
 
 
+class BenchmarkYear(BaseModel):
+    year: int
+    ret: float | None = None      # calendar-year return (fraction)
+    vol: float | None = None      # annualized vol (fraction)
+
+
+class BenchmarkCompare(BaseModel):
+    """A comparison index/ETF measured over the portfolio's common window."""
+    benchmark_id: int
+    ticker: str
+    name: str
+    stats: PortfolioStats             # Sharpe/Sortino/vol/return over the window
+    ytd: float | None = None          # current-year return
+    annual: list[BenchmarkYear] = []  # per-year return + vol
+    monthly: dict[str, float] = {}    # "YYYY-MM" -> return, for the months view + curve
+    drawdowns: list[DrawdownInfo] = []  # top-40 worst drawdowns over the window
+
+
 class OptimizeResponse(BaseModel):
     objective: str
     months: int
@@ -179,6 +207,7 @@ class OptimizeResponse(BaseModel):
     rebalance_count: int = 0          # # of strategy-trim rebalances over the window
     rebalance_dates: list[str] = []   # months a rebalance fired
     rebalance_freq_months: float | None = None   # avg months between rebalances
+    benchmark: BenchmarkCompare | None = None    # optional compare-against index
 
 
 class BacktestStats(BaseModel):
@@ -370,25 +399,68 @@ async def correlation(req: CorrelationRequest):
     return CorrelationResponse(strategy=strategy_stats, results=results)
 
 
-def _build_optimize_response(opt, objective: str, group_of, name_of) -> OptimizeResponse:
+def _meta_of_from(ticker_to_meta: dict):
+    """Build a `label → (benchmark_id, isin)` resolver from a ticker→benchmark-row
+    map. Returns `(None, None)` for the strategy sleeve / any unknown label."""
+    def f(label: str) -> tuple[int | None, str | None]:
+        m = ticker_to_meta.get(label)
+        return (m["benchmark_id"], m.get("isin")) if m else (None, None)
+    return f
+
+
+def _build_benchmark_compare(
+    benchmark_id: int, meta: dict, monthly: dict[str, float],
+    common_months: list[str], rf: float,
+) -> BenchmarkCompare | None:
+    """Comparison stats for an index/ETF over the portfolio's EXACT common window
+    (same months as before/after) — overall risk-adjusted stats + per-year
+    return/vol + the per-month returns for the expandable view. Returns None if
+    the benchmark has <2 months of overlap with the window."""
+    aligned = [m for m in common_months if m in monthly]
+    if len(aligned) < 2:
+        return None
+    rets = [monthly[m] for m in aligned]
+    s = div.annualized_stats(rets, rf)
+    years = div.annual_breakdown(aligned, rets, rets)   # before==after; read one side
+    return BenchmarkCompare(
+        benchmark_id=benchmark_id,
+        ticker=meta.get("ticker", ""),
+        name=meta.get("name") or meta.get("ticker", ""),
+        stats=PortfolioStats(
+            ann_return=s.ann_return, ann_vol=s.ann_vol, sharpe=s.sharpe,
+            sortino=s.sortino, median_month=s.median_month, win_rate=s.win_rate,
+        ),
+        ytd=years[-1].return_before if years else None,
+        annual=[BenchmarkYear(year=y.year, ret=y.return_before, vol=y.vol_before) for y in years],
+        monthly={m: monthly[m] for m in aligned},
+    )
+
+
+def _build_optimize_response(opt, objective: str, group_of, name_of, meta_of=None) -> OptimizeResponse:
     """Map a PortfolioOptimization (from the optimizer OR the manual backtester)
     to the wire OptimizeResponse. `group_of(label)`/`name_of(label)` resolve the
-    per-asset group + display name."""
+    per-asset group + display name; `meta_of(label)` → `(benchmark_id, isin)` so
+    the result rows carry their underlying benchmark (None for the strategy)."""
+    meta_of = meta_of or (lambda _label: (None, None))
+
     def _stats(s) -> PortfolioStats:
         return PortfolioStats(
             ann_return=s.ann_return, ann_vol=s.ann_vol, sharpe=s.sharpe, sortino=s.sortino,
             median_month=s.median_month, win_rate=s.win_rate,
         )
 
-    weights = [
-        AssetWeight(
+    def _weight(label: str, w: float) -> AssetWeight:
+        bid, isin = meta_of(label)
+        return AssetWeight(
             label=label,
             name=None if label == "Strategy" else name_of(label),
             weight=w,
             group=group_of(label),
+            benchmark_id=bid,
+            isin=isin,
         )
-        for label, w in zip(opt.assets, opt.weights)
-    ]
+
+    weights = [_weight(label, w) for label, w in zip(opt.assets, opt.weights)]
     curve = [
         CurvePoint(date=m, before=b, after=a)
         for m, b, a in zip(opt.curve_months, opt.curve_before, opt.curve_after)
@@ -458,17 +530,23 @@ async def optimize(req: OptimizeRequest):
         raise HTTPException(422, "The selected backtest has fewer than 2 completed months.")
 
     rf = req.risk_free_rate_pct / 100.0
-    core_pct = max(0.0, min(req.core_weight_pct, 100.0)) / 100.0
-    rebalance_band = max(0.0, min(req.rebalance_band_pct, 100.0)) / 100.0
+    # Legacy single weight pins the core; otherwise search the [min, max] range.
+    if req.core_weight_pct is not None:
+        core_min = core_max = max(0.0, min(req.core_weight_pct, 100.0)) / 100.0
+    else:
+        core_min = max(0.0, min(req.core_weight_min_pct, 100.0)) / 100.0
+        core_max = max(0.0, min(req.core_weight_max_pct, 100.0)) / 100.0
 
-    all_ids = list(dict.fromkeys([*req.benchmark_ids, *req.bond_ids]))
+    compare_ids = [req.compare_benchmark_id] if req.compare_benchmark_id is not None else []
+    all_ids = list(dict.fromkeys([*req.benchmark_ids, *req.bond_ids, *compare_ids]))
     meta_resp = await asyncio.to_thread(
         lambda: supabase.table("benchmark")
-        .select("benchmark_id, ticker, name")
+        .select("benchmark_id, ticker, name, isin")
         .in_("benchmark_id", all_ids or [-1])
         .execute()
     )
     meta = {m["benchmark_id"]: m for m in (meta_resp.data or [])}
+    ticker_to_meta = {m["ticker"]: m for m in meta.values()}
 
     ticker_to_name: dict[str, str] = {"Strategy": await _run_name(req.backtest_run_id)}
     bond_tickers: set[str] = set()
@@ -491,7 +569,7 @@ async def optimize(req: OptimizeRequest):
 
     opt = div.optimize_portfolio(
         strategy_returns, etf_series, bonds=bond_series, rf_annual=rf, objective=req.objective,
-        core_pct=core_pct, rebalance_band=rebalance_band,
+        core_min=core_min, core_max=core_max,
     )
 
     def _group(label: str) -> str:
@@ -499,7 +577,19 @@ async def optimize(req: OptimizeRequest):
             return "strategy"
         return "bond" if label in bond_tickers else "etf"
 
-    return _build_optimize_response(opt, req.objective, _group, ticker_to_name.get)
+    resp = _build_optimize_response(
+        opt, req.objective, _group, ticker_to_name.get, _meta_of_from(ticker_to_meta),
+    )
+
+    # Optional compare-against benchmark over the SAME common window.
+    if req.compare_benchmark_id is not None and (bmeta := meta.get(req.compare_benchmark_id)):
+        bench_prices = await _load_benchmark_prices(req.compare_benchmark_id)
+        bench_monthly = div.prices_to_monthly_returns(bench_prices)
+        common_months = [m.month for y in opt.annual for m in y.months]
+        resp.benchmark = _build_benchmark_compare(
+            req.compare_benchmark_id, bmeta, bench_monthly, common_months, rf,
+        )
+    return resp
 
 
 class SimHolding(BaseModel):
@@ -536,12 +626,13 @@ async def simulate(req: SimulateRequest):
         raise HTTPException(422, "The selected backtest has fewer than 2 completed months.")
 
     rf = req.risk_free_rate_pct / 100.0
-    holdings, name_of = await _assemble_holdings(
+    holdings, name_of, ticker_to_meta = await _assemble_holdings(
         strategy_returns, await _run_name(req.backtest_run_id), req.holdings
     )
     opt = div.simulate_portfolio(holdings, rf_annual=rf)
     return _build_optimize_response(
         opt, "manual", lambda lbl: "strategy" if lbl == "Strategy" else "etf", name_of.get,
+        _meta_of_from(ticker_to_meta),
     )
 
 
@@ -572,22 +663,24 @@ def _scheduled_strategy_monthly_returns(
 
 async def _assemble_holdings(
     strategy_returns: dict, strategy_name: str, sim_holdings: list,
-) -> tuple[list[tuple[str, dict, float, float]], dict[str, str]]:
+) -> tuple[list[tuple[str, dict, float, float]], dict[str, str], dict[str, dict]]:
     """Build `[(label, monthly_returns, weight, band_fraction), …]` (strategy
-    first) + a label→name map from a list of SimHoldings. Loads each fund's
-    monthly returns from its benchmark prices."""
+    first) + a label→name map + a ticker→benchmark-row map (for benchmark_id +
+    isin) from a list of SimHoldings. Loads each fund's monthly returns from its
+    benchmark prices."""
     strat_h = next((h for h in sim_holdings if h.benchmark_id is None), None)
     if strat_h is None:
         raise HTTPException(422, "Include the strategy holding (benchmark_id = null) with a weight.")
     fund_hs = [h for h in sim_holdings if h.benchmark_id is not None]
     meta_resp = await asyncio.to_thread(
         lambda: supabase.table("benchmark")
-        .select("benchmark_id, ticker, name")
+        .select("benchmark_id, ticker, name, isin")
         .in_("benchmark_id", [h.benchmark_id for h in fund_hs] or [-1])
         .execute()
     )
     meta = {m["benchmark_id"]: m for m in (meta_resp.data or [])}
     name_of: dict[str, str] = {"Strategy": strategy_name}
+    ticker_to_meta: dict[str, dict] = {}
     holdings: list[tuple[str, dict, float, float]] = [
         ("Strategy", strategy_returns, strat_h.weight_pct, max(0.0, strat_h.band_pct) / 100.0),
     ]
@@ -598,7 +691,8 @@ async def _assemble_holdings(
         prices = await _load_benchmark_prices(h.benchmark_id)
         holdings.append((m["ticker"], div.prices_to_monthly_returns(prices), h.weight_pct, max(0.0, h.band_pct) / 100.0))
         name_of[m["ticker"]] = m["name"]
-    return holdings, name_of
+        ticker_to_meta[m["ticker"]] = m
+    return holdings, name_of, ticker_to_meta
 
 
 # --------------------------------------------------------------------------- #
@@ -803,13 +897,14 @@ async def portfolio_state(portfolio_id: int):
 
     strategy_returns, strategy_name, inception, as_of = await _portfolio_strategy_returns(p)
     sim_holdings = [SimHolding(**h) for h in (p.get("holdings") or [])]
-    holdings, name_of = await _assemble_holdings(strategy_returns, strategy_name, sim_holdings)
+    holdings, name_of, ticker_to_meta = await _assemble_holdings(strategy_returns, strategy_name, sim_holdings)
 
     state = div.portfolio_current_state(holdings)
     rf = (p.get("risk_free_rate_pct") or 0.0) / 100.0
     opt = div.simulate_portfolio(holdings, rf_annual=rf)
     result = _build_optimize_response(
         opt, "manual", lambda lbl: "strategy" if lbl == "Strategy" else "etf", name_of.get,
+        _meta_of_from(ticker_to_meta),
     )
 
     # Blended-portfolio calendar returns off the realized (band-rebalanced) curve.

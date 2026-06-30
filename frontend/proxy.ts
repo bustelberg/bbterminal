@@ -1,26 +1,11 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { isAuthBypassEnabled } from '@/lib/authBypass'
+import { isUserAllowedPath } from '@/lib/userAllowedPaths'
 
-// Paths a regular (non-admin) user is allowed to view. Everything else
-// requires admin. Path matches against either an exact equality OR a
-// prefix-with-trailing-slash so subroutes are also allowed when needed.
-// `/forbidden` is here so blocked attempts can render the "no access"
-// page without bouncing into another redirect loop.
-const USER_ALLOWED_PATHS: readonly string[] = ['/', '/earnings', '/schedule', '/forbidden']
 // Paths that are accessible to anyone — including not-yet-logged-in users
 // (auth flow) and the home page (which any authenticated user can see).
 const PUBLIC_PATH_PREFIXES: readonly string[] = ['/login', '/set-password', '/auth/']
-
-function pathAllowedFor(pathname: string, allowed: readonly string[]): boolean {
-  for (const p of allowed) {
-    if (pathname === p) return true
-    // '/' must only match exactly — every path startsWith('/'), so the
-    // subroute form would let any pathname through and defeat the gate.
-    if (p !== '/' && pathname.startsWith(`${p}/`)) return true
-  }
-  return false
-}
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATH_PREFIXES.some((p) => pathname === p || pathname.startsWith(p))
@@ -89,7 +74,7 @@ export async function proxy(request: NextRequest) {
     const viewAs = request.cookies.get('view_as')?.value
     const effectiveRole = realRole === 'admin' && viewAs === 'user' ? 'user' : realRole
 
-    if (effectiveRole !== 'admin' && !pathAllowedFor(pathname, USER_ALLOWED_PATHS) && !publicPath) {
+    if (effectiveRole !== 'admin' && !isUserAllowedPath(pathname) && !publicPath) {
       // Regular user (or admin in view-as mode) hit an admin-only path —
       // route them to /forbidden so the URL stays explicit about what
       // happened (instead of silently bouncing to '/'). Pass the original

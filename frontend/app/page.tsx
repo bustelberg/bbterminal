@@ -1,16 +1,13 @@
 import Link from 'next/link';
 import { cookies } from 'next/headers';
 import { createClient } from '../lib/supabase/server';
+import { isUserAllowedPath } from '../lib/userAllowedPaths';
 
 type Tile = {
   href: string;
   label: string;
   description: string;
   badge?: string;
-  // Tiles marked `userVisible: true` are shown to regular users; everything
-  // else is admin-only. Mirrors the Sidebar's `userVisible` flag so the
-  // home page never advertises a page the user can't actually open.
-  userVisible?: true;
 };
 
 const tiles: Tile[] = [
@@ -18,7 +15,11 @@ const tiles: Tile[] = [
     href: '/earnings',
     label: 'Earnings Dashboard',
     description: 'Browse per-company earnings metrics pulled from GuruFocus, with quick refresh by source.',
-    userVisible: true,
+  },
+  {
+    href: '/schedule',
+    label: 'Schedule',
+    description: 'The scheduled momentum strategies shared with you — current holdings, returns, and the source-backtest equity curve (read-only).',
   },
   {
     href: '/backtest',
@@ -59,7 +60,6 @@ const tiles: Tile[] = [
     href: '/airs-portfolio',
     label: 'AIRS Portfolio',
     description: 'Broker scanner and AIRS Excel upload — parses holdings and computes YTD returns in EUR and local currency.',
-    userVisible: true,
   },
   {
     href: '/request_gurufocus',
@@ -75,7 +75,6 @@ const tiles: Tile[] = [
     href: '/companies',
     label: 'Companies',
     description: 'Searchable, filterable company table with inline edit, add, and delete (cascades metric and weight rows).',
-    userVisible: true,
   },
 ];
 
@@ -90,9 +89,11 @@ export default async function Home() {
   const viewAs = cookieStore.get('view_as')?.value;
   const effectiveRole: 'admin' | 'user' = realRole === 'admin' && viewAs !== 'user' ? 'admin' : 'user';
 
+  // Derive visibility from the SAME allow-list the route gate uses, so the home
+  // page can never advertise a page the user can't open (it used to drift).
   const visibleTiles = effectiveRole === 'admin'
     ? tiles
-    : tiles.filter((t) => t.userVisible);
+    : tiles.filter((t) => isUserAllowedPath(t.href));
 
   return (
     <div className="px-8 py-8 max-w-6xl">
