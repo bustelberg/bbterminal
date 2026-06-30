@@ -37,7 +37,7 @@ from index_universe.templates._cache import (
     list_summary_get,
     list_summary_set,
 )
-from routers._cache_headers import CACHE_PIPELINE
+from routers._cache_headers import CACHE_NONE, CACHE_PIPELINE
 from routers._sse import sse_event
 from routers.index_universe._helpers import drain_thread_queue
 
@@ -285,8 +285,14 @@ def _freeze_month_snapshot(src_id: int, dst_id: int, month: str, on_progress=Non
 async def list_static_universes(response: Response):
     """Frozen universe snapshots (`frozen_at` set, `template_key` NULL) — the
     reproducible, pipeline-immune universes the /backtest dropdown lists
-    alongside the live templates. Newest snapshot first."""
-    response.headers["Cache-Control"] = CACHE_PIPELINE
+    alongside the live templates. Newest snapshot first.
+
+    NOT HTTP-cached: each row's `latest_membership_count` is mutated through the
+    UI (the ISIN-compare prune drops members; freeze/delete add/remove
+    snapshots), so a cache would show a stale count right after the change and
+    defeat the frontend's `invalidateStaticUniverses()` refetch. The frontend
+    keeps its own in-memory cache for snappiness."""
+    response.headers["Cache-Control"] = CACHE_NONE
 
     def _q():
         resp = (

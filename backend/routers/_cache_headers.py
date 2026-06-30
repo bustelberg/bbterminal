@@ -35,3 +35,9 @@ from __future__ import annotations
 CACHE_STATIC = "public, max-age=600, stale-while-revalidate=3600"
 CACHE_PIPELINE = "public, max-age=60, stale-while-revalidate=300"
 CACHE_USER = "public, max-age=30, stale-while-revalidate=120"
+# Mutable list/count endpoints that MUST reflect a UI mutation immediately
+# (e.g. the frozen-universe membership count, changed by the ISIN-compare prune
+# / freeze / delete). Any browser/CDN caching here serves a stale count right
+# after the mutation and defeats the frontend's cache invalidation — so don't
+# store it at all. The frontend keeps its own in-memory cache for snappiness.
+CACHE_NONE = "no-store"

@@ -3441,6 +3441,12 @@ export interface paths {
          * @description Frozen universe snapshots (`frozen_at` set, `template_key` NULL) — the
          *     reproducible, pipeline-immune universes the /backtest dropdown lists
          *     alongside the live templates. Newest snapshot first.
+         *
+         *     NOT HTTP-cached: each row's `latest_membership_count` is mutated through the
+         *     UI (the ISIN-compare prune drops members; freeze/delete add/remove
+         *     snapshots), so a cache would show a stale count right after the change and
+         *     defeat the frontend's `invalidateStaticUniverses()` refetch. The frontend
+         *     keeps its own in-memory cache for snappiness.
          */
         get: operations["list_static_universes_api_static_universes_get"];
         put?: never;

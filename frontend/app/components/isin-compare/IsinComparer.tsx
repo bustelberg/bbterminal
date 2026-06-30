@@ -150,7 +150,10 @@ export default function IsinComparer() {
       // drop the shared cache so other pages refetch fresh on their next mount.
       invalidateStaticUniverses();
       try {
-        const ures = await apiFetch(`${API_URL}/api/static-universes`);
+        // `no-store` so this refetch can't be served the pre-prune count from
+        // the browser cache (the endpoint is no-store now, but bypass here too
+        // so it's correct even against a stale cache entry from before deploy).
+        const ures = await apiFetch(`${API_URL}/api/static-universes`, { cache: 'no-store' });
         if (ures.ok) setUniversesFresh(await ures.json());
       } catch { /* non-fatal — the result summary still shows the live count */ }
       await runCompare();

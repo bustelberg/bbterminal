@@ -11,9 +11,40 @@ from __future__ import annotations
 import logging
 from datetime import date
 
+import pandas as pd
+
 from deps import fetch_in_chunks, supabase
 
 _log = logging.getLogger(__name__)
+
+
+def _fx_asof(series: "pd.Series | None", day_iso: str) -> float | None:
+    """Last FX rate on or before `day_iso` (units of the currency per 1 EUR);
+    falls back to the earliest rate when the date predates the series. None
+    when there's no series."""
+    if series is None or len(series) == 0 or not day_iso:
+        return None
+    ts = pd.Timestamp(day_iso)
+    sub = series.loc[series.index <= ts]
+    if len(sub) == 0:
+        return float(series.iloc[0])
+    return float(sub.iloc[-1])
+
+
+def _to_eur(local: float | None, currency: str | None, day_iso: str,
+            fx_rates: dict) -> float | None:
+    """Convert a local-currency price to EUR at `day_iso`'s rate. EUR / no
+    currency passes through; returns None when the FX rate is unavailable so
+    the caller can fall back to a local computation for that holding."""
+    if local is None:
+        return None
+    ccy = (currency or "").upper()
+    if not ccy or ccy == "EUR":
+        return float(local)
+    rate = _fx_asof(fx_rates.get(ccy), day_iso)
+    if not rate or rate <= 0:
+        return None
+    return float(local) / rate
 
 
 def compute_and_save_price_update(
@@ -111,6 +142,35 @@ def compute_and_save_price_update(
         if bid not in latest_by_bid:
             latest_by_bid[bid] = r
 
+    # FX setup so the re-price is in EUR (matching the rebalance path + the
+    # rest of the EUR-reported UI). The OLD code computed `forward_return_pct`
+    # straight off LOCAL prices ((exit_local-entry_local)/entry_local), so after
+    # any price-update the per-holding return + the weighted `period_return_pct`
+    # silently dropped the FX leg — a USD/JPY/CHF holding's EUR return diverged
+    # from its local one and disagreed with the EUR daily curve + the (€) UI.
+    from momentum.data import load_company_currency, load_fx_rates  # noqa: PLC0415
+
+    company_cids = [
+        int(h["company_id"]) for h in holdings
+        if h.get("company_id") is not None and h["company_id"] > 0
+    ]
+    ccy_by_cid = load_company_currency(supabase, company_cids) if company_cids else {}
+
+    def _hold_ccy(h: dict) -> str | None:
+        cid = h.get("company_id")
+        if cid is not None and cid < 0:
+            return (h.get("currency") or "").upper() or None  # ETF: benchmark ccy
+        return ccy_by_cid.get(int(cid)) if cid is not None else None
+
+    entry_dates = [str(h["entry_date"])[:10] for h in holdings if h.get("entry_date")]
+    start_iso = min(entry_dates) if entry_dates else str(rebal.get("as_of_date") or "")[:10]
+    try:
+        fx_start = date.fromisoformat(start_iso)
+    except ValueError:
+        fx_start = date.today()
+    currencies = sorted({(_hold_ccy(h) or "EUR") for h in holdings})
+    fx_rates = load_fx_rates(supabase, currencies, fx_start, date.today())
+
     updated_holdings: list[dict] = []
     weighted_return_sum = 0.0
     total_weight = 0.0
@@ -120,6 +180,16 @@ def compute_and_save_price_update(
         cid = h.get("company_id")
         entry_local = h.get("entry_price_local")
         weight = float(h.get("weight") or 0.0)
+        ccy = _hold_ccy(h)
+        entry_date_iso = str(h.get("entry_date") or rebal.get("as_of_date") or "")[:10]
+        # Entry EUR: trust the rebalance's stored EUR mark for companies; for ETF
+        # overlay holdings (no stored EUR) derive it from the benchmark local +
+        # entry-date FX, and persist it so the card has a consistent EUR basis.
+        entry_eur = h.get("entry_price_eur")
+        if not entry_eur or entry_eur <= 0:
+            entry_eur = _to_eur(entry_local, ccy, entry_date_iso, fx_rates)
+            if entry_eur is not None:
+                new_h["entry_price_eur"] = round(entry_eur, 4)
         # Resolve the latest close: companies from metric_data, ETFs (negative
         # company_id) from benchmark_price (uniform {target_date, value} shape).
         if cid is not None and cid < 0:
@@ -130,13 +200,20 @@ def compute_and_save_price_update(
             )
         else:
             latest = latest_by_cid.get(cid)
-        if latest and entry_local:
+        if latest and entry_local and entry_eur and entry_eur > 0:
             current_local = float(latest["numeric_value"])
             target_d = str(latest["target_date"])[:10]
             new_h["exit_price_local"] = current_local
             new_h["exit_date"] = target_d
-            ret = ((current_local - float(entry_local)) / float(entry_local)) * 100.0
-            new_h["forward_return_pct"] = ret
+            current_eur = _to_eur(current_local, ccy, target_d, fx_rates)
+            if current_eur is not None:
+                new_h["exit_price_eur"] = round(current_eur, 4)
+                ret = (current_eur / float(entry_eur) - 1) * 100.0
+            else:
+                # FX unavailable for this currency — fall back to the local
+                # return rather than dropping the holding from the aggregate.
+                ret = ((current_local - float(entry_local)) / float(entry_local)) * 100.0
+            new_h["forward_return_pct"] = round(ret, 2)
             if latest_price_date is None or target_d > latest_price_date:
                 latest_price_date = target_d
             weighted_return_sum += ret * weight

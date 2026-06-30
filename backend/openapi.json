@@ -9171,7 +9171,7 @@
     },
     "/api/static-universes": {
       "get": {
-        "description": "Frozen universe snapshots (`frozen_at` set, `template_key` NULL) \u2014 the\nreproducible, pipeline-immune universes the /backtest dropdown lists\nalongside the live templates. Newest snapshot first.",
+        "description": "Frozen universe snapshots (`frozen_at` set, `template_key` NULL) \u2014 the\nreproducible, pipeline-immune universes the /backtest dropdown lists\nalongside the live templates. Newest snapshot first.\n\nNOT HTTP-cached: each row's `latest_membership_count` is mutated through the\nUI (the ISIN-compare prune drops members; freeze/delete add/remove\nsnapshots), so a cache would show a stale count right after the change and\ndefeat the frontend's `invalidateStaticUniverses()` refetch. The frontend\nkeeps its own in-memory cache for snappiness.",
         "operationId": "list_static_universes_api_static_universes_get",
         "responses": {
           "200": {

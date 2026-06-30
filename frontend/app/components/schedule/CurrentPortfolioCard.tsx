@@ -4,8 +4,7 @@ import { useCallback, useMemo } from 'react';
 import LoadingDots from '../LoadingDots';
 import CellInfoTip from '../momentum/CellInfoTip';
 import { useApiData } from '../../../lib/hooks/useApiData';
-import { useBenchmarkCurrencyMap, useBenchmarkIsinMap, useCompanyExchangeMap, useCompanyIsinMap, useFxRateMap } from '../../../lib/hooks/apiData';
-import { useFxConverters } from '../../../lib/hooks/useFxToEur';
+import { useBenchmarkCurrencyMap, useBenchmarkIsinMap, useCompanyExchangeMap, useCompanyIsinMap } from '../../../lib/hooks/apiData';
 import { displayExchange, EXCHANGE_NAMES, fmtPct, fmtPrice, guruFocusUrl } from '../momentum/utils';
 import type { Holding } from '../../../lib/stores/momentum';
 
@@ -41,7 +40,6 @@ export default function CurrentPortfolioCard({ snapshotId }: { snapshotId: numbe
   const isinByBenchmark = useBenchmarkIsinMap();   // keyed by -benchmark_id (the holding's company_id)
   const ccyByBenchmark = useBenchmarkCurrencyMap(); // ETF currency from the LIVE benchmark, keyed by -benchmark_id
   const exchangeByCompany = useCompanyExchangeMap();
-  const fxRate = useFxRateMap();                    // currency → units per EUR (latest; updates daily)
 
   // Resolve a holding's currency: an ETF (negative company_id) takes the LIVE
   // benchmark currency (so a currency set after scheduling is respected now);
@@ -53,20 +51,15 @@ export default function CurrentPortfolioCard({ snapshotId }: { snapshotId: numbe
     ).toUpperCase(),
     [ccyByBenchmark],
   );
-  // FX history converters for the ETF currencies (entry-date conversion of the
-  // ETF's native price — its stored EUR is unconverted when the currency was
-  // set after scheduling). Stocks keep the engine's reliable stored entry EUR.
-  const etfCurrencies = useMemo(
-    () => (snap?.holdings ?? []).filter((h) => (h.company_id ?? 0) < 0).map(resolveCcy),
-    [snap, resolveCcy],
-  );
-  const fxConverters = useFxConverters(etfCurrencies);
 
-  // Per-holding derived values — all in EUR so the card is internally
-  // consistent AND its Total lines up with the strategy-row MTD header (which
-  // is the EUR daily-curve return). Start (€) at the entry rate, End (€) marked
-  // to market at today's rate, the EUR return between them, and the drifted
-  // current weight (driven by the EUR return).
+  // Per-holding derived values, all in EUR. The EUR marks + per-holding return
+  // come STRAIGHT from the engine's stored values (`entry_price_eur`,
+  // `exit_price_eur`, `forward_return_pct`) — the price-update re-pricer now
+  // converts to EUR at each date's FX, so these are the authoritative EUR
+  // figures. We do NOT re-mark to today's rate client-side anymore: that drifted
+  // the card's Total away from the engine's `period_return_pct` (and the EUR
+  // daily curve). FX columns are derived from the stored EUR/local pair so they
+  // stay internally consistent with the return shown.
   const rows = useMemo(() => {
     const holdings = snap?.holdings ?? [];
     const derived = holdings.map((h) => {
@@ -77,25 +70,14 @@ export default function CurrentPortfolioCard({ snapshotId }: { snapshotId: numbe
       const endDate = h.exit_date
         ? String(h.exit_date).slice(0, 10)
         : (snap?.latest_price_date ? String(snap.latest_price_date).slice(0, 10) : null);
-      // Start (€): stocks keep the engine's stored entry EUR; an ETF converts
-      // its native entry price at the entry-date rate; EUR passes through.
-      let startEur: number | null;
-      if (isEur) startEur = h.entry_price_local ?? h.entry_price_eur ?? null;
-      else if (isEtf) {
-        const conv = fxConverters.get(ccy);
-        startEur = conv && h.entry_price_local != null && entryDate
-          ? conv(h.entry_price_local, entryDate)
-          : (h.entry_price_eur ?? null);
-      } else startEur = h.entry_price_eur ?? null;
+      const startEur = h.entry_price_eur ?? (isEur ? (h.entry_price_local ?? null) : null);
+      const endEur = h.exit_price_eur ?? (isEur ? (h.exit_price_local ?? null) : null);
       const startFx = startEur != null && h.entry_price_local ? startEur / h.entry_price_local : (isEur ? 1 : null);
-      const endRate = fxRate.get(ccy || 'EUR');
-      const endFx = isEur ? 1 : (endRate ? 1 / endRate : null);
-      const endEur = (h.exit_price_local != null && endFx != null) ? h.exit_price_local * endFx : (h.exit_price_eur ?? null);
-      // EUR return since entry; fall back to the stored (local) return only
-      // when EUR can't be resolved (foreign asset we haven't converted).
-      const eurReturn = startEur != null && endEur != null && startEur > 0
-        ? (endEur / startEur - 1) * 100
-        : (h.forward_return_pct ?? null);
+      const endFx = endEur != null && h.exit_price_local ? endEur / h.exit_price_local : (isEur ? 1 : null);
+      // The engine's stored EUR per-holding return is the source of truth; fall
+      // back to deriving it from the EUR marks only if it's absent.
+      const eurReturn = h.forward_return_pct
+        ?? (startEur != null && endEur != null && startEur > 0 ? (endEur / startEur - 1) * 100 : null);
       const weight = h.weight ?? 0;
       return { h, isEtf, ccy, isEur, entryDate, endDate, startEur, endEur, startFx, endFx, eurReturn, weight, target: weight * 100 };
     });
@@ -104,7 +86,7 @@ export default function CurrentPortfolioCard({ snapshotId }: { snapshotId: numbe
     return derived
       .map((d) => ({ ...d, current: (d.weight * (1 + (d.eurReturn ?? 0) / 100) / totalFactor) * 100 }))
       .sort((a, b) => b.current - a.current);
-  }, [snap, resolveCcy, fxConverters, fxRate]);
+  }, [snap, resolveCcy]);
 
   // Total portfolio performance since entry: each holding's EUR return weighted
   // by its target weight (same EUR basis as the strategy-row MTD header).
@@ -218,7 +200,7 @@ export default function CurrentPortfolioCard({ snapshotId }: { snapshotId: numbe
       <p className="text-xs text-fg-subtle mt-3 leading-relaxed">
         Sorted by current weight. <span className="font-medium">Target</span> is the weight set at the last rebalance; <span className="font-medium">Current</span> is where it has drifted to as prices moved (renormalized to 100%).
         <span className="font-medium"> Start/End</span> are the entry and latest-close prices in local currency.
-        <span className="font-medium"> Start FX→€</span> is the rate locked in at entry; <span className="font-medium">End FX→€</span> is today&apos;s rate (EUR per unit, refreshed daily from the FX sync), so <span className="font-medium">End (€)</span> is marked to market at the current rate. 1.00 for EUR sleeves; &quot;—&quot; when no rate is available.
+        <span className="font-medium"> Start FX→€</span> is the rate locked in at entry; <span className="font-medium">End FX→€</span> is the rate at the latest close (EUR per unit), so <span className="font-medium">End (€)</span> is the engine&apos;s EUR mark at that date — the same EUR basis as the strategy&apos;s headline return. 1.00 for EUR sleeves; &quot;—&quot; when no rate is available.
       </p>
     </div>
   );

@@ -607,6 +607,28 @@ def _hydrate(rows: list[dict]) -> list[dict]:
                         "as_of_date": bt["as_of_date"],
                     }
                     since_inception_pct = bt["since_inception_pct"]
+            # When the open period started THIS month (the latest rebalance
+            # fired in the current calendar month), the whole month-to-date IS
+            # that open period — so the header MTD must equal the held basket's
+            # actual return, the engine's authoritative per-snapshot
+            # `period_return_pct`. This makes the header agree with the
+            # Current-portfolio card + the engine to the cent (all read the same
+            # EUR held-basket return since the rebalance), instead of the
+            # calendar-month slice off the backtest curve which mixed in
+            # pre-rebalance days. (Spanning-month open periods keep the
+            # curve-based MTD above — that month-to-date isn't the full period.)
+            month_start = today.replace(day=1).isoformat()
+            last_rebalance = next(
+                (s for s in reversed(hist) if s.get("kind") == "rebalance"), None
+            )
+            snap_period_ret = latest.get("period_return_pct")
+            if (
+                last_rebalance is not None
+                and str(last_rebalance.get("as_of_date") or "")[:10] >= month_start
+                and snap_period_ret is not None
+            ):
+                returns = dict(returns)
+                returns["mtd_return_pct"] = round(float(snap_period_ret), 2)
             last_snapshot = {
                 "snapshot_id": latest["snapshot_id"],
                 "ingest_run_id": latest.get("ingest_run_id"),
