@@ -466,6 +466,14 @@
             "title": "Benchmark Id",
             "type": "integer"
           },
+          "drawdowns": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/DrawdownInfo"
+            },
+            "title": "Drawdowns",
+            "type": "array"
+          },
           "monthly": {
             "additionalProperties": {
               "type": "number"
@@ -1592,6 +1600,17 @@
             "default": 0.0,
             "title": "Risk Free Rate Pct",
             "type": "number"
+          },
+          "search_restarts": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Search Restarts"
           },
           "variant_key": {
             "anyOf": [

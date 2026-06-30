@@ -32,6 +32,17 @@ PERIODS_PER_YEAR = 12
 # exactly 0) producing NaN correlations or absurd Sharpe ratios.
 _ZERO_TOL = 1e-12
 
+# Coordinate-ascent restarts per core-weight in the portfolio optimizer. The
+# search is a discrete hill-climb that can land in a local optimum; each restart
+# is another seeded random starting sleeve, and we keep the best — so MORE
+# restarts is monotonic (can only match or beat fewer) and never hurts except in
+# runtime. Empirically (random 8–14 ETF instances vs a 48-restart reference) the
+# objective plateaus by here, so this gives a very low chance of missing the
+# global optimum while keeping a full [0,100] search at ~1–2s. Deterministic:
+# the RNG is reseeded per core-weight (seed + cw), so same inputs + same restarts
+# ⇒ identical weights, every run.
+OPTIMIZER_RESTARTS = 12
+
 
 def prices_to_monthly_returns(prices: list[tuple[object, float]]) -> dict[str, float]:
     """Month-end resample a daily price series into monthly simple returns.
@@ -695,7 +706,7 @@ def component_return_since(
 def _grid_optimize_weights(
     R: np.ndarray, n_assets: int, nb: int, ne: int,
     core_min: float, core_max: float, grid: float,
-    objective: str, rf_annual: float, seed: int, restarts: int = 2,
+    objective: str, rf_annual: float, seed: int, restarts: int = OPTIMIZER_RESTARTS,
 ) -> np.ndarray:
     """Discrete-grid weight search: find the weights (each a multiple of `grid`,
     e.g. 2.5%) that maximize the objective, with the CORE bucket (strategy +
@@ -807,6 +818,7 @@ def optimize_portfolio(
     grid: float = 0.025,
     n_samples: int = 4000,
     seed: int = 0,
+    search_restarts: int | None = None,
 ) -> PortfolioOptimization:
     """Optimize a 3-group portfolio on a DISCRETE weight grid, MONTHLY-rebalanced.
 
@@ -871,8 +883,9 @@ def optimize_portfolio(
 
     target = base_w.copy()
     if common and R.shape[0] >= 2 and (nb > 0 or ne > 0):
+        restarts = OPTIMIZER_RESTARTS if search_restarts is None else max(1, int(search_restarts))
         target = _grid_optimize_weights(
-            R, n_assets, nb, ne, core_min, core_max, grid, objective, rf_annual, seed,
+            R, n_assets, nb, ne, core_min, core_max, grid, objective, rf_annual, seed, restarts,
         )
 
     before_rets = (R @ base_w).tolist() if common else []

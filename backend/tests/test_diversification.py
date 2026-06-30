@@ -346,6 +346,38 @@ class TestOptimizePortfolio:
         opt = optimize_portfolio(strat, [("ANTI", anti)], core_min=0.30, core_max=0.50)
         assert 0.30 - 1e-9 <= opt.weights[0] <= 0.50 + 1e-9
 
+    def test_optimizer_is_deterministic(self):
+        # Same inputs + settings ⇒ byte-identical weights, every run (fixed seed,
+        # RNG reseeded per core-weight). Repeatability guarantee.
+        n = 90
+        strat = self._months([(0.03 if i % 2 == 0 else -0.01) for i in range(n)])
+        e1 = self._months([(0.01 if i % 3 == 0 else -0.003) for i in range(n)])
+        e2 = self._months([(-0.004 if i % 2 == 0 else 0.02) for i in range(n)])
+        etfs = [("E1", e1), ("E2", e2)]
+        a = optimize_portfolio(strat, etfs, core_min=0.0, core_max=1.0, objective="sortino")
+        b = optimize_portfolio(strat, etfs, core_min=0.0, core_max=1.0, objective="sortino")
+        assert a.weights == b.weights
+
+    def test_more_restarts_never_worse(self):
+        # search_restarts is configurable and MONOTONIC: each restart adds a
+        # seeded start and we keep the best, so more restarts can only match or
+        # beat fewer (never worse) — lower chance of missing the global optimum.
+        from momentum.diversification import annualized_stats
+
+        rng = np.random.default_rng(7)
+        nn = 100
+        strat = self._months((0.012 + 0.05 * rng.standard_normal(nn)).tolist())
+        etfs = [(f"E{k}", self._months((0.003 + 0.03 * rng.standard_normal(nn)).tolist())) for k in range(8)]
+        ms = sorted(set.intersection(set(strat), *[set(e[1]) for e in etfs]))
+        R = np.array([[strat[m]] + [e[1][m] for e in etfs] for m in ms])
+
+        def obj(opt):
+            return annualized_stats((R @ np.array(opt.weights)).tolist(), 0.0).sortino
+
+        low = optimize_portfolio(strat, etfs, core_min=0.0, core_max=1.0, objective="sortino", search_restarts=1)
+        high = optimize_portfolio(strat, etfs, core_min=0.0, core_max=1.0, objective="sortino", search_restarts=16)
+        assert obj(high) >= obj(low) - 1e-9
+
     def test_core_pct_back_compat_pins_the_core(self):
         # The legacy single `core_pct` still pins the core (min == max).
         n = 60

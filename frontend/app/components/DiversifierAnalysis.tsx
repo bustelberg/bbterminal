@@ -235,6 +235,11 @@ export default function DiversifierAnalysis() {
         />
 
         {/* ── Portfolio optimization ────────────────────────────────── */}
+        {d.optimizeResult && d.compareBenchmarkId != null && d.optimizeResult.benchmark?.benchmark_id !== d.compareBenchmarkId && (
+          <div className="rounded-lg bg-warn-500/10 border border-warn-500/20 px-4 py-2.5 text-sm text-warn-400">
+            Click <span className="font-medium">Optimize portfolio</span> to apply the selected benchmark comparison.
+          </div>
+        )}
         {d.optimizeResult && <OptimizeCard result={d.optimizeResult} onSetIsin={d.setBenchmarkIsin} />}
 
         {/* ── Manual portfolio backtest (below the optimizer) ───────── */}
@@ -384,6 +389,20 @@ function WeightBreakdown({ weights, onSetIsin }: {
   );
 }
 
+/** Cumulative return % (from window start) of a benchmark's monthly returns,
+ * aligned to `dates` — flat across any date the benchmark lacks. Module-level so
+ * the running product isn't a render-time mutation. */
+function benchCumulativePct(dates: string[], monthly: Record<string, number>): number[] {
+  const out: number[] = [];
+  let g = 1;
+  for (const d of dates) {
+    const br = monthly[d];
+    if (br != null) g *= 1 + br;
+    out.push((g - 1) * 100);
+  }
+  return out;
+}
+
 function OptimizeCard({ result: r, title, onSetIsin }: {
   result: OptimizeResponse;
   title?: string;
@@ -404,17 +423,26 @@ function OptimizeCard({ result: r, title, onSetIsin }: {
       else next.add(year);
       return next;
     });
-  const chartData = r.curve.map((p) => ({
-    date: p.date,
-    before: p.before,
-    after: p.after,
-    beforeG: 1 + p.before / 100,
-    afterG: 1 + p.after / 100,
-  }));
-  // Compare-benchmark lookups (per-year stats + per-month returns), if selected.
+  // Compare-benchmark lookups (per-year stats, per-month returns, drawdowns).
   const bench = r.benchmark ?? null;
   const benchYear = new Map((bench?.annual ?? []).map((y) => [y.year, y]));
   const benchMonthly = bench?.monthly ?? {};
+  const seriesLabel = (name: string) =>
+    name === 'before' || name === 'beforeG' ? 'Strategy alone'
+    : name === 'bench' || name === 'benchG' ? (bench?.ticker ?? 'Benchmark')
+    : 'Optimized';
+  // Equity curve: compound the benchmark's monthly returns along the same dates
+  // as before/after (flat across any month it lacks data) so all three align.
+  const benchCumPct = bench ? benchCumulativePct(r.curve.map((p) => p.date), benchMonthly) : [];
+  const chartData = r.curve.map((p, i) => ({
+    date: p.date,
+    before: p.before,
+    after: p.after,
+    bench: bench ? benchCumPct[i] : undefined,
+    beforeG: 1 + p.before / 100,
+    afterG: 1 + p.after / 100,
+    benchG: bench ? 1 + benchCumPct[i] / 100 : undefined,
+  }));
   return (
     <div className="bg-card rounded-xl border border-accent-500/30 p-5">
       <div className="flex items-baseline justify-between mb-3">
@@ -480,15 +508,15 @@ function OptimizeCard({ result: r, title, onSetIsin }: {
                 formatter={(value, name) => {
                   // Always report the cumulative % regardless of axis mode.
                   const pct = logScale ? (Number(value) - 1) * 100 : Number(value);
-                  const isBefore = name === 'before' || name === 'beforeG';
-                  return [`${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`, isBefore ? 'Strategy alone' : 'Optimized'];
+                  return [`${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`, seriesLabel(String(name))];
                 }}
               />
               <Legend
                 wrapperStyle={{ fontSize: 12, color: chartTheme.axisLabel }}
-                formatter={(v) => (v === 'before' || v === 'beforeG' ? 'Strategy alone' : 'Optimized')}
+                formatter={(v) => seriesLabel(String(v))}
               />
               <Line type="monotone" dataKey={logScale ? 'beforeG' : 'before'} stroke={chartTheme.universe} strokeWidth={1.5} strokeDasharray="4 3" dot={false} name={logScale ? 'beforeG' : 'before'} />
+              {bench && <Line type="monotone" dataKey={logScale ? 'benchG' : 'bench'} stroke={chartTheme.warn} strokeWidth={1.5} strokeDasharray="2 2" dot={false} name={logScale ? 'benchG' : 'bench'} connectNulls />}
               <Line type="monotone" dataKey={logScale ? 'afterG' : 'after'} stroke={chartTheme.accent} strokeWidth={2} dot={false} name={logScale ? 'afterG' : 'after'} />
             </LineChart>
           </ResponsiveContainer>
@@ -551,13 +579,14 @@ function OptimizeCard({ result: r, title, onSetIsin }: {
       {/* Weight breakdown, grouped: Core (strategy + bonds) then Diversifiers */}
       <WeightBreakdown weights={r.weights} onSetIsin={onSetIsin} />
 
-      {/* Top-10 worst drawdowns: strategy alone vs optimized */}
-      {(r.drawdowns_before.length > 0 || r.drawdowns_after.length > 0) && (
+      {/* Top-40 worst drawdowns: strategy alone vs optimized (vs benchmark) */}
+      {(r.drawdowns_before.length > 0 || r.drawdowns_after.length > 0 || (bench?.drawdowns?.length ?? 0) > 0) && (
         <div className="mt-6">
           <div className="text-fg-subtle text-xs uppercase tracking-wider mb-2">Top 40 worst drawdowns</div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-4">
+          <div className={`grid grid-cols-1 ${bench ? 'lg:grid-cols-3' : 'lg:grid-cols-2'} gap-x-6 gap-y-4`}>
             <DrawdownTable title="Strategy alone" rows={r.drawdowns_before} />
             <DrawdownTable title="Optimized" rows={r.drawdowns_after} accent />
+            {bench && <DrawdownTable title={`${bench.ticker} (benchmark)`} rows={bench.drawdowns ?? []} />}
           </div>
         </div>
       )}

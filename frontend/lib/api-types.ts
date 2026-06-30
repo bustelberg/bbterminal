@@ -4252,6 +4252,11 @@ export interface components {
             /** Benchmark Id */
             benchmark_id: number;
             /**
+             * Drawdowns
+             * @default []
+             */
+            drawdowns?: components["schemas"]["DrawdownInfo"][];
+            /**
              * Monthly
              * @default {}
              */
@@ -4643,6 +4648,8 @@ export interface components {
              * @default 0
              */
             risk_free_rate_pct?: number;
+            /** Search Restarts */
+            search_restarts?: number | null;
             /** Variant Key */
             variant_key?: string | null;
         };

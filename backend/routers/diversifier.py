@@ -119,6 +119,10 @@ class OptimizeRequest(BaseModel):
     # Optional index/ETF to COMPARE against (not part of the portfolio) — its
     # per-year return + vol and overall Sharpe/Sortino are returned alongside.
     compare_benchmark_id: int | None = None
+    # Coordinate-ascent restarts per core-weight (search thoroughness). Omit to
+    # use the tuned default (OPTIMIZER_RESTARTS); higher = lower chance of missing
+    # the global optimum, at more runtime. Deterministic for a given value.
+    search_restarts: int | None = None
 
 
 class PortfolioStats(BaseModel):
@@ -422,6 +426,7 @@ def _build_benchmark_compare(
     rets = [monthly[m] for m in aligned]
     s = div.annualized_stats(rets, rf)
     years = div.annual_breakdown(aligned, rets, rets)   # before==after; read one side
+    dds = div.top_drawdowns(aligned, rets)
     return BenchmarkCompare(
         benchmark_id=benchmark_id,
         ticker=meta.get("ticker", ""),
@@ -433,6 +438,13 @@ def _build_benchmark_compare(
         ytd=years[-1].return_before if years else None,
         annual=[BenchmarkYear(year=y.year, ret=y.return_before, vol=y.vol_before) for y in years],
         monthly={m: monthly[m] for m in aligned},
+        drawdowns=[
+            DrawdownInfo(
+                depth_pct=d.depth_pct, peak_date=d.peak_date, trough_date=d.trough_date,
+                recovery_date=d.recovery_date, length_months=d.length_months,
+            )
+            for d in dds
+        ],
     )
 
 
@@ -569,7 +581,7 @@ async def optimize(req: OptimizeRequest):
 
     opt = div.optimize_portfolio(
         strategy_returns, etf_series, bonds=bond_series, rf_annual=rf, objective=req.objective,
-        core_min=core_min, core_max=core_max,
+        core_min=core_min, core_max=core_max, search_restarts=req.search_restarts,
     )
 
     def _group(label: str) -> str:
