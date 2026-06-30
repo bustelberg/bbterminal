@@ -411,12 +411,12 @@ def _checkpoint(run_id: int, snap: dict, total: int | None = None) -> None:
     )
 
 
-def _collect_held_company_ids() -> set[int]:
-    """Pool the company_ids in the latest snapshot of every ENABLED scheduled
-    strategy — the union of all instruments currently held across the schedule.
-    Negative ids (synthetic ETF-overlay holdings, priced from `benchmark_price`,
-    not GuruFocus) are dropped. Shared by the held-price refresh and the
-    stale-price retry probe."""
+def _pool_held_holding_ids() -> set[int]:
+    """All `company_id`s (BOTH signs) in the latest snapshot of every ENABLED
+    scheduled strategy. Positive = real companies (priced from `metric_data`);
+    negative = `-benchmark_id` (synthetic ETF-overlay holdings, priced from
+    `benchmark_price`). The shared base for the held-company + held-benchmark
+    collectors."""
     strat_resp = (
         supabase.table("scheduled_strategy")
         .select("id")
@@ -434,7 +434,7 @@ def _collect_held_company_ids() -> set[int]:
         .order("created_at", desc=True)
         .execute()
     )
-    company_ids: set[int] = set()
+    ids: set[int] = set()
     seen: set[int] = set()
     for s in (snap_resp.data or []):
         sid = s.get("scheduled_strategy_id")
@@ -443,9 +443,76 @@ def _collect_held_company_ids() -> set[int]:
         seen.add(sid)
         for h in (s.get("holdings") or []):
             cid = h.get("company_id")
-            if cid is not None and int(cid) >= 0:
-                company_ids.add(int(cid))
-    return company_ids
+            if cid is not None:
+                ids.add(int(cid))
+    return ids
+
+
+def _collect_held_company_ids() -> set[int]:
+    """The real companies (positive ids) held across enabled strategies —
+    priced from `metric_data`. Shared by the held-price refresh + the
+    stale-price retry probe."""
+    return {c for c in _pool_held_holding_ids() if c >= 0}
+
+
+def _collect_held_benchmark_ids() -> set[int]:
+    """The benchmark ids behind the ETF-overlay holdings (negative company_id =
+    `-benchmark_id`) held across enabled strategies — priced from
+    `benchmark_price`."""
+    return {-c for c in _pool_held_holding_ids() if c < 0}
+
+
+def refresh_held_benchmarks(run_id: int) -> int:
+    """Re-fetch the latest prices for every ETF-overlay benchmark held across
+    enabled strategies, so a held ETF's `benchmark_price` stays as fresh as the
+    held companies' `metric_data`. Without this the price-update kept only the
+    real companies current (it drops negative/benchmark ids), leaving the ETF
+    rows stale — a stale `exit_date`/return in the current-portfolio card.
+
+    Best-effort per benchmark (a fetch/upsert failure is logged + skipped).
+    Returns the count refreshed."""
+    from ingest.api_usage import track_api_call  # noqa: PLC0415
+    from ingest.constants import DATA_CUTOFF  # noqa: PLC0415
+    from ingest.prices import _fetch_price_from_api, _parse_price_series  # noqa: PLC0415
+
+    bids = _collect_held_benchmark_ids()
+    if not bids:
+        return 0
+    log = logging.getLogger(__name__)
+    refreshed = 0
+    for bid in bids:
+        try:
+            bm = (
+                supabase.table("benchmark")
+                .select("ticker")
+                .eq("benchmark_id", bid)
+                .limit(1)
+                .execute()
+            )
+            if not bm.data:
+                continue
+            ticker = bm.data[0]["ticker"]
+            # ETFs are US-listed — same fetch the /api/benchmarks refresh uses.
+            data, fetch_log, _status = _fetch_price_from_api(ticker, "NYSE")
+            track_api_call(supabase, "NYSE")
+            if not data:
+                log.warning("[price_update] benchmark %s (%s) fetch failed: %s", bid, ticker, fetch_log)
+                continue
+            parsed = _parse_price_series(data)
+            if not parsed:
+                continue
+            rows = [
+                {"benchmark_id": bid, "target_date": d.isoformat(), "price": p}
+                for d, p in parsed if d >= DATA_CUTOFF
+            ]
+            for i in range(0, len(rows), 500):
+                supabase.table("benchmark_price").upsert(
+                    rows[i:i + 500], on_conflict="benchmark_id,target_date"
+                ).execute()
+            refreshed += 1
+        except Exception as e:
+            log.warning("[price_update] benchmark %s refresh failed: %s: %s", bid, type(e).__name__, e)
+    return refreshed
 
 
 def _collect_held_companies(run_id: int) -> list[dict]:

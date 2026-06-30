@@ -279,13 +279,19 @@ async def list_held_companies(request: Request):
                 "companies": [],
             }
 
-        # Step 4 — exchange lookup. Holdings JSONB doesn't include the
-        # GuruFocus exchange code or trading currency; fetch them from
-        # `company` joined to `gurufocus_exchange`. Batched by IN_CHUNK_SIZE
-        # to stay under the PostgREST URL-length window.
+        # Step 4 — identity + currency lookup. Holdings JSONB doesn't include
+        # the exchange code or trading currency. Real companies (positive id)
+        # resolve from `company`; ETF-overlay holdings (negative id =
+        # -benchmark_id) resolve from `benchmark` instead — without this they'd
+        # carry no currency and (step 5) no price, so they'd be miscounted as
+        # "missing" in the freshness summary even though the price-update keeps
+        # their `benchmark_price` current. Batched to stay under the PostgREST
+        # URL-length window.
         cids = list(pooled.keys())
+        company_cids = [c for c in cids if c >= 0]
+        benchmark_ids = [-c for c in cids if c < 0]
         for r in fetch_in_chunks(
-            cids,
+            company_cids,
             lambda chunk: supabase.table("company")
             .select(
                 "company_id, company_name, gurufocus_ticker, "
@@ -311,13 +317,32 @@ async def list_held_companies(request: Request):
             if r.get("company_name"):
                 pooled[cid]["company_name"] = r["company_name"]
 
+        # ETF-overlay holdings → identity + currency from `benchmark`.
+        for b in fetch_in_chunks(
+            benchmark_ids,
+            lambda chunk: supabase.table("benchmark")
+            .select("benchmark_id, ticker, name, currency")
+            .in_("benchmark_id", chunk)
+            .execute(),
+        ):
+            cid = -int(b["benchmark_id"])
+            if cid not in pooled:
+                continue
+            pooled[cid]["exchange"] = "ETF"
+            pooled[cid]["is_etf"] = True
+            pooled[cid]["currency"] = b.get("currency")
+            if b.get("ticker"):
+                pooled[cid]["ticker"] = b["ticker"]
+            if b.get("name"):
+                pooled[cid]["company_name"] = b["name"]
+
         # Canonical GuruFocus summary link per company, from the resolved
-        # ticker + exchange (single-sourced via the shared helper so it
-        # matches every other GF link in the app).
+        # ticker + exchange. ETF overlays have no GuruFocus listing page → no link.
         from ingest.gurufocus_url import gurufocus_url  # noqa: PLC0415
         for cid, bucket in pooled.items():
-            bucket["gurufocus_url"] = gurufocus_url(
-                bucket.get("ticker"), bucket.get("exchange")
+            bucket["gurufocus_url"] = (
+                None if bucket.get("is_etf")
+                else gurufocus_url(bucket.get("ticker"), bucket.get("exchange"))
             )
 
         # Step 5 — freshness + latest price lookup. Latest `close_price`
@@ -330,7 +355,7 @@ async def list_held_companies(request: Request):
         latest_price_by_cid: dict[int, float | None] = {}
         try:
             from momentum.data._pg import load_latest_close_prices_via_copy  # noqa: PLC0415
-            fast = load_latest_close_prices_via_copy(cids)
+            fast = load_latest_close_prices_via_copy(company_cids)
             if fast is not None:
                 for cid, row in fast.items():
                     latest_close_by_cid[cid] = row.get("date")
@@ -338,7 +363,7 @@ async def list_held_companies(request: Request):
             else:
                 # Fallback (no SUPABASE_DB_URL): per-company latest close,
                 # one cheap indexed query each (held set is small).
-                for cid in cids:
+                for cid in company_cids:
                     r = (
                         supabase.table("metric_data")
                         .select("target_date, numeric_value")
@@ -357,6 +382,27 @@ async def list_held_companies(request: Request):
             # + price just render as "unknown" in the UI.
             latest_close_by_cid = {}
             latest_price_by_cid = {}
+
+        # ETF overlays: latest close from `benchmark_price` (their metric_data
+        # equivalent), so they count toward freshness like any held instrument
+        # instead of being flagged "missing".
+        for bid in benchmark_ids:
+            try:
+                r = (
+                    supabase.table("benchmark_price")
+                    .select("target_date, price")
+                    .eq("benchmark_id", bid)
+                    .order("target_date", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+            except Exception:
+                continue
+            if r.data:
+                cid = -bid
+                latest_close_by_cid[cid] = r.data[0]["target_date"]
+                val = r.data[0].get("price")
+                latest_price_by_cid[cid] = float(val) if val is not None else None
 
         for cid, bucket in pooled.items():
             bucket["latest_close_price_date"] = latest_close_by_cid.get(cid)

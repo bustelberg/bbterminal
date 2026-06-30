@@ -26,7 +26,7 @@ from .planner import (
     collect_template_universe_companies,
     collect_universe_companies,
 )
-from .prices import _collect_held_companies, _run_prices_phase
+from .prices import _collect_held_companies, _run_prices_phase, refresh_held_benchmarks
 from .prune import _run_dedupe_phase, _run_delisting_phase, _run_prune_phase
 from .runlog import _now_utc_iso, _update_run
 from .templates import _run_templates_phase, templates_needing_refresh
@@ -373,6 +373,20 @@ def _run_price_update_pipeline_sync(run_id: int) -> None:
                 _update_run(run_id, current_message="No held companies yet — nothing to price.")
         except Exception as e:
             msg = f"Held-price phase failed: {type(e).__name__}: {e}"
+            log.warning("[price_update] run_id=%s %s", run_id, msg)
+            accumulated_errors.append(msg)
+
+        # ── Phase: benchmarks — held ETF overlays ──────────────────
+        # Keep held ETF benchmarks (negative company_id holdings) as fresh as the
+        # held companies, so the re-price below marks them to the latest close
+        # instead of a stale `benchmark_price`. Runs BEFORE momentum so the
+        # snapshot picks up the fresh benchmark data.
+        try:
+            n_bm = refresh_held_benchmarks(run_id)
+            if n_bm:
+                _update_run(run_id, current_message=f"Refreshed {n_bm} held ETF benchmark(s).")
+        except Exception as e:
+            msg = f"Held-benchmark refresh failed: {type(e).__name__}: {e}"
             log.warning("[price_update] run_id=%s %s", run_id, msg)
             accumulated_errors.append(msg)
 
