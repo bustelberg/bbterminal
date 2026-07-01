@@ -162,7 +162,7 @@ def test_mtd_matches_open_period_return_with_dense_backtest(monkeypatch):
     cutover, tail = _splice_snapshot_tail(bt, snap)
     kept = [(d, c) for d, c in bt if d < cutover]
     curve = kept + [(p["date"], p["cumulative_return_pct"]) for p in tail]
-    monkeypatch.setattr(_H, "_extended_curve", lambda rid, snaps: curve)
+    monkeypatch.setattr(_H, "_extended_curve", lambda rid, snaps, cash=0.0: curve)
     r = _returns_from_backtest(1, "2026-06-01", date(2026, 6, 25), [])
     assert abs(r["mtd_return_pct"] - (-0.98)) < 0.01
     # YTD anchors before Jan 1 → curve start (+10%): 1.0991/1.10 - 1 = -0.08%.
@@ -225,3 +225,34 @@ def test_open_basket_live_curve_dense_and_matches_reprice(monkeypatch):
 def test_open_basket_live_curve_empty_without_run(monkeypatch):
     monkeypatch.setattr(_bc, "load_backtest_result_sync", lambda rid: None)
     assert _open_basket_live_curve(1) == []
+
+
+# ── cash sleeve on the backtest curve ───────────────────────────────────────
+
+def test_scale_curve_returns_halves_daily_returns():
+    # 50% cash halves every period's return then recompounds.
+    pts = [("2026-01-01", 10.0), ("2026-01-02", 21.0)]  # day-2 daily = +10%
+    scaled = _H._scale_curve_returns(pts, 0.5, as_pct=True)
+    assert abs(scaled[0][1] - 5.0) < 1e-6
+    assert abs(scaled[1][1] - 10.25) < 1e-6           # 1.05 * 1.05 − 1
+
+
+def test_scale_curve_returns_noop_at_zero_cash():
+    pts = [("2026-01-01", 10.0), ("2026-01-02", 21.0)]
+    assert _H._scale_curve_returns(pts, 0.0, as_pct=True) == pts
+    assert _H._scale_curve_returns(pts, None, as_pct=True) == pts
+
+
+def test_scale_curve_equity_space():
+    # as_pct=False: levels are equity (base 1). 50% cash halves the return.
+    pts = [("2026-01-01", 1.0), ("2026-01-02", 1.10)]   # +10% day 2
+    scaled = _H._scale_curve_returns(pts, 0.5, as_pct=False)
+    assert abs(scaled[-1][1] - 1.05) < 1e-9
+
+
+def test_curve_stats_annualized_and_maxdd():
+    ann, mdd = _H._curve_stats([("2026-01-01", 0.0), ("2027-01-01", 20.0)])
+    assert abs(ann - 20.0) < 0.2 and mdd == 0.0
+    # up to +20% then down to +8% → peak 1.20, trough 1.08 → drawdown 10%.
+    _, mdd2 = _H._curve_stats([("2026-01-01", 0.0), ("2026-06-01", 20.0), ("2026-12-01", 8.0)])
+    assert abs(mdd2 - 10.0) < 1e-6

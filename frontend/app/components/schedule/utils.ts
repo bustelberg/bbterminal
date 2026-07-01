@@ -78,20 +78,32 @@ export function chipStyle(hue: number): CSSProperties {
   };
 }
 
-/** Compact "in 18h" / "in 6d" / "in 12m" / "now" relative formatter for a
- * future ISO timestamp, relative to `nowMs`. Returns '—' when null. */
+/** Compact "Xd Yh Zm Ws" duration for a non-negative second count — seconds are
+ * ALWAYS the final unit so every timer reads live down to the second. Leading
+ * zero-units are dropped ("12m 07s", "07s"); sub-units are zero-padded when a
+ * larger unit precedes them so the width stays stable as it ticks. */
+export function formatDur(totalSec: number): string {
+  const s = Math.max(0, Math.floor(totalSec));
+  const days = Math.floor(s / 86400);
+  const hours = Math.floor((s % 86400) / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = s % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  if (days > 0) return `${days}d ${hours}h ${pad(mins)}m ${pad(secs)}s`;
+  if (hours > 0) return `${hours}h ${pad(mins)}m ${pad(secs)}s`;
+  if (mins > 0) return `${mins}m ${pad(secs)}s`;
+  return `${secs}s`;
+}
+
+/** Relative time to the second, both directions: "in 5m 07s" / "3h 02m 15s ago"
+ * / "now". Relative to `nowMs`; returns '—' when null/unparseable. */
 export function relTime(iso: string | null, nowMs: number): string {
   if (!iso) return '—';
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return '—';
   const diffSec = Math.round((t - nowMs) / 1000);
-  if (diffSec <= 0) return 'now';
-  const m = Math.round(diffSec / 60);
-  if (m < 60) return `in ${m}m`;
-  const h = Math.round(diffSec / 3600);
-  if (h < 48) return `in ${h}h`;
-  const d = Math.round(diffSec / 86400);
-  return `in ${d}d`;
+  if (diffSec === 0) return 'now';
+  return diffSec > 0 ? `in ${formatDur(diffSec)}` : `${formatDur(-diffSec)} ago`;
 }
 
 /** Exact execution time: weekday, date, HH:MM, and the viewer's timezone
@@ -108,27 +120,14 @@ export function formatExecAt(iso: string | null): string {
   });
 }
 
-/** Precise "2d 5h left" / "5h 12m left" / "12m left" / "now" countdown to a
- * future ISO timestamp, relative to `nowMs`. Returns '—' when null. */
+/** Precise countdown to a future ISO timestamp, to the second: "2d 5h 12m 07s
+ * left" / "5h 12m 07s left" / "12m 07s left" / "07s left" / "now". Relative to
+ * `nowMs`; returns '—' when null. */
 export function countdownLeft(iso: string | null, nowMs: number): string {
   if (!iso) return '—';
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return '—';
-  const ms = t - nowMs;
-  if (ms <= 0) return 'now';
-  const totalMin = Math.floor(ms / 60000);
-  const days = Math.floor(totalMin / 1440);
-  const hours = Math.floor((totalMin % 1440) / 60);
-  const mins = totalMin % 60;
-  if (days > 0) return `${days}d ${hours}h left`;
-  if (hours > 0) return `${hours}h ${mins}m left`;
-  return `${mins}m left`;
-}
-
-/** Same countdown as `countdownLeft` but without the trailing " left" — for
- * cells that already carry an "in …" header (e.g. the stale-price retry
- * column). "2h 59m" / "12m" / "now" / "—". */
-export function countdownCompact(iso: string | null, nowMs: number): string {
-  const s = countdownLeft(iso, nowMs);
-  return s.endsWith(' left') ? s.slice(0, -' left'.length) : s;
+  const diffSec = Math.round((t - nowMs) / 1000);
+  if (diffSec <= 0) return 'now';
+  return `${formatDur(diffSec)} left`;
 }

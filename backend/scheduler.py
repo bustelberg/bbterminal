@@ -71,6 +71,15 @@ _PIPELINE_STALE_AFTER_SECONDS = 3600
 # once the day's budget is spent the next daily tick takes over.
 _PRICE_RETRY_DELAY_HOURS = float(os.environ.get("PRICE_RETRY_DELAY_HOURS", "3"))
 _PRICE_RETRY_MAX_PER_DAY = int(os.environ.get("PRICE_RETRY_MAX_PER_DAY", "3"))
+# The month-end full-price refresh gets ALL companies' most-recent prices before
+# the monthly GuruFocus quota resets. Rather than a single last-day tick (which a
+# deploy/restart in its 1h grace would drop for the whole month), it runs on a
+# daily 12:00-UTC tick gated to the last `_MONTH_END_WINDOW_DAYS` days of the
+# month: it fires once the window opens (~2 days before month end), and if that
+# day's run is missed OR errors, the next day in the window retries — no
+# startup/every-deploy auto-repricing. Guarded so it only actually runs once the
+# window has a successful full refresh.
+_MONTH_END_WINDOW_DAYS = int(os.environ.get("MONTH_END_WINDOW_DAYS", "2"))
 _price_retry_lock = threading.Lock()
 # UTC-date ISO string → retries scheduled so far that day. Pruned to a single
 # key (today's) on each schedule so it never grows.
@@ -232,6 +241,67 @@ def _maybe_kickstart_smart(sched: BackgroundScheduler) -> None:
         coalesce=True,
         misfire_grace_time=600,
     )
+
+
+def _month_end_window_start(today: "date") -> "date":
+    """First day of the end-of-month refresh window: `_MONTH_END_WINDOW_DAYS`
+    days before the month's last day (inclusive). E.g. a 30-day month with the
+    default 2 → the 28th, so the window is the 28th–30th."""
+    import calendar  # noqa: PLC0415
+    last_day = calendar.monthrange(today.year, today.month)[1]
+    start_day = max(1, last_day - _MONTH_END_WINDOW_DAYS)
+    return today.replace(day=start_day)
+
+
+def _fire_month_end_refresh() -> None:
+    """Daily 12:00-UTC tick that runs the FULL price refresh once during the
+    end-of-month window (the last `_MONTH_END_WINDOW_DAYS`+1 days). Fires on the
+    first window day; if that run was missed (deploy/restart) or errored, the next
+    day in the window retries — so a single dropped tick no longer loses the whole
+    month. No-op outside the window, and once the window already has a successful
+    full refresh (so it runs at most once/month). Never raises into the scheduler
+    thread."""
+    try:
+        today = datetime.now(timezone.utc).date()
+        window_start = _month_end_window_start(today)
+        if today < window_start:
+            return  # not yet in the end-of-month window — cheap daily no-op
+
+        from deps import supabase  # noqa: PLC0415 — avoid import cycle
+        # Already refreshed in THIS window? (A successful full/manual run whose
+        # finished_at is on/after the window start.) An ad-hoc refresh earlier in
+        # the month doesn't count — we want fresh prices near month end.
+        try:
+            resp = (
+                supabase.table("ingest_run")
+                .select("run_id")
+                .in_("job_name", ["full_price_refresh", "manual"])
+                .eq("status", "ok")
+                .gte("finished_at", window_start.isoformat())
+                .limit(1)
+                .execute()
+            )
+            if resp.data:
+                _log.info(
+                    "[scheduler] month-end refresh: already ran this window (since %s) — no-op",
+                    window_start,
+                )
+                return
+        except Exception as e:
+            # If the guard lookup fails, prefer firing (a redundant run is cheap —
+            # already-fresh companies short-circuit) over silently skipping.
+            _log.warning(
+                "[scheduler] month-end refresh: window-guard lookup failed (%s: %s) — firing anyway",
+                type(e).__name__, e,
+            )
+
+        _log.warning(
+            "[scheduler] month-end refresh: in window (since %s) with no successful "
+            "full refresh yet — firing full_price_refresh", window_start,
+        )
+        _fire_job("full_price_refresh")
+    except Exception as e:
+        _log.warning("[scheduler] month-end refresh tick failed: %s: %s", type(e).__name__, e)
 
 
 def _trading_day_age(latest: "date | None") -> "int | None":
@@ -552,14 +622,16 @@ def register_scheduler(app) -> None:
         )
         # Month-end FULL price refresh — re-price EVERY company (most-stale
         # first), bounded by the monthly GuruFocus quota that's about to reset.
-        # `day='last'` = the last calendar day of the month; noon UTC (07:00
-        # EST) is safely inside the EST usage month (which resets midnight EST
-        # on the 1st = 05:00 UTC) and leaves ~17h of runway. The full refresh is
-        # prices-only and serializes against the daily ops via the pipeline lock.
+        # Fires DAILY at 12:00 UTC (07:00 EST, safely inside the EST usage month
+        # that resets midnight EST on the 1st), but `_fire_month_end_refresh`
+        # gates it to the last `_MONTH_END_WINDOW_DAYS`+1 days AND to "not already
+        # done this window" — so it runs ONCE near month end, and a missed/failed
+        # day retries the next day in the window (vs the old single last-day tick
+        # a deploy could drop for the whole month). Prices-only; serializes
+        # against the daily ops via the pipeline lock.
         sched.add_job(
-            _fire_job,
-            CronTrigger(day="last", hour=12, minute=0, timezone="UTC"),
-            args=["full_price_refresh"],
+            _fire_month_end_refresh,
+            CronTrigger(hour=12, minute=0, timezone="UTC"),
             id="month_end_price_refresh",
             replace_existing=True,
             coalesce=True,

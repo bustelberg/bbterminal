@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import LoadingDots from '../LoadingDots';
 import ScheduledStrategyDetail from '../ScheduledStrategyDetail';
 import { fmtTimestamp } from '../../../lib/format';
@@ -23,7 +24,28 @@ export default function ScheduledStrategiesCard({ sched, readOnly = false }: { s
     removeStrategy,
     removeAllStrategies,
     setUserVisible,
+    reorderStrategies,
   } = sched;
+
+  // Drag-to-reorder (admin only). `dragId` = the row being dragged; `overId` =
+  // the current drop target (for the insertion highlight).
+  const [dragId, setDragId] = useState<number | null>(null);
+  const [overId, setOverId] = useState<number | null>(null);
+
+  const handleDrop = (targetId: number) => {
+    if (dragId != null && dragId !== targetId) {
+      const ids = strategies.map((s) => s.id);
+      const from = ids.indexOf(dragId);
+      const to = ids.indexOf(targetId);
+      if (from >= 0 && to >= 0) {
+        ids.splice(from, 1);
+        ids.splice(to, 0, dragId);
+        void reorderStrategies(ids);
+      }
+    }
+    setDragId(null);
+    setOverId(null);
+  };
 
   return (
     <div className="bg-card rounded-xl border border-neutral-800/40">
@@ -56,8 +78,28 @@ export default function ScheduledStrategiesCard({ sched, readOnly = false }: { s
           {strategies.map((s) => {
             const isExpanded = expandedStrategyId === s.id;
             return (
-              <div key={s.id}>
+              <div
+                key={s.id}
+                onDragOver={(e) => { if (!readOnly && dragId != null) { e.preventDefault(); if (overId !== s.id) setOverId(s.id); } }}
+                onDrop={(e) => { if (!readOnly) { e.preventDefault(); handleDrop(s.id); } }}
+                className={
+                  dragId === s.id ? 'opacity-40'
+                    : (overId === s.id && dragId != null) ? 'border-t-2 border-accent-500'
+                    : ''
+                }
+              >
                 <div className="px-5 py-3 flex items-center gap-3 hover:bg-overlay/[0.02] transition-colors">
+                  {!readOnly && (
+                    <span
+                      draggable
+                      onDragStart={() => setDragId(s.id)}
+                      onDragEnd={() => { setDragId(null); setOverId(null); }}
+                      title="Drag to reorder"
+                      className="shrink-0 cursor-grab active:cursor-grabbing text-fg-faint hover:text-fg-muted select-none px-0.5 text-sm leading-none"
+                    >
+                      ⠿
+                    </span>
+                  )}
                   <button
                     type="button"
                     onClick={() => setExpandedStrategyId(isExpanded ? null : s.id)}

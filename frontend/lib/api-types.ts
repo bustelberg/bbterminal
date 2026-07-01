@@ -1235,6 +1235,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/market-cap/refresh/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Market Cap Refresh Stream
+         * @description SSE push of the market-cap refresh status until it finishes — replaces the
+         *     button's 1s poll; closes itself when `running` goes false.
+         */
+        get: operations["market_cap_refresh_stream_api_companies_market_cap_refresh_stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/memberships": {
         parameters: {
             query?: never;
@@ -1303,6 +1324,27 @@ export interface paths {
          *     message + verified/mismatch counts). Polled by the /companies button.
          */
         get: operations["openfigi_verify_status_api_companies_openfigi_verify_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/openfigi/verify/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Openfigi Verify Stream
+         * @description SSE push of the OpenFIGI verify status until it finishes — replaces the
+         *     button's 1s poll; closes itself when `running` goes false.
+         */
+        get: operations["openfigi_verify_stream_api_companies_openfigi_verify_stream_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1383,6 +1425,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/data/latest-close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Latest Close
+         * @description Latest close-price date per company id — comma-separated `ids` (≤200).
+         *     Lets the /schedule stale-price refresh show exactly how far each company's
+         *     price data now extends AFTER a re-fetch (including names that caught up and
+         *     dropped off the worklist). Returns `{"dates": {"<id>": "YYYY-MM-DD" | null}}`.
+         *     Not cached — it's read right after a fetch to confirm what landed.
+         */
+        get: operations["latest_close_api_data_latest_close_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/data/latest-price-date": {
         parameters: {
             query?: never;
@@ -1431,6 +1497,33 @@ export interface paths {
          *     min) since the underlying aggregation isn't cheap.
          */
         get: operations["price_coverage_api_data_price_coverage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/data/stale-prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stale Prices
+         * @description The most-outdated ACTIVE companies by latest close date — the month-end
+         *     full-price-refresh worklist. Returns up to `limit` companies whose latest
+         *     close lags the freshest close held anywhere (≥1 trading day behind),
+         *     oldest-first, each enriched with name / ticker / exchange + how many trading
+         *     days behind. Delisted / out-of-scope / illiquid are excluded (expected-stale,
+         *     not refresh targets). `total_stale` is the full count behind the reference so
+         *     the UI can note when the list is truncated to `limit`. Cached 1 min (the
+         *     aggregation isn't cheap).
+         */
+        get: operations["stale_prices_api_data_stale_prices_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2411,6 +2504,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ingest/runs/{run_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Ingest Run
+         * @description SSE push of one `ingest_run` row until it reaches a terminal status — for
+         *     the transient 'watch this job to completion' UIs (market-cap / OpenFIGI /
+         *     stale-price / per-universe refresh). Replaces their 2s polling; closes itself
+         *     once the run finishes.
+         */
+        get: operations["stream_ingest_run_api_ingest_runs__run_id__stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ingest/runs/{run_id}/templates/{template_key}/membership": {
         parameters: {
             query?: never;
@@ -3253,6 +3369,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/schedule/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Schedule Stream
+         * @description SSE push of the /schedule "Smart pipeline activity" dashboard — emits each
+         *     topic (upcoming, held, strategies, runs, usage, price/universe coverage) only
+         *     when it changes, replacing the page's 7-endpoint polling with ONE connection.
+         *     Each topic recomputes on its own cadence: fast (~2s) while a pipeline run is
+         *     in flight, slow when idle; the heavy coverage aggregations stay at 30s/5min.
+         *     Admin-consumed (the activity card is admin-only).
+         */
+        get: operations["schedule_stream_api_schedule_stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/schedule/upcoming": {
         parameters: {
             query?: never;
@@ -3377,6 +3518,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scheduled-strategies/reorder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Reorder Scheduled Strategies
+         * @description Persist the drag-reordered display order: `sort_order = position` for each
+         *     id in `ordered_ids` (top = 0). The list GET sorts by `sort_order` then
+         *     `created_at`. Admin-only (the API gate blocks non-admin writes here).
+         */
+        patch: operations["reorder_scheduled_strategies_api_scheduled_strategies_reorder_patch"];
+        trace?: never;
+    };
     "/api/scheduled-strategies/{strategy_id}": {
         parameters: {
             query?: never;
@@ -3405,6 +3568,32 @@ export interface paths {
          *     unambiguous.
          */
         patch: operations["patch_scheduled_strategy_api_scheduled_strategies__strategy_id__patch"];
+        trace?: never;
+    };
+    "/api/scheduled-strategies/{strategy_id}/cash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set Strategy Cash
+         * @description Set a strategy's CASH allocation (0..1). Cash scales every other holding's
+         *     weight by (1-cash) and adds a flat 0%-return cash sleeve, so the reported
+         *     weights + the return pick up the cash drag. Re-prices the strategy
+         *     immediately so the new weighting shows at once (no wait for the daily tick).
+         *
+         *     Admin-only: the API gate blocks all non-admin writes here, so read-only users
+         *     can see the cash allocation but can't change it.
+         */
+        patch: operations["set_strategy_cash_api_scheduled_strategies__strategy_id__cash_patch"];
         trace?: never;
     };
     "/api/scheduled-strategies/{strategy_id}/runs": {
@@ -4056,6 +4245,27 @@ export interface paths {
          * @description GuruFocus API usage counter for the current month.
          */
         get: operations["api_usage_api_usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/usage/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Usage Stream
+         * @description SSE push of the GuruFocus usage counter — emits only when it changes,
+         *     replacing the `ApiUsageBadge`'s 60s poll. Recomputes every 30s server-side.
+         */
+        get: operations["usage_stream_api_usage_stream_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4814,6 +5024,11 @@ export interface components {
             /** Name */
             name?: string | null;
         };
+        /** ReorderRequest */
+        ReorderRequest: {
+            /** Ordered Ids */
+            ordered_ids: number[];
+        };
         /** ResolveNameResponse */
         ResolveNameResponse: {
             /** Currency */
@@ -4944,6 +5159,11 @@ export interface components {
              */
             force_refresh?: boolean;
         };
+        /** SetCashRequest */
+        SetCashRequest: {
+            /** Cash Pct */
+            cash_pct: number;
+        };
         /** SetRoleRequest */
         SetRoleRequest: {
             /** Role */
@@ -4977,6 +5197,11 @@ export interface components {
             band_pct?: number;
             /** Benchmark Id */
             benchmark_id?: number | null;
+            /**
+             * Is Cash
+             * @default false
+             */
+            is_cash?: boolean;
             /** Weight Pct */
             weight_pct: number;
         };
@@ -6637,6 +6862,26 @@ export interface operations {
             };
         };
     };
+    market_cap_refresh_stream_api_companies_market_cap_refresh_stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     list_company_memberships_api_companies_memberships_get: {
         parameters: {
             query?: never;
@@ -6678,6 +6923,26 @@ export interface operations {
         };
     };
     openfigi_verify_status_api_companies_openfigi_verify_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    openfigi_verify_stream_api_companies_openfigi_verify_stream_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -6814,6 +7079,37 @@ export interface operations {
             };
         };
     };
+    latest_close_api_data_latest_close_get: {
+        parameters: {
+            query?: {
+                ids?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     latest_price_date_api_data_latest_price_date_get: {
         parameters: {
             query?: never;
@@ -6850,6 +7146,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    stale_prices_api_data_stale_prices_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -8199,6 +8526,37 @@ export interface operations {
             };
         };
     };
+    stream_ingest_run_api_ingest_runs__run_id__stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_template_membership_for_run_api_ingest_runs__run_id__templates__template_key__membership_get: {
         parameters: {
             query?: {
@@ -9379,6 +9737,26 @@ export interface operations {
             };
         };
     };
+    schedule_stream_api_schedule_stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     schedule_upcoming_api_schedule_upcoming_get: {
         parameters: {
             query?: never;
@@ -9492,6 +9870,39 @@ export interface operations {
             };
         };
     };
+    reorder_scheduled_strategies_api_scheduled_strategies_reorder_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReorderRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     delete_scheduled_strategy_api_scheduled_strategies__strategy_id__delete: {
         parameters: {
             query?: never;
@@ -9535,6 +9946,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ScheduledStrategyPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_strategy_cash_api_scheduled_strategies__strategy_id__cash_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetCashRequest"];
             };
         };
         responses: {
@@ -10419,6 +10865,26 @@ export interface operations {
         };
     };
     api_usage_api_usage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    usage_stream_api_usage_stream_get: {
         parameters: {
             query?: never;
             header?: never;

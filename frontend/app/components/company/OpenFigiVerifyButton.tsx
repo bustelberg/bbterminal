@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
+import { useEventStream } from '../../../lib/hooks/useEventStream';
 import Spinner from '../Spinner';
 
 type Status = {
@@ -26,12 +27,20 @@ export default function OpenFigiVerifyButton({ onVerified }: { onVerified: () =>
   const [message, setMessage] = useState('');
   const [processed, setProcessed] = useState(0);
   const [total, setTotal] = useState(0);
-  const interval = useRef<number | null>(null);
+  // Watch progress over SSE (only while `running`); server closes on completion.
+  const { data: stream } = useEventStream(running ? '/api/companies/openfigi/verify/stream' : null);
 
-  const stop = useCallback(() => {
-    if (interval.current != null) { window.clearInterval(interval.current); interval.current = null; }
-  }, []);
-  useEffect(() => stop, [stop]);
+  useEffect(() => {
+    const s = stream.status as Status | undefined;
+    if (!s || !running) return;
+    setMessage(s.message ?? '');
+    setProcessed(s.processed ?? 0);
+    setTotal(s.total ?? 0);
+    if (!s.running) {
+      setRunning(false);
+      onVerified();
+    }
+  }, [stream.status, running, onVerified]);
 
   const start = useCallback(async () => {
     setRunning(true);
@@ -44,27 +53,8 @@ export default function OpenFigiVerifyButton({ onVerified }: { onVerified: () =>
       if (!d.started && !d.running) { setRunning(false); return; }
     } catch {
       setRunning(false);
-      return;
     }
-    stop();
-    interval.current = window.setInterval(async () => {
-      try {
-        const sr = await apiFetch(`${API_URL}/api/companies/openfigi/verify/status`);
-        const s: Status = await sr.json();
-        setMessage(s.message ?? '');
-        setProcessed(s.processed ?? 0);
-        setTotal(s.total ?? 0);
-        if (!s.running) {
-          stop();
-          setRunning(false);
-          onVerified();
-        }
-      } catch {
-        stop();
-        setRunning(false);
-      }
-    }, 1000);
-  }, [onVerified, stop]);
+  }, []);
 
   const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
 

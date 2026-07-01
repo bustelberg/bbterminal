@@ -13,6 +13,11 @@ import { apiFetch } from '../apiFetch';
  * success) and the last error (cleared on the next success). A non-2xx
  * response is ignored (keeps the prior data) rather than surfaced as an
  * error. Pass `url = null` to disable.
+ *
+ * Polling PAUSES while the tab is hidden (Page Visibility API) and resumes with
+ * an immediate catch-up fetch when it's shown again — so a backgrounded page
+ * (e.g. /schedule left open in another tab) stops hammering the API for status
+ * nobody's looking at.
  */
 export function usePollingFetch<T>(
   url: string | null,
@@ -24,6 +29,8 @@ export function usePollingFetch<T>(
   useEffect(() => {
     if (!url) return;
     let cancelled = false;
+    let timer: number | undefined;
+
     const poll = async () => {
       try {
         const r = await apiFetch(url);
@@ -34,9 +41,25 @@ export function usePollingFetch<T>(
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       }
     };
-    void poll();
-    const id = window.setInterval(poll, intervalMs);
-    return () => { cancelled = true; window.clearInterval(id); };
+
+    const start = () => { if (timer == null) timer = window.setInterval(poll, intervalMs); };
+    const stop = () => { if (timer != null) { window.clearInterval(timer); timer = undefined; } };
+    const onVisibility = () => {
+      if (document.hidden) {
+        stop();               // no requests while nobody's looking
+      } else {
+        void poll();          // catch up immediately on return
+        start();
+      }
+    };
+
+    if (!document.hidden) { void poll(); start(); }
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      cancelled = true;
+      stop();
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, [url, intervalMs]);
 
   return { data, error };

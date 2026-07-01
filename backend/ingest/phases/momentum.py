@@ -161,6 +161,9 @@ def _run_momentum_phase(
                     strategy_id=strategy_id,
                     ingest_run_id=run_id,
                     is_backfill=False,
+                    # Live cash % from the strategy config (not the rebalance
+                    # snapshot's), so an admin's cash change applies on this tick.
+                    cash_pct=float((sched.get("config") or {}).get("cash_pct") or 0.0),
                 )
                 if snapshot_id is None:
                     # No prior rebalance to price-update from. The very
@@ -350,6 +353,21 @@ def _run_momentum_phase(
                         run_id, strategy_name, type(e).__name__, e,
                     )
 
+            # Cash sleeve: scale every holding (stocks + any ETF overlay) by
+            # (1-cash) and append a flat 0%-return cash holding, so the reported
+            # weights + return pick up the cash drag. Sits on top of the overlay.
+            cash_pct = float(cfg.get("cash_pct") or 0.0)
+            if cash_pct > 0:
+                try:
+                    n_cash = _apply_cash_to_snapshot(int(snapshot_id), cash_pct)
+                    if n_cash is not None:
+                        holdings_count = n_cash
+                except Exception as e:
+                    log.warning(
+                        "[pipeline.momentum] run_id=%s strategy=%s cash sleeve failed: %s: %s",
+                        run_id, strategy_name, type(e).__name__, e,
+                    )
+
             entry["snapshot_id"] = snapshot_id
             entry["holdings_count"] = holdings_count
             entry["latest_price_date"] = latest_price_date
@@ -378,6 +396,32 @@ def _run_momentum_phase(
         raise RuntimeError(
             f"{len(errors)} of {total} strategies failed: " + " | ".join(errors[:3])
         )
+
+
+def _apply_cash_to_snapshot(snapshot_id: int, cash_pct: float) -> int | None:
+    """Apply a cash sleeve to a stored snapshot's holdings IN PLACE: strip any
+    existing cash, scale the rest by (1-cash), append the flat 0%-return cash
+    holding, and recompute `period_return_pct` off the single source of truth.
+    Returns the new holdings count (None if the snapshot is gone). Idempotent."""
+    from momentum.portfolio_math import (  # noqa: PLC0415
+        apply_cash_allocation,
+        portfolio_eur_return_pct,
+    )
+    snap = (
+        supabase.table("current_picks_snapshot")
+        .select("holdings")
+        .eq("snapshot_id", snapshot_id)
+        .limit(1)
+        .execute()
+    ).data
+    if not snap:
+        return None
+    holdings = apply_cash_allocation(snap[0].get("holdings") or [], cash_pct)
+    supabase.table("current_picks_snapshot").update({
+        "holdings": holdings,
+        "period_return_pct": portfolio_eur_return_pct(holdings),
+    }).eq("snapshot_id", snapshot_id).execute()
+    return len(holdings)
 
 
 def _apply_etf_overlay_to_snapshot(snapshot_id: int, etf_overlay: list[dict]) -> int | None:
@@ -474,20 +518,45 @@ def _apply_etf_overlay_to_snapshot(snapshot_id: int, etf_overlay: list[dict]) ->
     return len(merged)
 
 
+def _price_update_marks_sig(holdings: list[dict] | None) -> tuple:
+    """Order-independent signature of the per-holding marks that DEFINE a
+    price_update snapshot: (company_id, side, exit_date, exit_price_local,
+    forward_return_pct). Two snapshots with the same signature are genuine
+    duplicates; a different signature means a holding's mark moved."""
+    out: list[tuple] = []
+    for h in holdings or []:
+        exit_local = h.get("exit_price_local")
+        fwd = h.get("forward_return_pct")
+        out.append((
+            h.get("company_id"),
+            h.get("side") or "long",
+            str(h.get("exit_date") or ""),
+            round(float(exit_local), 6) if exit_local is not None else None,
+            round(float(fwd), 4) if fwd is not None else None,
+        ))
+    out.sort(key=lambda t: (t[0] if t[0] is not None else 0, t[1]))
+    return tuple(out)
+
+
 def _dedupe_price_update(strategy_id: int, new_snapshot_id: int, new_row: dict) -> int | None:
     """Same-period dedup, shared by the smart momentum phase + daily MTD.
 
-    If a snapshot identical to the just-inserted one already exists for the
-    SAME strategy + open period (`as_of_date`) + `latest_price_date`, delete
-    the redundant new row and return the surviving snapshot_id. Returns None
-    when there's no duplicate (the new row stands)."""
+    Deletes the just-inserted snapshot and returns the surviving one ONLY when an
+    existing snapshot for the SAME strategy + open period (`as_of_date`) +
+    `latest_price_date` ALSO has identical per-holding marks. The holdings check
+    is essential, not cosmetic: `latest_price_date` is the MAX exit date across
+    holdings, so a lagging ETF catching up to a company's already-max date leaves
+    the max unchanged while its OWN price/return moved — the date-only key wrongly
+    treated that as a no-op and DELETED the fresh snapshot, freezing the ETF's
+    mark on every affected strategy. Returns None when there's no true duplicate
+    (the new row stands)."""
     new_as_of = new_row.get("as_of_date")
     new_lpd = new_row.get("latest_price_date")
     if not new_as_of or not new_lpd:
         return None
     dup = (
         supabase.table("current_picks_snapshot")
-        .select("snapshot_id")
+        .select("snapshot_id, holdings")
         .eq("scheduled_strategy_id", strategy_id)
         .eq("as_of_date", new_as_of)
         .eq("latest_price_date", new_lpd)
@@ -498,7 +567,12 @@ def _dedupe_price_update(strategy_id: int, new_snapshot_id: int, new_row: dict) 
     )
     if not dup.data:
         return None
-    surviving = int(dup.data[0]["snapshot_id"])
+    prior = dup.data[0]
+    if _price_update_marks_sig(new_row.get("holdings")) != _price_update_marks_sig(prior.get("holdings")):
+        # A mark actually changed (e.g. a lagging ETF caught up) — the snapshots
+        # only SHARE a max date; they are NOT duplicates. Keep the fresh one.
+        return None
+    surviving = int(prior["snapshot_id"])
     supabase.table("current_picks_snapshot").delete().eq(
         "snapshot_id", new_snapshot_id
     ).execute()

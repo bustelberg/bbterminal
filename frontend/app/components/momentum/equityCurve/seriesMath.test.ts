@@ -8,10 +8,28 @@ import {
   alignSeries,
   computeYearlySubplots,
   endOfMonth,
+  scaleCumCurve,
   seriesFromMonthly,
   seriesFromPrices,
   type ResolvedSeries,
 } from './seriesMath';
+
+describe('scaleCumCurve (cash sleeve on a cumulative-return curve)', () => {
+  it('halves every period return at 50% cash and recompounds', () => {
+    const pts = [
+      { date: '2026-01-01', cumulative_return_pct: 10 },
+      { date: '2026-01-02', cumulative_return_pct: 21 }, // +10% day 2
+    ];
+    const out = scaleCumCurve(pts, 0.5);
+    expect(out[0].cumulative_return_pct).toBeCloseTo(5, 6);
+    expect(out[1].cumulative_return_pct).toBeCloseTo(10.25, 6); // 1.05*1.05-1
+  });
+
+  it('is a no-op at 0 cash and preserves other fields', () => {
+    const pts = [{ date: '2026-01-01', cumulative_return_pct: 10, extra: 'x' }];
+    expect(scaleCumCurve(pts, 0)).toEqual(pts);
+  });
+});
 
 // ─── endOfMonth ─────────────────────────────────────────────────────
 

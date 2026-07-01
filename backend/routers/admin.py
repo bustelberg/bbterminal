@@ -606,11 +606,12 @@ async def get_schedule_risk_metrics(strategy_id: int, authorization: str = Heade
     _require_admin(authorization)
 
     def _query() -> dict:
-        from routers._schedule_hydration import _load_backtest_pts  # noqa: PLC0415
+        from routers._schedule_hydration import _curve_stats, _load_backtest_pts  # noqa: PLC0415
         from routers.momentum.backtest_crud import load_backtest_result_sync  # noqa: PLC0415
 
         strat = _load_strategy_row(strategy_id)
         run_id = strat.get("backtest_run_id")
+        cash_pct = float((strat.get("config") or {}).get("cash_pct") or 0.0)
         base = {
             "strategy_id": strat["id"],
             "name": strat.get("name") or f"Strategy #{strat['id']}",
@@ -632,12 +633,26 @@ async def get_schedule_risk_metrics(strategy_id: int, authorization: str = Heade
             cfg = strat.get("config") or {}
             period = {"start_date": cfg.get("start_date"), "end_date": cfg.get("end_date")}
         base.update({
+            # Sharpe/Sortino are cash-INVARIANT (mean & vol both scale by
+            # (1-cash), so the ratio is unchanged) — use the stored values.
             "sharpe_ratio": summary.get("sharpe_ratio"),
             "sortino_ratio": summary.get("sortino_ratio"),
             "annualized_return_pct": summary.get("annualized_return_pct"),
             "max_drawdown_pct": summary.get("max_drawdown_pct"),
             "period": period,
         })
+        # Cash drag DOES scale annualized return + max drawdown. Recompute
+        # annualized off the cash-scaled curve; scale the stored max-drawdown by
+        # the magnitude ratio (preserves its sign convention). No-op at cash=0.
+        if cash_pct > 0 and pts and len(pts) >= 2:
+            scaled = _load_backtest_pts(int(run_id), cash_pct)
+            ann_scaled, mdd_scaled = _curve_stats(scaled)
+            _, mdd_base = _curve_stats(pts)
+            if ann_scaled is not None:
+                base["annualized_return_pct"] = round(ann_scaled, 2)
+            stored_mdd = summary.get("max_drawdown_pct")
+            if stored_mdd is not None and mdd_base and mdd_scaled is not None:
+                base["max_drawdown_pct"] = round(stored_mdd * (mdd_scaled / mdd_base), 2)
         return base
 
     return await asyncio.to_thread(_query)
@@ -692,9 +707,10 @@ async def get_schedule_performance(strategy_id: int, authorization: str = Header
         }
         if not run_id:
             return base
+        cash_pct = float((strat.get("config") or {}).get("cash_pct") or 0.0)
         snapshots = _strategy_snapshots(strategy_id)
         rets = _returns_from_backtest(
-            int(run_id), inception_iso, _now_utc().date(), snapshots
+            int(run_id), inception_iso, _now_utc().date(), snapshots, cash_pct=cash_pct
         )
         if rets:
             base.update({
@@ -703,7 +719,7 @@ async def get_schedule_performance(strategy_id: int, authorization: str = Header
                 "mtd_return_pct": rets.get("mtd_return_pct"),
             })
         base["daily_returns"] = _daily_returns_since(
-            _extended_curve(int(run_id), snapshots), inception_iso
+            _extended_curve(int(run_id), snapshots, cash_pct), inception_iso
         )
         return base
 

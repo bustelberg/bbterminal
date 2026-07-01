@@ -37,7 +37,7 @@ import asyncio
 import threading
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Body, Header, HTTPException
+from fastapi import APIRouter, Body, Header, HTTPException, Request
 
 from common.cron import verify_cron_secret
 from deps import supabase
@@ -366,6 +366,42 @@ async def schedule_upcoming():
     }
 
 
+@router.get("/api/schedule/stream")
+async def schedule_stream(request: Request):
+    """SSE push of the /schedule "Smart pipeline activity" dashboard — emits each
+    topic (upcoming, held, strategies, runs, usage, price/universe coverage) only
+    when it changes, replacing the page's 7-endpoint polling with ONE connection.
+    Each topic recomputes on its own cadence: fast (~2s) while a pipeline run is
+    in flight, slow when idle; the heavy coverage aggregations stay at 30s/5min.
+    Admin-consumed (the activity card is admin-only)."""
+    from fastapi import Response as _Resp  # noqa: PLC0415
+    from routers._sse_stream import snapshot_stream_response  # noqa: PLC0415
+    from routers.scheduled_strategies import (  # noqa: PLC0415
+        list_held_companies,
+        list_scheduled_strategies,
+    )
+    from routers.system import api_usage, price_coverage, universe_coverage  # noqa: PLC0415
+
+    def _running(latest: dict) -> bool:
+        up = latest.get("upcoming")
+        return bool(isinstance(up, dict) and up.get("running"))
+
+    # Per-topic recompute interval: fast while a run is active, slow when idle.
+    fast_slow = lambda latest: 2.0 if _running(latest) else 20.0  # noqa: E731
+    cov_interval = lambda latest: 30.0 if _running(latest) else 300.0  # noqa: E731
+
+    topics = {
+        "upcoming": (lambda: schedule_upcoming(), fast_slow),
+        "held": (lambda: list_held_companies(request), fast_slow),
+        "strategies": (lambda: list_scheduled_strategies(request), fast_slow),
+        "runs": (lambda: list_ingest_runs(limit=20), fast_slow),
+        "usage": (lambda: api_usage(), fast_slow),
+        "price_coverage": (lambda: price_coverage(_Resp()), cov_interval),
+        "universe_coverage": (lambda: universe_coverage(_Resp()), cov_interval),
+    }
+    return snapshot_stream_response(request, topics)
+
+
 @router.get("/api/schedule/plan")
 async def schedule_plan():
     """The most recent smart-pipeline run's derived plan, for the /schedule
@@ -407,6 +443,25 @@ async def get_ingest_run(run_id: int):
     if not resp.data:
         raise HTTPException(404, "Run not found")
     return resp.data[0]
+
+
+@router.get("/api/ingest/runs/{run_id}/stream")
+async def stream_ingest_run(run_id: int, request: Request):
+    """SSE push of one `ingest_run` row until it reaches a terminal status — for
+    the transient 'watch this job to completion' UIs (market-cap / OpenFIGI /
+    stale-price / per-universe refresh). Replaces their 2s polling; closes itself
+    once the run finishes."""
+    from routers._sse_stream import run_detail_stream_response  # noqa: PLC0415
+
+    async def _build() -> dict:
+        try:
+            return await get_ingest_run(run_id)
+        except HTTPException:
+            # Not found yet (a just-spawned run) — keep the stream open as
+            # 'running' so the client waits for the row to appear.
+            return {"run_id": run_id, "status": "running", "current_message": "Queued…"}
+
+    return run_detail_stream_response(request, _build)
 
 
 @router.get("/api/ingest/runs/{run_id}/templates/{template_key}/membership")

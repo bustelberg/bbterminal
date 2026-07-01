@@ -2198,6 +2198,22 @@
         "title": "RenameCurrentPicksRequest",
         "type": "object"
       },
+      "ReorderRequest": {
+        "properties": {
+          "ordered_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Ordered Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ordered_ids"
+        ],
+        "title": "ReorderRequest",
+        "type": "object"
+      },
       "ResolveNameResponse": {
         "properties": {
           "currency": {
@@ -2582,6 +2598,19 @@
         "title": "ScreenRequest",
         "type": "object"
       },
+      "SetCashRequest": {
+        "properties": {
+          "cash_pct": {
+            "title": "Cash Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "cash_pct"
+        ],
+        "title": "SetCashRequest",
+        "type": "object"
+      },
       "SetRoleRequest": {
         "properties": {
           "role": {
@@ -2680,6 +2709,11 @@
               }
             ],
             "title": "Benchmark Id"
+          },
+          "is_cash": {
+            "default": false,
+            "title": "Is Cash",
+            "type": "boolean"
           },
           "weight_pct": {
             "title": "Weight Pct",
@@ -5357,6 +5391,26 @@
         ]
       }
     },
+    "/api/companies/market-cap/refresh/stream": {
+      "get": {
+        "description": "SSE push of the market-cap refresh status until it finishes \u2014 replaces the\nbutton's 1s poll; closes itself when `running` goes false.",
+        "operationId": "market_cap_refresh_stream_api_companies_market_cap_refresh_stream_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Market Cap Refresh Stream",
+        "tags": [
+          "companies"
+        ]
+      }
+    },
     "/api/companies/memberships": {
       "get": {
         "description": "Distinct universe labels per company. Computed server-side via the\n`company_universe_labels` RPC; backed by an index on\nuniverse_membership(company_id) so the aggregate is fast even when the\ntable holds millions of per-month rows. Returns\n`{memberships: {company_id: [labels]}}`.\n\nPagination: the cloud Supabase project caps PostgREST responses at\n`db-max-rows=1000` per request (local Docker Supabase is bumped to\n10000 in `supabase/config.toml`, which hides the cap during dev). The\nRPC returns ~2800 rows in prod, so without paging we'd silently miss\nthe membership chips for every company past offset 1000 \u2014 see the\n2G Energy AG / cid=4875 incident on 2026-05-22. The loop here pages\nvia `.range()` until a partial page comes back.",
@@ -5412,6 +5466,26 @@
           }
         },
         "summary": "Openfigi Verify Status",
+        "tags": [
+          "companies"
+        ]
+      }
+    },
+    "/api/companies/openfigi/verify/stream": {
+      "get": {
+        "description": "SSE push of the OpenFIGI verify status until it finishes \u2014 replaces the\nbutton's 1s poll; closes itself when `running` goes false.",
+        "operationId": "openfigi_verify_stream_api_companies_openfigi_verify_stream_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Openfigi Verify Stream",
         "tags": [
           "companies"
         ]
@@ -5567,6 +5641,48 @@
         ]
       }
     },
+    "/api/data/latest-close": {
+      "get": {
+        "description": "Latest close-price date per company id \u2014 comma-separated `ids` (\u2264200).\nLets the /schedule stale-price refresh show exactly how far each company's\nprice data now extends AFTER a re-fetch (including names that caught up and\ndropped off the worklist). Returns `{\"dates\": {\"<id>\": \"YYYY-MM-DD\" | null}}`.\nNot cached \u2014 it's read right after a fetch to confirm what landed.",
+        "operationId": "latest_close_api_data_latest_close_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Ids",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Latest Close",
+        "tags": [
+          "system"
+        ]
+      }
+    },
     "/api/data/latest-price-date": {
       "get": {
         "description": "Most recent close-price observation across all companies. The\n/backtest page uses this as the default end-date \u2014 \"test up to\nhowever current our data is.\" The `source_code = 'gurufocus'` filter is\nload-bearing: it lets Postgres serve this via the\n`idx_metric_data_source_date` (source_code, target_date) index as a\nbackward scan. Without it there's no usable index for\n`metric_code = \u2026 ORDER BY target_date DESC`, so prod seq-scans the whole\n`metric_data` table and trips the statement timeout (57014).",
@@ -5602,6 +5718,48 @@
           }
         },
         "summary": "Price Coverage",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/data/stale-prices": {
+      "get": {
+        "description": "The most-outdated ACTIVE companies by latest close date \u2014 the month-end\nfull-price-refresh worklist. Returns up to `limit` companies whose latest\nclose lags the freshest close held anywhere (\u22651 trading day behind),\noldest-first, each enriched with name / ticker / exchange + how many trading\ndays behind. Delisted / out-of-scope / illiquid are excluded (expected-stale,\nnot refresh targets). `total_stale` is the full count behind the reference so\nthe UI can note when the list is truncated to `limit`. Cached 1 min (the\naggregation isn't cheap).",
+        "operationId": "stale_prices_api_data_stale_prices_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stale Prices",
         "tags": [
           "system"
         ]
@@ -7512,6 +7670,47 @@
         ]
       }
     },
+    "/api/ingest/runs/{run_id}/stream": {
+      "get": {
+        "description": "SSE push of one `ingest_run` row until it reaches a terminal status \u2014 for\nthe transient 'watch this job to completion' UIs (market-cap / OpenFIGI /\nstale-price / per-universe refresh). Replaces their 2s polling; closes itself\nonce the run finishes.",
+        "operationId": "stream_ingest_run_api_ingest_runs__run_id__stream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Ingest Run",
+        "tags": [
+          "ingest"
+        ]
+      }
+    },
     "/api/ingest/runs/{run_id}/templates/{template_key}/membership": {
       "get": {
         "description": "Universe membership captured by this run's templates phase, for\nthe given `template_key`. Reads `universe_id` + `this_month` from\nthe run's `templates_summary` array entry (set by the templates\nphase as each template's refresh completes). Returns 404 when the\nrun didn't include the requested template, or when its diff entry\nfailed (no `this_month`).",
@@ -9080,6 +9279,26 @@
         ]
       }
     },
+    "/api/schedule/stream": {
+      "get": {
+        "description": "SSE push of the /schedule \"Smart pipeline activity\" dashboard \u2014 emits each\ntopic (upcoming, held, strategies, runs, usage, price/universe coverage) only\nwhen it changes, replacing the page's 7-endpoint polling with ONE connection.\nEach topic recomputes on its own cadence: fast (~2s) while a pipeline run is\nin flight, slow when idle; the heavy coverage aggregations stay at 30s/5min.\nAdmin-consumed (the activity card is admin-only).",
+        "operationId": "schedule_stream_api_schedule_stream_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Schedule Stream",
+        "tags": [
+          "ingest"
+        ]
+      }
+    },
     "/api/schedule/upcoming": {
       "get": {
         "description": "Backs the /schedule \"Pipeline activity\" strip.\n\nReturns the live scheduler job list (with next-fire times, straight\nfrom the in-process APScheduler so it's the single source of truth \u2014\nincluding one-shot catch-up jobs the bootstrap path schedules on app\nstart) plus every `ingest_run` currently in `status='running'`. The\nfrontend renders the running set as a \"Running now\" group and the\nrest as a chronological \"Upcoming\" list, marking a job busy when a\nrun that fires it is in flight.",
@@ -9196,6 +9415,46 @@
         ]
       }
     },
+    "/api/scheduled-strategies/reorder": {
+      "patch": {
+        "description": "Persist the drag-reordered display order: `sort_order = position` for each\nid in `ordered_ids` (top = 0). The list GET sorts by `sort_order` then\n`created_at`. Admin-only (the API gate blocks non-admin writes here).",
+        "operationId": "reorder_scheduled_strategies_api_scheduled_strategies_reorder_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reorder Scheduled Strategies",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
     "/api/scheduled-strategies/{strategy_id}": {
       "delete": {
         "description": "Remove from the schedule. Past snapshots are preserved (the\nsnapshot's `scheduled_strategy_id` FK is set to NULL via the\nforeign-key cascade, so they're orphaned but visible for historical\ninspection).",
@@ -9281,6 +9540,57 @@
           }
         },
         "summary": "Patch Scheduled Strategy",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
+    "/api/scheduled-strategies/{strategy_id}/cash": {
+      "patch": {
+        "description": "Set a strategy's CASH allocation (0..1). Cash scales every other holding's\nweight by (1-cash) and adds a flat 0%-return cash sleeve, so the reported\nweights + the return pick up the cash drag. Re-prices the strategy\nimmediately so the new weighting shows at once (no wait for the daily tick).\n\nAdmin-only: the API gate blocks all non-admin writes here, so read-only users\ncan see the cash allocation but can't change it.",
+        "operationId": "set_strategy_cash_api_scheduled_strategies__strategy_id__cash_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCashRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Strategy Cash",
         "tags": [
           "schedule"
         ]
@@ -10436,6 +10746,26 @@
           }
         },
         "summary": "Api Usage",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/usage/stream": {
+      "get": {
+        "description": "SSE push of the GuruFocus usage counter \u2014 emits only when it changes,\nreplacing the `ApiUsageBadge`'s 60s poll. Recomputes every 30s server-side.",
+        "operationId": "usage_stream_api_usage_stream_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Usage Stream",
         "tags": [
           "system"
         ]

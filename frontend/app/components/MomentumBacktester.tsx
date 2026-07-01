@@ -340,6 +340,7 @@ export default function MomentumBacktester() {
   const {
     saving,
     handleAddVariantToSchedule,
+    handleScheduleLoadedRun,
     saveVariantsBundle,
     defaultVariantsBundleName,
   } = useVariantsBundle({ config, variantSel, selectedIndexUniverse, sectorEtfs, loadSavedRuns });
@@ -681,7 +682,7 @@ export default function MomentumBacktester() {
               </div>
             )}
             {loadedRunId && (
-              <div className="bg-accent-500/10 border border-accent-500/20 rounded-lg px-4 py-3 text-accent-400 text-sm flex items-center gap-2">
+              <div className="bg-accent-500/10 border border-accent-500/20 rounded-lg px-4 py-3 text-accent-400 text-sm flex items-center gap-2 flex-wrap">
                 <span>Saved as</span>
                 <span className="text-accent-300 font-medium">
                   {savedRuns.find((r) => r.run_id === loadedRunId)?.name}
@@ -690,6 +691,18 @@ export default function MomentumBacktester() {
                   <span className="text-accent-400/70 text-xs">
                     · {Object.keys(variants).length} variants
                   </span>
+                )}
+                {/* Single loaded run has no Variants row (that's where the
+                    per-variant "+ Schedule" lives), so offer scheduling here. */}
+                {!hasVariants && (
+                  <button
+                    type="button"
+                    onClick={() => void handleScheduleLoadedRun()}
+                    title="Add this saved backtest to /schedule as a live strategy the pipeline keeps up to date."
+                    className="ml-auto text-[11px] font-medium uppercase tracking-wider px-2 py-1 rounded border border-accent-500/40 text-accent-300 bg-accent-500/10 hover:bg-accent-500/20 transition-colors"
+                  >
+                    + Schedule
+                  </button>
                 )}
               </div>
             )}

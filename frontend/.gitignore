@@ -17,7 +17,7 @@
 /playwright-report/
 /playwright/.cache/
 
-# eslint incremental cache (written by the lint-staged pre-commit hook)
+# eslint incremental cache (written by `npx eslint --cache` on manual runs)
 /.eslintcache
 
 # next.js

@@ -53,6 +53,28 @@ export function useScheduledStrategies() {
     }
   }, []);
 
+  /** Persist a drag-reordered list (admin only). Optimistically reorders local
+   * state, then PATCHes the new order; reloads to reconcile on failure. */
+  const reorderStrategies = useCallback(async (orderedIds: number[]) => {
+    setStrategies((prev) => {
+      const byId = new Map(prev.map((s) => [s.id, s]));
+      const next = orderedIds.map((id) => byId.get(id)).filter((s): s is ScheduledStrategy => !!s);
+      for (const s of prev) if (!orderedIds.includes(s.id)) next.push(s); // safety
+      return next;
+    });
+    try {
+      const r = await apiFetch(`${API_URL}/api/scheduled-strategies/reorder`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ordered_ids: orderedIds }),
+      });
+      if (!r.ok) { setError(`Reorder failed: ${r.status}`); await loadStrategies(); }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      await loadStrategies();
+    }
+  }, [loadStrategies]);
+
   useEffect(() => {
     void loadStrategies();
   }, [loadStrategies]);
@@ -191,5 +213,6 @@ export function useScheduledStrategies() {
     removeStrategy,
     removeAllStrategies,
     setUserVisible,
+    reorderStrategies,
   };
 }

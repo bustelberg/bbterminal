@@ -26,6 +26,19 @@ import type { UseBacktestConfigResult } from './useBacktestConfig';
 import type { UseVariantSelectionResult } from './useVariantSelection';
 import { parseMinScoreList, parseNumList } from './variantHelpers';
 
+// Map a backtest's `rebalance_frequency` to a pipeline schedule cadence.
+// Off-cadence months round to quarterly (rare; the cadence only controls how
+// often the pipeline refreshes the snapshot, not the strategy's own rebalance).
+const FREQ_MAP: Record<string, string> = {
+  daily: 'daily', weekly: 'weekly', monthly: 'monthly',
+  every_2_months: 'bimonthly',
+  every_3_months: 'quarterly', every_4_months: 'quarterly',
+  every_5_months: 'quarterly', every_6_months: 'quarterly',
+  every_7_months: 'quarterly', every_8_months: 'quarterly',
+  every_9_months: 'quarterly', every_10_months: 'quarterly',
+  every_11_months: 'quarterly', every_12_months: 'quarterly',
+};
+
 export function useVariantsBundle({
   config,
   variantSel,
@@ -59,20 +72,6 @@ export function useVariantsBundle({
       await dialog.alert(`Couldn't parse variant key "${variantKey}".`, { title: 'Schedule add failed' });
       return;
     }
-    // Map the variant's `rebalance_frequency` to a schedule cadence.
-    // Off-cadence months (4/5/7/8/10/11) round to quarterly — those
-    // variants are rare and the cadence pinning isn't strict (the
-    // strategy still rebalances on its own internal cadence; this
-    // controls how often the pipeline refreshes the snapshot).
-    const FREQ_MAP: Record<string, string> = {
-      daily: 'daily', weekly: 'weekly', monthly: 'monthly',
-      every_2_months: 'bimonthly',
-      every_3_months: 'quarterly', every_4_months: 'quarterly',
-      every_5_months: 'quarterly', every_6_months: 'quarterly',
-      every_7_months: 'quarterly', every_8_months: 'quarterly',
-      every_9_months: 'quarterly', every_10_months: 'quarterly',
-      every_11_months: 'quarterly', every_12_months: 'quarterly',
-    };
     const scheduleFreq = FREQ_MAP[v.frequency] ?? 'monthly';
 
     // Scheduled strategies default to the product name "MomentumTopSelectie";
@@ -220,6 +219,66 @@ export function useVariantsBundle({
         `Failed to schedule "${enteredName}": ${e instanceof Error ? e.message : String(e)}`,
         { title: 'Schedule add failed' },
       );
+    }
+  };
+
+  /** Schedule the currently-loaded SINGLE saved backtest as a strategy. The run
+   * is already persisted, so we link the scheduled_strategy straight to its
+   * `backtest_run_id` with its own saved config (authoritative — independent of
+   * any un-run UI tweaks). The Variants table's per-row "+ Schedule" covers
+   * sweeps; this covers a plain loaded run, which has no variant row. */
+  const handleScheduleLoadedRun = async () => {
+    const runId = momentumStore.get().loadedRunId;
+    if (runId == null) {
+      await dialog.alert('Load a saved backtest first, then schedule it.', { title: 'Schedule failed' });
+      return;
+    }
+    // Pull the saved run's authoritative config (frequency + all dials).
+    let cfg: Record<string, unknown>;
+    try {
+      const resp = await apiFetch(`${API_URL}/api/momentum/backtests/${runId}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      cfg = (data.config ?? {}) as Record<string, unknown>;
+    } catch (e) {
+      await dialog.alert(`Couldn't read the backtest's config: ${e instanceof Error ? e.message : String(e)}`, { title: 'Schedule failed' });
+      return;
+    }
+    const freq = String(cfg.rebalance_frequency ?? 'monthly');
+    const scheduleFreq = FREQ_MAP[freq] ?? 'monthly';
+    const enteredName = await dialog.prompt(
+      `Save this backtest to /schedule. Pipeline cadence: ${scheduleFreq} (from "${freq}").`,
+      {
+        title: 'Schedule this backtest',
+        defaultValue: 'MomentumTopSelectie',
+        placeholder: 'Strategy name',
+        chainLoading: 'Scheduling…',
+      },
+    );
+    if (!enteredName || !enteredName.trim()) { dialog.close(); return; }
+    try {
+      const r = await apiFetch(`${API_URL}/api/scheduled-strategies`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: enteredName.trim(),
+          frequency: scheduleFreq,
+          config: cfg,
+          backtest_run_id: runId,
+        }),
+      });
+      if (!r.ok) {
+        const body = await r.text().catch(() => '');
+        await dialog.alert(`Failed to schedule "${enteredName}": ${r.status} ${body.slice(0, 240)}`, { title: 'Schedule failed' });
+        return;
+      }
+      loadSavedRuns();
+      await dialog.alert(
+        `"${enteredName}" added to /schedule. The full backtest history is preserved; the next pipeline tick will start appending live snapshots.`,
+        { title: 'Backtest scheduled' },
+      );
+    } catch (e) {
+      await dialog.alert(`Failed to schedule "${enteredName}": ${e instanceof Error ? e.message : String(e)}`, { title: 'Schedule failed' });
     }
   };
 
@@ -376,5 +435,5 @@ export function useVariantsBundle({
     setSaving(false);
   };
 
-  return { saving, handleAddVariantToSchedule, saveVariantsBundle, defaultVariantsBundleName };
+  return { saving, handleAddVariantToSchedule, handleScheduleLoadedRun, saveVariantsBundle, defaultVariantsBundleName };
 }

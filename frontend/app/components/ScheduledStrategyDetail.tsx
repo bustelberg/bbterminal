@@ -161,7 +161,12 @@ export default function ScheduledStrategyDetail({
     <div className="px-5 py-4 bg-sidebar border-t border-neutral-800/30 space-y-4">
       {/* Current live portfolio — the most actionable view, shown first: what
           you hold, target vs drifted weight, the rebalance action, and ISIN. */}
-      <CurrentPortfolioCard snapshotId={data.runs?.[0]?.snapshot_id ?? null} />
+      <CurrentPortfolioCard
+        snapshotId={data.runs?.[0]?.snapshot_id ?? null}
+        strategyId={strategyId}
+        canEditCash={!readOnly}
+        onCashChanged={async () => { await load(); onMutated?.(); }}
+      />
 
       {/* Strategy params (collapsible — verbose enough to want to hide
           unless the user is checking what's actually scheduled). */}
@@ -215,7 +220,7 @@ export default function ScheduledStrategyDetail({
             {/* Source backtest — the variant's full equity curve, sector
                 timeline + per-month holdings, exactly as on /backtest, with
                 the red dashed go-live marker at the date above. */}
-            <SourceBacktestCard runId={data.backtest_run_id} markerDate={effectiveStart} liveCurve={data.live_curve} />
+            <SourceBacktestCard runId={data.backtest_run_id} markerDate={effectiveStart} liveCurve={data.live_curve} cashPct={Number(data.config?.cash_pct ?? 0)} />
           </>
         );
       })()}

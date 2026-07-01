@@ -7,8 +7,7 @@
     "doc": "docs"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "prepare": "husky"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
     "type": "git",
@@ -23,8 +22,6 @@
   },
   "homepage": "https://github.com/bustelberg/bbterminal#readme",
   "devDependencies": {
-    "husky": "^9.1.7",
-    "lint-staged": "^16.4.0",
     "supabase": "^2.95.5"
   }
 }

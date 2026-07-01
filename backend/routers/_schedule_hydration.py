@@ -139,10 +139,62 @@ def _compute_period_returns(snapshots: list[dict], today: date) -> dict:
     }
 
 
-def _load_backtest_pts(backtest_run_id: int) -> list[tuple[str, float]]:
+def _scale_curve_returns(
+    pts: list[tuple[str, float]], cash_pct: float | None, *, as_pct: bool,
+) -> list[tuple[str, float]]:
+    """Apply a cash sleeve to a return curve: scale EVERY period's return by
+    `(1 - cash_pct)` and recompound. `pts` = `[(date, level)]`, where `level` is
+    cumulative return % when `as_pct` else equity (base 1.0). This is the exact
+    cash-drag transform of a curve — annualized return + drawdown shrink, while
+    Sharpe/Sortino (mean÷vol, both scaled) are unchanged. No-op when cash ≤ 0."""
+    pct = min(max(float(cash_pct or 0.0), 0.0), 1.0)
+    if not pts or pct <= 0.0:
+        return pts
+    scale = 1.0 - pct
+    out: list[tuple[str, float]] = []
+    prev_eq = 1.0
+    cur = 1.0
+    first = True
+    for d, lv in pts:
+        eq_in = (1.0 + float(lv) / 100.0) if as_pct else float(lv)
+        r = (eq_in - 1.0) if first else (eq_in / prev_eq - 1.0) if prev_eq else 0.0
+        first = False
+        cur *= (1.0 + r * scale)
+        prev_eq = eq_in
+        out.append((d, (cur - 1.0) * 100.0 if as_pct else cur))
+    return out
+
+
+def _curve_stats(pts: list[tuple[str, float]]) -> tuple[float | None, float | None]:
+    """`(annualized_return_pct, max_drawdown_magnitude_pct)` from a cumulative-
+    return-% curve `[(date, cum_pct)]`. maxdd is a POSITIVE magnitude. Both None
+    when the curve is too short. Used to recompute cash-adjusted risk stats."""
+    if not pts or len(pts) < 2:
+        return None, None
+    eqs = [(d, 1.0 + c / 100.0) for d, c in pts]
+    peak = eqs[0][1]
+    mdd = 0.0
+    for _, e in eqs:
+        if e > peak:
+            peak = e
+        if peak > 0:
+            mdd = max(mdd, (peak - e) / peak)
+    try:
+        d0 = date.fromisoformat(eqs[0][0][:10])
+        d1 = date.fromisoformat(eqs[-1][0][:10])
+        years = max((d1 - d0).days / 365.25, 1e-9)
+    except ValueError:
+        years = 1.0
+    final = eqs[-1][1]
+    ann = ((final ** (1.0 / years)) - 1.0) * 100.0 if final > 0 else None
+    return ann, mdd * 100.0
+
+
+def _load_backtest_pts(backtest_run_id: int, cash_pct: float = 0.0) -> list[tuple[str, float]]:
     """The saved backtest's daily equity curve as
-    ``[(YYYY-MM-DD, cumulative_return_pct), ...]`` ascending. Empty when the
-    run has no stored curve. Best-effort (storage errors → empty)."""
+    ``[(YYYY-MM-DD, cumulative_return_pct), ...]`` ascending, with the strategy's
+    cash sleeve applied (returns scaled by `1-cash_pct`). Empty when the run has
+    no stored curve. Best-effort (storage errors → empty)."""
     from routers.momentum.backtest_crud import load_backtest_result_sync  # noqa: PLC0415
 
     res = load_backtest_result_sync(backtest_run_id)
@@ -153,10 +205,10 @@ def _load_backtest_pts(backtest_run_id: int) -> list[tuple[str, float]]:
         if dt and cum is not None:
             pts.append((dt, float(cum)))
     pts.sort(key=lambda p: p[0])
-    return pts
+    return _scale_curve_returns(pts, cash_pct, as_pct=True)
 
 
-def _open_basket_live_curve(backtest_run_id: int) -> list[tuple[str, float]]:
+def _open_basket_live_curve(backtest_run_id: int, cash_pct: float = 0.0) -> list[tuple[str, float]]:
     """Dense DAILY equity curve (base 1.0) of the strategy's OPEN-period basket:
     the source backtest's last-period holdings, re-priced EVERY trading day in
     EUR from their entry through the latest available close.
@@ -283,7 +335,10 @@ def _open_basket_live_curve(backtest_run_id: int) -> list[tuple[str, float]]:
         if lr is None and sr is None:
             continue
         curve.append((d, 1.0 + (lr or 0.0) - (sr or 0.0)))
-    return curve
+    # This basket is FULLY invested (the backtest holdings carry no cash), so
+    # apply the strategy's cash sleeve here (unlike the snapshot walk, which is
+    # already cash-aware via period_return_pct).
+    return _scale_curve_returns(curve, cash_pct, as_pct=False)
 
 
 def _splice_snapshot_tail(
@@ -357,20 +412,21 @@ def _splice_snapshot_tail(
 
 
 def _extended_curve(
-    backtest_run_id: int, snapshots: list[dict],
+    backtest_run_id: int, snapshots: list[dict], cash_pct: float = 0.0,
 ) -> list[tuple[str, float]]:
     """The strategy's full equity curve: the backtest daily curve with the
-    live snapshot tail spliced on (continuous cumulative scale). The single
-    source of truth shared by the run-history rollups (`_returns_from_backtest`)
-    and the detail view's live curve (`build_live_curve`). Empty when the run
-    has no stored curve."""
-    bt_pts = _load_backtest_pts(backtest_run_id)
+    live snapshot tail spliced on (continuous cumulative scale), with the cash
+    sleeve applied. The single source of truth shared by the run-history rollups
+    (`_returns_from_backtest`) and the detail view's live curve
+    (`build_live_curve`). Empty when the run has no stored curve."""
+    bt_pts = _load_backtest_pts(backtest_run_id, cash_pct)   # cash-scaled
     if not bt_pts:
         return []
     # Prefer the dense daily open-basket curve (a point per trading day, matches
     # the holdings table's open-period figure); fall back to the sparse
-    # per-snapshot walk only when the basket can't be re-priced.
-    snap_curve = _open_basket_live_curve(backtest_run_id)
+    # per-snapshot walk only when the basket can't be re-priced. The open-basket
+    # is fully-invested → cash-scaled; the walk is already cash-aware → left as-is.
+    snap_curve = _open_basket_live_curve(backtest_run_id, cash_pct)
     if not snap_curve:
         snap_curve, _, _ = _walk_snapshot_curve(snapshots or [])
     cutover, tail = _splice_snapshot_tail(bt_pts, snap_curve)
@@ -389,6 +445,7 @@ def _returns_from_backtest(
     today: date,
     snapshots: list[dict] | None = None,
     clamp_calendar_to_inception: bool = True,
+    cash_pct: float = 0.0,
 ) -> dict | None:
     """MTD / YTD / since-inception returns read off the strategy's full
     equity curve (`_extended_curve`), anchored at the go-live date.
@@ -407,7 +464,7 @@ def _returns_from_backtest(
     reports a YTD of just its live performance (not the backtest's Jan→launch
     gains); for a strategy live since a prior year the calendar anchors apply
     unchanged. Returns None when the run has no curve."""
-    pts = _extended_curve(backtest_run_id, snapshots or [])
+    pts = _extended_curve(backtest_run_id, snapshots or [], cash_pct)
     if not pts:
         return None
     latest_date, latest_cum = pts[-1]
@@ -482,19 +539,21 @@ def _returns_from_backtest(
     }
 
 
-def build_live_curve(backtest_run_id: int, snapshots: list[dict]) -> dict | None:
+def build_live_curve(backtest_run_id: int, snapshots: list[dict], cash_pct: float = 0.0) -> dict | None:
     """The live-extension of a scheduled strategy's backtest curve, for the
     detail view's monthly-returns heatmap + equity curve.
 
     Splices the snapshot tail (`_splice_snapshot_tail`) onto the backtest
-    daily curve — same single source as the run-history rollups. Returns
-    ``{cutover_date, points, as_of_date}`` (the caller keeps backtest points
-    before `cutover_date` and appends `points`), or None when there's no
-    backtest curve / no live data fresher than the curve's end."""
-    bt_pts = _load_backtest_pts(backtest_run_id)
+    daily curve — same single source as the run-history rollups. The cash sleeve
+    is applied (the tail here is on the SAME rebased scale as the frontend's
+    pre-cutover backtest curve, which the frontend cash-scales client-side with
+    the `cash_pct` from the /runs response). Returns ``{cutover_date, points,
+    as_of_date}`` (the caller keeps backtest points before `cutover_date` and
+    appends `points`), or None when there's no backtest curve / no live data."""
+    bt_pts = _load_backtest_pts(backtest_run_id, cash_pct)
     if not bt_pts:
         return None
-    snap_curve = _open_basket_live_curve(backtest_run_id)
+    snap_curve = _open_basket_live_curve(backtest_run_id, cash_pct)
     if not snap_curve:
         snap_curve, _, _ = _walk_snapshot_curve(snapshots or [])
     cutover_date, tail = _splice_snapshot_tail(bt_pts, snap_curve)
@@ -597,6 +656,7 @@ def _hydrate(rows: list[dict]) -> list[dict]:
                         # Live-only clamp only when the user set an explicit
                         # go-live; otherwise full calendar (matches the chart).
                         clamp_calendar_to_inception=bool(r.get("start_date")),
+                        cash_pct=float((r.get("config") or {}).get("cash_pct") or 0.0),
                     )
                 except Exception:
                     bt = None

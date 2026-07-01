@@ -77,6 +77,51 @@ def _strategy_is_user_visible(strategy_id: int) -> bool:
     return bool(r.data and r.data[0].get("user_visible"))
 
 
+def _enrich_holdings_isin(holdings: list[dict]) -> list[dict]:
+    """Attach `isin` to each holding IN PLACE so the frontend renders it with
+    the snapshot itself — no separate /api/companies + /api/benchmarks fetch to
+    race (which made ETF ISINs pop in a beat after the stock ISINs). Stocks
+    (positive company_id) resolve from `company.isin`; ETF/bond sleeves (negative
+    company_id = `-benchmark_id`) from `benchmark.isin`. Best-effort: on any
+    lookup error the holdings are returned unchanged (the frontend still falls
+    back to the id→isin maps). Holdings are a small set (~tens), so no chunking."""
+    if not holdings:
+        return holdings
+    company_ids = sorted({
+        int(h["company_id"]) for h in holdings
+        if h.get("company_id") is not None and int(h["company_id"]) > 0
+    })
+    benchmark_ids = sorted({
+        -int(h["company_id"]) for h in holdings
+        if h.get("company_id") is not None and int(h["company_id"]) < 0
+    })
+    isin_by_company: dict[int, str] = {}
+    isin_by_benchmark: dict[int, str] = {}
+    try:
+        if company_ids:
+            r = supabase.table("company").select("company_id, isin").in_("company_id", company_ids).execute()
+            for c in r.data or []:
+                if c.get("isin"):
+                    isin_by_company[int(c["company_id"])] = c["isin"]
+        if benchmark_ids:
+            r = supabase.table("benchmark").select("benchmark_id, isin").in_("benchmark_id", benchmark_ids).execute()
+            for b in r.data or []:
+                if b.get("isin"):
+                    isin_by_benchmark[int(b["benchmark_id"])] = b["isin"]
+    except Exception as e:  # noqa: BLE001 — enrichment is best-effort
+        logging.getLogger(__name__).warning("holdings ISIN enrichment failed: %s: %s", type(e).__name__, e)
+        return holdings
+    for h in holdings:
+        cid = h.get("company_id")
+        if cid is None:
+            continue
+        cid = int(cid)
+        isin = isin_by_company.get(cid) if cid > 0 else isin_by_benchmark.get(-cid)
+        if isin and not h.get("isin"):
+            h["isin"] = isin
+    return holdings
+
+
 @router.get("/api/momentum/current-picks/{snapshot_id}")
 async def get_current_picks(snapshot_id: int, request: Request):
     """Full snapshot for one id, including holdings.
@@ -100,6 +145,8 @@ async def get_current_picks(snapshot_id: int, request: Request):
         sid = row.get("scheduled_strategy_id")
         if sid is None or not await asyncio.to_thread(_strategy_is_user_visible, sid):
             raise HTTPException(403, "Admin role required")
+    if isinstance(row.get("holdings"), list):
+        row["holdings"] = await asyncio.to_thread(_enrich_holdings_isin, row["holdings"])
     return row
 
 

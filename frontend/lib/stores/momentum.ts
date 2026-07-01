@@ -16,6 +16,14 @@ export type Holding = {
   weight: number;
   forward_return_pct: number | null;
   currency?: string | null;
+  // ISIN, attached at read time by the current-picks snapshot endpoint
+  // (`_enrich_holdings_isin`) so it arrives with the snapshot itself — the
+  // Current portfolio card reads this directly instead of racing a separate
+  // /api/companies + /api/benchmarks fetch. Null when unknown/out-of-scope.
+  isin?: string | null;
+  // Synthetic cash sleeve (company_id 0, flat 0% return) — the admin-set cash
+  // allocation. The Current-portfolio card renders it as a plain "Cash" row.
+  is_cash?: boolean;
   entry_price_local?: number | null;
   exit_price_local?: number | null;
   entry_price_eur?: number | null;

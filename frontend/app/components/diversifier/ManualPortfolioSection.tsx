@@ -38,6 +38,9 @@ export default function ManualPortfolioSection({
   const rows: { key: string; label: string; name?: string }[] = [
     { key: 'strategy', label: 'Strategy' },
     ...funds.map((f) => ({ key: String(f.benchmark_id), label: f.ticker, name: f.name })),
+    // Cash — a first-class asset in the mix (flat 0% return); set its % from the
+    // start just like an ETF. Always present so it can be weighted from the get-go.
+    { key: 'cash', label: 'Cash', name: 'flat 0% return' },
   ];
   // Effective value = user override ?? auto-default.
   const eff = (key: string, field: 'weight' | 'band') =>

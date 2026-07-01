@@ -120,6 +120,40 @@ _TARGETS: list[str] = _enumerate_targets()
 _preferred_lock = threading.Lock()
 _preferred: str = _TARGETS[0] if _TARGETS else ""
 
+# Targets that recently timed out or got Cloudflare-blocked. Deprioritised to the
+# BACK of the ladder for a TTL so a fingerprint Cloudflare is currently silently
+# dropping (typically the *newest* Chrome, tried first) isn't re-tried FIRST by
+# every worker on every call — which otherwise makes the whole pool re-eat a 30s
+# timeout each and spams the log ("chrome146 timeout → trying next" ad infinitum).
+# Still kept as a last resort (a drop may be transient); cleared on that target's
+# next success. Set GURUFOCUS_TARGET_FAILURE_TTL_S=0 to disable.
+_FAILED_TTL_S = float(os.environ.get("GURUFOCUS_TARGET_FAILURE_TTL_S", "300"))
+_failed_lock = threading.Lock()
+_recently_failed: dict[str, float] = {}
+
+
+def _note_target_failure(target: str) -> None:
+    """Mark `target` as recently-failed so the ladder deprioritises it."""
+    if _FAILED_TTL_S <= 0 or not target:
+        return
+    with _failed_lock:
+        _recently_failed[target] = time.time() + _FAILED_TTL_S
+
+
+def _active_failed_targets() -> set[str]:
+    """Currently-deprioritised targets, pruning expired entries in passing."""
+    now = time.time()
+    with _failed_lock:
+        for t in [t for t, exp in _recently_failed.items() if exp <= now]:
+            del _recently_failed[t]
+        return set(_recently_failed)
+
+
+def _clear_target_failure(target: str) -> None:
+    """Un-deprioritise `target` (called on its next success)."""
+    with _failed_lock:
+        _recently_failed.pop(target, None)
+
 # ── Proxy (for IP-block mitigation) ────────────────────────────────
 # Read at import — set GURUFOCUS_PROXY (or fall back to the standard
 # HTTPS_PROXY) before the backend starts. Empty string = direct
@@ -210,7 +244,9 @@ _circuit = _CircuitBreaker(
 )
 
 if _HAS_CURL_CFFI:
-    log.warning(
+    # INFO, not WARNING — it's boot config, nothing is wrong. Prod log level
+    # (INFO) still surfaces it for a `gurufocus` grep; local dev stays quiet.
+    log.info(
         "gurufocus http: curl_cffi ladder %s (preferred=%s) proxy=%s",
         _TARGETS, _preferred, _mask_proxy_url(_PROXY_URL) or "<direct>",
     )
@@ -344,13 +380,17 @@ def cf_get(
 
     with _preferred_lock:
         preferred = _preferred or _TARGETS[0]
-    # Build the try-order: preferred first, then anything else in
-    # ladder order, dedup'd. The preferred is usually equal to
-    # _TARGETS[0]; only diverges after a recovered block.
-    order: list[str] = [preferred]
-    for t in _TARGETS:
-        if t not in order:
-            order.append(t)
+    # Build the try-order: preferred first, then anything else in ladder order,
+    # dedup'd. The preferred is usually equal to _TARGETS[0]; only diverges after
+    # a recovered block. Then push any RECENTLY-FAILED target (timed out / CF-
+    # blocked) to the BACK so the pool stops re-trying a currently-dropped
+    # fingerprint first — the failing target is still kept as a last resort.
+    good: list[str] = []
+    for t in [preferred, *_TARGETS]:
+        if t not in good:
+            good.append(t)
+    failed = _active_failed_targets()
+    order = [t for t in good if t not in failed] + [t for t in good if t in failed]
 
     # Strip any caller-supplied User-Agent (case-insensitively). curl_cffi's
     # `impersonate=` sets a *full* set of browser-matching headers including
@@ -390,6 +430,7 @@ def cf_get(
             }
             if _is_cloudflare_block(resp.status_code, body):
                 saw_cf_block_this_call = True
+                _note_target_failure(target)
                 last = CfResponse(
                     status_code=resp.status_code,
                     text=body,
@@ -407,6 +448,7 @@ def cf_get(
             # Either 2xx, or a non-CF 4xx (real GuruFocus error — auth,
             # quota, unknown ticker). Pass it through; the caller will
             # log it.
+            _clear_target_failure(target)
             if target != preferred:
                 with _preferred_lock:
                     _preferred = target
@@ -425,6 +467,7 @@ def cf_get(
                 headers=resp_headers,
             )
         except Exception as e:
+            _note_target_failure(target)
             last = CfResponse(
                 status_code=None,
                 text="",

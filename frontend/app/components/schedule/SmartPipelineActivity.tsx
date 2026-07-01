@@ -8,8 +8,10 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { guruFocusUrl } from '../../../lib/gurufocusUrl';
 import { useNow } from '../../../lib/hooks/useNow';
 import { usePollingFetch } from '../../../lib/hooks/usePollingFetch';
+import { useEventStream } from '../../../lib/hooks/useEventStream';
+import { watchRun, type RunRow } from '../../../lib/watchRun';
 import CollapsibleCard from '../momentum/CollapsibleCard';
-import { relTime, formatExecAt, countdownLeft, countdownCompact } from './utils';
+import { relTime, formatExecAt, countdownLeft, formatDur } from './utils';
 import type {
   ScheduleUpcoming,
   HeldCompaniesResponse,
@@ -128,29 +130,43 @@ type UniverseStaleness = {
  * one while the other runs just queues it. Each section has its own status,
  * Run-now button, and detail. */
 export default function SmartPipelineActivity() {
-  // Poll fast (3s) only while a run is in flight so progress updates live;
-  // back off to 30s when idle. Idle is the common case (nobody's running
-  // anything), and these light status endpoints barely change then -- a slower
-  // idle cadence cuts continuous Supabase load with no real UX cost (a scheduled
-  // run is still detected within ~30s, after which polling jumps to 3s).
   const [active, setActive] = useState(true);
-  const interval = active ? 3000 : 30000;
-  const { data: upcoming, error: upErr } = usePollingFetch<ScheduleUpcoming>(`${API_URL}/api/schedule/upcoming`, interval);
-  const { data: held, error: heldErr } = usePollingFetch<HeldCompaniesResponse>(`${API_URL}/api/scheduled-strategies/held-companies`, interval);
-  const { data: strategies } = usePollingFetch<ScheduledStrategy[]>(`${API_URL}/api/scheduled-strategies`, interval);
-  const { data: recentRuns } = usePollingFetch<IngestRun[]>(`${API_URL}/api/ingest/runs?limit=20`, interval);
-  const { data: usage } = usePollingFetch<ApiUsage>(`${API_URL}/api/usage`, interval);
-  // Coverage drives the freshest/most-stale display. Its aggregation is the
-  // HEAVY part of this page (RPC scans over metric_data dates + every frozen
-  // universe's membership), and it only changes when a price refresh runs. So
-  // poll it briskly only while a run is active; when idle, drop to every 5 min
-  // -- the coverage can't move without a run, so polling it 120x/hr idle is pure
-  // wasted Disk IO.
+  // PRIMARY transport: ONE SSE stream that pushes each topic only when it
+  // changes (routers/_sse_stream.py) — no idle polling, closes when the tab is
+  // hidden. Server-side each topic recomputes fast while a run is active, slow
+  // when idle (coverage stays at 30s/5min). Polling below is a FALLBACK, enabled
+  // only if the stream can't connect, so the page still works if SSE is blocked.
+  const { data: stream, failed: sseFailed } = useEventStream('/api/schedule/stream');
+  const triggerInterval = active ? 3000 : 30000;
+  const statusInterval = active ? 3000 : 120000;
   const coverageInterval = active ? 30000 : 300000;
-  const { data: coverage } = usePollingFetch<PriceCoverage>(`${API_URL}/api/data/price-coverage`, coverageInterval);
-  const { data: universeCoverage } = usePollingFetch<UniverseCoverage>(`${API_URL}/api/data/universe-coverage`, coverageInterval);
+  const fb = (p: string) => (sseFailed ? `${API_URL}${p}` : null);
+  const { data: upPoll, error: upErr } = usePollingFetch<ScheduleUpcoming>(fb('/api/schedule/upcoming'), triggerInterval);
+  const { data: heldPoll, error: heldErr } = usePollingFetch<HeldCompaniesResponse>(fb('/api/scheduled-strategies/held-companies'), statusInterval);
+  const { data: stratPoll } = usePollingFetch<ScheduledStrategy[]>(fb('/api/scheduled-strategies'), statusInterval);
+  const { data: runsPoll } = usePollingFetch<IngestRun[]>(fb('/api/ingest/runs?limit=20'), statusInterval);
+  const { data: usagePoll } = usePollingFetch<ApiUsage>(fb('/api/usage'), statusInterval);
+  const { data: covPoll } = usePollingFetch<PriceCoverage>(fb('/api/data/price-coverage'), coverageInterval);
+  const { data: uCovPoll } = usePollingFetch<UniverseCoverage>(fb('/api/data/universe-coverage'), coverageInterval);
+
+  // Prefer the streamed payload; the poll value is only populated on SSE failure.
+  const upcoming = (stream.upcoming as ScheduleUpcoming | undefined) ?? upPoll ?? null;
+  const held = (stream.held as HeldCompaniesResponse | undefined) ?? heldPoll ?? null;
+  // Guard against a non-array payload (e.g. an error body if the endpoint 500s)
+  // so the whole card can't crash on `.filter`.
+  const strategies: ScheduledStrategy[] | null =
+    (Array.isArray(stream.strategies) ? (stream.strategies as ScheduledStrategy[]) : null)
+    ?? (Array.isArray(stratPoll) ? stratPoll : null);
+  const recentRuns = (stream.runs as IngestRun[] | undefined) ?? runsPoll ?? null;
+  const usage = (stream.usage as ApiUsage | undefined) ?? usagePoll ?? null;
+  const coverage = (stream.price_coverage as PriceCoverage | undefined) ?? covPoll ?? null;
+  const universeCoverage = (stream.universe_coverage as UniverseCoverage | undefined) ?? uCovPoll ?? null;
   const loadError = upErr ?? heldErr;
-  const nowMs = useNow(15000);
+  // 1s tick so every relative-time / countdown display (next run, due, last run,
+  // retry) advances to the second — an at-a-glance "is it live?" signal. Only
+  // this lightweight header/status text depends on it; the heavy tables re-render
+  // trivially since their props don't change.
+  const nowMs = useNow(1000);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -282,6 +298,20 @@ function NextRun({ at, nowMs }: { at: string | null; nowMs: number }) {
   );
 }
 
+/** Live "Xh Ym Zs" countdown to `at`, ticking every SECOND on its own so the
+ * visible seconds make it instantly obvious the timer is live (not stale). It
+ * owns a 1s `useNow` — isolated to this tiny node so only it re-renders each
+ * second, not the whole activity tree with its big tables. Renders nothing when
+ * `at` is null/unparseable. */
+function RetryCountdown({ at }: { at: string | null }) {
+  const now = useNow(1000);
+  if (!at) return null;
+  const t = Date.parse(at);
+  if (Number.isNaN(t)) return null;
+  const diffSec = Math.round((t - now) / 1000);
+  return <span className="font-mono">{diffSec <= 0 ? 'now' : formatDur(diffSec)}</span>;
+}
+
 /** Outcome chip for the most recent finished run of an operation. */
 function LastResult({ run, nowMs }: { run: IngestRun | null; nowMs: number }) {
   if (!run || run.status === 'running') return null;
@@ -376,7 +406,7 @@ function PriceUpdateSection({
               className="text-warn-300 flex items-center gap-1"
               title="Held prices are still behind the latest close (GuruFocus publish lag). An automatic re-price is scheduled — it retries every 3h (up to 3× a day), then the next daily tick takes over."
             >
-              ↻ trying again in <span className="font-mono">{countdownCompact(retryAt, nowMs)}</span>
+              ↻ trying again in <RetryCountdown at={retryAt} />
             </span>
           )}
           {fresh?.latest_close_date && <span className="text-fg-faint font-mono">through {fresh.latest_close_date}</span>}
@@ -425,7 +455,7 @@ function PriceUpdateSection({
                 </thead>
                 <tbody className="divide-y divide-neutral-800/20">
                   {held.companies.map((c) => (
-                    <HeldRow key={c.company_id} c={c} expected={fresh?.expected_close_date ?? null} retryAt={retryAt} nowMs={nowMs} />
+                    <HeldRow key={c.company_id} c={c} expected={fresh?.expected_close_date ?? null} retryAt={retryAt} />
                   ))}
                 </tbody>
               </table>
@@ -771,32 +801,22 @@ function UniverseCoverageRow({ u, busy, progress, onTrigger }: {
   const stalePolling = staleRun?.status === 'running' && (staleRun?.runId ?? -1) >= 0;
   useEffect(() => {
     if (staleRunId == null || staleRunId < 0 || !stalePolling) return;
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const r = await apiFetch(`${API_URL}/api/ingest/runs/${staleRunId}`);
-        if (cancelled || !r.ok) return;
-        const row = await r.json() as Record<string, unknown>;
-        if (cancelled) return;
-        const status = (row.status as string) ?? 'running';
-        setStaleRun((prev) => (prev && prev.runId === staleRunId ? {
-          ...prev,
-          status,
-          message: (row.current_message as string) ?? prev.message,
-          prices: (row.prices_refreshed as number) ?? prev.prices,
-          volumes: (row.volumes_refreshed as number) ?? prev.volumes,
-          forbidden: (row.forbidden_count as number) ?? prev.forbidden,
-          errors: (row.error_count as number) ?? prev.errors,
-          errorSummary: (row.error_summary as string) ?? prev.errorSummary,
-        } : prev));
-        if (status !== 'running') void loadDetail();
-      } catch {
-        // transient — keep polling
-      }
-    };
-    void tick();
-    const id = setInterval(tick, 2000);
-    return () => { cancelled = true; clearInterval(id); };
+    const abort = new AbortController();
+    void watchRun(staleRunId, (row) => {
+      const status = (row.status as string) ?? 'running';
+      setStaleRun((prev) => (prev && prev.runId === staleRunId ? {
+        ...prev,
+        status,
+        message: (row.current_message as string) ?? prev.message,
+        prices: (row.prices_refreshed as number) ?? prev.prices,
+        volumes: (row.volumes_refreshed as number) ?? prev.volumes,
+        forbidden: (row.forbidden_count as number) ?? prev.forbidden,
+        errors: (row.error_count as number) ?? prev.errors,
+        errorSummary: (row.error_summary as string) ?? prev.errorSummary,
+      } : prev));
+      if (status !== 'running') void loadDetail();
+    }, abort.signal);
+    return () => { abort.abort(); };
   }, [staleRunId, stalePolling, loadDetail]);
 
   // Auto-reload the breakdown when THIS universe's refresh finishes, so the
@@ -985,6 +1005,304 @@ function UniverseCoverageList({ universes, runningJob }: {
   );
 }
 
+/** One row of the month-end stale-price worklist (`/api/data/stale-prices`). */
+type StaleCompany = {
+  company_id: number;
+  company_name: string | null;
+  ticker: string | null;
+  exchange: string | null;
+  date: string;
+  days_behind: number | null;
+};
+type StalePrices = {
+  companies: StaleCompany[];
+  reference_date: string | null;
+  total_stale: number;
+  priced_companies: number;
+  limit: number;
+  error?: string;
+};
+
+/** Per-company outcome of a refresh: whether that name's latest-close date
+ * actually moved forward, so the user knows if the fetch changed anything. */
+type RefreshOutcome = {
+  company_id: number;
+  ticker: string | null;
+  exchange: string | null;
+  before: string;
+  after: string | null;   // null = caught up / off the worklist
+  status: 'updated' | 'no_change';
+};
+
+/** Compare each refreshed company's before-date against its ACTUAL new latest
+ * close date (from `/api/data/latest-close`, so caught-up names carry a real
+ * date too). Newer date → `updated`; same/older/missing → GuruFocus had nothing
+ * newer (`no_change`). */
+function computeOutcomes(
+  before: Map<number, { ticker: string | null; exchange: string | null; before: string }>,
+  afterById: Map<number, string | null>,
+): RefreshOutcome[] {
+  return [...before.entries()].map(([id, m]) => {
+    const after = afterById.get(id) ?? null;
+    return {
+      company_id: id, ticker: m.ticker, exchange: m.exchange, before: m.before, after,
+      status: after && after > m.before ? ('updated' as const) : ('no_change' as const),
+    };
+  });
+}
+
+/** The month-end refresh worklist: up to 50 most-outdated ACTIVE companies, each
+ * with its latest close date + trading-days behind the market's freshest close.
+ * "Refresh all" re-fetches prices+volumes for every listed name; each row has its
+ * own "Refresh" and "Illiquid". Refreshes run the `companies_price_refresh` job
+ * (bounded by the GuruFocus budget), are polled to completion, then the list
+ * reloads to show which names caught up. `busy` disables actions while another
+ * pipeline op is running (the backend serializes them). */
+function StalePricesPanel({ busy }: { busy: boolean }) {
+  const [data, setData] = useState<StalePrices | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshingIds, setRefreshingIds] = useState<Set<number>>(new Set());
+  const [runId, setRunId] = useState<number | null>(null);
+  const [runMsg, setRunMsg] = useState<string | null>(null);
+  const [marked, setMarked] = useState<Set<number>>(new Set());
+  const [lastResults, setLastResults] = useState<RefreshOutcome[] | null>(null);
+  // Snapshot of each refreshed company's latest-close date BEFORE the run, so
+  // once it finishes we can report per-company whether the date actually moved.
+  const pendingBeforeRef = useRef<Map<number, { ticker: string | null; exchange: string | null; before: string }>>(new Map());
+
+  const load = useCallback(async (): Promise<StalePrices | null> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await apiFetch(`${API_URL}/api/data/stale-prices?limit=50`);
+      if (r.ok) { const d = (await r.json()) as StalePrices; setData(d); return d; }
+      setData(null); setError(`${r.status}`); return null;
+    } catch (e) {
+      setData(null); setError(e instanceof Error ? e.message : String(e)); return null;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  // Poll the spawned refresh run to completion, then reload the worklist so the
+  // caught-up names drop off. (The job can finish between the parent's polls, so
+  // we track it ourselves rather than rely on the shared running-job state.)
+  useEffect(() => {
+    if (runId == null) return;
+    const abort = new AbortController();
+    let done = false;
+    const finalize = async (row: RunRow) => {
+      if (done) return;
+      done = true;
+      const status = (row.status as string) ?? 'ok';
+      setRunMsg(status === 'error'
+        ? `Refresh failed: ${(row.error_summary as string) ?? 'error'}`
+        : `Fetched ${(row.prices_refreshed as number) ?? 0} price / ${(row.volumes_refreshed as number) ?? 0} volume series from GuruFocus`);
+      setRunId(null);
+      setRefreshingIds(new Set());
+      // Look up each refreshed company's ACTUAL new latest-close date (so
+      // caught-up names carry a real "through" date), report per-company what
+      // moved, then reload the worklist so the fixed ones drop off.
+      const before = pendingBeforeRef.current;
+      if (before.size > 0) {
+        const ids = [...before.keys()];
+        let afterById = new Map<number, string | null>();
+        try {
+          const lc = await apiFetch(`${API_URL}/api/data/latest-close?ids=${ids.join(',')}`);
+          if (lc.ok) {
+            const j = (await lc.json()) as { dates: Record<string, string | null> };
+            afterById = new Map(Object.entries(j.dates).map(([k, v]) => [Number(k), v]));
+          }
+        } catch { /* fall back to before-only */ }
+        setLastResults(computeOutcomes(before, afterById));
+        pendingBeforeRef.current = new Map();
+      }
+      void load();
+    };
+    // Watch the run over SSE (server closes the stream on terminal status).
+    void watchRun(runId, (row) => {
+      const status = (row.status as string) ?? 'running';
+      if (status === 'running') setRunMsg((row.current_message as string) ?? 'Refreshing…');
+      else void finalize(row);
+    }, abort.signal).then((last) => {
+      // Safety net if the stream ended without a terminal frame we handled.
+      if (!done && last) void finalize(last);
+    });
+    return () => { abort.abort(); };
+  }, [runId, load]);
+
+  const anyRefreshing = runId != null;
+  const disabled = anyRefreshing || busy;
+
+  const refresh = useCallback(async (ids: number[]) => {
+    if (ids.length === 0 || anyRefreshing || busy) return;
+    // Snapshot before-dates from the current list so we can report, per company,
+    // whether the refresh actually moved the latest-close date forward.
+    const idSet = new Set(ids);
+    pendingBeforeRef.current = new Map(
+      (data?.companies ?? [])
+        .filter((c) => idSet.has(c.company_id))
+        .map((c) => [c.company_id, { ticker: c.ticker, exchange: c.exchange, before: c.date }]),
+    );
+    setLastResults(null);
+    setRefreshingIds(new Set(ids));
+    setRunMsg('Starting…');
+    try {
+      const r = await apiFetch(`${API_URL}/api/ingest/scheduled-refresh/trigger?job_name=companies_price_refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company_ids: ids }),
+      });
+      if (!r.ok) {
+        const t = await r.text().catch(() => '');
+        setRunMsg(`Failed: ${r.status} ${t.slice(0, 160)}`);
+        setRefreshingIds(new Set());
+        return;
+      }
+      const j = (await r.json()) as { run_id?: number };
+      if (j.run_id == null) { setRunMsg('No run id returned'); setRefreshingIds(new Set()); return; }
+      setRunMsg('Queued — waiting for the pipeline…');
+      setRunId(j.run_id);
+    } catch (e) {
+      setRunMsg(e instanceof Error ? e.message : String(e));
+      setRefreshingIds(new Set());
+    }
+  }, [anyRefreshing, busy, data]);
+
+  const markIlliquid = useCallback(async (cid: number) => {
+    setMarked((s) => new Set(s).add(cid));  // optimistic hide
+    try {
+      await apiFetch(`${API_URL}/api/admin/company-illiquid`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company_id: cid, illiquid: true }),
+      });
+    } catch { /* the reload reconciles */ }
+    void load();
+  }, [load]);
+
+  const rows = (data?.companies ?? []).filter((c) => !marked.has(c.company_id));
+  const allIds = rows.map((c) => c.company_id);
+
+  return (
+    <div className="space-y-1.5 pt-1 border-t border-neutral-800/30">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[10px] uppercase tracking-wide text-fg-faint">
+          Outdated prices{data ? ` · ${data.total_stale} behind${data.total_stale > (data.companies?.length ?? 0) ? ` (top ${data.companies.length} shown)` : ''}` : ''}
+          {data?.reference_date && <> · vs {data.reference_date}</>}
+        </span>
+        <div className="ml-auto flex items-center gap-1.5">
+          <button type="button" onClick={() => void load()} disabled={loading}
+            className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-40 transition-colors">
+            {loading ? 'Loading…' : 'Reload'}
+          </button>
+          {allIds.length > 0 && (
+            <button type="button" onClick={() => void refresh(allIds)} disabled={disabled}
+              title="Re-fetch prices + volumes for every listed company (within the monthly GuruFocus budget)"
+              className="text-[11px] px-2 py-0.5 rounded-lg border border-warn-500/40 text-warn-300 hover:bg-warn-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5">
+              {anyRefreshing && <Spinner className="h-3 w-3" />}
+              {anyRefreshing ? 'Refreshing…' : `Refresh all ${allIds.length}`}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {runMsg && (
+        <div className={`text-[11px] flex items-center gap-1.5 ${runMsg.startsWith('Refresh failed') || runMsg.startsWith('Failed') ? 'text-neg-300' : anyRefreshing ? 'text-accent-300' : 'text-fg-subtle'}`}>
+          {anyRefreshing && <Spinner className="h-3 w-3" />}{runMsg}
+        </div>
+      )}
+
+      {lastResults && lastResults.length > 0 && (() => {
+        const updated = lastResults.filter((r) => r.status === 'updated');
+        const unchanged = lastResults.filter((r) => r.status === 'no_change');
+        return (
+          <div className="rounded-lg border border-neutral-800/40 bg-inset px-2.5 py-2 space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] uppercase tracking-wide text-fg-faint">Refresh result</span>
+              <button type="button" onClick={() => setLastResults(null)} className="text-[10px] text-fg-muted hover:text-fg">dismiss</button>
+            </div>
+            <div className="text-[11px] flex items-center gap-3 flex-wrap">
+              <span className={updated.length > 0 ? 'text-pos-300' : 'text-fg-faint'}>✓ {updated.length} updated</span>
+              <span className={unchanged.length > 0 ? 'text-warn-300' : 'text-fg-faint'}>— {unchanged.length} no newer data</span>
+            </div>
+            <div className="max-h-40 overflow-auto space-y-0.5 pt-0.5">
+              {lastResults.map((r) => (
+                <div key={r.company_id} className="text-[11px] flex items-center gap-2">
+                  <span className={r.status === 'updated' ? 'text-pos-400' : 'text-warn-300'}>{r.status === 'updated' ? '✓' : '—'}</span>
+                  <span className="font-mono whitespace-nowrap">{r.ticker ?? '—'}{r.exchange && <span className="text-fg-faint">·{r.exchange}</span>}</span>
+                  {r.status === 'updated' ? (
+                    <span className="text-fg-subtle">
+                      was through <span className="font-mono text-fg-faint">{r.before}</span> · now through <span className="font-mono text-pos-300">{r.after}</span>
+                    </span>
+                  ) : (
+                    <span className="text-warn-300/90">no newer data · still through <span className="font-mono">{r.before}</span></span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {error ? (
+        <div className="text-[11px] text-neg-300">Failed to load: {error}</div>
+      ) : loading && !data ? (
+        <div className="text-[11px] text-fg-faint flex items-center gap-1.5"><Spinner className="h-3 w-3" /> Loading…</div>
+      ) : rows.length === 0 ? (
+        <div className="text-[11px] text-pos-300">All active prices are up to date.</div>
+      ) : (
+        <div className="max-h-80 overflow-auto rounded-lg border border-neutral-800/40">
+          <table className="w-full text-[11px]">
+            <thead className="sticky top-0 bg-card z-10">
+              <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+                <th className="px-2 py-1 text-left font-medium">Ticker</th>
+                <th className="px-2 py-1 text-left font-medium">Company</th>
+                <th className="px-2 py-1 text-right font-medium">Latest close</th>
+                <th className="px-2 py-1 text-right font-medium" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-800/20">
+              {rows.map((c) => {
+                const href = c.ticker ? guruFocusUrl(c.ticker, c.exchange ?? '') : null;
+                const one = refreshingIds.has(c.company_id);
+                return (
+                  <tr key={c.company_id} className="hover:bg-overlay/[0.02]">
+                    <td className="px-2 py-1 font-mono whitespace-nowrap">
+                      {href ? <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent-400 hover:text-accent-300 hover:underline">{c.ticker}</a> : (c.ticker ?? '—')}
+                      {c.exchange && <span className="text-fg-faint">·{c.exchange}</span>}
+                    </td>
+                    <td className="px-2 py-1 text-fg-soft truncate max-w-[220px]" title={c.company_name ?? ''}>{c.company_name ?? '—'}</td>
+                    <td className="px-2 py-1 text-right font-mono whitespace-nowrap text-warn-300">
+                      {c.date}{c.days_behind != null && c.days_behind > 0 ? ` (−${c.days_behind}d)` : ''}
+                    </td>
+                    <td className="px-2 py-1 text-right whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-1">
+                        <button type="button" onClick={() => void refresh([c.company_id])} disabled={disabled}
+                          title="Re-fetch this company's prices + volumes (within budget)"
+                          className="text-[10px] px-1.5 py-0.5 rounded border border-neutral-700 text-fg-muted hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1">
+                          {one && <Spinner className="h-2.5 w-2.5" />}Refresh
+                        </button>
+                        <button type="button" onClick={() => void markIlliquid(c.company_id)} disabled={disabled}
+                          title="Mark illiquid — trades rarely, so its stale price isn't a valid freshness signal. Excluded from this measure (still priced)."
+                          className="text-[10px] px-1.5 py-0.5 rounded border border-neutral-700 text-fg-muted hover:text-warn-300 hover:border-warn-500/50 disabled:opacity-40 transition-colors">
+                          Illiquid
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FullPriceRefreshSection({
   running, lastRun, nextRunAt, schedulerOff, usage, coverage, universeCoverage,
   universeRefreshRunning, nowMs,
@@ -1012,22 +1330,6 @@ function FullPriceRefreshSection({
       ] as const)
     : [];
   const totalLeft = regions.reduce((s, r) => s + Math.max(0, API_LIMIT - r.used), 0);
-
-  // Companies the user just marked illiquid this session — hidden optimistically
-  // (shown as "✓ illiquid · refreshing…") until the 30s coverage poll drops them.
-  const [markedIlliquid, setMarkedIlliquid] = useState<Set<number>>(new Set());
-  const markIlliquid = useCallback(async (cid: number) => {
-    try {
-      const r = await apiFetch(`${API_URL}/api/admin/company-illiquid`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ company_id: cid, illiquid: true }),
-      });
-      if (r.ok) setMarkedIlliquid((s) => new Set(s).add(cid));
-    } catch {
-      // The coverage poll reconciles regardless — no inline error needed.
-    }
-  }, []);
 
   return (
     <CollapsibleCard
@@ -1087,21 +1389,17 @@ function FullPriceRefreshSection({
         </div>
       )}
 
-      {coverage && (coverage.newest || coverage.oldest) && (
+      {coverage?.newest && (
         <div className="space-y-1.5 pt-1 border-t border-neutral-800/30">
           <div className="text-[10px] uppercase tracking-wide text-fg-faint">
-            Prices on file · {coverage.priced_companies.toLocaleString()} active companies — newest &amp; most-stale latest close (delisted / out-of-scope excluded)
+            Prices on file · {coverage.priced_companies.toLocaleString()} active companies — freshest close (delisted / out-of-scope excluded)
           </div>
           <CoverageLine label="Newest" c={coverage.newest} tone="text-pos-400" />
-          <CoverageLine
-            label="Oldest"
-            c={coverage.oldest}
-            tone="text-warn-300"
-            marked={coverage.oldest ? markedIlliquid.has(coverage.oldest.company_id) : false}
-            onMark={coverage.oldest ? () => markIlliquid(coverage.oldest!.company_id) : undefined}
-          />
         </div>
       )}
+
+      {/* Month-end worklist: the most-outdated companies, refresh all or any one. */}
+      <StalePricesPanel busy={!!running || !!universeRefreshRunning} />
 
       {universeCoverage && universeCoverage.universes.length > 0 && (
         <UniverseCoverageList
@@ -1122,11 +1420,10 @@ function FullPriceRefreshSection({
   );
 }
 
-function HeldRow({ c, expected, retryAt, nowMs }: {
+function HeldRow({ c, expected, retryAt }: {
   c: HeldCompany;
   expected: string | null;
   retryAt: string | null;
-  nowMs: number;
 }) {
   const d = c.latest_close_price_date;
   // Fresh when the close is at/after the last settled trading day; stale when
@@ -1135,7 +1432,7 @@ function HeldRow({ c, expected, retryAt, nowMs }: {
   const tone = d == null ? 'text-neg-400' : isFresh ? 'text-pos-400' : 'text-warn-300';
   // The auto-retry re-prices ONLY the stale/missing held names — so the "trying
   // again in" countdown belongs on those rows, not the up-to-date ones.
-  const retryLabel = !isFresh && retryAt ? countdownCompact(retryAt, nowMs) : null;
+  const showRetry = !isFresh && !!retryAt;
   const price = c.latest_close_price;
   // Native-currency close: thousands-grouped, 2 decimals, with the currency code.
   const priceLabel = price == null
@@ -1179,7 +1476,7 @@ function HeldRow({ c, expected, retryAt, nowMs }: {
       <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap text-fg">{eurLabel}</td>
       <td className={`px-3 py-1.5 text-right font-mono whitespace-nowrap ${tone}`}>{d ?? 'none'}</td>
       <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap text-warn-300">
-        {retryLabel ?? <span className="text-fg-faint">—</span>}
+        {showRetry ? <RetryCountdown at={retryAt} /> : <span className="text-fg-faint">—</span>}
       </td>
     </tr>
   );

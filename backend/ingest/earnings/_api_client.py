@@ -22,26 +22,14 @@ from urllib.request import Request, urlopen
 
 from ingest._gurufocus_http import (
     cf_get,
-    current_preferred_target,
     explain_failure,
     is_available as _cf_is_available,
-    ladder as _cf_ladder,
 )
 
 log = logging.getLogger(__name__)
 
-# Boot-time diagnostic — same line both clients write so a grep through
-# the Railway logs immediately shows what's going to be tried.
-if _cf_is_available():
-    log.warning(
-        "gurufocus client: curl_cffi ladder %s (preferred=%s)",
-        _cf_ladder(), current_preferred_target(),
-    )
-else:
-    log.error(
-        "gurufocus client: FALLBACK to urllib (curl_cffi unavailable) — "
-        "Cloudflare will block production calls"
-    )
+# The curl_cffi ladder / preferred target is logged once at boot by
+# `_gurufocus_http` itself — no need to repeat it per client.
 
 # Plain Chrome UA string. Modern enough to match a real browser; the
 # important fingerprint signal is the TLS handshake (handled by

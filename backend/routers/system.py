@@ -13,7 +13,7 @@ import asyncio
 import os
 from datetime import date
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 
 from deps import fetch_in_chunks, supabase
 from ingest.api_usage import get_usage
@@ -63,6 +63,16 @@ def get_items():
 async def api_usage():
     """GuruFocus API usage counter for the current month."""
     return await asyncio.to_thread(get_usage, supabase)
+
+
+@router.get("/api/usage/stream")
+async def usage_stream(request: Request):
+    """SSE push of the GuruFocus usage counter — emits only when it changes,
+    replacing the `ApiUsageBadge`'s 60s poll. Recomputes every 30s server-side."""
+    from routers._sse_stream import snapshot_stream_response  # noqa: PLC0415
+
+    topics = {"usage": (lambda: api_usage(), lambda _latest: 30.0)}
+    return snapshot_stream_response(request, topics)
 
 
 @router.get("/api/data/latest-price-date")
@@ -202,6 +212,101 @@ async def price_coverage(response: Response):
     return await asyncio.to_thread(_q)
 
 
+@router.get("/api/data/stale-prices")
+async def stale_prices(response: Response, limit: int = 50):
+    """The most-outdated ACTIVE companies by latest close date — the month-end
+    full-price-refresh worklist. Returns up to `limit` companies whose latest
+    close lags the freshest close held anywhere (≥1 trading day behind),
+    oldest-first, each enriched with name / ticker / exchange + how many trading
+    days behind. Delisted / out-of-scope / illiquid are excluded (expected-stale,
+    not refresh targets). `total_stale` is the full count behind the reference so
+    the UI can note when the list is truncated to `limit`. Cached 1 min (the
+    aggregation isn't cheap)."""
+    response.headers["Cache-Control"] = CACHE_PIPELINE
+    limit = max(1, min(200, limit))
+
+    def _q() -> dict:
+        from ingest.staleness import trading_days_between  # noqa: PLC0415
+
+        latest_by_cid: dict[int, str] = {}
+        page, offset = 1000, 0
+        for _ in range(30):
+            try:
+                resp = (
+                    supabase.rpc("company_latest_close_price_dates", {})
+                    .range(offset, offset + page - 1).execute()
+                )
+            except Exception as e:
+                return {"companies": [], "reference_date": None, "total_stale": 0,
+                        "priced_companies": 0, "limit": limit,
+                        "error": f"{type(e).__name__}: {e}"}
+            batch = resp.data or []
+            if not batch:
+                break
+            for row in batch:
+                cid = row.get("company_id")
+                d = row.get("latest_target_date")
+                if cid is not None and d:
+                    latest_by_cid[int(cid)] = str(d)[:10]
+            if len(batch) < page:
+                break
+            offset += page
+
+        latest_by_cid = {c: d for c, d in latest_by_cid.items() if c not in _excluded_company_ids()}
+        if not latest_by_cid:
+            return {"companies": [], "reference_date": None, "total_stale": 0,
+                    "priced_companies": 0, "limit": limit}
+
+        reference_str = max(latest_by_cid.values())
+        try:
+            ref_date: date | None = date.fromisoformat(reference_str[:10])
+        except ValueError:
+            ref_date = None
+
+        def _behind(dstr: str) -> int | None:
+            if ref_date is None:
+                return None
+            try:
+                return trading_days_between(date.fromisoformat(dstr[:10]), ref_date)
+            except ValueError:
+                return None
+
+        # ≥1 trading day behind the freshest close = a real stale price to chase.
+        stale = [(c, d, _behind(d)) for c, d in latest_by_cid.items()]
+        stale = [(c, d, b) for (c, d, b) in stale if (b or 0) >= 1]
+        stale.sort(key=lambda x: x[1])  # oldest close date first
+        total_stale = len(stale)
+        top = stale[:limit]
+
+        info: dict[int, dict] = {}
+        for r in fetch_in_chunks(
+            [c for c, _, _ in top],
+            lambda chunk: supabase.table("company")
+            .select("company_id, company_name, gurufocus_ticker, "
+                    "gurufocus_exchange:gurufocus_exchange(exchange_code)")
+            .in_("company_id", chunk).execute(),
+        ):
+            info[int(r["company_id"])] = r
+
+        companies = [{
+            "company_id": c,
+            "company_name": info.get(c, {}).get("company_name"),
+            "ticker": info.get(c, {}).get("gurufocus_ticker"),
+            "exchange": (info.get(c, {}).get("gurufocus_exchange") or {}).get("exchange_code"),
+            "date": d,
+            "days_behind": b,
+        } for (c, d, b) in top]
+
+        return {
+            "companies": companies,
+            "reference_date": reference_str,
+            "total_stale": total_stale,
+            "priced_companies": len(latest_by_cid),
+            "limit": limit,
+        }
+    return await asyncio.to_thread(_q)
+
+
 def _latest_metric_dates_for(cids: set[int], metric_code: str) -> dict[int, str]:
     """`{company_id: latest target_date}` for `metric_code`, scoped to `cids`,
     via the `company_latest_metric_dates_for` RPC. Chunked (≤800 ids/call) so
@@ -244,6 +349,29 @@ def _excluded_company_ids() -> set[int]:
     except Exception:
         pass  # best-effort
     return excluded
+
+
+@router.get("/api/data/latest-close")
+async def latest_close(response: Response, ids: str = ""):
+    """Latest close-price date per company id — comma-separated `ids` (≤200).
+    Lets the /schedule stale-price refresh show exactly how far each company's
+    price data now extends AFTER a re-fetch (including names that caught up and
+    dropped off the worklist). Returns `{"dates": {"<id>": "YYYY-MM-DD" | null}}`.
+    Not cached — it's read right after a fetch to confirm what landed."""
+    response.headers["Cache-Control"] = "no-store"
+    cid_list: list[int] = []
+    for tok in ids.split(","):
+        tok = tok.strip()
+        if tok.lstrip("-").isdigit():
+            cid_list.append(int(tok))
+    cid_list = cid_list[:200]
+    if not cid_list:
+        return {"dates": {}}
+
+    def _q() -> dict:
+        found = _latest_metric_dates_for(set(cid_list), "close_price")
+        return {"dates": {str(c): found.get(c) for c in cid_list}}
+    return await asyncio.to_thread(_q)
 
 
 @router.get("/api/data/universe-coverage")

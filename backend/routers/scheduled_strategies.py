@@ -492,11 +492,40 @@ async def list_scheduled_strategies(request: Request):
     admin = _is_admin(request)
 
     def _query() -> list[dict]:
-        q = supabase.table("scheduled_strategy").select("*").order("created_at")
+        # Manual drag-order first (nulls last), then creation order for rows the
+        # admin hasn't reordered yet.
+        q = (
+            supabase.table("scheduled_strategy")
+            .select("*")
+            .order("sort_order", desc=False, nullsfirst=False)
+            .order("created_at")
+        )
         if not admin:
             q = q.eq("user_visible", True)
         return _hydrate(q.execute().data or [])
     return await asyncio.to_thread(_query)
+
+
+class ReorderRequest(BaseModel):
+    # The strategy ids in the desired display order (top → bottom).
+    ordered_ids: list[int]
+
+
+# NOTE: must be declared BEFORE the `/{strategy_id}` routes — otherwise FastAPI
+# matches "reorder" against the int path param and 422s.
+@router.patch("/api/scheduled-strategies/reorder")
+async def reorder_scheduled_strategies(body: ReorderRequest):
+    """Persist the drag-reordered display order: `sort_order = position` for each
+    id in `ordered_ids` (top = 0). The list GET sorts by `sort_order` then
+    `created_at`. Admin-only (the API gate blocks non-admin writes here)."""
+    def _apply() -> dict:
+        now = datetime.now(timezone.utc).isoformat()
+        for pos, sid in enumerate(body.ordered_ids):
+            supabase.table("scheduled_strategy").update(
+                {"sort_order": pos, "updated_at": now}
+            ).eq("id", int(sid)).execute()
+        return {"ok": True, "count": len(body.ordered_ids)}
+    return await asyncio.to_thread(_apply)
 
 
 @router.post("/api/scheduled-strategies")
@@ -566,6 +595,57 @@ async def patch_scheduled_strategy(strategy_id: int, body: ScheduledStrategyPatc
             raise HTTPException(404, f"Scheduled strategy #{strategy_id} not found")
         return _hydrate(resp.data)[0]
     return await asyncio.to_thread(_update)
+
+
+class SetCashRequest(BaseModel):
+    # Cash allocation as a fraction 0..1 (e.g. 0.1 = 10% cash).
+    cash_pct: float
+
+
+@router.patch("/api/scheduled-strategies/{strategy_id}/cash")
+async def set_strategy_cash(strategy_id: int, body: SetCashRequest):
+    """Set a strategy's CASH allocation (0..1). Cash scales every other holding's
+    weight by (1-cash) and adds a flat 0%-return cash sleeve, so the reported
+    weights + the return pick up the cash drag. Re-prices the strategy
+    immediately so the new weighting shows at once (no wait for the daily tick).
+
+    Admin-only: the API gate blocks all non-admin writes here, so read-only users
+    can see the cash allocation but can't change it."""
+    cash = min(max(float(body.cash_pct), 0.0), 1.0)
+
+    def _apply() -> dict:
+        row = (
+            supabase.table("scheduled_strategy")
+            .select("id, config")
+            .eq("id", strategy_id)
+            .limit(1)
+            .execute()
+        ).data
+        if not row:
+            raise HTTPException(404, f"Scheduled strategy #{strategy_id} not found")
+        cfg = dict(row[0].get("config") or {})
+        cfg["cash_pct"] = cash
+        supabase.table("scheduled_strategy").update(
+            {"config": cfg, "updated_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("id", strategy_id).execute()
+        # Re-price now so the new cash weighting is reflected immediately.
+        # Best-effort: a strategy with no rebalance yet just picks cash up on its
+        # first rebalance / price-update.
+        try:
+            from routers._schedule_snapshots import (  # noqa: PLC0415
+                compute_and_save_price_update,
+            )
+            compute_and_save_price_update(strategy_id, ingest_run_id=None, cash_pct=cash)
+        except Exception as e:
+            logging.getLogger(__name__).warning(
+                "[cash] re-price after cash change failed for strategy %s: %s: %s",
+                strategy_id, type(e).__name__, e,
+            )
+        updated = (
+            supabase.table("scheduled_strategy").select("*").eq("id", strategy_id).execute()
+        )
+        return _hydrate(updated.data)[0]
+    return await asyncio.to_thread(_apply)
 
 
 @router.delete("/api/scheduled-strategies")
@@ -723,7 +803,8 @@ async def list_strategy_runs(strategy_id: int, request: Request, limit: int = 50
                 .execute()
             )
             live_curve = build_live_curve(
-                int(sched["backtest_run_id"]), curve_hist.data or []
+                int(sched["backtest_run_id"]), curve_hist.data or [],
+                float((sched.get("config") or {}).get("cash_pct") or 0.0),
             )
 
         return {

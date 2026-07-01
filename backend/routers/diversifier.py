@@ -608,9 +608,12 @@ async def optimize(req: OptimizeRequest):
 
 
 class SimHolding(BaseModel):
-    benchmark_id: int | None = None   # None = the strategy
+    benchmark_id: int | None = None   # None = the strategy (or cash, see is_cash)
     weight_pct: float                 # target weight (need not sum to 100 — normalized)
     band_pct: float = 10.0            # rebalance when it drifts ± this from target
+    # A CASH sleeve — a synthetic asset with a flat 0% return every month, added
+    # to the mix just like an ETF. Dampens the blend by its weight (cash drag).
+    is_cash: bool = False
 
 
 class SimulateRequest(BaseModel):
@@ -646,7 +649,9 @@ async def simulate(req: SimulateRequest):
     )
     opt = div.simulate_portfolio(holdings, rf_annual=rf)
     return _build_optimize_response(
-        opt, "manual", lambda lbl: "strategy" if lbl == "Strategy" else "etf", name_of.get,
+        opt, "manual",
+        lambda lbl: "strategy" if lbl == "Strategy" else "cash" if lbl == "Cash" else "etf",
+        name_of.get,
         _meta_of_from(ticker_to_meta),
     )
 
@@ -683,10 +688,11 @@ async def _assemble_holdings(
     first) + a label→name map + a ticker→benchmark-row map (for benchmark_id +
     isin) from a list of SimHoldings. Loads each fund's monthly returns from its
     benchmark prices."""
-    strat_h = next((h for h in sim_holdings if h.benchmark_id is None), None)
+    strat_h = next((h for h in sim_holdings if h.benchmark_id is None and not h.is_cash), None)
     if strat_h is None:
         raise HTTPException(422, "Include the strategy holding (benchmark_id = null) with a weight.")
-    fund_hs = [h for h in sim_holdings if h.benchmark_id is not None]
+    fund_hs = [h for h in sim_holdings if h.benchmark_id is not None and not h.is_cash]
+    cash_hs = [h for h in sim_holdings if h.is_cash]
     meta_resp = await asyncio.to_thread(
         lambda: supabase.table("benchmark")
         .select("benchmark_id, ticker, name, isin")
@@ -707,6 +713,14 @@ async def _assemble_holdings(
         holdings.append((m["ticker"], div.prices_to_monthly_returns(prices), h.weight_pct, max(0.0, h.band_pct) / 100.0))
         name_of[m["ticker"]] = m["name"]
         ticker_to_meta[m["ticker"]] = m
+    # Cash sleeve — a flat 0%-return asset over the strategy's window (so it never
+    # restricts the common window and just dampens the blend by its weight).
+    if cash_hs:
+        total_cash = sum(max(0.0, h.weight_pct) for h in cash_hs)
+        band = max((max(0.0, h.band_pct) for h in cash_hs), default=10.0) / 100.0
+        zero = {m: 0.0 for m in strategy_returns}
+        holdings.append(("Cash", zero, total_cash, band))
+        name_of["Cash"] = "Cash"
     return holdings, name_of, ticker_to_meta
 
 
@@ -918,7 +932,9 @@ async def portfolio_state(portfolio_id: int):
     rf = (p.get("risk_free_rate_pct") or 0.0) / 100.0
     opt = div.simulate_portfolio(holdings, rf_annual=rf)
     result = _build_optimize_response(
-        opt, "manual", lambda lbl: "strategy" if lbl == "Strategy" else "etf", name_of.get,
+        opt, "manual",
+        lambda lbl: "strategy" if lbl == "Strategy" else "cash" if lbl == "Cash" else "etf",
+        name_of.get,
         _meta_of_from(ticker_to_meta),
     )
 
@@ -944,7 +960,7 @@ async def portfolio_state(portfolio_id: int):
             HoldingStateInfo(
                 label=h.label,
                 name=None if h.label == "Strategy" else name_of.get(h.label),
-                group="strategy" if h.label == "Strategy" else "etf",
+                group="strategy" if h.label == "Strategy" else "cash" if h.label == "Cash" else "etf",
                 target_pct=h.target * 100.0,
                 current_pct=h.current * 100.0,
                 band_pct=h.band * 100.0,
@@ -1045,7 +1061,7 @@ async def schedule_as_strategy(req: ScheduleAsStrategyRequest):
         )
     if not req.name.strip():
         raise HTTPException(400, "name must be non-empty")
-    strat_h = next((h for h in req.holdings if h.benchmark_id is None), None)
+    strat_h = next((h for h in req.holdings if h.benchmark_id is None and not h.is_cash), None)
     if strat_h is None:
         raise HTTPException(422, "Include the strategy holding (benchmark_id = null) with a weight.")
 
@@ -1062,8 +1078,16 @@ async def schedule_as_strategy(req: ScheduleAsStrategyRequest):
             "(save one variant from /backtest), then diversify + schedule it.",
         )
 
-    etf_hs = [h for h in req.holdings if h.benchmark_id is not None and (h.weight_pct or 0) > 0]
+    etf_hs = [h for h in req.holdings if h.benchmark_id is not None and not h.is_cash and (h.weight_pct or 0) > 0]
     base_config = {k: v for k, v in source_config.items() if k not in ("variants", "n_trials")}
+
+    # Cash sleeve → config.cash_pct (0..1), the fraction of the whole portfolio.
+    # The live re-pricer's `apply_cash_allocation` renormalizes the strategy+ETF
+    # blend to (1-cash) and adds the cash holding, so the ETF weights below stay
+    # the invested-relative weights and cash is handled by the sleeve.
+    _total = sum(max(0.0, h.weight_pct or 0) for h in req.holdings)
+    _cash = sum(max(0.0, h.weight_pct or 0) for h in req.holdings if h.is_cash)
+    base_config["cash_pct"] = (_cash / _total) if (_total > 0 and _cash > 0) else 0.0
 
     # ── Vanilla (no ETFs): schedule the existing backtest run directly. ──
     if not etf_hs:

@@ -48,7 +48,7 @@ export default function Schedule() {
         )}
       </div>
 
-      <div className="px-8 py-6 space-y-6 max-w-screen-2xl">
+      <div className="px-8 py-6 space-y-6">
         {error && (
           <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-4 py-3 text-sm text-neg-300 flex items-center justify-between">
             <span>{error}</span>

@@ -700,3 +700,28 @@ export function resolveSeries(
   }
   return out;
 }
+
+/**
+ * Apply a cash sleeve to a cumulative-return curve: scale every period's RETURN
+ * by (1 − cashPct) and recompound, preserving all other record fields. Mirrors
+ * the backend `_scale_curve_returns(as_pct=True)` so the frontend equity curve /
+ * monthly heatmap match the server-computed cash-adjusted stats. cashPct is a
+ * fraction 0..1; ≤0 is a no-op.
+ */
+export function scaleCumCurve<T extends { cumulative_return_pct: number }>(
+  records: T[],
+  cashPct: number,
+): T[] {
+  const pct = Math.min(Math.max(cashPct || 0, 0), 1);
+  if (pct <= 0 || records.length === 0) return records;
+  const scale = 1 - pct;
+  let prevEq = 1;
+  let cur = 1;
+  return records.map((rec, i) => {
+    const eqIn = 1 + (rec.cumulative_return_pct ?? 0) / 100;
+    const r = i === 0 ? eqIn - 1 : prevEq ? eqIn / prevEq - 1 : 0;
+    cur *= 1 + r * scale;
+    prevEq = eqIn;
+    return { ...rec, cumulative_return_pct: (cur - 1) * 100 };
+  });
+}

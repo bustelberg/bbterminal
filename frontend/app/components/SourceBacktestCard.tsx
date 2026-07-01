@@ -6,6 +6,7 @@ import { apiFetch } from '../../lib/apiFetch';
 import type { BacktestResult, UniverseEntry } from '../../lib/stores/momentum';
 import BacktestResultView from './momentum/BacktestResultView';
 import type { ScoringConfig } from './momentum/MonthlyHoldingsTable';
+import { scaleCumCurve } from './momentum/equityCurve/seriesMath';
 import LoadingDots from './LoadingDots';
 
 type LoadedBacktest = {
@@ -69,8 +70,13 @@ export default function SourceBacktestCard({
   runId,
   markerDate,
   liveCurve,
+  cashPct = 0,
 }: {
   runId: number;
+  /** Strategy cash allocation (0..1). Scales the backtest's daily curve so the
+   * equity line / monthly heatmap / distributions reflect the cash drag,
+   * matching the server-computed cash-adjusted stats. */
+  cashPct?: number;
   /** "Go-live" date (YYYY-MM-DD) for the red dashed marker on the equity
    * curve — the strategy's configured start_date (or its scheduled-at
    * date as a fallback). */
@@ -124,13 +130,17 @@ export default function SourceBacktestCard({
   const liveExtendedResult = useMemo(() => {
     const base = data?.result;
     if (!base) return base ?? null;
+    // Cash sleeve: scale the strategy's daily curve by the cash drag (the
+    // universe baseline is left as the market benchmark). The live tail is
+    // already cash-scaled server-side, so it's appended to the scaled base.
+    const scaledDaily = scaleCumCurve(base.daily_records ?? [], cashPct);
     const pts = liveCurve?.points ?? [];
-    if (pts.length === 0) return base;
-    const kept = (base.daily_records ?? []).filter(
+    if (pts.length === 0) return { ...base, daily_records: scaledDaily };
+    const kept = scaledDaily.filter(
       (d) => d.date.slice(0, 10) < liveCurve!.cutover_date,
     );
     return { ...base, daily_records: [...kept, ...pts] };
-  }, [data, liveCurve]);
+  }, [data, liveCurve, cashPct]);
 
   // Rebuild the scoring config from the saved run's params so the holdings
   // table's category-score columns match /backtest. Empty maps are a safe

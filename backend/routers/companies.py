@@ -18,7 +18,7 @@ import asyncio
 import threading
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from routers._cache_headers import CACHE_USER
@@ -517,6 +517,14 @@ async def market_cap_refresh_status():
     return dict(_MKTCAP_REFRESH)
 
 
+@router.get("/api/companies/market-cap/refresh/stream")
+async def market_cap_refresh_stream(request: Request):
+    """SSE push of the market-cap refresh status until it finishes — replaces the
+    button's 1s poll; closes itself when `running` goes false."""
+    from routers._sse_stream import status_stream_response  # noqa: PLC0415
+    return status_stream_response(request, market_cap_refresh_status)
+
+
 # Manual, on-demand: verify every company's stored ISIN against OpenFIGI and
 # store the per-company `openfigi_status`. Batched (one OpenFIGI call per 100
 # ISINs), so it's far faster than the market-cap sweep — but still a
@@ -585,6 +593,14 @@ async def openfigi_verify_status():
     """Progress for the OpenFIGI verification sweep (running flag + latest
     message + verified/mismatch counts). Polled by the /companies button."""
     return dict(_OPENFIGI_REFRESH)
+
+
+@router.get("/api/companies/openfigi/verify/stream")
+async def openfigi_verify_stream(request: Request):
+    """SSE push of the OpenFIGI verify status until it finishes — replaces the
+    button's 1s poll; closes itself when `running` goes false."""
+    from routers._sse_stream import status_stream_response  # noqa: PLC0415
+    return status_stream_response(request, openfigi_verify_status)
 
 
 @router.post("/api/companies/{company_id}/openfigi-verify")

@@ -456,15 +456,21 @@ export function useDiversifier() {
     [manualWeights, manualDefaults],
   );
 
-  /** The holdings payload (strategy + selected funds) for save/simulate. */
-  const buildHoldings = useCallback(() => [
-    { benchmark_id: null, weight_pct: manualVal('strategy', 'weight'), band_pct: manualVal('strategy', 'band') },
-    ...[...selectedEtfIds].map((id) => ({
-      benchmark_id: id,
-      weight_pct: manualVal(String(id), 'weight'),
-      band_pct: manualVal(String(id), 'band'),
-    })),
-  ], [manualVal, selectedEtfIds]);
+  /** The holdings payload (strategy + selected funds + optional cash) for
+   * save/simulate. Cash is a synthetic flat-0%-return asset — included only when
+   * its weight > 0, sent as `is_cash: true` (no benchmark_id). */
+  const buildHoldings = useCallback(() => {
+    const cashW = manualVal('cash', 'weight');
+    return [
+      { benchmark_id: null, weight_pct: manualVal('strategy', 'weight'), band_pct: manualVal('strategy', 'band') },
+      ...[...selectedEtfIds].map((id) => ({
+        benchmark_id: id,
+        weight_pct: manualVal(String(id), 'weight'),
+        band_pct: manualVal(String(id), 'band'),
+      })),
+      ...(cashW > 0 ? [{ benchmark_id: null, is_cash: true, weight_pct: cashW, band_pct: manualVal('cash', 'band') }] : []),
+    ];
+  }, [manualVal, selectedEtfIds]);
 
   /** Backtest the hand-specified portfolio (strategy + selected funds). */
   const runSimulate = useCallback(async () => {

@@ -72,6 +72,7 @@ def compute_and_save_price_update(
     ingest_run_id: int | None,
     is_backfill: bool = False,
     as_of_iso: str | None = None,
+    cash_pct: float | None = None,
 ) -> int | None:
     """Build a price_update snapshot for `strategy_id` by re-pricing the
     most recent rebalance's holdings against the latest available close
@@ -118,6 +119,12 @@ def compute_and_save_price_update(
     holdings = rebal.get("holdings") or []
     if not holdings:
         return None
+    # Strip any existing cash sleeve — we re-derive it from the CURRENT cash_pct
+    # below, so changing the allocation takes effect on the next re-price. The
+    # cash % defaults to the strategy's stored config when not passed explicitly.
+    holdings = [h for h in holdings if not h.get("is_cash")]
+    if cash_pct is None:
+        cash_pct = float((rebal.get("config") or {}).get("cash_pct") or 0.0)
 
     # Fetch the latest close-price observation for every holding's
     # company_id in one batched query. We `order desc` and pick the
@@ -265,11 +272,14 @@ def compute_and_save_price_update(
                 latest_price_date = target_d
         updated_holdings.append(new_h)
 
-    # Period return via the SINGLE source of truth — the weighted per-holding
-    # `forward_return_pct` (see `momentum.portfolio_math`). Keeps the stored
-    # `period_return_pct` exactly equal to the weighted mean of the per-row
+    # Apply the cash sleeve (scales every holding by (1-cash) + appends a flat
+    # 0%-return cash holding) so the weights + the period return pick up the cash
+    # drag. Then the period return via the SINGLE source of truth — the weighted
+    # per-holding `forward_return_pct` (see `momentum.portfolio_math`) — keeps the
+    # stored `period_return_pct` exactly equal to the weighted mean of the per-row
     # returns the card displays, so the card Total + header MTD can't diverge.
-    from momentum.portfolio_math import portfolio_eur_return_pct  # noqa: PLC0415
+    from momentum.portfolio_math import apply_cash_allocation, portfolio_eur_return_pct  # noqa: PLC0415
+    updated_holdings = apply_cash_allocation(updated_holdings, cash_pct)
     portfolio_return = portfolio_eur_return_pct(updated_holdings)
 
     new_row = {
@@ -352,10 +362,13 @@ def _seed_snapshot_from_backtest(
 
     row = {
         "triggered_by": "auto",
-        # The backtest's last period is the current open period; its date is
-        # the period's first-<weekday> (e.g. 2026-06-01). Anchor the snapshot
-        # there so it reads as the current-period rebalance.
-        "as_of_date": _coerce_as_of_date(last.get("as_of_date") or last.get("date")),
+        # The backtest's last period is the current open period. Anchor the
+        # snapshot to its REBALANCE date — the record's `date` field, which is
+        # always the exact rebalance Monday (e.g. 2026-06-01). NOT `as_of_date`:
+        # the runner sets that to the open period's EXIT date (`open_as_of`, the
+        # latest data date) for the blend/curve math, so using it here made the
+        # snapshot read "held since <latest price date>" instead of the rebalance.
+        "as_of_date": _coerce_as_of_date(last.get("date") or last.get("as_of_date")),
         "latest_price_date": _latest_exit_date(last),
         "config": config,
         "holdings": holdings,

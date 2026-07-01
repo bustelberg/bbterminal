@@ -13,7 +13,12 @@ they can never disagree. These tests pin the contract the writers
 """
 from __future__ import annotations
 
-from momentum.portfolio_math import holding_eur_return_pct, portfolio_eur_return_pct
+from momentum.portfolio_math import (
+    apply_cash_allocation,
+    holding_eur_return_pct,
+    make_cash_holding,
+    portfolio_eur_return_pct,
+)
 
 
 class TestHoldingReturn:
@@ -73,3 +78,53 @@ class TestSnapshotInvariant:
         # Invariant 2: the period return IS the weighted mean of those.
         expected = 0.5 * 20.0 + 0.3 * -10.0 + 0.2 * 3.0  # = 7.6
         assert abs(portfolio_eur_return_pct(holdings) - expected) < 1e-9
+
+
+class TestCashAllocation:
+    def _basket(self):
+        # Two equal holdings, fully invested (weights sum to 1).
+        return [
+            {"company_id": 1, "weight": 0.5, "forward_return_pct": 10.0,
+             "entry_price_eur": 100.0, "exit_price_eur": 110.0},
+            {"company_id": 2, "weight": 0.5, "forward_return_pct": 20.0,
+             "entry_price_eur": 100.0, "exit_price_eur": 120.0},
+        ]
+
+    def test_zero_cash_is_noop(self):
+        b = self._basket()
+        assert apply_cash_allocation(b, 0.0) == b
+        assert apply_cash_allocation(b, None) == b
+
+    def test_scales_weights_and_adds_cash(self):
+        out = apply_cash_allocation(self._basket(), 0.2)
+        cash = [h for h in out if h.get("is_cash")]
+        stocks = [h for h in out if not h.get("is_cash")]
+        assert len(cash) == 1 and abs(cash[0]["weight"] - 0.2) < 1e-9
+        # Each 0.5 stock scaled by (1-0.2)=0.8 → 0.4; weights still sum to 1.
+        assert all(abs(h["weight"] - 0.4) < 1e-9 for h in stocks)
+        assert abs(sum(h["weight"] for h in out) - 1.0) < 1e-9
+
+    def test_return_picks_up_cash_drag(self):
+        b = self._basket()
+        full = portfolio_eur_return_pct(b)                 # 0.5*10 + 0.5*20 = 15
+        with_cash = portfolio_eur_return_pct(apply_cash_allocation(b, 0.25))
+        # 25% cash → the basket return is scaled to 75% of fully-invested.
+        assert abs(full - 15.0) < 1e-9
+        assert abs(with_cash - 0.75 * full) < 1e-9
+
+    def test_idempotent_and_restrips_existing_cash(self):
+        once = apply_cash_allocation(self._basket(), 0.3)
+        twice = apply_cash_allocation(once, 0.3)            # already has cash
+        assert len([h for h in twice if h.get("is_cash")]) == 1
+        assert abs(sum(h["weight"] for h in twice) - 1.0) < 1e-9
+        # Re-applying a DIFFERENT pct strips the old cash and re-scales from base.
+        changed = apply_cash_allocation(once, 0.5)
+        cash = [h for h in changed if h.get("is_cash")][0]
+        assert abs(cash["weight"] - 0.5) < 1e-9
+        stocks = [h for h in changed if not h.get("is_cash")]
+        assert all(abs(h["weight"] - 0.25) < 1e-9 for h in stocks)  # 0.5*(1-0.5)
+
+    def test_cash_holding_is_flat_zero_return(self):
+        c = make_cash_holding(0.1)
+        assert c["is_cash"] is True and c["company_id"] == 0
+        assert holding_eur_return_pct(c) == 0.0

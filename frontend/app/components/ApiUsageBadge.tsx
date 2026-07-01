@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useImperativeHandle, useRef, forwardR
 
 import { API_URL } from '../../lib/apiUrl';
 import { apiFetch } from '../../lib/apiFetch';
+import { useEventStream } from '../../lib/hooks/useEventStream';
 const LIMIT = 20000;
 
 type Usage = { usa: number; europe: number; asia: number; month: string };
@@ -47,6 +48,8 @@ function ApiInfoTip() {
 }
 
 const ApiUsageBadge = forwardRef<ApiUsageBadgeHandle>(function ApiUsageBadge(_props, ref) {
+  // Live usage via SSE (pushes only on change, pauses when the tab's hidden).
+  const { data: stream, failed: sseFailed } = useEventStream('/api/usage/stream');
   const [usage, setUsage] = useState<Usage | null>(null);
   const [session, setSession] = useState({ usa: 0, europe: 0, asia: 0 });
 
@@ -67,11 +70,18 @@ const ApiUsageBadge = forwardRef<ApiUsageBadgeHandle>(function ApiUsageBadge(_pr
     refresh: fetchUsage,
   }), [fetchUsage]);
 
+  // One-shot on mount for an instant first paint; the stream keeps it fresh.
+  useEffect(() => { fetchUsage(); }, [fetchUsage]);
+  // Stream push → state.
   useEffect(() => {
-    fetchUsage();
-    const interval = setInterval(fetchUsage, 60_000);
-    return () => clearInterval(interval);
-  }, [fetchUsage]);
+    if (stream.usage) setUsage(stream.usage as Usage);
+  }, [stream.usage]);
+  // Fallback: resume the 60s poll only if the stream can't connect.
+  useEffect(() => {
+    if (!sseFailed) return;
+    const id = setInterval(fetchUsage, 60_000);
+    return () => clearInterval(id);
+  }, [sseFailed, fetchUsage]);
 
   if (!usage) return null;
 

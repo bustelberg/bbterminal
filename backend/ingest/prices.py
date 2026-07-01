@@ -20,29 +20,16 @@ from common.retry import retry
 from ingest.metric_upsert import upsert_metric_rows
 from ingest._gurufocus_http import (
     cf_get,
-    current_preferred_target,
     explain_failure,
     is_available as _cf_is_available,
-    ladder as _cf_ladder,
 )
 from ingest.constants import DATA_CUTOFF
 from ingest.staleness import is_cache_fresh, is_daily_data_fresh
 from ingest.api_usage import track_api_call
 from .gurufocus_url import US_EXCHANGE_CODES as US_EXCHANGES  # single source of truth
 
-# Boot-time diagnostic. Same line both clients log — grepping the
-# Railway logs for `gurufocus` immediately shows which fingerprint
-# ladder is in play.
-if _cf_is_available():
-    logging.getLogger(__name__).warning(
-        "gurufocus prices client: curl_cffi ladder %s (preferred=%s)",
-        _cf_ladder(), current_preferred_target(),
-    )
-else:
-    logging.getLogger(__name__).error(
-        "gurufocus prices client: FALLBACK to urllib (curl_cffi unavailable) — "
-        "Cloudflare will block production calls"
-    )
+# The curl_cffi ladder / preferred target is logged once at boot by
+# `_gurufocus_http` itself — no need to repeat it per client.
 
 _BUCKET = "gurufocus-raw"
 
