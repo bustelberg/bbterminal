@@ -124,3 +124,11 @@ export function countdownLeft(iso: string | null, nowMs: number): string {
   if (hours > 0) return `${hours}h ${mins}m left`;
   return `${mins}m left`;
 }
+
+/** Same countdown as `countdownLeft` but without the trailing " left" — for
+ * cells that already carry an "in …" header (e.g. the stale-price retry
+ * column). "2h 59m" / "12m" / "now" / "—". */
+export function countdownCompact(iso: string | null, nowMs: number): string {
+  const s = countdownLeft(iso, nowMs);
+  return s.endsWith(' left') ? s.slice(0, -' left'.length) : s;
+}

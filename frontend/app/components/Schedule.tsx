@@ -5,6 +5,7 @@ import ScheduledStrategiesCard from './schedule/ScheduledStrategiesCard';
 import DiversifiedPortfoliosCard from './schedule/DiversifiedPortfoliosCard';
 import { useScheduledStrategies } from './schedule/useScheduledStrategies';
 import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
+import { useBenchmarks } from '../../lib/hooks/apiData';
 
 // Two sections only:
 //   1. Scheduled strategies — the strategies the user has pinned.
@@ -20,6 +21,11 @@ import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
 export default function Schedule() {
   const sched = useScheduledStrategies();
   const { error, setError, latestPriceDate } = sched;
+  // Warm `/api/benchmarks` up front so ETF ISINs/currencies are cached before a
+  // strategy is expanded — otherwise CurrentPortfolioCard / SnapshotHoldings hit
+  // a cache miss on that niche endpoint and the ETF's ISIN flashes in a beat
+  // after the (already-warm /api/companies) stock ISINs. Fire-and-forget.
+  useBenchmarks();
   // Non-admins get a read-only view: only the strategies an admin flagged
   // visible, with no mutation controls and none of the admin automation cards.
   const isAdmin = useIsAdmin();

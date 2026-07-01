@@ -122,8 +122,9 @@ export default function CurrentPortfolioCard({ snapshotId }: { snapshotId: numbe
     { key: 'currency', header: 'Currency', accessor: (d) => d.ccy },
     { key: 'target', header: 'Target %', accessor: (d) => d.target },
     { key: 'current', header: 'Current %', accessor: (d) => d.current },
-    { key: 'start_loc', header: 'Start (loc)', accessor: (d) => d.h.entry_price_local ?? null },
-    { key: 'end_loc', header: 'End (loc)', accessor: (d) => d.h.exit_price_local ?? null },
+    { key: 'start_loc', header: 'Start (local)', accessor: (d) => d.h.entry_price_local ?? null },
+    { key: 'end_loc', header: 'End (local)', accessor: (d) => d.h.exit_price_local ?? null },
+    { key: 'as_of', header: 'As of', accessor: (d) => d.endDate },
     { key: 'start_fx_eur', header: 'Start FX→€', accessor: (d) => d.startFx },
     { key: 'end_fx_eur', header: 'End FX→€', accessor: (d) => d.endFx },
     { key: 'start_eur', header: 'Start (€)', accessor: (d) => d.startEur },
@@ -147,6 +148,11 @@ export default function CurrentPortfolioCard({ snapshotId }: { snapshotId: numbe
     );
   }
   if (!snap || rows.length === 0) return null;
+
+  // Reference for "out of date": the portfolio's freshest close. A holding
+  // whose latest close (End date) lags this is stale (GuruFocus publish lag /
+  // an illiquid name) and gets flagged orange in the As-of column.
+  const referenceDate = snap.latest_price_date ? String(snap.latest_price_date).slice(0, 10) : null;
 
   return (
     <div className="bg-card border border-neutral-800/40 rounded-xl p-5">
@@ -187,10 +193,12 @@ export default function CurrentPortfolioCard({ snapshotId }: { snapshotId: numbe
               <th className="text-left font-medium py-2 px-2">Sector</th>
               <th className="text-right font-medium py-2 px-2" title="Target weight set at the rebalance">Target</th>
               <th className="text-right font-medium py-2 px-2" title="Weight today after price drift, renormalized to 100%">Current</th>
-              <th className="text-right font-medium py-2 px-2 border-l border-neutral-800/40" title="Entry price in local trading currency">Start (loc)</th>
-              <th className="text-right font-medium py-2 px-2" title="Latest close in local trading currency">End (loc)</th>
+              <th className="text-right font-medium py-2 px-2 border-l border-neutral-800/40" title="Entry price in local trading currency">Start (local)</th>
+              <th className="text-right font-medium py-2 px-2" title="Latest close in local trading currency">End (local)</th>
+              <th className="text-right font-medium py-2 px-2" title="Latest-close date the End (local) price reflects. Orange when it lags the portfolio's freshest close (stale price).">As of</th>
               <th className="text-right font-medium py-2 px-2 border-l border-neutral-800/40" title="FX rate locked in at entry: EUR per 1 unit of the local currency (1.00 for EUR)">Start FX→€</th>
               <th className="text-right font-medium py-2 px-2" title="FX rate at the latest close: EUR per 1 unit of the local currency (the engine's exit EUR ÷ local)">End FX→€</th>
+              <th className="text-right font-medium py-2 px-2" title="Date the End FX→€ rate reflects. Orange when it lags the portfolio's freshest close (stale).">As of</th>
               <th className="text-right font-medium py-2 px-2 border-l border-neutral-800/40" title="Engine's EUR entry mark (converted at the entry-date FX)">Start (€)</th>
               <th className="text-right font-medium py-2 px-2" title="Engine's EUR exit mark (converted at the close-date FX)">End (€)</th>
               <th className="text-right font-medium py-2 pl-2 border-l border-neutral-800/40" title="The engine's per-holding EUR return since entry (forward_return_pct) — shown verbatim, not recomputed">Return (€)</th>
@@ -203,6 +211,18 @@ export default function CurrentPortfolioCard({ snapshotId }: { snapshotId: numbe
               const exch = displayExchange(exchRaw, h.ticker);
               const isin = isinByCompany.get(h.company_id) ?? isinByBenchmark.get(h.company_id) ?? '';
               const href = guruFocusUrl(h.ticker, exchRaw);
+              // The End (local) close date + the End FX→€ rate date are the same
+              // close date; each End value carries its own As-of cell, orange
+              // when this holding lags the portfolio's freshest close.
+              const staleEnd = !!(endDate && referenceDate && endDate < referenceDate);
+              const asOfCell = () => (
+                <td
+                  className={`py-2 px-2 text-right font-mono whitespace-nowrap ${staleEnd ? 'text-warn-400' : 'text-fg-subtle'}`}
+                  title={staleEnd ? `Stale — this holding's latest close (${endDate}) lags the portfolio's freshest close (${referenceDate})` : 'Latest close date this holding reflects'}
+                >
+                  {endDate ?? '—'}
+                </td>
+              );
               return (
                 <tr key={`${h.side ?? 'long'}-${h.company_id}`} className="border-b border-neutral-800/30 hover:bg-overlay/[0.02]">
                   <td className="py-2 pr-2 font-mono whitespace-nowrap">
@@ -220,15 +240,17 @@ export default function CurrentPortfolioCard({ snapshotId }: { snapshotId: numbe
                   <td className="py-2 px-2 text-right font-mono text-fg-muted whitespace-nowrap border-l border-neutral-800/40">
                     {fmtPrice(h.entry_price_local)}{ccy && <span className="text-fg-faint text-[10px] ml-1">{ccy}</span>}<AsOfTip date={entryDate} />
                   </td>
-                  <td className="py-2 px-2 text-right font-mono text-fg-muted whitespace-nowrap">{fmtPrice(h.exit_price_local)}<AsOfTip date={endDate} /></td>
+                  <td className="py-2 px-2 text-right font-mono text-fg-muted whitespace-nowrap">{fmtPrice(h.exit_price_local)}</td>
+                  {asOfCell()}
                   <td className="py-2 px-2 text-right font-mono text-fg-subtle whitespace-nowrap border-l border-neutral-800/40" title={startFx != null && ccy ? `1 ${ccy} = ${startFx.toFixed(4)} EUR (at entry)` : 'No entry FX (EUR / not converted)'}>
                     {startFx != null ? startFx.toFixed(4) : '—'}<AsOfTip date={entryDate} />
                   </td>
                   <td className="py-2 px-2 text-right font-mono text-fg-subtle whitespace-nowrap" title={endFx != null && ccy ? `1 ${ccy} = ${endFx.toFixed(4)} EUR (latest)` : 'No FX rate available'}>
-                    {endFx != null ? endFx.toFixed(4) : '—'}<AsOfTip date={endDate} />
+                    {endFx != null ? endFx.toFixed(4) : '—'}
                   </td>
+                  {asOfCell()}
                   <td className="py-2 px-2 text-right font-mono text-fg-muted whitespace-nowrap border-l border-neutral-800/40">{fmtPrice(startEur)}<AsOfTip date={entryDate} /></td>
-                  <td className="py-2 px-2 text-right font-mono text-fg whitespace-nowrap">{fmtPrice(endEur)}<AsOfTip date={endDate} /></td>
+                  <td className="py-2 px-2 text-right font-mono text-fg whitespace-nowrap">{fmtPrice(endEur)}</td>
                   <td className={`py-2 pl-2 text-right font-mono border-l border-neutral-800/40 ${eurReturn != null ? (eurReturn >= 0 ? 'text-pos-400' : 'text-neg-400') : 'text-fg-faint'}`}>
                     {fmtPct(eurReturn)}
                   </td>

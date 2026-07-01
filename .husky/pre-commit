@@ -48,7 +48,9 @@ for _gitusr in \
   fi
 done
 
-# Fast feedback only — eslint for staged frontend files, ruff for
-# staged backend files. Both auto-fix and re-stage. Anything slower
-# (typecheck, contract drift) runs on pre-push so commits stay snappy.
+# Fast feedback only — ruff auto-fix on staged backend files (~0.4s).
+# eslint is intentionally NOT here: its Next flat config loads
+# typescript-eslint on every run, costing ~4-6s of startup even with
+# --cache, so it lives in CI instead. Typecheck runs on pre-push. Keeps
+# commits snappy — the hook can't stand in for the full CI pipeline.
 npx lint-staged

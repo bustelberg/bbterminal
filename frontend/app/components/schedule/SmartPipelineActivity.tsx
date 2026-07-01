@@ -9,7 +9,7 @@ import { guruFocusUrl } from '../../../lib/gurufocusUrl';
 import { useNow } from '../../../lib/hooks/useNow';
 import { usePollingFetch } from '../../../lib/hooks/usePollingFetch';
 import CollapsibleCard from '../momentum/CollapsibleCard';
-import { relTime, formatExecAt, countdownLeft } from './utils';
+import { relTime, formatExecAt, countdownLeft, countdownCompact } from './utils';
 import type {
   ScheduleUpcoming,
   HeldCompaniesResponse,
@@ -164,6 +164,10 @@ export default function SmartPipelineActivity() {
 
   // Both ops fire off the one daily tick — its next fire time drives "next run".
   const dailyJob = upcoming?.jobs?.find((j) => j.id === 'daily_pipeline') ?? null;
+  // One-shot stale-held-price retry (scheduled +3h out by the backend when held
+  // prices are still behind after a price_update). Present only while a retry is
+  // pending — drives the "Trying again in" countdown on the price-update card.
+  const retryJob = upcoming?.jobs?.find((j) => j.id === 'price_update_retry') ?? null;
   // The month-end full-price-refresh job (its own monthly cron).
   const monthEndJob = upcoming?.jobs?.find((j) => j.id === 'month_end_price_refresh') ?? null;
   const schedulerOff = upcoming?.scheduler_enabled === false;
@@ -198,6 +202,7 @@ export default function SmartPipelineActivity() {
             running={running('price_update')}
             lastRun={lastRun('price_update')}
             nextRunAt={dailyJob?.next_run_at ?? null}
+            retryAt={retryJob?.next_run_at ?? null}
             schedulerOff={schedulerOff}
             held={held}
             nowMs={nowMs}
@@ -329,11 +334,12 @@ function HeaderStatus({
 }
 
 function PriceUpdateSection({
-  running, lastRun, nextRunAt, schedulerOff, held, nowMs,
+  running, lastRun, nextRunAt, retryAt, schedulerOff, held, nowMs,
 }: {
   running: RunningJob | null;
   lastRun: IngestRun | null;
   nextRunAt: string | null;
+  retryAt: string | null;
   schedulerOff: boolean;
   held: HeldCompaniesResponse | null | undefined;
   nowMs: number;
@@ -365,6 +371,14 @@ function PriceUpdateSection({
             : (held && held.total_companies > 0)
               ? <span className="text-pos-400">fresh</span>
               : null}
+          {retryAt && (
+            <span
+              className="text-warn-300 flex items-center gap-1"
+              title="Held prices are still behind the latest close (GuruFocus publish lag). An automatic re-price is scheduled — it retries every 3h (up to 3× a day), then the next daily tick takes over."
+            >
+              ↻ trying again in <span className="font-mono">{countdownCompact(retryAt, nowMs)}</span>
+            </span>
+          )}
           {fresh?.latest_close_date && <span className="text-fg-faint font-mono">through {fresh.latest_close_date}</span>}
           <RunNowButton job="price_update" busy={!!running} />
         </>
@@ -406,11 +420,12 @@ function PriceUpdateSection({
                     <th className="px-3 py-1.5 text-right font-medium" title="Listing currency per 1 EUR — latest stored rate (same source as the FX page)">FX /€</th>
                     <th className="px-3 py-1.5 text-right font-medium" title="Close converted to EUR (local ÷ FX rate)">Price €</th>
                     <th className="px-3 py-1.5 text-right font-medium">Date</th>
+                    <th className="px-3 py-1.5 text-right font-medium" title="For a stale/missing held price we auto-retry the fetch every 3h (GuruFocus publish lag). Blank when the price is fresh or no retry is currently scheduled.">Trying again in</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-800/20">
                   {held.companies.map((c) => (
-                    <HeldRow key={c.company_id} c={c} expected={fresh?.expected_close_date ?? null} />
+                    <HeldRow key={c.company_id} c={c} expected={fresh?.expected_close_date ?? null} retryAt={retryAt} nowMs={nowMs} />
                   ))}
                 </tbody>
               </table>
@@ -1107,11 +1122,20 @@ function FullPriceRefreshSection({
   );
 }
 
-function HeldRow({ c, expected }: { c: HeldCompany; expected: string | null }) {
+function HeldRow({ c, expected, retryAt, nowMs }: {
+  c: HeldCompany;
+  expected: string | null;
+  retryAt: string | null;
+  nowMs: number;
+}) {
   const d = c.latest_close_price_date;
   // Fresh when the close is at/after the last settled trading day; stale when
   // behind it (new prices to fetch); missing when there's no close at all.
-  const tone = d == null ? 'text-neg-400' : (expected && d >= expected) ? 'text-pos-400' : 'text-warn-300';
+  const isFresh = d != null && !!expected && d >= expected;
+  const tone = d == null ? 'text-neg-400' : isFresh ? 'text-pos-400' : 'text-warn-300';
+  // The auto-retry re-prices ONLY the stale/missing held names — so the "trying
+  // again in" countdown belongs on those rows, not the up-to-date ones.
+  const retryLabel = !isFresh && retryAt ? countdownCompact(retryAt, nowMs) : null;
   const price = c.latest_close_price;
   // Native-currency close: thousands-grouped, 2 decimals, with the currency code.
   const priceLabel = price == null
@@ -1154,6 +1178,9 @@ function HeldRow({ c, expected }: { c: HeldCompany; expected: string | null }) {
       <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap text-fg-subtle">{fxLabel}</td>
       <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap text-fg">{eurLabel}</td>
       <td className={`px-3 py-1.5 text-right font-mono whitespace-nowrap ${tone}`}>{d ?? 'none'}</td>
+      <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap text-warn-300">
+        {retryLabel ?? <span className="text-fg-faint">—</span>}
+      </td>
     </tr>
   );
 }
