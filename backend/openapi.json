@@ -3797,6 +3797,47 @@
         ]
       }
     },
+    "/api/admin/etfs": {
+      "get": {
+        "description": "Every ETF that carries an ISIN, enriched like a universe member. Admin only.\n\nETFs live in the `benchmark` table (the same rows the diversifier + sector\noverlays reference \u2014 an ETF is a benchmark with a tradeable ISIN). This\nreturns ONLY benchmarks with an `isin` set \u2014 the identifiable, tradeable\ninstruments \u2014 each with its latest close (native + EUR via the same fx_rate\nsource the /fx-rates page + universe members use). Index-only benchmarks\n(no ISIN) are excluded.\n\nEach ETF carries the universe-member-style shape (minus the fields that\ndon't apply to a fund \u2014 exchange/country/industry):\n\n    benchmark_id, ticker, name, isin, currency, sector,\n    latest_close_local, latest_close_eur, latest_close_date, fx_rate_per_eur\n\nResponse: `{count, etfs:[\u2026]}`, sorted by ticker.",
+        "operationId": "list_etfs_api_admin_etfs_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Etfs",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/admin/gurufocus-company-name": {
       "post": {
         "description": "Fetch the company name GuruFocus reports for a (ticker, exchange) \u2014 so a\nmislabeled row can be corrected to what its GuruFocus link actually shows\n(e.g. a row stored as \"TSMC\" whose `TSE:2330` listing GuruFocus calls\n\"Forside Co Ltd\"). One GuruFocus call. Returns `{name, found, symbol, log}`;\nthe caller confirms + writes the rename via PUT /api/companies/{id}.",

@@ -45,7 +45,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# Load scripts/.env.local (gitignored) -- same precedence as copy-local-to-prod.ps1.
+# Load scripts/.env.local (gitignored) -- same precedence as clone-local-to-prod.ps1.
 $envFile = Join-Path $PSScriptRoot '.env.local'
 if (Test-Path $envFile) {
     Get-Content $envFile | ForEach-Object {

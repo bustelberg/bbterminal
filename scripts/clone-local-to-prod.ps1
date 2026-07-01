@@ -5,12 +5,13 @@
   the backtest-results Storage bucket.
 
 .DESCRIPTION
-  Unlike copy-local-to-prod.ps1 (which DROPs prod's public schema and restores
-  all ~26M metric_data rows every run), this script:
+  Makes prod match local by transferring only what differs -- no schema drop, no
+  full ~26M-row metric_data reload. It:
 
     1. Schema parity: applies any local migrations prod is missing, then aligns
-       supabase_migrations.schema_migrations to local. (Stops if prod has drift
-       it can't reconcile -- use copy-local-to-prod.ps1 for a full rebuild then.)
+       supabase_migrations.schema_migrations to local. (Stops if prod is AHEAD of
+       local -- extra migrations/columns local lacks. Reconcile prod by hand or
+       restore it from a Supabase backup, then re-run.)
     2. Stages every small/medium table's local rows into a clone_stg schema on
        prod (one transfer; ~140k rows total -> seconds).
     3. UPSERTs them parent->child (insert + update by PK), then DELETEs prod rows
@@ -73,6 +74,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Invoke-WebRequest draws a per-call progress bar on PS 5.1 that throttles file
+# transfers by 10-50x; the Storage mirror moves every blob through it. Silence it
+# for a large speedup. Scoped to this (child) runspace, so the caller is unaffected.
+$ProgressPreference = 'SilentlyContinue'
 $swAll = [System.Diagnostics.Stopwatch]::StartNew()
 
 # ---- env + prod URL ---------------------------------------------------------
@@ -144,12 +149,15 @@ $StorageSyncEnabled = [bool]($LocalServiceKey -and $ProdServiceKey -and $ProdSto
 function Invoke-Local([string]$sql) {
     $out = docker exec $Container psql -U postgres -d postgres -tA -F'|' -c $sql
     if ($LASTEXITCODE -ne 0) { throw "local psql failed: $sql`n$out" }
-    return @($out | Where-Object { $_ -ne $null -and $_ -ne '' })
+    # TrimEnd CR: docker-exec output can carry a stray trailing \r on Windows,
+    # which would silently break version/PK compares + int parses downstream.
+    # ("$_" coerces a possible $null to '' so TrimEnd never throws.)
+    return @($out | ForEach-Object { "$_".TrimEnd("`r") } | Where-Object { $_ -ne '' })
 }
 function Invoke-Prod([string]$sql) {
     $out = docker exec @prodEnv $Container psql $prodUrlNoPw -tA -F'|' -c $sql
     if ($LASTEXITCODE -ne 0) { throw "prod psql failed: $sql`n$out" }
-    return @($out | Where-Object { $_ -ne $null -and $_ -ne '' })
+    return @($out | ForEach-Object { "$_".TrimEnd("`r") } | Where-Object { $_ -ne '' })
 }
 # Run a multi-statement / \copy script against prod via stdin (-f -).
 function Invoke-ProdScript([string]$script) {
@@ -201,19 +209,28 @@ function Invoke-StorageMirror([switch]$DryRunOnly) {
     } catch { }
 
     $tmp = Join-Path $env:TEMP 'clone_storage_obj.bin'
-    $up = 0
+    $up = 0; $failed = 0
     foreach ($name in $toUpload) {
-        $encName = [Uri]::EscapeDataString($name)
-        Invoke-WebRequest -Method Get -Uri "$LocalStorageUrl/storage/v1/object/$StorageBucket/$encName" `
-            -Headers $localHdr -OutFile $tmp -UseBasicParsing -ErrorAction Stop
-        Invoke-WebRequest -Method Post -Uri "$ProdStorageUrl/storage/v1/object/$StorageBucket/$encName" `
-            -Headers ($prodHdr + @{ 'x-upsert' = 'true'; 'Content-Type' = 'application/json' }) `
-            -InFile $tmp -UseBasicParsing -ErrorAction Stop | Out-Null
-        $up++
-        if ($up % 25 -eq 0) { Write-Host "    uploaded $up/$($toUpload.Count)..." }
+        # Per-object try/catch: a single flaky blob shouldn't abort the run -- by
+        # this point (step 7c) the DB clone is already done. Warn + continue;
+        # re-running the (idempotent) clone retries only the still-missing blobs.
+        try {
+            $encName = [Uri]::EscapeDataString($name)
+            Invoke-WebRequest -Method Get -Uri "$LocalStorageUrl/storage/v1/object/$StorageBucket/$encName" `
+                -Headers $localHdr -OutFile $tmp -UseBasicParsing -ErrorAction Stop
+            Invoke-WebRequest -Method Post -Uri "$ProdStorageUrl/storage/v1/object/$StorageBucket/$encName" `
+                -Headers ($prodHdr + @{ 'x-upsert' = 'true'; 'Content-Type' = 'application/json' }) `
+                -InFile $tmp -UseBasicParsing -ErrorAction Stop | Out-Null
+            $up++
+            if ($up % 25 -eq 0) { Write-Host "    uploaded $up/$($toUpload.Count)..." }
+        } catch {
+            $failed++
+            Write-Host "    WARNING: object '$name' failed to mirror: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
     }
     if (Test-Path $tmp) { Remove-Item $tmp -Force }
     if ($toUpload.Count -gt 0) { Write-Host "  uploaded $up object(s) to prod." -ForegroundColor Green }
+    if ($failed -gt 0) { Write-Host "  $failed object(s) failed to upload -- re-run the clone to retry (idempotent)." -ForegroundColor Yellow }
 
     if ($toDelete.Count -gt 0) {
         # Bulk delete: DELETE /storage/v1/object/{bucket} with {prefixes:[...]}.
@@ -356,22 +373,46 @@ Write-Host "  $($allTables.Count) tables; upsert order resolved." -ForegroundCol
 # THIS query's session: it's a full ~26M-row GROUP BY, and on an IO-throttled prod
 # it can exceed the default timeout. Done inline (not just via PGOPTIONS) because
 # a managed pooler may ignore startup options. The `SET` emits a "SET" status line
-# that Get-MdSignatures skips (it isn't a pipe-delimited data row).
+# that ConvertTo-MdSignatureMap skips (it isn't a pipe-delimited data row).
 $mdSigSql = @"
 SET statement_timeout = 0;
 SELECT company_id, count(*), coalesce(sum(numeric_value),0)::text, coalesce(max(target_date)::text,''), coalesce(min(target_date)::text,'')
 FROM metric_data GROUP BY company_id
 "@
-function Get-MdSignatures([scriptblock]$runner) {
+function ConvertTo-MdSignatureMap([string[]]$lines) {
     $map = @{}
-    foreach ($r in (& $runner $mdSigSql)) {
-        $p = $r -split '\|'
+    foreach ($r in $lines) {
+        $p = ("$r".TrimEnd("`r")) -split '\|'        # TrimEnd CR (job output)
         if ($p.Length -lt 5) { continue }            # skip the 'SET' tag + blank lines
         $cid = 0
         if (-not [int]::TryParse($p[0], [ref]$cid)) { continue }
         $map[$cid] = "$($p[1])|$($p[2])|$($p[3])|$($p[4])"
     }
     return $map
+}
+# Run BOTH metric_data signature scans concurrently. Each is a full ~26M-row
+# GROUP BY and they're independent (local -> local disk; prod -> the pooler), so
+# parallel wall-time is ~max(local, prod) instead of the sum -- and this diff is
+# the dominant cost of the whole clone. Background jobs run docker in a separate
+# process; we check each job's exit code, then parse the raw output in-runspace.
+# Returns @{ Local = <sig map>; Prod = <sig map> }.
+function Get-MdSignaturesParallel {
+    $localJob = Start-Job -ScriptBlock {
+        param($Container, $sql)
+        $out = docker exec $Container psql -U postgres -d postgres -tA -F'|' -c $sql
+        [pscustomobject]@{ Out = @($out); Code = $LASTEXITCODE }
+    } -ArgumentList $Container, $mdSigSql
+    $prodJob = Start-Job -ScriptBlock {
+        param($Container, $prodEnv, $prodUrlNoPw, $sql)
+        $out = docker exec @prodEnv $Container psql $prodUrlNoPw -tA -F'|' -c $sql
+        [pscustomobject]@{ Out = @($out); Code = $LASTEXITCODE }
+    } -ArgumentList $Container, $prodEnv, $prodUrlNoPw, $mdSigSql
+    # Both jobs are already running; -Wait on each just collects (max, not sum).
+    $lr = Receive-Job -Job $localJob -Wait -AutoRemoveJob
+    $pr = Receive-Job -Job $prodJob  -Wait -AutoRemoveJob
+    if ($lr.Code -ne 0) { throw "local metric_data signature scan failed:`n$($lr.Out -join "`n")" }
+    if ($pr.Code -ne 0) { throw "prod metric_data signature scan failed:`n$($pr.Out -join "`n")" }
+    return @{ Local = (ConvertTo-MdSignatureMap $lr.Out); Prod = (ConvertTo-MdSignatureMap $pr.Out) }
 }
 
 # ---- DRY RUN ----------------------------------------------------------------
@@ -383,9 +424,9 @@ if ($DryRun) {
         $flag = if ($lc -ne $pc) { "  <-- differs" } else { "" }
         Write-Host ("  {0,-28} local={1,-10} prod={2,-10}{3}" -f $t, $lc, $pc, $flag)
     }
-    Write-Host "  computing metric_data per-company signatures (full scan both sides)..."
-    $localSig = Get-MdSignatures ${function:Invoke-Local}
-    $prodSig  = Get-MdSignatures ${function:Invoke-Prod}
+    Write-Host "  computing metric_data per-company signatures (both sides, concurrent)..."
+    $sigs = Get-MdSignaturesParallel
+    $localSig = $sigs.Local; $prodSig = $sigs.Prod
     $resync = @($localSig.Keys | Where-Object { $prodSig[$_] -ne $localSig[$_] })
     $prodOnly = @($prodSig.Keys | Where-Object { -not $localSig.ContainsKey($_) })
     Write-Host ("  metric_data: {0} companies local, {1} prod; {2} need re-copy, {3} prod-only to delete." -f $localSig.Count, $prodSig.Count, $resync.Count, $prodOnly.Count) -ForegroundColor Cyan
@@ -420,7 +461,7 @@ $missing   = @($localVers | Where-Object { $prodVers -notcontains $_ })
 $ahead     = @($prodVers  | Where-Object { $localVers -notcontains $_ })
 if ($ahead.Count -gt 0) {
     Write-Host "  WARNING: prod has $($ahead.Count) migration(s) local doesn't: $($ahead -join ', ')." -ForegroundColor Yellow
-    Write-Host "  prod schema may be AHEAD of local. If data sync errors on unknown columns, use copy-local-to-prod.ps1 for a full rebuild." -ForegroundColor Yellow
+    Write-Host "  prod schema may be AHEAD of local. If data sync errors on unknown columns, drop the prod-only objects (or restore prod from a Supabase backup) and re-run." -ForegroundColor Yellow
 }
 foreach ($v in $missing) {
     $file = Get-ChildItem -Path $migDir -Filter "$v*.sql" | Select-Object -First 1
@@ -429,7 +470,7 @@ foreach ($v in $missing) {
     (Get-Content $file.FullName -Raw) | docker exec -i @prodEnv $Container psql $prodUrlNoPw -v ON_ERROR_STOP=1 -f -
     if ($LASTEXITCODE -ne 0) { throw "migration $($file.Name) failed on prod." }
 }
-# Align tracker to local verbatim (mirrors copy-local-to-prod.ps1 step 6).
+# Align the migration tracker to local verbatim.
 $trackRows = Invoke-Local "SELECT version, name FROM supabase_migrations.schema_migrations ORDER BY version"
 $trackSql = New-Object System.Text.StringBuilder
 [void]$trackSql.AppendLine("TRUNCATE supabase_migrations.schema_migrations;")
@@ -499,14 +540,11 @@ Write-Host "  all $nStaged tables upserted." -ForegroundColor Green
 
 # ---- [6] metric_data differential -------------------------------------------
 Write-Host "[6] Diffing metric_data per company (full scan both sides)..."
-Write-Host "  scanning LOCAL metric_data signatures (full ~26M-row GROUP BY)... " -NoNewline
+Write-Host "  scanning LOCAL + PROD signatures concurrently (full ~26M-row GROUP BYs)... " -NoNewline
 $swSig = [System.Diagnostics.Stopwatch]::StartNew()
-$localSig = Get-MdSignatures ${function:Invoke-Local}
-Write-Host ("done ({0} companies, {1:N0}s)" -f $localSig.Count, $swSig.Elapsed.TotalSeconds) -ForegroundColor Green
-Write-Host "  scanning PROD metric_data signatures (full ~26M-row GROUP BY)... " -NoNewline
-$swSig = [System.Diagnostics.Stopwatch]::StartNew()
-$prodSig  = Get-MdSignatures ${function:Invoke-Prod}
-Write-Host ("done ({0} companies, {1:N0}s)" -f $prodSig.Count, $swSig.Elapsed.TotalSeconds) -ForegroundColor Green
+$sigs = Get-MdSignaturesParallel
+$localSig = $sigs.Local; $prodSig = $sigs.Prod
+Write-Host ("done (local {0}, prod {1} companies, {2:N0}s wall)" -f $localSig.Count, $prodSig.Count, $swSig.Elapsed.TotalSeconds) -ForegroundColor Green
 $resync   = @($localSig.Keys | Where-Object { $prodSig[$_] -ne $localSig[$_] })
 $prodOnly = @($prodSig.Keys  | Where-Object { -not $localSig.ContainsKey($_) })
 Write-Host "  $($resync.Count) companies to re-copy, $($prodOnly.Count) prod-only to delete."
@@ -555,7 +593,9 @@ Write-Host "  done." -ForegroundColor Green
 Write-Host "[7b] Resetting $($seqResets.Count) identity/serial sequences..."
 foreach ($s in $seqResets) {
     $tbl = $s[0]; $col = $s[1]; $seq = $s[2]
-    Invoke-Prod "SELECT setval('$seq', GREATEST(COALESCE((SELECT MAX($col) FROM public.$tbl),0),1));" | Out-Null
+    # is_called = (table has rows): non-empty -> next id = MAX+1; empty ->
+    # setval(1, false) so the first insert gets id 1, not 2.
+    Invoke-Prod "SELECT setval('$seq', GREATEST(m,1), m > 0) FROM (SELECT COALESCE(MAX($col),0) AS m FROM public.$tbl) q;" | Out-Null
 }
 Write-Host "  done." -ForegroundColor Green
 

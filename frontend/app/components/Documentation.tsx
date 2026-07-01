@@ -251,6 +251,14 @@ class BBTerminalClient:
         params = {"month": month} if month else None
         return self._request("GET", f"/api/admin/universes/{universe_id}", params=params)
 
+    def etfs(self) -> list[dict]:
+        """Every ETF (a benchmark row) that carries an ISIN — the tradeable,
+        identifiable funds. Each carries the same universe-member shape:
+        benchmark_id, ticker, name, isin, currency, sector, plus the latest
+        close (native + EUR) and fx_rate_per_eur. Index-only benchmarks
+        (no ISIN) are excluded."""
+        return self._request("GET", "/api/admin/etfs")["etfs"]
+
     # ─── Factory ─────────────────────────────────────────────────
 
     @classmethod
@@ -609,6 +617,7 @@ export default function Documentation() {
                     ['GET', '/api/admin/schedules/{id}', 'bb.schedule(id)', 'One strategy’s current holdings — order-ready (ticker, exchange, country, currency, isin, weight, side) + as_of_date.'],
                     ['GET', '/api/admin/universes', 'bb.universes()', 'List every universe + its id / kind / month range. Pick an id for the membership call.'],
                     ['GET', '/api/admin/universes/{id}', 'bb.universe(id)', 'Full membership for a month (default latest; ?month=YYYY-MM) — same per-company fields as holdings (ticker, exchange, country, currency, isin, sector) + latest close (native + EUR).'],
+                    ['GET', '/api/admin/etfs', 'bb.etfs()', 'Every ETF (benchmark) with an ISIN — benchmark_id, ticker, name, isin, currency, sector + latest close (native + EUR). Same shape as a universe member.'],
                     ['GET', '/api/admin/health', 'bb.health()', 'Composite go/no-go. Gate trades on is_healthy_strict.'],
                     ['GET', '/api/auth/me', 'bb.whoami()', 'Caller identity + role. Bail fast if role != "admin".'],
                   ].map(([method, path, py, desc]) => (

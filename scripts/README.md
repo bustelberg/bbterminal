@@ -35,28 +35,31 @@ are PowerShell + Docker.
 
 ## Scripts
 
-### `copy-local-to-prod.ps1` — destructive replicate
+### `clone-local-to-prod.ps1` — differential sync
 
-Wipes prod's `public` schema and replaces it with a byte-for-byte copy of
-local (schema + all data). Keeps `auth.users`, Storage buckets, API keys,
-and the Supabase project itself intact.
+Makes prod's `public` schema an exact clone of local by transferring only
+what differs — no schema drop, no full data reload. Applies any missing
+migrations, upserts + delete-mirrors every table, syncs `metric_data`
+per-company by signature (only changed companies cross the wire), and mirrors
+the `backtest-results` Storage bucket. Non-destructive to `auth.users` / API
+keys. Idempotent — a second run right after transfers nothing.
 
 ```powershell
-./scripts/copy-local-to-prod.ps1
-# Or non-interactive:
-./scripts/copy-local-to-prod.ps1 -Force
+# Preview what would change (read-only):
+./scripts/clone-local-to-prod.ps1 -DryRun
+# Apply (interactive confirm):
+./scripts/clone-local-to-prod.ps1
+# Non-interactive:
+./scripts/clone-local-to-prod.ps1 -Force
 ```
 
-Use only while the project has no real users — it nukes every prod row.
-After it runs, prod's `schema_migrations` matches local's, so
-`supabase migration list` reports clean.
+Storage sync needs a prod service key — set `PROD_SERVICE_KEY` (and
+`PROD_SUPABASE_URL` if it can't be auto-derived) in `scripts/.env.local`; the
+DB clone still runs without it (the Storage step warns + skips).
 
-The script also re-grants Supabase's stock privileges (`anon`,
-`authenticated`, `service_role`) on the freshly restored tables. Without
-this step the backend's `service_role` key gets `permission denied`
-errors on every query, because `pg_restore --no-privileges` strips ACLs
-and Supabase's auto-grant event trigger doesn't fire on bulk restores.
-Mirror of `supabase/migrations/20260522000000_restore_supabase_default_grants.sql`.
+If prod is ever AHEAD of local (extra migrations/columns local lacks), the
+clone stops. Reconcile prod by hand (drop the prod-only objects) or restore it
+from a Supabase backup, then re-run.
 
 ### `apply-migration.ps1` — additive migration
 

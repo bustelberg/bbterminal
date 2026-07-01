@@ -337,6 +337,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/etfs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Etfs
+         * @description Every ETF that carries an ISIN, enriched like a universe member. Admin only.
+         *
+         *     ETFs live in the `benchmark` table (the same rows the diversifier + sector
+         *     overlays reference — an ETF is a benchmark with a tradeable ISIN). This
+         *     returns ONLY benchmarks with an `isin` set — the identifiable, tradeable
+         *     instruments — each with its latest close (native + EUR via the same fx_rate
+         *     source the /fx-rates page + universe members use). Index-only benchmarks
+         *     (no ISIN) are excluded.
+         *
+         *     Each ETF carries the universe-member-style shape (minus the fields that
+         *     don't apply to a fund — exchange/country/industry):
+         *
+         *         benchmark_id, ticker, name, isin, currency, sector,
+         *         latest_close_local, latest_close_eur, latest_close_date, fx_rate_per_eur
+         *
+         *     Response: `{count, etfs:[…]}`, sorted by ticker.
+         */
+        get: operations["list_etfs_api_admin_etfs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/gurufocus-company-name": {
         parameters: {
             query?: never;
@@ -5713,6 +5748,37 @@ export interface operations {
         };
     };
     get_egress_ip_api_admin_egress_ip_get: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_etfs_api_admin_etfs_get: {
         parameters: {
             query?: never;
             header: {

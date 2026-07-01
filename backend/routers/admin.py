@@ -918,6 +918,94 @@ async def get_universe(
     return await asyncio.to_thread(_query)
 
 
+@router.get("/api/admin/etfs")
+async def list_etfs(authorization: str = Header(...)):
+    """Every ETF that carries an ISIN, enriched like a universe member. Admin only.
+
+    ETFs live in the `benchmark` table (the same rows the diversifier + sector
+    overlays reference — an ETF is a benchmark with a tradeable ISIN). This
+    returns ONLY benchmarks with an `isin` set — the identifiable, tradeable
+    instruments — each with its latest close (native + EUR via the same fx_rate
+    source the /fx-rates page + universe members use). Index-only benchmarks
+    (no ISIN) are excluded.
+
+    Each ETF carries the universe-member-style shape (minus the fields that
+    don't apply to a fund — exchange/country/industry):
+
+        benchmark_id, ticker, name, isin, currency, sector,
+        latest_close_local, latest_close_eur, latest_close_date, fx_rate_per_eur
+
+    Response: `{count, etfs:[…]}`, sorted by ticker."""
+    _require_admin(authorization)
+
+    def _query() -> dict:
+        rows = (
+            supabase.table("benchmark")
+            .select("benchmark_id, ticker, name, isin, currency, sector")
+            .not_.is_("isin", "null")
+            .order("ticker")
+            .execute()
+        ).data or []
+        if not rows:
+            return {"count": 0, "etfs": []}
+
+        # Latest close per benchmark from benchmark_price. ETFs number in the
+        # dozens, so a per-row limit-1 (newest date) is cheap.
+        latest: dict[int, dict] = {}
+        for r in rows:
+            bid = int(r["benchmark_id"])
+            pr = (
+                supabase.table("benchmark_price")
+                .select("target_date, price")
+                .eq("benchmark_id", bid)
+                .order("target_date", desc=True)
+                .limit(1)
+                .execute()
+            ).data
+            if pr:
+                latest[bid] = {"date": pr[0].get("target_date"), "price": pr[0].get("price")}
+
+        # Latest {ccy}/EUR rate per currency — same source as _enrich_universe_members.
+        fx: dict[str, float] = {}
+        try:
+            from fx_rates import fetch_latest_from_db  # noqa: PLC0415
+            for r in fetch_latest_from_db(supabase):
+                code, rate = r.get("currency"), r.get("rate")
+                if code and rate:
+                    fx[code] = float(rate)
+        except Exception:
+            fx = {}
+
+        out: list[dict] = []
+        for r in rows:
+            bid = int(r["benchmark_id"])
+            cur = r.get("currency")
+            lc = latest.get(bid, {})
+            raw = lc.get("price")
+            local = float(raw) if raw is not None else None
+            rate = 1.0 if cur == "EUR" else (fx.get(cur) if cur else None)
+            eur = (
+                round(local / rate, 4)
+                if rate and local is not None and rate > 0
+                else None
+            )
+            out.append({
+                "benchmark_id": bid,
+                "ticker": r.get("ticker"),
+                "name": r.get("name"),
+                "isin": r.get("isin"),
+                "currency": cur,
+                "sector": r.get("sector"),
+                "latest_close_local": local,
+                "latest_close_eur": eur,
+                "latest_close_date": lc.get("date"),
+                "fx_rate_per_eur": rate,
+            })
+        return {"count": len(out), "etfs": out}
+
+    return await asyncio.to_thread(_query)
+
+
 # ─── Health ────────────────────────────────────────────────────────
 
 

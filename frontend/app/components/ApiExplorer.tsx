@@ -84,6 +84,7 @@ const VISIBLE_ENDPOINTS = new Set<string>([
   'GET /api/admin/schedules/{strategy_id}/performance',
   'GET /api/admin/universes',
   'GET /api/admin/universes/{universe_id}',
+  'GET /api/admin/etfs',
   'GET /api/admin/health',
 ]);
 
