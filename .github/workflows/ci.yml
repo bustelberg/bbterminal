@@ -595,13 +595,28 @@ jobs:
           fail=0
           while IFS= read -r path; do
             [[ -z "$path" ]] && continue
-            status=$(curl -sS -o /tmp/body -w "%{http_code}" -m 60 \
+            # SSE endpoints (…/stream) never close, so curl can only stop by
+            # disconnecting on a -m timeout. Their 2xx status line arrives with
+            # the response headers — well before any body — so a short timeout is
+            # enough to prove they opened; probe those briefly. Everything else
+            # keeps the full 60s (some GETs are genuinely slow on a cold DB).
+            case "$path" in
+              */stream) TIMEOUT=8 ;;
+              *)        TIMEOUT=60 ;;
+            esac
+            # `%{http_code}` is written even when -m aborts mid-stream (it holds
+            # the received status line), so an SSE timeout still yields e.g. 200.
+            # `|| true` stops set -e firing on the timeout exit; a real connection
+            # failure leaves http_code at 000. (The old `|| echo 000` CONCATENATED
+            # onto the -w output — "200"+"000" = "200000" — which failed the 2xx
+            # check for every streaming endpoint.)
+            http=$(curl -sS -o /tmp/body -w "%{http_code}" -m "$TIMEOUT" \
               -H "Authorization: Bearer ci-admin" \
-              "$BACKEND$path" || echo "000")
-            if [[ "$status" =~ ^2[0-9][0-9]$ ]]; then
-              printf "OK   %s  %s\n" "$status" "$path"
+              "$BACKEND$path" || true)
+            if [[ "$http" =~ ^2[0-9][0-9]$ ]]; then
+              printf "OK   %s  %s\n" "$http" "$path"
             else
-              printf "FAIL %s  %s\n" "$status" "$path"
+              printf "FAIL %s  %s\n" "$http" "$path"
               echo "  body (first 500 bytes):"
               head -c 500 /tmp/body | sed 's/^/    /'
               echo
