@@ -282,27 +282,29 @@ def load_companies_via_copy() -> list[dict] | None:
     return out
 
 
-def load_latest_close_dates_via_copy(company_ids: list[int]) -> dict[int, str] | None:
-    """Latest `close_price` `target_date` per company, for a SMALL set of
-    company ids (e.g. a strategy's ~24 held names). Returns
-    `{company_id: 'YYYY-MM-DD'}` (companies with no close_price are simply
-    absent), or `None` for the PostgREST fall-back.
+def load_latest_metric_dates_via_copy(
+    company_ids: list[int], metric_code: str,
+) -> dict[int, str] | None:
+    """Latest `target_date` per company for a given `metric_code` (source
+    'gurufocus'), for a set of company ids — ONE grouped COPY. Returns
+    `{company_id: 'YYYY-MM-DD'}` (companies with no such metric are absent), or
+    `None` for the PostgREST fall-back (SUPABASE_DB_URL unset / psycopg missing /
+    error). Both `close_price` and `volume` are 100% source 'gurufocus', so the
+    source filter is a no-op that just unlocks the single-seek index path.
 
-    Uses a per-company lateral `ORDER BY target_date DESC LIMIT 1` (a "loose
-    index scan") so the PK index seeks straight to each company's latest row --
-    one row read per company. The old `GROUP BY max(target_date)` read EVERY
-    date row per company; close_price is 100% source 'gurufocus', so the source
-    filter is a no-op that just unlocks the single-seek index path."""
+    Per-company lateral `ORDER BY target_date DESC LIMIT 1` (a "loose index
+    scan") so the PK index seeks straight to each company's latest row — one row
+    read per company, all in a single round-trip instead of N PostgREST calls."""
     if not _db_url() or not company_ids:
         return None
     sql = (
         "COPY (SELECT cid AS company_id, l.d::text FROM unnest(%s::int[]) AS cid "
         "CROSS JOIN LATERAL (SELECT md.target_date AS d FROM metric_data md "
-        "WHERE md.company_id = cid AND md.metric_code = 'close_price' "
+        "WHERE md.company_id = cid AND md.metric_code = %s "
         "AND md.source_code = 'gurufocus' ORDER BY md.target_date DESC LIMIT 1) l) "
         "TO STDOUT WITH (FORMAT csv)"
     )
-    buf = _run_copy(sql, (list(company_ids),))
+    buf = _run_copy(sql, (list(company_ids), metric_code))
     if buf is None:
         return None
 
@@ -313,6 +315,12 @@ def load_latest_close_dates_via_copy(company_ids: list[int]) -> dict[int, str] |
             continue
         out[int(row[0])] = row[1]
     return out
+
+
+def load_latest_close_dates_via_copy(company_ids: list[int]) -> dict[int, str] | None:
+    """Latest `close_price` `target_date` per company (thin wrapper over
+    `load_latest_metric_dates_via_copy` — kept for existing callers)."""
+    return load_latest_metric_dates_via_copy(company_ids, "close_price")
 
 
 def load_latest_close_prices_via_copy(

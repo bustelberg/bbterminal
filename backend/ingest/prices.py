@@ -379,8 +379,85 @@ def _parse_price_series(data: list | dict) -> list[tuple[date, float]]:
     return results
 
 
-def _db_max_date(supabase: Client, company_id: int, metric_code: str) -> date | None:
-    """Return the latest target_date already stored for this company/metric, or None."""
+# ── Batch max-date cache ─────────────────────────────────────────────────────
+# The price refresh processes companies CONCURRENTLY, and each worker calls
+# `_db_max_date` per company × metric. Those per-company reads multiplexed onto
+# the supabase client's (formerly HTTP/2) connection and tripped Cloudflare's
+# per-connection GOAWAY (see deps.py). `prime_db_max_dates` collapses them into
+# ONE grouped query per metric up front; the workers then read this cache
+# instead of hitting the DB. Keyed (company_id, metric_code); membership in
+# `_PRIMED_MAX_DATES` means "value known" so a cached None ("no data") is
+# distinct from "not primed". Module-global, but the pipeline lock serializes
+# refresh runs, so there's a single writer; the phase clears it when done.
+_MAX_DATE_CACHE: dict[tuple[int, str], date | None] = {}
+_PRIMED_MAX_DATES: set[tuple[int, str]] = set()
+
+
+def _db_max_dates(
+    supabase: Client, company_ids: list[int], metric_code: str,
+) -> dict[int, date]:
+    """Latest stored `target_date` per company for `metric_code` (source
+    'gurufocus') in ONE grouped query via the COPY path. Falls back to
+    per-company PostgREST reads when the direct-DB URL isn't configured (still
+    correct, just N calls — but now over HTTP/1.1, so no GOAWAY churn)."""
+    ids = [int(c) for c in company_ids]
+    if not ids:
+        return {}
+    try:
+        from momentum.data._pg import load_latest_metric_dates_via_copy  # noqa: PLC0415
+        copied = load_latest_metric_dates_via_copy(ids, metric_code)
+    except Exception:
+        copied = None
+    if copied is not None:
+        out: dict[int, date] = {}
+        for cid, s in copied.items():
+            try:
+                out[int(cid)] = date.fromisoformat(s)
+            except (TypeError, ValueError):
+                pass
+        return out
+    # Fallback: per-company (uncached, so we don't read a half-primed cache).
+    out = {}
+    for cid in ids:
+        d = _db_max_date(supabase, cid, metric_code, _use_cache=False)
+        if d is not None:
+            out[cid] = d
+    return out
+
+
+def prime_db_max_dates(
+    supabase: Client,
+    company_ids: list[int],
+    metric_codes: tuple[str, ...] = ("close_price", "volume"),
+) -> None:
+    """Precompute + cache latest DB dates for a batch of companies — one grouped
+    query per metric — so the subsequent per-company `_db_max_date` reads in the
+    concurrent refresh loop are cache hits instead of threads × companies round-
+    trips. Call before the refresh pool; pair with `clear_db_max_date_cache`."""
+    ids = [int(c) for c in company_ids]
+    for metric in metric_codes:
+        dates = _db_max_dates(supabase, ids, metric)
+        for cid in ids:
+            key = (cid, metric)
+            _MAX_DATE_CACHE[key] = dates.get(cid)
+            _PRIMED_MAX_DATES.add(key)
+
+
+def clear_db_max_date_cache() -> None:
+    """Drop the primed max-date cache (call after a refresh batch finishes)."""
+    _MAX_DATE_CACHE.clear()
+    _PRIMED_MAX_DATES.clear()
+
+
+def _db_max_date(
+    supabase: Client, company_id: int, metric_code: str, *, _use_cache: bool = True,
+) -> date | None:
+    """Return the latest target_date already stored for this company/metric, or
+    None. Reads the primed batch cache (`prime_db_max_dates`) when available, so
+    the concurrent refresh loop doesn't issue one query per company."""
+    key = (int(company_id), metric_code)
+    if _use_cache and key in _PRIMED_MAX_DATES:
+        return _MAX_DATE_CACHE.get(key)
     try:
         resp = (
             supabase.table("metric_data")

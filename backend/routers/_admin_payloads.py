@@ -19,13 +19,22 @@ def _build_portfolio_payload(snapshot_row: dict) -> dict:
         country           listing country name (via the exchange)
         currency          ISO 4217 currency code
         side              "long" or "short"
-        target_weight     fractional weight in the portfolio (sum ≈ 1.0)
+        is_cash           true for the synthetic cash sleeve (company_id 0)
+        target_weight     weight set at the last rebalance (fraction, sum ≈ 1.0)
+        current_weight    drift-adjusted weight today, renormalized to sum 1
         company_id        DB id, useful for cross-referencing
         company_name      display name
         sector            GICS sector (for verification)
         isin              ISO 6166 security identifier (null if unknown)
-        entry_price_local most recent close in the listing currency
-        entry_price_eur   …same converted to EUR
+        entry_price_local entry (rebalance) close in the listing currency
+        exit_price_local  latest close in the listing currency
+        entry_price_eur   entry close converted to EUR (entry-date FX)
+        exit_price_eur    latest close converted to EUR (close-date FX)
+        entry_date        trading date the entry marks + entry FX reflect
+        exit_date         trading date the exit marks + exit FX reflect
+        entry_fx_rate_eur EUR per 1 unit of the local currency at entry
+        exit_fx_rate_eur  …at the latest close
+        return_eur_pct    weighted EUR return of this holding since entry
         score             the momentum score at selection time
 
     The IBKR symbol/exchange mapping isn't done here — callers know
@@ -40,11 +49,12 @@ def _build_portfolio_payload(snapshot_row: dict) -> dict:
     # carry exchange/country directly (only currency); we look them up via
     # the company table joined to gurufocus_exchange → country.
     cids = [int(h["company_id"]) for h in raw_holdings if h.get("company_id") is not None]
+    pos_cids = [c for c in cids if c > 0]
     exchange_by_cid: dict[int, str] = {}
     country_by_cid: dict[int, str | None] = {}
     isin_by_cid: dict[int, str | None] = {}
     for row in fetch_in_chunks(
-        cids,
+        pos_cids,
         lambda chunk: supabase.table("company")
         .select(
             "company_id, isin, gurufocus_exchange:gurufocus_exchange("
@@ -59,17 +69,49 @@ def _build_portfolio_payload(snapshot_row: dict) -> dict:
         country_by_cid[cid] = (exch_info.get("country") or {}).get("country_name")
         isin_by_cid[cid] = row.get("isin")
 
+    # ETF-overlay holdings carry a NEGATIVE company_id (= -benchmark_id); their
+    # ISIN lives in the `benchmark` table, not `company`, so resolve it there so
+    # the order payload carries the ETF's ISIN too. (company_id 0 = the cash
+    # sleeve — no ISIN, correctly left null.)
+    etf_bids = [-c for c in cids if c < 0]
+    if etf_bids:
+        for row in fetch_in_chunks(
+            etf_bids,
+            lambda chunk: supabase.table("benchmark")
+            .select("benchmark_id, isin")
+            .in_("benchmark_id", chunk)
+            .execute(),
+        ):
+            isin_by_cid[-int(row["benchmark_id"])] = row.get("isin")
+
     from ingest.gurufocus_url import gurufocus_url, pad_hkse_ticker  # noqa: PLC0415
 
+    def _fx(eur: object, local: object) -> float | None:
+        """Displayed EUR-per-1-unit-local rate = the stored EUR mark ÷ the local
+        price (mirrors the Current-portfolio card's FX→€ columns). None when a
+        side is missing or the local price is 0."""
+        try:
+            if eur is not None and local:
+                return round(float(eur) / float(local), 6)
+        except (TypeError, ValueError, ZeroDivisionError):
+            pass
+        return None
+
+    # First pass: assemble each row + its drift factor (weight × EUR growth),
+    # so a second pass can set the renormalized CURRENT weight (needs the total).
+    rows_tmp: list[tuple[dict, float]] = []
     total_weight = 0.0
-    holdings_out: list[dict] = []
+    total_factor = 0.0
     for h in raw_holdings:
         cid = int(h.get("company_id")) if h.get("company_id") is not None else None
         weight = float(h.get("weight") or 0.0)
+        ret = h.get("forward_return_pct")
+        factor = weight * (1.0 + (float(ret) / 100.0 if ret is not None else 0.0))
         total_weight += weight
+        total_factor += factor
         exchange = exchange_by_cid.get(cid, "") if cid is not None else ""
         gf_ticker = pad_hkse_ticker(h.get("ticker"), exchange)
-        holdings_out.append({
+        rows_tmp.append(({
             "company_id": cid,
             "ticker": h.get("ticker"),
             "exchange": exchange,
@@ -77,15 +119,33 @@ def _build_portfolio_payload(snapshot_row: dict) -> dict:
             "currency": h.get("currency"),
             "isin": isin_by_cid.get(cid) if cid is not None else None,
             "side": h.get("side") or "long",
+            "is_cash": bool(h.get("is_cash")),
+            # Weight set at the last rebalance vs where it has drifted to today
+            # (renormalized to sum 1 across the basket — filled below).
             "target_weight": round(weight, 6),
+            "current_weight": None,
             "company_name": h.get("company_name"),
             "sector": h.get("sector"),
+            # Entry (rebalance close) vs exit (latest close) marks, native + EUR,
+            # with the FX rate baked into each and the trading date each reflects.
             "entry_price_local": h.get("entry_price_local"),
+            "exit_price_local": h.get("exit_price_local"),
             "entry_price_eur": h.get("entry_price_eur"),
+            "exit_price_eur": h.get("exit_price_eur"),
             "entry_date": h.get("entry_date"),
+            "exit_date": h.get("exit_date"),
+            "entry_fx_rate_eur": _fx(h.get("entry_price_eur"), h.get("entry_price_local")),
+            "exit_fx_rate_eur": _fx(h.get("exit_price_eur"), h.get("exit_price_local")),
+            # Weighted EUR return of this holding since entry (the engine's mark).
+            "return_eur_pct": h.get("forward_return_pct"),
             "score": h.get("score"),
             "gurufocus_url": gurufocus_url(gf_ticker, exchange),
-        })
+        }, factor))
+
+    holdings_out: list[dict] = []
+    for row, factor in rows_tmp:
+        row["current_weight"] = round(factor / total_factor, 6) if total_factor else None
+        holdings_out.append(row)
 
     return {
         "snapshot_id": snapshot_row.get("snapshot_id"),

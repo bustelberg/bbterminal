@@ -12,6 +12,7 @@ this module thin; if a helper has a clear home in one of the
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator
@@ -82,6 +83,34 @@ class _LazySupabase:
                     storage_client_timeout=30,
                 ),
             )
+            # Force PostgREST onto HTTP/1.1. postgrest-py hardcodes http2=True on
+            # its httpx session; Supabase's Cloudflare gateway caps requests per
+            # connection and sends an HTTP/2 GOAWAY once hit, which httpx surfaces
+            # as `RemoteProtocolError: ConnectionTerminated` on whatever request
+            # was in flight (it can't safely retry a non-idempotent-looking one).
+            # A chatty read sweep (e.g. the price refresh's per-company
+            # `_db_max_date`) then sees a RUN of failures mid-batch. HTTP/1.1 uses
+            # a plain connection pool with no GOAWAY-mid-stream failure mode, so
+            # swap in an http1 session that copies the base_url + auth headers
+            # postgrest already set. Best-effort: if supabase-py internals move we
+            # keep the default (http2) client rather than crash the app.
+            try:
+                import httpx  # noqa: PLC0415
+
+                _pg = real.postgrest.session
+                real.postgrest.session = httpx.Client(
+                    base_url=_pg.base_url,
+                    headers=_pg.headers,
+                    timeout=_pg.timeout,
+                    follow_redirects=True,
+                    http2=False,
+                )
+                _pg.close()  # fresh client, no in-flight requests — safe to drop
+            except Exception:
+                logging.getLogger(__name__).debug(
+                    "[deps] postgrest HTTP/1.1 swap skipped; using default client",
+                    exc_info=True,
+                )
             object.__setattr__(self, "_real", real)
         return real
 

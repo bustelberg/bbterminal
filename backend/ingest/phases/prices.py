@@ -154,8 +154,10 @@ def _run_prices_phase(
     hammering an exhausted quota. Used by the month-end full-price refresh."""
     from ingest.api_usage import _region_for_exchange  # noqa: PLC0415
     from ingest.prices import (  # noqa: PLC0415
+        clear_db_max_date_cache,
         ensure_prices_for_company,
         ensure_volume_for_company,
+        prime_db_max_dates,
     )
 
     log = logging.getLogger(__name__)
@@ -343,10 +345,18 @@ def _run_prices_phase(
         if checkpoint:
             _checkpoint(run_id, checkpoint, total)
 
-    with ThreadPoolExecutor(
-        max_workers=_MAX_WORKERS, thread_name_prefix=f"ingest-{run_id}"
-    ) as executor:
-        list(executor.map(_refresh_one, companies))
+    # Collapse the workers' per-company max-date reads (close_price + volume)
+    # into ONE grouped query per metric up front — thousands of concurrent
+    # PostgREST round-trips otherwise (which tripped Cloudflare's HTTP/2 GOAWAY).
+    # Cleared in finally so it never leaks stale entries into the next run.
+    prime_db_max_dates(supabase, [c["cid"] for c in companies])
+    try:
+        with ThreadPoolExecutor(
+            max_workers=_MAX_WORKERS, thread_name_prefix=f"ingest-{run_id}"
+        ) as executor:
+            list(executor.map(_refresh_one, companies))
+    finally:
+        clear_db_max_date_cache()
 
     # Final counter write — orchestrator handles status/finished_at.
     _update_run(

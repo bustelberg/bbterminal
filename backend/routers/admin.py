@@ -482,9 +482,14 @@ async def get_schedule(strategy_id: int, authorization: str = Header(...)):
     so you never trade on stale data. A strategy with no snapshot yet returns
     an empty `holdings` list. 404 when the strategy doesn't exist.
 
-    Each holding carries everything needed to place an order:
+    Each holding carries everything needed to place an order + the full set of
+    per-position marks shown on the /schedule Current-portfolio table:
         company_id, ticker, exchange, country, currency, isin, company_name,
-        side, target_weight, score, entry_price_local, entry_price_eur
+        sector, side, is_cash, score,
+        target_weight, current_weight (drift-renormalized),
+        entry_price_local, exit_price_local, entry_price_eur, exit_price_eur,
+        entry_date, exit_date, entry_fx_rate_eur, exit_fx_rate_eur,
+        return_eur_pct
 
     Response: `{strategy_id, name, enabled, frequency, next_rebalance_at,
     last_run_at, as_of_date, latest_price_date, holdings_count, holdings:[…]}`."""
