@@ -14,7 +14,12 @@ import { createPortal } from 'react-dom';
  * Closes on any scroll so the fixed-positioned tooltip doesn't float
  * over the sticky header after its anchor row has scrolled away.
  */
-export default function CellInfoTip({ children }: { children: React.ReactNode }) {
+export default function CellInfoTip({ children, trigger }: {
+  children: React.ReactNode;
+  /** Custom hover affordance in place of the default "i" badge (e.g. a ⚠).
+   * Rendered inside the same measured anchor span so positioning is unchanged. */
+  trigger?: React.ReactNode;
+}) {
   const [show, setShow] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const [mounted, setMounted] = useState(false);
@@ -56,12 +61,18 @@ export default function CellInfoTip({ children }: { children: React.ReactNode })
       onMouseEnter={handleEnter}
       onMouseLeave={() => setShow(false)}
     >
-      <span
-        ref={iconRef}
-        className="inline-flex items-center justify-center w-3 h-3 ml-1 rounded-full border border-neutral-700 text-fg-subtle text-[8px] leading-none hover:border-accent-400 hover:text-accent-400 transition-colors cursor-help align-middle"
-      >
-        i
-      </span>
+      {trigger ? (
+        <span ref={iconRef} className="inline-flex items-center justify-center cursor-help align-middle">
+          {trigger}
+        </span>
+      ) : (
+        <span
+          ref={iconRef}
+          className="inline-flex items-center justify-center w-3 h-3 ml-1 rounded-full border border-neutral-700 text-fg-subtle text-[8px] leading-none hover:border-accent-400 hover:text-accent-400 transition-colors cursor-help align-middle"
+        >
+          i
+        </span>
+      )}
       {show && mounted && createPortal(
         <span
           className="fixed px-3 py-2 bg-popover border border-neutral-700 rounded-lg text-[11px] text-fg-soft leading-relaxed z-[9999] shadow-xl pointer-events-none"

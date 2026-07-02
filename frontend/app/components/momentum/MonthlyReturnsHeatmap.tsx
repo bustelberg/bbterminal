@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import CollapsibleCard from './CollapsibleCard';
-import InfoTip from '../InfoTip';
+import CellInfoTip from './CellInfoTip';
 import type { BacktestResult } from '../../../lib/stores/momentum';
 
 /** A month whose latest live data point mixes carried-forward (stale) prices
@@ -71,21 +71,29 @@ export default function MonthlyReturnsHeatmap({
   const goLiveMonth = markerDate ? markerDate.slice(0, 7) : null;
   const goLiveYear = markerDate ? markerDate.slice(0, 4) : null;
 
-  // Tooltip body for the incomplete-data cell — lists each lagging holding
-  // and the close date it's stuck on. Newlines are preserved by InfoTip.
-  const staleText = staleWarning
-    ? [
-        `Incomplete data for ${monthLabel(staleWarning.month)}.`,
-        '',
-        `These holdings have no close for ${staleWarning.reference_date} yet and are carried forward at an older price, so this month's return would be based on stale prices:`,
-        '',
-        ...staleWarning.missing.map(
-          (m) => `• ${m.label}${m.ticker ? ` (${m.ticker})` : ''} — last close ${m.last_close ?? 'none'}`,
-        ),
-        '',
-        'This cell fills in once those prices publish.',
-      ].join('\n')
-    : '';
+  // Tooltip body for the incomplete-data cell — lists each lagging holding and
+  // the close date it's stuck on. Rendered via CellInfoTip (portaled to <body>
+  // so it isn't clipped/mispositioned by the card's containment).
+  const staleTip = staleWarning ? (
+    <div className="space-y-1">
+      <div className="font-medium text-warn-300">Incomplete data — {monthLabel(staleWarning.month)}</div>
+      <div className="text-fg-muted">
+        No close for <span className="font-mono">{staleWarning.reference_date}</span> yet; carried forward at an older price, so this month&apos;s return is partial:
+      </div>
+      <ul className="space-y-0.5">
+        {staleWarning.missing.slice(0, 12).map((m) => (
+          <li key={m.company_id} className="flex justify-between gap-3">
+            <span className="truncate">{m.label}{m.ticker ? ` (${m.ticker})` : ''}</span>
+            <span className="font-mono text-fg-faint shrink-0">{m.last_close ?? 'no data'}</span>
+          </li>
+        ))}
+        {staleWarning.missing.length > 12 && (
+          <li className="text-fg-faint">+{staleWarning.missing.length - 12} more</li>
+        )}
+      </ul>
+      <div className="text-fg-faint">Fills in once those prices publish.</div>
+    </div>
+  ) : null;
 
   const { years, byKey, yearTotals, maxAbs, maxAbsYear, dailyByMonth, maxAbsDaily } = useMemo(() => {
     // Dedupe by date (keep the last cumulative value) — the daily curve repeats
@@ -197,10 +205,9 @@ export default function MonthlyReturnsHeatmap({
                         className="px-1.5 py-1 text-center"
                         style={{ background: 'color-mix(in srgb, var(--color-warn-500) 22%, transparent)', color: 'var(--color-fg-strong)', ...(ring ? { boxShadow: ring } : {}) }}
                       >
-                        <span className="inline-flex items-center justify-center gap-0.5">
-                          <span aria-hidden className="text-warn-400 leading-none">⚠</span>
-                          <InfoTip text={staleText} />
-                        </span>
+                        <CellInfoTip trigger={<span aria-hidden className="text-warn-400 text-[13px] leading-none">⚠</span>}>
+                          {staleTip}
+                        </CellInfoTip>
                       </td>
                     );
                   }
