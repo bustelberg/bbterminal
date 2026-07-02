@@ -58,6 +58,15 @@ export type StrategyRunHistory = {
     points: { date: string; cumulative_return_pct: number }[];
     as_of_date: string;
   } | null;
+  /** Present when the latest live month mixes carried-forward prices: the
+   * affected month + the holdings still missing a close for `reference_date`.
+   * The monthly-returns heatmap warns on that cell instead of showing a
+   * partial number. Null when the latest point is a clean mark-to-market. */
+  stale_prices: {
+    reference_date: string;
+    month: string;
+    missing: { company_id: number; label: string; ticker: string | null; last_close: string | null }[];
+  } | null;
 };
 
 /** Per-strategy expanded view: strategy params + the source-backtest
@@ -165,6 +174,11 @@ export default function ScheduledStrategyDetail({
         snapshotId={data.runs?.[0]?.snapshot_id ?? null}
         strategyId={strategyId}
         canEditCash={!readOnly}
+        // Live staleness (same signal the monthly-returns heatmap warns on):
+        // the holdings whose latest close lags the basket's freshest — so a
+        // stock is refreshable here even when the persisted snapshot's frozen
+        // dates don't yet show it as stale.
+        staleCompanyIds={(data.stale_prices?.missing ?? []).map((m) => m.company_id)}
         onCashChanged={async () => { await load(); onMutated?.(); }}
       />
 
@@ -220,7 +234,7 @@ export default function ScheduledStrategyDetail({
             {/* Source backtest — the variant's full equity curve, sector
                 timeline + per-month holdings, exactly as on /backtest, with
                 the red dashed go-live marker at the date above. */}
-            <SourceBacktestCard runId={data.backtest_run_id} markerDate={effectiveStart} liveCurve={data.live_curve} cashPct={Number(data.config?.cash_pct ?? 0)} />
+            <SourceBacktestCard runId={data.backtest_run_id} markerDate={effectiveStart} liveCurve={data.live_curve} staleWarning={data.stale_prices} cashPct={Number(data.config?.cash_pct ?? 0)} />
           </>
         );
       })()}

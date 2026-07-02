@@ -278,6 +278,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/company-price-refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Company Price Refresh
+         * @description Force-refresh ONE company's prices from GuruFocus (bypassing cache) and
+         *     return a COMPACT view of the actual API request + response — for clearing a
+         *     single stale holding straight from the /schedule Current-portfolio card.
+         *
+         *     Loads the fetched closes into `metric_data`; when `strategy_id` is supplied,
+         *     re-prices that strategy's held basket (a new price_update snapshot) so the
+         *     card + heatmap update on the next reload. Admin only. ETF overlays (negative
+         *     company_id) aren't refreshable here — they price from `benchmark_price` via
+         *     the price-update job.
+         */
+        post: operations["company_price_refresh_api_admin_company_price_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/copy-status": {
         parameters: {
             query?: never;
@@ -5403,6 +5431,13 @@ export interface components {
              */
             illiquid?: boolean;
         };
+        /** _PriceRefreshBody */
+        _PriceRefreshBody: {
+            /** Company Id */
+            company_id: number;
+            /** Strategy Id */
+            strategy_id?: number | null;
+        };
     };
     responses: never;
     parameters: never;
@@ -5698,6 +5733,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["_IlliquidBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    company_price_refresh_api_admin_company_price_refresh_post: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_PriceRefreshBody"];
             };
         };
         responses: {

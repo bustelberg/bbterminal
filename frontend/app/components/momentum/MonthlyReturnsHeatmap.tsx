@@ -3,7 +3,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import CollapsibleCard from './CollapsibleCard';
+import InfoTip from '../InfoTip';
 import type { BacktestResult } from '../../../lib/stores/momentum';
+
+/** A month whose latest live data point mixes carried-forward (stale) prices
+ * for some holdings — so its return can't be shown as a clean number. Supplied
+ * by /schedule's `stale_prices`; the flagged month's cell renders a warning +
+ * an info icon listing the lagging assets instead of a value. */
+export type StalePriceWarning = {
+  /** "YYYY-MM" — the calendar month of the incomplete cell. */
+  month: string;
+  /** The freshest close across the basket (the day the cell is marked to). */
+  reference_date: string;
+  missing: { company_id: number; label: string; ticker: string | null; last_close: string | null }[];
+};
 
 /**
  * Classic year × month returns heatmap. Calendar-month % returns are
@@ -35,6 +48,7 @@ export default function MonthlyReturnsHeatmap({
   defaultCollapsed = false,
   markerDate,
   liveThrough,
+  staleWarning,
 }: {
   result: BacktestResult;
   defaultCollapsed?: boolean;
@@ -46,12 +60,32 @@ export default function MonthlyReturnsHeatmap({
    * (YYYY-MM-DD) — surfaced in the caption so it's clear the grid is
    * current rather than ending where the backtest was saved. */
   liveThrough?: string;
+  /** When the latest live cell mixes carried-forward prices, the affected
+   * month + the lagging holdings. That cell shows a warning + info icon
+   * instead of a (misleading, partial) number. */
+  staleWarning?: StalePriceWarning | null;
 }) {
   const [selected, setSelected] = useState<string | null>(null); // "YYYY-MM" drill-down
   // Go-live anchors: the month it falls in gets a marker outline; earlier
   // months are dimmed as pre-go-live backtest context.
   const goLiveMonth = markerDate ? markerDate.slice(0, 7) : null;
   const goLiveYear = markerDate ? markerDate.slice(0, 4) : null;
+
+  // Tooltip body for the incomplete-data cell — lists each lagging holding
+  // and the close date it's stuck on. Newlines are preserved by InfoTip.
+  const staleText = staleWarning
+    ? [
+        `Incomplete data for ${monthLabel(staleWarning.month)}.`,
+        '',
+        `These holdings have no close for ${staleWarning.reference_date} yet and are carried forward at an older price, so this month's return would be based on stale prices:`,
+        '',
+        ...staleWarning.missing.map(
+          (m) => `• ${m.label}${m.ticker ? ` (${m.ticker})` : ''} — last close ${m.last_close ?? 'none'}`,
+        ),
+        '',
+        'This cell fills in once those prices publish.',
+      ].join('\n')
+    : '';
 
   const { years, byKey, yearTotals, maxAbs, maxAbsYear, dailyByMonth, maxAbsDaily } = useMemo(() => {
     // Dedupe by date (keep the last cumulative value) — the daily curve repeats
@@ -144,6 +178,7 @@ export default function MonthlyReturnsHeatmap({
                   const isSel = selected === key;
                   const isPreGoLive = goLiveMonth != null && key < goLiveMonth;
                   const isGoLive = goLiveMonth != null && key === goLiveMonth;
+                  const isStale = staleWarning != null && key === staleWarning.month;
                   // Go-live outline (red, matching the equity-curve marker)
                   // wins over the click-selection ring when both apply.
                   const ring = isSel
@@ -151,6 +186,24 @@ export default function MonthlyReturnsHeatmap({
                     : isGoLive
                       ? 'inset 0 0 0 2px var(--color-neg-400)'
                       : undefined;
+                  // Incomplete-data cell: some holdings are carried forward at
+                  // a stale close, so the number would mislead. Show a warning
+                  // glyph + info icon (the assets that are missing prices)
+                  // instead — no value, no drill-down.
+                  if (isStale) {
+                    return (
+                      <td
+                        key={mi}
+                        className="px-1.5 py-1 text-center"
+                        style={{ background: 'color-mix(in srgb, var(--color-warn-500) 22%, transparent)', color: 'var(--color-fg-strong)', ...(ring ? { boxShadow: ring } : {}) }}
+                      >
+                        <span className="inline-flex items-center justify-center gap-0.5">
+                          <span aria-hidden className="text-warn-400 leading-none">⚠</span>
+                          <InfoTip text={staleText} />
+                        </span>
+                      </td>
+                    );
+                  }
                   return (
                     <td
                       key={mi}

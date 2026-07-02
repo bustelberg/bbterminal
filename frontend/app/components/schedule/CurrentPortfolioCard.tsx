@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { Fragment, useCallback, useMemo, useState } from 'react';
 import LoadingDots from '../LoadingDots';
 import CellInfoTip from '../momentum/CellInfoTip';
 import { apiFetch } from '../../../lib/apiFetch';
@@ -9,6 +9,7 @@ import { useApiData } from '../../../lib/hooks/useApiData';
 import { useBenchmarkCurrencyMap, useBenchmarkIsinMap, useCompanyExchangeMap, useCompanyIsinMap } from '../../../lib/hooks/apiData';
 import { displayExchange, EXCHANGE_NAMES, fmtPct, fmtPrice, guruFocusUrl } from '../momentum/utils';
 import TableDownloadButton from '../TableDownloadButton';
+import { PriceRefreshPanel, useStockRefresh } from './priceRefresh';
 import type { Column } from '../../../lib/tableExport';
 import type { Holding } from '../../../lib/stores/momentum';
 
@@ -97,12 +98,17 @@ function CashControl({ strategyId, currentPct, canEdit, onChanged }: {
  * local + EUR with the FX rate, the return, and the ISIN. Always sorted by
  * current weight descending. Renders nothing when there's no snapshot yet. */
 export default function CurrentPortfolioCard({
-  snapshotId, strategyId, canEditCash = false, onCashChanged,
+  snapshotId, strategyId, canEditCash = false, staleCompanyIds, onCashChanged,
 }: {
   snapshotId: number | null;
   strategyId?: number;
   /** Admin (non-read-only) may set the cash allocation. */
   canEditCash?: boolean;
+  /** Company ids the LIVE staleness check (from /runs `stale_prices`) flags as
+   * lagging the basket's freshest close — the same set the monthly-returns
+   * heatmap warns on. These rows always get the refresh action, even when the
+   * persisted snapshot's frozen dates don't yet mark them stale. */
+  staleCompanyIds?: number[];
   /** Called after a successful cash change so the parent reloads the detail
    * (the re-price creates a NEW snapshot the card then re-reads). */
   onCashChanged?: () => void | Promise<void>;
@@ -110,6 +116,13 @@ export default function CurrentPortfolioCard({
   const { data: snap, loading, error } = useApiData<SnapshotResponse>(
     snapshotId != null ? `/api/momentum/current-picks/${snapshotId}` : null,
   );
+  // Per-stock refresh (admin only): fetch one holding's price from GuruFocus
+  // now and show the request/response inline. Reloading the detail after a
+  // success surfaces the freshly-loaded close (+ re-priced basket).
+  const { refreshing, results: refreshResults, refresh, clear: clearRefresh } = useStockRefresh(onCashChanged);
+  const refreshOne = useCallback((companyId: number) => refresh(companyId, strategyId), [refresh, strategyId]);
+  const staleSet = useMemo(() => new Set(staleCompanyIds ?? []), [staleCompanyIds]);
+
   const isinByCompany = useCompanyIsinMap();
   const isinByBenchmark = useBenchmarkIsinMap();   // keyed by -benchmark_id (the holding's company_id)
   const ccyByBenchmark = useBenchmarkCurrencyMap(); // ETF currency from the LIVE benchmark, keyed by -benchmark_id
@@ -328,6 +341,14 @@ export default function CurrentPortfolioCard({
               // never "stale"); End cells show the close date, orange when this
               // holding lags the portfolio's freshest close.
               const staleEnd = !!(endDate && referenceDate && endDate < referenceDate);
+              // Admins can force-refresh ANY holding from here — a stock from
+              // metric_data, an ETF overlay from benchmark_price. Stale rows —
+              // flagged by the LIVE check (matches the heatmap warning) or the
+              // snapshot's own lagging close — show the ↻ always, in warning
+              // colour; healthy rows show it subtly on hover.
+              const canRefresh = canEditCash;
+              const isStale = staleSet.has(h.company_id) || staleEnd;
+              const detail = refreshResults.get(h.company_id);
               const entryAsOfCell = () => (
                 <td className="py-2 px-2 text-right font-mono whitespace-nowrap text-fg-subtle" title="Entry date this value reflects">
                   {entryDate ?? '—'}
@@ -342,11 +363,29 @@ export default function CurrentPortfolioCard({
                 </td>
               );
               return (
-                <tr key={`${h.side ?? 'long'}-${h.company_id}`} className="border-b border-neutral-800/30 hover:bg-overlay/[0.02]">
+                <Fragment key={`${h.side ?? 'long'}-${h.company_id}`}>
+                <tr className="group border-b border-neutral-800/30 hover:bg-overlay/[0.02]">
                   <td className="py-2 pr-2 font-mono whitespace-nowrap">
                     <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent-400 hover:text-accent-300 hover:underline">{h.ticker}</a>
                     {exch && <span className="ml-1 text-[10px] text-fg-subtle" title={EXCHANGE_NAMES[exch.toUpperCase()] ?? exch}>({exch})</span>}
                     {isEtf && <span className="ml-1.5 text-[9px] uppercase tracking-wide px-1 py-0.5 rounded bg-accent-500/15 text-accent-300 border border-accent-500/30">ETF</span>}
+                    {canRefresh && (
+                      <button
+                        type="button"
+                        onClick={() => void refreshOne(h.company_id)}
+                        disabled={refreshing.has(h.company_id)}
+                        title={isStale
+                          ? "Stale price — refresh this stock from GuruFocus now (shows the request + response)"
+                          : "Refresh this stock's price from GuruFocus now (shows the request + response)"}
+                        className={`ml-1.5 text-[11px] disabled:opacity-40 transition-opacity ${
+                          isStale
+                            ? 'text-warn-400 hover:text-warn-300'
+                            : 'text-fg-faint hover:text-accent-300 opacity-0 group-hover:opacity-100 focus:opacity-100'
+                        }`}
+                      >
+                        {refreshing.has(h.company_id) ? '…' : '↻'}
+                      </button>
+                    )}
                   </td>
                   <td className="py-2 px-2 font-mono text-fg-muted whitespace-nowrap">{isin || '—'}</td>
                   <td className="py-2 px-2 truncate max-w-[220px]">
@@ -375,6 +414,17 @@ export default function CurrentPortfolioCard({
                     {fmtPct(eurReturn)}
                   </td>
                 </tr>
+                {detail && (
+                  <tr className="border-b border-neutral-800/30 bg-inset/40">
+                    <td colSpan={17} className="px-3 py-2">
+                      <PriceRefreshPanel
+                        result={detail}
+                        onClose={() => clearRefresh(h.company_id)}
+                      />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               );
             })}
           </tbody>
@@ -384,6 +434,7 @@ export default function CurrentPortfolioCard({
         Sorted by current weight. <span className="font-medium">Target</span> is the weight set at the last rebalance; <span className="font-medium">Current</span> is where it has drifted to as prices moved (renormalized to 100%).
         <span className="font-medium"> Start/End</span> are the entry and latest-close prices in local currency.
 <span className="font-medium"> Return (€)</span> and the <span className="font-medium">Total</span> are the engine&apos;s figures shown verbatim (the per-holding return and the snapshot&apos;s weighted EUR return) — the same source the headline MTD reads, so they always agree. <span className="font-medium">Start/End (€)</span> show the engine&apos;s EUR marks; &quot;—&quot; until a holding has been EUR-priced (an ETF self-heals on the next price-update).
+        {canEditCash && <> A stale <span className="text-warn-400">orange</span> close date shows a <span className="text-warn-400">↻</span> to refresh that one stock from GuruFocus now — the request + response appear inline.</>}
       </p>
     </div>
   );

@@ -5,6 +5,7 @@ import { API_URL } from '../../lib/apiUrl';
 import { apiFetch } from '../../lib/apiFetch';
 import type { BacktestResult, UniverseEntry } from '../../lib/stores/momentum';
 import BacktestResultView from './momentum/BacktestResultView';
+import type { StalePriceWarning } from './momentum/MonthlyReturnsHeatmap';
 import type { ScoringConfig } from './momentum/MonthlyHoldingsTable';
 import { scaleCumCurve } from './momentum/equityCurve/seriesMath';
 import LoadingDots from './LoadingDots';
@@ -71,8 +72,14 @@ export default function SourceBacktestCard({
   markerDate,
   liveCurve,
   cashPct = 0,
+  staleWarning,
 }: {
   runId: number;
+  /** When the latest live month mixes carried-forward prices, the affected
+   * month + lagging holdings (from /runs `stale_prices`). Forwarded to the
+   * monthly-returns heatmap so that cell warns instead of showing a partial
+   * number. */
+  staleWarning?: StalePriceWarning | null;
   /** Strategy cash allocation (0..1). Scales the backtest's daily curve so the
    * equity line / monthly heatmap / distributions reflect the cash drag,
    * matching the server-computed cash-adjusted stats. */
@@ -271,6 +278,7 @@ export default function SourceBacktestCard({
         scoringConfig={scoringConfig}
         markerDate={markerDate}
         liveThrough={liveThrough ?? undefined}
+        staleWarning={staleWarning}
         activeDefinesWindowEnd={liveThrough != null}
         defaultCollapsed
       />

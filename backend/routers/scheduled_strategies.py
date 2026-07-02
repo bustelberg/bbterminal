@@ -33,7 +33,7 @@ from momentum.schedule import _expected_latest_trading_day, _initial_next_due_at
 
 from ._authz import is_admin_request
 from ._schedule_backfill import reset_stale_backfills  # noqa: F401 — re-exported for main.py
-from ._schedule_hydration import _hydrate, build_live_curve
+from ._schedule_hydration import _hydrate, basket_price_staleness, build_live_curve
 from ._schedule_snapshots import _seed_snapshot_from_backtest
 
 _log = logging.getLogger(__name__)
@@ -241,6 +241,10 @@ async def list_held_companies(request: Request):
                 if cid_raw is None:
                     continue
                 cid = int(cid_raw)
+                # The cash sleeve (company_id 0 / is_cash) isn't a priceable
+                # security — exclude it from the held/price-update set entirely.
+                if cid == 0 or h.get("is_cash"):
+                    continue
                 bucket = pooled.setdefault(cid, {
                     "company_id": cid,
                     "ticker": h.get("ticker"),
@@ -807,6 +811,17 @@ async def list_strategy_runs(strategy_id: int, request: Request, limit: int = 50
                 float((sched.get("config") or {}).get("cash_pct") or 0.0),
             )
 
+        # Stale-price guard for the live tail: when the latest plotted point
+        # carries some holdings forward at an older close (GuruFocus publish
+        # lag), the current-month heatmap cell isn't a clean mark-to-market.
+        # Surfaced so the frontend replaces that cell with a warning listing
+        # the lagging assets. Only meaningful once a live tail exists.
+        stale_prices = (
+            basket_price_staleness(int(sched["backtest_run_id"]))
+            if live_curve and sched.get("backtest_run_id")
+            else None
+        )
+
         return {
             "id": sched["id"],
             "name": sched.get("name") or f"Strategy #{sched['id']}",
@@ -837,6 +852,11 @@ async def list_strategy_runs(strategy_id: int, request: Request, limit: int = 50
             # or None. Frontend keeps backtest daily points before
             # cutover_date and appends `points` (same cumulative scale).
             "live_curve": live_curve,
+            # {reference_date, month, missing:[{company_id,label,ticker,
+            # last_close}]} or None. When present, the latest live point mixes
+            # carried-forward prices for `missing`; the frontend warns on that
+            # month's heatmap cell instead of showing a partial number.
+            "stale_prices": stale_prices,
         }
 
     return await asyncio.to_thread(_query)

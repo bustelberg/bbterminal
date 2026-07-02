@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Spinner from '../Spinner';
 import LoadingDots from '../LoadingDots';
 import { API_URL } from '../../../lib/apiUrl';
@@ -11,6 +11,7 @@ import { usePollingFetch } from '../../../lib/hooks/usePollingFetch';
 import { useEventStream } from '../../../lib/hooks/useEventStream';
 import { watchRun, type RunRow } from '../../../lib/watchRun';
 import CollapsibleCard from '../momentum/CollapsibleCard';
+import { PriceRefreshPanel, useStockRefresh } from './priceRefresh';
 import { relTime, formatExecAt, countdownLeft, formatDur } from './utils';
 import type {
   ScheduleUpcoming,
@@ -363,6 +364,65 @@ function HeaderStatus({
   );
 }
 
+/** Sortable columns of the held-companies table. */
+type HeldSortKey = 'ticker' | 'exchange' | 'company' | 'sector' | 'price' | 'fx' | 'price_eur' | 'date';
+type HeldSort = { key: HeldSortKey; dir: 'asc' | 'desc' };
+
+/** A clickable column header that toggles sort on `k`. Shows ▲/▼ when active. */
+function SortHeader({ label, k, sort, onSort, align = 'left', title }: {
+  label: string;
+  k: HeldSortKey;
+  sort: HeldSort;
+  onSort: (k: HeldSortKey) => void;
+  align?: 'left' | 'right';
+  title?: string;
+}) {
+  const active = sort.key === k;
+  return (
+    <th className={`px-3 py-1.5 font-medium ${align === 'right' ? 'text-right' : 'text-left'}`}>
+      <button
+        type="button"
+        onClick={() => onSort(k)}
+        title={title}
+        className={`inline-flex items-center gap-0.5 hover:text-fg-soft transition-colors
+                    ${active ? 'text-fg-soft' : ''} ${align === 'right' ? 'flex-row-reverse' : ''}`}
+      >
+        <span>{label}</span>
+        <span className="text-[8px] w-2 leading-none">{active ? (sort.dir === 'asc' ? '▲' : '▼') : ''}</span>
+      </button>
+    </th>
+  );
+}
+
+/** Sort held companies by the chosen column. Empty strings / null values always
+ * sink to the bottom regardless of direction (they carry no comparable data). */
+function sortHeld(companies: HeldCompany[], { key, dir }: HeldSort): HeldCompany[] {
+  const val = (c: HeldCompany): string | number | null => {
+    switch (key) {
+      case 'ticker': return c.ticker ?? '';
+      case 'exchange': return c.exchange ?? '';
+      case 'company': return c.company_name ?? '';
+      case 'sector': return c.sector ?? '';
+      case 'price': return c.latest_close_price;
+      case 'fx': return c.fx_rate_per_eur;
+      case 'price_eur': return c.latest_close_price_eur;
+      case 'date': return c.latest_close_price_date;
+    }
+  };
+  return [...companies].sort((a, b) => {
+    const av = val(a); const bv = val(b);
+    const aNull = av == null || av === '';
+    const bNull = bv == null || bv === '';
+    if (aNull && bNull) return 0;
+    if (aNull) return 1;
+    if (bNull) return -1;
+    const r = (typeof av === 'number' && typeof bv === 'number')
+      ? av - bv
+      : String(av).localeCompare(String(bv));
+    return dir === 'asc' ? r : -r;
+  });
+}
+
 function PriceUpdateSection({
   running, lastRun, nextRunAt, retryAt, schedulerOff, held, nowMs,
 }: {
@@ -380,6 +440,17 @@ function PriceUpdateSection({
   const done = running?.companies_processed ?? 0;
   const showBar = !!running && total > 0 && running.current_phase === 'prices';
   const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+
+  // Column sort — click a header to toggle asc/desc. Default: oldest close
+  // first (the price-update view is about finding what's behind).
+  const [sort, setSort] = useState<HeldSort>({ key: 'date', dir: 'asc' });
+  const onSort = useCallback((k: HeldSortKey) => {
+    setSort((s) => (s.key === k ? { key: k, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key: k, dir: 'asc' }));
+  }, []);
+  const sortedCompanies = useMemo(
+    () => (held?.companies ? sortHeld(held.companies, sort) : []),
+    [held, sort],
+  );
 
   return (
     <CollapsibleCard
@@ -443,18 +514,20 @@ function PriceUpdateSection({
               <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-card z-10">
                   <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
-                    <th className="px-3 py-1.5 text-left font-medium">Ticker</th>
-                    <th className="px-3 py-1.5 text-left font-medium">Company</th>
-                    <th className="px-3 py-1.5 text-left font-medium">Sector</th>
-                    <th className="px-3 py-1.5 text-right font-medium">Price</th>
-                    <th className="px-3 py-1.5 text-right font-medium" title="Listing currency per 1 EUR — latest stored rate (same source as the FX page)">FX /€</th>
-                    <th className="px-3 py-1.5 text-right font-medium" title="Close converted to EUR (local ÷ FX rate)">Price €</th>
-                    <th className="px-3 py-1.5 text-right font-medium">Date</th>
+                    <SortHeader label="Ticker" k="ticker" sort={sort} onSort={onSort} />
+                    <SortHeader label="Exch" k="exchange" sort={sort} onSort={onSort} title="Listing exchange" />
+                    <SortHeader label="Company" k="company" sort={sort} onSort={onSort} />
+                    <SortHeader label="Sector" k="sector" sort={sort} onSort={onSort} />
+                    <SortHeader label="Price" k="price" sort={sort} onSort={onSort} align="right" />
+                    <SortHeader label="FX /€" k="fx" sort={sort} onSort={onSort} align="right" title="Listing currency per 1 EUR — latest stored rate (same source as the FX page)" />
+                    <SortHeader label="Price €" k="price_eur" sort={sort} onSort={onSort} align="right" title="Close converted to EUR (local ÷ FX rate)" />
+                    <SortHeader label="Date" k="date" sort={sort} onSort={onSort} align="right" />
                     <th className="px-3 py-1.5 text-right font-medium" title="For a stale/missing held price we auto-retry the fetch every 3h (GuruFocus publish lag). Blank when the price is fresh or no retry is currently scheduled.">Trying again in</th>
+                    <th className="px-3 py-1.5 text-right font-medium" title="Force a fresh GuruFocus price fetch for this one stock now — shows the actual request + response.">Refresh</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-800/20">
-                  {held.companies.map((c) => (
+                  {sortedCompanies.map((c) => (
                     <HeldRow key={c.company_id} c={c} expected={fresh?.expected_close_date ?? null} retryAt={retryAt} />
                   ))}
                 </tbody>
@@ -1452,32 +1525,64 @@ function HeldRow({ c, expected, retryAt }: {
   const eurLabel = eur == null
     ? '—'
     : `€${eur.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  // Per-asset price refresh. A holding priced by ≥1 strategy passes a
+  // strategy_id so the fetch also re-prices that basket; the request/response
+  // shows inline in a detail row below.
+  const { refreshing, results, refresh, clear } = useStockRefresh();
+  const strategyId = c.held_by?.[0]?.strategy_id ?? null;
+  const busy = refreshing.has(c.company_id);
+  const detail = results.get(c.company_id);
+  // Highlight the action on stale/missing rows; subtle otherwise.
+  const btnTone = isFresh
+    ? 'text-fg-faint hover:text-accent-300 border-neutral-700'
+    : 'text-warn-300 hover:text-warn-200 border-warn-500/40';
   return (
-    <tr className="hover:bg-overlay/[0.02]">
-      <td className="px-3 py-1.5 font-mono whitespace-nowrap">
-        {c.gurufocus_url ? (
-          <a
-            href={c.gurufocus_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-accent-400 hover:text-accent-300 hover:underline"
+    <Fragment>
+      <tr className="hover:bg-overlay/[0.02]">
+        <td className="px-3 py-1.5 font-mono whitespace-nowrap">
+          {c.gurufocus_url ? (
+            <a
+              href={c.gurufocus_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-accent-400 hover:text-accent-300 hover:underline"
+            >
+              {c.ticker ?? '—'}
+            </a>
+          ) : (
+            <span className="text-fg">{c.ticker ?? '—'}</span>
+          )}
+        </td>
+        <td className="px-3 py-1.5 font-mono whitespace-nowrap text-fg-subtle">{c.exchange || '—'}</td>
+        <td className="px-3 py-1.5 text-fg-soft truncate max-w-[240px]">{c.company_name ?? '—'}</td>
+        <td className="px-3 py-1.5 text-fg-subtle whitespace-nowrap">{c.sector ?? '—'}</td>
+        <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap text-fg">{priceLabel}</td>
+        <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap text-fg-subtle">{fxLabel}</td>
+        <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap text-fg">{eurLabel}</td>
+        <td className={`px-3 py-1.5 text-right font-mono whitespace-nowrap ${tone}`}>{d ?? 'none'}</td>
+        <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap text-warn-300">
+          {showRetry ? <RetryCountdown at={retryAt} /> : <span className="text-fg-faint">—</span>}
+        </td>
+        <td className="px-3 py-1.5 text-right whitespace-nowrap">
+          <button
+            type="button"
+            onClick={() => void refresh(c.company_id, strategyId)}
+            disabled={busy}
+            title="Fetch this stock's price from GuruFocus now (bypasses cache) and show the request + response"
+            className={`text-[11px] px-2 py-0.5 rounded-lg border ${btnTone} disabled:opacity-40 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1`}
           >
-            {c.ticker ?? '—'}
-          </a>
-        ) : (
-          <span className="text-fg">{c.ticker ?? '—'}</span>
-        )}
-        {c.exchange && <span className="text-fg-faint">·{c.exchange}</span>}
-      </td>
-      <td className="px-3 py-1.5 text-fg-soft truncate max-w-[240px]">{c.company_name ?? '—'}</td>
-      <td className="px-3 py-1.5 text-fg-subtle whitespace-nowrap">{c.sector ?? '—'}</td>
-      <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap text-fg">{priceLabel}</td>
-      <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap text-fg-subtle">{fxLabel}</td>
-      <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap text-fg">{eurLabel}</td>
-      <td className={`px-3 py-1.5 text-right font-mono whitespace-nowrap ${tone}`}>{d ?? 'none'}</td>
-      <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap text-warn-300">
-        {showRetry ? <RetryCountdown at={retryAt} /> : <span className="text-fg-faint">—</span>}
-      </td>
-    </tr>
+            {busy && <Spinner className="h-3 w-3" />}
+            {busy ? 'Fetching…' : '↻ Refresh'}
+          </button>
+        </td>
+      </tr>
+      {detail && (
+        <tr>
+          <td colSpan={10} className="px-3 pb-2 pt-0">
+            <PriceRefreshPanel result={detail} onClose={() => clear(c.company_id)} />
+          </td>
+        </tr>
+      )}
+    </Fragment>
   );
 }

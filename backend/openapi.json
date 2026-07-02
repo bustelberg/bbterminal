@@ -3307,6 +3307,30 @@
         ],
         "title": "_IlliquidBody",
         "type": "object"
+      },
+      "_PriceRefreshBody": {
+        "properties": {
+          "company_id": {
+            "title": "Company Id",
+            "type": "integer"
+          },
+          "strategy_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Id"
+          }
+        },
+        "required": [
+          "company_id"
+        ],
+        "title": "_PriceRefreshBody",
+        "type": "object"
       }
     }
   },
@@ -3710,6 +3734,57 @@
           }
         },
         "summary": "Set Company Illiquid",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/company-price-refresh": {
+      "post": {
+        "description": "Force-refresh ONE company's prices from GuruFocus (bypassing cache) and\nreturn a COMPACT view of the actual API request + response \u2014 for clearing a\nsingle stale holding straight from the /schedule Current-portfolio card.\n\nLoads the fetched closes into `metric_data`; when `strategy_id` is supplied,\nre-prices that strategy's held basket (a new price_update snapshot) so the\ncard + heatmap update on the next reload. Admin only. ETF overlays (negative\ncompany_id) aren't refreshable here \u2014 they price from `benchmark_price` via\nthe price-update job.",
+        "operationId": "company_price_refresh_api_admin_company_price_refresh_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/_PriceRefreshBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Company Price Refresh",
         "tags": [
           "admin"
         ]

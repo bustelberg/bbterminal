@@ -566,6 +566,117 @@ def build_live_curve(backtest_run_id: int, snapshots: list[dict], cash_pct: floa
     }
 
 
+def basket_price_staleness(backtest_run_id: int) -> dict | None:
+    """Whether the LATEST plotted point of the strategy's live curve mixes
+    stale (carried-forward) prices — and if so, which holdings.
+
+    The monthly-returns heatmap's live tail (`_open_basket_live_curve`) marks
+    the source backtest's last-period holdings each trading day using an as-of
+    (last-close-on-or-before) lookup, so a holding whose latest close predates
+    the freshest close in the basket is silently carried forward at the last
+    point. That makes the current-month cell a PARTIAL mark-to-market rather
+    than a clean one.
+
+    Reference date = the freshest close across the basket (= the day the last
+    curve point / `live_curve.as_of_date` is marked through). A holding is
+    "missing" when its own latest close is strictly before the reference (or it
+    has no close at all). Holdings marked delisted / out-of-scope / illiquid are
+    skipped — they lag by design and are legitimately unpriced — as is cash
+    (`company_id == 0`). ETF-overlay holdings (negative `company_id` =
+    `-benchmark_id`) are checked against `benchmark_price`.
+
+    Returns ``{reference_date, month, missing:[{company_id, label, ticker,
+    last_close}]}`` only when ≥1 holding is missing; None when the basket is a
+    clean mark-to-market (or there's no basket / no priced holdings). The caller
+    surfaces this so the heatmap can replace the incomplete month cell with a
+    warning listing the lagging assets instead of a misleading number."""
+    from routers.momentum.backtest_crud import load_backtest_result_sync  # noqa: PLC0415
+
+    res = load_backtest_result_sync(backtest_run_id)
+    monthly = (res or {}).get("monthly_records") or []
+    if not monthly:
+        return None
+    holdings = monthly[-1].get("holdings") or []
+    comp = {
+        int(h["company_id"]): h for h in holdings
+        if h.get("company_id") is not None and int(h["company_id"]) > 0
+    }
+    etfs = {
+        int(h["company_id"]): h for h in holdings
+        if h.get("company_id") is not None and int(h["company_id"]) < 0
+    }
+    if not comp and not etfs:
+        return None
+
+    # Latest close date per company (metric_data) + per ETF benchmark.
+    latest_by_cid: dict[int, str] = {}
+    for r in fetch_in_chunks(
+        list(comp.keys()),
+        lambda chunk: supabase.table("metric_data")
+        .select("company_id, target_date")
+        .eq("metric_code", "close_price")
+        .in_("company_id", chunk)
+        .order("target_date", desc=True)
+        .execute(),
+    ):
+        cid = int(r["company_id"])
+        if cid not in latest_by_cid:
+            latest_by_cid[cid] = str(r["target_date"])[:10]
+
+    latest_by_bid: dict[int, str] = {}
+    for r in fetch_in_chunks(
+        [-c for c in etfs],
+        lambda chunk: supabase.table("benchmark_price")
+        .select("benchmark_id, target_date")
+        .in_("benchmark_id", chunk)
+        .order("target_date", desc=True)
+        .execute(),
+    ):
+        bid = int(r["benchmark_id"])
+        if bid not in latest_by_bid:
+            latest_by_bid[bid] = str(r["target_date"])[:10]
+
+    # Skip companies unpriced BY DESIGN (delisted / out-of-scope / illiquid):
+    # they lag the pack legitimately and shouldn't raise a stale-price warning.
+    excluded: set[int] = set()
+    for r in fetch_in_chunks(
+        list(comp.keys()),
+        lambda chunk: supabase.table("company")
+        .select("company_id, delisted_at, out_of_scope_at, illiquid_at")
+        .in_("company_id", chunk)
+        .execute(),
+    ):
+        if r.get("delisted_at") or r.get("out_of_scope_at") or r.get("illiquid_at"):
+            excluded.add(int(r["company_id"]))
+
+    per_hold: list[tuple[dict, str | None]] = []
+    for cid, h in comp.items():
+        if cid in excluded:
+            continue
+        per_hold.append((h, latest_by_cid.get(cid)))
+    for cid, h in etfs.items():
+        per_hold.append((h, latest_by_bid.get(-cid)))
+
+    dates = [d for _, d in per_hold if d]
+    if not dates:
+        return None
+    reference = max(dates)
+
+    missing: list[dict] = []
+    for h, d in per_hold:
+        if d is None or d < reference:
+            missing.append({
+                "company_id": int(h["company_id"]),
+                "label": h.get("company_name") or h.get("ticker") or f"#{h.get('company_id')}",
+                "ticker": h.get("ticker"),
+                "last_close": d,
+            })
+    if not missing:
+        return None
+    missing.sort(key=lambda m: (m["last_close"] or "", m["label"]))
+    return {"reference_date": reference, "month": reference[:7], "missing": missing}
+
+
 def _hydrate(rows: list[dict]) -> list[dict]:
     """Attach the most recent snapshot summary + period-return rollups to
     each row, joined via the `current_picks_snapshot.scheduled_strategy_id`

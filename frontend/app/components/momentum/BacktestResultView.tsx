@@ -5,7 +5,7 @@ import { useMemo } from 'react';
 import type { BacktestResult, UniverseEntry } from '../../../lib/stores/momentum';
 import { useCompanyExchangeMap, useCompanyIsinMap } from '../../../lib/hooks/apiData';
 import DailyReturnsHistograms from './DailyReturnsHistograms';
-import MonthlyReturnsHeatmap from './MonthlyReturnsHeatmap';
+import MonthlyReturnsHeatmap, { type StalePriceWarning } from './MonthlyReturnsHeatmap';
 import EquityCurveCard from './EquityCurveCard';
 import FeeWaterfallPanel from './FeeWaterfallPanel';
 import MarketHealthCard from './MarketHealthCard';
@@ -48,6 +48,10 @@ type Props = {
    * defines the alignment window's right edge (the frozen universe baseline
    * can't be extended). /schedule sets this. */
   activeDefinesWindowEnd?: boolean;
+  /** When the latest live month mixes carried-forward prices, the month +
+   * lagging holdings — the monthly-returns heatmap warns on that cell instead
+   * of showing a partial number. /schedule sets this. */
+  staleWarning?: StalePriceWarning | null;
 };
 
 /** The complete /backtest result view: the equity-curve card (log-scale
@@ -67,6 +71,7 @@ export default function BacktestResultView({
   defaultCollapsed = false,
   liveThrough,
   activeDefinesWindowEnd = false,
+  staleWarning,
 }: Props) {
   // Live company directory — the fallback exchange source. Saved backtests
   // often bundle an EMPTY `universe` payload (e.g. run 32), so without this
@@ -139,6 +144,7 @@ export default function BacktestResultView({
         result={result}
         markerDate={markerDate}
         liveThrough={liveThrough}
+        staleWarning={staleWarning}
         defaultCollapsed={defaultCollapsed}
       />
       <MonthlyHoldingsTable

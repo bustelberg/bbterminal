@@ -114,6 +114,210 @@ async def gurufocus_company_name(body: _GfCompanyNameBody, authorization: str = 
     return await asyncio.to_thread(gf_company_name_for, body.ticker, body.exchange)
 
 
+class _PriceRefreshBody(BaseModel):
+    company_id: int
+    # When set, re-price this strategy's held basket after the fetch so the
+    # Current-portfolio card + monthly-returns heatmap reflect the fresh close
+    # immediately (a new price_update snapshot).
+    strategy_id: int | None = None
+
+
+@router.post("/api/admin/company-price-refresh")
+async def company_price_refresh(body: _PriceRefreshBody, authorization: str = Header(...)):
+    """Force-refresh ONE holding's prices from GuruFocus (bypassing cache) and
+    return a COMPACT view of the actual API request + response — for clearing a
+    single stale row straight from the /schedule Price-update / Current-portfolio
+    views.
+
+    Handles both a real company (positive `company_id` → `metric_data`) and an
+    ETF overlay (negative `company_id` = `-benchmark_id` → `benchmark_price`,
+    priced as a US listing like the /benchmarks refresh). When `strategy_id` is
+    supplied, re-prices that strategy's held basket (a new price_update snapshot)
+    so the card + heatmap update on the next reload. Admin only."""
+    _require_admin(authorization)
+    import os  # noqa: PLC0415
+    from urllib.parse import quote  # noqa: PLC0415
+
+    from ingest.api_usage import track_api_call  # noqa: PLC0415
+    from ingest.constants import DATA_CUTOFF  # noqa: PLC0415
+    from ingest.prices import (  # noqa: PLC0415
+        _build_symbol,
+        _fetch_price_from_api,
+        _mask_url,
+        _parse_price_series,
+        ensure_prices_for_company,
+    )
+
+    def _q() -> dict:
+        cid = body.company_id
+        if cid == 0:
+            raise HTTPException(400, "Cash is not a priceable security.")
+
+        # ── ETF overlay: negative company_id = -benchmark_id (benchmark_price) ──
+        if cid < 0:
+            bid = -cid
+            b = (
+                supabase.table("benchmark")
+                .select("benchmark_id, ticker, name")
+                .eq("benchmark_id", bid)
+                .limit(1)
+                .execute()
+            )
+            if not b.data:
+                raise HTTPException(404, f"Benchmark #{bid} not found")
+            brow = b.data[0]
+            ticker = brow.get("ticker") or ""
+            if not ticker:
+                raise HTTPException(400, f"Benchmark #{bid} has no ticker to fetch")
+            exchange = "NYSE"  # ETFs price as US listings (matches /benchmarks refresh)
+
+            def _edge(desc: bool, n: int = 2) -> list[str]:
+                r = (
+                    supabase.table("benchmark_price")
+                    .select("target_date")
+                    .eq("benchmark_id", bid)
+                    .order("target_date", desc=desc)
+                    .limit(n)
+                    .execute()
+                )
+                return [str(x["target_date"])[:10] for x in (r.data or [])]
+
+            before = (_edge(True, 1) or [None])[0]
+            data, api_log, http_status = _fetch_price_from_api(ticker, exchange)
+            track_api_call(supabase, exchange)
+            parsed = _parse_price_series(data) if data is not None else []
+            rows_loaded = 0
+            if parsed:
+                rows = [
+                    {"benchmark_id": bid, "target_date": d.isoformat(), "price": p}
+                    for d, p in parsed if d >= DATA_CUTOFF
+                ]
+                for i in range(0, len(rows), 500):
+                    supabase.table("benchmark_price").upsert(
+                        rows[i:i + 500], on_conflict="benchmark_id,target_date"
+                    ).execute()
+                rows_loaded = len(rows)
+            symbol = _build_symbol(ticker, exchange)
+            base = os.environ.get("GURUFOCUS_BASE_URL", "").strip().rstrip("/")
+            if base.endswith("/data"):
+                base = base[: -len("/data")]
+            key = os.environ.get("GURUFOCUS_API_KEY", "")
+            info = {
+                "company_name": brow.get("name"),
+                "ticker": ticker, "exchange": exchange, "resolved_exchange": None,
+                "request_url": _mask_url(f"{base}/public/user/{key}/stock/{quote(symbol, safe=':')}/price"),
+                "symbol": symbol,
+                "http_status": http_status,
+                "source": "api" if parsed else "none",
+                "points": len(parsed),
+                "excerpt": None,
+                "error": None if parsed else (api_log or "no prices parsed"),
+                "is_delisted": False, "is_forbidden": False,
+                "rows_loaded": rows_loaded, "api_calls": 1,
+                "before": before, "newest": _edge(True), "oldest": _edge(False),
+                "logs": [api_log] if api_log else [],
+            }
+        # ── Real company: positive company_id (metric_data) ──
+        else:
+            resp = (
+                supabase.table("company")
+                .select(
+                    "company_id, company_name, gurufocus_ticker, "
+                    "gurufocus_exchange:gurufocus_exchange(exchange_code)"
+                )
+                .eq("company_id", cid)
+                .limit(1)
+                .execute()
+            )
+            if not resp.data:
+                raise HTTPException(404, f"Company #{cid} not found")
+            row = resp.data[0]
+            ticker = row.get("gurufocus_ticker") or ""
+            exchange = (row.get("gurufocus_exchange") or {}).get("exchange_code") or ""
+            if not ticker or not exchange:
+                raise HTTPException(400, f"Company #{cid} has no ticker/exchange to fetch")
+
+            def _edge(desc: bool, n: int = 2) -> list[str]:
+                r = (
+                    supabase.table("metric_data")
+                    .select("target_date")
+                    .eq("company_id", cid)
+                    .eq("metric_code", "close_price")
+                    .order("target_date", desc=desc)
+                    .limit(n)
+                    .execute()
+                )
+                return [str(x["target_date"])[:10] for x in (r.data or [])]
+
+            before = (_edge(True, 1) or [None])[0]
+            result = ensure_prices_for_company(
+                supabase, cid, ticker, exchange, force_refresh=True,
+            )
+            info = {
+                "company_name": row.get("company_name"),
+                "ticker": ticker, "exchange": exchange,
+                "resolved_exchange": result.resolved_exchange,
+                "request_url": result.request_url, "symbol": f"{exchange}:{ticker}",
+                "http_status": result.http_status,
+                "source": result.source, "points": result.total_prices,
+                "excerpt": result.response_excerpt, "error": result.error,
+                "is_delisted": result.is_delisted, "is_forbidden": result.is_forbidden,
+                "rows_loaded": result.rows_loaded, "api_calls": result.api_calls,
+                "before": before, "newest": _edge(True), "oldest": _edge(False),
+                "logs": result.logs,
+            }
+
+        after = info["newest"][0] if info["newest"] else None
+
+        repriced = False
+        if body.strategy_id is not None:
+            try:
+                from routers._schedule_snapshots import (  # noqa: PLC0415
+                    compute_and_save_price_update,
+                )
+                compute_and_save_price_update(body.strategy_id, ingest_run_id=None)
+                repriced = True
+            except Exception:
+                repriced = False
+
+        return {
+            "company_id": cid,
+            "company_name": info["company_name"],
+            "ticker": info["ticker"],
+            "exchange": info["exchange"],
+            "resolved_exchange": info["resolved_exchange"],
+            "request": {
+                "method": "GET",
+                "url": info["request_url"],
+                "symbol": info["symbol"],
+            },
+            "response": {
+                # None on a cache-only path (API not hit) — surfaced as "cache".
+                "http_status": info["http_status"],
+                "source": info["source"],
+                "points": info["points"],
+                "excerpt": info["excerpt"],
+                "error": info["error"],
+                "is_delisted": info["is_delisted"],
+                "is_forbidden": info["is_forbidden"],
+            },
+            "db": {
+                "rows_loaded": info["rows_loaded"],
+                "latest_before": info["before"],
+                "latest_after": after,
+                "advanced": bool(after and (info["before"] is None or after > info["before"])),
+            },
+            # The 2 newest + 2 oldest close dates now stored (= what the fetch
+            # returned, clamped to the 1998 cutoff) — the compact single-line view.
+            "dates": {"newest": info["newest"], "oldest": info["oldest"]},
+            "api_calls": info["api_calls"],
+            "logs": info["logs"],
+            "repriced": repriced,
+        }
+
+    return await asyncio.to_thread(_q)
+
+
 @router.post("/api/admin/gurufocus-exchange-search")
 async def gurufocus_exchange_search(
     body: _GuruFocusExchangeSearchBody,

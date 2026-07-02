@@ -70,6 +70,12 @@ class PriceResult:
     # subsequent volume fetch so it doesn't re-try the dead primary.
     resolved_exchange: str | None = None
     api_calls: int = 0  # Number of GuruFocus API requests made
+    # Diagnostics captured on the API path so a caller (e.g. the single-stock
+    # refresh endpoint) can show the actual request + response compactly. Only
+    # populated when the API is actually hit; cache-only paths leave them None.
+    http_status: int | None = None       # HTTP status of the API fetch
+    request_url: str | None = None        # masked GuruFocus URL actually called
+    response_excerpt: str | None = None   # compact JSON excerpt of the body (or the failure log)
 
 
 def normalize_gurufocus_ticker(ticker: str, exchange: str) -> str:
@@ -678,15 +684,33 @@ def ensure_prices_for_company(
         base_url = base_url[: -len("/data")]
     api_key = os.environ.get("GURUFOCUS_API_KEY", "")
     raw_url = f"{base_url}/public/user/{api_key}/stock/{quote(symbol, safe=':')}/price"
+    result.request_url = _mask_url(raw_url)
     _log(f"Calling {_mask_url(raw_url)} ...")
     data, api_log, http_status, used_exchange = _try_with_fallbacks(
         ticker, exchange, "price", on_log=_log,
     )
     track_api_call(supabase, used_exchange)
     result.api_calls += 1
+    result.http_status = http_status
+    # Compact response capture: the parsed JSON re-serialized (faithful + small)
+    # on success, else the explanatory failure log — so the caller can show what
+    # GuruFocus actually returned without hauling the full body.
+    if data is not None:
+        try:
+            result.response_excerpt = json.dumps(data)[:600]
+        except (TypeError, ValueError):
+            result.response_excerpt = str(data)[:600]
+    else:
+        result.response_excerpt = (api_log or "")[:600]
     _log(api_log)
     if used_exchange != exchange:
         result.resolved_exchange = used_exchange
+        # The successful URL is the fallback exchange's — reflect it so the
+        # displayed request matches what actually returned data.
+        result.request_url = _mask_url(
+            f"{base_url}/public/user/{api_key}/stock/"
+            f"{quote(_build_symbol(ticker, used_exchange), safe=':')}/price"
+        )
         # Repoint storage cache to the resolved exchange so subsequent
         # runs hit the right path immediately.
         path = _storage_path(ticker, used_exchange)
