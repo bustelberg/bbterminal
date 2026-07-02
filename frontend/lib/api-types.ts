@@ -953,6 +953,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/asset-pipeline/assets/{analysis_id}/series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Asset Series
+         * @description The stored daily close+volume series for one analysis asset (for the
+         *     catalog chart). Paginated to defeat PostgREST's 1000-row cap, then
+         *     downsampled to ~`max_points` (stride, first+last kept) so a 10k-bar series
+         *     stays light to ship + render.
+         */
+        get: operations["asset_series_api_asset_pipeline_assets__analysis_id__series_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/asset-pipeline/ingest": {
         parameters: {
             query?: never;
@@ -6564,6 +6587,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    asset_series_api_asset_pipeline_assets__analysis_id__series_get: {
+        parameters: {
+            query?: {
+                max_points?: number;
+            };
+            header?: never;
+            path: {
+                analysis_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

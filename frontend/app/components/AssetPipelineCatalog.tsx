@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
+import AssetPriceChart from './AssetPriceChart';
 
 type Execution = {
   execution_id: number; isin: string; yahoo_symbol: string | null; name: string | null;
@@ -107,7 +108,13 @@ function FragmentRow({ a, isOpen, onToggle }: { a: Asset; isOpen: boolean; onTog
       </tr>
       {isOpen && (
         <tr className="bg-inset/40">
-          <td colSpan={7} className="px-3 py-2">
+          <td colSpan={7} className="px-3 py-2 space-y-3">
+            {a.price_rows > 0 && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-fg-faint mb-1">{a.symbol} · price &amp; volume</div>
+                <AssetPriceChart analysisId={a.analysis_id} currency={a.currency} />
+              </div>
+            )}
             <div className="text-[10px] uppercase tracking-wide text-fg-faint mb-1">Executions (trade one of these)</div>
             <div className="space-y-1">
               {a.executions_list.length === 0 && <div className="text-[11px] text-fg-faint">No executions (native symbol).</div>}

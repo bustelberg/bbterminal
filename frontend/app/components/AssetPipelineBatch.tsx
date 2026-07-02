@@ -35,16 +35,17 @@ export default function AssetPipelineBatch({ isins, onIngested }: { isins: strin
   }, []);
   useEffect(() => { void loadStorage(); }, [loadStorage]);
 
-  const run = async () => {
-    if (running || !isins.length) return;
+  const run = async (subset?: string[]) => {
+    const ids = subset ?? isins;
+    if (running || !ids.length) return;
     setRunning(true); setError(null); setSummary(null); setLog([]);
-    setProgress({ i: 0, total: isins.length });
+    setProgress({ i: 0, total: ids.length });
     const ac = new AbortController();
     abortRef.current = ac;
     try {
       await runSSE(
         `${API_URL}/api/asset-pipeline/ingest`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifiers: isins }) },
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifiers: ids }) },
         (data) => {
           const d = data as Frame;
           if (d.type === 'item') { setProgress({ i: d.i, total: d.total }); setLog((l) => [d, ...l].slice(0, 12)); }
@@ -60,6 +61,19 @@ export default function AssetPipelineBatch({ isins, onIngested }: { isins: strin
     }
   };
   const stop = () => { abortRef.current?.abort(); setRunning(false); };
+
+  const [sampleN, setSampleN] = useState('');
+  const runRandom = () => {
+    const n = Math.max(1, Math.min(isins.length, Math.floor(Number(sampleN) || 0)));
+    if (!n || running) return;
+    // Fisher-Yates on a copy → an unbiased random sample of size n.
+    const pool = [...isins];
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    void run(pool.slice(0, n));
+  };
 
   const pct = progress && progress.total > 0 ? Math.round((progress.i / progress.total) * 100) : 0;
 
@@ -81,6 +95,24 @@ export default function AssetPipelineBatch({ isins, onIngested }: { isins: strin
         >
           {running ? `Ingesting… ${progress?.i ?? 0}/${progress?.total ?? 0}` : `Ingest all ${isins.length} ISINs`}
         </button>
+        {isins.length > 0 && !running && (
+          <span className="flex items-center gap-1.5">
+            <span className="text-fg-faint text-xs">or</span>
+            <input
+              type="number" min={1} max={isins.length} value={sampleN}
+              onChange={(e) => setSampleN(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') runRandom(); }}
+              placeholder="N"
+              className="w-16 bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30"
+            />
+            <button
+              type="button" onClick={runRandom} disabled={!sampleN}
+              className="text-sm px-3 py-2 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              🎲 Ingest random
+            </button>
+          </span>
+        )}
         {running && (
           <button type="button" onClick={stop} className="text-xs px-3 py-1.5 rounded-lg border border-neutral-700 text-fg-muted hover:text-neg-300 hover:border-neg-500/50 transition-colors">Stop</button>
         )}

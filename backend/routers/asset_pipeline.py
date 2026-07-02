@@ -153,6 +153,47 @@ async def ingest(body: _IngestBody):
     )
 
 
+@router.get("/api/asset-pipeline/assets/{analysis_id}/series")
+async def asset_series(analysis_id: int, max_points: int = 3000):
+    """The stored daily close+volume series for one analysis asset (for the
+    catalog chart). Paginated to defeat PostgREST's 1000-row cap, then
+    downsampled to ~`max_points` (stride, first+last kept) so a 10k-bar series
+    stays light to ship + render."""
+    from deps import supabase  # noqa: PLC0415
+
+    def _q() -> dict:
+        rows: list[dict] = []
+        offset = 0
+        while True:
+            r = (
+                supabase.table("asset_price")
+                .select("target_date, close, volume")
+                .eq("analysis_id", analysis_id)
+                .order("target_date")
+                .range(offset, offset + 999)
+                .execute()
+            )
+            batch = r.data or []
+            rows.extend(batch)
+            if len(batch) < 1000:
+                break
+            offset += 1000
+        total = len(rows)
+        if max_points and total > max_points:
+            stride = -(-total // max_points)  # ceil
+            sampled = rows[::stride]
+            if sampled and sampled[-1] is not rows[-1]:
+                sampled.append(rows[-1])  # always keep the latest bar
+            rows = sampled
+        series = [
+            {"date": str(x["target_date"])[:10], "close": x.get("close"), "volume": x.get("volume")}
+            for x in rows
+        ]
+        return {"analysis_id": analysis_id, "total": total, "points": len(series), "series": series}
+
+    return await asyncio.to_thread(_q)
+
+
 @router.get("/api/asset-pipeline/storage")
 async def storage():
     """Live row counts + rough on-disk estimate for the asset-pipeline tables."""
