@@ -59,6 +59,11 @@
       },
       "BacktestRequest": {
         "properties": {
+          "backfill_below_min_score": {
+            "default": true,
+            "title": "Backfill Below Min Score",
+            "type": "boolean"
+          },
           "category_weights": {
             "anyOf": [
               {
@@ -3308,6 +3313,22 @@
         "title": "_IlliquidBody",
         "type": "object"
       },
+      "_IngestBody": {
+        "properties": {
+          "identifiers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Identifiers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "identifiers"
+        ],
+        "title": "_IngestBody",
+        "type": "object"
+      },
       "_PriceRefreshBody": {
         "properties": {
           "company_id": {
@@ -3330,6 +3351,19 @@
           "company_id"
         ],
         "title": "_PriceRefreshBody",
+        "type": "object"
+      },
+      "_StoreBody": {
+        "properties": {
+          "identifier": {
+            "title": "Identifier",
+            "type": "string"
+          }
+        },
+        "required": [
+          "identifier"
+        ],
+        "title": "_StoreBody",
         "type": "object"
       }
     }
@@ -3741,7 +3775,7 @@
     },
     "/api/admin/company-price-refresh": {
       "post": {
-        "description": "Force-refresh ONE company's prices from GuruFocus (bypassing cache) and\nreturn a COMPACT view of the actual API request + response \u2014 for clearing a\nsingle stale holding straight from the /schedule Current-portfolio card.\n\nLoads the fetched closes into `metric_data`; when `strategy_id` is supplied,\nre-prices that strategy's held basket (a new price_update snapshot) so the\ncard + heatmap update on the next reload. Admin only. ETF overlays (negative\ncompany_id) aren't refreshable here \u2014 they price from `benchmark_price` via\nthe price-update job.",
+        "description": "Force-refresh ONE holding's prices from GuruFocus (bypassing cache) and\nreturn a COMPACT view of the actual API request + response \u2014 for clearing a\nsingle stale row straight from the /schedule Price-update / Current-portfolio\nviews.\n\nHandles both a real company (positive `company_id` \u2192 `metric_data`) and an\nETF overlay (negative `company_id` = `-benchmark_id` \u2192 `benchmark_price`,\npriced as a US listing like the /benchmarks refresh). When `strategy_id` is\nsupplied, re-prices that strategy's held basket (a new price_update snapshot)\nso the card + heatmap update on the next reload. Admin only.",
         "operationId": "company_price_refresh_api_admin_company_price_refresh_post",
         "parameters": [
           {
@@ -4722,6 +4756,184 @@
         "summary": "Airs Vermogen Holdings",
         "tags": [
           "airs"
+        ]
+      }
+    },
+    "/api/asset-pipeline/assets": {
+      "get": {
+        "description": "Browse what's stored: every analysis asset (from asset_catalog \u2014 execution\ncount + price coverage) with its execution instruments (many-to-one) nested,\nmost-liquid first. One round-trip for the catalog + one for executions.",
+        "operationId": "list_assets_api_asset_pipeline_assets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Assets",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/ingest": {
+      "post": {
+        "description": "Batch-resolve + PERSIST a list of ISINs (SSE progress). For each: resolve\n\u2192 upsert the analysis asset (dedup by symbol) + the execution (by ISIN) \u2192\nstore the analysis instrument's daily close+volume. Robust: per-ISIN errors\nare captured, not fatal. Ends with a summary (counts + size estimate) after\nflagging the default execution per asset.",
+        "operationId": "ingest_api_asset_pipeline_ingest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/_IngestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ingest",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/resolve": {
+      "get": {
+        "description": "Resolve one identifier (ISIN or native Yahoo symbol). Returns the ranked\ncandidate listings, the chosen ANALYSIS instrument (longest + most-liquid,\nor the underlying for a crypto/commodity ETF wrapper), the rationale,\noldest/newest candles, an auto label, and the IBKR EXECUTION step (stub).\nDoes NOT write to the DB \u2014 use /ingest for that.",
+        "operationId": "resolve_asset_api_asset_pipeline_resolve_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "identifier",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Identifier",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "id_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Id Type"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Asset",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/storage": {
+      "get": {
+        "description": "Live row counts + rough on-disk estimate for the asset-pipeline tables.",
+        "operationId": "storage_api_asset_pipeline_storage_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Storage",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/store": {
+      "post": {
+        "description": "Persist ONE identifier (from the single-ISIN view): resolve \u2192 upsert the\nanalysis asset + execution \u2192 store the analysis series' close+volume. Returns\nwhat was stored, incl. the exact `stored_fields`.",
+        "operationId": "store_one_api_asset_pipeline_store_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/_StoreBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Store One",
+        "tags": [
+          "asset-pipeline"
         ]
       }
     },

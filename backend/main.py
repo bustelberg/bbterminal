@@ -27,6 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from routers import (
     admin as _admin_router,
     airs as _airs_router,
+    asset_pipeline as _asset_pipeline_router,
     auth as _auth_router,
     benchmarks as _benchmarks_router,
     companies as _companies_router,
@@ -111,6 +112,7 @@ for _r in (
     _universe_templates_router.router,
     _timezone_router.router,
     _isin_compare_router.router,
+    _asset_pipeline_router.router,
     _admin_router.router,
     # Momentum splits into four sub-routers (signals, backtest_stream,
     # backtest_crud, current_picks); `routers.momentum.routers` is the

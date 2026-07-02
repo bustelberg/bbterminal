@@ -98,10 +98,19 @@ def compute_category_scores(
     signal_weights: dict[str, float],
     category_weights: dict[str, float] | None = None,
     signal_defs: list[dict] | None = None,
+    *,
+    exclude_incomplete: bool = True,
 ) -> pd.DataFrame:
     """Score each company per category (0-100), then compute a weighted final score.
 
     Adds columns: score_price, score_volume, ..., momentum_score (final).
+
+    When `exclude_incomplete` (default), a company is DROPPED from scoring if any
+    signal that actually carries weight (a weighted signal in a weighted
+    category) can't be computed — e.g. < 12 months of price history means no
+    12-1M return. Previously such gaps defaulted to a neutral 50; now the name is
+    excluded until it has enough history to compute every weighted stat. Pass
+    False to keep the old default-50 behavior.
     """
     cats = _get_category_keys(signal_defs)
 
@@ -115,6 +124,20 @@ def compute_category_scores(
     if cw_sum == 0:
         cw_sum = 1.0
     cw_normed = {c: v / cw_sum for c, v in category_weights.items()}
+
+    # Exclusion: require EVERY weighted signal (in a weighted category) to be
+    # computable; drop names that can't (they re-qualify once they have the
+    # history). Applied before scoring so selection never sees them.
+    if exclude_incomplete and len(df):
+        required = [
+            k
+            for cat, cat_keys in cats.items() if cw_normed.get(cat, 0) != 0
+            for k in cat_keys
+            if k in df.columns and signal_weights.get(k, 0) != 0
+        ]
+        if required:
+            complete = df[required].notna().all(axis=1)
+            df = df[complete].copy()
 
     # Score each category independently
     for cat, keys in cats.items():
@@ -182,6 +205,7 @@ def select_from_scored(
     top_n_per_sector: int = 6,
     direction: SelectionDirection = "top",
     min_price_score: float | None = None,
+    backfill_below_min_score: bool = True,
 ) -> pd.DataFrame:
     """The select-half of `score_and_select`: applies `min_price_score`,
     aggregates to sector, picks `top_n_sectors` × `top_n_per_sector`,
@@ -200,12 +224,21 @@ def select_from_scored(
     # match what pandas's `.isin()` does). The pandas implementation
     # handles those gracefully via Series.isin(). The numpy version's
     # speedup (~1.18× on bench) wasn't worth the correctness risk.
-    if direction == "top" and min_price_score is not None and "score_price" in scored.columns:
+    # min_price_score handling. Without backfill it's a HARD cut (drop
+    # below-threshold names → a sector can end up with < top_n_per_sector). With
+    # backfill (default), it's a within-sector PREFERENCE: keep the full pool so
+    # selection can always fill each sector to top_n_per_sector, ranking
+    # above-threshold names first so they're picked before any backfills.
+    has_min = (
+        direction == "top" and min_price_score is not None and "score_price" in scored.columns
+    )
+    pool = scored
+    if has_min and not backfill_below_min_score:
         mask = scored["score_price"].notna() & (scored["score_price"] > min_price_score)
         if not mask.all():
-            scored = scored[mask]
+            pool = scored[mask]
 
-    sector_scores = aggregate_to_sector(scored)
+    sector_scores = aggregate_to_sector(pool)
     if direction == "top":
         chosen_sectors = sector_scores.head(top_n_sectors)["sector"].tolist()
         ascending_within = False
@@ -220,22 +253,34 @@ def select_from_scored(
         return pd.DataFrame()
 
     sector_rank_map = {sec: i + 1 for i, sec in enumerate(chosen_sectors)}
-    in_chosen = scored[scored["sector"].isin(chosen_sectors)]
+    in_chosen = pool[pool["sector"].isin(chosen_sectors)]
     if in_chosen.empty:
         return pd.DataFrame()
 
-    in_chosen = in_chosen.assign(
-        sector_rank=in_chosen["sector"].map(sector_rank_map),
-    ).sort_values(
-        ["sector_rank", "momentum_score"],
-        ascending=[True, ascending_within],
-    )
+    in_chosen = in_chosen.assign(sector_rank=in_chosen["sector"].map(sector_rank_map))
+    sort_cols = ["sector_rank", "momentum_score"]
+    sort_asc = [True, ascending_within]
+    if has_min and backfill_below_min_score:
+        # Above-threshold names first, then by momentum → the top_n_per_sector
+        # head takes eligible names first and only dips below the threshold to
+        # fill the sector up (the "pick the next eligible company" backfill).
+        in_chosen = in_chosen.assign(
+            _above_min=(
+                in_chosen["score_price"].notna()
+                & (in_chosen["score_price"] > min_price_score)
+            ).astype(int),
+        )
+        sort_cols = ["sector_rank", "_above_min", "momentum_score"]
+        sort_asc = [True, False, ascending_within]
+    in_chosen = in_chosen.sort_values(sort_cols, ascending=sort_asc)
     selected = (
         in_chosen
         .groupby("sector_rank", sort=False)
         .head(top_n_per_sector)
         .reset_index(drop=True)
     )
+    if "_above_min" in selected.columns:
+        selected = selected.drop(columns=["_above_min"])
 
     if not selected.empty:
         selected["sector_rank"] = selected["sector_rank"].astype("Int64")
@@ -255,6 +300,7 @@ def score_and_select(
     category_weights: dict[str, float] | None = None,
     direction: SelectionDirection = "top",
     min_price_score: float | None = None,
+    backfill_below_min_score: bool = True,
     signal_defs: list[dict] | None = None,
 ) -> pd.DataFrame:
     """Convenience wrapper combining `score_universe` + `select_from_scored`
@@ -271,6 +317,7 @@ def score_and_select(
         top_n_per_sector=top_n_per_sector,
         direction=direction,
         min_price_score=min_price_score,
+        backfill_below_min_score=backfill_below_min_score,
     )
 
 

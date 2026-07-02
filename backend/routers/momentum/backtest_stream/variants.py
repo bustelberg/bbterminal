@@ -595,6 +595,7 @@ async def run_variants_sweep(
                 "strategy_type": vspec_inner.strategy_type,
                 "sector_etfs": req.sector_etfs,
                 "min_price_score": v_min_score,
+                "backfill_below_min_score": req.backfill_below_min_score,
                 "vol_target": v_vol_target,
                 "regime_floor": v_regime_floor,
                 "regime_ramp_lo": req.regime_ramp_lo,

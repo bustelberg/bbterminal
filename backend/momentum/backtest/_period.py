@@ -951,6 +951,7 @@ def compute_selection_period(
                 k = (
                     period_date, config.top_n_sectors,
                     config.top_n_per_sector, ms, direction,
+                    config.backfill_below_min_score,
                 )
                 hit = selection_cache.get(k)
                 if hit is not None:
@@ -961,6 +962,7 @@ def compute_selection_period(
                 top_n_per_sector=config.top_n_per_sector,
                 direction=direction,
                 min_price_score=ms,
+                backfill_below_min_score=config.backfill_below_min_score,
             )
             if selection_cache is not None:
                 # CPython dict assignment is atomic per-key; the

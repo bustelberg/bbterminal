@@ -162,7 +162,7 @@ class TestEvery2MonthsBacktest:
     def test_full_loop(self):
         # 6-month window so we get 3 every-2-month entries (Jan, Mar, May)
         # plus a May→Jul exit pin (May has no forward → 2 records: Jan, Mar).
-        history_start = "2023-09-01"
+        history_start = "2022-12-01"  # ≥12 months before the 2024-01 start so 12-1M computes
         prices_end = "2024-08-15"
         bt_start = date(2024, 1, 1)
         bt_end = date(2024, 7, 1)
@@ -217,7 +217,7 @@ class TestWeeklyBacktest:
     next available trading day on/after each Monday."""
 
     def test_full_loop(self):
-        history_start = "2023-09-01"
+        history_start = "2022-12-01"  # ≥12 months before the 2024-01 start so 12-1M computes
         prices_end = "2024-03-15"
         bt_start = date(2024, 1, 1)  # Monday
         bt_end = date(2024, 2, 12)   # Monday — 6 weekly entries inclusive

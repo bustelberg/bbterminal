@@ -289,15 +289,16 @@ export interface paths {
         put?: never;
         /**
          * Company Price Refresh
-         * @description Force-refresh ONE company's prices from GuruFocus (bypassing cache) and
+         * @description Force-refresh ONE holding's prices from GuruFocus (bypassing cache) and
          *     return a COMPACT view of the actual API request + response — for clearing a
-         *     single stale holding straight from the /schedule Current-portfolio card.
+         *     single stale row straight from the /schedule Price-update / Current-portfolio
+         *     views.
          *
-         *     Loads the fetched closes into `metric_data`; when `strategy_id` is supplied,
-         *     re-prices that strategy's held basket (a new price_update snapshot) so the
-         *     card + heatmap update on the next reload. Admin only. ETF overlays (negative
-         *     company_id) aren't refreshable here — they price from `benchmark_price` via
-         *     the price-update job.
+         *     Handles both a real company (positive `company_id` → `metric_data`) and an
+         *     ETF overlay (negative `company_id` = `-benchmark_id` → `benchmark_price`,
+         *     priced as a US listing like the /benchmarks refresh). When `strategy_id` is
+         *     supplied, re-prices that strategy's held basket (a new price_update snapshot)
+         *     so the card + heatmap update on the next reload. Admin only.
          */
         post: operations["company_price_refresh_api_admin_company_price_refresh_post"];
         delete?: never;
@@ -924,6 +925,118 @@ export interface paths {
         get: operations["airs_vermogen_holdings_api_airs_vermogen__portfolio_name__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Assets
+         * @description Browse what's stored: every analysis asset (from asset_catalog — execution
+         *     count + price coverage) with its execution instruments (many-to-one) nested,
+         *     most-liquid first. One round-trip for the catalog + one for executions.
+         */
+        get: operations["list_assets_api_asset_pipeline_assets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest
+         * @description Batch-resolve + PERSIST a list of ISINs (SSE progress). For each: resolve
+         *     → upsert the analysis asset (dedup by symbol) + the execution (by ISIN) →
+         *     store the analysis instrument's daily close+volume. Robust: per-ISIN errors
+         *     are captured, not fatal. Ends with a summary (counts + size estimate) after
+         *     flagging the default execution per asset.
+         */
+        post: operations["ingest_api_asset_pipeline_ingest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve Asset
+         * @description Resolve one identifier (ISIN or native Yahoo symbol). Returns the ranked
+         *     candidate listings, the chosen ANALYSIS instrument (longest + most-liquid,
+         *     or the underlying for a crypto/commodity ETF wrapper), the rationale,
+         *     oldest/newest candles, an auto label, and the IBKR EXECUTION step (stub).
+         *     Does NOT write to the DB — use /ingest for that.
+         */
+        get: operations["resolve_asset_api_asset_pipeline_resolve_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Storage
+         * @description Live row counts + rough on-disk estimate for the asset-pipeline tables.
+         */
+        get: operations["storage_api_asset_pipeline_storage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/store": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Store One
+         * @description Persist ONE identifier (from the single-ISIN view): resolve → upsert the
+         *     analysis asset + execution → store the analysis series' close+volume. Returns
+         *     what was stored, incl. the exact `stored_fields`.
+         */
+        post: operations["store_one_api_asset_pipeline_store_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4366,6 +4479,11 @@ export interface components {
         };
         /** BacktestRequest */
         BacktestRequest: {
+            /**
+             * Backfill Below Min Score
+             * @default true
+             */
+            backfill_below_min_score?: boolean;
             /** Category Weights */
             category_weights?: {
                 [key: string]: number;
@@ -5431,12 +5549,22 @@ export interface components {
              */
             illiquid?: boolean;
         };
+        /** _IngestBody */
+        _IngestBody: {
+            /** Identifiers */
+            identifiers: string[];
+        };
         /** _PriceRefreshBody */
         _PriceRefreshBody: {
             /** Company Id */
             company_id: number;
             /** Strategy Id */
             strategy_id?: number | null;
+        };
+        /** _StoreBody */
+        _StoreBody: {
+            /** Identifier */
+            identifier: string;
         };
     };
     responses: never;
@@ -6399,6 +6527,144 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_assets_api_asset_pipeline_assets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    ingest_api_asset_pipeline_ingest_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_IngestBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_asset_api_asset_pipeline_resolve_get: {
+        parameters: {
+            query: {
+                identifier: string;
+                id_type?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    storage_api_asset_pipeline_storage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    store_one_api_asset_pipeline_store_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_StoreBody"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

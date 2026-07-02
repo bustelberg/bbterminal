@@ -33,7 +33,13 @@ def calendar_daily(start: str, end: str) -> pd.DatetimeIndex:
 
 
 def exp_prices(daily_factor: float, *, dates: pd.DatetimeIndex, start_price: float = 100.0) -> np.ndarray:
-    """Pure exponential growth: price[i] = start * factor**i."""
+    """Pure exponential growth: price[i] = start * factor**i.
+
+    NOTE: a pure exponential has ZERO daily-return volatility, so
+    `volatility_adjusted_return_6m` (= return / vol) is undefined (None). Since
+    the scoring engine now EXCLUDES companies missing any weighted stat, tests
+    that weight that signal on this synthetic data must build the config with
+    `exclude_incomplete=False` to isolate the mechanic under test."""
     return start_price * (daily_factor ** np.arange(len(dates)))
 
 
@@ -70,12 +76,18 @@ def build_universe_df(rows: list[tuple[int, str, str | None, str]]) -> pd.DataFr
 
 
 def equal_signal_weights() -> dict[str, float]:
-    """Equal weight across every price signal — the synthetic series are
-    monotonic, so the relative ordering is the same on every signal."""
+    """Equal weight across the price signals computable on the synthetic series.
+
+    The synthetic prices are pure exponentials (monotonic), so the relative
+    ordering is the same on every signal — BUT a pure exponential has zero
+    daily-return volatility, so `volatility_adjusted_return_6m` (= return / vol)
+    is undefined. Since the scoring engine now EXCLUDES any company missing a
+    weighted stat, we don't weight vol-adj here (it would drop every company on
+    this zero-vol fixture). The four weighted signals still rank identically, so
+    every selection/return assertion is unchanged."""
     return {
         "mom_12_1": 1,
         "mom_6m": 1,
-        "volatility_adjusted_return_6m": 1,
         "drawdown_from_recent_high_pct": 1,
         "above_200ma": 1,
     }
