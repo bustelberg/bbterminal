@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { API_URL } from '../../lib/apiUrl';
 import { apiFetch } from '../../lib/apiFetch';
-import type { BacktestResult, UniverseEntry } from '../../lib/stores/momentum';
+import type { BacktestResult, PeriodRecord, UniverseEntry } from '../../lib/stores/momentum';
 import BacktestResultView from './momentum/BacktestResultView';
 import type { StalePriceWarning } from './momentum/MonthlyReturnsHeatmap';
 import type { ScoringConfig } from './momentum/MonthlyHoldingsTable';
@@ -71,6 +71,7 @@ export default function SourceBacktestCard({
   runId,
   markerDate,
   liveCurve,
+  liveRecords,
   cashPct = 0,
   staleWarning,
 }: {
@@ -93,6 +94,11 @@ export default function SourceBacktestCard({
    * appended, so the equity curve + monthly-returns heatmap track the
    * latest priced day rather than ending where the backtest was saved. */
   liveCurve?: LiveCurve | null;
+  /** The strategy's live rebalance baskets (from /runs). Appended to the
+   * backtest's `monthly_records` so the holdings table + sector timeline list
+   * the newly-computed portfolios. Backtest periods on/after the first live
+   * rebalance are dropped (the live basket supersedes the projection). */
+  liveRecords?: PeriodRecord[] | null;
 }) {
   const [data, setData] = useState<LoadedBacktest | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -141,13 +147,26 @@ export default function SourceBacktestCard({
     // universe baseline is left as the market benchmark). The live tail is
     // already cash-scaled server-side, so it's appended to the scaled base.
     const scaledDaily = scaleCumCurve(base.daily_records ?? [], cashPct);
+    // Splice the live rebalance baskets onto the FROZEN backtest periods so the
+    // holdings table + sector timeline list the newly-computed portfolios. Drop
+    // any backtest period on/after the first live rebalance — the live basket
+    // supersedes the backtest's forward projection for that window.
+    const recs = liveRecords ?? [];
+    const monthly = recs.length
+      ? [
+          ...(base.monthly_records ?? []).filter(
+            (m) => m.date.slice(0, 10) < recs[0].date.slice(0, 10),
+          ),
+          ...recs,
+        ]
+      : (base.monthly_records ?? []);
     const pts = liveCurve?.points ?? [];
-    if (pts.length === 0) return { ...base, daily_records: scaledDaily };
+    if (pts.length === 0) return { ...base, daily_records: scaledDaily, monthly_records: monthly };
     const kept = scaledDaily.filter(
       (d) => d.date.slice(0, 10) < liveCurve!.cutover_date,
     );
-    return { ...base, daily_records: [...kept, ...pts] };
-  }, [data, liveCurve, cashPct]);
+    return { ...base, daily_records: [...kept, ...pts], monthly_records: monthly };
+  }, [data, liveCurve, liveRecords, cashPct]);
 
   // Rebuild the scoring config from the saved run's params so the holdings
   // table's category-score columns match /backtest. Empty maps are a safe

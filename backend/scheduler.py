@@ -87,29 +87,26 @@ _price_retry_counts: dict[str, int] = {}
 
 
 def _reap_orphan_runs() -> None:
-    """Mark any `ingest_run` row stuck in `status='running'` for longer
-    than `_PIPELINE_STALE_AFTER_SECONDS` as errored. Runs once on
-    startup so a backend restart that killed mid-run daemon threads
-    doesn't leave the /schedule UI showing a perpetually-running job.
+    """Mark EVERY `ingest_run` row still in `status='running'` as errored.
+    Runs once on startup (before any new run is kicked off), so a backend
+    restart that killed mid-run daemon threads doesn't leave the /schedule UI
+    showing a perpetually-running job.
 
-    The pipeline workers run as `daemon=True` threads
-    (`_spawn_ingest` in `routers/ingest_runs.py`), which means a
-    process restart — common during dev with uvicorn --reload, but
-    also possible in prod on a Railway deploy that lands while a job
-    is in flight — kills them mid-execution. The `ingest_run` row
-    keeps the last checkpoint state forever unless something cleans
-    it up. The hour-old cutoff is conservative: even the full weekly
-    pipeline (acquisition + templates + prune + prices + momentum)
-    completes inside an hour, so anything older that's still
-    `running` is provably orphaned.
+    The pipeline workers run as `daemon=True` threads (`_spawn_ingest` in
+    `routers/ingest_runs.py`), so a process restart — common during dev with
+    uvicorn --reload, but also possible in prod on a Railway deploy that lands
+    mid-job — kills them mid-execution, leaving the `ingest_run` row frozen in
+    `running` forever. On a FRESH process there are no live pipeline threads,
+    so ANY `running` row is provably orphaned by the previous process — reap
+    them ALL. (It used to only reap hour-old rows, which left a just-killed job
+    showing a frozen "running…" for up to an hour after every restart.) The
+    reaper runs before `_maybe_kickstart_smart` kicks off this process's first
+    run, so it can never reap a run this process actually owns.
 
-    Best-effort: failures are logged + swallowed so a Supabase blip
-    on boot never blocks scheduler startup."""
+    Best-effort: failures are logged + swallowed so a Supabase blip on boot
+    never blocks scheduler startup."""
     from deps import supabase  # noqa: PLC0415
 
-    cutoff_iso = (
-        datetime.now(timezone.utc) - timedelta(seconds=_PIPELINE_STALE_AFTER_SECONDS)
-    ).isoformat()
     try:
         # 1. Find them so we can log the IDs explicitly. Useful when
         #    triaging a recurring-restart situation — without the log
@@ -118,7 +115,6 @@ def _reap_orphan_runs() -> None:
             supabase.table("ingest_run")
             .select("run_id, job_name, started_at, current_phase, current_message")
             .eq("status", "running")
-            .lt("started_at", cutoff_iso)
             .order("started_at", desc=False)
             .execute()
         )
@@ -126,9 +122,9 @@ def _reap_orphan_runs() -> None:
         if not orphans:
             return
         _log.warning(
-            "[scheduler] reaping %s orphan ingest_run row(s) "
-            "(status=running, older than %ss): %s",
-            len(orphans), _PIPELINE_STALE_AFTER_SECONDS,
+            "[scheduler] reaping %s orphan ingest_run row(s) (status=running "
+            "on a fresh process → provably dead): %s",
+            len(orphans),
             [
                 {
                     "run_id": o["run_id"],

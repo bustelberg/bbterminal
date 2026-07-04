@@ -87,12 +87,12 @@ class BacktestRequest(BaseModel):
     # bucket of long-short strategies ignores it — see
     # scoring.score_and_select for the rationale.
     min_price_score: float | None = None
-    # When True (default), `min_price_score` is a soft preference: above-threshold
-    # names are picked first, but each sector is still filled to
-    # `top_n_per_sector` by backfilling with the next-best below-threshold names
-    # (so a restrictive threshold never yields short/empty sectors). False = hard
-    # cut (a sector may end up with fewer than top_n_per_sector).
-    backfill_below_min_score: bool = True
+    # Default False = `min_price_score` is a HARD FLOOR: names below it are
+    # dropped, so every pick satisfies it (a sector short on eligible names ends
+    # up with fewer than top_n_per_sector rather than padding with below-floor
+    # names). True = soft preference: above-floor names first, then pad each
+    # sector to top_n_per_sector with the next-best BELOW-floor names.
+    backfill_below_min_score: bool = False
     universe_label: str | None = None  # if set, use universe_membership for per-month filtering
     index_universe: str | None = None  # if set, use universe_membership for per-month filtering (e.g. "SP500")
     # How `top_n_sectors` buckets companies. "sector" is the universe-level

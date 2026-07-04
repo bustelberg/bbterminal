@@ -966,6 +966,9 @@ export interface paths {
          *     catalog chart). Paginated to defeat PostgREST's 1000-row cap, then
          *     downsampled to ~`max_points` (stride, first+last kept) so a 10k-bar series
          *     stays light to ship + render.
+         *
+         *     `in_eur=true` converts each close to EUR (via the fx_rate table, GBp
+         *     handled); bars with no available FX rate come back with a null close.
          */
         get: operations["asset_series_api_asset_pipeline_assets__analysis_id__series_get"];
         put?: never;
@@ -2799,6 +2802,12 @@ export interface paths {
          *     Pass a JSON body `{"company_ids": [...]}` with `job_name=companies_price_refresh`
          *     to re-price only those companies (the "Refresh stale" button after Inspect
          *     freshness).
+         *
+         *     Pass `force=true` with `job_name=rebalance` to OVERRIDE the per-period lock —
+         *     re-decide (re-select) EVERY enabled strategy's current period even if it was
+         *     already rebalanced. The original decisions stay in the run history. Without
+         *     it, a manual rebalance only rebalances strategies actually due (so an
+         *     already-decided period isn't silently re-decided on newer/revised data).
          */
         post: operations["trigger_scheduled_refresh_api_ingest_scheduled_refresh_trigger_post"];
         delete?: never;
@@ -4504,7 +4513,7 @@ export interface components {
         BacktestRequest: {
             /**
              * Backfill Below Min Score
-             * @default true
+             * @default false
              */
             backfill_below_min_score?: boolean;
             /** Category Weights */
@@ -6595,6 +6604,7 @@ export interface operations {
         parameters: {
             query?: {
                 max_points?: number;
+                in_eur?: boolean;
             };
             header?: never;
             path: {
@@ -9093,6 +9103,7 @@ export interface operations {
             query?: {
                 job_name?: string;
                 universe?: string | null;
+                force?: boolean;
             };
             header?: never;
             path?: never;

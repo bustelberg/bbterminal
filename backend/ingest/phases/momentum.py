@@ -103,10 +103,19 @@ def _run_momentum_phase(
     from routers._schedule_snapshots import (  # noqa: PLC0415
         compute_and_save_price_update as _compute_and_save_price_update,
     )
+    from routers.momentum._helpers import strategy_hash as _sel_hash  # noqa: PLC0415
 
     summaries: list[dict] = []
     errors: list[str] = []
     total = len(scheduled)
+    # Shared-selection memo for this run: the momentum stock pick is fully
+    # determined by `strategy_hash` (signal/category weights, top-N, universe,
+    # selection mode …) — NOT by the ETF overlay or cash sleeve. So multiple
+    # scheduled strategies that run the SAME base strategy and only differ in
+    # their ETF/cash produce the identical selection. We compute that heavy
+    # selection ONCE per hash and clone it for the rest, applying each strategy's
+    # own overlay/cash on top: one calc rebalances them all.
+    base_by_hash: dict[str, dict] = {}
 
     for idx, sched in enumerate(scheduled, start=1):
         strategy_id = sched["id"]
@@ -229,9 +238,17 @@ def _run_momentum_phase(
             # Pipeline-only overrides — the saved config is the user's
             # intent; we only force the mode/cache flags so it computes
             # a fresh current-portfolio snapshot.
+            #
+            # db_only=True: the rebalance JUST RUNS THE CALCULATION against the
+            # prices already in the DB — it never triggers the per-company
+            # GuruFocus ensure-fetch loop (db_only=False). Fetching prices is the
+            # price_update op's / month-end refresh's job; a rebalance must not
+            # hang on 1,479 API calls. Companies with stale/missing DB prices are
+            # dropped by signals.py's 30-day staleness guard (the rebalance op
+            # already surfaces a non-blocking freshness warning for those).
             cfg["mode"] = "current_portfolio"
             cfg["force_recompute"] = True
-            cfg["db_only"] = False
+            cfg["db_only"] = True
             cfg.pop("variants", None)
             cfg.pop("n_trials", None)
             try:
@@ -245,40 +262,63 @@ def _run_momentum_phase(
             stream_err: str | None = None
             holdings_count = 0
             latest_price_date: str | None = None
-            msg_throttle = _Throttle()
 
-            async def _drain() -> None:
-                nonlocal snapshot_id, stream_err, holdings_count, latest_price_date
-                async for chunk in _momentum_backtest_stream(req):
-                    if not isinstance(chunk, str) or not chunk.startswith("data: "):
-                        continue
-                    try:
-                        evt = _json.loads(chunk[len("data: "):].strip())
-                    except _json.JSONDecodeError:
-                        continue
-                    t = evt.get("type")
-                    if t == "progress":
-                        m = evt.get("message")
-                        if m and msg_throttle.should_write():
-                            await asyncio.to_thread(
-                                _update_run,
-                                run_id,
-                                current_message=f"[{idx}/{total} {strategy_name}] {m}",
-                            )
-                    elif t == "current_portfolio":
-                        payload = evt.get("data") or {}
-                        snapshot_id = payload.get("snapshot_id")
-                        holdings_count = len(payload.get("holdings") or [])
-                        latest_price_date = payload.get("latest_price_date")
-                    elif t == "error":
-                        stream_err = evt.get("message") or "unknown error"
+            base_hash = _sel_hash(req)
+            if base_hash in base_by_hash:
+                # Another due strategy this run already computed this exact
+                # selection (they differ only by ETF overlay / cash). Clone its
+                # base stock snapshot instead of re-running the whole momentum
+                # stream — the ETF overlay + cash below are applied per-strategy,
+                # so each still gets its own correct snapshot.
+                base = base_by_hash[base_hash]
+                snapshot_id = _clone_rebalance_snapshot(
+                    base, strategy_id, run_id, config=sched.get("config") or {},
+                )
+                holdings_count = len(base.get("holdings") or [])
+                latest_price_date = base.get("latest_price_date")
+                _update_run(run_id, current_message=(
+                    f"Strategy {idx} of {total} · reusing shared selection for "
+                    f"{strategy_name} (same picks as another strategy)…"))
+            else:
+                msg_throttle = _Throttle()
 
-            asyncio.run(_drain())
+                async def _drain() -> None:
+                    nonlocal snapshot_id, stream_err, holdings_count, latest_price_date
+                    async for chunk in _momentum_backtest_stream(req):
+                        if not isinstance(chunk, str) or not chunk.startswith("data: "):
+                            continue
+                        try:
+                            evt = _json.loads(chunk[len("data: "):].strip())
+                        except _json.JSONDecodeError:
+                            continue
+                        t = evt.get("type")
+                        if t == "progress":
+                            m = evt.get("message")
+                            if m and msg_throttle.should_write():
+                                await asyncio.to_thread(
+                                    _update_run,
+                                    run_id,
+                                    current_message=f"[{idx}/{total} {strategy_name}] {m}",
+                                )
+                        elif t == "current_portfolio":
+                            payload = evt.get("data") or {}
+                            snapshot_id = payload.get("snapshot_id")
+                            holdings_count = len(payload.get("holdings") or [])
+                            latest_price_date = payload.get("latest_price_date")
+                        elif t == "error":
+                            stream_err = evt.get("message") or "unknown error"
 
-            if stream_err:
-                raise RuntimeError(stream_err)
-            if snapshot_id is None:
-                raise RuntimeError("Momentum compute finished without persisting a snapshot")
+                asyncio.run(_drain())
+
+                if stream_err:
+                    raise RuntimeError(stream_err)
+                if snapshot_id is None:
+                    raise RuntimeError("Momentum compute finished without persisting a snapshot")
+
+                # Capture the PURE stock selection (before the ETF overlay/cash
+                # below mutates this snapshot) so strategies later in this run
+                # that share the selection can clone it instead of recomputing.
+                base_by_hash[base_hash] = _read_base_snapshot(snapshot_id)
 
             # Tag the snapshot with the pipeline run + scheduled
             # strategy it came from, and re-tag as 'auto' (the SSE flow
@@ -398,6 +438,53 @@ def _run_momentum_phase(
         )
 
 
+def _read_base_snapshot(snapshot_id: int) -> dict:
+    """Read the fields needed to CLONE a freshly-computed rebalance snapshot for
+    another strategy sharing its selection. Called right after the momentum
+    stream persists it, so `holdings` are the PURE stock picks (no ETF overlay /
+    cash applied yet)."""
+    r = (
+        supabase.table("current_picks_snapshot")
+        .select("holdings, as_of_date, latest_price_date, daily_picks, strategy_hash, name")
+        .eq("snapshot_id", snapshot_id)
+        .limit(1)
+        .execute()
+    )
+    return (r.data or [{}])[0]
+
+
+def _clone_rebalance_snapshot(
+    base: dict, strategy_id: int, run_id: int, *, config: dict,
+) -> int:
+    """Insert a new `rebalance` snapshot for `strategy_id` from a shared base
+    selection (same stock picks as another strategy this run). Copies the base's
+    holdings + as_of/latest dates + daily_picks + strategy_hash, tagged to this
+    strategy + run. The caller then applies THIS strategy's ETF overlay + cash on
+    top, so the clone becomes its own correct blended snapshot. `current_picks_day`
+    rows aren't duplicated — they're keyed by `strategy_hash`, shared across the
+    group, and the base compute already wrote them.
+
+    Note `config` is THIS strategy's own saved config (its ETF overlay / cash),
+    not the base's — so the price-update re-pricer's `cash_pct` fallback reads the
+    right value for this strategy."""
+    row = {
+        "triggered_by": "auto",
+        "as_of_date": base.get("as_of_date"),
+        "latest_price_date": base.get("latest_price_date"),
+        "config": config,
+        "holdings": base.get("holdings") or [],
+        "daily_picks": base.get("daily_picks") or [],
+        "strategy_hash": base.get("strategy_hash"),
+        "name": base.get("name"),
+        "kind": "rebalance",
+        "is_backfill": False,
+        "ingest_run_id": run_id,
+        "scheduled_strategy_id": strategy_id,
+    }
+    ins = supabase.table("current_picks_snapshot").insert(row).execute()
+    return int(ins.data[0]["snapshot_id"])
+
+
 def _apply_cash_to_snapshot(snapshot_id: int, cash_pct: float) -> int | None:
     """Apply a cash sleeve to a stored snapshot's holdings IN PLACE: strip any
     existing cash, scale the rest by (1-cash), append the flat 0%-return cash
@@ -452,6 +539,22 @@ def _apply_etf_overlay_to_snapshot(snapshot_id: int, etf_overlay: list[dict]) ->
     stock_holdings = [h for h in (snap.get("holdings") or []) if (h.get("company_id") or 0) >= 0]
     as_of = str(snap.get("as_of_date") or "")[:10]
     latest = str(snap.get("latest_price_date") or as_of)[:10]
+    # ETF entry must anchor to the SAME bar the stock sleeve entered on — the
+    # prior trading day's close the picks are anchored to (`run_current_portfolio`
+    # enters stocks at `_price_on_or_before(rebalance_date − 1)`), NOT the raw
+    # `as_of`. `as_of` is the nominal rebalance grid date, which can be a FUTURE
+    # Monday when the tick fires early (Saturday, for the upcoming Monday). Using
+    # it stamped a future ETF entry_date and priced entry against a not-yet-real
+    # (or corrupt future) benchmark bar — the SPMO +277% incident. Take the stock
+    # sleeve's actual entry_date (they all share the prior-trading-day anchor);
+    # fall back to `latest` (the freshest real close, never the future) for a
+    # pure-ETF strategy with no stock holdings.
+    stock_entry_dates = [
+        str(h.get("entry_date"))[:10] for h in stock_holdings if h.get("entry_date")
+    ]
+    entry_ref = min(stock_entry_dates) if stock_entry_dates else latest
+    if latest and entry_ref > latest:
+        entry_ref = latest  # never price entry past the latest real close
 
     bids = [int(o["benchmark_id"]) for o in overlay]
     meta_resp = (
@@ -497,9 +600,9 @@ def _apply_etf_overlay_to_snapshot(snapshot_id: int, etf_overlay: list[dict]) ->
             name=m.get("name") or m.get("ticker") or f"Benchmark {bid}",
             sector=m.get("sector"),
             weight=float(o.get("weight_pct") or 0.0) / 100.0,
-            entry_price=_asof(bid, as_of),
+            entry_price=_asof(bid, entry_ref),
             exit_price=_asof(bid, latest),
-            entry_date=as_of or None,
+            entry_date=entry_ref or None,
             exit_date=latest or None,
             currency=m.get("currency"),
         ))

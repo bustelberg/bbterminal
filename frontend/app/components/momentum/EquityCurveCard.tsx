@@ -10,7 +10,8 @@ import type {
 } from '../../../lib/stores/momentum';
 import type { Column } from '../../../lib/tableExport';
 import { SERIES_COLORS } from './utils';
-import type { BenchmarkOption, BenchmarkPrice, ComparisonItem, SavedRun, SavedVariant } from './types';
+import type { BenchmarkOption, ComparisonItem, SavedRun, SavedVariant } from './types';
+import { loadFreshBenchmarkPrices, type BenchStatus } from './benchmarkFreshness';
 import { type NetStats } from './feeStats';
 import { computeFeeWaterfall, type FeeBreakdownRow, type FeeWaterfall } from './feeModel';
 import { useClickOutside } from '../../../lib/hooks/useClickOutside';
@@ -94,6 +95,19 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
   // show a small spinner pill while we fetch the backend payload. Cleared
   // once the comparison item lands in `comparisons`.
   const [addingSeriesId, setAddingSeriesId] = useState<string | null>(null);
+  // Status line for a benchmark add/refresh — so selecting a benchmark tells you
+  // when its prices are stale, that it's refreshing, and the outcome.
+  const [benchStatus, setBenchStatus] = useState<BenchStatus>(null);
+
+  // The date the chart's active line reaches — the reference for "is this
+  // benchmark's data stale?". A benchmark whose latest close is well behind
+  // this can't be compared over the full window, so we refresh it.
+  const strategyLatest = useMemo<string | null>(() => {
+    const dr = result.daily_records ?? [];
+    if (dr.length) return String(dr[dr.length - 1].date).slice(0, 10);
+    const mr = result.monthly_records ?? [];
+    return mr.length ? String(mr[mr.length - 1].date).slice(0, 10) : null;
+  }, [result.daily_records, result.monthly_records]);
 
   // Net stats for the active strategy + every saved comparison. We
   // reuse the parent's `exchangeByCompany` as the lookup for all of
@@ -197,18 +211,19 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
     const opt = benchmarkOptions.find((b) => b.benchmark_id === benchmarkId);
     const label = opt ? opt.ticker : `Benchmark ${benchmarkId}`;
     setAddingSeriesId(`bench:${benchmarkId}`);
-    // Widen fetch window so any later series can still overlap.
     try {
-      const resp = await apiFetch(
-        `${API_URL}/api/benchmarks/${benchmarkId}/prices?start_date=1990-01-01&end_date=2099-12-31`,
-      );
-      if (!resp.ok) return;
-      const prices: BenchmarkPrice[] = await resp.json();
+      // Fetch prices, auto-refreshing from GuruFocus when stale vs the strategy's
+      // line (narrated via `benchStatus`). Shared with the monthly-returns card.
+      const prices = await loadFreshBenchmarkPrices(benchmarkId, label, strategyLatest, setBenchStatus);
       setComparisons((prev) => [
         ...prev,
         { id: `bench:${benchmarkId}`, kind: 'benchmark', benchmarkId, label, prices },
       ]);
-    } catch {} finally {
+      // Clear the status a few seconds after a successful, non-warning outcome.
+      window.setTimeout(() => setBenchStatus((cur) => (cur && cur.tone === 'ok' ? null : cur)), 6000);
+    } catch {
+      setBenchStatus({ msg: `Couldn't load ${label}.`, tone: 'warn' });
+    } finally {
       setAddingSeriesId(null);
     }
   };
@@ -506,6 +521,21 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
             </span>
           )}
         </div>
+        {benchStatus && (
+          <div className={`mt-2 text-[11px] flex items-center gap-1.5 ${
+            benchStatus.tone === 'ok' ? 'text-pos-400' : benchStatus.tone === 'warn' ? 'text-warn-400' : 'text-accent-300'
+          }`}>
+            {addingSeriesId != null ? (
+              <svg className="animate-spin w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            ) : (
+              <span aria-hidden className="shrink-0">{benchStatus.tone === 'ok' ? '✓' : '⚠'}</span>
+            )}
+            <span>{benchStatus.msg}</span>
+          </div>
+        )}
       </div>
 
       {/* Summary Stats */}

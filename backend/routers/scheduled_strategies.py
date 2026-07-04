@@ -33,7 +33,12 @@ from momentum.schedule import _expected_latest_trading_day, _initial_next_due_at
 
 from ._authz import is_admin_request
 from ._schedule_backfill import reset_stale_backfills  # noqa: F401 — re-exported for main.py
-from ._schedule_hydration import _hydrate, basket_price_staleness, build_live_curve
+from ._schedule_hydration import (
+    _hydrate,
+    basket_price_staleness,
+    build_live_curve,
+    live_period_records,
+)
 from ._schedule_snapshots import _seed_snapshot_from_backtest
 
 _log = logging.getLogger(__name__)
@@ -797,18 +802,33 @@ async def list_strategy_runs(strategy_id: int, request: Request, limit: int = 50
         # rollups use. Best-effort: None when there's no source backtest or
         # no live data fresher than the curve's end.
         live_curve = None
+        live_records: list[dict] = []
         if sched.get("backtest_run_id"):
+            # Full snapshot history WITH holdings — the live curve now follows the
+            # actual live rebalances (each real basket re-priced daily), and the
+            # holdings table lists every live rebalance period. Both need the
+            # holdings + is_backfill flag, and ALL periods (not just the recent
+            # `limit`), so this is a separate unbounded fetch from `snapshots`.
             curve_hist = (
                 supabase.table("current_picks_snapshot")
-                .select("kind, as_of_date, latest_price_date, period_return_pct, created_at")
+                .select(
+                    "kind, as_of_date, latest_price_date, period_return_pct, "
+                    "created_at, holdings, is_backfill"
+                )
                 .eq("scheduled_strategy_id", strategy_id)
                 .order("latest_price_date", desc=False)
                 .order("created_at", desc=False)
                 .execute()
             )
+            cash = float((sched.get("config") or {}).get("cash_pct") or 0.0)
             live_curve = build_live_curve(
-                int(sched["backtest_run_id"]), curve_hist.data or [],
-                float((sched.get("config") or {}).get("cash_pct") or 0.0),
+                int(sched["backtest_run_id"]), curve_hist.data or [], cash,
+            )
+            # Live rebalance baskets as PeriodRecord rows, so the detail view's
+            # holdings table lists the newly-computed portfolios alongside the
+            # frozen backtest periods.
+            live_records = live_period_records(
+                curve_hist.data or [], int(sched["backtest_run_id"]), cash,
             )
 
         # Stale-price guard for the live tail: when the latest plotted point
@@ -817,7 +837,13 @@ async def list_strategy_runs(strategy_id: int, request: Request, limit: int = 50
         # Surfaced so the frontend replaces that cell with a warning listing
         # the lagging assets. Only meaningful once a live tail exists.
         stale_prices = (
-            basket_price_staleness(int(sched["backtest_run_id"]))
+            basket_price_staleness(
+                int(sched["backtest_run_id"]),
+                # Check the basket that's actually plotted: the latest LIVE
+                # rebalance's holdings when the strategy has rebalanced, else the
+                # backtest's last basket (None → the function loads it).
+                live_records[-1]["holdings"] if live_records else None,
+            )
             if live_curve and sched.get("backtest_run_id")
             else None
         )
@@ -852,6 +878,11 @@ async def list_strategy_runs(strategy_id: int, request: Request, limit: int = 50
             # or None. Frontend keeps backtest daily points before
             # cutover_date and appends `points` (same cumulative scale).
             "live_curve": live_curve,
+            # PeriodRecord[] — the strategy's live rebalance baskets, chained
+            # onto the backtest's cumulative. The frontend appends these to
+            # `monthly_records` so the holdings table + sector timeline include
+            # the newly-computed portfolios. Empty when no live rebalances yet.
+            "live_records": live_records,
             # {reference_date, month, missing:[{company_id,label,ticker,
             # last_close}]} or None. When present, the latest live point mixes
             # carried-forward prices for `missing`; the frontend warns on that

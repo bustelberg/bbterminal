@@ -4,7 +4,56 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from momentum.scoring import random_select
+from momentum.scoring import random_select, select_from_scored
+
+
+def _scored(rows: list[tuple]) -> pd.DataFrame:
+    """Pre-scored frame for `select_from_scored`: (company_id, sector,
+    score_price, momentum_score)."""
+    return pd.DataFrame([
+        {"company_id": cid, "sector": sec, "company_name": f"Co{cid}",
+         "gurufocus_ticker": f"T{cid}", "score_price": sp, "momentum_score": mom}
+        for cid, sec, sp, mom in rows
+    ])
+
+
+class TestMinPriceScoreFloor:
+    # One sector, 3 slots. Eligible (score_price >= 30): #1, #4. Below floor: #2,#3,#5.
+    ROWS = [
+        (1, "Tech", 90.0, 100.0),
+        (2, "Tech", 25.0, 95.0),   # below floor
+        (3, "Tech", 20.0, 90.0),   # below floor
+        (4, "Tech", 80.0, 85.0),
+        (5, "Tech", 15.0, 80.0),   # below floor
+    ]
+
+    def test_default_is_a_hard_floor(self):
+        # Default (backfill_below_min_score=False): every pick is >= the floor,
+        # even if that leaves the sector short of top_n_per_sector.
+        out = select_from_scored(
+            _scored(self.ROWS), top_n_sectors=1, top_n_per_sector=3, min_price_score=30,
+        )
+        assert set(out["company_id"]) == {1, 4}          # only the eligible names
+        assert (out["score_price"] >= 30).all()          # NONE below the floor
+        assert len(out) == 2                             # short sector, not padded
+
+    def test_backfill_true_pads_with_below_floor(self):
+        # Opt-in soft mode still pads the sector with the next-best below-floor
+        # name (this is the behavior that surprised us in live rebalances).
+        out = select_from_scored(
+            _scored(self.ROWS), top_n_sectors=1, top_n_per_sector=3,
+            min_price_score=30, backfill_below_min_score=True,
+        )
+        assert set(out["company_id"]) == {1, 4, 2}       # #2 (25) padded in
+        assert (out["score_price"] < 30).any()
+
+    def test_floor_is_inclusive(self):
+        # "min 30" keeps a score of exactly 30; 29.99 is dropped.
+        out = select_from_scored(
+            _scored([(1, "Tech", 30.0, 100.0), (2, "Tech", 29.99, 95.0), (3, "Tech", 50.0, 90.0)]),
+            top_n_sectors=1, top_n_per_sector=3, min_price_score=30,
+        )
+        assert set(out["company_id"]) == {1, 3}
 
 
 def _universe_df(n_per_sector: dict[str, int]) -> pd.DataFrame:

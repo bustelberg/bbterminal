@@ -56,6 +56,10 @@ class StrategyPlan:
     resolved_universe_id: int | None
     is_due: bool
     due_reason: str  # "first_run" | "due" | "not_due" | "unresolved"
+    # The grid time this strategy became due (ISO, 02:00 UTC on the grid date).
+    # None on first_run. The rebalance freshness gate measures its deadline from
+    # this — how long we've been waiting for the due universe to publish.
+    next_due_at: str | None = None
 
 
 @dataclass
@@ -180,6 +184,7 @@ def build_plan(now: datetime) -> SmartPlan:
             resolved_universe_id=universe_id,
             is_due=is_due,
             due_reason=reason,
+            next_due_at=str(next_due_iso) if next_due_iso else None,
         ))
 
     plan.needed_template_keys = sorted(needed)

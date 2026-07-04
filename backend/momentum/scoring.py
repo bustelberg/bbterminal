@@ -205,7 +205,7 @@ def select_from_scored(
     top_n_per_sector: int = 6,
     direction: SelectionDirection = "top",
     min_price_score: float | None = None,
-    backfill_below_min_score: bool = True,
+    backfill_below_min_score: bool = False,
 ) -> pd.DataFrame:
     """The select-half of `score_and_select`: applies `min_price_score`,
     aggregates to sector, picks `top_n_sectors` × `top_n_per_sector`,
@@ -224,17 +224,19 @@ def select_from_scored(
     # match what pandas's `.isin()` does). The pandas implementation
     # handles those gracefully via Series.isin(). The numpy version's
     # speedup (~1.18× on bench) wasn't worth the correctness risk.
-    # min_price_score handling. Without backfill it's a HARD cut (drop
-    # below-threshold names → a sector can end up with < top_n_per_sector). With
-    # backfill (default), it's a within-sector PREFERENCE: keep the full pool so
-    # selection can always fill each sector to top_n_per_sector, ranking
-    # above-threshold names first so they're picked before any backfills.
+    # min_price_score handling. Default (backfill=False) is a HARD FLOOR: names
+    # with a price score below `min_price_score` are DROPPED entirely, so every
+    # pick satisfies the floor (a sector short on eligible names ends up with
+    # fewer than top_n_per_sector — the floor is never violated to pad it). The
+    # threshold is inclusive (`>=`): min_price_score=30 keeps a score of exactly
+    # 30. With backfill=True it's instead a soft within-sector PREFERENCE that
+    # keeps the full pool and pads under-filled sectors with below-floor names.
     has_min = (
         direction == "top" and min_price_score is not None and "score_price" in scored.columns
     )
     pool = scored
     if has_min and not backfill_below_min_score:
-        mask = scored["score_price"].notna() & (scored["score_price"] > min_price_score)
+        mask = scored["score_price"].notna() & (scored["score_price"] >= min_price_score)
         if not mask.all():
             pool = scored[mask]
 
@@ -267,7 +269,7 @@ def select_from_scored(
         in_chosen = in_chosen.assign(
             _above_min=(
                 in_chosen["score_price"].notna()
-                & (in_chosen["score_price"] > min_price_score)
+                & (in_chosen["score_price"] >= min_price_score)
             ).astype(int),
         )
         sort_cols = ["sector_rank", "_above_min", "momentum_score"]
@@ -300,7 +302,7 @@ def score_and_select(
     category_weights: dict[str, float] | None = None,
     direction: SelectionDirection = "top",
     min_price_score: float | None = None,
-    backfill_below_min_score: bool = True,
+    backfill_below_min_score: bool = False,
     signal_defs: list[dict] | None = None,
 ) -> pd.DataFrame:
     """Convenience wrapper combining `score_universe` + `select_from_scored`

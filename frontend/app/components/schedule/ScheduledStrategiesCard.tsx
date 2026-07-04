@@ -143,19 +143,9 @@ export default function ScheduledStrategiesCard({ sched, readOnly = false }: { s
                                 .join(' · ')}
                             </span>
                           )}
-                          {(s.last_snapshot.mtd_return_pct != null
-                            || s.last_snapshot.ytd_return_pct != null
+                          {(s.last_snapshot.ytd_return_pct != null
                             || s.last_snapshot.since_inception_pct != null) && (
                             <span className="text-fg-faint">|</span>
-                          )}
-                          {s.last_snapshot.mtd_return_pct != null && (
-                            <span>
-                              <span className="text-fg-subtle">MTD </span>
-                              <span className={s.last_snapshot.mtd_return_pct >= 0 ? 'text-pos-400' : 'text-neg-400'}>
-                                {s.last_snapshot.mtd_return_pct >= 0 ? '+' : ''}
-                                {s.last_snapshot.mtd_return_pct.toFixed(2)}%
-                              </span>
-                            </span>
                           )}
                           {s.last_snapshot.ytd_return_pct != null && (
                             <span>

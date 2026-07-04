@@ -154,14 +154,22 @@ async def ingest(body: _IngestBody):
 
 
 @router.get("/api/asset-pipeline/assets/{analysis_id}/series")
-async def asset_series(analysis_id: int, max_points: int = 3000):
+async def asset_series(analysis_id: int, max_points: int = 3000, in_eur: bool = False):
     """The stored daily close+volume series for one analysis asset (for the
     catalog chart). Paginated to defeat PostgREST's 1000-row cap, then
     downsampled to ~`max_points` (stride, first+last kept) so a 10k-bar series
-    stays light to ship + render."""
+    stays light to ship + render.
+
+    `in_eur=true` converts each close to EUR (via the fx_rate table, GBp
+    handled); bars with no available FX rate come back with a null close."""
     from deps import supabase  # noqa: PLC0415
 
     def _q() -> dict:
+        arow = (
+            supabase.table("asset_analysis").select("currency")
+            .eq("analysis_id", analysis_id).limit(1).execute().data
+        )
+        native_ccy = arow[0].get("currency") if arow else None
         rows: list[dict] = []
         offset = 0
         while True:
@@ -189,7 +197,17 @@ async def asset_series(analysis_id: int, max_points: int = 3000):
             {"date": str(x["target_date"])[:10], "close": x.get("close"), "volume": x.get("volume")}
             for x in rows
         ]
-        return {"analysis_id": analysis_id, "total": total, "points": len(series), "series": series}
+        currency = native_ccy
+        if in_eur:
+            from asset_pipeline.fx import to_eur  # noqa: PLC0415
+            converted = to_eur(series, native_ccy)
+            for s, c in zip(series, converted):
+                s["close"] = c["close_eur"]  # EUR close (null where no FX rate)
+            currency = "EUR"
+        return {
+            "analysis_id": analysis_id, "total": total, "points": len(series),
+            "currency": currency, "native_currency": native_ccy, "series": series,
+        }
 
     return await asyncio.to_thread(_q)
 

@@ -64,6 +64,12 @@ async def run_single(
         "rebalance_weekday": req.rebalance_weekday,
         "strategy_type": req.strategy_type,
         "sector_etfs": req.sector_etfs,
+        # min_price_score MUST be threaded through here — this path builds the
+        # config for the single-run backtest AND the live current-portfolio
+        # rebalance. Omitting it silently dropped the price-score floor on every
+        # live rebalance (the variants path passed it, so a swept backtest looked
+        # compliant while the scheduled strategy picked sub-floor names).
+        "min_price_score": req.min_price_score,
         "backfill_below_min_score": req.backfill_below_min_score,
         "vol_target": req.vol_target,
         "regime_floor": req.regime_floor,

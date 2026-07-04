@@ -133,13 +133,13 @@ class BacktestConfig:
     # None disables the filter (default), matching pre-feature
     # behavior.
     min_price_score: float | None = None
-    # When True (default), `min_price_score` is a soft PREFERENCE, not a hard
-    # cut: above-threshold names are picked first, but each sector is still
-    # filled to `top_n_per_sector` by backfilling with the next-best
-    # below-threshold names — so a restrictive threshold never yields short
-    # (or empty) sectors. False = the hard-cut behavior (a sector may end up
-    # with fewer than top_n_per_sector). Only affects the long bucket.
-    backfill_below_min_score: bool = True
+    # Default False = `min_price_score` is a HARD FLOOR (inclusive `>=`): names
+    # below it are dropped, so every long pick satisfies it (a sector short on
+    # eligible names ends up with fewer than top_n_per_sector rather than being
+    # padded with below-floor names). True = soft preference: above-floor names
+    # first, then pad each sector with the next-best below-floor names. Only
+    # affects the long bucket.
+    backfill_below_min_score: bool = False
     # When True, run_backtest appends one trailing "open" period record
     # whose entry is the last scheduled rebalance date and whose exit is
     # the most recent available close. The open period appears in
@@ -209,7 +209,7 @@ class BacktestConfig:
             rebalance_weekday=int(d.get("rebalance_weekday", 0) or 0),
             strategy_type=d.get("strategy_type", _DEFAULT_STRATEGY),
             min_price_score=d.get("min_price_score"),
-            backfill_below_min_score=bool(d.get("backfill_below_min_score", True)),
+            backfill_below_min_score=bool(d.get("backfill_below_min_score", False)),
             include_open_period=d.get("include_open_period", True),
             vol_target=d.get("vol_target"),
             vol_target_lookback=int(d.get("vol_target_lookback", 60) or 60),

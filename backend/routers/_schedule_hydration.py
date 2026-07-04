@@ -341,6 +341,141 @@ def _open_basket_live_curve(backtest_run_id: int, cash_pct: float = 0.0) -> list
     return _scale_curve_returns(curve, cash_pct, as_pct=False)
 
 
+def _live_rebalance_dense_curve(snapshots: list[dict]) -> list[tuple[str, float]]:
+    """Dense DAILY equity curve that FOLLOWS the strategy's live rebalances:
+    each live rebalance's REAL basket re-priced (EUR) every trading day over its
+    own window [rebalance date → next rebalance / today], chained across
+    periods. Unlike `_open_basket_live_curve` (which marks the BACKTEST's last
+    basket forward forever), this switches baskets at each live rebalance, so the
+    equity line + monthly heatmap reflect what the strategy actually held.
+
+    Cash is honoured intrinsically and NOT re-scaled: the snapshot holdings
+    already carry the cash sleeve (a flat `is_cash` holding + (1-cash)-scaled
+    invested weights), so the UN-renormalized weighted return `1 + Σ w·(p/e−1)`
+    over the invested holdings equals the stored `period_return_pct` at each
+    period's latest close (cash contributes 0 with its weight simply absent from
+    the sum). Requires the snapshots to carry `holdings` with `entry_price_eur`.
+    Returns `[(date, equity)]` base-1.0 at the first live rebalance; empty when
+    there are no live rebalances or no usable prices."""
+    periods = _live_periods(snapshots)
+    if not periods:
+        return []
+
+    from momentum.data import (  # noqa: PLC0415
+        convert_prices_to_eur, load_all_prices, load_company_currency, load_fx_rates,
+    )
+
+    # Invested identities across every period (skip the flat cash sleeve).
+    cids: set[int] = set()
+    bids: set[int] = set()
+    for s in periods:
+        for h in (s.get("holdings") or []):
+            if h.get("is_cash") or not h.get("entry_price_eur"):
+                continue
+            cid = h.get("company_id")
+            if cid is None:
+                continue
+            if int(cid) > 0:
+                cids.add(int(cid))
+            elif int(cid) < 0:
+                bids.add(-int(cid))
+    start_iso = str(periods[0].get("as_of_date") or "")[:10]
+    try:
+        start = date.fromisoformat(start_iso)
+    except ValueError:
+        return []
+    today = date.today()
+
+    px: dict[int, tuple[list[str], list[float]]] = {}
+    if cids:
+        local_df = load_all_prices(supabase, list(cids), start, today)
+        if not local_df.empty:
+            cur = load_company_currency(supabase, list(cids))
+            currencies = sorted({c for c in cur.values() if c})
+            fx = load_fx_rates(supabase, currencies, start, today) if currencies else {}
+            eur_df, _ = convert_prices_to_eur(local_df, cur, fx)
+            for cid, group in eur_df.groupby("company_id"):
+                g = group.sort_values("target_date")
+                ds = [d.isoformat() if hasattr(d, "isoformat") else str(d)[:10] for d in g["target_date"]]
+                px[int(cid)] = (ds, [float(p) for p in g["price"]])
+    for bid in bids:
+        rows: list[dict] = []
+        offset = 0
+        while True:
+            resp = (
+                supabase.table("benchmark_price")
+                .select("target_date, price")
+                .eq("benchmark_id", bid)
+                .gte("target_date", start.isoformat())
+                .order("target_date")
+                .range(offset, offset + 999)
+                .execute()
+            )
+            batch = resp.data or []
+            rows.extend(batch)
+            if len(batch) < 1000:
+                break
+            offset += 1000
+        if rows:
+            ds = [str(r["target_date"])[:10] for r in rows]
+            px[-bid] = (ds, [float(r["price"]) for r in rows])
+
+    all_days = sorted({d for ds, _ in px.values() for d in ds})
+    if not all_days:
+        return []
+
+    def _asof(cid: int, day: str) -> float | None:
+        pair = px.get(cid)
+        if not pair:
+            return None
+        ds, ps = pair
+        i = bisect.bisect_right(ds, day) - 1
+        return ps[i] if i >= 0 else None
+
+    def _basket_equity(holdings: list[dict], day: str) -> float | None:
+        """`1 + Σ w·(p/entry − 1)` over invested holdings (shorts subtract),
+        RAW weights (no renormalization → the cash sleeve's drag is intact).
+        None when no holding has a price on/before `day`."""
+        num = 0.0
+        any_priced = False
+        for h in holdings:
+            if h.get("is_cash"):
+                continue
+            cid = h.get("company_id")
+            entry = h.get("entry_price_eur")
+            if cid is None or not entry:
+                continue
+            p = _asof(int(cid), day)
+            if p is None:
+                continue
+            w = float(h.get("weight") or 0.0)
+            sign = -1.0 if (h.get("side") == "short") else 1.0
+            num += sign * w * (p / float(entry) - 1.0)
+            any_priced = True
+        return (1.0 + num) if any_priced else None
+
+    curve: list[tuple[str, float]] = []
+    global_eq = 1.0
+    for i, s in enumerate(periods):
+        p_start = str(s.get("as_of_date") or "")[:10]
+        p_end = str(periods[i + 1].get("as_of_date") or "")[:10] if i + 1 < len(periods) else None
+        holdings = s.get("holdings") or []
+        last_eq = 1.0
+        for d in all_days:
+            if d < p_start:
+                continue
+            if p_end is not None and d >= p_end:
+                break
+            eq = _basket_equity(holdings, d)
+            if eq is None:
+                continue
+            last_eq = eq
+            curve.append((d, global_eq * eq))
+        # Carry this period's ending equity into the chain for the next basket.
+        global_eq *= last_eq
+    return curve
+
+
 def _splice_snapshot_tail(
     backtest_pts: list[tuple[str, float]],
     snap_curve: list[tuple[str, float]],
@@ -422,11 +557,15 @@ def _extended_curve(
     bt_pts = _load_backtest_pts(backtest_run_id, cash_pct)   # cash-scaled
     if not bt_pts:
         return []
-    # Prefer the dense daily open-basket curve (a point per trading day, matches
-    # the holdings table's open-period figure); fall back to the sparse
-    # per-snapshot walk only when the basket can't be re-priced. The open-basket
-    # is fully-invested → cash-scaled; the walk is already cash-aware → left as-is.
-    snap_curve = _open_basket_live_curve(backtest_run_id, cash_pct)
+    # Live tail, in order of fidelity:
+    #  1. the dense curve that FOLLOWS live rebalances (each real basket re-priced
+    #     daily over its window) — cash-aware via the snapshot holdings;
+    #  2. else the dense re-price of the BACKTEST's last basket (a strategy that's
+    #     gone live but not yet rebalanced) — fully-invested, so cash-scaled here;
+    #  3. else the sparse per-snapshot walk (already cash-aware).
+    snap_curve = _live_rebalance_dense_curve(snapshots or [])
+    if not snap_curve:
+        snap_curve = _open_basket_live_curve(backtest_run_id, cash_pct)
     if not snap_curve:
         snap_curve, _, _ = _walk_snapshot_curve(snapshots or [])
     cutover, tail = _splice_snapshot_tail(bt_pts, snap_curve)
@@ -553,7 +692,9 @@ def build_live_curve(backtest_run_id: int, snapshots: list[dict], cash_pct: floa
     bt_pts = _load_backtest_pts(backtest_run_id, cash_pct)
     if not bt_pts:
         return None
-    snap_curve = _open_basket_live_curve(backtest_run_id, cash_pct)
+    snap_curve = _live_rebalance_dense_curve(snapshots or [])
+    if not snap_curve:
+        snap_curve = _open_basket_live_curve(backtest_run_id, cash_pct)
     if not snap_curve:
         snap_curve, _, _ = _walk_snapshot_curve(snapshots or [])
     cutover_date, tail = _splice_snapshot_tail(bt_pts, snap_curve)
@@ -566,9 +707,77 @@ def build_live_curve(backtest_run_id: int, snapshots: list[dict], cash_pct: floa
     }
 
 
-def basket_price_staleness(backtest_run_id: int) -> dict | None:
+def _live_periods(snapshots: list[dict]) -> list[dict]:
+    """The strategy's LIVE rebalance periods as the FRESHEST snapshot per open
+    period (`as_of_date`), ascending. Backfill (seed) rows are skipped — they
+    duplicate the backtest's last period. Shared by `live_period_records` (the
+    holdings list) and `_live_rebalance_dense_curve` (the equity/heatmap tail)."""
+    by_period: dict[str, dict] = {}
+    for s in snapshots or []:
+        if s.get("is_backfill"):
+            continue
+        aod = str(s.get("as_of_date") or "")[:10]
+        if not aod:
+            continue
+        prev = by_period.get(aod)
+        # Keep the freshest snapshot for this period (latest mark-to-market).
+        if prev is None or str(s.get("latest_price_date") or "")[:10] >= str(
+            prev.get("latest_price_date") or ""
+        )[:10]:
+            by_period[aod] = s
+    return [by_period[k] for k in sorted(by_period)]
+
+
+def live_period_records(
+    snapshots: list[dict], backtest_run_id: int, cash_pct: float = 0.0,
+) -> list[dict]:
+    """The strategy's LIVE rebalance baskets as `PeriodRecord`-shaped rows —
+    one per open period (rebalance), so the /schedule holdings table can list
+    the newly-computed portfolios alongside the frozen backtest periods.
+
+    Each live rebalance opens a period keyed by `as_of_date`; the price-update
+    job marks it to market on later snapshots (same as_of_date). We take the
+    LATEST snapshot per period — its holdings carry current marks + returns —
+    and chain each period's `period_return_pct` onto the backtest curve's end
+    cumulative, so the appended rows continue the backtest's cumulative scale.
+    Backfill (seed) rows are skipped: they duplicate the backtest's last period.
+
+    `snapshots` is any list of the strategy's snapshot rows carrying
+    `kind, as_of_date, latest_price_date, holdings, period_return_pct,
+    is_backfill` (order-independent — we sort by `as_of_date`). Returns
+    `[]` when there are no live rebalance periods."""
+    periods = _live_periods(snapshots)
+    if not periods:
+        return []
+
+    bt_pts = _load_backtest_pts(backtest_run_id, cash_pct)
+    cum_factor = (1.0 + bt_pts[-1][1] / 100.0) if bt_pts else 1.0
+    records: list[dict] = []
+    for i, s in enumerate(periods):
+        ret = s.get("period_return_pct")
+        r = float(ret) if ret is not None else 0.0
+        cum_factor *= (1.0 + r / 100.0)
+        records.append({
+            "date": str(s["as_of_date"])[:10],
+            "holdings": s.get("holdings") or [],
+            "portfolio_return_pct": round(r, 6),
+            "cumulative_return_pct": round((cum_factor - 1.0) * 100.0, 6),
+            "is_open": i == len(periods) - 1,
+            "as_of_date": str(s.get("latest_price_date") or s.get("as_of_date") or "")[:10],
+        })
+    return records
+
+
+def basket_price_staleness(
+    backtest_run_id: int, holdings: list[dict] | None = None,
+) -> dict | None:
     """Whether the LATEST plotted point of the strategy's live curve mixes
     stale (carried-forward) prices — and if so, which holdings.
+
+    `holdings` is the CURRENTLY-shown basket to check: pass the latest LIVE
+    rebalance's holdings (the curve now follows live rebalances) so the warning
+    matches what's plotted. When omitted, falls back to the source backtest's
+    last-period holdings (a strategy that's gone live but not yet rebalanced).
 
     The monthly-returns heatmap's live tail (`_open_basket_live_curve`) marks
     the source backtest's last-period holdings each trading day using an as-of
@@ -590,13 +799,14 @@ def basket_price_staleness(backtest_run_id: int) -> dict | None:
     clean mark-to-market (or there's no basket / no priced holdings). The caller
     surfaces this so the heatmap can replace the incomplete month cell with a
     warning listing the lagging assets instead of a misleading number."""
-    from routers.momentum.backtest_crud import load_backtest_result_sync  # noqa: PLC0415
+    if holdings is None:
+        from routers.momentum.backtest_crud import load_backtest_result_sync  # noqa: PLC0415
 
-    res = load_backtest_result_sync(backtest_run_id)
-    monthly = (res or {}).get("monthly_records") or []
-    if not monthly:
-        return None
-    holdings = monthly[-1].get("holdings") or []
+        res = load_backtest_result_sync(backtest_run_id)
+        monthly = (res or {}).get("monthly_records") or []
+        if not monthly:
+            return None
+        holdings = monthly[-1].get("holdings") or []
     comp = {
         int(h["company_id"]): h for h in holdings
         if h.get("company_id") is not None and int(h["company_id"]) > 0

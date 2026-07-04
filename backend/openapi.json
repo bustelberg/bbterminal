@@ -60,7 +60,7 @@
       "BacktestRequest": {
         "properties": {
           "backfill_below_min_score": {
-            "default": true,
+            "default": false,
             "title": "Backfill Below Min Score",
             "type": "boolean"
           },
@@ -4781,7 +4781,7 @@
     },
     "/api/asset-pipeline/assets/{analysis_id}/series": {
       "get": {
-        "description": "The stored daily close+volume series for one analysis asset (for the\ncatalog chart). Paginated to defeat PostgREST's 1000-row cap, then\ndownsampled to ~`max_points` (stride, first+last kept) so a 10k-bar series\nstays light to ship + render.",
+        "description": "The stored daily close+volume series for one analysis asset (for the\ncatalog chart). Paginated to defeat PostgREST's 1000-row cap, then\ndownsampled to ~`max_points` (stride, first+last kept) so a 10k-bar series\nstays light to ship + render.\n\n`in_eur=true` converts each close to EUR (via the fx_rate table, GBp\nhandled); bars with no available FX rate come back with a null close.",
         "operationId": "asset_series_api_asset_pipeline_assets__analysis_id__series_get",
         "parameters": [
           {
@@ -4801,6 +4801,16 @@
               "default": 3000,
               "title": "Max Points",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "in_eur",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "In Eur",
+              "type": "boolean"
             }
           }
         ],
@@ -8214,7 +8224,7 @@
     },
     "/api/ingest/scheduled-refresh/trigger": {
       "post": {
-        "description": "Manual trigger from the /schedule UI's Run-now button. Same work\nas the cron path, just `triggered_by='manual'`. No cron-secret \u2014\nauth is enforced by the frontend proxy middleware in `frontend/proxy.ts`.\n\nPass `universe=<label>` with `job_name=universe_price_refresh` to re-price\njust that universe's companies (the per-universe coverage \"Refresh\" button).\nPass a JSON body `{\"company_ids\": [...]}` with `job_name=companies_price_refresh`\nto re-price only those companies (the \"Refresh stale\" button after Inspect\nfreshness).",
+        "description": "Manual trigger from the /schedule UI's Run-now button. Same work\nas the cron path, just `triggered_by='manual'`. No cron-secret \u2014\nauth is enforced by the frontend proxy middleware in `frontend/proxy.ts`.\n\nPass `universe=<label>` with `job_name=universe_price_refresh` to re-price\njust that universe's companies (the per-universe coverage \"Refresh\" button).\nPass a JSON body `{\"company_ids\": [...]}` with `job_name=companies_price_refresh`\nto re-price only those companies (the \"Refresh stale\" button after Inspect\nfreshness).\n\nPass `force=true` with `job_name=rebalance` to OVERRIDE the per-period lock \u2014\nre-decide (re-select) EVERY enabled strategy's current period even if it was\nalready rebalanced. The original decisions stay in the run history. Without\nit, a manual rebalance only rebalances strategies actually due (so an\nalready-decided period isn't silently re-decided on newer/revised data).",
         "operationId": "trigger_scheduled_refresh_api_ingest_scheduled_refresh_trigger_post",
         "parameters": [
           {
@@ -8241,6 +8251,16 @@
                 }
               ],
               "title": "Universe"
+            }
+          },
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force",
+              "type": "boolean"
             }
           }
         ],

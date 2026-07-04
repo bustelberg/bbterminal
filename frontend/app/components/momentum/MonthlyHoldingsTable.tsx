@@ -650,7 +650,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
                               }
                               if (aHas !== bHas) return aHas ? -1 : 1;
                               const sec = a.sector.localeCompare(b.sector);
-                              return sec !== 0 ? sec : b.score - a.score;
+                              return sec !== 0 ? sec : (b.score ?? 0) - (a.score ?? 0);
                             })
                             .map((h) => {
                               const exchRaw = exchangeByCompany.get(h.company_id) ?? '';
@@ -748,7 +748,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
                                       {h.category_scores?.[cat] != null ? h.category_scores[cat]!.toFixed(0) : '—'}
                                     </td>
                                   ))}
-                                  <td className="text-right py-1.5 text-fg-strong font-mono font-medium">{h.score.toFixed(1)}</td>
+                                  <td className="text-right py-1.5 text-fg-strong font-mono font-medium">{h.score != null ? h.score.toFixed(1) : '—'}</td>
                                   <td className="text-right py-1.5 text-fg-muted font-mono pl-4">
                                     {h.weight != null ? `${(h.weight * 100).toFixed(1)}%` : '—'}
                                   </td>

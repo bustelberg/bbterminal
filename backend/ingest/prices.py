@@ -350,8 +350,20 @@ def _try_with_fallbacks(
 
 
 def _parse_price_series(data: list | dict) -> list[tuple[date, float]]:
-    """Parse GuruFocus price response into [(date, price)] pairs."""
+    """Parse GuruFocus price response into [(date, price)] pairs.
+
+    Drops any row dated in the FUTURE (> today, UTC). A close price can never
+    be dated after today; GuruFocus occasionally returns a stray/corrupt tick
+    with a future date, and storing it poisons everything downstream: the
+    momentum engine's `latest_data_date` anchor jumps forward, a rebalance
+    gets pinned to an upcoming (not-yet-happened) grid date, and the ETF
+    overlay prices entry against that future bar — yielding an impossible
+    entry_date and a nonsensical return (the SPMO +277% incident). This is the
+    single parser every ingest path (stock/benchmark/indicator refreshes)
+    flows through, so guarding here fixes all of them.
+    """
     results: list[tuple[date, float]] = []
+    today = date.today()
 
     items: list = []
     if isinstance(data, list):
@@ -377,6 +389,8 @@ def _parse_price_series(data: list | dict) -> list[tuple[date, float]]:
                 d = datetime.utcfromtimestamp(float(date_str)).date()
             else:
                 continue
+            if d > today:
+                continue  # never store a future-dated close
             p = float(price_val)
             results.append((d, p))
         except (ValueError, TypeError, OverflowError):

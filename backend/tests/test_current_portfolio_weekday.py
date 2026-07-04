@@ -87,6 +87,51 @@ def test_fires_early_once_deciding_bar_is_in():
     assert cp.as_of_date == "2026-06-01"
 
 
+def _data_through(end: str):
+    """Same universe as `_data`, but with prices ending at `end` — lets a test
+    simulate a market that stopped trading before the calendar deciding bar
+    (a holiday) or a stale-data outage."""
+    dates = calendar_daily("2025-01-01", end)
+    prices = build_prices_df({10: 1.001, 11: 1.0008, 12: 1.0006, 13: 1.0004}, dates)
+    universe = build_universe_df([
+        (10, "A1", "Alpha", "Alpha-1"),
+        (11, "A2", "Alpha", "Alpha-2"),
+        (12, "B1", "Beta", "Beta-1"),
+        (13, "B2", "Beta", "Beta-2"),
+    ])
+    return prices, universe
+
+
+def test_holiday_deciding_bar_is_forgiven():
+    # The July-4th incident. First Monday of July 2026 is Jul 6; its calendar
+    # deciding bar is Fri Jul 3 — but US markets are CLOSED Jul 3 (Independence
+    # Day observed, since Jul 4 is a Saturday), so data stops at Thu Jul 2. The
+    # real deciding bar (Jul 2) HAS settled, so the Jul 6 rebalance is decidable
+    # and must NOT get stranded on June's picks.
+    prices, universe = _data_through("2026-07-02")
+    cp = run_current_portfolio(
+        _cfg(weekday=0), prices, universe, today=date(2026, 7, 4),
+    )
+    assert cp.as_of_date == "2026-07-06"
+    # And the entry anchors to a REAL past close (≤ the last data date), never
+    # the future rebalance Monday.
+    assert cp.holdings and all(
+        h.entry_date is not None and h.entry_date <= "2026-07-02" for h in cp.holdings
+    )
+
+
+def test_stale_data_gap_is_not_forgiven():
+    # Contrast: a wide gap between the latest data (Jun 25) and the Jul 6
+    # rebalance's deciding bar (Jul 3) is an OUTAGE, not a one-day holiday, so we
+    # do NOT forgive it — we stay on the last decidable rebalance (first Monday
+    # of June) rather than rebalancing on missing data.
+    prices, universe = _data_through("2026-06-25")
+    cp = run_current_portfolio(
+        _cfg(weekday=0), prices, universe, today=date(2026, 7, 4),
+    )
+    assert cp.as_of_date == "2026-06-01"
+
+
 def test_saturday_run_reproduces_the_monday_run():
     # The core guarantee: firing on Saturday (before the Jun 1 first Monday)
     # produces the SAME picks + cost basis as running it on the Monday — the

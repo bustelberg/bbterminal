@@ -8,6 +8,7 @@ import { apiFetch } from '../../lib/apiFetch';
 import { StrategyConfigDetail } from './schedule/StrategyConfigDetail';
 import CurrentPortfolioCard from './schedule/CurrentPortfolioCard';
 import type { IngestRun } from './schedule/types';
+import type { PeriodRecord } from '../../lib/stores/momentum';
 
 import { API_URL } from '../../lib/apiUrl';
 
@@ -67,6 +68,12 @@ export type StrategyRunHistory = {
     month: string;
     missing: { company_id: number; label: string; ticker: string | null; last_close: string | null }[];
   } | null;
+  /** The strategy's LIVE rebalance baskets as period records, chained onto the
+   * backtest's cumulative. Appended to the source backtest's `monthly_records`
+   * so the holdings table + sector timeline list the newly-computed portfolios,
+   * not just the frozen backtest periods. Empty until the strategy rebalances
+   * live. */
+  live_records?: PeriodRecord[] | null;
 };
 
 /** Per-strategy expanded view: strategy params + the source-backtest
@@ -234,7 +241,7 @@ export default function ScheduledStrategyDetail({
             {/* Source backtest — the variant's full equity curve, sector
                 timeline + per-month holdings, exactly as on /backtest, with
                 the red dashed go-live marker at the date above. */}
-            <SourceBacktestCard runId={data.backtest_run_id} markerDate={effectiveStart} liveCurve={data.live_curve} staleWarning={data.stale_prices} cashPct={Number(data.config?.cash_pct ?? 0)} />
+            <SourceBacktestCard runId={data.backtest_run_id} markerDate={effectiveStart} liveCurve={data.live_curve} liveRecords={data.live_records} staleWarning={data.stale_prices} cashPct={Number(data.config?.cash_pct ?? 0)} />
           </>
         );
       })()}

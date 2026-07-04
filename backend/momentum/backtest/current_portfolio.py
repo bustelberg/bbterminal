@@ -25,11 +25,20 @@ from .types import BacktestConfig, CurrentPortfolio, DailyPick, PeriodHolding
 
 _logger = logging.getLogger(__name__)
 
+# Largest calendar gap (days) we'll treat as a market HOLIDAY rather than
+# stale/missing data when forgiving an un-traded deciding bar (see
+# `run_current_portfolio`). Covers the worst single-closure case — a Monday
+# holiday (MLK/Presidents/Memorial/Labor Day), whose prior real bar is the
+# preceding Friday (Fri→Mon = 3 days) — with a day of slack. A wider gap means
+# we're genuinely missing bars (an outage), not a holiday, so we DON'T forgive.
+_MAX_HOLIDAY_GAP_DAYS = 4
+
 
 def _prior_trading_day(d: date) -> date:
     """Last weekday strictly before `d` (skips Sat/Sun). Holidays aren't
-    modelled — that errs toward 'the deciding bar is available', the same
-    convention the schedule's freshness reference uses."""
+    modelled here — the decidability check in `run_current_portfolio` layers
+    holiday-awareness on top (a weekday that never traded is forgiven only once
+    it's actually in the past)."""
     p = d - timedelta(days=1)
     while p.weekday() >= 5:  # 5=Sat, 6=Sun
         p -= timedelta(days=1)
@@ -151,16 +160,35 @@ def run_current_portfolio(
     # close (today=Sat ≥ Fri), so the upcoming Monday is decidable; before the
     # deciding bar has settled it isn't, and we keep the prior period.
     ldd = today_d if latest_data_date is None else min(today_d, latest_data_date)
+
+    def _decidable(rebal: date) -> bool:
+        """Has `rebal`'s deciding bar — the prior trading day's close its signals
+        + entry anchor to — already settled? Decidable once that bar is within
+        our loaded data (`<= ldd`). But `_prior_trading_day` is holiday-UNAWARE:
+        it can land on a market holiday that never traded (e.g. the US July-4th
+        observance on Fri 07-03, when the real deciding bar is Thu 07-02, or any
+        Monday holiday whose real bar is the prior Friday). Across a mixed-market
+        universe this skewed the anchor — pinning a rebalance to an upcoming grid
+        date or, in a single-calendar universe, stranding it a period behind. So
+        forgive a calendar deciding bar that has already PASSED (`< today`) and
+        sits only a holiday-sized gap beyond our data — but NOT one that simply
+        hasn't occurred yet (a future bar we must wait for), nor a wide gap that
+        signals genuinely stale/missing data (an outage) rather than a holiday."""
+        dbar = _prior_trading_day(rebal)
+        if dbar <= ldd:
+            return True
+        return dbar < today_d and (dbar - ldd).days <= _MAX_HOLIDAY_GAP_DAYS
+
     rebalance_date = _first_weekday_on_or_after(
         date(today_d.year, today_d.month, 1), weekday
     )
     while True:
         nxt = _first_weekday_on_or_after(_next_month_start(rebalance_date), weekday)
-        if _prior_trading_day(nxt) <= ldd:
+        if _decidable(nxt):
             rebalance_date = nxt
         else:
             break
-    while _prior_trading_day(rebalance_date) > ldd:
+    while not _decidable(rebalance_date):
         rebalance_date = _first_weekday_on_or_after(_prev_month_start(rebalance_date), weekday)
     # The signal-cutoff + entry anchor for the locked-at-start holdings.
     month_start = rebalance_date

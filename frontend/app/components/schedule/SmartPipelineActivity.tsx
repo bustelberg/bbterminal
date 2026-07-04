@@ -5,6 +5,7 @@ import Spinner from '../Spinner';
 import LoadingDots from '../LoadingDots';
 import { API_URL } from '../../../lib/apiUrl';
 import { apiFetch } from '../../../lib/apiFetch';
+import { dialog } from '../../../lib/dialog';
 import { guruFocusUrl } from '../../../lib/gurufocusUrl';
 import { useNow } from '../../../lib/hooks/useNow';
 import { usePollingFetch } from '../../../lib/hooks/usePollingFetch';
@@ -285,6 +286,44 @@ function RunNowButton({ job, busy }: { job: string; busy: boolean }) {
   );
 }
 
+/** Force re-rebalance: overrides the per-period LOCK — re-decides the current
+ * period for EVERY enabled strategy, even ones already rebalanced this period.
+ * Confirms first (it changes the of-record decision; originals stay in history). */
+function ForceRebalanceButton({ busy }: { busy: boolean }) {
+  const [pending, setPending] = useState(false);
+  const disabled = pending || busy;
+  const run = useCallback(async () => {
+    if (disabled) return;
+    const ok = await dialog.confirm(
+      'Re-decide the CURRENT period for every enabled strategy — including ones already '
+      + 'rebalanced this period — using the latest prices in the DB? By default a decided '
+      + 'period is locked so it stays reproducible; this overrides that. The original '
+      + 'decisions are kept in the run history.',
+      { title: 'Force re-rebalance', confirmLabel: 'Force re-rebalance' },
+    );
+    if (!ok) return;
+    setPending(true);
+    try {
+      await apiFetch(`${API_URL}/api/ingest/scheduled-refresh/trigger?job_name=rebalance&force=true`, { method: 'POST' });
+    } catch {
+      // Polling surfaces the run (or its absence) — no inline error needed.
+    } finally {
+      setTimeout(() => setPending(false), 1500);
+    }
+  }, [disabled]);
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); void run(); }}
+      disabled={disabled}
+      title="Re-decide the current period for all enabled strategies (overrides the per-period lock). Originals stay in the run history."
+      className="text-xs px-2.5 py-1 rounded-lg border border-warn-500/40 text-warn-300 hover:bg-warn-500/10
+                 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+    >
+      {pending ? 'Starting…' : 'Force re-rebalance'}
+    </button>
+  );
+}
+
 /** Exact next-execution time (the viewer's local timezone, with the tz
  * abbreviation) + a precise "Xd Yh left" countdown — shown in each pipeline
  * section's header bar. */
@@ -553,6 +592,20 @@ function RebalanceSection({
   const rebalanced = (lastRun?.momentum_summary ?? []).filter(
     (m) => m.kind === 'rebalance' && m.status === 'ok',
   );
+  // Live progress: which phase + step the rebalance is on right now. The counter
+  // only maps to a bar during the price fetch; every other phase (freshness,
+  // momentum compute, …) is conveyed via the current_message so the card is
+  // never just "running…" with no detail.
+  const total = running?.companies_total ?? 0;
+  const done = running?.companies_processed ?? 0;
+  const showBar = !!running && total > 0 && running.current_phase === 'prices';
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  // Friendly label for the current pipeline phase.
+  const PHASE_LABEL: Record<string, string> = {
+    plan: 'Planning', templates: 'Refreshing universes', dedupe: 'Deduping listings',
+    prices: 'Fetching prices', freshness: 'Checking freshness', momentum: 'Computing rebalance',
+    deferred: 'Waiting on data', done: 'Finishing',
+  };
   return (
     <CollapsibleCard
       title="Rebalance"
@@ -567,6 +620,7 @@ function RebalanceSection({
             nowMs={nowMs}
             idleNode={nextDue ? <NextRun at={nextDue} nowMs={nowMs} /> : <LastResult run={lastRun} nowMs={nowMs} />}
           />
+          <ForceRebalanceButton busy={!!running} />
           <RunNowButton job="rebalance" busy={!!running} />
         </>
       }
@@ -577,20 +631,65 @@ function RebalanceSection({
           <span className="text-fg-faint"> ({relTime(nextDue, nowMs)})</span>
         </div>
       )}
-      {lastRun ? (
-        rebalanced.length > 0 ? (
-          <div className="text-fg-subtle">
-            Last rebalance {relTime(lastRun.finished_at ?? lastRun.started_at, nowMs)} ·{' '}
-            {rebalanced.map((m) => `${m.strategy_name} (${m.holdings_count})`).join(', ')}
+      {running && (
+        <div className="space-y-1.5 rounded-lg bg-inset/60 px-3 py-2 border border-neutral-800/40">
+          <div className="flex items-center gap-2">
+            <Spinner className="h-3 w-3 shrink-0 text-accent-300" />
+            <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-accent-500/15 text-accent-300 border border-accent-500/30 shrink-0">
+              {PHASE_LABEL[running.current_phase ?? ''] ?? (running.current_phase || 'Running')}
+            </span>
+            <span className="text-fg-subtle truncate">{running.current_message ?? 'Working…'}</span>
           </div>
-        ) : (
-          <div className="text-fg-subtle">
-            Last run {relTime(lastRun.finished_at ?? lastRun.started_at, nowMs)} — no strategies were due.
-          </div>
-        )
-      ) : (
-        <div className="text-fg-subtle">No rebalance has run yet.</div>
+          {showBar && (
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-1.5 rounded-full bg-inset overflow-hidden">
+                <div className="h-full bg-accent-500 transition-all" style={{ width: `${pct}%` }} />
+              </div>
+              <span className="text-[11px] font-mono text-fg-faint shrink-0">{done}/{total}</span>
+            </div>
+          )}
+        </div>
       )}
+      {/* Last-run OUTCOME — always states what happened + why, so clicking
+          "Run now" never flips silently back to idle with no explanation. */}
+      {!running && (lastRun ? (() => {
+        const when = relTime(lastRun.finished_at ?? lastRun.started_at, nowMs);
+        const trigger = lastRun.triggered_by === 'manual' ? 'Run now' : 'Scheduled run';
+        if (lastRun.status === 'error') {
+          return (
+            <div className="rounded-lg border border-neg-500/25 bg-neg-500/10 px-3 py-2">
+              <div className="font-medium text-neg-300">✗ {trigger} failed {when}</div>
+              {(lastRun.error_summary || lastRun.current_message) && (
+                <div className="text-neg-300/80 mt-0.5 whitespace-pre-line">{lastRun.error_summary ?? lastRun.current_message}</div>
+              )}
+            </div>
+          );
+        }
+        if (rebalanced.length > 0) {
+          return (
+            <div className="rounded-lg border border-pos-500/25 bg-pos-500/10 px-3 py-2">
+              <div className="font-medium text-pos-300">
+                ✓ Rebalanced {when} — {rebalanced.map((m) => `${m.strategy_name} (${m.holdings_count})`).join(', ')}
+              </div>
+              {lastRun.current_message && <div className="text-fg-subtle mt-0.5">{lastRun.current_message}</div>}
+            </div>
+          );
+        }
+        // Ran but rebalanced nothing — state exactly why (the backend's message).
+        return (
+          <div className="rounded-lg border border-neutral-800/40 bg-inset/60 px-3 py-2">
+            <div className="font-medium text-fg-soft">{trigger} finished {when} — nothing to rebalance</div>
+            <div className="text-fg-subtle mt-0.5">
+              {lastRun.current_message
+                ?? (lastRun.triggered_by === 'manual'
+                  ? 'No enabled strategies to rebalance.'
+                  : 'No strategies were due to rebalance.')}
+            </div>
+          </div>
+        );
+      })() : (
+        <div className="text-fg-subtle">No rebalance has run yet.</div>
+      ))}
     </CollapsibleCard>
   );
 }

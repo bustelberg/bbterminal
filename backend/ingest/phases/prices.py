@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
@@ -39,6 +40,15 @@ _MAX_WORKERS = 12
 # (_MESSAGE_THROTTLE_SECONDS) bounds total DB write volume regardless,
 # and the counter-only update is cheap enough to do per-row.
 _CHECKPOINT_EVERY = 1
+# Live-progress heartbeat cadence + the idle threshold past which the UI/logs
+# explicitly flag the phase as STALLED (the processed count hasn't advanced in
+# this many seconds — a hung fetch, not just a slow one).
+_HEARTBEAT_SECONDS = 3.0
+_STALL_WARN_SECONDS = 45.0
+# A single in-flight fetch older than this is almost certainly wedged on the
+# Cloudflare/impersonation-ladder retry path (the throttled tail of a big run),
+# not merely slow — surfaced explicitly so a hung name reads as such.
+_SLOW_FETCH_WARN_SECONDS = 25.0
 
 
 def _load_all_companies() -> list[dict]:
@@ -176,6 +186,11 @@ def _run_prices_phase(
     # Per-region remaining monthly quota (only when budgeting). Decremented by
     # each fetch's real `api_calls`; a region at 0 skips its remaining names.
     region_remaining: dict[str, int] = dict(budget_by_region) if budget_by_region else {}
+    # Each worker records the company it's CURRENTLY on, keyed by thread name —
+    # at most _MAX_WORKERS entries; the next company on that thread overwrites
+    # the previous, so no cleanup is needed. The heartbeat reads these to show
+    # exactly what's in flight.
+    current_by_thread: dict[str, str] = {}
 
     companies = companies_override if companies_override is not None else _load_all_companies()
 
@@ -199,6 +214,13 @@ def _run_prices_phase(
         exch = c["exchange"]
         region = _region_for_exchange(exch)
         checkpoint: dict | None = None
+        # Publish what this worker is about to fetch + WHEN it started, so the
+        # heartbeat can show the live in-flight set with per-company elapsed time
+        # (this overwrites the thread's previous company).
+        with lock:
+            current_by_thread[threading.current_thread().name] = (
+                f"{exch}:{ticker}", time.monotonic(),
+            )
 
         # Budget gate — when month-end budgeting, skip companies whose region
         # has no monthly GuruFocus quota left (counts toward budget_skipped, no
@@ -350,12 +372,73 @@ def _run_prices_phase(
     # PostgREST round-trips otherwise (which tripped Cloudflare's HTTP/2 GOAWAY).
     # Cleared in finally so it never leaks stale entries into the next run.
     prime_db_max_dates(supabase, [c["cid"] for c in companies])
+
+    # Live-progress heartbeat: every few seconds publish rate + ETA + the
+    # companies each worker is currently on + how long since the processed count
+    # last advanced — so a genuine STALL is unmistakable (the idle seconds keep
+    # climbing and we flag it), not a static "Running…". Own thread; the
+    # per-company `_checkpoint` keeps the structured counters live between beats.
+    hb_start = time.monotonic()
+    hb_stop = threading.Event()
+
+    def _heartbeat() -> None:
+        last_done, last_change = -1, time.monotonic()
+        while not hb_stop.wait(_HEARTBEAT_SECONDS):
+            now = time.monotonic()
+            with lock:
+                done = counters["processed"]
+                errs, forb = counters["errors"], counters["forbidden"]
+                # (label, seconds-in-flight) per worker, oldest first.
+                inflight = sorted(
+                    ((lbl, now - st) for lbl, st in current_by_thread.values()),
+                    key=lambda x: -x[1],
+                )
+            if done != last_done:
+                last_done, last_change = done, now
+            idle = now - last_change
+            elapsed = max(1e-6, now - hb_start)
+            rate = done / elapsed * 60.0            # companies/min
+            eta_min = (total - done) / rate if rate > 0 else 0.0
+            # Annotate each in-flight company with how long it's been fetching —
+            # a wedged name (Cloudflare/ladder churn on the throttled tail) shows
+            # an ever-growing age, so "stuck" is unmistakable from "slow".
+            sample = ", ".join(f"{lbl} ({age:.0f}s)" for lbl, age in inflight[:8]) + (
+                f" +{len(inflight) - 8} more" if len(inflight) > 8 else "")
+            oldest = inflight[0][1] if inflight else 0.0
+            # The tail is being throttled when every worker has been wedged on the
+            # SAME fetch for a while but the processed count is barely moving.
+            throttled = oldest >= _SLOW_FETCH_WARN_SECONDS
+            stalled = idle >= _STALL_WARN_SECONDS
+            warn = ""
+            if throttled:
+                warn = (
+                    f" · ⚠ tail throttled — oldest fetch {oldest:.0f}s "
+                    "(GuruFocus/Cloudflare rate-limiting; each wedged name is "
+                    "retried across the impersonation ladder, then skipped)"
+                )
+            elif stalled:
+                warn = f" · ⚠ STALLED {idle:.0f}s with no completion"
+            msg = (
+                f"Refreshing {done}/{total} · {rate:.0f}/min · ETA {eta_min:.0f}m · "
+                f"{forb} forbidden, {errs} err · now fetching: {sample or '—'}{warn}"
+            )
+            # Write the structured counter alongside the message so the card's
+            # header count (companies_processed) can't drift ahead of the
+            # heartbeat line during a wedged tail (no completions → no checkpoint).
+            _update_run(run_id, current_message=msg, companies_processed=done)
+            (log.warning if (throttled or stalled) else log.info)(
+                "[pipeline.prices] run_id=%s %s", run_id, msg)
+
+    hb_thread = threading.Thread(target=_heartbeat, daemon=True, name=f"prices-hb-{run_id}")
+    hb_thread.start()
     try:
         with ThreadPoolExecutor(
             max_workers=_MAX_WORKERS, thread_name_prefix=f"ingest-{run_id}"
         ) as executor:
             list(executor.map(_refresh_one, companies))
     finally:
+        hb_stop.set()
+        hb_thread.join(timeout=2)
         clear_db_max_date_cache()
 
     # Final counter write — orchestrator handles status/finished_at.
@@ -388,27 +471,12 @@ def _run_prices_phase(
 
 
 def _checkpoint(run_id: int, snap: dict, total: int | None = None) -> None:
-    """Periodic progress write. Best-effort — a transient blip on the
-    checkpoint is harmless; the next one (or the final summary) will
-    catch up. Includes a `current_message` summarizing per-class
-    counters so /schedule renders an actionable status line between
-    structured-counter updates."""
-    budget_note = (
-        f" · {snap['budget_skipped']} skipped (budget)"
-        if snap.get("budget_skipped") else ""
-    )
-    if total is not None:
-        msg = (
-            f"Refreshing {snap['processed']} of {total} companies · "
-            f"{snap['prices']}p / {snap['volumes']}v refreshed · "
-            f"{snap['forbidden']} forbidden, {snap['errors']} errors" + budget_note
-        )
-    else:
-        msg = (
-            f"{snap['processed']} processed · "
-            f"{snap['prices']}p / {snap['volumes']}v refreshed · "
-            f"{snap['forbidden']} forbidden, {snap['errors']} errors" + budget_note
-        )
+    """Periodic STRUCTURED-counter write, once per company. Best-effort — a
+    transient blip is harmless; the next one (or the final summary) catches up.
+    The human-readable `current_message` is owned by the phase's heartbeat
+    thread (rate / ETA / in-flight companies / stall warning), so this only
+    keeps the numeric counters the UI reads current between beats — writing a
+    message here too would just flicker over the richer heartbeat line."""
     _update_run(
         run_id,
         companies_processed=snap["processed"],
@@ -417,7 +485,6 @@ def _checkpoint(run_id: int, snap: dict, total: int | None = None) -> None:
         forbidden_count=snap["forbidden"],
         delisted_count=snap["delisted"],
         error_count=snap["errors"],
-        current_message=msg,
     )
 
 
@@ -658,3 +725,48 @@ def held_prices_lagging() -> bool:
             "[prices] held_prices_lagging probe failed: %s: %s", type(e).__name__, e,
         )
         return False
+
+
+def universe_freshness(universe_cids):
+    """Per-exchange freshness of a specific universe (the DB-backed gatherer for
+    `ingest.freshness.classify_universe_freshness`).
+
+    Cheap by design — no GuruFocus calls: reads each company's latest close date
+    (one paginated RPC, shared with the prices phase's most-stale ordering) + its
+    listing exchange, marks delisted/out-of-scope/illiquid AND
+    GuruFocus-unsubscribed names as excluded (they lag by design), and hands the
+    lot to the pure classifier. Use it to decide readiness / pick the laggards to
+    re-fetch WITHOUT churning the whole universe through the API."""
+    from ingest.freshness import FreshnessReport, classify_universe_freshness  # noqa: PLC0415
+    from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
+
+    cids = sorted({int(c) for c in universe_cids})
+    if not cids:
+        return FreshnessReport(global_latest=None, exchange_latest={})
+
+    # Listing exchange per company (the peer-group key).
+    exchange_by_cid: dict[int, str | None] = {}
+    for r in fetch_in_chunks(
+        cids,
+        lambda chunk: supabase.table("company")
+        .select("company_id, gurufocus_exchange:gurufocus_exchange(exchange_code)")
+        .in_("company_id", chunk)
+        .execute(),
+    ):
+        exch = (r.get("gurufocus_exchange") or {}).get("exchange_code")
+        exchange_by_cid[int(r["company_id"])] = exch
+
+    # Latest close date per company (reuse the paginated all-companies RPC, then
+    # narrow to this universe — one cheap round-trip set, no per-cid queries).
+    all_latest = _latest_close_dates_all()
+    latest_by_cid = {c: all_latest.get(c) for c in cids}
+
+    # Exclude names that lag by design: status markers + out-of-coverage venues.
+    excluded = _price_status_excluded_ids(set(cids))
+    for c, exch in exchange_by_cid.items():
+        if not is_gf_subscribed_exchange(exch):
+            excluded.add(c)
+
+    return classify_universe_freshness(
+        latest_by_cid, exchange_by_cid, excluded_ids=excluded,
+    )

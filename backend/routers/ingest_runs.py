@@ -79,18 +79,20 @@ def _spawn_ingest(
     job_name: str,
     universe: str | None = None,
     company_ids: list[int] | None = None,
+    force: bool = False,
 ) -> None:
     """Dispatch by `job_name`. `price_update`/`rebalance` run the split
     pipeline's two operations; `universe_price_refresh` re-prices one universe
     (the `universe` label is threaded to the op); `companies_price_refresh`
     re-prices the explicit `company_ids` set; `smart_daily` runs the legacy
     dependency-driven pipeline; `manual`/`bootstrap` run the full refresh-all
-    pipeline."""
+    pipeline. `force` (rebalance only) overrides the per-period lock."""
     args: tuple = (run_id,)
     if job_name == "price_update":
         target = _run_price_update_pipeline_sync
     elif job_name == "rebalance":
         target = _run_rebalance_pipeline_sync
+        args = (run_id, force)
     elif job_name == "full_price_refresh":
         target = _run_full_price_refresh_pipeline_sync
     elif job_name == "universe_price_refresh":
@@ -151,6 +153,7 @@ async def cron_scheduled_refresh(
 async def trigger_scheduled_refresh(
     job_name: str = "manual",
     universe: str | None = None,
+    force: bool = False,
     company_ids: list[int] | None = Body(default=None, embed=True),
 ):
     """Manual trigger from the /schedule UI's Run-now button. Same work
@@ -161,7 +164,13 @@ async def trigger_scheduled_refresh(
     just that universe's companies (the per-universe coverage "Refresh" button).
     Pass a JSON body `{"company_ids": [...]}` with `job_name=companies_price_refresh`
     to re-price only those companies (the "Refresh stale" button after Inspect
-    freshness)."""
+    freshness).
+
+    Pass `force=true` with `job_name=rebalance` to OVERRIDE the per-period lock —
+    re-decide (re-select) EVERY enabled strategy's current period even if it was
+    already rebalanced. The original decisions stay in the run history. Without
+    it, a manual rebalance only rebalances strategies actually due (so an
+    already-decided period isn't silently re-decided on newer/revised data)."""
     if job_name not in _VALID_JOB_NAMES:
         raise HTTPException(
             400,
@@ -172,10 +181,10 @@ async def trigger_scheduled_refresh(
     if job_name == "companies_price_refresh" and not company_ids:
         raise HTTPException(400, "companies_price_refresh requires a non-empty `company_ids` list")
     run_id = await asyncio.to_thread(_create_run, job_name, "manual")
-    _spawn_ingest(run_id, job_name, universe=universe, company_ids=company_ids)
+    _spawn_ingest(run_id, job_name, universe=universe, company_ids=company_ids, force=force)
     return {
         "run_id": run_id, "status": "running", "job_name": job_name,
-        "universe": universe, "company_count": len(company_ids or []),
+        "universe": universe, "company_count": len(company_ids or []), "force": force,
     }
 
 

@@ -26,7 +26,12 @@ from .planner import (
     collect_template_universe_companies,
     collect_universe_companies,
 )
-from .prices import _collect_held_companies, _run_prices_phase, refresh_held_benchmarks
+from .prices import (
+    _collect_held_companies,
+    _run_prices_phase,
+    refresh_held_benchmarks,
+    universe_freshness,
+)
 from .prune import _run_dedupe_phase, _run_delisting_phase, _run_prune_phase
 from .runlog import _now_utc_iso, _update_run
 from .templates import _run_templates_phase, templates_needing_refresh
@@ -56,6 +61,25 @@ def _serialized(run_id: int):
         yield
     finally:
         _PIPELINE_LOCK.release()
+
+
+def _run_is_manual(run_id: int) -> bool:
+    """True when this ingest_run was triggered by a manual 'Run now'
+    (`triggered_by='manual'`) rather than the scheduler (`'auto'`). A manual
+    rebalance skips the universe re-scrape (recomputes from the DB — fast).
+    Best-effort → False (treat as scheduled)."""
+    try:
+        from deps import supabase  # noqa: PLC0415
+        r = (
+            supabase.table("ingest_run")
+            .select("triggered_by")
+            .eq("run_id", run_id)
+            .limit(1)
+            .execute()
+        )
+        return bool(r.data) and r.data[0].get("triggered_by") == "manual"
+    except Exception:
+        return False
 
 
 def _run_pipeline_sync(run_id: int) -> None:
@@ -421,18 +445,29 @@ def _run_price_update_pipeline_sync(run_id: int) -> None:
         )
 
 
-def _run_rebalance_pipeline_sync(run_id: int) -> None:
+def _run_rebalance_pipeline_sync(run_id: int, force: bool = False) -> None:
     """Operation 2 of the split pipeline — rebalance the DUE scheduled
-    strategies (re-select holdings from a freshly-refreshed universe).
+    strategies (re-select holdings from the current universe).
 
-    For each strategy whose `next_due_at` has arrived: refresh its
-    template-managed universe (so it re-selects from current membership),
-    load that universe's prices (so newly-eligible names have history before
-    scoring), then run the momentum rebalance. Strategies that aren't due are
-    left untouched — the price-update op owns their MTD refresh.
+    For each strategy whose `next_due_at` has arrived: run the momentum rebalance
+    calculation against the prices ALREADY in the DB. It deliberately does NOT
+    fetch prices — that's the price-update op's / the month-end refresh's job —
+    so a rebalance just runs the calculation and can't hang on GuruFocus. A
+    cheap, NON-BLOCKING freshness probe surfaces a warning when some universe
+    prices are stale, but the rebalance always computes and the engine's 30-day
+    staleness guard drops anything too old.
 
-    No-op (status ok) when nothing is due. Serialized against the
-    price-update op via `_PIPELINE_LOCK`."""
+    PER-PERIOD LOCK: a strategy is only rebalanced when it's actually DUE, so a
+    period that was already decided is NOT re-decided on newer/revised data —
+    keeping each historical decision reproducible. `force=True` (an explicit
+    "Force re-rebalance") overrides the lock: it re-decides EVERY enabled
+    strategy's current period; the original decisions stay in the run history.
+
+    A MANUAL trigger ("Run now" / Force) skips the universe re-scrape — it just
+    recomputes from the membership already in the DB (fast, no external calls);
+    only the SCHEDULED (auto) tick refreshes universes. Never a silent no-op:
+    when nothing is due it says so (and points at Force re-rebalance). Serialized
+    against the price-update op via `_PIPELINE_LOCK`."""
     log = logging.getLogger(__name__)
     accumulated_errors: list[str] = []
 
@@ -448,20 +483,46 @@ def _run_rebalance_pipeline_sync(run_id: int) -> None:
             log.warning("[rebalance] run_id=%s %s", run_id, msg)
             accumulated_errors.append(msg)
 
+        is_manual = _run_is_manual(run_id)
+        # LOCK vs FORCE: by default rebalance only DUE strategies (an
+        # already-decided period stays put). `force` re-decides every enabled
+        # strategy's current period — the explicit override.
+        if force and plan:
+            for sp in plan.strategies:
+                sp.is_due = True
+
         due_plans = [sp for sp in plan.strategies if sp.is_due] if plan else []
         if not due_plans:
-            _update_run(run_id, current_message="No strategies due to rebalance.")
+            # Never a silent no-op — say exactly why nothing ran.
+            enabled = plan.strategies if plan else []
+            nxt = min((sp.next_due_at for sp in enabled if sp.next_due_at), default=None)
+            if not enabled:
+                msg = "No enabled strategies to rebalance."
+            else:
+                msg = (
+                    "All enabled strategies are already rebalanced for their current "
+                    "period (locked)"
+                    + (f" — next rebalance due {str(nxt)[:10]}" if nxt else "")
+                    + ". Use ‘Force re-rebalance’ to re-decide the current period now."
+                )
+            _update_run(run_id, current_message=msg)
             _finalize_run(run_id, accumulated_errors, log, tag="rebalance")
             return
 
         # Template universes the due strategies select from (+ parents for
-        # derived templates), so each re-selects from current membership.
+        # derived templates), so each re-selects from current membership. A
+        # MANUAL run skips this re-scrape entirely — it just recomputes the
+        # selection from the membership + prices already in the DB (fast, no
+        # external calls); refresh the universe from /acwi · /leonteq if you want
+        # it current first. The scheduled tick keeps refreshing so the automated
+        # grid stays up to date.
         needed_keys: set[str] = set()
-        for sp in due_plans:
-            if sp.resolved_template_key:
-                needed_keys.add(sp.resolved_template_key)
-                for parent in _TEMPLATE_PARENTS.get(sp.resolved_template_key, ()):
-                    needed_keys.add(parent)
+        if not is_manual:
+            for sp in due_plans:
+                if sp.resolved_template_key:
+                    needed_keys.add(sp.resolved_template_key)
+                    for parent in _TEMPLATE_PARENTS.get(sp.resolved_template_key, ()):
+                        needed_keys.add(parent)
 
         # ── Phase: templates — due strategies' universes ───────────
         templates_refreshed = 0
@@ -487,22 +548,35 @@ def _run_rebalance_pipeline_sync(run_id: int) -> None:
                 log.warning("[rebalance] run_id=%s %s", run_id, msg)
                 accumulated_errors.append(msg)
 
-        # ── Phase: prices — due strategies' full universe ──────────
+        # ── Freshness WARNING (non-blocking) ──────────────────────
+        # The rebalance deliberately does NOT fetch prices — it runs the momentum
+        # calculation against whatever's already in the DB (fetching is the
+        # price_update op's / month-end refresh's job). We only run a CHEAP
+        # freshness probe (DB reads, no GuruFocus) to surface a warning when some
+        # of the universe's prices are out of date; the rebalance ALWAYS computes.
         universe_count = 0
-        _update_run(run_id, current_phase="prices", current_message="Collecting rebalance universe…")
+        freshness_warning: str | None = None
         try:
+            _update_run(run_id, current_phase="freshness",
+                        current_message="Checking price freshness…")
             universe_companies = collect_universe_companies(due_plans)
             universe_count = len(universe_companies)
-            if universe_companies:
-                _update_run(run_id, current_message=f"Refreshing {universe_count} universe companies…")
-                _run_prices_phase(run_id, accumulated_errors, companies_override=universe_companies)
+            universe_cids = [c["cid"] for c in universe_companies]
+            if universe_cids:
+                report = universe_freshness(universe_cids)  # cheap DB read, no fetch
+                stale = len(report.to_fetch)
+                if stale:
+                    freshness_warning = (
+                        f"{stale} of {report.active_total} universe companies have "
+                        "stale/missing prices — used their last close (refresh prices to update)")
+                    log.warning("[rebalance] run_id=%s %s", run_id, freshness_warning)
         except Exception as e:
-            msg = f"Universe-price phase failed: {type(e).__name__}: {e}"
-            log.warning("[rebalance] run_id=%s %s", run_id, msg)
-            accumulated_errors.append(msg)
+            log.warning(
+                "[rebalance] run_id=%s freshness probe failed (non-blocking): %s: %s",
+                run_id, type(e).__name__, e)
 
-        # ── Phase: momentum — rebalance the due strategies only ────
-        _update_run(run_id, current_phase="momentum", current_message="Rebalancing due strategies…")
+        # ── Phase: momentum — rebalance the due strategies (always) ────
+        _update_run(run_id, current_phase="momentum", current_message="Running the rebalance calculation…")
         try:
             _run_momentum_phase(
                 run_id,
@@ -519,6 +593,22 @@ def _run_rebalance_pipeline_sync(run_id: int) -> None:
             plan.universes_refreshed = sorted(needed_keys)
             plan.universe_company_count = universe_count
             _update_run(run_id, plan_summary=plan.to_summary())
+        # Leave a CLEAR final message stating the outcome (the /schedule card
+        # shows it verbatim), so a completed run never reads as a stale
+        # in-progress line. On error, leave the last message + let _finalize_run
+        # set status/error_summary.
+        if not accumulated_errors:
+            n = len(due_plans)
+            noun = "strategy" if n == 1 else "strategies"
+            done_msg = (
+                f"{'Force-rebalanced' if force else 'Rebalanced'} {n} {noun} from the "
+                "DB (prices not refreshed — run a price update if you want fresher data)."
+            )
+            if force:
+                done_msg += " Re-decided the current period; the original decision is kept in the run history."
+            if freshness_warning:
+                done_msg += f" ⚠ {freshness_warning}"
+            _update_run(run_id, current_message=done_msg)
 
     _finalize_run(run_id, accumulated_errors, log, tag="rebalance")
 
