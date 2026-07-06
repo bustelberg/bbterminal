@@ -931,6 +931,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/asset-pipeline/alphalab": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Alphalab
+         * @description AlphaLab IC scoreboard over a DEFINED universe of analysis instruments —
+         *     filtered by a liquidity floor (`min_adv_eur`), sector presence, and asset
+         *     class, capped at `max_assets` most-liquid. Each signal's cross-sectional
+         *     Information Coefficient (rank-corr vs next-month return) + t-stat / hit rate /
+         *     quintile spread. `preview=true` returns just the universe (size + sector
+         *     breakdown), cheaply. Cached ~30 min per filter-set (`refresh=true` recomputes).
+         */
+        get: operations["alphalab_api_asset_pipeline_alphalab_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/asset-pipeline/assets": {
         parameters: {
             query?: never;
@@ -953,6 +978,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/asset-pipeline/assets/{analysis_id}/parquet": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Asset Parquet
+         * @description A short-lived signed download URL for the asset's full-OHLCV parquet
+         *     archive (date/open/high/low/close/adj_close/volume/dividends/splits). 404
+         *     when the asset has no stored parquet yet.
+         */
+        get: operations["asset_parquet_api_asset_pipeline_assets__analysis_id__parquet_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/asset-pipeline/assets/{analysis_id}/series": {
         parameters: {
             query?: never;
@@ -962,15 +1009,71 @@ export interface paths {
         };
         /**
          * Asset Series
-         * @description The stored daily close+volume series for one analysis asset (for the
-         *     catalog chart). Paginated to defeat PostgREST's 1000-row cap, then
-         *     downsampled to ~`max_points` (stride, first+last kept) so a 10k-bar series
-         *     stays light to ship + render.
+         * @description The stored daily series for one analysis asset (for the dual chart).
+         *     Paginated to defeat PostgREST's 1000-row cap. `max_points` is a safety cap
+         *     only (stride downsample, first+last kept); the default (20k) is far above any
+         *     realistic series length (~7k daily bars since the 1998 cutoff, ~4k for 7-day
+         *     crypto), so FULL daily resolution is preserved — Lightweight Charts renders
+         *     the whole series fine. It only ever trips for a pathological outlier.
          *
-         *     `in_eur=true` converts each close to EUR (via the fx_rate table, GBp
-         *     handled); bars with no available FX rate come back with a null close.
+         *     Each bar carries BOTH the native `close`+`volume` (as Yahoo gives it) and
+         *     the EUR-converted `close_eur`+`volume_eur` — price via the fx_rate table
+         *     (minor units like GBp handled), and volume-in-EUR as turnover
+         *     (price×shares×fx) for equities/ETFs or notional×fx for crypto (per the
+         *     etoro-yfinance methodology). Bars with no FX rate get null *_eur.
          */
         get: operations["asset_series_api_asset_pipeline_assets__analysis_id__series_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/existing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Existing
+         * @description Fast check: which of these ISINs are ALREADY ingested (status='ok', i.e.
+         *     what a batch would skip)? Returns the matching set + counts so the UI can show
+         *     new-vs-stored the instant a CSV is uploaded.
+         *
+         *     Loads the whole already-stored `ok` ISIN set ONCE and intersects (same as the
+         *     ingest skip). The stored set is small + bounded (~thousands), so this is a
+         *     couple of paginated round-trips regardless of how big the uploaded list is —
+         *     cheaper than a chunked `.in_()` that scales with the (large) input.
+         */
+        post: operations["existing_api_asset_pipeline_existing_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/grid": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Grid
+         * @description The flat one-row-per-ISIN grid (from the `asset_grid` view): every input
+         *     ISIN — mapped OR unmapped — with the resolved yfinance-request fields
+         *     (symbol/exchange/currency), history + liquidity, Yahoo price coverage (span +
+         *     bar count), and its resolution status. Offset-paginated to beat PostgREST's
+         *     1000-row cap. Read-only.
+         */
+        get: operations["grid_api_asset_pipeline_grid_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -997,6 +1100,90 @@ export interface paths {
          *     flagging the default execution per asset.
          */
         post: operations["ingest_api_asset_pipeline_ingest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enqueue
+         * @description Add ISINs to the async ingest queue as `pending` (instant — no Yahoo).
+         *     A single background worker drains them. Skips already-ingested (ok) ISINs.
+         *     Returns {queued, skipped_existing, input}.
+         */
+        post: operations["enqueue_api_asset_pipeline_queue_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/queue/process": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue Process
+         * @description Manually run ONE worker slice (the scheduler runs this automatically).
+         *     Handy to kick the queue immediately or in envs with the scheduler disabled.
+         */
+        post: operations["queue_process_api_asset_pipeline_queue_process_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/queue/requeue-suspects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue Requeue Suspects
+         * @description Re-queue wrong-company mis-mapped rows for a clean worker pass (fixes the
+         *     throttle-corrupted re-resolutions).
+         */
+        post: operations["queue_requeue_suspects_api_asset_pipeline_queue_requeue_suspects_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/queue/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Queue Status
+         * @description Queue counts by status (pending / done / failed) — for the UI progress.
+         */
+        get: operations["queue_status_api_asset_pipeline_queue_status_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1063,6 +1250,30 @@ export interface paths {
          *     what was stored, incl. the exact `stored_fields`.
          */
         post: operations["store_one_api_asset_pipeline_store_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/upload/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Scan
+         * @description Parse an uploaded CSV or Excel file and, per column, list the VALID ISINs
+         *     it contains (structure + check-digit) — so the frontend can show columns with
+         *     their ISIN counts and let the user pick which one to enqueue. Columns are
+         *     returned most-ISINs-first. No DB writes — the picked column's ISINs go through
+         *     the normal /queue enqueue.
+         */
+        post: operations["upload_scan_api_asset_pipeline_upload_scan_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4491,6 +4702,87 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AssetGridResponse */
+        AssetGridResponse: {
+            /** Rows */
+            rows: components["schemas"]["AssetGridRow"][];
+        };
+        /**
+         * AssetGridRow
+         * @description One row of the flat per-ISIN grid (from the `asset_grid` view). The
+         *     resolved yahoo_symbol + exchange + currency are 'the info to request
+         *     yfinance'; price_from/to + bars are Yahoo coverage; status is the
+         *     resolution outcome (ok | bond | not_found | error).
+         */
+        AssetGridRow: {
+            /** Analysis Id */
+            analysis_id?: number | null;
+            /** Analysis Symbol */
+            analysis_symbol?: string | null;
+            /** Asset Class */
+            asset_class?: string | null;
+            /** Bars */
+            bars?: number | null;
+            /** Currency */
+            currency?: string | null;
+            /** Exchange */
+            exchange?: string | null;
+            /** Execution Id */
+            execution_id: number;
+            /** First Date */
+            first_date?: string | null;
+            /** Is Default */
+            is_default?: boolean | null;
+            /** Is Leveraged */
+            is_leveraged?: boolean | null;
+            /** Isin */
+            isin: string;
+            /**
+             * Leonteq Verified
+             * @default false
+             */
+            leonteq_verified?: boolean;
+            /** Med Adv Eur */
+            med_adv_eur?: number | null;
+            /** Name */
+            name?: string | null;
+            /** Openfigi Exch */
+            openfigi_exch?: string | null;
+            /** Openfigi Figi */
+            openfigi_figi?: string | null;
+            /** Openfigi Name */
+            openfigi_name?: string | null;
+            /** Openfigi Ticker */
+            openfigi_ticker?: string | null;
+            /** Openfigi Type */
+            openfigi_type?: string | null;
+            /** Parquet Path */
+            parquet_path?: string | null;
+            /** Parquet Rows */
+            parquet_rows?: number | null;
+            /** Price From */
+            price_from?: string | null;
+            /** Price To */
+            price_to?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Sector */
+            sector?: string | null;
+            /** Status */
+            status: string;
+            /** Volume From */
+            volume_from?: string | null;
+            /** Volume To */
+            volume_to?: string | null;
+            /** Wrapper */
+            wrapper?: string | null;
+            /** Yahoo Symbol */
+            yahoo_symbol?: string | null;
+            /** Years */
+            years?: number | null;
+            /** Zero Vol Frac */
+            zero_vol_frac?: number | null;
+        };
         /** AssetWeight */
         AssetWeight: {
             /** Benchmark Id */
@@ -4717,6 +5009,11 @@ export interface components {
         Body_trigger_scheduled_refresh_api_ingest_scheduled_refresh_trigger_post: {
             /** Company Ids */
             company_ids?: number[] | null;
+        };
+        /** Body_upload_scan_api_asset_pipeline_upload_scan_post */
+        Body_upload_scan_api_asset_pipeline_upload_scan_post: {
+            /** File */
+            file: string;
         };
         /** BuildUniverseRequest */
         BuildUniverseRequest: {
@@ -5546,6 +5843,11 @@ export interface components {
             vol_before?: number | null;
             /** Year */
             year: number;
+        };
+        /** _ExistingBody */
+        _ExistingBody: {
+            /** Identifiers */
+            identifiers: string[];
         };
         /** _GfCompanyNameBody */
         _GfCompanyNameBody: {
@@ -6580,6 +6882,42 @@ export interface operations {
             };
         };
     };
+    alphalab_api_asset_pipeline_alphalab_get: {
+        parameters: {
+            query?: {
+                min_adv_eur?: number;
+                require_sector?: boolean;
+                asset_class?: string;
+                max_assets?: number;
+                preview?: boolean;
+                refresh?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_assets_api_asset_pipeline_assets_get: {
         parameters: {
             query?: never;
@@ -6600,11 +6938,41 @@ export interface operations {
             };
         };
     };
+    asset_parquet_api_asset_pipeline_assets__analysis_id__parquet_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                analysis_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     asset_series_api_asset_pipeline_assets__analysis_id__series_get: {
         parameters: {
             query?: {
                 max_points?: number;
-                in_eur?: boolean;
             };
             header?: never;
             path: {
@@ -6630,6 +6998,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    existing_api_asset_pipeline_existing_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_ExistingBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    grid_api_asset_pipeline_grid_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetGridResponse"];
                 };
             };
         };
@@ -6663,6 +7084,110 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enqueue_api_asset_pipeline_queue_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_IngestBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    queue_process_api_asset_pipeline_queue_process_post: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    queue_requeue_suspects_api_asset_pipeline_queue_requeue_suspects_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    queue_status_api_asset_pipeline_queue_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };
@@ -6729,6 +7254,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["_StoreBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_scan_api_asset_pipeline_upload_scan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_scan_api_asset_pipeline_upload_scan_post"];
             };
         };
         responses: {

@@ -45,6 +45,7 @@ from datetime import date, datetime, timedelta, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from routers.ingest_runs import kick_off_refresh
 
@@ -510,6 +511,22 @@ def maybe_schedule_price_retry(*, reason: str = "") -> None:
         )
 
 
+def _fire_asset_ingest_queue() -> None:
+    """Drain one slice of the asset-pipeline ingest queue. THE single Yahoo/
+    OpenFIGI consumer for uploaded ISINs — runs on a short interval with
+    max_instances=1, so slices process back-to-back without ever overlapping (no
+    competing Yahoo traffic → no throttle-corrupted resolutions). A no-op when the
+    queue is empty. Never raises into the scheduler."""
+    try:
+        from asset_pipeline import queue as _q  # noqa: PLC0415
+        r = _q.process_slice()
+        if r.get("processed"):
+            _log.info("[scheduler] asset ingest queue: %s processed (%s ok, %s failed, %s remaining)",
+                      r.get("processed"), r.get("ok"), r.get("failed"), r.get("remaining"))
+    except Exception:  # noqa: BLE001
+        _log.exception("[scheduler] asset ingest queue worker failed")
+
+
 def _fire_fx_sync() -> None:
     """Daily ECB FX sync — keeps EVERY fetchable currency's `fx_rate` current.
     The daily pipeline only syncs the currencies the held strategies actually
@@ -672,6 +689,25 @@ def register_scheduler(app) -> None:
             coalesce=True,
             misfire_grace_time=3600,
         )
+        # Asset-pipeline ingest-queue worker — OPT-IN (ASSET_QUEUE_INPROCESS=1).
+        # By default the worker is the STANDALONE `scripts/asset_queue_worker.py`
+        # process, which survives backend restarts (dev --reload / redeploys) and
+        # keeps draining. Run EXACTLY ONE worker — this in-process tick OR the
+        # standalone script, never both (two would compete for the Yahoo throttle
+        # and re-introduce throttle-corrupted resolutions). When enabled: every
+        # 20s drain one slice; max_instances=1 + coalesce run slices back-to-back
+        # without overlap; empty queue → instant no-op.
+        if os.environ.get("ASSET_QUEUE_INPROCESS", "").lower() in ("1", "true", "yes"):
+            sched.add_job(
+                _fire_asset_ingest_queue,
+                IntervalTrigger(seconds=20),
+                id="asset_ingest_queue",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=30,
+            )
+            _log.info("[scheduler] ASSET_QUEUE_INPROCESS set — in-process ingest-queue worker enabled")
         sched.start()
         _scheduler = sched
         # Reap any orphan `ingest_run` rows left in `status='running'`

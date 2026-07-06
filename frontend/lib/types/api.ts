@@ -61,3 +61,6 @@ export type UniverseRenameRequest = components['schemas']['UniverseRenameRequest
 export type CreateUserRequest = components['schemas']['CreateUserRequest'];
 export type SetRoleRequest = components['schemas']['SetRoleRequest'];
 export type ImpersonateRequest = components['schemas']['ImpersonateRequest'];
+
+// Asset pipeline (flat per-ISIN grid)
+export type AssetGridRow = components['schemas']['AssetGridRow'];

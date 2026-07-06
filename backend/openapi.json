@@ -1,6 +1,359 @@
 {
   "components": {
     "schemas": {
+      "AssetGridResponse": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/AssetGridRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows"
+        ],
+        "title": "AssetGridResponse",
+        "type": "object"
+      },
+      "AssetGridRow": {
+        "description": "One row of the flat per-ISIN grid (from the `asset_grid` view). The\nresolved yahoo_symbol + exchange + currency are 'the info to request\nyfinance'; price_from/to + bars are Yahoo coverage; status is the\nresolution outcome (ok | bond | not_found | error).",
+        "properties": {
+          "analysis_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Id"
+          },
+          "analysis_symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Symbol"
+          },
+          "asset_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Class"
+          },
+          "bars": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bars"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange"
+          },
+          "execution_id": {
+            "title": "Execution Id",
+            "type": "integer"
+          },
+          "first_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Date"
+          },
+          "is_default": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Default"
+          },
+          "is_leveraged": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Leveraged"
+          },
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          },
+          "leonteq_verified": {
+            "default": false,
+            "title": "Leonteq Verified",
+            "type": "boolean"
+          },
+          "med_adv_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Med Adv Eur"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "openfigi_exch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Openfigi Exch"
+          },
+          "openfigi_figi": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Openfigi Figi"
+          },
+          "openfigi_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Openfigi Name"
+          },
+          "openfigi_ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Openfigi Ticker"
+          },
+          "openfigi_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Openfigi Type"
+          },
+          "parquet_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parquet Path"
+          },
+          "parquet_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parquet Rows"
+          },
+          "price_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price From"
+          },
+          "price_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price To"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "volume_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume From"
+          },
+          "volume_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume To"
+          },
+          "wrapper": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wrapper"
+          },
+          "yahoo_symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Yahoo Symbol"
+          },
+          "years": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Years"
+          },
+          "zero_vol_frac": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zero Vol Frac"
+          }
+        },
+        "required": [
+          "execution_id",
+          "isin",
+          "status"
+        ],
+        "title": "AssetGridRow",
+        "type": "object"
+      },
       "AssetWeight": {
         "properties": {
           "benchmark_id": {
@@ -586,6 +939,20 @@
           }
         },
         "title": "Body_trigger_scheduled_refresh_api_ingest_scheduled_refresh_trigger_post",
+        "type": "object"
+      },
+      "Body_upload_scan_api_asset_pipeline_upload_scan_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_scan_api_asset_pipeline_upload_scan_post",
         "type": "object"
       },
       "BuildUniverseRequest": {
@@ -3216,6 +3583,22 @@
         "title": "YearStat",
         "type": "object"
       },
+      "_ExistingBody": {
+        "properties": {
+          "identifiers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Identifiers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "identifiers"
+        ],
+        "title": "_ExistingBody",
+        "type": "object"
+      },
       "_GfCompanyNameBody": {
         "properties": {
           "exchange": {
@@ -4759,57 +5142,71 @@
         ]
       }
     },
-    "/api/asset-pipeline/assets": {
+    "/api/asset-pipeline/alphalab": {
       "get": {
-        "description": "Browse what's stored: every analysis asset (from asset_catalog \u2014 execution\ncount + price coverage) with its execution instruments (many-to-one) nested,\nmost-liquid first. One round-trip for the catalog + one for executions.",
-        "operationId": "list_assets_api_asset_pipeline_assets_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "List Assets",
-        "tags": [
-          "asset-pipeline"
-        ]
-      }
-    },
-    "/api/asset-pipeline/assets/{analysis_id}/series": {
-      "get": {
-        "description": "The stored daily close+volume series for one analysis asset (for the\ncatalog chart). Paginated to defeat PostgREST's 1000-row cap, then\ndownsampled to ~`max_points` (stride, first+last kept) so a 10k-bar series\nstays light to ship + render.\n\n`in_eur=true` converts each close to EUR (via the fx_rate table, GBp\nhandled); bars with no available FX rate come back with a null close.",
-        "operationId": "asset_series_api_asset_pipeline_assets__analysis_id__series_get",
+        "description": "AlphaLab IC scoreboard over a DEFINED universe of analysis instruments \u2014\nfiltered by a liquidity floor (`min_adv_eur`), sector presence, and asset\nclass, capped at `max_assets` most-liquid. Each signal's cross-sectional\nInformation Coefficient (rank-corr vs next-month return) + t-stat / hit rate /\nquintile spread. `preview=true` returns just the universe (size + sector\nbreakdown), cheaply. Cached ~30 min per filter-set (`refresh=true` recomputes).",
+        "operationId": "alphalab_api_asset_pipeline_alphalab_get",
         "parameters": [
           {
-            "in": "path",
-            "name": "analysis_id",
-            "required": true,
-            "schema": {
-              "title": "Analysis Id",
-              "type": "integer"
-            }
-          },
-          {
             "in": "query",
-            "name": "max_points",
+            "name": "min_adv_eur",
             "required": false,
             "schema": {
-              "default": 3000,
-              "title": "Max Points",
+              "default": 1000000.0,
+              "minimum": 0,
+              "title": "Min Adv Eur",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "require_sector",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Require Sector",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "asset_class",
+            "required": false,
+            "schema": {
+              "default": "equity",
+              "title": "Asset Class",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_assets",
+            "required": false,
+            "schema": {
+              "default": 600,
+              "maximum": 2500,
+              "minimum": 20,
+              "title": "Max Assets",
               "type": "integer"
             }
           },
           {
             "in": "query",
-            "name": "in_eur",
+            "name": "preview",
             "required": false,
             "schema": {
               "default": false,
-              "title": "In Eur",
+              "title": "Preview",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
               "type": "boolean"
             }
           }
@@ -4834,7 +5231,181 @@
             "description": "Validation Error"
           }
         },
+        "summary": "Alphalab",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/assets": {
+      "get": {
+        "description": "Browse what's stored: every analysis asset (from asset_catalog \u2014 execution\ncount + price coverage) with its execution instruments (many-to-one) nested,\nmost-liquid first. One round-trip for the catalog + one for executions.",
+        "operationId": "list_assets_api_asset_pipeline_assets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Assets",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/assets/{analysis_id}/parquet": {
+      "get": {
+        "description": "A short-lived signed download URL for the asset's full-OHLCV parquet\narchive (date/open/high/low/close/adj_close/volume/dividends/splits). 404\nwhen the asset has no stored parquet yet.",
+        "operationId": "asset_parquet_api_asset_pipeline_assets__analysis_id__parquet_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analysis_id",
+            "required": true,
+            "schema": {
+              "title": "Analysis Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Asset Parquet",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/assets/{analysis_id}/series": {
+      "get": {
+        "description": "The stored daily series for one analysis asset (for the dual chart).\nPaginated to defeat PostgREST's 1000-row cap. `max_points` is a safety cap\nonly (stride downsample, first+last kept); the default (20k) is far above any\nrealistic series length (~7k daily bars since the 1998 cutoff, ~4k for 7-day\ncrypto), so FULL daily resolution is preserved \u2014 Lightweight Charts renders\nthe whole series fine. It only ever trips for a pathological outlier.\n\nEach bar carries BOTH the native `close`+`volume` (as Yahoo gives it) and\nthe EUR-converted `close_eur`+`volume_eur` \u2014 price via the fx_rate table\n(minor units like GBp handled), and volume-in-EUR as turnover\n(price\u00d7shares\u00d7fx) for equities/ETFs or notional\u00d7fx for crypto (per the\netoro-yfinance methodology). Bars with no FX rate get null *_eur.",
+        "operationId": "asset_series_api_asset_pipeline_assets__analysis_id__series_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analysis_id",
+            "required": true,
+            "schema": {
+              "title": "Analysis Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_points",
+            "required": false,
+            "schema": {
+              "default": 20000,
+              "title": "Max Points",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
         "summary": "Asset Series",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/existing": {
+      "post": {
+        "description": "Fast check: which of these ISINs are ALREADY ingested (status='ok', i.e.\nwhat a batch would skip)? Returns the matching set + counts so the UI can show\nnew-vs-stored the instant a CSV is uploaded.\n\nLoads the whole already-stored `ok` ISIN set ONCE and intersects (same as the\ningest skip). The stored set is small + bounded (~thousands), so this is a\ncouple of paginated round-trips regardless of how big the uploaded list is \u2014\ncheaper than a chunked `.in_()` that scales with the (large) input.",
+        "operationId": "existing_api_asset_pipeline_existing_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/_ExistingBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Existing",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/grid": {
+      "get": {
+        "description": "The flat one-row-per-ISIN grid (from the `asset_grid` view): every input\nISIN \u2014 mapped OR unmapped \u2014 with the resolved yfinance-request fields\n(symbol/exchange/currency), history + liquidity, Yahoo price coverage (span +\nbar count), and its resolution status. Offset-paginated to beat PostgREST's\n1000-row cap. Read-only.",
+        "operationId": "grid_api_asset_pipeline_grid_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetGridResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Grid",
         "tags": [
           "asset-pipeline"
         ]
@@ -4875,6 +5446,128 @@
           }
         },
         "summary": "Ingest",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/queue": {
+      "post": {
+        "description": "Add ISINs to the async ingest queue as `pending` (instant \u2014 no Yahoo).\nA single background worker drains them. Skips already-ingested (ok) ISINs.\nReturns {queued, skipped_existing, input}.",
+        "operationId": "enqueue_api_asset_pipeline_queue_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/_IngestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Enqueue",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/queue/process": {
+      "post": {
+        "description": "Manually run ONE worker slice (the scheduler runs this automatically).\nHandy to kick the queue immediately or in envs with the scheduler disabled.",
+        "operationId": "queue_process_api_asset_pipeline_queue_process_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 40,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Queue Process",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/queue/requeue-suspects": {
+      "post": {
+        "description": "Re-queue wrong-company mis-mapped rows for a clean worker pass (fixes the\nthrottle-corrupted re-resolutions).",
+        "operationId": "queue_requeue_suspects_api_asset_pipeline_queue_requeue_suspects_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Queue Requeue Suspects",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/queue/status": {
+      "get": {
+        "description": "Queue counts by status (pending / done / failed) \u2014 for the UI progress.",
+        "operationId": "queue_status_api_asset_pipeline_queue_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Queue Status",
         "tags": [
           "asset-pipeline"
         ]
@@ -4993,6 +5686,46 @@
           }
         },
         "summary": "Store One",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/upload/scan": {
+      "post": {
+        "description": "Parse an uploaded CSV or Excel file and, per column, list the VALID ISINs\nit contains (structure + check-digit) \u2014 so the frontend can show columns with\ntheir ISIN counts and let the user pick which one to enqueue. Columns are\nreturned most-ISINs-first. No DB writes \u2014 the picked column's ISINs go through\nthe normal /queue enqueue.",
+        "operationId": "upload_scan_api_asset_pipeline_upload_scan_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_scan_api_asset_pipeline_upload_scan_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Scan",
         "tags": [
           "asset-pipeline"
         ]

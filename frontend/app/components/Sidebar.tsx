@@ -46,6 +46,7 @@ const navItems: NavEntry[] = [
   { href: '/companies', label: 'Companies' },
   { href: '/isin-compare', label: 'ISIN Compare' },
   { href: '/asset-pipeline', label: 'Asset Pipeline' },
+  { href: '/alphalab', label: 'AlphaLab' },
   { href: '/schedule', label: 'Schedule' },
   { href: '/fees', label: 'Fees' },
   { href: '/api', label: 'API' },

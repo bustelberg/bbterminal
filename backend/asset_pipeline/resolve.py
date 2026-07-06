@@ -11,9 +11,26 @@ from __future__ import annotations
 import re
 import statistics as st
 import time
-from datetime import date, datetime, timezone
+import unicodedata
+from datetime import date
 
 from . import ibkr, openfigi, yahoo
+
+try:
+    from rapidfuzz import fuzz as _fuzz
+except Exception:  # noqa: BLE001
+    _fuzz = None
+
+
+_NAME_MATCH = 80  # rapidfuzz token_set_ratio floor to treat two names as the SAME company
+
+
+def _name_score(a: str | None, b: str | None) -> float:
+    """rapidfuzz token_set_ratio of two company names — 0 when either is missing
+    or rapidfuzz is unavailable (→ no anchoring, keep the liquidity pick)."""
+    if not a or not b or _fuzz is None:
+        return 0.0
+    return _fuzz.token_set_ratio(a.lower(), b.lower())
 
 ISIN_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
 MIN_YEARS = 3.0
@@ -23,6 +40,53 @@ _STOP = {
     "the", "inc", "plc", "ag", "sa", "co", "ltd", "group", "holdings", "corp",
     "nv", "oyj", "asa", "ab", "spa", "class", "ord", "shares", "limited", "company",
 }
+
+# When comparing a STORED analysis name to the OpenFIGI name, also strip
+# depositary/listing markers — OpenFIGI often names a US ISIN as its ADR
+# ("TOYOTA MOTOR CORP -SPON ADR") while yfinance resolved the home line
+# ("Toyota Motor Corporation"). Same company; only these suffixes differ.
+_DEPOSITARY_STOP = _STOP | {
+    "corporation", "incorporated", "adr", "ads", "gdr", "sdr", "spon", "sponsored",
+    "unsponsored", "sp", "reg", "repr", "representing", "depositary", "depository",
+    "receipt", "receipts", "series", "ser", "cl", "new", "old", "common", "stock",
+    "units", "unit", "npv", "and", "se", "warrants", "warrant", "rights", "right",
+    "pref", "preferred", "grp", "sponsered", "part", "cer", "prf",
+    # common abbreviation ↔ word pairs (strip BOTH sides so they can't disagree)
+    "international", "intl", "technology", "technologies", "tech", "reit",
+    "services", "service", "serv", "svcs", "svc", "national", "natl", "companies",
+    "cos", "mfg", "manufacturing", "industries", "hldgs", "hldg", "hold",
+    "publ", "shs", "shrs", "spons", "spns", "invt", "invts", "investment",
+    "investments", "mgmt", "management", "info", "informat", "information",
+    # non-english corporate forms
+    "sab", "sociedad", "anonima", "societe", "societa", "aktiengesellschaft",
+    "kgaa", "bhd", "berhad", "tbk", "pjsc", "ojsc", "pcl", "aps", "gmbh",
+}
+
+
+def _strip_accents(s: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
+
+
+def _company_root(name: str | None) -> str:
+    """Reduce a name to comparable core tokens — accents, punctuation, corporate
+    forms, share-class + depositary (ADR/GDR/SDR) markers, common abbreviations
+    and single letters removed. So 'Toyota Motor Corporation' and 'TOYOTA MOTOR
+    CORP -SPON ADR' both reduce to 'toyota motor', and 'Schrödinger' matches
+    'SCHRODINGER INC' — but 'Qualcomm' and 'Cytokinetics' stay distinct."""
+    if not name:
+        return ""
+    s = re.sub(r"[^a-z0-9 ]", " ", _strip_accents(name.lower()))
+    return " ".join(t for t in s.split() if len(t) > 1 and t not in _DEPOSITARY_STOP)
+
+
+def same_company(stored_name: str | None, figi_name: str | None) -> bool:
+    """True when the stored analysis name and OpenFIGI name are the SAME company
+    after stripping depositary/share-class/corp-form noise. Empty roots → True
+    (can't judge — don't flag the mapping as wrong)."""
+    a, b = _company_root(stored_name), _company_root(figi_name)
+    if not a or not b:
+        return True
+    return _name_score(a, b) >= _NAME_MATCH
 
 
 def detect_id_type(identifier: str) -> str:
@@ -165,7 +229,7 @@ def _score(symbol: str) -> dict | None:
     ]
     med = st.median(vals) if vals else 0.0
     ft = meta.get("firstTradeDate")
-    start = datetime.fromtimestamp(ft, timezone.utc).date().isoformat() if ft else None
+    start = yahoo.utc_dt(ft).date().isoformat() if ft else None
     return {
         "symbol": symbol,
         "currency": ccy,
@@ -196,7 +260,7 @@ def _bars(result: dict | None) -> list[dict]:
         if g(c, i) is None or not yahoo.is_closed_bar(ts[i]):  # skip null + today's partial
             continue
         out.append({
-            "date": datetime.fromtimestamp(ts[i], timezone.utc).date().isoformat(),
+            "date": yahoo.utc_dt(ts[i]).date().isoformat(),
             "open": g(o, i), "high": g(h, i), "low": g(low, i), "close": g(c, i), "volume": g(v, i),
         })
     return out
@@ -278,16 +342,30 @@ def _identity_result(identifier: str, idt: str, name: str | None, asset_class: s
     }
 
 
-def resolve(identifier: str, id_type: str | None = None, with_candles: bool = True) -> dict:
+def resolve(identifier: str, id_type: str | None = None, with_candles: bool = True,
+            figi_hint: dict | None = None) -> dict:
     identifier = identifier.strip()
     idt = id_type or detect_id_type(identifier)
     sector: str | None = None
 
     if idt == "isin":
         isin = identifier.upper()
+        # OpenFIGI identity for this ISIN (passed in by the batch, else looked up
+        # here) — authoritative name + ticker(s). Used to ANCHOR the pick so
+        # Yahoo's fuzzy ISIN search can't hand us a more-liquid but WRONG company.
+        if figi_hint is None:
+            figi_hint = openfigi.extract_columns(openfigi.lookup_isins([isin]).get(isin, []))
+        figi_name = (figi_hint or {}).get("openfigi_name")
+        figi_tickers = {
+            t.strip().upper()
+            for t in ((figi_hint or {}).get("openfigi_ticker") or "").split(",") if t.strip()
+        }
         quotes = yahoo.search(isin)
-        name_hint = next((q.get("shortname") or q.get("longname") for q in quotes
-                          if q.get("shortname") or q.get("longname")), None)
+        # Prefer the OpenFIGI name as the search/guard hint (authoritative) over
+        # Yahoo's first ISIN-search hit, which may itself be a false match.
+        name_hint = figi_name or next(
+            (q.get("shortname") or q.get("longname") for q in quotes
+             if q.get("shortname") or q.get("longname")), None)
         if name_hint:  # broaden with a name search — catches cross-listings ISIN search misses
             quotes = quotes + yahoo.search(name_hint)
         scored, sector = _rank_candidates(quotes, name_hint)
@@ -319,12 +397,35 @@ def resolve(identifier: str, id_type: str | None = None, with_candles: bool = Tr
 
         elig = [s for s in scored if s["years"] >= MIN_YEARS] or scored
         elig.sort(key=lambda s: (-s["med_adv_eur"], s["first_date"] or "9999"))
+        # Anchor to the OpenFIGI NAME: KEEP the most-liquid listing unless its name
+        # is a different company than the ISIN's OpenFIGI name (a Yahoo ISIN-search
+        # false match — SkyWater→Micron, several ES ISINs→GGAL). Only then swap to
+        # the most-liquid candidate whose NAME actually matches OpenFIGI. Name, not
+        # ticker: Yahoo/OpenFIGI ticker conventions differ per exchange (SGX F34 vs
+        # WIL), so a ticker anchor wrongly downgrades correct cross-listings.
         chosen = elig[0]
+        anchored = False
+        if figi_name and _name_score(chosen.get("name"), figi_name) < _NAME_MATCH:
+            better = [s for s in elig if _name_score(s.get("name"), figi_name) >= _NAME_MATCH]
+            if better:
+                # Right company established by NAME; among ITS listings prefer the
+                # one whose ticker matches OpenFIGI (usually the primary), else the
+                # most liquid.
+                tmatch = [s for s in better if s["symbol"].split(".")[0].upper() in figi_tickers]
+                chosen = (tmatch or better)[0]
+                anchored = True
         for s in scored:
             s["eligible"] = s["years"] >= MIN_YEARS
         scored.sort(key=lambda s: -s["med_adv_eur"])
         runner = next((s for s in scored if s["symbol"] != chosen["symbol"]), None)
-        reason = _reason(chosen, runner, scored)
+        if anchored:
+            reason = (
+                f"Picked {chosen['symbol']} ({chosen.get('exchange')}, {chosen.get('currency')}) — its "
+                f"name matches this ISIN's OpenFIGI identity ({figi_name}). The more-liquid "
+                f"{elig[0]['symbol']} is a different company Yahoo's ISIN search false-matched."
+            )
+        else:
+            reason = _reason(chosen, runner, scored)
         asset_class = _asset_class(chosen.get("quote_type"), chosen["symbol"])
         ibkr_res = ibkr.resolve_tradeable_eu(isin, analysis=chosen)
     else:

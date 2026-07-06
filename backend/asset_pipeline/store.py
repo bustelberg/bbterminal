@@ -38,9 +38,11 @@ def _analysis_id(symbol: str) -> int | None:
     return r.data[0]["analysis_id"] if r.data else None
 
 
-def upsert_asset(res: dict) -> dict:
+def upsert_asset(res: dict, figi: dict | None = None) -> dict:
     """Upsert asset_analysis (by symbol) + — for an ISIN input — asset_execution
-    (by ISIN, linked to the analysis asset). Returns ids + the analysis symbol."""
+    (by ISIN, linked to the analysis asset). `figi` is an optional
+    `openfigi.extract_columns` dict (the 5 openfigi_* columns) merged into the
+    execution row. Returns ids + the analysis symbol."""
     an = res.get("analysis") or {}
     symbol = an.get("symbol")
     if not symbol:
@@ -64,26 +66,58 @@ def upsert_asset(res: dict) -> dict:
     execution_id = None
     if res.get("id_type") == "isin":
         ex = res.get("execution") or {}
-        eup = supabase.table("asset_execution").upsert(
-            {
-                "isin": res["input"].strip().upper(),
-                "analysis_id": analysis_id,
-                "yahoo_symbol": ex.get("symbol"),
-                "name": ex.get("name"),
-                "exchange": ex.get("exchange"),
-                "currency": ex.get("currency"),
-                "med_adv_eur": ex.get("med_adv_eur"),
-                "first_date": ex.get("first_date"),
-                "years": ex.get("years"),
-                "wrapper": res.get("wrapper"),
-                "is_leveraged": bool(res.get("is_leveraged")),
-                "updated_at": _now_iso(),
-            },
-            on_conflict="isin",
-        ).execute()
+        payload = {
+            "isin": res["input"].strip().upper(),
+            "analysis_id": analysis_id,
+            "yahoo_symbol": ex.get("symbol"),
+            "name": ex.get("name"),
+            "exchange": ex.get("exchange"),
+            "currency": ex.get("currency"),
+            "med_adv_eur": ex.get("med_adv_eur"),
+            "first_date": ex.get("first_date"),
+            "years": ex.get("years"),
+            "wrapper": res.get("wrapper"),
+            "is_leveraged": bool(res.get("is_leveraged")),
+            "status": "ok",
+            "asset_class": res.get("asset_class"),
+            "updated_at": _now_iso(),
+        }
+        if figi:  # merge the 5 openfigi_* columns
+            payload.update(figi)
+        eup = supabase.table("asset_execution").upsert(payload, on_conflict="isin").execute()
         execution_id = eup.data[0]["execution_id"] if eup.data else None
 
     return {"analysis_id": analysis_id, "execution_id": execution_id, "symbol": symbol}
+
+
+def upsert_unmapped(
+    isin: str,
+    status: str,
+    reason: str | None,
+    asset_class: str | None = None,
+    name: str | None = None,
+    figi: dict | None = None,
+) -> None:
+    """Persist a row for an input ISIN that did NOT resolve to a Yahoo listing
+    (status: bond | not_found | error) — `analysis_id` NULL, so it shows in the
+    flat grid with its status but contributes no price series (like the etoro
+    table's unmapped rows). `figi` merges the openfigi_* columns — often the most
+    useful data on a bond/not-found row. Upsert by isin — idempotent."""
+    payload = {
+        "isin": isin.strip().upper(),
+        "analysis_id": None,
+        "yahoo_symbol": None,   # clear any stale mapping if a row flips ok→fail
+        "status": status,
+        "reason": reason,
+        "asset_class": asset_class,
+        "name": name,
+        "updated_at": _now_iso(),
+    }
+    if figi:  # OpenFIGI identity even when Yahoo couldn't price it
+        payload.update(figi)
+        if not payload.get("name"):
+            payload["name"] = figi.get("openfigi_name")  # fall back to the OpenFIGI name
+    supabase.table("asset_execution").upsert(payload, on_conflict="isin").execute()
 
 
 def store_series(analysis_id: int, symbol: str, first_ts: int | None) -> int:
@@ -109,7 +143,7 @@ def store_series(analysis_id: int, symbol: str, first_ts: int | None) -> int:
             continue
         row: dict = {
             "analysis_id": analysis_id,
-            "target_date": datetime.fromtimestamp(ts[i], timezone.utc).date().isoformat(),
+            "target_date": yahoo.utc_dt(ts[i]).date().isoformat(),
         }
         for ykey, col in STORED_FIELDS:
             arr = series[ykey]
@@ -131,6 +165,32 @@ def store_series(analysis_id: int, symbol: str, first_ts: int | None) -> int:
     # now excludes today doesn't leave a stale partial close behind.
     today = datetime.now(timezone.utc).date().isoformat()
     supabase.table("asset_price").delete().eq("analysis_id", analysis_id).gte("target_date", today).execute()
+
+    # Denormalized coverage stats onto asset_analysis — the asset_grid view READS
+    # these instead of running 6 correlated subqueries per row over the 14M-row
+    # asset_price table (which was blowing the statement timeout). Computed from
+    # the rows we just stored. (ISO date strings sort correctly, so min/max work.)
+    upd: dict = {"updated_at": _now_iso()}
+    if rows:
+        dates = [r["target_date"] for r in rows]
+        vol_dates = [r["target_date"] for r in rows if (r.get("volume") or 0) > 0]
+        n_zero = sum(1 for r in rows if (r.get("volume") or 0) == 0)
+        upd.update({
+            "price_from": min(dates), "price_to": max(dates), "bars": len(rows),
+            "volume_from": min(vol_dates) if vol_dates else None,
+            "volume_to": max(vol_dates) if vol_dates else None,
+            "zero_vol_frac": round(n_zero / len(rows), 6),
+        })
+    # Full OHLCV+actions parquet archive (alongside asset_price) — built from the
+    # SAME window `w`, so no extra Yahoo call. Best-effort: never fails the store.
+    try:
+        from . import parquet  # noqa: PLC0415
+        pq = parquet.write(symbol, parquet.build_frame(w))
+        if pq:
+            upd["parquet_path"], upd["parquet_rows"] = pq
+    except Exception:  # noqa: BLE001
+        pass
+    supabase.table("asset_analysis").update(upd).eq("analysis_id", analysis_id).execute()
     return stored
 
 
@@ -139,12 +199,21 @@ def store_one(identifier: str) -> dict:
     the execution (by ISIN) + the analysis series' close+volume. Returns what was
     stored, including the exact `stored_fields`. Used by the single-ISIN 'Store'
     action; the batch flow reuses upsert_asset + store_series directly."""
-    from .resolve import resolve  # noqa: PLC0415
-    res = resolve(identifier, with_candles=False)  # store doesn't need candles
+    from . import openfigi  # noqa: PLC0415
+    from .resolve import detect_id_type, resolve  # noqa: PLC0415
+    # Fetch OpenFIGI identity first so it can anchor the resolution (below).
+    fig = (openfigi.extract_columns(openfigi.lookup_isins([identifier]).get(identifier.strip().upper(), []))
+           if detect_id_type(identifier) == "isin" else None)
+    res = resolve(identifier, with_candles=False, figi_hint=fig)  # anchor to OpenFIGI identity
     an = res.get("analysis") or {}
     if not an.get("symbol"):
-        raise ValueError(res.get("reason") or "no analysis instrument resolved")
-    ids = upsert_asset(res)
+        reason = res.get("reason") or "no analysis instrument resolved"
+        if res.get("id_type") == "isin":  # record the unmapped ISIN in the grid
+            ac = res.get("asset_class")
+            upsert_unmapped(identifier, "bond" if ac == "bond" else "not_found",
+                            reason, ac, res.get("sector"), figi=fig)
+        raise ValueError(reason)
+    ids = upsert_asset(res, figi=fig)
     rows = store_series(ids["analysis_id"], an["symbol"], an.get("first_ts"))
     try:
         set_default_executions()
@@ -167,6 +236,7 @@ def set_default_executions() -> int:
     rows = (
         supabase.table("asset_execution")
         .select("execution_id, analysis_id, med_adv_eur, is_default")
+        .not_.is_("analysis_id", "null")  # unmapped rows have no analysis to default within
         .execute()
     ).data or []
     by: dict[int, list[dict]] = {}
