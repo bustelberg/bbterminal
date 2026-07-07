@@ -956,6 +956,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/asset-pipeline/alphalab/regime": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Alphalab Regime
+         * @description Bull/bear × calm/turbulent regime timeline of the equal-weight index, over
+         *     either the ADV/sector filters OR a saved `universe_id`'s members. bull = index ≥
+         *     its trailing 200-day mean; turbulent = 63-day vol above the median of its own
+         *     prior history. Returns daily {dates, index, ma200, bull[], turb[], current}.
+         *     The frontend rebases the index to 100 at the window start. Cached ~30 min.
+         */
+        get: operations["alphalab_regime_api_asset_pipeline_alphalab_regime_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/asset-pipeline/assets": {
         parameters: {
             query?: never;
@@ -1106,6 +1130,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/asset-pipeline/leonteq/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Leonteq Upload
+         * @description Upload a Leonteq (lynqs) CSV/Excel — columns id, ticker, name, productType,
+         *     ric, isin, currency. REPLACES the Leonteq-Verified set with the file's valid
+         *     ISINs + their name/currency/productType (so the grid badges + surfaces them),
+         *     and (unless `enqueue=false`) queues those ISINs for the background ingest so
+         *     unseen ones get resolved + priced. Returns row/member/queue counts.
+         */
+        post: operations["leonteq_upload_api_asset_pipeline_leonteq_upload_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/asset-pipeline/queue": {
         parameters: {
             query?: never;
@@ -1214,6 +1262,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/asset-pipeline/rows/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Row
+         * @description Fetch OpenFIGI + yfinance for ONE row and persist. Returns a per-source
+         *     outcome ({openfigi:{found,…}, yfinance:{found,…}, identity_status, status})
+         *     so the UI can show what got filled vs. what's missing. Never 502s on a plain
+         *     'not found' — that's a `found:false` result, not an error.
+         */
+        post: operations["refresh_row_api_asset_pipeline_rows_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/asset-pipeline/storage": {
         parameters: {
             query?: never;
@@ -1250,6 +1321,111 @@ export interface paths {
          *     what was stored, incl. the exact `stored_fields`.
          */
         post: operations["store_one_api_asset_pipeline_store_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/universe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Universe
+         * @description PREVIEW a large, LIQUID universe of UNIQUE yfinance tickers with price +
+         *     volume history, from the resolved grid. Read-only — tune the params, read the
+         *     `count`, then POST /universe/create to save it. `count_only=true` skips the
+         *     ticker list (cheap live preview).
+         */
+        get: operations["universe_api_asset_pipeline_universe_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/universe/create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Universe
+         * @description Materialise + SAVE the filtered universe under `name`: computes the unique
+         *     tickers, replaces any same-named universe, stores membership. Returns
+         *     {id, name, ticker_count}.
+         */
+        post: operations["create_universe_api_asset_pipeline_universe_create_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/universes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Universes
+         * @description Saved universes (id, name, params, ticker_count, created_at), newest first.
+         */
+        get: operations["list_universes_api_asset_pipeline_universes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/universes/{universe_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Universe
+         * @description Delete a saved universe (members cascade).
+         */
+        delete: operations["delete_universe_api_asset_pipeline_universes__universe_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/universes/{universe_id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Universe Members
+         * @description The member analysis_symbols of a saved universe (for the grid filter).
+         */
+        get: operations["universe_members_api_asset_pipeline_universes__universe_id__members_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4731,17 +4907,29 @@ export interface components {
             execution_id: number;
             /** First Date */
             first_date?: string | null;
+            /** Identity Status */
+            identity_status?: string | null;
             /** Is Default */
             is_default?: boolean | null;
             /** Is Leveraged */
             is_leveraged?: boolean | null;
             /** Isin */
             isin: string;
+            /** Leonteq Currency */
+            leonteq_currency?: string | null;
+            /** Leonteq Name */
+            leonteq_name?: string | null;
+            /** Leonteq Product Type */
+            leonteq_product_type?: string | null;
             /**
              * Leonteq Verified
              * @default false
              */
             leonteq_verified?: boolean;
+            /** Market Cap Currency */
+            market_cap_currency?: string | null;
+            /** Market Cap Eur */
+            market_cap_eur?: number | null;
             /** Med Adv Eur */
             med_adv_eur?: number | null;
             /** Name */
@@ -4999,6 +5187,11 @@ export interface components {
             vol?: number | null;
             /** Year */
             year: number;
+        };
+        /** Body_leonteq_upload_api_asset_pipeline_leonteq_upload_post */
+        Body_leonteq_upload_api_asset_pipeline_leonteq_upload_post: {
+            /** File */
+            file: string;
         };
         /** Body_parse_portfolio_api_portfolios_parse_post */
         Body_parse_portfolio_api_portfolios_parse_post: {
@@ -5762,6 +5955,61 @@ export interface components {
             /** New Label */
             new_label: string;
         };
+        /** UniverseResponse */
+        UniverseResponse: {
+            /** Count */
+            count: number;
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
+            /** Tickers */
+            tickers: components["schemas"]["UniverseTicker"][];
+        };
+        /**
+         * UniverseTicker
+         * @description One member of the liquid universe — a UNIQUE yfinance ticker (the analysis
+         *     instrument), backed by its most-liquid tradeable listing (execution).
+         */
+        UniverseTicker: {
+            /** Analysis Symbol */
+            analysis_symbol: string;
+            /** Asset Class */
+            asset_class?: string | null;
+            /** Bars */
+            bars?: number | null;
+            /** Currency */
+            currency?: string | null;
+            /** Exchange */
+            exchange?: string | null;
+            /** Execution Isin */
+            execution_isin?: string | null;
+            /** Execution Symbol */
+            execution_symbol?: string | null;
+            /** Leonteq Name */
+            leonteq_name?: string | null;
+            /** Leonteq Product Type */
+            leonteq_product_type?: string | null;
+            /** Market Cap Eur */
+            market_cap_eur?: number | null;
+            /** Med Adv Eur */
+            med_adv_eur?: number | null;
+            /**
+             * N Listings
+             * @default 1
+             */
+            n_listings?: number;
+            /** Name */
+            name?: string | null;
+            /** Price From */
+            price_from?: string | null;
+            /** Price To */
+            price_to?: string | null;
+            /** Sector */
+            sector?: string | null;
+            /** Zero Vol Frac */
+            zero_vol_frac?: number | null;
+        };
         /** UpdateBenchmarkRequest */
         UpdateBenchmarkRequest: {
             /** Currency */
@@ -5844,6 +6092,45 @@ export interface components {
             /** Year */
             year: number;
         };
+        /** _CreateUniverseBody */
+        _CreateUniverseBody: {
+            /** Asset Class */
+            asset_class?: string | null;
+            /**
+             * Max Zero Vol
+             * @default 0.05
+             */
+            max_zero_vol?: number;
+            /**
+             * Min Adv Eur
+             * @default 1000000
+             */
+            min_adv_eur?: number;
+            /**
+             * Min Market Cap Eur
+             * @default 0
+             */
+            min_market_cap_eur?: number;
+            /** Name */
+            name: string;
+            /**
+             * Require Leonteq
+             * @default true
+             */
+            require_leonteq?: boolean;
+            /**
+             * Require Openfigi Match
+             * @default true
+             */
+            require_openfigi_match?: boolean;
+            /**
+             * Require Volume
+             * @default true
+             */
+            require_volume?: boolean;
+            /** Sectors */
+            sectors?: string[] | null;
+        };
         /** _ExistingBody */
         _ExistingBody: {
             /** Identifiers */
@@ -5894,6 +6181,11 @@ export interface components {
             company_id: number;
             /** Strategy Id */
             strategy_id?: number | null;
+        };
+        /** _RowRefreshBody */
+        _RowRefreshBody: {
+            /** Identifier */
+            identifier: string;
         };
         /** _StoreBody */
         _StoreBody: {
@@ -6918,6 +7210,45 @@ export interface operations {
             };
         };
     };
+    alphalab_regime_api_asset_pipeline_alphalab_regime_get: {
+        parameters: {
+            query?: {
+                min_adv_eur?: number;
+                require_sector?: boolean;
+                asset_class?: string;
+                max_assets?: number;
+                start?: string | null;
+                end?: string | null;
+                /** @description use a SAVED universe's members instead of the ADV/sector filters */
+                universe_id?: number | null;
+                refresh?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_assets_api_asset_pipeline_assets_get: {
         parameters: {
             query?: never;
@@ -7088,6 +7419,41 @@ export interface operations {
             };
         };
     };
+    leonteq_upload_api_asset_pipeline_leonteq_upload_post: {
+        parameters: {
+            query?: {
+                enqueue?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_leonteq_upload_api_asset_pipeline_leonteq_upload_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     enqueue_api_asset_pipeline_queue_post: {
         parameters: {
             query?: never;
@@ -7224,6 +7590,39 @@ export interface operations {
             };
         };
     };
+    refresh_row_api_asset_pipeline_rows_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_RowRefreshBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     storage_api_asset_pipeline_storage_get: {
         parameters: {
             query?: never;
@@ -7256,6 +7655,169 @@ export interface operations {
                 "application/json": components["schemas"]["_StoreBody"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    universe_api_asset_pipeline_universe_get: {
+        parameters: {
+            query?: {
+                /** @description HYBRID fallback: min ADV (EUR) for tickers with NO market cap (ETFs/crypto) */
+                min_adv_eur?: number;
+                /** @description HYBRID primary: min market cap (EUR) for tickers that have one; 0 = no floor. Listing-independent */
+                min_market_cap_eur?: number;
+                /** @description max zero-volume bar fraction (illiquidity guard) */
+                max_zero_vol?: number;
+                /** @description require all 4 Leonteq columns (verified + name + currency + productType) */
+                require_leonteq?: boolean;
+                /** @description require OpenFIGI name + a 'verified' identity match */
+                require_openfigi_match?: boolean;
+                /** @description require stored traded-volume data */
+                require_volume?: boolean;
+                /** @description restrict to one asset class (equity/etf/crypto/commodity/…) */
+                asset_class?: string | null;
+                /** @description comma-separated sectors to include; omit = all */
+                sectors?: string | null;
+                /** @description return only the count (for the live create-universe preview) */
+                count_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UniverseResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_universe_api_asset_pipeline_universe_create_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_CreateUniverseBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_universes_api_asset_pipeline_universes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    delete_universe_api_asset_pipeline_universes__universe_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                universe_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    universe_members_api_asset_pipeline_universes__universe_id__members_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                universe_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

@@ -53,6 +53,103 @@ except Exception:  # noqa: BLE001
 
 _SEARCH = "https://query2.finance.yahoo.com/v1/finance/search"
 _CHART = "https://query1.finance.yahoo.com/v8/finance/chart"
+_QUOTE = "https://query1.finance.yahoo.com/v7/finance/quote"
+
+# v7/quote (market cap, shares, avg volume) 401s without a consent cookie + crumb.
+# Prime once, cache the session + crumb, refresh on a 401.
+_quote_sess = None
+_quote_crumb: str | None = None
+
+
+def _quote_session():
+    """Cached (curl_cffi session, crumb) primed with Yahoo's cookie. (None, None)
+    when curl_cffi is missing or priming failed — quote() then no-ops."""
+    global _quote_sess, _quote_crumb
+    if _quote_sess is not None and _quote_crumb:
+        return _quote_sess, _quote_crumb
+    if not _HAS_CURL:
+        return None, None
+    try:
+        s = _creq.Session(impersonate="chrome")
+        try:
+            s.get("https://fc.yahoo.com", timeout=10)  # sets the A1 consent cookie
+        except Exception:  # noqa: BLE001
+            pass
+        r = s.get("https://query1.finance.yahoo.com/v1/test/getcrumb", timeout=10)
+        crumb = (r.text or "").strip()
+        if not crumb or len(crumb) > 40:  # an HTML error page isn't a crumb
+            return None, None
+        _quote_sess, _quote_crumb = s, crumb
+        return s, crumb
+    except Exception:  # noqa: BLE001
+        return None, None
+
+
+def asset_profile(symbols: list[str]) -> dict[str, dict]:
+    """Per-symbol v10 quoteSummary assetProfile -> {symbol: {sector, industry,
+    country}}. One request/symbol (no batch), cookie+crumb (refreshed once on a
+    401), lightly paced. Best-effort — the sector source the fast path can't get
+    from the chart endpoint."""
+    global _quote_sess, _quote_crumb
+    s, crumb = _quote_session()
+    out: dict[str, dict] = {}
+    if not s:
+        return out
+    for sym in dict.fromkeys(x for x in symbols if x):
+        try:
+            r = s.get(f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{sym}",
+                      params={"modules": "assetProfile", "crumb": crumb}, timeout=20)
+            if r.status_code == 401:
+                _quote_sess = _quote_crumb = None
+                s, crumb = _quote_session()
+                if not s:
+                    break
+                r = s.get(f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{sym}",
+                          params={"modules": "assetProfile", "crumb": crumb}, timeout=20)
+            res = (r.json().get("quoteSummary") or {}).get("result")
+            if res:
+                ap = res[0].get("assetProfile") or {}
+                if ap.get("sector"):
+                    out[sym] = {"sector": ap.get("sector"), "industry": ap.get("industry"),
+                                "country": ap.get("country")}
+        except Exception:  # noqa: BLE001
+            pass
+        time.sleep(0.15)
+    return out
+
+
+def quote(symbols: list[str]) -> dict[str, dict]:
+    """Batch v7 quote -> {symbol: {marketCap, currency, sharesOutstanding, …}}.
+    Chunks of 100, cookie+crumb auth (refreshed once on a 401), lightly paced.
+    Best-effort — symbols Yahoo doesn't return are simply absent. This is the
+    market-cap source (listing-INDEPENDENT: query a company's PRIMARY listing)."""
+    global _quote_sess, _quote_crumb
+    syms = [s for s in dict.fromkeys(symbols) if s]
+    out: dict[str, dict] = {}
+    if not syms:
+        return out
+    s, crumb = _quote_session()
+    if not s:
+        return out
+    i = 0
+    while i < len(syms):
+        chunk = syms[i:i + 100]
+        try:
+            r = s.get(_QUOTE, params={"symbols": ",".join(chunk), "crumb": crumb}, timeout=20)
+            if r.status_code == 401:  # crumb expired — refresh once, retry the chunk
+                _quote_sess = _quote_crumb = None
+                s, crumb = _quote_session()
+                if not s:
+                    break
+                continue
+            for q in (r.json().get("quoteResponse") or {}).get("result", []) or []:
+                if q.get("symbol"):
+                    out[q["symbol"]] = q
+        except Exception:  # noqa: BLE001
+            pass
+        i += 100
+        time.sleep(0.2)
+    return out
 
 
 def _raw_get(url: str) -> tuple[int | None, str]:

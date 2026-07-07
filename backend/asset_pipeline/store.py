@@ -82,6 +82,12 @@ def upsert_asset(res: dict, figi: dict | None = None) -> dict:
             "asset_class": res.get("asset_class"),
             "updated_at": _now_iso(),
         }
+        # OpenFIGI confirmation verdict: does the independent OpenFIGI name agree
+        # with the yfinance listing we resolved? (Drives the grid's Match badge.)
+        from .resolve import identity_status  # noqa: PLC0415
+        payload["identity_status"] = identity_status(
+            ex.get("name"), (figi or {}).get("openfigi_name")
+        )
         if figi:  # merge the 5 openfigi_* columns
             payload.update(figi)
         eup = supabase.table("asset_execution").upsert(payload, on_conflict="isin").execute()
@@ -111,6 +117,8 @@ def upsert_unmapped(
         "reason": reason,
         "asset_class": asset_class,
         "name": name,
+        # No yfinance instrument to confirm — clear any stale verdict.
+        "identity_status": "unknown",
         "updated_at": _now_iso(),
     }
     if figi:  # OpenFIGI identity even when Yahoo couldn't price it
@@ -226,6 +234,65 @@ def store_one(identifier: str) -> dict:
         "asset_class": res.get("asset_class"),
         "rows": rows,
         "stored_fields": stored_columns(),
+    }
+
+
+def refresh_row(identifier: str) -> dict:
+    """Resolve ONE row's OpenFIGI + yfinance data and persist it, returning a
+    per-SOURCE outcome so the UI/script can report exactly what was found or is
+    missing. Unlike `store_one` it never raises for a legit 'not found' — it
+    upserts the unmapped row and returns `found=False` for that source.
+
+    Result shape:
+      {isin, status, identity_status,
+       openfigi:{found,name,figi}, yfinance:{found,symbol,name,currency,rows,analysis_id}}
+
+    OpenFIGI is fetched first because it anchors the yfinance pick (the wrong-
+    company guard); the batch script parallelizes ACROSS rows for throughput."""
+    from . import openfigi  # noqa: PLC0415
+    from .resolve import detect_id_type, identity_status, resolve  # noqa: PLC0415
+
+    ident = identifier.strip()
+    isin = ident.upper()
+    idt = detect_id_type(ident)
+    fig = (openfigi.extract_columns(openfigi.lookup_isins([ident]).get(isin, []))
+           if idt == "isin" else None)
+    of = {"found": bool(fig and fig.get("openfigi_figi")),
+          "name": (fig or {}).get("openfigi_name"), "figi": (fig or {}).get("openfigi_figi")}
+
+    res = resolve(ident, with_candles=False, figi_hint=fig)  # anchored to OpenFIGI
+    an = res.get("analysis") or {}
+    if not an.get("symbol"):
+        ac = res.get("asset_class")
+        db_status = "bond" if ac == "bond" else "not_found"
+        if idt == "isin":
+            upsert_unmapped(ident, db_status, res.get("reason"), ac, res.get("sector"), figi=fig)
+        return {
+            "isin": isin, "status": db_status, "identity_status": "unknown",
+            "openfigi": of,
+            "yfinance": {"found": False, "symbol": None, "name": None,
+                         "currency": None, "rows": 0, "analysis_id": None},
+            "message": res.get("reason") or "No yfinance price series for this identifier.",
+        }
+
+    ids = upsert_asset(res, figi=fig)
+    rows = store_series(ids["analysis_id"], an["symbol"], an.get("first_ts"))
+    try:
+        set_default_executions()
+    except Exception:  # noqa: BLE001
+        pass
+    ex = res.get("execution") or {}
+    return {
+        "isin": isin, "status": "ok",
+        "identity_status": identity_status(ex.get("name"), (fig or {}).get("openfigi_name")),
+        "openfigi": of,
+        "yfinance": {
+            "found": True, "symbol": an.get("symbol"),
+            "name": ex.get("name") or an.get("name"),
+            "currency": ex.get("currency") or an.get("currency"),
+            "rows": rows, "analysis_id": ids["analysis_id"],
+        },
+        "message": f"Resolved {an.get('symbol')} · {rows:,} bars stored.",
     }
 
 

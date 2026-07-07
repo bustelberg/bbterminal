@@ -18,6 +18,7 @@ export default function AssetPipeline() {
   const [pickedCol, setPickedCol] = useState('');
   const [scanning, setScanning] = useState(false);
   const [enqueuing, setEnqueuing] = useState(false);
+  const [leonteqUploading, setLeonteqUploading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,6 +36,28 @@ export default function AssetPipeline() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setScanning(false); }
+  };
+
+  // Leonteq (lynqs) CSV — id, ticker, name, productType, ric, isin, currency.
+  // Posts the whole file: replaces the Leonteq-Verified set (name/ccy/productType
+  // per ISIN) AND queues the ISINs for ingestion. No column-pick — shape is known.
+  const onLeonteqFile = async (file: File) => {
+    setLeonteqUploading(true); setError(null); setMsg(null); setScan(null); setPickedCol('');
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await apiFetch(`${API_URL}/api/asset-pipeline/leonteq/upload`, { method: 'POST', body: fd });
+      const b = await r.json().catch(() => null);
+      if (!r.ok) { setError(b?.detail ?? `HTTP ${r.status}`); return; }
+      setMsg(`Leonteq list uploaded: ${(b.members ?? 0).toLocaleString()} verified instruments `
+        + `(${(b.valid_isins ?? 0).toLocaleString()} valid ISINs of ${(b.rows ?? 0).toLocaleString()} rows) · `
+        + `${(b.seeded ?? 0).toLocaleString()} now shown in the grid (queued) · `
+        + `${(b.queue?.queued ?? 0).toLocaleString()} to resolve, `
+        + `${(b.queue?.skipped_existing ?? 0).toLocaleString()} already stored. The background worker enriches queued rows with yfinance + OpenFIGI data.`);
+      setCatalogReload((x) => x + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setLeonteqUploading(false); }
   };
 
   const col = scan?.columns.find((c) => c.name === pickedCol) ?? null;
@@ -80,8 +103,19 @@ export default function AssetPipeline() {
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); e.target.value = ''; }}
               />
             </label>
+            <label className={`text-sm px-4 py-2 rounded-lg border border-accent-500/40 text-accent-300 hover:bg-accent-500/10 transition-colors ${leonteqUploading ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
+              {leonteqUploading ? 'Uploading…' : 'Upload Leonteq (lynqs) CSV'}
+              <input
+                type="file" className="hidden" disabled={leonteqUploading}
+                accept=".csv,.tsv,.txt,.xlsx,.xlsm,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) void onLeonteqFile(f); e.target.value = ''; }}
+              />
+            </label>
             {scan && <span className="text-[11px] text-fg-faint font-mono">{scan.filename} · {scan.rows.toLocaleString()} rows</span>}
           </div>
+          <p className="mt-2 text-[11px] text-fg-faint">
+            <span className="text-accent-300 font-medium">Leonteq (lynqs) CSV</span> — columns id, ticker, name, productType, ric, isin, currency — replaces the Leonteq-Verified set (name/currency/productType shown in the grid + a badge on each verified row) and queues its ISINs for ingestion.
+          </p>
 
           {/* Column picker — choose which column holds the ISINs. */}
           {scan && (

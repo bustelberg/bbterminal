@@ -40,6 +40,8 @@ class AssetGridRow(BaseModel):
     sector: str | None = None
     analysis_symbol: str | None = None
     med_adv_eur: float | None = None
+    market_cap_eur: float | None = None
+    market_cap_currency: str | None = None
     first_date: str | None = None
     years: float | None = None
     wrapper: str | None = None
@@ -53,6 +55,8 @@ class AssetGridRow(BaseModel):
     openfigi_ticker: str | None = None
     openfigi_exch: str | None = None
     openfigi_type: str | None = None
+    # OpenFIGI confirmation verdict: verified | mismatch | unknown
+    identity_status: str | None = None
     # Yahoo coverage + parquet OHLCV archive pointer
     price_from: str | None = None
     price_to: str | None = None
@@ -62,6 +66,10 @@ class AssetGridRow(BaseModel):
     zero_vol_frac: float | None = None
     parquet_path: str | None = None
     parquet_rows: int | None = None
+    # Leonteq (lynqs) list metadata — present only for a Leonteq-Verified row
+    leonteq_name: str | None = None
+    leonteq_currency: str | None = None
+    leonteq_product_type: str | None = None
     leonteq_verified: bool = False
 
 
@@ -105,6 +113,28 @@ async def store_one(body: _StoreBody):
         return await asyncio.to_thread(store.store_one, ident)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"store failed: {type(e).__name__}: {e}")
+
+
+class _RowRefreshBody(BaseModel):
+    identifier: str
+
+
+@router.post("/api/asset-pipeline/rows/refresh")
+async def refresh_row(body: _RowRefreshBody):
+    """Fetch OpenFIGI + yfinance for ONE row and persist. Returns a per-source
+    outcome ({openfigi:{found,…}, yfinance:{found,…}, identity_status, status})
+    so the UI can show what got filled vs. what's missing. Never 502s on a plain
+    'not found' — that's a `found:false` result, not an error."""
+    ident = body.identifier.strip()
+    if not ident:
+        raise HTTPException(400, "identifier required")
+    from asset_pipeline import store  # noqa: PLC0415
+    try:
+        return await asyncio.to_thread(store.refresh_row, ident)
+    except YahooThrottled as e:
+        raise HTTPException(429, f"Yahoo rate-limited — try again shortly. {e}")
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"refresh failed: {type(e).__name__}: {e}")
 
 
 class _IngestBody(BaseModel):
@@ -474,6 +504,80 @@ async def upload_scan(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=f"Could not parse file: {type(e).__name__}: {e}")
 
 
+@router.post("/api/asset-pipeline/leonteq/upload")
+async def leonteq_upload(file: UploadFile = File(...), enqueue: bool = Query(True)):
+    """Upload a Leonteq (lynqs) CSV/Excel — columns id, ticker, name, productType,
+    ric, isin, currency. REPLACES the Leonteq-Verified set with the file's valid
+    ISINs + their name/currency/productType (so the grid badges + surfaces them),
+    and (unless `enqueue=false`) queues those ISINs for the background ingest so
+    unseen ones get resolved + priced. Returns row/member/queue counts."""
+    raw = await file.read()
+    fname = (file.filename or "").lower()
+
+    def _work() -> dict:
+        import io  # noqa: PLC0415
+
+        import pandas as pd  # noqa: PLC0415
+
+        from asset_pipeline import leonteq as _lt  # noqa: PLC0415
+        from asset_pipeline import queue as _q  # noqa: PLC0415
+        from asset_pipeline.isin_util import is_valid_isin  # noqa: PLC0415
+
+        if fname.endswith((".xlsx", ".xlsm")):
+            df = pd.read_excel(io.BytesIO(raw), dtype=str, engine="openpyxl")
+        elif fname.endswith(".xls"):
+            df = pd.read_excel(io.BytesIO(raw), dtype=str, engine="xlrd")
+        else:  # csv / tsv — delimiter from a SAFE set so ISINs aren't split
+            head = raw.decode("utf-8-sig", errors="replace").lstrip().splitlines()
+            first = head[0] if head else ""
+            delim = next((d for d in (",", ";", "\t", "|") if d in first), ",")
+            df = pd.read_csv(io.BytesIO(raw), dtype=str, keep_default_na=False,
+                             sep=delim, engine="python")
+        df = df.fillna("")
+        colmap = {str(c).strip().lower(): c for c in df.columns}
+
+        def _col(*names: str) -> str | None:
+            for n in names:
+                if n in colmap:
+                    return colmap[n]
+            return None
+
+        isin_c = _col("isin")
+        if isin_c is None:
+            raise ValueError("no 'isin' column in the file")
+        name_c = _col("name")
+        ccy_c = _col("currency", "ccy")
+        pt_c = _col("producttype", "product_type", "type")
+
+        members: list[dict] = []
+        isins: list[str] = []
+        for _, row in df.iterrows():
+            isin = str(row[isin_c]).strip().upper()
+            if not is_valid_isin(isin):
+                continue
+            members.append({
+                "identifier": isin,
+                "name": str(row[name_c]).strip() if name_c else None,
+                "currency": str(row[ccy_c]).strip() if ccy_c else None,
+                "product_type": str(row[pt_c]).strip() if pt_c else None,
+            })
+            isins.append(isin)
+
+        res = _lt.replace_universe(members)
+        # Seed a placeholder grid row per instrument so the WHOLE universe shows
+        # immediately (badged + name/ccy/productType), then enqueue for the worker
+        # to enrich each with yfinance/OpenFIGI in the background.
+        seeded = _lt.seed_execution_placeholders(isins)
+        q = _q.enqueue(isins) if enqueue else {"queued": 0, "skipped_existing": 0, "input": 0}
+        return {"filename": file.filename, "rows": int(len(df)),
+                "valid_isins": len(isins), "seeded": seeded, **res, "queue": q}
+
+    try:
+        return await asyncio.to_thread(_work)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Could not process Leonteq file: {type(e).__name__}: {e}")
+
+
 @router.get("/api/asset-pipeline/storage")
 async def storage():
     """Live row counts + rough on-disk estimate for the asset-pipeline tables."""
@@ -514,6 +618,40 @@ async def alphalab(
     return res
 
 
+_regime_cache: dict[tuple, tuple[float, dict]] = {}
+
+
+@router.get("/api/asset-pipeline/alphalab/regime")
+async def alphalab_regime(
+    min_adv_eur: float = Query(1_000_000.0, ge=0),
+    require_sector: bool = True,
+    asset_class: str = Query("equity"),
+    max_assets: int = Query(600, ge=20, le=2500),
+    start: str | None = Query(None),
+    end: str | None = Query(None),
+    universe_id: int | None = Query(None, description="use a SAVED universe's members instead of the ADV/sector filters"),
+    refresh: bool = False,
+):
+    """Bull/bear × calm/turbulent regime timeline of the equal-weight index, over
+    either the ADV/sector filters OR a saved `universe_id`'s members. bull = index ≥
+    its trailing 200-day mean; turbulent = 63-day vol above the median of its own
+    prior history. Returns daily {dates, index, ma200, bull[], turb[], current}.
+    The frontend rebases the index to 100 at the window start. Cached ~30 min."""
+    import time  # noqa: PLC0415
+
+    from asset_pipeline import alphalab as _al  # noqa: PLC0415
+    ac = asset_class or None
+    key = (min_adv_eur, require_sector, ac, int(max_assets), start, end, universe_id)
+    hit = _regime_cache.get(key)
+    if hit and not refresh and (time.time() - hit[0] < 1800):
+        return hit[1]
+    res = await asyncio.to_thread(
+        _al.compute_regime, min_adv_eur, require_sector, ac, max_assets, start, end, universe_id,
+    )
+    _regime_cache[key] = (time.time(), res)
+    return res
+
+
 @router.get("/api/asset-pipeline/grid", response_model=AssetGridResponse)
 async def grid():
     """The flat one-row-per-ISIN grid (from the `asset_grid` view): every input
@@ -546,6 +684,217 @@ async def grid():
         return {"rows": rows}
 
     return await asyncio.to_thread(_q)
+
+
+class UniverseTicker(BaseModel):
+    """One member of the liquid universe — a UNIQUE yfinance ticker (the analysis
+    instrument), backed by its most-liquid tradeable listing (execution)."""
+    analysis_symbol: str
+    name: str | None = None
+    asset_class: str | None = None
+    sector: str | None = None
+    currency: str | None = None
+    med_adv_eur: float | None = None
+    market_cap_eur: float | None = None
+    bars: int | None = None
+    price_from: str | None = None
+    price_to: str | None = None
+    zero_vol_frac: float | None = None
+    n_listings: int = 1                       # how many execution listings map to this ticker
+    # the chosen (most-liquid) tradeable listing behind the ticker
+    execution_isin: str | None = None
+    execution_symbol: str | None = None
+    exchange: str | None = None
+    leonteq_name: str | None = None
+    leonteq_product_type: str | None = None
+
+
+class UniverseResponse(BaseModel):
+    count: int
+    params: dict
+    tickers: list[UniverseTicker]
+
+
+class UniverseParams(BaseModel):
+    min_adv_eur: float = 1_000_000.0
+    min_market_cap_eur: float = 0.0            # 0 = no market-cap floor
+    max_zero_vol: float = 0.05
+    require_leonteq: bool = True
+    require_openfigi_match: bool = True
+    require_volume: bool = True
+    asset_class: str | None = None
+    sectors: list[str] | None = None          # None/empty = all sectors
+
+
+def _universe_members(supabase, p: UniverseParams) -> list[dict]:
+    """The deduped unique-yfinance-ticker members for a filter: pull grid listings
+    meeting the identity + liquidity constraints, dedupe by `analysis_symbol`
+    keeping the most-liquid listing (17 BTC ETPs → one BTC-USD), then apply the ADV
+    floor to that listing. Returns shaped ticker dicts, most-liquid first."""
+    rows: list[dict] = []
+    off = 0
+    while True:
+        qb = (
+            supabase.table("asset_grid").select(
+                "isin, analysis_symbol, name, asset_class, sector, currency, yahoo_symbol, "
+                "exchange, med_adv_eur, market_cap_eur, bars, price_from, price_to, zero_vol_frac, "
+                "volume_from, leonteq_verified, leonteq_name, leonteq_currency, leonteq_product_type, "
+                "openfigi_name, identity_status"
+            )
+            .eq("status", "ok")
+            .not_.is_("analysis_symbol", "null")
+            .gt("bars", 0)
+            .lte("zero_vol_frac", p.max_zero_vol)
+        )
+        if p.require_volume:
+            qb = qb.not_.is_("volume_from", "null")
+        if p.require_leonteq:
+            qb = (qb.eq("leonteq_verified", True)
+                  .not_.is_("leonteq_name", "null")
+                  .not_.is_("leonteq_currency", "null")
+                  .not_.is_("leonteq_product_type", "null"))
+        if p.require_openfigi_match:
+            qb = qb.eq("identity_status", "verified").not_.is_("openfigi_name", "null")
+        if p.asset_class:
+            qb = qb.eq("asset_class", p.asset_class)
+        if p.sectors:
+            qb = qb.in_("sector", p.sectors)
+        r = qb.order("isin").range(off, off + 999).execute().data or []
+        rows += r
+        if len(r) < 1000:
+            break
+        off += 1000
+
+    best: dict[str, dict] = {}
+    counts: dict[str, int] = {}
+    for x in rows:
+        s = x["analysis_symbol"]
+        counts[s] = counts.get(s, 0) + 1
+        cur = best.get(s)
+        if cur is None or (x.get("med_adv_eur") or 0) > (cur.get("med_adv_eur") or 0):
+            best[s] = x
+    # HYBRID size/liquidity gate: use market cap when we have it (listing-
+    # independent, so a mega-cap stranded on a thin listing still qualifies), and
+    # fall back to ADV for cap-less tickers (ETFs, crypto, commodity underlyings).
+    def _passes(x: dict) -> bool:
+        mc = x.get("market_cap_eur")
+        if mc is not None:
+            return mc >= p.min_market_cap_eur
+        return (x.get("med_adv_eur") or 0) >= p.min_adv_eur
+
+    members = [x for x in best.values() if _passes(x)]
+    members.sort(key=lambda x: -(x.get("market_cap_eur") or x.get("med_adv_eur") or 0))
+    return [{
+        "analysis_symbol": x["analysis_symbol"], "name": x.get("name"),
+        "asset_class": x.get("asset_class"), "sector": x.get("sector"),
+        "currency": x.get("currency"), "med_adv_eur": x.get("med_adv_eur"),
+        "market_cap_eur": x.get("market_cap_eur"),
+        "bars": x.get("bars"), "price_from": x.get("price_from"),
+        "price_to": x.get("price_to"), "zero_vol_frac": x.get("zero_vol_frac"),
+        "n_listings": counts.get(x["analysis_symbol"], 1),
+        "execution_isin": x.get("isin"), "execution_symbol": x.get("yahoo_symbol"),
+        "exchange": x.get("exchange"), "leonteq_name": x.get("leonteq_name"),
+        "leonteq_product_type": x.get("leonteq_product_type"),
+    } for x in members]
+
+
+@router.get("/api/asset-pipeline/universe", response_model=UniverseResponse)
+async def universe(
+    min_adv_eur: float = Query(1_000_000.0, ge=0, description="HYBRID fallback: min ADV (EUR) for tickers with NO market cap (ETFs/crypto)"),
+    min_market_cap_eur: float = Query(0.0, ge=0, description="HYBRID primary: min market cap (EUR) for tickers that have one; 0 = no floor. Listing-independent"),
+    max_zero_vol: float = Query(0.05, ge=0, le=1, description="max zero-volume bar fraction (illiquidity guard)"),
+    require_leonteq: bool = Query(True, description="require all 4 Leonteq columns (verified + name + currency + productType)"),
+    require_openfigi_match: bool = Query(True, description="require OpenFIGI name + a 'verified' identity match"),
+    require_volume: bool = Query(True, description="require stored traded-volume data"),
+    asset_class: str | None = Query(None, description="restrict to one asset class (equity/etf/crypto/commodity/…)"),
+    sectors: str | None = Query(None, description="comma-separated sectors to include; omit = all"),
+    count_only: bool = Query(False, description="return only the count (for the live create-universe preview)"),
+):
+    """PREVIEW a large, LIQUID universe of UNIQUE yfinance tickers with price +
+    volume history, from the resolved grid. Read-only — tune the params, read the
+    `count`, then POST /universe/create to save it. `count_only=true` skips the
+    ticker list (cheap live preview)."""
+    from deps import supabase  # noqa: PLC0415
+    p = UniverseParams(min_adv_eur=min_adv_eur, min_market_cap_eur=min_market_cap_eur,
+                       max_zero_vol=max_zero_vol, require_leonteq=require_leonteq,
+                       require_openfigi_match=require_openfigi_match,
+                       require_volume=require_volume, asset_class=asset_class,
+                       sectors=[s for s in sectors.split(",") if s.strip()] if sectors else None)
+    tickers = await asyncio.to_thread(_universe_members, supabase, p)
+    return {"count": len(tickers), "params": p.model_dump(),
+            "tickers": [] if count_only else tickers}
+
+
+class _CreateUniverseBody(UniverseParams):
+    name: str
+
+
+@router.post("/api/asset-pipeline/universe/create")
+async def create_universe(body: _CreateUniverseBody):
+    """Materialise + SAVE the filtered universe under `name`: computes the unique
+    tickers, replaces any same-named universe, stores membership. Returns
+    {id, name, ticker_count}."""
+    from deps import supabase  # noqa: PLC0415
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "name required")
+    p = UniverseParams(**body.model_dump(exclude={"name"}))
+
+    def _work() -> dict:
+        tickers = _universe_members(supabase, p)
+        syms = [t["analysis_symbol"] for t in tickers]
+        # Replace any existing universe of the same name (idempotent re-create).
+        supabase.table("asset_universe").delete().eq("name", name).execute()
+        ins = supabase.table("asset_universe").insert(
+            {"name": name, "params": p.model_dump(), "ticker_count": len(syms)}
+        ).execute()
+        uid = ins.data[0]["id"]
+        rows = [{"universe_id": uid, "analysis_symbol": s} for s in syms]
+        for i in range(0, len(rows), 500):
+            supabase.table("asset_universe_member").insert(rows[i:i + 500]).execute()
+        return {"id": uid, "name": name, "ticker_count": len(syms)}
+
+    return await asyncio.to_thread(_work)
+
+
+@router.get("/api/asset-pipeline/universes")
+async def list_universes():
+    """Saved universes (id, name, params, ticker_count, created_at), newest first."""
+    from deps import supabase  # noqa: PLC0415
+    return await asyncio.to_thread(
+        lambda: {"universes": supabase.table("asset_universe").select("*")
+                 .order("created_at", desc=True).execute().data or []}
+    )
+
+
+@router.get("/api/asset-pipeline/universes/{universe_id}/members")
+async def universe_members(universe_id: int):
+    """The member analysis_symbols of a saved universe (for the grid filter)."""
+    from deps import supabase  # noqa: PLC0415
+
+    def _q() -> dict:
+        syms: list[str] = []
+        off = 0
+        while True:
+            r = (supabase.table("asset_universe_member").select("analysis_symbol")
+                 .eq("universe_id", universe_id).range(off, off + 999).execute().data) or []
+            syms += [x["analysis_symbol"] for x in r]
+            if len(r) < 1000:
+                break
+            off += 1000
+        return {"universe_id": universe_id, "members": syms}
+
+    return await asyncio.to_thread(_q)
+
+
+@router.delete("/api/asset-pipeline/universes/{universe_id}")
+async def delete_universe(universe_id: int):
+    """Delete a saved universe (members cascade)."""
+    from deps import supabase  # noqa: PLC0415
+    await asyncio.to_thread(
+        lambda: supabase.table("asset_universe").delete().eq("id", universe_id).execute()
+    )
+    return {"deleted": universe_id}
 
 
 @router.get("/api/asset-pipeline/assets")

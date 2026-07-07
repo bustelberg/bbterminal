@@ -15,6 +15,7 @@ from __future__ import annotations
 import io
 import math
 
+import numpy as np
 import pandas as pd
 
 from deps import supabase
@@ -37,12 +38,18 @@ def _signals(m: pd.DataFrame, ret1: pd.DataFrame) -> dict[str, pd.DataFrame]:
     }
 
 
-def _load_closes(analysis_ids: list[int]) -> pd.DataFrame | None:
-    """(analysis_id, target_date, close) for the given assets via one COPY."""
+def _load_closes(analysis_ids: list[int], since: str | None = None) -> pd.DataFrame | None:
+    """(analysis_id, target_date, close) for the given assets via one COPY. `since`
+    (YYYY-MM-DD) bounds the scan to recent history — crucial for a large universe
+    (loading ALL history for thousands of ids is a slow full scan)."""
+    where = "analysis_id = ANY(%s::int[]) AND close IS NOT NULL"
+    params: tuple = (analysis_ids,)
+    if since:
+        where += " AND target_date >= %s"
+        params = (analysis_ids, since)
     buf: io.BytesIO | None = _pg._run_copy(
-        "COPY (SELECT analysis_id, target_date, close FROM asset_price "
-        "WHERE analysis_id = ANY(%s::int[]) AND close IS NOT NULL) TO STDOUT WITH CSV",
-        (analysis_ids,),
+        f"COPY (SELECT analysis_id, target_date, close FROM asset_price WHERE {where}) TO STDOUT WITH CSV",
+        params,
     )
     if buf is None:
         return None
@@ -103,6 +110,110 @@ def _select_universe(
         ),
     }
     return [aid for aid, _, _ in picked], meta
+
+
+def _eq_index(R: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Equal-weight universe index level + its trailing 63-day realized vol, from a
+    days×instruments daily-return matrix. Daily returns are clipped to ±50% before
+    averaging so a single blow-up bar can't hijack the index. (Faithful to the
+    etoro-yfinance regime detector.)"""
+    with np.errstate(all="ignore"):
+        clipped = np.clip(R, -0.5, 0.5)
+        cnt = np.isfinite(clipped).sum(axis=1)
+        eq_ret = np.where(cnt > 0, np.nansum(clipped, axis=1) / np.maximum(cnt, 1), 0.0)
+    eq_curve = np.cumprod(1.0 + eq_ret)
+    roll_vol = pd.Series(eq_ret).rolling(63).std().to_numpy()
+    return eq_curve, roll_vol
+
+
+def _universe_analysis_ids(universe_id: int) -> tuple[list[int], dict]:
+    """Analysis ids for a SAVED universe (asset_universe): its member
+    analysis_symbols mapped back to analysis_ids. Returns (ids, meta)."""
+    syms: list[str] = []
+    off = 0
+    while True:
+        r = (supabase.table("asset_universe_member").select("analysis_symbol")
+             .eq("universe_id", universe_id).range(off, off + 999).execute().data) or []
+        syms += [x["analysis_symbol"] for x in r]
+        if len(r) < 1000:
+            break
+        off += 1000
+    aids: list[int] = []
+    for i in range(0, len(syms), 200):
+        r = (supabase.table("asset_analysis").select("analysis_id, symbol")
+             .in_("symbol", syms[i:i + 200]).execute().data) or []
+        aids += [x["analysis_id"] for x in r]
+    u = (supabase.table("asset_universe").select("name").eq("id", universe_id).limit(1).execute().data) or []
+    name = u[0]["name"] if u else f"Universe {universe_id}"
+    return aids, {"size": len(aids), "matched": len(syms), "name": name, "sectors": []}
+
+
+def compute_regime(
+    min_adv_eur: float = 1_000_000.0,
+    require_sector: bool = True,
+    asset_class: str | None = "equity",
+    max_assets: int = 600,
+    start: str | None = None,
+    end: str | None = None,
+    universe_id: int | None = None,
+) -> dict:
+    """Daily bull/bear × calm/turbulent regime of the equal-weight universe index
+    (the same universe the IC scoreboard uses). bull = index at/above its trailing
+    200-day mean; turbulent = current 63-day vol above the median of its own prior
+    history — each day uses ONLY pre-day data (no look-ahead). Returns the index,
+    its 200-day mean, and the bull/turb flags over [start, end] (warm-up kept
+    behind the scenes). Faithful to etoro-yfinance `signals.regime_series`."""
+    min_adv_eur = max(0.0, float(min_adv_eur))
+    max_assets = max(20, min(int(max_assets), 2500))
+    asset_class = asset_class or None
+    if universe_id is not None:
+        aids, uni = _universe_analysis_ids(universe_id)
+    else:
+        aids, uni = _select_universe(min_adv_eur, require_sector, asset_class, max_assets)
+    base = {"universe": uni, "filters": {
+        "min_adv_eur": min_adv_eur, "require_sector": require_sector,
+        "asset_class": asset_class, "max_assets": max_assets, "universe_id": universe_id}}
+    if not aids:
+        return {**base, "dates": [], "note": "no instruments match these filters"}
+    # Bound the scan to ~400 days before `start` so the 200-day mean + 63-day-vol
+    # median still warm up, without loading every id's full history.
+    since = None
+    if start:
+        since = (pd.Timestamp(start) - pd.Timedelta(days=400)).date().isoformat()
+    df = _load_closes(aids, since=since)
+    if df is None:
+        return {**base, "dates": [], "note": "fast COPY loader unavailable (set SUPABASE_DB_URL)"}
+    df["target_date"] = pd.to_datetime(df["target_date"])
+    panel = df.pivot_table(index="target_date", columns="analysis_id", values="close").sort_index()
+    if len(panel) < 220:
+        return {**base, "dates": [], "note": "not enough daily history for the 200-day regime"}
+
+    idx = panel.index
+    eq_curve, roll_vol = _eq_index(panel.pct_change().to_numpy())
+    n = len(eq_curve)
+    ma200 = np.empty(n)
+    bull = np.empty(n, dtype=bool)
+    turb = np.empty(n, dtype=bool)
+    for p in range(n):
+        prior = eq_curve[max(0, p - 200):p]
+        ma200[p] = float(np.mean(prior)) if len(prior) else eq_curve[p]
+        bull[p] = bool(eq_curve[p] >= np.mean(prior)) if len(prior) else True
+        hist = roll_vol[63:p]
+        hist = hist[np.isfinite(hist)]
+        turb[p] = bool(len(hist) > 60 and np.isfinite(roll_vol[p]) and roll_vol[p] > np.median(hist))
+
+    lo = 0 if start is None else int(idx.searchsorted(pd.Timestamp(start), "left"))
+    hi = n if end is None else int(idx.searchsorted(pd.Timestamp(end), "right"))
+    sl = slice(lo, hi)
+    return {
+        **base,
+        "dates": [str(d.date()) for d in idx[sl]],
+        "index": [round(float(v), 4) for v in eq_curve[sl]],
+        "ma200": [round(float(v), 4) for v in ma200[sl]],
+        "bull": [bool(v) for v in bull[sl]],
+        "turb": [bool(v) for v in turb[sl]],
+        "current": {"bull": bool(bull[-1]), "turb": bool(turb[-1]), "date": str(idx[-1].date())},
+    }
 
 
 def _monthly_ic(sig: pd.DataFrame, fwd: pd.DataFrame) -> pd.Series:

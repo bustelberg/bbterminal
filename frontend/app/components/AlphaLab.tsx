@@ -1,9 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
 import AssetNav from './AssetNav';
+import LwLineChart from './LwLineChart';
+import { type RegimeData } from './RegimeChart';
 
 type Sig = {
   signal: string;
@@ -56,6 +58,47 @@ export default function AlphaLab() {
   const [board, setBoard] = useState<Board | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [regime, setRegime] = useState<RegimeData | null>(null);
+  const [regimeLoading, setRegimeLoading] = useState(false);
+  const [regimeError, setRegimeError] = useState<string | null>(null);
+  // Saved universes (from the Execution-instruments "Create universe").
+  const [savedUniverses, setSavedUniverses] = useState<{ id: number; name: string; ticker_count: number }[]>([]);
+  const [regimeUniverseId, setRegimeUniverseId] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await apiFetch(`${API_URL}/api/asset-pipeline/universes`);
+        const b = await r.json().catch(() => null);
+        if (r.ok) setSavedUniverses(b?.universes ?? []);
+      } catch { /* ignore */ }
+    })();
+  }, []);
+
+  const loadRegime = useCallback(async (universeId: string) => {
+    if (!universeId) { setRegime(null); setRegimeError(null); return; }
+    setRegimeLoading(true); setRegimeError(null); setRegime(null);
+    try {
+      // Bound the compute to a long-but-manageable window; index is =100 at the start.
+      const p = new URLSearchParams({ universe_id: universeId, start: '2015-01-01' });
+      const r = await apiFetch(`${API_URL}/api/asset-pipeline/alphalab/regime?${p}`);
+      const b = await r.json().catch(() => null);
+      if (!r.ok) setRegimeError(b?.detail ?? `HTTP ${r.status}`);
+      else if (!b?.dates?.length) setRegimeError(b?.note ?? 'No price history for this universe.');
+      else setRegime(b as RegimeData);
+    } catch (e) {
+      setRegimeError(e instanceof Error ? e.message : String(e));
+    } finally { setRegimeLoading(false); }
+  }, []);
+
+  // Equal-weight index, rebased to 100 at the window start.
+  const eqLine = useMemo(() => {
+    const idx = regime?.index;
+    if (!idx?.length) return [];
+    const base = idx[0] || 1;
+    return regime!.dates.map((d, i) => ({ date: d, value: (idx[i] / base) * 100 }));
+  }, [regime]);
 
   const qs = useCallback((preview: boolean, refresh: boolean) => {
     const p = new URLSearchParams({
@@ -148,6 +191,30 @@ export default function AlphaLab() {
               ))}
             </div>
           )}
+        </div>
+
+        {/* Equal-weight index of a saved universe (=100 at the start) */}
+        <div className="bg-card border border-neutral-800/40 rounded-xl p-4 space-y-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-xs font-semibold text-fg-strong uppercase tracking-wide">Equal-weight index</span>
+            <select value={regimeUniverseId} onChange={(e) => { setRegimeUniverseId(e.target.value); void loadRegime(e.target.value); }}
+              className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-sm max-w-[260px] focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30">
+              <option value="">Select a universe…</option>
+              {savedUniverses.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.ticker_count.toLocaleString()})</option>)}
+            </select>
+            {regimeLoading && <span className="text-[11px] text-fg-faint">Computing…</span>}
+            <span className="text-[11px] text-fg-faint">equal-weight price index of the universe · =100 at the start</span>
+          </div>
+          {regimeError && <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2 text-xs text-neg-300">{regimeError}</div>}
+          {regime && eqLine.length > 0 && (
+            <>
+              <LwLineChart data={eqLine} scale="log" unit="=100" />
+              <div className="text-[10px] text-fg-faint">
+                Equal-weight index of {regime.universe?.name ? `“${regime.universe.name}”` : 'the universe'} ({regime.universe?.size ?? 0} instruments) · =100 at start · scroll to zoom, drag to pan, double-click to reset.
+              </div>
+            </>
+          )}
+          {!regime && !regimeError && !regimeLoading && <p className="text-[11px] text-fg-subtle">Pick a universe to chart its equal-weight index.</p>}
         </div>
 
         {error && <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-4 py-3 text-sm text-neg-300">{error}</div>}

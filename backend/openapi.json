@@ -101,6 +101,17 @@
             ],
             "title": "First Date"
           },
+          "identity_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identity Status"
+          },
           "is_default": {
             "anyOf": [
               {
@@ -127,10 +138,65 @@
             "title": "Isin",
             "type": "string"
           },
+          "leonteq_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leonteq Currency"
+          },
+          "leonteq_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leonteq Name"
+          },
+          "leonteq_product_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leonteq Product Type"
+          },
           "leonteq_verified": {
             "default": false,
             "title": "Leonteq Verified",
             "type": "boolean"
+          },
+          "market_cap_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Cap Currency"
+          },
+          "market_cap_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Cap Eur"
           },
           "med_adv_eur": {
             "anyOf": [
@@ -905,6 +971,20 @@
           "year"
         ],
         "title": "BenchmarkYear",
+        "type": "object"
+      },
+      "Body_leonteq_upload_api_asset_pipeline_leonteq_upload_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_leonteq_upload_api_asset_pipeline_leonteq_upload_post",
         "type": "object"
       },
       "Body_parse_portfolio_api_portfolios_parse_post": {
@@ -3248,6 +3328,217 @@
         "title": "UniverseRenameRequest",
         "type": "object"
       },
+      "UniverseResponse": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "params": {
+            "additionalProperties": true,
+            "title": "Params",
+            "type": "object"
+          },
+          "tickers": {
+            "items": {
+              "$ref": "#/components/schemas/UniverseTicker"
+            },
+            "title": "Tickers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "params",
+          "tickers"
+        ],
+        "title": "UniverseResponse",
+        "type": "object"
+      },
+      "UniverseTicker": {
+        "description": "One member of the liquid universe \u2014 a UNIQUE yfinance ticker (the analysis\ninstrument), backed by its most-liquid tradeable listing (execution).",
+        "properties": {
+          "analysis_symbol": {
+            "title": "Analysis Symbol",
+            "type": "string"
+          },
+          "asset_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Class"
+          },
+          "bars": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bars"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange"
+          },
+          "execution_isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Isin"
+          },
+          "execution_symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Symbol"
+          },
+          "leonteq_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leonteq Name"
+          },
+          "leonteq_product_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leonteq Product Type"
+          },
+          "market_cap_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Cap Eur"
+          },
+          "med_adv_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Med Adv Eur"
+          },
+          "n_listings": {
+            "default": 1,
+            "title": "N Listings",
+            "type": "integer"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "price_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price From"
+          },
+          "price_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price To"
+          },
+          "sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector"
+          },
+          "zero_vol_frac": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zero Vol Frac"
+          }
+        },
+        "required": [
+          "analysis_symbol"
+        ],
+        "title": "UniverseTicker",
+        "type": "object"
+      },
       "UpdateBenchmarkRequest": {
         "properties": {
           "currency": {
@@ -3583,6 +3874,74 @@
         "title": "YearStat",
         "type": "object"
       },
+      "_CreateUniverseBody": {
+        "properties": {
+          "asset_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Class"
+          },
+          "max_zero_vol": {
+            "default": 0.05,
+            "title": "Max Zero Vol",
+            "type": "number"
+          },
+          "min_adv_eur": {
+            "default": 1000000.0,
+            "title": "Min Adv Eur",
+            "type": "number"
+          },
+          "min_market_cap_eur": {
+            "default": 0.0,
+            "title": "Min Market Cap Eur",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "require_leonteq": {
+            "default": true,
+            "title": "Require Leonteq",
+            "type": "boolean"
+          },
+          "require_openfigi_match": {
+            "default": true,
+            "title": "Require Openfigi Match",
+            "type": "boolean"
+          },
+          "require_volume": {
+            "default": true,
+            "title": "Require Volume",
+            "type": "boolean"
+          },
+          "sectors": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sectors"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "_CreateUniverseBody",
+        "type": "object"
+      },
       "_ExistingBody": {
         "properties": {
           "identifiers": {
@@ -3734,6 +4093,19 @@
           "company_id"
         ],
         "title": "_PriceRefreshBody",
+        "type": "object"
+      },
+      "_RowRefreshBody": {
+        "properties": {
+          "identifier": {
+            "title": "Identifier",
+            "type": "string"
+          }
+        },
+        "required": [
+          "identifier"
+        ],
+        "title": "_RowRefreshBody",
         "type": "object"
       },
       "_StoreBody": {
@@ -5237,6 +5609,141 @@
         ]
       }
     },
+    "/api/asset-pipeline/alphalab/regime": {
+      "get": {
+        "description": "Bull/bear \u00d7 calm/turbulent regime timeline of the equal-weight index, over\neither the ADV/sector filters OR a saved `universe_id`'s members. bull = index \u2265\nits trailing 200-day mean; turbulent = 63-day vol above the median of its own\nprior history. Returns daily {dates, index, ma200, bull[], turb[], current}.\nThe frontend rebases the index to 100 at the window start. Cached ~30 min.",
+        "operationId": "alphalab_regime_api_asset_pipeline_alphalab_regime_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "min_adv_eur",
+            "required": false,
+            "schema": {
+              "default": 1000000.0,
+              "minimum": 0,
+              "title": "Min Adv Eur",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "require_sector",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Require Sector",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "asset_class",
+            "required": false,
+            "schema": {
+              "default": "equity",
+              "title": "Asset Class",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_assets",
+            "required": false,
+            "schema": {
+              "default": 600,
+              "maximum": 2500,
+              "minimum": 20,
+              "title": "Max Assets",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          },
+          {
+            "description": "use a SAVED universe's members instead of the ADV/sector filters",
+            "in": "query",
+            "name": "universe_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "use a SAVED universe's members instead of the ADV/sector filters",
+              "title": "Universe Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Alphalab Regime",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
     "/api/asset-pipeline/assets": {
       "get": {
         "description": "Browse what's stored: every analysis asset (from asset_catalog \u2014 execution\ncount + price coverage) with its execution instruments (many-to-one) nested,\nmost-liquid first. One round-trip for the catalog + one for executions.",
@@ -5451,6 +5958,58 @@
         ]
       }
     },
+    "/api/asset-pipeline/leonteq/upload": {
+      "post": {
+        "description": "Upload a Leonteq (lynqs) CSV/Excel \u2014 columns id, ticker, name, productType,\nric, isin, currency. REPLACES the Leonteq-Verified set with the file's valid\nISINs + their name/currency/productType (so the grid badges + surfaces them),\nand (unless `enqueue=false`) queues those ISINs for the background ingest so\nunseen ones get resolved + priced. Returns row/member/queue counts.",
+        "operationId": "leonteq_upload_api_asset_pipeline_leonteq_upload_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "enqueue",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Enqueue",
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_leonteq_upload_api_asset_pipeline_leonteq_upload_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Leonteq Upload",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
     "/api/asset-pipeline/queue": {
       "post": {
         "description": "Add ISINs to the async ingest queue as `pending` (instant \u2014 no Yahoo).\nA single background worker drains them. Skips already-ingested (ok) ISINs.\nReturns {queued, skipped_existing, input}.",
@@ -5631,6 +6190,46 @@
         ]
       }
     },
+    "/api/asset-pipeline/rows/refresh": {
+      "post": {
+        "description": "Fetch OpenFIGI + yfinance for ONE row and persist. Returns a per-source\noutcome ({openfigi:{found,\u2026}, yfinance:{found,\u2026}, identity_status, status})\nso the UI can show what got filled vs. what's missing. Never 502s on a plain\n'not found' \u2014 that's a `found:false` result, not an error.",
+        "operationId": "refresh_row_api_asset_pipeline_rows_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/_RowRefreshBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Row",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
     "/api/asset-pipeline/storage": {
       "get": {
         "description": "Live row counts + rough on-disk estimate for the asset-pipeline tables.",
@@ -5686,6 +6285,306 @@
           }
         },
         "summary": "Store One",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/universe": {
+      "get": {
+        "description": "PREVIEW a large, LIQUID universe of UNIQUE yfinance tickers with price +\nvolume history, from the resolved grid. Read-only \u2014 tune the params, read the\n`count`, then POST /universe/create to save it. `count_only=true` skips the\nticker list (cheap live preview).",
+        "operationId": "universe_api_asset_pipeline_universe_get",
+        "parameters": [
+          {
+            "description": "HYBRID fallback: min ADV (EUR) for tickers with NO market cap (ETFs/crypto)",
+            "in": "query",
+            "name": "min_adv_eur",
+            "required": false,
+            "schema": {
+              "default": 1000000.0,
+              "description": "HYBRID fallback: min ADV (EUR) for tickers with NO market cap (ETFs/crypto)",
+              "minimum": 0,
+              "title": "Min Adv Eur",
+              "type": "number"
+            }
+          },
+          {
+            "description": "HYBRID primary: min market cap (EUR) for tickers that have one; 0 = no floor. Listing-independent",
+            "in": "query",
+            "name": "min_market_cap_eur",
+            "required": false,
+            "schema": {
+              "default": 0.0,
+              "description": "HYBRID primary: min market cap (EUR) for tickers that have one; 0 = no floor. Listing-independent",
+              "minimum": 0,
+              "title": "Min Market Cap Eur",
+              "type": "number"
+            }
+          },
+          {
+            "description": "max zero-volume bar fraction (illiquidity guard)",
+            "in": "query",
+            "name": "max_zero_vol",
+            "required": false,
+            "schema": {
+              "default": 0.05,
+              "description": "max zero-volume bar fraction (illiquidity guard)",
+              "maximum": 1,
+              "minimum": 0,
+              "title": "Max Zero Vol",
+              "type": "number"
+            }
+          },
+          {
+            "description": "require all 4 Leonteq columns (verified + name + currency + productType)",
+            "in": "query",
+            "name": "require_leonteq",
+            "required": false,
+            "schema": {
+              "default": true,
+              "description": "require all 4 Leonteq columns (verified + name + currency + productType)",
+              "title": "Require Leonteq",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "require OpenFIGI name + a 'verified' identity match",
+            "in": "query",
+            "name": "require_openfigi_match",
+            "required": false,
+            "schema": {
+              "default": true,
+              "description": "require OpenFIGI name + a 'verified' identity match",
+              "title": "Require Openfigi Match",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "require stored traded-volume data",
+            "in": "query",
+            "name": "require_volume",
+            "required": false,
+            "schema": {
+              "default": true,
+              "description": "require stored traded-volume data",
+              "title": "Require Volume",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "restrict to one asset class (equity/etf/crypto/commodity/\u2026)",
+            "in": "query",
+            "name": "asset_class",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "restrict to one asset class (equity/etf/crypto/commodity/\u2026)",
+              "title": "Asset Class"
+            }
+          },
+          {
+            "description": "comma-separated sectors to include; omit = all",
+            "in": "query",
+            "name": "sectors",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "comma-separated sectors to include; omit = all",
+              "title": "Sectors"
+            }
+          },
+          {
+            "description": "return only the count (for the live create-universe preview)",
+            "in": "query",
+            "name": "count_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "return only the count (for the live create-universe preview)",
+              "title": "Count Only",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UniverseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Universe",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/universe/create": {
+      "post": {
+        "description": "Materialise + SAVE the filtered universe under `name`: computes the unique\ntickers, replaces any same-named universe, stores membership. Returns\n{id, name, ticker_count}.",
+        "operationId": "create_universe_api_asset_pipeline_universe_create_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/_CreateUniverseBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Universe",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/universes": {
+      "get": {
+        "description": "Saved universes (id, name, params, ticker_count, created_at), newest first.",
+        "operationId": "list_universes_api_asset_pipeline_universes_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Universes",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/universes/{universe_id}": {
+      "delete": {
+        "description": "Delete a saved universe (members cascade).",
+        "operationId": "delete_universe_api_asset_pipeline_universes__universe_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "universe_id",
+            "required": true,
+            "schema": {
+              "title": "Universe Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Universe",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/universes/{universe_id}/members": {
+      "get": {
+        "description": "The member analysis_symbols of a saved universe (for the grid filter).",
+        "operationId": "universe_members_api_asset_pipeline_universes__universe_id__members_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "universe_id",
+            "required": true,
+            "schema": {
+              "title": "Universe Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Universe Members",
         "tags": [
           "asset-pipeline"
         ]

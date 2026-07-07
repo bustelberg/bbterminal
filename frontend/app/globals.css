@@ -289,3 +289,29 @@ html {
   scrollbar-width: thin;
   scrollbar-color: #c4ccd6 transparent;
 }
+
+/* Indeterminate loading bar — a thin accent sliver that sweeps across a track,
+   for fetches with no measurable progress (e.g. a bulk grid load). Track: a
+   `relative overflow-hidden` element with the `.loading-bar` class; it renders
+   the moving sliver via ::after so callers add no extra markup. */
+.loading-bar {
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--color-accent-500) 15%, transparent);
+}
+.loading-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 35%;
+  border-radius: inherit;
+  background: var(--color-accent-500);
+  animation: loading-bar-slide 1.15s ease-in-out infinite;
+}
+@keyframes loading-bar-slide {
+  0%   { transform: translateX(-110%); }
+  100% { transform: translateX(400%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .loading-bar::after { animation-duration: 2.4s; }
+}

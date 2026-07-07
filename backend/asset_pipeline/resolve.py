@@ -89,6 +89,18 @@ def same_company(stored_name: str | None, figi_name: str | None) -> bool:
     return _name_score(a, b) >= _NAME_MATCH
 
 
+def identity_status(resolved_name: str | None, figi_name: str | None) -> str:
+    """The OpenFIGI CONFIRMATION verdict for a resolved instrument:
+      'verified' — the independent OpenFIGI name agrees with the resolved
+                   (yfinance) name → we priced the right security;
+      'mismatch' — OpenFIGI names a DIFFERENT company → likely wrong resolution;
+      'unknown'  — no OpenFIGI name (or no resolved name) to compare.
+    Reuses `same_company` so it matches the requeue-suspects detector exactly."""
+    if not figi_name or not resolved_name:
+        return "unknown"
+    return "verified" if same_company(resolved_name, figi_name) else "mismatch"
+
+
 def detect_id_type(identifier: str) -> str:
     return "isin" if ISIN_RE.match(identifier.strip().upper()) else "yahoo"
 
@@ -123,18 +135,41 @@ def _asset_class(quote_type: str | None, symbol: str) -> str:
 # literally named "Barrick Gold" is never mis-mapped.
 _UNDERLYING: list[tuple[tuple[str, ...], str, str, list[str]]] = [
     (("bitcoin cash",), "Bitcoin Cash", "crypto", ["BCH-USD"]),
-    (("bitcoin", "btc", "xbt"), "Bitcoin", "crypto", ["BTC-USD"]),
+    (("bitcoin", "btc"), "Bitcoin", "crypto", ["BTC-USD"]),  # NOT "xbt" — it's the
+    # "XBT Provider" brand prefix on BOTH their Bitcoin AND Ether trackers, so it
+    # mis-mapped "XBT … Ether Tracker" -> BTC. The real BTC name always says bitcoin/btc.
     (("ethereum", "ether"), "Ethereum", "crypto", ["ETH-USD"]),
     (("solana",), "Solana", "crypto", ["SOL-USD"]),
     (("ripple", "xrp"), "XRP", "crypto", ["XRP-USD"]),
     (("litecoin",), "Litecoin", "crypto", ["LTC-USD"]),
+    # Long-tail single-coin ETPs -> their yfinance <COIN>-USD spot series. Keyed on
+    # the FULL coin name (unambiguous; short tickers like COMP/DOT/UNI would false-
+    # match equities). The wrapper gate + name guard keep real equities out.
+    (("cardano",), "Cardano", "crypto", ["ADA-USD"]),
+    (("polkadot",), "Polkadot", "crypto", ["DOT-USD"]),
+    (("avalanche",), "Avalanche", "crypto", ["AVAX-USD"]),
+    (("chainlink",), "Chainlink", "crypto", ["LINK-USD"]),
+    (("polygon", "matic"), "Polygon", "crypto", ["POL-USD", "MATIC-USD"]),
+    (("dogecoin",), "Dogecoin", "crypto", ["DOGE-USD"]),
+    (("uniswap",), "Uniswap", "crypto", ["UNI-USD"]),
+    (("algorand",), "Algorand", "crypto", ["ALGO-USD"]),
+    (("cosmos",), "Cosmos", "crypto", ["ATOM-USD"]),
+    (("tezos",), "Tezos", "crypto", ["XTZ-USD"]),
+    (("chiliz",), "Chiliz", "crypto", ["CHZ-USD"]),
+    (("aave",), "Aave", "crypto", ["AAVE-USD"]),
+    (("stellar",), "Stellar", "crypto", ["XLM-USD"]),
+    (("filecoin",), "Filecoin", "crypto", ["FIL-USD"]),
+    (("compound",), "Compound", "crypto", ["COMP-USD"]),
+    (("decentraland",), "Decentraland", "crypto", ["MANA-USD"]),
+    (("apecoin",), "ApeCoin", "crypto", ["APE-USD"]),
+    (("axie",), "Axie Infinity", "crypto", ["AXS-USD"]),
     (("gold",), "Gold", "commodity", ["GLD", "IAU", "GC=F"]),
     (("silver",), "Silver", "commodity", ["SLV", "SI=F"]),
     (("platinum",), "Platinum", "commodity", ["PPLT", "PL=F"]),
     (("palladium",), "Palladium", "commodity", ["PALL", "PA=F"]),
     (("natural gas",), "Natural Gas", "commodity", ["UNG", "NG=F"]),
     (("brent",), "Brent Crude", "commodity", ["BNO", "BZ=F"]),
-    (("crude", "wti"), "Crude Oil (WTI)", "commodity", ["USO", "CL=F"]),
+    (("crude", "wti", "oil"), "Crude Oil (WTI)", "commodity", ["USO", "CL=F"]),
     (("copper",), "Copper", "commodity", ["CPER", "HG=F"]),
 ]
 
@@ -155,8 +190,15 @@ _EQUITY_HINT = re.compile(
     r"\b(mining|miner|miners|producers|resources|corp|corporation|company|companies|holdings|ltd|plc|inc|ag|sa|nv)\b",
     re.I,
 )
-# Baskets of commodity EQUITIES (miners/producers) are NOT the commodity itself.
-_BASKET_RE = re.compile(r"\b(miner|miners|mining|producers|equities|companies)\b", re.I)
+# Baskets of commodity/crypto EQUITIES (miners / exploration / production / oil
+# services / sector indices / equity blends) are NOT the commodity itself — never
+# swap them to the underlying. STEMS so every form is caught: explor(ation/ers),
+# produc(tion/ers), refin(ing/ers), equit(y/ies), compan(y/ies).
+_BASKET_RE = re.compile(
+    r"(miner|mining|explor|produc|refin|service|equipment|equit|compan|"
+    r"\bindex\b|\bsector\b|equal weight)",
+    re.I,
+)
 
 
 def _looks_like_wrapper(name: str | None, asset_class: str) -> bool:
@@ -342,6 +384,51 @@ def _identity_result(identifier: str, idt: str, name: str | None, asset_class: s
     }
 
 
+def resolve_analysis_instrument(chosen: dict, asset_class: str) -> dict:
+    """Given the resolved EXECUTION listing (`chosen`), decide the ANALYSIS
+    instrument. For a single-underlying crypto/commodity WRAPPER (a BTC/ETH/gold
+    ETP) swap the analysis series to the underlying's long history (BTC-USD /
+    ETH-USD / GLD …), keeping the ETP as execution; a leveraged/inverse product
+    backtests on ITSELF (different return profile). Returns the execution/analysis
+    split + flags. Shared by `resolve()` and `fast_resolve.fast_resolve()` so both
+    paths map wrappers identically."""
+    execution = chosen
+    analysis_note: str | None = None
+    is_leveraged = False
+    underlying: tuple[str, str, list[str]] | None = None
+    if _looks_like_wrapper(chosen.get("name"), asset_class):
+        if _is_leveraged(chosen.get("name")):
+            is_leveraged = True  # leveraged/inverse — backtest on ITSELF, not the underlying
+            analysis_note = (
+                f"{execution['symbol']} looks leveraged/inverse — NOT mapped to a plain "
+                "underlying (different return profile). Backtested on itself (short history)."
+            )
+        else:
+            underlying = _detect_underlying(chosen.get("name"))
+    picked = _pick_analysis(underlying[2]) if underlying else None
+    if underlying and picked:
+        u_label, u_aclass, _cands = underlying
+        analysis = picked
+        analysis_asset_class = u_aclass  # the TRUE asset (commodity/crypto), not the proxy's 'etf'
+        analysis_note = (
+            f"Input resolves to a {u_label} ETP ({execution['symbol']}); backtest on "
+            f"{picked['symbol']} (since {picked.get('first_date')}, {picked.get('years')}y, "
+            "real daily volume) — chosen over lower-quality alternatives (e.g. continuous "
+            "futures with settlement-only / zero-volume early history). The ETP is the "
+            "execution instrument."
+        )
+    else:
+        analysis = chosen
+        analysis_asset_class = asset_class
+    return {
+        "execution": execution, "analysis": analysis,
+        "analysis_asset_class": analysis_asset_class,
+        "wrapper": "etf" if (underlying and picked) else None,
+        "is_leveraged": is_leveraged, "underlying": underlying,
+        "analysis_note": analysis_note,
+    }
+
+
 def resolve(identifier: str, id_type: str | None = None, with_candles: bool = True,
             figi_hint: dict | None = None) -> dict:
     identifier = identifier.strip()
@@ -443,35 +530,14 @@ def resolve(identifier: str, id_type: str | None = None, with_candles: bool = Tr
     # (EXECUTION) listing. If it's a single-underlying WRAPPER (a crypto/
     # commodity ETP), the thing to BACKTEST is the underlying's long series —
     # e.g. a Bitcoin ETF (short history) → BTC-USD (since 2014). Swap the
-    # ANALYSIS instrument to it; keep the ETF as execution.
-    execution = chosen
-    analysis_note: str | None = None
-    is_leveraged = False
-    underlying: tuple[str, str, list[str]] | None = None
-    if _looks_like_wrapper(chosen.get("name"), asset_class):
-        if _is_leveraged(chosen.get("name")):
-            is_leveraged = True  # leveraged/inverse — backtest on ITSELF, not the underlying
-            analysis_note = (
-                f"{execution['symbol']} looks leveraged/inverse — NOT mapped to a plain "
-                "underlying (different return profile). Backtested on itself (short history)."
-            )
-        else:
-            underlying = _detect_underlying(chosen.get("name"))
-    picked = _pick_analysis(underlying[2]) if underlying else None
-    if underlying and picked:
-        u_label, u_aclass, _cands = underlying
-        analysis = picked
-        analysis_asset_class = u_aclass  # the TRUE asset (commodity/crypto), not the proxy's 'etf'
-        analysis_note = (
-            f"Input resolves to a {u_label} ETP ({execution['symbol']}); backtest on "
-            f"{picked['symbol']} (since {picked.get('first_date')}, {picked.get('years')}y, "
-            "real daily volume) — chosen over lower-quality alternatives (e.g. continuous "
-            "futures with settlement-only / zero-volume early history). The ETP is the "
-            "execution instrument."
-        )
-    else:
-        analysis = chosen
-        analysis_asset_class = asset_class
+    # ANALYSIS instrument to it; keep the ETF as execution. (Shared helper.)
+    _ai = resolve_analysis_instrument(chosen, asset_class)
+    execution = _ai["execution"]
+    analysis = _ai["analysis"]
+    analysis_asset_class = _ai["analysis_asset_class"]
+    is_leveraged = _ai["is_leveraged"]
+    underlying = _ai["underlying"]
+    analysis_note = _ai["analysis_note"]
 
     candles = _fetch_candles(analysis["symbol"], analysis.get("first_ts")) if with_candles else None
 
@@ -479,7 +545,7 @@ def resolve(identifier: str, id_type: str | None = None, with_candles: bool = Tr
         "input": identifier,
         "id_type": idt,
         "asset_class": analysis_asset_class,   # the TRUE asset (crypto for a BTC ETF)
-        "wrapper": "etf" if (underlying and picked) else None,
+        "wrapper": _ai["wrapper"],
         "is_leveraged": is_leveraged,
         "candidates": scored,
         "execution": execution,                # what you trade (resolved from the ISIN)

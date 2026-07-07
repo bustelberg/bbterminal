@@ -5,37 +5,50 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
 import type { AssetGridRow } from '../../lib/types/api';
+import { classLabel, sectorLabel } from '../../lib/assetLabels';
 import AssetChartModal from './AssetChartModal';
+import RowResolveModal from './RowResolveModal';
+import CreateUniverseModal from './CreateUniverseModal';
 
 /** Median daily traded value, EUR — compact. */
 const adv = (v: number | null | undefined) =>
   v == null ? '—' : v >= 1e9 ? `€${(v / 1e9).toFixed(2)}B` : v >= 1e6 ? `€${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `€${(v / 1e3).toFixed(0)}k` : `€${v.toFixed(0)}`;
 
-// Resolution status → dot colour: ok=green, not_found=amber, bond=neutral, error=red.
+/** Market cap, EUR — compact (€T/€B/€M). */
+const mcap = (v: number | null | undefined) =>
+  v == null ? '—' : v >= 1e12 ? `€${(v / 1e12).toFixed(2)}T` : v >= 1e9 ? `€${(v / 1e9).toFixed(1)}B` : v >= 1e6 ? `€${(v / 1e6).toFixed(0)}M` : `€${v.toFixed(0)}`;
+
+// Resolution status → dot colour: ok=green, not_found=amber, bond=neutral,
+// error=red, queued=blue (awaiting the background worker — not yet resolved).
 const STATUS_DOT: Record<string, string> = {
   ok: 'bg-pos-500', not_found: 'bg-warn-500', bond: 'bg-neutral-500', error: 'bg-neg-500',
+  queued: 'bg-accent-500',
 };
 
 type SortKey =
-  | 'isin' | 'openfigi_figi' | 'openfigi_ticker' | 'openfigi_exch' | 'openfigi_type'
+  | 'isin'
+  | 'leonteq_name' | 'leonteq_product_type' | 'leonteq_currency'
+  | 'openfigi_name' | 'identity_status'
   | 'name' | 'analysis_symbol' | 'currency' | 'asset_class' | 'sector'
-  | 'med_adv_eur' | 'price_from' | 'price_to' | 'volume_from' | 'volume_to' | 'zero_vol_frac';
+  | 'med_adv_eur' | 'market_cap_eur' | 'price_from' | 'price_to' | 'volume_from' | 'volume_to' | 'zero_vol_frac';
 
-// `sep` marks the first column of a group (ISIN | OpenFIGI | yfinance) → left
-// border so the three families read as sections like the etoro table.
+// `sep` marks the first column of a group (ISIN | Leonteq | OpenFIGI | yfinance)
+// → left border so the families read as sections like the etoro table.
 type Col = { key: SortKey; label: string; align?: 'right'; title?: string; sep?: boolean };
 const COLS: Col[] = [
   { key: 'isin', label: 'ISIN' },
-  { key: 'openfigi_figi', label: 'FIGI', sep: true, title: 'OpenFIGI — Bloomberg security identifier' },
-  { key: 'openfigi_ticker', label: 'OF Ticker', title: 'OpenFIGI ticker(s) for this ISIN' },
-  { key: 'openfigi_exch', label: 'OF Exch', title: 'OpenFIGI exchange code(s)' },
-  { key: 'openfigi_type', label: 'OF Type', title: 'OpenFIGI security type' },
+  { key: 'leonteq_name', label: 'Ltq Name', title: 'Name from the uploaded Leonteq (lynqs) list' },
+  { key: 'leonteq_product_type', label: 'Product', title: 'Leonteq productType (EQUITY, ETF, …)' },
+  { key: 'leonteq_currency', label: 'Ltq Ccy', title: 'Currency from the Leonteq list' },
+  { key: 'openfigi_name', label: 'OpenFIGI Name', sep: true, title: 'Independent instrument name from OpenFIGI (the identity cross-check)' },
+  { key: 'identity_status', label: 'Match', title: 'Does the OpenFIGI name confirm the resolved yfinance instrument? verified = yes · mismatch = OpenFIGI names a different company (likely wrong resolution)' },
   { key: 'name', label: 'Name', sep: true },
   { key: 'analysis_symbol', label: 'Symbol', title: 'yfinance symbol we fetch the price series from — the ANALYSIS instrument (a wrapper like a BTC ETF maps to BTC-USD; the tradable listing is shown as "via …")' },
   { key: 'currency', label: 'Ccy' },
   { key: 'asset_class', label: 'Class' },
   { key: 'sector', label: 'Sector' },
-  { key: 'med_adv_eur', label: '€ ADV', align: 'right', title: 'Median daily traded value in EUR (liquidity)' },
+  { key: 'med_adv_eur', label: '€ ADV', align: 'right', title: 'Median daily traded value in EUR (liquidity of THIS listing)' },
+  { key: 'market_cap_eur', label: '€ Mkt Cap', align: 'right', title: 'Market cap in EUR — from the company PRIMARY listing, so listing-independent (a stranded thin listing still shows the true size)' },
   { key: 'price_from', label: 'Price from', align: 'right', title: 'First stored price date' },
   { key: 'price_to', label: 'Price to', align: 'right', title: 'Last stored price date' },
   { key: 'volume_from', label: 'Vol from', align: 'right', title: 'First date with traded volume' },
@@ -43,17 +56,42 @@ const COLS: Col[] = [
   { key: 'zero_vol_frac', label: 'Zero-vol %', align: 'right', title: 'Share of stored bars with zero volume — illiquidity / data-gap flag (a liquid equity ≈ 0%; FX/index ≈ 100%)' },
 ];
 
-// Each column carries a coloured badge naming where its value came from: ISIN
-// from the uploaded CSV, the openfigi_* block from OpenFIGI, everything else
-// (incl. the parquet OHLCV) from yfinance/Yahoo.
+// Each column carries a coloured badge naming where its value came from: ISIN +
+// the Leonteq metadata from the uploaded list, the OpenFIGI name + Match verdict
+// from OpenFIGI, everything else (incl. the parquet OHLCV) from yfinance/Yahoo.
 const SOURCE_TONE: Record<string, string> = {
-  csv: 'bg-accent-500/10 text-accent-300 border-accent-500/20',
+  Leonteq: 'bg-accent-600/15 text-accent-400 border-accent-600/30',
   OpenFIGI: 'bg-warn-500/10 text-warn-300 border-warn-500/20',
   yfinance: 'bg-pos-500/10 text-pos-300 border-pos-500/20',
 };
-const _OPENFIGI_KEYS = new Set<SortKey>(['openfigi_figi', 'openfigi_ticker', 'openfigi_exch', 'openfigi_type']);
+const _OPENFIGI_KEYS = new Set<SortKey>(['openfigi_name', 'identity_status']);
+// ISIN + the Leonteq metadata columns all come from the uploaded Leonteq list.
+const _LEONTEQ_KEYS = new Set<SortKey>(['isin', 'leonteq_name', 'leonteq_product_type', 'leonteq_currency']);
 const sourceOf = (key: SortKey): keyof typeof SOURCE_TONE =>
-  key === 'isin' ? 'csv' : _OPENFIGI_KEYS.has(key) ? 'OpenFIGI' : 'yfinance';
+  _LEONTEQ_KEYS.has(key) ? 'Leonteq' : _OPENFIGI_KEYS.has(key) ? 'OpenFIGI' : 'yfinance';
+
+// Match badge: verified = green ✓, mismatch = amber ⚠, else neutral —.
+const MATCH_TONE: Record<string, string> = {
+  verified: 'bg-pos-500/10 text-pos-400 border-pos-500/20',
+  mismatch: 'bg-warn-500/10 text-warn-400 border-warn-500/20',
+};
+// Shown in a source's cell when that source was requested but found nothing.
+function MissingBadge() {
+  return (
+    <span title="Requested but this source found nothing"
+      className="text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border bg-neg-500/10 text-neg-400 border-neg-500/20">
+      missing
+    </span>
+  );
+}
+
+function MatchBadge({ status }: { status?: string | null }) {
+  if (status === 'verified')
+    return <span title="OpenFIGI confirms the resolved instrument" className={`text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${MATCH_TONE.verified}`}>✓ Match</span>;
+  if (status === 'mismatch')
+    return <span title="OpenFIGI names a different company — likely wrong resolution" className={`text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${MATCH_TONE.mismatch}`}>⚠ Mismatch</span>;
+  return <span className="text-fg-faint" title="No OpenFIGI name to compare">—</span>;
+}
 
 function SourceBadge({ source }: { source: keyof typeof SOURCE_TONE }) {
   return (
@@ -71,12 +109,42 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [chartRow, setChartRow] = useState<AssetGridRow | null>(null);
+  const [resolveRow, setResolveRow] = useState<AssetGridRow | null>(null);
 
   const [q, setQ] = useState('');
   const [classFilter, setClassFilter] = useState('');
   const [sectorFilter, setSectorFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [productFilter, setProductFilter] = useState('');
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'med_adv_eur', dir: -1 });
+
+  // Saved universes: filter the grid to a universe's member tickers + create new.
+  const [universes, setUniverses] = useState<{ id: number; name: string; ticker_count: number }[]>([]);
+  const [universeFilter, setUniverseFilter] = useState('');            // universe id (string)
+  const [universeMembers, setUniverseMembers] = useState<Set<string> | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+
+  const loadUniverses = useCallback(async () => {
+    try {
+      const r = await apiFetch(`${API_URL}/api/asset-pipeline/universes`);
+      const b = await r.json().catch(() => null);
+      if (r.ok) setUniverses(b?.universes ?? []);
+    } catch { /* ignore */ }
+  }, []);
+  useEffect(() => { void loadUniverses(); }, [loadUniverses]);
+
+  // Fetch the selected universe's member tickers (for the grid filter).
+  useEffect(() => {
+    if (!universeFilter) { setUniverseMembers(null); return; }
+    let alive = true;
+    (async () => {
+      try {
+        const r = await apiFetch(`${API_URL}/api/asset-pipeline/universes/${universeFilter}/members`);
+        const b = await r.json().catch(() => null);
+        if (alive && r.ok) setUniverseMembers(new Set<string>(b?.members ?? []));
+      } catch { /* ignore */ }
+    })();
+    return () => { alive = false; };
+  }, [universeFilter]);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -107,23 +175,24 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
   // One predicate for every filter. `skip` omits a single facet so that facet's
   // option counts reflect all the OTHER active filters — faceted counts, so each
   // dropdown shows what picking an option would yield given the rest.
-  const matches = useCallback((r: AssetGridRow, skip?: 'class' | 'sector' | 'status') => {
+  const matches = useCallback((r: AssetGridRow, skip?: 'class' | 'sector' | 'product') => {
     if (skip !== 'class' && classFilter && r.asset_class !== classFilter) return false;
     if (skip !== 'sector' && sectorFilter && r.sector !== sectorFilter) return false;
-    if (skip !== 'status' && statusFilter && r.status !== statusFilter) return false;
+    if (skip !== 'product' && productFilter && r.leonteq_product_type !== productFilter) return false;
+    if (universeFilter && universeMembers && !universeMembers.has(r.analysis_symbol ?? '')) return false;
     const needle = q.trim().toLowerCase();
     if (needle) {
-      const hay = `${r.isin} ${r.name ?? ''} ${r.yahoo_symbol ?? ''} ${r.analysis_symbol ?? ''} ${r.openfigi_ticker ?? ''} ${r.openfigi_figi ?? ''}`.toLowerCase();
+      const hay = `${r.isin} ${r.name ?? ''} ${r.leonteq_name ?? ''} ${r.openfigi_name ?? ''} ${r.yahoo_symbol ?? ''} ${r.analysis_symbol ?? ''}`.toLowerCase();
       if (!hay.includes(needle)) return false;
     }
     return true;
-  }, [q, classFilter, sectorFilter, statusFilter]);
+  }, [q, classFilter, sectorFilter, productFilter, universeFilter, universeMembers]);
 
   // Distinct values of `key` counted over rows matching all OTHER filters, most
   // common first. Always keeps the current selection selectable (count 0 if it
   // no longer matches). `total` = rows matching the other filters (the "All" count).
   const facet = useCallback((
-    skip: 'class' | 'sector' | 'status',
+    skip: 'class' | 'sector' | 'product',
     key: (r: AssetGridRow) => string | null | undefined,
     selected: string,
   ) => {
@@ -144,7 +213,7 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
 
   const classFacet = useMemo(() => facet('class', (r) => r.asset_class, classFilter), [facet, classFilter]);
   const sectorFacet = useMemo(() => facet('sector', (r) => r.sector, sectorFilter), [facet, sectorFilter]);
-  const statusFacet = useMemo(() => facet('status', (r) => r.status, statusFilter), [facet, statusFilter]);
+  const productFacet = useMemo(() => facet('product', (r) => r.leonteq_product_type, productFilter), [facet, productFilter]);
 
   const view = useMemo(() => {
     const { key, dir } = sort;
@@ -180,39 +249,66 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
         <h3 className="text-sm font-semibold text-fg-strong">
           Execution instruments{rows ? ` · ${view.length}/${rows.length}` : ''}
         </h3>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-end gap-2 flex-wrap">
           <input
             value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search ISIN / name / symbol / FIGI…"
             className="bg-page border border-neutral-700 rounded-lg px-3 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 w-60"
           />
-          <select value={classFilter} onChange={(e) => setClassFilter(e.target.value)}
-            className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30">
-            <option value="">All classes ({classFacet.total})</option>
-            {classFacet.opts.map((o) => <option key={o.value} value={o.value}>{o.value} ({o.count})</option>)}
-          </select>
-          <select value={sectorFilter} onChange={(e) => setSectorFilter(e.target.value)}
-            className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 max-w-[180px]">
-            <option value="">All sectors ({sectorFacet.total})</option>
-            {sectorFacet.opts.map((o) => <option key={o.value} value={o.value}>{o.value} ({o.count})</option>)}
-          </select>
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-            className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30">
-            <option value="">All statuses ({statusFacet.total})</option>
-            {statusFacet.opts.map((o) => <option key={o.value} value={o.value}>{o.value} ({o.count})</option>)}
-          </select>
+          {/* Leonteq PRODUCT filter (Leonteq badge) */}
+          <div className="flex flex-col items-start gap-1">
+            <SourceBadge source="Leonteq" />
+            <select value={productFilter} onChange={(e) => setProductFilter(e.target.value)}
+              className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 max-w-[160px]" title="Leonteq productType">
+              <option value="">All products ({productFacet.total})</option>
+              {productFacet.opts.map((o) => <option key={o.value} value={o.value}>{o.value} ({o.count})</option>)}
+            </select>
+          </div>
+          {/* yfinance CLASS filter (yfinance badge) */}
+          <div className="flex flex-col items-start gap-1">
+            <SourceBadge source="yfinance" />
+            <select value={classFilter} onChange={(e) => setClassFilter(e.target.value)}
+              className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30" title="yfinance asset class">
+              <option value="">All classes ({classFacet.total})</option>
+              {classFacet.opts.map((o) => <option key={o.value} value={o.value}>{classLabel(o.value)} ({o.count})</option>)}
+            </select>
+          </div>
+          {/* yfinance SECTOR filter (yfinance badge) */}
+          <div className="flex flex-col items-start gap-1">
+            <SourceBadge source="yfinance" />
+            <select value={sectorFilter} onChange={(e) => setSectorFilter(e.target.value)}
+              className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 max-w-[180px]" title="yfinance sector">
+              <option value="">All sectors ({sectorFacet.total})</option>
+              {sectorFacet.opts.map((o) => <option key={o.value} value={o.value}>{sectorLabel(o.value)} ({o.count})</option>)}
+            </select>
+          </div>
           <button type="button" onClick={() => void load()} disabled={loading}
             className="text-xs px-3 py-1.5 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-40 transition-colors">
             {loading ? 'Loading…' : 'Refresh'}
           </button>
-          <button type="button" onClick={() => { setQ(''); setClassFilter(''); setSectorFilter(''); setStatusFilter(''); }}
-            disabled={!q.trim() && !classFilter && !sectorFilter && !statusFilter}
+          {/* Universe membership filter */}
+          <select value={universeFilter} onChange={(e) => setUniverseFilter(e.target.value)} title="Filter to a saved universe's tickers"
+            className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 max-w-[200px]">
+            <option value="">All universes</option>
+            {universes.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.ticker_count.toLocaleString()})</option>)}
+          </select>
+          <button type="button" onClick={() => { setQ(''); setClassFilter(''); setSectorFilter(''); setProductFilter(''); setUniverseFilter(''); }}
+            disabled={!q.trim() && !classFilter && !sectorFilter && !productFilter && !universeFilter}
             className="text-xs px-3 py-1.5 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
             Clear filters
+          </button>
+          <button type="button" onClick={() => setShowCreate(true)}
+            className="text-xs px-3 py-1.5 rounded-lg bg-accent-600 hover:bg-accent-500 text-white transition-colors">
+            + Create universe
           </button>
         </div>
       </div>
 
+      {/* Indeterminate loading bar — shows on the initial mount fetch and on
+          every Refresh (the grid is one bulk load, so there's no % to report). */}
+      {loading && <div className="loading-bar h-0.5 w-full rounded-full" aria-hidden />}
+
       {error && <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2 text-xs text-neg-300">{error}</div>}
+      {rows === null && loading && <div className="text-xs text-fg-subtle">Loading instruments…</div>}
       {rows && rows.length === 0 && <div className="text-xs text-fg-subtle">Nothing ingested yet — upload a CSV and run a batch above.</div>}
 
       {rows && rows.length > 0 && (
@@ -230,7 +326,7 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
                     </div>
                   </th>
                 ))}
-                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap border-l border-neutral-800/40" title="Native + EUR price/volume charts">Chart</th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap border-l border-neutral-800/40" title="Chart · manual OpenFIGI + yfinance resolve">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800/20">
@@ -239,6 +335,7 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
                 const r = view[vi.index];
                 return (
                   <GridRow key={r.execution_id} r={r} onChart={() => setChartRow(r)}
+                    onResolve={() => setResolveRow(r)}
                     measureRef={rowVirtualizer.measureElement} dataIndex={vi.index} />
                 );
               })}
@@ -249,40 +346,68 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
       )}
 
       {chartRow && <AssetChartModal row={chartRow} onClose={() => setChartRow(null)} />}
+      {resolveRow && (
+        <RowResolveModal row={resolveRow}
+          onClose={(didResolve) => { setResolveRow(null); if (didResolve) void load(); }} />
+      )}
+      {showCreate && (
+        <CreateUniverseModal
+          sectorOptions={[...new Set(((rows ?? []).map((r) => r.sector).filter(Boolean) as string[]))].sort()}
+          onClose={(created) => { setShowCreate(false); if (created) void loadUniverses(); }} />
+      )}
     </section>
   );
 }
 
-function GridRow({ r, onChart, measureRef, dataIndex }: {
+function GridRow({ r, onChart, onResolve, measureRef, dataIndex }: {
   r: AssetGridRow;
   onChart: () => void;
+  onResolve: () => void;
   measureRef?: (el: HTMLTableRowElement | null) => void;
   dataIndex?: number;
 }) {
   const hasSeries = r.analysis_id != null && (r.bars ?? 0) > 0;
+  // A source is "missing" once the row was ATTEMPTED (not a fresh 'queued'
+  // placeholder) but that source came back empty: no OpenFIGI FIGI, or no
+  // priceable yfinance listing (status not 'ok').
+  const attempted = r.status !== 'queued';
+  const openfigiMissing = attempted && !r.openfigi_figi;
+  const yfinanceMissing = attempted && r.status !== 'ok';
   return (
       <tr ref={measureRef} data-index={dataIndex} className="hover:bg-accent-500/10 transition-colors">
         <td className="px-3 py-1.5 font-mono text-fg whitespace-nowrap">
           <span title={`${r.status}${r.reason ? ' — ' + r.reason : ''}`}
             className={`inline-block h-2 w-2 rounded-full align-middle mr-2 ${STATUS_DOT[r.status] ?? 'bg-neutral-500'}`} />
           {r.isin}
+          {r.leonteq_verified && (
+            <span title="In the uploaded Leonteq (lynqs) list"
+              className="ml-2 align-middle text-[8px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-accent-600/15 text-accent-400 border-accent-600/30">
+              Leonteq ✓
+            </span>
+          )}
         </td>
-        {/* OpenFIGI group */}
-        <td className="px-3 py-1.5 font-mono text-fg-subtle whitespace-nowrap border-l border-neutral-800/40">
-          <span className="inline-block max-w-[120px] truncate align-bottom" title={r.openfigi_figi ?? ''}>{r.openfigi_figi ?? '—'}</span>
-        </td>
-        <td className="px-3 py-1.5 font-mono text-fg-muted whitespace-nowrap">
-          <span className="inline-block max-w-[110px] truncate align-bottom" title={r.openfigi_ticker ?? ''}>{r.openfigi_ticker ?? '—'}</span>
-        </td>
-        <td className="px-3 py-1.5 font-mono text-fg-subtle whitespace-nowrap">
-          <span className="inline-block max-w-[90px] truncate align-bottom" title={r.openfigi_exch ?? ''}>{r.openfigi_exch ?? '—'}</span>
+        {/* Leonteq (lynqs) group — from the uploaded list (no separator: ISIN is Leonteq too) */}
+        <td className="px-3 py-1.5 text-fg-soft">
+          <span className="inline-block max-w-[180px] truncate align-bottom" title={r.leonteq_name ?? ''}>{r.leonteq_name ?? '—'}</span>
         </td>
         <td className="px-3 py-1.5 text-fg-subtle whitespace-nowrap">
-          <span className="inline-block max-w-[110px] truncate align-bottom" title={r.openfigi_type ?? ''}>{r.openfigi_type ?? '—'}</span>
+          <span className="inline-block max-w-[110px] truncate align-bottom" title={r.leonteq_product_type ?? ''}>{r.leonteq_product_type ?? '—'}</span>
         </td>
-        {/* yfinance group */}
+        <td className="px-3 py-1.5 font-mono text-fg-muted whitespace-nowrap">{r.leonteq_currency ?? '—'}</td>
+        {/* OpenFIGI confirmation group */}
+        <td className="px-3 py-1.5 text-fg-subtle whitespace-nowrap border-l border-neutral-800/40">
+          {openfigiMissing
+            ? <MissingBadge />
+            : <span className="inline-block max-w-[200px] truncate align-bottom" title={r.openfigi_name ?? ''}>{r.openfigi_name ?? '—'}</span>}
+        </td>
+        <td className="px-3 py-1.5 whitespace-nowrap">
+          {openfigiMissing ? <MissingBadge /> : <MatchBadge status={r.identity_status} />}
+        </td>
+        {/* yfinance group — when the source is missing, EVERY column in the group
+            shows the missing badge (not just the anchor). */}
         <td className="px-3 py-1.5 text-fg-soft border-l border-neutral-800/40">
-          <span className="inline-block max-w-[200px] truncate align-bottom" title={r.name ?? ''}>{r.name ?? '—'}</span>
+          {yfinanceMissing ? <MissingBadge />
+            : <span className="inline-block max-w-[200px] truncate align-bottom" title={r.name ?? ''}>{r.name ?? '—'}</span>}
         </td>
         <td className="px-3 py-1.5 font-mono text-fg whitespace-nowrap">
           {r.analysis_symbol ? (
@@ -294,31 +419,40 @@ function GridRow({ r, onChart, measureRef, dataIndex }: {
                 <span className="ml-1.5 text-[10px] text-fg-faint" title="Tradable listing (execution)">via {r.yahoo_symbol}</span>
               )}
             </>
-          ) : (r.yahoo_symbol ?? '—')}
+          ) : yfinanceMissing ? <MissingBadge /> : (r.yahoo_symbol ?? '—')}
         </td>
-        <td className="px-3 py-1.5 font-mono text-fg-muted whitespace-nowrap">{r.currency ?? '—'}</td>
-        <td className="px-3 py-1.5 text-fg-subtle whitespace-nowrap">{r.asset_class ?? '—'}</td>
+        <td className="px-3 py-1.5 font-mono text-fg-muted whitespace-nowrap">{yfinanceMissing ? <MissingBadge /> : (r.currency ?? '—')}</td>
+        <td className="px-3 py-1.5 text-fg-subtle whitespace-nowrap">{yfinanceMissing ? <MissingBadge /> : (classLabel(r.asset_class) || '—')}</td>
         <td className="px-3 py-1.5 text-fg-subtle whitespace-nowrap">
-          <span className="inline-block max-w-[140px] truncate align-bottom" title={r.sector ?? ''}>{r.sector ?? '—'}</span>
+          {yfinanceMissing ? <MissingBadge />
+            : <span className="inline-block max-w-[140px] truncate align-bottom" title={r.sector ?? ''}>{sectorLabel(r.sector) || '—'}</span>}
         </td>
-        <td className="px-3 py-1.5 text-right font-mono text-fg whitespace-nowrap">{adv(r.med_adv_eur)}</td>
-        <td className="px-3 py-1.5 text-right font-mono text-fg-subtle whitespace-nowrap">{r.price_from ?? '—'}</td>
-        <td className="px-3 py-1.5 text-right font-mono text-fg-subtle whitespace-nowrap">{r.price_to ?? '—'}</td>
-        <td className="px-3 py-1.5 text-right font-mono text-fg-subtle whitespace-nowrap">{r.volume_from ?? '—'}</td>
-        <td className="px-3 py-1.5 text-right font-mono text-fg-subtle whitespace-nowrap">{r.volume_to ?? '—'}</td>
+        <td className="px-3 py-1.5 text-right font-mono text-fg whitespace-nowrap">{yfinanceMissing ? <MissingBadge /> : adv(r.med_adv_eur)}</td>
+        <td className="px-3 py-1.5 text-right font-mono text-fg-soft whitespace-nowrap">{mcap(r.market_cap_eur)}</td>
+        <td className="px-3 py-1.5 text-right font-mono text-fg-subtle whitespace-nowrap">{yfinanceMissing ? <MissingBadge /> : (r.price_from ?? '—')}</td>
+        <td className="px-3 py-1.5 text-right font-mono text-fg-subtle whitespace-nowrap">{yfinanceMissing ? <MissingBadge /> : (r.price_to ?? '—')}</td>
+        <td className="px-3 py-1.5 text-right font-mono text-fg-subtle whitespace-nowrap">{yfinanceMissing ? <MissingBadge /> : (r.volume_from ?? '—')}</td>
+        <td className="px-3 py-1.5 text-right font-mono text-fg-subtle whitespace-nowrap">{yfinanceMissing ? <MissingBadge /> : (r.volume_to ?? '—')}</td>
         <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
-          {r.zero_vol_frac == null
-            ? <span className="text-fg-faint">—</span>
-            : <span className={r.zero_vol_frac >= 0.05 ? 'text-warn-300' : 'text-fg-subtle'}>{(r.zero_vol_frac * 100).toFixed(1)}%</span>}
+          {yfinanceMissing ? <MissingBadge />
+            : r.zero_vol_frac == null
+              ? <span className="text-fg-faint">—</span>
+              : <span className={r.zero_vol_frac >= 0.05 ? 'text-warn-300' : 'text-fg-subtle'}>{(r.zero_vol_frac * 100).toFixed(1)}%</span>}
         </td>
-        {/* Chart — native + EUR price/volume modal (last cell) */}
+        {/* Actions — Chart (if priced) + manual OpenFIGI/yfinance resolve (last cell) */}
         <td className="px-3 py-1.5 whitespace-nowrap border-l border-neutral-800/40">
-          {hasSeries ? (
-            <button type="button" onClick={onChart} title="View native + EUR price & volume charts"
-              className="text-[10px] px-2 py-0.5 rounded border border-neutral-700 text-accent-400 hover:border-accent-500/50 transition-colors">
-              Chart
+          <div className="flex items-center gap-1.5">
+            {hasSeries && (
+              <button type="button" onClick={onChart} title="View native + EUR price & volume charts"
+                className="text-[10px] px-2 py-0.5 rounded border border-neutral-700 text-accent-400 hover:border-accent-500/50 transition-colors">
+                Chart
+              </button>
+            )}
+            <button type="button" onClick={onResolve} title="Fetch OpenFIGI + yfinance for this row now"
+              className="text-[10px] px-2 py-0.5 rounded border border-neutral-700 text-fg-muted hover:text-accent-300 hover:border-accent-500/50 transition-colors">
+              Resolve
             </button>
-          ) : <span className="text-fg-faint">—</span>}
+          </div>
         </td>
       </tr>
   );
