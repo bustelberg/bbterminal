@@ -10,8 +10,8 @@ from __future__ import annotations
 import bisect
 from datetime import date as _date
 
-# Minor-unit quotes → (major currency, divisor). Mirrors the etoro-yfinance
-# currency._SUBUNIT: normalise the minor unit into its major unit before FX.
+# Minor-unit quotes → (major currency, divisor). Normalise the minor unit into
+# its major unit before FX.
 _SUBUNIT: dict[str, tuple[str, float]] = {
     "GBp": ("GBP", 100.0),   # London pence
     "GBX": ("GBP", 100.0),
@@ -21,7 +21,7 @@ _SUBUNIT: dict[str, tuple[str, float]] = {
 
 # Asset classes where Yahoo reports `volume` as a quote-currency NOTIONAL amount
 # (already money) rather than a share COUNT — so EUR volume is volume×fx, NOT
-# price×volume×fx. Matches the etoro-yfinance `is_notional_volume`. Crypto
+# price×volume×fx. Matches the reference `is_notional_volume`. Crypto
 # (e.g. BTC-USD) is the case that matters here.
 _NOTIONAL_CLASSES = {"crypto"}
 
@@ -46,7 +46,7 @@ def _fx_series(base: str, dates: list[_date]) -> tuple[list[str], list[float]] |
 
 def to_eur_series(rows: list[dict], currency: str | None, asset_class: str | None = None) -> list[dict]:
     """Return `rows` with `close_eur` + `volume_eur` added, using the
-    etoro-yfinance conversion methodology:
+    reference conversion methodology:
 
       * price:  close_eur = (close / subunit_divisor) / rate     (rate = units/EUR)
       * volume: NOTIONAL (crypto) → volume_eur = volume / rate    (already money)

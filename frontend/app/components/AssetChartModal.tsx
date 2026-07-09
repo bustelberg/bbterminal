@@ -5,8 +5,7 @@ import type { AssetGridRow } from '../../lib/types/api';
 import AssetDualChart from './AssetDualChart';
 
 /** Modal fragment: side-by-side price+volume charts for one asset — native
- * (left) and EUR-converted (right), with a log/linear price toggle. Mirrors the
- * etoro-yfinance `_chart.html` modal. */
+ * (left) and EUR-converted (right), with a log/linear price toggle. */
 export default function AssetChartModal({ row, onClose }: { row: AssetGridRow; onClose: () => void }) {
   const [scale, setScale] = useState<'log' | 'linear'>('log');
 

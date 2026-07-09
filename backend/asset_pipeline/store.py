@@ -106,8 +106,8 @@ def upsert_unmapped(
 ) -> None:
     """Persist a row for an input ISIN that did NOT resolve to a Yahoo listing
     (status: bond | not_found | error) — `analysis_id` NULL, so it shows in the
-    flat grid with its status but contributes no price series (like the etoro
-    table's unmapped rows). `figi` merges the openfigi_* columns — often the most
+    flat grid with its status but contributes no price series (an unmapped
+    row). `figi` merges the openfigi_* columns — often the most
     useful data on a bond/not-found row. Upsert by isin — idempotent."""
     payload = {
         "isin": isin.strip().upper(),

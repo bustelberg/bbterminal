@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # backend/ on p
 import deps  # noqa: E402,F401
 from deps import supabase  # noqa: E402
 
-from asset_pipeline import yahoo  # noqa: E402
+from asset_pipeline import short_etf, yahoo  # noqa: E402
 
 
 def main() -> None:
@@ -43,7 +43,8 @@ def main() -> None:
     for x in rows:
         p = profiles.get(x["symbol"])
         if p and p.get("sector"):
-            supabase.table("asset_analysis").update({"sector": p["sector"]}).eq(
+            sec = short_etf.normalize_sector(p["sector"])  # → canonical taxonomy
+            supabase.table("asset_analysis").update({"sector": sec}).eq(
                 "analysis_id", x["analysis_id"]
             ).execute()
             updated += 1

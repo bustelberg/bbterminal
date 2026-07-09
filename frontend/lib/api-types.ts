@@ -968,10 +968,81 @@ export interface paths {
          * @description Bull/bear × calm/turbulent regime timeline of the equal-weight index, over
          *     either the ADV/sector filters OR a saved `universe_id`'s members. bull = index ≥
          *     its trailing 200-day mean; turbulent = 63-day vol above the median of its own
-         *     prior history. Returns daily {dates, index, ma200, bull[], turb[], current}.
-         *     The frontend rebases the index to 100 at the window start. Cached ~30 min.
+         *     prior history. `exclude_sectors` drops weak sectors from the benchmark index.
+         *     Returns daily {dates, index, ma200, bull[], turb[], current}. The frontend
+         *     rebases the index to 100 at the window start. Cached ~30 min.
          */
         get: operations["alphalab_regime_api_asset_pipeline_alphalab_regime_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/alphalab/regime/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Alphalab Regime Stream
+         * @description SSE variant of /alphalab/regime — emits `{stage}` frames as the compute
+         *     progresses (resolve → load prices → build index → score), then one final
+         *     `{stage:"done", result}`. Same 30-min cache as the plain endpoint (a cache
+         *     hit streams straight to `done`). Lets the UI show live stage progress.
+         */
+        get: operations["alphalab_regime_stream_api_asset_pipeline_alphalab_regime_stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/alphalab/sectors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Alphalab Sectors
+         * @description Per-sector equal-weight price index of the universe — one {sector, size,
+         *     dates, index} entry per sector present, each index built over that sector's
+         *     own price history. Feeds the AlphaLab per-sector charts + risk/return tables.
+         *     Cached ~30 min.
+         */
+        get: operations["alphalab_sectors_api_asset_pipeline_alphalab_sectors_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/alphalab/sectors/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Alphalab Sectors Stream
+         * @description SSE variant of /alphalab/sectors — emits `{stage}` progress, then one
+         *     `{topic:"sector", result}` frame PER sector as it's computed (largest first),
+         *     so the UI renders sector cards progressively instead of waiting for all of
+         *     them. `start`/`end` bound the window (with warm-up) like the benchmark stream,
+         *     and reuse the same cached price panel (no second COPY). Ends `{topic:"done"}`.
+         */
+        get: operations["alphalab_sectors_stream_api_asset_pipeline_alphalab_sectors_stream_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1043,10 +1114,108 @@ export interface paths {
          *     Each bar carries BOTH the native `close`+`volume` (as Yahoo gives it) and
          *     the EUR-converted `close_eur`+`volume_eur` — price via the fx_rate table
          *     (minor units like GBp handled), and volume-in-EUR as turnover
-         *     (price×shares×fx) for equities/ETFs or notional×fx for crypto (per the
-         *     etoro-yfinance methodology). Bars with no FX rate get null *_eur.
+         *     (price×shares×fx) for equities/ETFs or notional×fx for crypto. Bars with
+         *     no FX rate get null *_eur.
          */
         get: operations["asset_series_api_asset_pipeline_assets__analysis_id__series_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/equity-sectors/backfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Equity Sector Backfill
+         * @description SSE: fill the REAL Yahoo sector on equities still stuck on the `equity`
+         *     fallback (the fast chart-resolver carries no sector). Fetches v10
+         *     assetProfile per symbol, normalizes onto the canonical taxonomy (Apple →
+         *     Technology, JPMorgan → Financials), and updates `asset_analysis.sector`.
+         *     Emits per-symbol progress + a final summary. Re-runnable; only touches
+         *     equity-class rows on the fallback. Admin-only.
+         */
+        post: operations["equity_sector_backfill_api_asset_pipeline_equity_sectors_backfill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/equity-sectors/stuck": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Equity Sector Stuck
+         * @description Equities STILL on the `equity`/NULL sector fallback (Yahoo assetProfile had
+         *     no sector for them — foreign/holding/ADR names, delisted symbols, …). Returns
+         *     `{stuck:[{analysis_id, symbol, name, current_sector, guess}], sectors}` for
+         *     manual assignment (a name-based `guess` pre-fills the dropdown when it's
+         *     confident). Apply via POST /etf-sectors/apply.
+         */
+        get: operations["equity_sector_stuck_api_asset_pipeline_equity_sectors_stuck_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/etf-sectors/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Etf Sector Apply
+         * @description Commit confirmed ETF sector tags: set `asset_analysis.sector` +
+         *     `short_multiplier` per analysis_id. `sector` must be a category or a Short
+         *     sector, or null to CLEAR (reset to the plain asset_class, multiplier→null).
+         *     The multiplier is only kept for a `Short …` sector. Admin-only.
+         */
+        post: operations["etf_sector_apply_api_asset_pipeline_etf_sectors_apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/etf-sectors/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Etf Sector Candidates
+         * @description Scan fund-like instruments (ETF/crypto/commodity/fx/index/bond) whose
+         *     sector is still the lazy asset-class fallback ('etf', …) and propose a REAL
+         *     category for each — the sector it'd have if held long (`Equity`, `Real Estate`,
+         *     `Bonds`, `Commodity`, `FX`, `Crypto`, …), or `Short <category>` + a leverage
+         *     multiplier for inverse products. Real Yahoo sectors + already-tagged rows are
+         *     left out. HEURISTIC → for human review: returns the proposal alongside the
+         *     current sector; nothing changes until POST /etf-sectors/apply.
+         */
+        get: operations["etf_sector_candidates_api_asset_pipeline_etf_sectors_candidates_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1279,6 +1448,30 @@ export interface paths {
          *     'not found' — that's a `found:false` result, not an error.
          */
         post: operations["refresh_row_api_asset_pipeline_rows_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/signal-lab": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Signal Lab
+         * @description Signal Lab — predictive-power research over the unified price/volume signal
+         *     panel. Per signal: cross-sectional rank IC vs next-month return, t-stat, hit
+         *     rate, quintile spread, decile monotonicity, PER-SECTOR + PER-REGIME IC, and the
+         *     monthly IC series. `start`/`end` = the train/test evaluation window. Pure
+         *     research (no portfolio). Cached ~30 min.
+         */
+        get: operations["signal_lab_api_asset_pipeline_signal_lab_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4956,6 +5149,8 @@ export interface components {
             reason?: string | null;
             /** Sector */
             sector?: string | null;
+            /** Short Multiplier */
+            short_multiplier?: number | null;
             /** Status */
             status: string;
             /** Volume From */
@@ -6187,6 +6382,20 @@ export interface components {
             /** Identifier */
             identifier: string;
         };
+        /** _SectorApplyBody */
+        _SectorApplyBody: {
+            /** Tags */
+            tags: components["schemas"]["_SectorTag"][];
+        };
+        /** _SectorTag */
+        _SectorTag: {
+            /** Analysis Id */
+            analysis_id: number;
+            /** Multiplier */
+            multiplier?: number | null;
+            /** Sector */
+            sector?: string | null;
+        };
         /** _StoreBody */
         _StoreBody: {
             /** Identifier */
@@ -7221,7 +7430,121 @@ export interface operations {
                 end?: string | null;
                 /** @description use a SAVED universe's members instead of the ADV/sector filters */
                 universe_id?: number | null;
+                /** @description comma-separated sectors to drop from the benchmark (e.g. 'commodity') */
+                exclude_sectors?: string | null;
                 refresh?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    alphalab_regime_stream_api_asset_pipeline_alphalab_regime_stream_get: {
+        parameters: {
+            query?: {
+                min_adv_eur?: number;
+                require_sector?: boolean;
+                asset_class?: string;
+                max_assets?: number;
+                start?: string | null;
+                end?: string | null;
+                universe_id?: number | null;
+                exclude_sectors?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    alphalab_sectors_api_asset_pipeline_alphalab_sectors_get: {
+        parameters: {
+            query?: {
+                min_adv_eur?: number;
+                require_sector?: boolean;
+                asset_class?: string;
+                max_assets?: number;
+                /** @description use a SAVED universe's members instead of the ADV/sector filters */
+                universe_id?: number | null;
+                refresh?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    alphalab_sectors_stream_api_asset_pipeline_alphalab_sectors_stream_get: {
+        parameters: {
+            query?: {
+                min_adv_eur?: number;
+                require_sector?: boolean;
+                asset_class?: string;
+                max_assets?: number;
+                universe_id?: number | null;
+                start?: string | null;
+                end?: string | null;
             };
             header?: never;
             path?: never;
@@ -7329,6 +7652,99 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    equity_sector_backfill_api_asset_pipeline_equity_sectors_backfill_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    equity_sector_stuck_api_asset_pipeline_equity_sectors_stuck_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    etf_sector_apply_api_asset_pipeline_etf_sectors_apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_SectorApplyBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    etf_sector_candidates_api_asset_pipeline_etf_sectors_candidates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };
@@ -7602,6 +8018,47 @@ export interface operations {
                 "application/json": components["schemas"]["_RowRefreshBody"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    signal_lab_api_asset_pipeline_signal_lab_get: {
+        parameters: {
+            query?: {
+                min_adv_eur?: number;
+                require_sector?: boolean;
+                asset_class?: string;
+                max_assets?: number;
+                /** @description use a SAVED universe's members */
+                universe_id?: number | null;
+                /** @description evaluate IC from this month (train/test split) */
+                start?: string | null;
+                /** @description evaluate IC to this month */
+                end?: string | null;
+                refresh?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

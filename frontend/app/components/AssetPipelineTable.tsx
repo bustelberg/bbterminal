@@ -33,7 +33,7 @@ type SortKey =
   | 'med_adv_eur' | 'market_cap_eur' | 'price_from' | 'price_to' | 'volume_from' | 'volume_to' | 'zero_vol_frac';
 
 // `sep` marks the first column of a group (ISIN | Leonteq | OpenFIGI | yfinance)
-// → left border so the families read as sections like the etoro table.
+// → left border so the families read as sections.
 type Col = { key: SortKey; label: string; align?: 'right'; title?: string; sep?: boolean };
 const COLS: Col[] = [
   { key: 'isin', label: 'ISIN' },
@@ -101,7 +101,7 @@ function SourceBadge({ source }: { source: keyof typeof SOURCE_TONE }) {
   );
 }
 
-/** Flat one-row-per-ISIN grid — the etoro-yfinance table, ISIN edition. ISIN →
+/** Flat one-row-per-ISIN grid — the instrument table, ISIN edition. ISIN →
  * OpenFIGI identity → yfinance columns. Searchable, filterable by class/status,
  * sortable; expand a mapped row for its chart; download the full-OHLCV parquet. */
 export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: number }) {
@@ -281,10 +281,6 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
               {sectorFacet.opts.map((o) => <option key={o.value} value={o.value}>{sectorLabel(o.value)} ({o.count})</option>)}
             </select>
           </div>
-          <button type="button" onClick={() => void load()} disabled={loading}
-            className="text-xs px-3 py-1.5 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-40 transition-colors">
-            {loading ? 'Loading…' : 'Refresh'}
-          </button>
           {/* Universe membership filter */}
           <select value={universeFilter} onChange={(e) => setUniverseFilter(e.target.value)} title="Filter to a saved universe's tickers"
             className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 max-w-[200px]">
@@ -303,8 +299,8 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
         </div>
       </div>
 
-      {/* Indeterminate loading bar — shows on the initial mount fetch and on
-          every Refresh (the grid is one bulk load, so there's no % to report). */}
+      {/* Indeterminate loading bar — shows while the grid loads (one bulk fetch,
+          so there's no % to report). */}
       {loading && <div className="loading-bar h-0.5 w-full rounded-full" aria-hidden />}
 
       {error && <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2 text-xs text-neg-300">{error}</div>}
@@ -353,6 +349,8 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
       {showCreate && (
         <CreateUniverseModal
           sectorOptions={[...new Set(((rows ?? []).map((r) => r.sector).filter(Boolean) as string[]))].sort()}
+          universes={universes}
+          onDeleted={() => { setUniverseFilter(''); void loadUniverses(); }}
           onClose={(created) => { setShowCreate(false); if (created) void loadUniverses(); }} />
       )}
     </section>
@@ -424,8 +422,15 @@ function GridRow({ r, onChart, onResolve, measureRef, dataIndex }: {
         <td className="px-3 py-1.5 font-mono text-fg-muted whitespace-nowrap">{yfinanceMissing ? <MissingBadge /> : (r.currency ?? '—')}</td>
         <td className="px-3 py-1.5 text-fg-subtle whitespace-nowrap">{yfinanceMissing ? <MissingBadge /> : (classLabel(r.asset_class) || '—')}</td>
         <td className="px-3 py-1.5 text-fg-subtle whitespace-nowrap">
-          {yfinanceMissing ? <MissingBadge />
-            : <span className="inline-block max-w-[140px] truncate align-bottom" title={r.sector ?? ''}>{sectorLabel(r.sector) || '—'}</span>}
+          {yfinanceMissing ? <MissingBadge /> : (
+            <span className="inline-flex items-center gap-1 max-w-[160px] align-bottom" title={r.sector ?? ''}>
+              <span className="truncate">{sectorLabel(r.sector) || '—'}</span>
+              {r.short_multiplier != null && (
+                <span className="shrink-0 text-[9px] font-mono font-semibold px-1 py-0.5 rounded bg-neg-500/15 text-neg-300 border border-neg-500/20"
+                  title={`Inverse ${r.short_multiplier}× leverage`}>−{r.short_multiplier}×</span>
+              )}
+            </span>
+          )}
         </td>
         <td className="px-3 py-1.5 text-right font-mono text-fg whitespace-nowrap">{yfinanceMissing ? <MissingBadge /> : adv(r.med_adv_eur)}</td>
         <td className="px-3 py-1.5 text-right font-mono text-fg-soft whitespace-nowrap">{mcap(r.market_cap_eur)}</td>

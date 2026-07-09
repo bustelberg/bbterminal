@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 const TABS = [
   { href: '/asset-pipeline', label: 'Execution instruments' },
   { href: '/alphalab', label: 'AlphaLab' },
+  { href: '/signal-lab', label: 'Signal Lab' },
 ];
 
 /** Tab nav shared by the asset-pipeline pages (Asset Pipeline home + AlphaLab). */

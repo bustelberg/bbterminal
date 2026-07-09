@@ -1,10 +1,13 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
 import { sectorLabel } from '../../lib/assetLabels';
+import { dialog } from '../../lib/dialog';
+
+export type SavedUniverse = { id: number; name: string; ticker_count: number };
 
 const INPUT_CLS = 'bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 w-28 text-right';
 
@@ -23,13 +26,15 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 
 /** Build + save a named liquid universe of unique yfinance tickers. Tune the
  * identity/liquidity params, watch the live count, then Create. */
-export default function CreateUniverseModal({ sectorOptions, onClose }: {
+export default function CreateUniverseModal({ sectorOptions, universes, onDeleted, onClose }: {
   sectorOptions: string[];
+  universes: SavedUniverse[];
+  onDeleted: () => void;
   onClose: (created: boolean) => void;
 }) {
   const [name, setName] = useState('');
-  const [minAdvM, setMinAdvM] = useState(1);        // €M
-  const [minMktCapB, setMinMktCapB] = useState(0);  // €B
+  const [minAdvM, setMinAdvM] = useState(1);        // €M — fallback liquidity gate for cap-less names
+  const [minMktCapB, setMinMktCapB] = useState(1);  // €B — matches LEONTEQ_MIN_MARKET_CAP_EUR (mid-cap+ floor)
   const [maxZeroPct, setMaxZeroPct] = useState(5);  // %
   const [reqLeonteq, setReqLeonteq] = useState(true);
   const [reqOpenfigi, setReqOpenfigi] = useState(true);
@@ -100,8 +105,35 @@ export default function CreateUniverseModal({ sectorOptions, onClose }: {
     } finally { setCreating(false); }
   };
 
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  // Only close on a backdrop click that also STARTED on the backdrop — otherwise
+  // drag-selecting text in an input (mouse-up landing on the backdrop) closes it.
+  const downOnBackdrop = useRef(false);
+
+  const remove = async (u: SavedUniverse) => {
+    const ok = await dialog.confirm(
+      `Delete the universe "${u.name}" (${u.ticker_count.toLocaleString()} tickers)? This cannot be undone.`,
+      { title: 'Delete universe', confirmLabel: 'Delete', destructive: true },
+    );
+    if (!ok) return;
+    setDeletingId(u.id); setError(null);
+    try {
+      const r = await apiFetch(`${API_URL}/api/asset-pipeline/universes/${u.id}`, { method: 'DELETE' });
+      if (!r.ok) {
+        const b = await r.json().catch(() => null);
+        setError(b?.detail ?? `HTTP ${r.status}`);
+        return;
+      }
+      onDeleted();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setDeletingId(null); }
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/60 p-4" onClick={() => onClose(false)}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/60 p-4"
+      onMouseDown={(e) => { downOnBackdrop.current = e.target === e.currentTarget; }}
+      onClick={(e) => { if (e.target === e.currentTarget && downOnBackdrop.current) onClose(false); }}>
       <div className="bg-elevated border border-neutral-800/40 rounded-xl shadow-xl w-full max-w-md p-5 space-y-4"
         onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-semibold text-fg-strong">Create liquid universe</h3>
@@ -148,6 +180,28 @@ export default function CreateUniverseModal({ sectorOptions, onClose }: {
             ))}
           </div>
         </div>
+
+        {/* Existing universes — inspect count + delete. */}
+        {universes.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="text-xs text-fg-muted">Existing universes ({universes.length})</div>
+            <div className="max-h-32 overflow-auto rounded-lg border border-neutral-800/40 divide-y divide-neutral-800/20">
+              {universes.map((u) => (
+                <div key={u.id} className="group flex items-center justify-between gap-2 px-2.5 py-1.5 text-xs">
+                  <span className="truncate text-fg-soft">{u.name}</span>
+                  <span className="flex items-center gap-2 shrink-0">
+                    <span className="font-mono text-fg-faint">{u.ticker_count.toLocaleString()}</span>
+                    <button type="button" onClick={() => void remove(u)} disabled={deletingId !== null}
+                      title="Delete universe"
+                      className="text-neg-400 hover:text-neg-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors opacity-0 group-hover:opacity-100">
+                      {deletingId === u.id ? '…' : '✕'}
+                    </button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="text-center py-2 rounded-lg bg-accent-500/10 border border-accent-500/20">
           <span className="text-lg font-semibold text-accent-300 font-mono">

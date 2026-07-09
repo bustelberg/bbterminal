@@ -189,8 +189,8 @@ class _Throttle:
     """Adaptive rate-limiter + ban detector for the whole Yahoo layer.
 
     Every `_get` funnels through here, so ONE instance paces all Yahoo traffic
-    (search + per-candidate score fetches + candles + FX). Ported from the
-    etoro-yfinance canary/backoff design, adapted to our curl_cffi HTTP layer:
+    (search + per-candidate score fetches + candles + FX). A canary/backoff
+    design adapted to our curl_cffi HTTP layer:
     the throttle signal is an HTTP 429/999 or a network error, NOT an
     empty-but-200 body (an empty search result is legitimate, not a ban).
 

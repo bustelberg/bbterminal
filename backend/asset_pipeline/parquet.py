@@ -1,7 +1,7 @@
 """Parquet OHLCV+actions archive for the asset pipeline.
 
 One parquet blob per analysis asset in the `asset-parquet` Supabase Storage
-bucket, holding the etoro-yfinance column set: date, open, high, low, close,
+bucket, holding the standard column set: date, open, high, low, close,
 adj_close, volume, dividends, splits. Written ALONGSIDE the close+volume
 `asset_price` table (which still powers the chart + grid coverage) — parquet is
 the fuller archive. Built from the SAME full-history `yahoo.chart_window` fetch
@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 
 BUCKET = "asset-parquet"
 
-# The etoro-yfinance per-asset column set, in order.
+# The per-asset column set, in order.
 COLUMNS = ["date", "open", "high", "low", "close", "adj_close", "volume", "dividends", "splits"]
 
 

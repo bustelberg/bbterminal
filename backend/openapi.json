@@ -341,6 +341,17 @@
             ],
             "title": "Sector"
           },
+          "short_multiplier": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Short Multiplier"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -4108,6 +4119,57 @@
         "title": "_RowRefreshBody",
         "type": "object"
       },
+      "_SectorApplyBody": {
+        "properties": {
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/_SectorTag"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tags"
+        ],
+        "title": "_SectorApplyBody",
+        "type": "object"
+      },
+      "_SectorTag": {
+        "properties": {
+          "analysis_id": {
+            "title": "Analysis Id",
+            "type": "integer"
+          },
+          "multiplier": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Multiplier"
+          },
+          "sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector"
+          }
+        },
+        "required": [
+          "analysis_id"
+        ],
+        "title": "_SectorTag",
+        "type": "object"
+      },
       "_StoreBody": {
         "properties": {
           "identifier": {
@@ -5611,7 +5673,7 @@
     },
     "/api/asset-pipeline/alphalab/regime": {
       "get": {
-        "description": "Bull/bear \u00d7 calm/turbulent regime timeline of the equal-weight index, over\neither the ADV/sector filters OR a saved `universe_id`'s members. bull = index \u2265\nits trailing 200-day mean; turbulent = 63-day vol above the median of its own\nprior history. Returns daily {dates, index, ma200, bull[], turb[], current}.\nThe frontend rebases the index to 100 at the window start. Cached ~30 min.",
+        "description": "Bull/bear \u00d7 calm/turbulent regime timeline of the equal-weight index, over\neither the ADV/sector filters OR a saved `universe_id`'s members. bull = index \u2265\nits trailing 200-day mean; turbulent = 63-day vol above the median of its own\nprior history. `exclude_sectors` drops weak sectors from the benchmark index.\nReturns daily {dates, index, ma200, bull[], turb[], current}. The frontend\nrebases the index to 100 at the window start. Cached ~30 min.",
         "operationId": "alphalab_regime_api_asset_pipeline_alphalab_regime_get",
         "parameters": [
           {
@@ -5708,6 +5770,24 @@
             }
           },
           {
+            "description": "comma-separated sectors to drop from the benchmark (e.g. 'commodity')",
+            "in": "query",
+            "name": "exclude_sectors",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "comma-separated sectors to drop from the benchmark (e.g. 'commodity')",
+              "title": "Exclude Sectors"
+            }
+          },
+          {
             "in": "query",
             "name": "refresh",
             "required": false,
@@ -5739,6 +5819,371 @@
           }
         },
         "summary": "Alphalab Regime",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/alphalab/regime/stream": {
+      "get": {
+        "description": "SSE variant of /alphalab/regime \u2014 emits `{stage}` frames as the compute\nprogresses (resolve \u2192 load prices \u2192 build index \u2192 score), then one final\n`{stage:\"done\", result}`. Same 30-min cache as the plain endpoint (a cache\nhit streams straight to `done`). Lets the UI show live stage progress.",
+        "operationId": "alphalab_regime_stream_api_asset_pipeline_alphalab_regime_stream_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "min_adv_eur",
+            "required": false,
+            "schema": {
+              "default": 1000000.0,
+              "minimum": 0,
+              "title": "Min Adv Eur",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "require_sector",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Require Sector",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "asset_class",
+            "required": false,
+            "schema": {
+              "default": "equity",
+              "title": "Asset Class",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_assets",
+            "required": false,
+            "schema": {
+              "default": 600,
+              "maximum": 2500,
+              "minimum": 20,
+              "title": "Max Assets",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          },
+          {
+            "in": "query",
+            "name": "universe_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Universe Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exclude_sectors",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Exclude Sectors"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Alphalab Regime Stream",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/alphalab/sectors": {
+      "get": {
+        "description": "Per-sector equal-weight price index of the universe \u2014 one {sector, size,\ndates, index} entry per sector present, each index built over that sector's\nown price history. Feeds the AlphaLab per-sector charts + risk/return tables.\nCached ~30 min.",
+        "operationId": "alphalab_sectors_api_asset_pipeline_alphalab_sectors_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "min_adv_eur",
+            "required": false,
+            "schema": {
+              "default": 1000000.0,
+              "minimum": 0,
+              "title": "Min Adv Eur",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "require_sector",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Require Sector",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "asset_class",
+            "required": false,
+            "schema": {
+              "default": "equity",
+              "title": "Asset Class",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_assets",
+            "required": false,
+            "schema": {
+              "default": 600,
+              "maximum": 2500,
+              "minimum": 20,
+              "title": "Max Assets",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "use a SAVED universe's members instead of the ADV/sector filters",
+            "in": "query",
+            "name": "universe_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "use a SAVED universe's members instead of the ADV/sector filters",
+              "title": "Universe Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Alphalab Sectors",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/alphalab/sectors/stream": {
+      "get": {
+        "description": "SSE variant of /alphalab/sectors \u2014 emits `{stage}` progress, then one\n`{topic:\"sector\", result}` frame PER sector as it's computed (largest first),\nso the UI renders sector cards progressively instead of waiting for all of\nthem. `start`/`end` bound the window (with warm-up) like the benchmark stream,\nand reuse the same cached price panel (no second COPY). Ends `{topic:\"done\"}`.",
+        "operationId": "alphalab_sectors_stream_api_asset_pipeline_alphalab_sectors_stream_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "min_adv_eur",
+            "required": false,
+            "schema": {
+              "default": 1000000.0,
+              "minimum": 0,
+              "title": "Min Adv Eur",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "require_sector",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Require Sector",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "asset_class",
+            "required": false,
+            "schema": {
+              "default": "equity",
+              "title": "Asset Class",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_assets",
+            "required": false,
+            "schema": {
+              "default": 600,
+              "maximum": 2500,
+              "minimum": 20,
+              "title": "Max Assets",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "universe_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Universe Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Alphalab Sectors Stream",
         "tags": [
           "asset-pipeline"
         ]
@@ -5807,7 +6252,7 @@
     },
     "/api/asset-pipeline/assets/{analysis_id}/series": {
       "get": {
-        "description": "The stored daily series for one analysis asset (for the dual chart).\nPaginated to defeat PostgREST's 1000-row cap. `max_points` is a safety cap\nonly (stride downsample, first+last kept); the default (20k) is far above any\nrealistic series length (~7k daily bars since the 1998 cutoff, ~4k for 7-day\ncrypto), so FULL daily resolution is preserved \u2014 Lightweight Charts renders\nthe whole series fine. It only ever trips for a pathological outlier.\n\nEach bar carries BOTH the native `close`+`volume` (as Yahoo gives it) and\nthe EUR-converted `close_eur`+`volume_eur` \u2014 price via the fx_rate table\n(minor units like GBp handled), and volume-in-EUR as turnover\n(price\u00d7shares\u00d7fx) for equities/ETFs or notional\u00d7fx for crypto (per the\netoro-yfinance methodology). Bars with no FX rate get null *_eur.",
+        "description": "The stored daily series for one analysis asset (for the dual chart).\nPaginated to defeat PostgREST's 1000-row cap. `max_points` is a safety cap\nonly (stride downsample, first+last kept); the default (20k) is far above any\nrealistic series length (~7k daily bars since the 1998 cutoff, ~4k for 7-day\ncrypto), so FULL daily resolution is preserved \u2014 Lightweight Charts renders\nthe whole series fine. It only ever trips for a pathological outlier.\n\nEach bar carries BOTH the native `close`+`volume` (as Yahoo gives it) and\nthe EUR-converted `close_eur`+`volume_eur` \u2014 price via the fx_rate table\n(minor units like GBp handled), and volume-in-EUR as turnover\n(price\u00d7shares\u00d7fx) for equities/ETFs or notional\u00d7fx for crypto. Bars with\nno FX rate get null *_eur.",
         "operationId": "asset_series_api_asset_pipeline_assets__analysis_id__series_get",
         "parameters": [
           {
@@ -5851,6 +6296,106 @@
           }
         },
         "summary": "Asset Series",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/equity-sectors/backfill": {
+      "post": {
+        "description": "SSE: fill the REAL Yahoo sector on equities still stuck on the `equity`\nfallback (the fast chart-resolver carries no sector). Fetches v10\nassetProfile per symbol, normalizes onto the canonical taxonomy (Apple \u2192\nTechnology, JPMorgan \u2192 Financials), and updates `asset_analysis.sector`.\nEmits per-symbol progress + a final summary. Re-runnable; only touches\nequity-class rows on the fallback. Admin-only.",
+        "operationId": "equity_sector_backfill_api_asset_pipeline_equity_sectors_backfill_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Equity Sector Backfill",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/equity-sectors/stuck": {
+      "get": {
+        "description": "Equities STILL on the `equity`/NULL sector fallback (Yahoo assetProfile had\nno sector for them \u2014 foreign/holding/ADR names, delisted symbols, \u2026). Returns\n`{stuck:[{analysis_id, symbol, name, current_sector, guess}], sectors}` for\nmanual assignment (a name-based `guess` pre-fills the dropdown when it's\nconfident). Apply via POST /etf-sectors/apply.",
+        "operationId": "equity_sector_stuck_api_asset_pipeline_equity_sectors_stuck_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Equity Sector Stuck",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/etf-sectors/apply": {
+      "post": {
+        "description": "Commit confirmed ETF sector tags: set `asset_analysis.sector` +\n`short_multiplier` per analysis_id. `sector` must be a category or a Short\nsector, or null to CLEAR (reset to the plain asset_class, multiplier\u2192null).\nThe multiplier is only kept for a `Short \u2026` sector. Admin-only.",
+        "operationId": "etf_sector_apply_api_asset_pipeline_etf_sectors_apply_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/_SectorApplyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Etf Sector Apply",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/etf-sectors/candidates": {
+      "get": {
+        "description": "Scan fund-like instruments (ETF/crypto/commodity/fx/index/bond) whose\nsector is still the lazy asset-class fallback ('etf', \u2026) and propose a REAL\ncategory for each \u2014 the sector it'd have if held long (`Equity`, `Real Estate`,\n`Bonds`, `Commodity`, `FX`, `Crypto`, \u2026), or `Short <category>` + a leverage\nmultiplier for inverse products. Real Yahoo sectors + already-tagged rows are\nleft out. HEURISTIC \u2192 for human review: returns the proposal alongside the\ncurrent sector; nothing changes until POST /etf-sectors/apply.",
+        "operationId": "etf_sector_candidates_api_asset_pipeline_etf_sectors_candidates_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Etf Sector Candidates",
         "tags": [
           "asset-pipeline"
         ]
@@ -6225,6 +6770,145 @@
           }
         },
         "summary": "Refresh Row",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/signal-lab": {
+      "get": {
+        "description": "Signal Lab \u2014 predictive-power research over the unified price/volume signal\npanel. Per signal: cross-sectional rank IC vs next-month return, t-stat, hit\nrate, quintile spread, decile monotonicity, PER-SECTOR + PER-REGIME IC, and the\nmonthly IC series. `start`/`end` = the train/test evaluation window. Pure\nresearch (no portfolio). Cached ~30 min.",
+        "operationId": "signal_lab_api_asset_pipeline_signal_lab_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "min_adv_eur",
+            "required": false,
+            "schema": {
+              "default": 1000000.0,
+              "minimum": 0,
+              "title": "Min Adv Eur",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "require_sector",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Require Sector",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "asset_class",
+            "required": false,
+            "schema": {
+              "default": "equity",
+              "title": "Asset Class",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_assets",
+            "required": false,
+            "schema": {
+              "default": 600,
+              "maximum": 2500,
+              "minimum": 20,
+              "title": "Max Assets",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "use a SAVED universe's members",
+            "in": "query",
+            "name": "universe_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "use a SAVED universe's members",
+              "title": "Universe Id"
+            }
+          },
+          {
+            "description": "evaluate IC from this month (train/test split)",
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "evaluate IC from this month (train/test split)",
+              "title": "Start"
+            }
+          },
+          {
+            "description": "evaluate IC to this month",
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "evaluate IC to this month",
+              "title": "End"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Signal Lab",
         "tags": [
           "asset-pipeline"
         ]

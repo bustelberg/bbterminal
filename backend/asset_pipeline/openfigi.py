@@ -83,7 +83,7 @@ def lookup_isins(isins: list[str]) -> dict[str, list[dict]]:
 def extract_columns(rows: list[dict]) -> dict:
     """Flatten OpenFIGI `data` rows for one ISIN into the 5 grid columns: the top
     row's figi/name/securityType + the unique tickers/exchange-codes joined
-    (matches the etoro openfigi_check shape). Always returns all 5 keys (None when
+    (matches the reference openfigi_check shape). Always returns all 5 keys (None when
     absent) so it can be merged straight into an execution upsert."""
     if not rows:
         return {k: None for k in ("openfigi_figi", "openfigi_name", "openfigi_ticker",

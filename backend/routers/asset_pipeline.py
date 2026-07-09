@@ -38,6 +38,7 @@ class AssetGridRow(BaseModel):
     currency: str | None = None
     asset_class: str | None = None
     sector: str | None = None
+    short_multiplier: int | None = None  # -1x/-2x/-3x for a "Short …" sector
     analysis_symbol: str | None = None
     med_adv_eur: float | None = None
     market_cap_eur: float | None = None
@@ -373,8 +374,8 @@ async def asset_series(analysis_id: int, max_points: int = 20000):
     Each bar carries BOTH the native `close`+`volume` (as Yahoo gives it) and
     the EUR-converted `close_eur`+`volume_eur` — price via the fx_rate table
     (minor units like GBp handled), and volume-in-EUR as turnover
-    (price×shares×fx) for equities/ETFs or notional×fx for crypto (per the
-    etoro-yfinance methodology). Bars with no FX rate get null *_eur."""
+    (price×shares×fx) for equities/ETFs or notional×fx for crypto. Bars with
+    no FX rate get null *_eur."""
     from deps import supabase  # noqa: PLC0415
 
     def _q() -> dict:
@@ -618,6 +619,40 @@ async def alphalab(
     return res
 
 
+_signal_lab_cache: dict[tuple, tuple[float, dict]] = {}
+
+
+@router.get("/api/asset-pipeline/signal-lab")
+async def signal_lab(
+    min_adv_eur: float = Query(1_000_000.0, ge=0),
+    require_sector: bool = True,
+    asset_class: str = Query("equity"),
+    max_assets: int = Query(600, ge=20, le=2500),
+    universe_id: int | None = Query(None, description="use a SAVED universe's members"),
+    start: str | None = Query(None, description="evaluate IC from this month (train/test split)"),
+    end: str | None = Query(None, description="evaluate IC to this month"),
+    refresh: bool = False,
+):
+    """Signal Lab — predictive-power research over the unified price/volume signal
+    panel. Per signal: cross-sectional rank IC vs next-month return, t-stat, hit
+    rate, quintile spread, decile monotonicity, PER-SECTOR + PER-REGIME IC, and the
+    monthly IC series. `start`/`end` = the train/test evaluation window. Pure
+    research (no portfolio). Cached ~30 min."""
+    import time  # noqa: PLC0415
+
+    from asset_pipeline import alphalab as _al  # noqa: PLC0415
+    ac = asset_class or None
+    key = (min_adv_eur, require_sector, ac, int(max_assets), universe_id, start, end)
+    hit = _signal_lab_cache.get(key)
+    if hit and not refresh and (time.time() - hit[0] < 1800):
+        return hit[1]
+    res = await asyncio.to_thread(
+        _al.compute_signal_lab, min_adv_eur, require_sector, ac, max_assets, universe_id, start, end,
+    )
+    _signal_lab_cache[key] = (time.time(), res)
+    return res
+
+
 _regime_cache: dict[tuple, tuple[float, dict]] = {}
 
 
@@ -630,26 +665,174 @@ async def alphalab_regime(
     start: str | None = Query(None),
     end: str | None = Query(None),
     universe_id: int | None = Query(None, description="use a SAVED universe's members instead of the ADV/sector filters"),
+    exclude_sectors: str | None = Query(None, description="comma-separated sectors to drop from the benchmark (e.g. 'commodity')"),
     refresh: bool = False,
 ):
     """Bull/bear × calm/turbulent regime timeline of the equal-weight index, over
     either the ADV/sector filters OR a saved `universe_id`'s members. bull = index ≥
     its trailing 200-day mean; turbulent = 63-day vol above the median of its own
-    prior history. Returns daily {dates, index, ma200, bull[], turb[], current}.
-    The frontend rebases the index to 100 at the window start. Cached ~30 min."""
+    prior history. `exclude_sectors` drops weak sectors from the benchmark index.
+    Returns daily {dates, index, ma200, bull[], turb[], current}. The frontend
+    rebases the index to 100 at the window start. Cached ~30 min."""
     import time  # noqa: PLC0415
 
     from asset_pipeline import alphalab as _al  # noqa: PLC0415
     ac = asset_class or None
-    key = (min_adv_eur, require_sector, ac, int(max_assets), start, end, universe_id)
+    excl = [s for s in (exclude_sectors or "").split(",") if s.strip()]
+    key = (min_adv_eur, require_sector, ac, int(max_assets), start, end, universe_id, tuple(sorted(excl)))
     hit = _regime_cache.get(key)
     if hit and not refresh and (time.time() - hit[0] < 1800):
         return hit[1]
     res = await asyncio.to_thread(
-        _al.compute_regime, min_adv_eur, require_sector, ac, max_assets, start, end, universe_id,
+        _al.compute_regime, min_adv_eur, require_sector, ac, max_assets, start, end, universe_id, excl,
     )
     _regime_cache[key] = (time.time(), res)
     return res
+
+
+@router.get("/api/asset-pipeline/alphalab/regime/stream")
+async def alphalab_regime_stream(
+    min_adv_eur: float = Query(1_000_000.0, ge=0),
+    require_sector: bool = True,
+    asset_class: str = Query("equity"),
+    max_assets: int = Query(600, ge=20, le=2500),
+    start: str | None = Query(None),
+    end: str | None = Query(None),
+    universe_id: int | None = Query(None),
+    exclude_sectors: str | None = Query(None),
+):
+    """SSE variant of /alphalab/regime — emits `{stage}` frames as the compute
+    progresses (resolve → load prices → build index → score), then one final
+    `{stage:"done", result}`. Same 30-min cache as the plain endpoint (a cache
+    hit streams straight to `done`). Lets the UI show live stage progress."""
+    import time  # noqa: PLC0415
+
+    from asset_pipeline import alphalab as _al  # noqa: PLC0415
+    ac = asset_class or None
+    excl = [s for s in (exclude_sectors or "").split(",") if s.strip()]
+    key = (min_adv_eur, require_sector, ac, int(max_assets), start, end, universe_id, tuple(sorted(excl)))
+
+    async def gen():
+        q: _queue.Queue = _queue.Queue()
+        hit = _regime_cache.get(key)
+        cached = hit[1] if (hit and (time.time() - hit[0] < 1800)) else None
+
+        def work():
+            try:
+                if cached is not None:
+                    q.put(_frame({"stage": "done", "result": cached}))
+                    return
+                res = _al.compute_regime(
+                    min_adv_eur, require_sector, ac, max_assets, start, end, universe_id, excl,
+                    lambda stage: q.put(_frame({"stage": stage})),
+                )
+                _regime_cache[key] = (time.time(), res)
+                q.put(_frame({"stage": "done", "result": res}))
+            except Exception as e:  # noqa: BLE001
+                q.put(_frame({"stage": "error", "error": f"{type(e).__name__}: {e}"}))
+            finally:
+                q.put(None)
+
+        threading.Thread(target=work, daemon=True).start()
+        yield ": keepalive\n\n"
+        while True:
+            item = await asyncio.to_thread(q.get)
+            if item is None:
+                break
+            yield item
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+_sector_regime_cache: dict[tuple, tuple[float, dict]] = {}
+
+
+@router.get("/api/asset-pipeline/alphalab/sectors")
+async def alphalab_sectors(
+    min_adv_eur: float = Query(1_000_000.0, ge=0),
+    require_sector: bool = True,
+    asset_class: str = Query("equity"),
+    max_assets: int = Query(600, ge=20, le=2500),
+    universe_id: int | None = Query(None, description="use a SAVED universe's members instead of the ADV/sector filters"),
+    refresh: bool = False,
+):
+    """Per-sector equal-weight price index of the universe — one {sector, size,
+    dates, index} entry per sector present, each index built over that sector's
+    own price history. Feeds the AlphaLab per-sector charts + risk/return tables.
+    Cached ~30 min."""
+    import time  # noqa: PLC0415
+
+    from asset_pipeline import alphalab as _al  # noqa: PLC0415
+    ac = asset_class or None
+    key = (min_adv_eur, require_sector, ac, int(max_assets), universe_id)
+    hit = _sector_regime_cache.get(key)
+    if hit and not refresh and (time.time() - hit[0] < 1800):
+        return hit[1]
+    res = await asyncio.to_thread(
+        _al.compute_sector_regime, min_adv_eur, require_sector, ac, max_assets, universe_id,
+    )
+    _sector_regime_cache[key] = (time.time(), res)
+    return res
+
+
+@router.get("/api/asset-pipeline/alphalab/sectors/stream")
+async def alphalab_sectors_stream(
+    min_adv_eur: float = Query(1_000_000.0, ge=0),
+    require_sector: bool = True,
+    asset_class: str = Query("equity"),
+    max_assets: int = Query(600, ge=20, le=2500),
+    universe_id: int | None = Query(None),
+    start: str | None = Query(None),
+    end: str | None = Query(None),
+):
+    """SSE variant of /alphalab/sectors — emits `{stage}` progress, then one
+    `{topic:"sector", result}` frame PER sector as it's computed (largest first),
+    so the UI renders sector cards progressively instead of waiting for all of
+    them. `start`/`end` bound the window (with warm-up) like the benchmark stream,
+    and reuse the same cached price panel (no second COPY). Ends `{topic:"done"}`."""
+    from asset_pipeline import alphalab as _al  # noqa: PLC0415
+    ac = asset_class or None
+
+    async def gen():
+        q: _queue.Queue = _queue.Queue()
+
+        def work():
+            try:
+                panel, secmap, uni = _al.load_panel(
+                    min_adv_eur, require_sector, ac, max_assets, universe_id, start, end,
+                    lambda stage: q.put(_frame({"stage": stage})),
+                )
+                if panel is None:
+                    q.put(_frame({"stage": "error", "error": "fast COPY loader unavailable (set SUPABASE_DB_URL)"}))
+                    return
+                q.put(_frame({"topic": "universe", "result": uni}))
+                for sec in _al.iter_sector_indices(
+                    panel, secmap, lambda stage: q.put(_frame({"stage": stage})), start, end,
+                ):
+                    q.put(_frame({"topic": "sector", "result": sec}))
+                q.put(_frame({"topic": "done"}))
+            except Exception as e:  # noqa: BLE001
+                q.put(_frame({"stage": "error", "error": f"{type(e).__name__}: {e}"}))
+            finally:
+                q.put(None)
+
+        threading.Thread(target=work, daemon=True).start()
+        yield ": keepalive\n\n"
+        while True:
+            item = await asyncio.to_thread(q.get)
+            if item is None:
+                break
+            yield item
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/api/asset-pipeline/grid", response_model=AssetGridResponse)
@@ -895,6 +1078,226 @@ async def delete_universe(universe_id: int):
         lambda: supabase.table("asset_universe").delete().eq("id", universe_id).execute()
     )
     return {"deleted": universe_id}
+
+
+@router.get("/api/asset-pipeline/etf-sectors/candidates")
+async def etf_sector_candidates():
+    """Scan fund-like instruments (ETF/crypto/commodity/fx/index/bond) whose
+    sector is still the lazy asset-class fallback ('etf', …) and propose a REAL
+    category for each — the sector it'd have if held long (`Equity`, `Real Estate`,
+    `Bonds`, `Commodity`, `FX`, `Crypto`, …), or `Short <category>` + a leverage
+    multiplier for inverse products. Real Yahoo sectors + already-tagged rows are
+    left out. HEURISTIC → for human review: returns the proposal alongside the
+    current sector; nothing changes until POST /etf-sectors/apply."""
+    from deps import supabase  # noqa: PLC0415
+    from asset_pipeline import short_etf as _se  # noqa: PLC0415
+
+    def _q() -> dict:
+        # One row per analysis instrument (prefer the default execution's name).
+        best: dict[int, dict] = {}
+        off = 0
+        while True:
+            rows = (
+                supabase.table("asset_grid")
+                .select("analysis_id, name, asset_class, sector, short_multiplier, analysis_symbol, is_default")
+                .in_("asset_class", list(_se.CANDIDATE_CLASSES))
+                .range(off, off + 999).execute().data
+            ) or []
+            for r in rows:
+                aid = r["analysis_id"]
+                if aid is None:
+                    continue
+                cur = best.get(aid)
+                if cur is None or (r.get("is_default") and not cur.get("is_default")):
+                    best[aid] = r
+            if len(rows) < 1000:
+                break
+            off += 1000
+
+        out: list[dict] = []
+        for aid, r in best.items():
+            # Only rows still on the asset-class fallback — never overwrite a real
+            # Yahoo sector or an already-tagged Short sector.
+            if not _se.is_fallback_sector(r.get("sector"), r.get("asset_class")):
+                continue
+            cls = _se.classify_sector(r.get("name"), r.get("asset_class"))
+            out.append({
+                "analysis_id": aid,
+                "analysis_symbol": r.get("analysis_symbol"),
+                "name": r.get("name"),
+                "asset_class": r.get("asset_class"),
+                "current_sector": r.get("sector"),
+                "multiplier": cls["multiplier"],
+                "category": cls["category"],
+                "is_short": cls["is_short"],
+                "proposed_sector": cls["sector"],
+            })
+        # Shorts first, then by category / leverage / name.
+        out.sort(key=lambda x: (not x["is_short"], x["category"], -(x["multiplier"] or 0), (x["name"] or "")))
+        return {
+            "candidates": out,
+            "sectors": list(_se.SECTORS),
+            "short_sectors": list(_se.SHORT_SECTORS),
+        }
+
+    return await asyncio.to_thread(_q)
+
+
+class _SectorTag(BaseModel):
+    analysis_id: int
+    sector: str | None = None       # a category / Short sector, or null to clear (→ asset_class)
+    multiplier: int | None = None   # leverage for a Short sector; null for long
+
+
+class _SectorApplyBody(BaseModel):
+    tags: list[_SectorTag]
+
+
+@router.post("/api/asset-pipeline/etf-sectors/apply")
+async def etf_sector_apply(body: _SectorApplyBody):
+    """Commit confirmed ETF sector tags: set `asset_analysis.sector` +
+    `short_multiplier` per analysis_id. `sector` must be a category or a Short
+    sector, or null to CLEAR (reset to the plain asset_class, multiplier→null).
+    The multiplier is only kept for a `Short …` sector. Admin-only."""
+    from deps import supabase  # noqa: PLC0415
+    from asset_pipeline import short_etf as _se  # noqa: PLC0415
+
+    allowed = set(_se.SECTORS) | set(_se.SHORT_SECTORS)
+
+    def _apply() -> dict:
+        updated = 0
+        for t in body.tags:
+            if t.sector is not None and t.sector not in allowed:
+                continue  # ignore unexpected sector values
+            if t.sector is None:  # clear → fall back to the asset class, drop the multiplier
+                a = (supabase.table("asset_analysis").select("asset_class")
+                     .eq("analysis_id", t.analysis_id).limit(1).execute().data) or []
+                patch = {"sector": (a[0].get("asset_class") if a else None) or "etf", "short_multiplier": None}
+            else:
+                mult = t.multiplier if t.sector.startswith("Short ") else None
+                patch = {"sector": t.sector, "short_multiplier": mult}
+            supabase.table("asset_analysis").update(patch).eq("analysis_id", t.analysis_id).execute()
+            updated += 1
+        return {"updated": updated}
+
+    return await asyncio.to_thread(_apply)
+
+
+@router.get("/api/asset-pipeline/equity-sectors/stuck")
+async def equity_sector_stuck():
+    """Equities STILL on the `equity`/NULL sector fallback (Yahoo assetProfile had
+    no sector for them — foreign/holding/ADR names, delisted symbols, …). Returns
+    `{stuck:[{analysis_id, symbol, name, current_sector, guess}], sectors}` for
+    manual assignment (a name-based `guess` pre-fills the dropdown when it's
+    confident). Apply via POST /etf-sectors/apply."""
+    from deps import supabase  # noqa: PLC0415
+    from asset_pipeline import short_etf as _se  # noqa: PLC0415
+
+    def _q() -> dict:
+        best: dict[int, dict] = {}
+        off = 0
+        while True:
+            rows = (
+                supabase.table("asset_grid")
+                .select("analysis_id, name, sector, analysis_symbol, is_default")
+                .eq("asset_class", "equity").range(off, off + 999).execute().data
+            ) or []
+            for r in rows:
+                aid = r["analysis_id"]
+                if aid is None or r.get("sector") not in (None, "equity"):
+                    continue
+                cur = best.get(aid)
+                if cur is None or (r.get("is_default") and not cur.get("is_default")):
+                    best[aid] = r
+            if len(rows) < 1000:
+                break
+            off += 1000
+
+        out = []
+        for aid, r in best.items():
+            name = r.get("name")
+            known = _se.known_sector(name)  # curated override — wins, pre-fills even "Equity"
+            if known:
+                guess, mult = known, None
+            else:
+                cls = _se.classify_sector(name, "equity")
+                # A confident pre-fill (skip the generic Equity/Single-Stock fallbacks).
+                guess = cls["sector"] if cls["sector"] not in ("Equity", "Single Stock") else None
+                mult = cls["multiplier"]
+            out.append({
+                "analysis_id": aid,
+                "symbol": r.get("analysis_symbol"),
+                "name": name,
+                "current_sector": r.get("sector"),
+                "guess": guess,
+                "multiplier": mult,
+            })
+        out.sort(key=lambda x: (x["name"] or ""))
+        return {"stuck": out, "sectors": list(_se.SECTORS), "short_sectors": list(_se.SHORT_SECTORS)}
+
+    return await asyncio.to_thread(_q)
+
+
+@router.post("/api/asset-pipeline/equity-sectors/backfill")
+async def equity_sector_backfill():
+    """SSE: fill the REAL Yahoo sector on equities still stuck on the `equity`
+    fallback (the fast chart-resolver carries no sector). Fetches v10
+    assetProfile per symbol, normalizes onto the canonical taxonomy (Apple →
+    Technology, JPMorgan → Financials), and updates `asset_analysis.sector`.
+    Emits per-symbol progress + a final summary. Re-runnable; only touches
+    equity-class rows on the fallback. Admin-only."""
+    from deps import supabase  # noqa: PLC0415
+    from asset_pipeline import short_etf as _se, yahoo  # noqa: PLC0415
+
+    async def gen():
+        q: _queue.Queue = _queue.Queue()
+
+        def work():
+            try:
+                q.put(_frame({"type": "status", "message": "Finding equities without a real sector…"}))
+                rows: list[dict] = []
+                off = 0
+                while True:
+                    r = (
+                        supabase.table("asset_analysis").select("analysis_id, symbol, sector")
+                        .eq("asset_class", "equity").range(off, off + 999).execute().data
+                    ) or []
+                    rows += [x for x in r if (x.get("sector") in (None, "equity")) and x.get("symbol")]
+                    if len(r) < 1000:
+                        break
+                    off += 1000
+
+                total = len(rows)
+                q.put(_frame({"type": "start", "total": total}))
+                updated = 0
+                for i, x in enumerate(rows, 1):
+                    prof = yahoo.asset_profile([x["symbol"]])  # paced internally
+                    p = prof.get(x["symbol"])
+                    sec = _se.normalize_sector(p.get("sector")) if p else None
+                    if sec:
+                        supabase.table("asset_analysis").update({"sector": sec}).eq(
+                            "analysis_id", x["analysis_id"]).execute()
+                        updated += 1
+                    q.put(_frame({"type": "item", "i": i, "total": total, "symbol": x["symbol"], "sector": sec}))
+                q.put(_frame({"type": "summary", "total": total, "updated": updated}))
+            except Exception as e:  # noqa: BLE001
+                q.put(_frame({"type": "error", "error": f"{type(e).__name__}: {e}"}))
+            finally:
+                q.put(None)
+
+        threading.Thread(target=work, daemon=True).start()
+        yield ": keepalive\n\n"
+        while True:
+            item = await asyncio.to_thread(q.get)
+            if item is None:
+                break
+            yield item
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/api/asset-pipeline/assets")
