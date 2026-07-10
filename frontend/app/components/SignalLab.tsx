@@ -10,8 +10,15 @@ import { RANGES, type RangeId } from './alphalab/window';
 
 const REGIME_ORDER: RegKey[] = ['bc', 'bt', 'rc', 'rt'];
 
+type Cadence = 'month_end' | 'daily_asof';
+
 type SignalRow = {
-  signal: string; label: string; group: 'price' | 'volume';
+  signal: string; label: string; group: 'price' | 'volume' | 'trend';
+  /** Which engine produced it. `daily_asof` = the signals /schedule actually trades.
+   *  Load-bearing: `mom_12_1` and `daily.mom_12_1` are the same measure, but
+   *  `vol_trend_3m` and `daily.vol_trend_3m` are NOT (spearman 0.58, opposite
+   *  sign). Without the cadence rendered, those two rows are indistinguishable. */
+  cadence?: Cadence;
   mean_ic: number; t_stat: number; p_value: number; hit_rate: number;
   quintile_spread: number | null; monotonicity: number | null; deciles: (number | null)[];
   months: number; significant: boolean;
@@ -34,6 +41,25 @@ function icStyle(ic: number | undefined): React.CSSProperties {
   return { background: ic >= 0 ? `rgba(34,197,94,${a})` : `rgba(239,68,68,${a})` };
 }
 
+const GROUP_STYLE: Record<string, string> = {
+  price: 'bg-accent-500/15 text-accent-300',
+  volume: 'bg-warn-500/15 text-warn-300',
+  trend: 'bg-pos-500/15 text-pos-300',
+};
+
+/** Two rows can carry near-identical labels across cadences ("volume trend 3m" vs
+ *  "Volume Trend 3M") while measuring different things. Never render one without
+ *  the other. */
+function CadenceTag({ cadence }: { cadence?: Cadence }) {
+  if (cadence !== 'daily_asof') return null;
+  return (
+    <span className="ml-1.5 text-[8px] uppercase tracking-wider px-1 py-0.5 rounded bg-pos-500/15 text-pos-300"
+      title="Daily as-of cadence — the signal the live /schedule strategy trades (strict < cutoff, 30-day staleness guard)">
+      live
+    </span>
+  );
+}
+
 export default function SignalLab() {
   const [universes, setUniverses] = useState<{ id: number; name: string; ticker_count: number }[]>([]);
   const [universeId, setUniverseId] = useState('');
@@ -43,6 +69,9 @@ export default function SignalLab() {
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);  // expanded signal (deciles)
+  // Off by default: the daily battery loops per instrument, taking the 4,006-name
+  // universe from ~31s to ~110s.
+  const [includeDaily, setIncludeDaily] = useState(false);
 
   useEffect(() => {
     try { const r = localStorage.getItem('signalLab.range'); if (r === 'train' || r === 'test' || r === 'full') setRange(r); } catch { /* ignore */ }
@@ -63,13 +92,14 @@ export default function SignalLab() {
     return () => clearInterval(id);
   }, [loading]);
 
-  const load = useCallback(async (id: string, r: RangeId) => {
+  const load = useCallback(async (id: string, r: RangeId, daily: boolean) => {
     setLoading(true); setError(null); setData(null); setOpen(null);
     try {
       const w = RANGES[r];
       const p = new URLSearchParams({ universe_id: id });
       if (w.start) p.set('start', w.start);
       if (w.end) p.set('end', w.end);
+      if (daily) p.set('include_daily', 'true');
       const resp = await apiFetch(`${API_URL}/api/asset-pipeline/signal-lab?${p}`);
       const b = await resp.json().catch(() => null);
       if (!resp.ok) setError(b?.detail ?? `HTTP ${resp.status}`);
@@ -82,8 +112,8 @@ export default function SignalLab() {
 
   useEffect(() => {
     if (!universeId) { setData(null); setError(null); return; }
-    void load(universeId, range);
-  }, [universeId, range, load]);
+    void load(universeId, range, includeDaily);
+  }, [universeId, range, includeDaily, load]);
 
   const sectors = data?.sectors ?? [];
 
@@ -121,6 +151,12 @@ export default function SignalLab() {
               <option value="">Select a universe…</option>
               {universes.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.ticker_count.toLocaleString()})</option>)}
             </select>
+            <label className="flex items-center gap-1.5 text-[11px] text-fg-muted cursor-pointer select-none"
+              title="Also score the daily as-of signals the live /schedule strategy trades. Much slower — it loops per instrument.">
+              <input type="checkbox" checked={includeDaily} onChange={(e) => setIncludeDaily(e.target.checked)}
+                className="accent-accent-600" />
+              Live-strategy signals <span className="text-fg-faint">(slower)</span>
+            </label>
             {loading && <span className="text-[11px] text-fg-faint">Computing… {elapsed.toFixed(1)}s</span>}
             {data && <span className="text-[11px] text-fg-faint">{RANGES[range].label} · {data.months} months · {data.from} → {data.to} · {data.universe?.size ?? 0} instruments</span>}
           </div>
@@ -156,10 +192,11 @@ export default function SignalLab() {
                         className="hover:bg-overlay/[0.02] cursor-pointer">
                         <td className="px-3 py-1.5 text-fg-soft whitespace-nowrap">
                           <span className="text-fg-faint text-[9px] mr-1">{open === s.signal ? '▾' : '▸'}</span>{s.label}
+                          <CadenceTag cadence={s.cadence} />
                           {s.significant && <span className="ml-1.5 text-[8px] uppercase tracking-wider text-accent-400">sig</span>}
                         </td>
                         <td className="px-3 py-1.5">
-                          <span className={`text-[9px] uppercase tracking-wider px-1 py-0.5 rounded ${s.group === 'volume' ? 'bg-warn-500/15 text-warn-300' : 'bg-accent-500/15 text-accent-300'}`}>{s.group}</span>
+                          <span className={`text-[9px] uppercase tracking-wider px-1 py-0.5 rounded ${GROUP_STYLE[s.group] ?? GROUP_STYLE.price}`}>{s.group}</span>
                         </td>
                         <td className="px-3 py-1.5 text-right font-mono" style={icStyle(s.mean_ic)}>{num(s.mean_ic, 3)}</td>
                         <td className={`px-3 py-1.5 text-right font-mono ${Math.abs(s.t_stat) >= 2 ? 'text-fg-strong font-semibold' : 'text-fg-muted'}`}>{s.t_stat.toFixed(1)}</td>
@@ -202,7 +239,7 @@ export default function SignalLab() {
                 <tbody>
                   {data.signals.map((s) => (
                     <tr key={s.signal} className="border-t border-neutral-800/20">
-                      <td className="px-2 py-1 text-fg-soft whitespace-nowrap sticky left-0 bg-card z-10">{s.label}</td>
+                      <td className="px-2 py-1 text-fg-soft whitespace-nowrap sticky left-0 bg-card z-10">{s.label}<CadenceTag cadence={s.cadence} /></td>
                       {sectors.map((sec) => {
                         const ic = s.sector_ic?.[sec];
                         return (
@@ -246,7 +283,7 @@ export default function SignalLab() {
                 <tbody className="divide-y divide-neutral-800/20">
                   {data.signals.map((s) => (
                     <tr key={s.signal} className="hover:bg-overlay/[0.02]">
-                      <td className="px-3 py-1.5 text-fg-soft whitespace-nowrap">{s.label}</td>
+                      <td className="px-3 py-1.5 text-fg-soft whitespace-nowrap">{s.label}<CadenceTag cadence={s.cadence} /></td>
                       {REGIME_ORDER.map((k) => {
                         const ic = s.regime_ic?.[k];
                         return (

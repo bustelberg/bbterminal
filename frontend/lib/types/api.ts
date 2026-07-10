@@ -64,3 +64,9 @@ export type ImpersonateRequest = components['schemas']['ImpersonateRequest'];
 
 // Asset pipeline (flat per-ISIN grid)
 export type AssetGridRow = components['schemas']['AssetGridRow'];
+// GuruFocus dividends, bridged onto the grid by ISIN (only ~13% of rows resolve).
+export type DividendCoverageEntry = components['schemas']['DividendCoverageEntry'];
+export type DividendSeriesResponse = components['schemas']['DividendSeriesResponse'];
+// The live per-payment feed. The fiscal-year series only gains a point when a
+// fiscal year closes, so a mid-year dividend hike is invisible for up to a year.
+export type DividendPaymentsResponse = components['schemas']['DividendPaymentsResponse'];

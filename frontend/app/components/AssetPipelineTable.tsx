@@ -4,9 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
-import type { AssetGridRow } from '../../lib/types/api';
+import type { AssetGridRow, DividendCoverageEntry } from '../../lib/types/api';
 import { classLabel, sectorLabel } from '../../lib/assetLabels';
 import AssetChartModal from './AssetChartModal';
+import AssetDividendModal from './AssetDividendModal';
 import RowResolveModal from './RowResolveModal';
 import CreateUniverseModal from './CreateUniverseModal';
 
@@ -72,6 +73,14 @@ const SOURCE_TONE: Record<string, string> = {
   Leonteq: 'bg-accent-600/15 text-accent-400 border-accent-600/30',
   OpenFIGI: 'bg-warn-500/10 text-warn-300 border-warn-500/20',
   yfinance: 'bg-pos-500/10 text-pos-300 border-pos-500/20',
+  // Every other column comes from the Yahoo/OpenFIGI/Leonteq pipeline keyed by
+  // ISIN. Div/share is the one column sourced from GuruFocus, reached by bridging
+  // this row's ISIN to a GuruFocus company — so it earns its own badge.
+  //
+  // Neutral slate, NOT `neg-*`: the three semantic ramps (accent/warn/pos) are
+  // taken by the badges above, and `neg-*` means "negative return / error" in this
+  // palette. A red source badge reads as a broken column.
+  GuruFocus: 'bg-overlay/[0.06] text-fg-muted border-neutral-700',
 };
 const _OPENFIGI_KEYS = new Set<SortKey>(['openfigi_name', 'identity_status']);
 // ISIN + the Leonteq metadata columns all come from the uploaded Leonteq list.
@@ -119,6 +128,12 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
   const [loading, setLoading] = useState(false);
   const [chartRow, setChartRow] = useState<AssetGridRow | null>(null);
   const [resolveRow, setResolveRow] = useState<AssetGridRow | null>(null);
+  // ISIN -> GuruFocus company. Only ~13% of grid rows resolve; the rest are ETFs,
+  // crypto, or equities never ingested into `company`. An ISIN absent from this
+  // map has no obtainable dividend data, and the cell says so rather than
+  // rendering a blank that reads as "pays no dividend".
+  const [dividends, setDividends] = useState<Record<string, DividendCoverageEntry>>({});
+  const [dividendRow, setDividendRow] = useState<AssetGridRow | null>(null);
 
   const [q, setQ] = useState('');
   const [classFilter, setClassFilter] = useState('');
@@ -143,6 +158,17 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
     } catch { /* ignore */ }
   }, []);
   useEffect(() => { void loadUniverses(); }, [loadUniverses]);
+
+  // One small map (~2.5k entries), joined to the grid on ISIN client-side. Failing
+  // to load it must leave the column inert, never break the table.
+  const loadDividendCoverage = useCallback(async () => {
+    try {
+      const r = await apiFetch(`${API_URL}/api/asset-pipeline/dividends/coverage`);
+      const b = await r.json().catch(() => null);
+      if (r.ok) setDividends(b?.by_isin ?? {});
+    } catch { /* the column degrades to "—"; the grid is unaffected */ }
+  }, []);
+  useEffect(() => { void loadDividendCoverage(); }, [loadDividendCoverage]);
 
   // Fetch the selected universe's member tickers (for the grid filter).
   useEffect(() => {
@@ -368,25 +394,44 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
                   </th>
                 ))}
                 <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap border-l border-neutral-800/40" title="Chart · manual OpenFIGI + yfinance resolve">Actions</th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap border-l border-neutral-800/40"
+                  title="Dividends per share (GuruFocus). Resolved from this row's ISIN to a GuruFocus company — most grid rows (ETFs, crypto, un-ingested equities) have none.">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span>Div/share</span>
+                    <SourceBadge source="GuruFocus" />
+                  </div>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800/20">
-              {padTop > 0 && <tr aria-hidden><td colSpan={COLS.length + 1} style={{ height: padTop }} /></tr>}
+              {/* +2: the Div/share and Actions columns live outside COLS. */}
+              {padTop > 0 && <tr aria-hidden><td colSpan={COLS.length + 2} style={{ height: padTop }} /></tr>}
               {vItems.map((vi) => {
                 const r = view[vi.index];
                 return (
                   <GridRow key={r.execution_id} r={r} onChart={() => setChartRow(r)}
                     onResolve={() => setResolveRow(r)}
+                    dividend={r.isin ? dividends[r.isin] : undefined}
+                    onDividends={() => setDividendRow(r)}
                     measureRef={rowVirtualizer.measureElement} dataIndex={vi.index} />
                 );
               })}
-              {padBottom > 0 && <tr aria-hidden><td colSpan={COLS.length + 1} style={{ height: padBottom }} /></tr>}
+              {padBottom > 0 && <tr aria-hidden><td colSpan={COLS.length + 2} style={{ height: padBottom }} /></tr>}
             </tbody>
           </table>
         </div>
       )}
 
       {chartRow && <AssetChartModal row={chartRow} onClose={() => setChartRow(null)} />}
+      {dividendRow?.isin && dividends[dividendRow.isin] && (
+        <AssetDividendModal row={dividendRow} companyId={dividends[dividendRow.isin].company_id}
+          onClose={() => setDividendRow(null)}
+          // Flip has_data locally so the cell stops offering a fetch.
+          onFetched={() => setDividends((d) => {
+            const isin = dividendRow.isin;
+            return isin && d[isin] ? { ...d, [isin]: { ...d[isin], has_data: true } } : d;
+          })} />
+      )}
       {resolveRow && (
         <RowResolveModal row={resolveRow}
           onClose={(didResolve) => { setResolveRow(null); if (didResolve) void load(); }} />
@@ -402,10 +447,47 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
   );
 }
 
-function GridRow({ r, onChart, onResolve, measureRef, dataIndex }: {
+/** The Div/share cell has four states, and conflating any two of them is a lie:
+ *   no GuruFocus company behind this ISIN  -> "—" (majority of the grid)
+ *   company found, exchange outside our GF subscription -> UNSUBSCRIBED
+ *   company found, series already stored   -> "Chart"
+ *   company found, nothing stored yet      -> "Fetch" (one lazy GF call)
+ * A blank cell must never read as "this company pays no dividend". */
+function DividendCell({ entry, onOpen }: { entry?: DividendCoverageEntry; onOpen: () => void }) {
+  if (!entry) {
+    return (
+      <span className="text-fg-faint" title="No GuruFocus company is linked to this ISIN — ETFs, crypto, and equities we have never ingested have no dividend data.">
+        —
+      </span>
+    );
+  }
+  if (entry.gf_unsubscribed) {
+    return (
+      <span className="text-[9px] uppercase tracking-wider px-1 py-0.5 rounded bg-warn-500/15 text-warn-300"
+        title={`Exchange ${entry.exchange ?? '?'} is outside our GuruFocus subscription — no dividend data is obtainable for this listing.`}>
+        UNSUBSCRIBED
+      </span>
+    );
+  }
+  // "View", not "Chart": the Actions column's price-chart button sits immediately
+  // to the left and is already labelled Chart. Two adjacent "Chart" buttons that
+  // open different things is a trap.
+  return (
+    <button type="button" onClick={onOpen}
+      title={entry.has_data ? 'View the dividends-per-share history' : 'Fetch dividends from GuruFocus (one API call, cached)'}
+      className={`text-[10px] px-2 py-0.5 rounded border border-neutral-700 transition-colors hover:border-accent-500/50 ${
+        entry.has_data ? 'text-accent-400' : 'text-fg-muted hover:text-accent-300'}`}>
+      {entry.has_data ? 'View' : 'Fetch'}
+    </button>
+  );
+}
+
+function GridRow({ r, onChart, onResolve, dividend, onDividends, measureRef, dataIndex }: {
   r: AssetGridRow;
   onChart: () => void;
   onResolve: () => void;
+  dividend?: DividendCoverageEntry;
+  onDividends: () => void;
   measureRef?: (el: HTMLTableRowElement | null) => void;
   dataIndex?: number;
 }) {
@@ -515,7 +597,7 @@ function GridRow({ r, onChart, onResolve, measureRef, dataIndex }: {
               ? <span className="text-fg-faint">—</span>
               : <span className={r.zero_vol_frac >= 0.05 ? 'text-warn-300' : 'text-fg-subtle'}>{(r.zero_vol_frac * 100).toFixed(1)}%</span>}
         </td>
-        {/* Actions — Chart (if priced) + manual OpenFIGI/yfinance resolve (last cell) */}
+        {/* Actions — Chart (if priced) + manual OpenFIGI/yfinance resolve */}
         <td className="px-3 py-1.5 whitespace-nowrap border-l border-neutral-800/40">
           <div className="flex items-center gap-1.5">
             {hasSeries && (
@@ -529,6 +611,10 @@ function GridRow({ r, onChart, onResolve, measureRef, dataIndex }: {
               Resolve
             </button>
           </div>
+        </td>
+        {/* Dividends per share (GuruFocus, bridged by ISIN) — the rightmost cell */}
+        <td className="px-3 py-1.5 whitespace-nowrap border-l border-neutral-800/40">
+          <DividendCell entry={dividend} onOpen={onDividends} />
         </td>
       </tr>
   );

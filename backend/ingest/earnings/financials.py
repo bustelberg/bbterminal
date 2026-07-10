@@ -51,8 +51,19 @@ def _extract_financials_dates(data: dict) -> list[date]:
     return sorted(dates)
 
 
-def _parse_financials(data: dict, company_id: int) -> list[dict]:
-    """Parse GuruFocus /financials response into metric_data rows."""
+def _parse_financials(
+    data: dict, company_id: int, *, metric_codes: set[str] | None = None,
+) -> list[dict]:
+    """Parse GuruFocus /financials response into metric_data rows.
+
+    `metric_codes` restricts what is PERSISTED. `None` (the default, and what the
+    earnings dashboard's refresh uses) keeps every field, which is ~36,700
+    `metric_data` rows for one company — 263 leaf fields x ~160 periods. A caller
+    that only needs one series (the asset-pipeline dividends column wants two
+    codes, ~320 rows) passes them here rather than paying 100x the storage for
+    data nothing reads. The raw JSON is cached in Storage either way, so a later
+    full parse costs no extra GuruFocus call.
+    """
     financials = data.get("financials")
     if not isinstance(financials, dict):
         return []
@@ -96,6 +107,8 @@ def _parse_financials(data: dict, company_id: int) -> list[dict]:
                 continue
             for path_parts, leaf in _flatten(top_val, [block_name, str(top_key)]):
                 metric_code = "__".join(path_parts)
+                if metric_codes is not None and metric_code not in metric_codes:
+                    continue
                 if isinstance(leaf, list):
                     # Pre-scan: only record this field's period rows if at
                     # least one period has a real number. That keeps storage
@@ -139,6 +152,7 @@ def fetch_financials(
     *,
     force_refresh: bool = False,
     on_log: callable = None,
+    metric_codes: set[str] | None = None,
 ) -> EarningsResult:
     def _log(msg: str):
         result.logs.append(msg)
@@ -193,7 +207,7 @@ def fetch_financials(
             _log("Cached to storage")
 
     # Parse and load into DB (always, even on cache hit)
-    rows = _parse_financials(cached, company_id)
+    rows = _parse_financials(cached, company_id, metric_codes=metric_codes)
     result.metrics_found = len(set(r["metric_code"] for r in rows))
     _log(f"Parsed {len(rows)} rows, {result.metrics_found} metrics")
     result.rows_loaded = _upsert_metric_rows(supabase, rows)

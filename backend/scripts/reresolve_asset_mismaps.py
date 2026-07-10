@@ -47,7 +47,7 @@ def _load_ok_rows(sb) -> list[dict]:
 
 
 def main() -> None:
-    from asset_pipeline.resolve import _NAME_MATCH, _name_score  # noqa: PLC0415
+    from asset_pipeline.resolve import same_company  # noqa: PLC0415
 
     sb = deps.supabase
     rows = _load_ok_rows(sb)
@@ -56,9 +56,14 @@ def main() -> None:
     # QCOM). Deliberately name-based, NOT ticker-based: same-company relistings
     # (A-share↔H-share, cross-exchange) share the name and must be left alone —
     # they trade at different prices and aren't errors.
+    # `same_company`, NOT a raw `_name_score >= 80` floor: "Ingentec Corporation"
+    # vs OpenFIGI's "INGENTEC CORP" scores 75.9 and would be flagged as a wrong
+    # company. Measured 2026-07-10: the raw filter produced 636 suspects, of which
+    # 555 were false — it flagged every issuer whose Yahoo name spells out a
+    # corporate form. `same_company` strips those first and finds the real 81.
     suspects = [
         r for r in rows
-        if r.get("openfigi_name") and _name_score(r.get("name"), r.get("openfigi_name")) < _NAME_MATCH
+        if r.get("openfigi_name") and not same_company(r.get("name"), r.get("openfigi_name"))
     ]
 
     print(f"{len(rows)} ok rows · {len(suspects)} wrong-company suspects"
@@ -78,7 +83,7 @@ def main() -> None:
         new, new_name = an.get("symbol"), an.get("name")
         # Only replace when the NEW resolution IS the right company (its name
         # matches OpenFIGI) and the symbol actually changed.
-        if new and new != old and _name_score(new_name, figi_name) >= _NAME_MATCH:
+        if new and new != old and same_company(new_name, figi_name):
             changed += 1
             print(f"  FIXED {isin}: {old} ({(r.get('name') or '?')[:22]}) -> {new} ({(new_name or '?')[:22]})  "
                   f"[OpenFIGI: {figi_name}]", flush=True)

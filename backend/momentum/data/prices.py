@@ -1,9 +1,18 @@
 """Bulk price + volume loaders.
 
-Both call `_load_metric_chunks` with a different `metric_code`. The
-returned DataFrame is sorted by `(company_id, target_date)` so the
-downstream indexers in `momentum.backtest.indices` can build their
-per-company Series without re-sorting."""
+Thin adapters over `timeseries.load_series` — they exist to keep the legacy
+column names (`price`, `volume`) and the `(supabase, ids, start, end)` signature
+that the backtest stream and self-heal paths pass. The query, the COPY fast path
+and the PostgREST fallback all live in `timeseries/`.
+
+The returned DataFrame is sorted by `(company_id, target_date)` so the
+downstream indexers in `momentum.backtest.indices` can build their per-company
+Series without re-sorting.
+
+Both series are GuruFocus (`gf.*`). That is deliberate and load-bearing: the
+scheduled /schedule strategy is priced off GuruFocus, and `yf.close` is a
+different number. Swapping the vendor here would change live holdings.
+"""
 from __future__ import annotations
 
 from datetime import date
@@ -11,8 +20,14 @@ from datetime import date
 import pandas as pd
 from supabase import Client
 
-from ._helpers import _load_metric_chunks
-from ._pg import load_metric_df_via_copy
+from timeseries import ENTITY_COL, load_series
+
+
+def _adapt(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
+    """Canonical `[entity_id, date, <alias>]` -> legacy `[company_id, target_date, <value_col>]`."""
+    return df.rename(columns={ENTITY_COL: "company_id", "date": "target_date"})[
+        ["company_id", "target_date", value_col]
+    ]
 
 
 def load_all_prices(
@@ -27,33 +42,16 @@ def load_all_prices(
     Args:
         on_progress: Optional callback(rows_so_far, page_num) called after
             each page. Called from worker threads; must be thread-safe.
+            Only fires on the PostgREST fallback path.
 
     Returns DataFrame with columns: company_id, target_date, price
     sorted by (company_id, target_date).
     """
-    if not company_ids:
-        return pd.DataFrame(columns=["company_id", "target_date", "price"])
-
-    # Fast path: one direct-Postgres COPY when SUPABASE_DB_URL is configured.
-    # Returns None (→ PostgREST path below) when unconfigured or on any error.
-    fast = load_metric_df_via_copy(company_ids, "close_price", start_date, end_date, "price")
-    if fast is not None:
-        return fast
-
-    rows = _load_metric_chunks(
-        supabase, company_ids, "close_price", start_date, end_date,
-        on_progress, description_prefix="load_all_prices",
+    df = load_series(
+        company_ids, "gf.close", start_date, end_date,
+        supabase=supabase, on_progress=on_progress,
     )
-
-    if not rows:
-        return pd.DataFrame(columns=["company_id", "target_date", "price"])
-
-    df = pd.DataFrame(rows)
-    df.rename(columns={"numeric_value": "price"}, inplace=True)
-    df["target_date"] = pd.to_datetime(df["target_date"])
-    df["price"] = df["price"].astype(float)
-    df = df.sort_values(["company_id", "target_date"]).reset_index(drop=True)
-    return df
+    return _adapt(df.rename(columns={"close": "price"}), "price")
 
 
 def load_all_volumes(
@@ -68,29 +66,13 @@ def load_all_volumes(
     Args:
         on_progress: Optional callback(rows_so_far, page_num) called after
             each page. Called from worker threads; must be thread-safe.
+            Only fires on the PostgREST fallback path.
 
     Returns DataFrame with columns: company_id, target_date, volume
     sorted by (company_id, target_date).
     """
-    if not company_ids:
-        return pd.DataFrame(columns=["company_id", "target_date", "volume"])
-
-    # Fast path: one direct-Postgres COPY when SUPABASE_DB_URL is configured.
-    fast = load_metric_df_via_copy(company_ids, "volume", start_date, end_date, "volume")
-    if fast is not None:
-        return fast
-
-    rows = _load_metric_chunks(
-        supabase, company_ids, "volume", start_date, end_date,
-        on_progress, description_prefix="load_all_volumes",
+    df = load_series(
+        company_ids, "gf.volume", start_date, end_date,
+        supabase=supabase, on_progress=on_progress,
     )
-
-    if not rows:
-        return pd.DataFrame(columns=["company_id", "target_date", "volume"])
-
-    df = pd.DataFrame(rows)
-    df.rename(columns={"numeric_value": "volume"}, inplace=True)
-    df["target_date"] = pd.to_datetime(df["target_date"])
-    df["volume"] = df["volume"].astype(float)
-    df = df.sort_values(["company_id", "target_date"]).reset_index(drop=True)
-    return df
+    return _adapt(df, "volume")

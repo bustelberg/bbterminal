@@ -21,7 +21,13 @@ from pydantic import BaseModel
 from asset_pipeline.resolve import resolve as _resolve
 from asset_pipeline.yahoo import YahooThrottled
 
+from ._asset_dividends import router as _dividends_router
+
 router = APIRouter(tags=["asset-pipeline"])
+# GuruFocus dividends for the grid's rightmost column. Kept in its own module
+# because it is the ONLY place the Yahoo asset universe is bridged to the
+# GuruFocus company universe (by ISIN) — see its docstring for the coverage math.
+router.include_router(_dividends_router)
 
 
 class AssetGridRow(BaseModel):
@@ -641,23 +647,38 @@ async def signal_lab(
     universe_id: int | None = Query(None, description="use a SAVED universe's members"),
     start: str | None = Query(None, description="evaluate IC from this month (train/test split)"),
     end: str | None = Query(None, description="evaluate IC to this month"),
+    include_daily: bool = Query(
+        False,
+        description="also score the daily as-of signals /schedule trades (keys "
+                    "prefixed `daily.`). Off by default: `evaluate_panel` loops "
+                    "per entity, so on the 4,006-name 'liquid' universe it takes "
+                    "the call from ~31s to ~110s.",
+    ),
     refresh: bool = False,
 ):
     """Signal Lab — predictive-power research over the unified price/volume signal
     panel. Per signal: cross-sectional rank IC vs next-month return, t-stat, hit
     rate, quintile spread, decile monotonicity, PER-SECTOR + PER-REGIME IC, and the
     monthly IC series. `start`/`end` = the train/test evaluation window. Pure
-    research (no portfolio). Cached ~30 min."""
+    research (no portfolio). Cached ~30 min.
+
+    Each row carries a `cadence`: `month_end` for the lab's own battery, or
+    `daily_asof` for the signals the live /schedule strategy trades. Daily rows are
+    keyed by registry key (`daily.mom_12_1`) because the bare names collide and are
+    NOT the same measure — see `signal_engine.registry.PARITY`."""
     import time  # noqa: PLC0415
 
     from asset_pipeline import alphalab as _al  # noqa: PLC0415
     ac = asset_class or None
-    key = (min_adv_eur, require_sector, ac, int(max_assets), universe_id, start, end)
+    # `include_daily` MUST be in the key: it changes the payload, so a `false`
+    # call would otherwise serve a truncated response to a `true` one.
+    key = (min_adv_eur, require_sector, ac, int(max_assets), universe_id, start, end, include_daily)
     hit = _signal_lab_cache.get(key)
     if hit and not refresh and (time.time() - hit[0] < 1800):
         return hit[1]
     res = await asyncio.to_thread(
-        _al.compute_signal_lab, min_adv_eur, require_sector, ac, max_assets, universe_id, start, end,
+        _al.compute_signal_lab, min_adv_eur, require_sector, ac, max_assets, universe_id,
+        start, end, include_daily,
     )
     _signal_lab_cache[key] = (time.time(), res)
     return res

@@ -492,8 +492,16 @@ def resolve(identifier: str, id_type: str | None = None, with_candles: bool = Tr
         # WIL), so a ticker anchor wrongly downgrades correct cross-listings.
         chosen = elig[0]
         anchored = False
-        if figi_name and _name_score(chosen.get("name"), figi_name) < _NAME_MATCH:
-            better = [s for s in elig if _name_score(s.get("name"), figi_name) >= _NAME_MATCH]
+        # `same_company`, NOT a raw `_name_score` floor. `token_set_ratio` scores
+        # "NVIDIA Corporation" vs OpenFIGI's "NVIDIA CORP" at 75.9 — under the 80
+        # floor — so the anchor concluded the most-liquid NVDA was a DIFFERENT
+        # company and swapped in the Stuttgart line (€1.6M ADV vs €28,076M). Same
+        # for "Intel Corporation"/"INTEL CORP" (74.1) and "Eli Lilly and
+        # Company"/"LILLY(ELI) & CO" (50.0). `same_company` strips corporate forms
+        # first, so those match while Micron/SkyWater still doesn't — and it is
+        # what `identity_status` already uses, so the two can no longer disagree.
+        if figi_name and not same_company(chosen.get("name"), figi_name):
+            better = [s for s in elig if same_company(s.get("name"), figi_name)]
             if better:
                 # Right company established by NAME; among ITS listings prefer the
                 # one whose ticker matches OpenFIGI (usually the primary), else the

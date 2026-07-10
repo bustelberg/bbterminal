@@ -12,7 +12,6 @@ spreads, robustness, decile monotonicity) — that's the deepening step.
 """
 from __future__ import annotations
 
-import io
 import math
 import threading
 import time
@@ -22,7 +21,9 @@ import numpy as np
 import pandas as pd
 
 from deps import supabase
-from momentum.data import _pg
+from signal_engine import by_cadence
+from signal_engine.daily import evaluate_panel
+from timeseries import ENTITY_COL, SeriesUnavailable, load_series, to_panel
 
 # Signals: name -> builder over the month-end price panel `m` (index=month-end,
 # columns=analysis_id). Each returns a same-shaped cross-sectional DataFrame.
@@ -39,6 +40,33 @@ def _signals(m: pd.DataFrame, ret1: pd.DataFrame) -> dict[str, pd.DataFrame]:
     return {s.name: s.build(c) for s in _sig.SIGNALS if s.group == "price"}
 
 
+def _load_asset_series(
+    analysis_ids: list[int],
+    series: list[str],
+    since: str | None,
+    until: str | None,
+) -> pd.DataFrame | None:
+    """Adapter over `timeseries.load_series` keeping this module's legacy column
+    names. Returns `None` when the COPY fast path is unavailable — `asset_price`
+    has no PostgREST fallback, and every caller here degrades to a "set
+    SUPABASE_DB_URL" note rather than erroring."""
+    try:
+        df = load_series(analysis_ids, series, since, until, order=False)
+    except SeriesUnavailable:
+        return None
+    return df.rename(columns={ENTITY_COL: "analysis_id", "date": "target_date"})
+
+
+def _panel(df: pd.DataFrame, value: str) -> pd.DataFrame:
+    """Long -> wide (index=target_date, columns=analysis_id).
+
+    `timeseries.to_panel` is a factorize + numpy scatter: identical output to the
+    `pivot_table(...).sort_index()` this replaces (both source tables have a PK on
+    (entity, date), so there are no duplicates to aggregate), ~7x faster on a
+    large panel — 1,591 ms -> 232 ms over 5.58M rows."""
+    return to_panel(df, value, entity_col="analysis_id", date_col="target_date")
+
+
 def _load_closes(
     analysis_ids: list[int], since: str | None = None, until: str | None = None,
 ) -> pd.DataFrame | None:
@@ -46,21 +74,7 @@ def _load_closes(
     `since`/`until` (YYYY-MM-DD, inclusive) bound the scan to a date window —
     crucial for a large universe (loading ALL history for thousands of ids is a
     slow full scan) and for the train/test split."""
-    where = "analysis_id = ANY(%s::int[]) AND close IS NOT NULL"
-    params: list = [analysis_ids]
-    if since:
-        where += " AND target_date >= %s"
-        params.append(since)
-    if until:
-        where += " AND target_date <= %s"
-        params.append(until)
-    buf: io.BytesIO | None = _pg._run_copy(
-        f"COPY (SELECT analysis_id, target_date, close FROM asset_price WHERE {where}) TO STDOUT WITH CSV",
-        tuple(params),
-    )
-    if buf is None:
-        return None
-    return pd.read_csv(buf, names=["analysis_id", "target_date", "close"])
+    return _load_asset_series(analysis_ids, ["yf.close"], since, until)
 
 
 def _sector_map(aids: list[int]) -> dict[int, str | None]:
@@ -265,8 +279,7 @@ def load_panel(
         if df is None:
             return None, {}, uni  # COPY unavailable — do NOT cache the miss
         _p("Building price panel")
-        df["target_date"] = pd.to_datetime(df["target_date"])
-        panel = df.pivot_table(index="target_date", columns="analysis_id", values="close").sort_index()
+        panel = _panel(df, "close")
         _panel_cache[key] = (time.time(), panel, secmap, uni)
         return panel, secmap, uni
 
@@ -510,8 +523,7 @@ def compute_scoreboard(
         return {**base, "months": 0, "signals": [],
                 "note": "fast COPY loader unavailable (set SUPABASE_DB_URL) — scoreboard skipped"}
 
-    df["target_date"] = pd.to_datetime(df["target_date"])
-    panel = df.pivot_table(index="target_date", columns="analysis_id", values="close").sort_index()
+    panel = _panel(df, "close")
     # Daily → month-end last close; need enough history for the 12m lookbacks.
     m = panel.resample("ME").last()
     if len(m) < 18:
@@ -557,22 +569,62 @@ def _load_close_volume(
     analysis_ids: list[int], since: str | None = None, until: str | None = None,
 ) -> pd.DataFrame | None:
     """(analysis_id, target_date, close, volume) via one COPY. `since`/`until`
-    (inclusive) bound the scan to a date window for the train/test split."""
-    where = "analysis_id = ANY(%s::int[]) AND close IS NOT NULL"
-    params: list = [analysis_ids]
-    if since:
-        where += " AND target_date >= %s"
-        params.append(since)
-    if until:
-        where += " AND target_date <= %s"
-        params.append(until)
-    buf = _pg._run_copy(
-        f"COPY (SELECT analysis_id, target_date, close, volume FROM asset_price WHERE {where}) TO STDOUT WITH CSV",
-        tuple(params),
+    (inclusive) bound the scan to a date window for the train/test split.
+
+    Both series are columns of `asset_price`, so `load_series` fuses them into a
+    single scan — same one query as before, not two."""
+    return _load_asset_series(analysis_ids, ["yf.close", "yf.volume"], since, until)
+
+
+_DAILY_SPECS = by_cadence("daily_asof")
+
+
+def _daily_signal_panels(
+    close: pd.DataFrame, volume: pd.DataFrame, months: pd.DatetimeIndex,
+) -> dict[str, pd.DataFrame]:
+    """Score the LIVE strategy's signals at this lab's decision points.
+
+    `/schedule` trades the seven `daily_asof` signals; the Signal Lab only ever
+    measured the nine `month_end` ones. Both batteries now come from
+    `signal_engine`, so the lab can report the IC of the signals actually traded.
+
+    Alignment: `evaluate_panel`'s cutoff is exclusive (strict `<`), so a cutoff of
+    `month_end + 1 day` anchors on the month-end bar itself — exactly the decision
+    point the month-end signals use, and exactly the bar `fwd` starts its return
+    from. The two cadences are therefore measured on identical information.
+
+    What this cadence adds, beyond different formulas: `evaluate_panel` drops an
+    entity whose newest bar is more than `MAX_STALENESS_DAYS` before the cutoff, or
+    that has fewer than `MIN_BARS` of history. A halted or delisted name that
+    `resample("ME").last()` would still carry becomes NaN here, and NaN is excluded
+    from the IC.
+
+    Returns `{registry_key: month x analysis_id panel}` — keyed by `daily.mom_12_1`
+    rather than `mom_12_1`, because the month-end battery already claims the bare
+    name and they are NOT the same measure (see `signal_engine.registry.PARITY`).
+    """
+    aids = [int(a) for a in close.columns]
+    price_index = {int(a): close[a].dropna() for a in close.columns}
+    volume_index = {int(a): volume[a].dropna() for a in volume.columns}
+
+    cutoffs = [(pd.Timestamp(me) + pd.Timedelta(days=1)).date() for me in months]
+    per_cutoff = evaluate_panel(
+        aids, cutoffs, price_index=price_index, volume_index=volume_index, id_col="entity_id",
     )
-    if buf is None:
-        return None
-    return pd.read_csv(buf, names=["analysis_id", "target_date", "close", "volume"])
+
+    panels = {
+        s.key: pd.DataFrame(np.nan, index=months, columns=close.columns, dtype="float64")
+        for s in _DAILY_SPECS
+    }
+    for me, c in zip(months, cutoffs):
+        rows = per_cutoff.get(pd.Timestamp(c)) or []
+        if not rows:
+            continue
+        block = pd.DataFrame(rows).set_index("entity_id")
+        for s in _DAILY_SPECS:
+            if s.name in block.columns:
+                panels[s.key].loc[me, block.index] = block[s.name].to_numpy(dtype="float64")
+    return panels
 
 
 def _ic_series(sig: pd.DataFrame, fwd: pd.DataFrame, min_names: int) -> pd.Series:
@@ -621,6 +673,7 @@ def compute_signal_lab(
     universe_id: int | None = None,
     start: str | None = None,
     end: str | None = None,
+    include_daily: bool = True,
 ) -> dict:
     """Predictive-power research over the universe: for each signal (price +
     volume) the cross-sectional rank IC vs next-month return, t-stat, hit rate,
@@ -649,9 +702,8 @@ def compute_signal_lab(
     df = _load_close_volume(aids, since=since, until=end)
     if df is None:
         return {**base, "signals": [], "sectors": [], "note": "fast COPY loader unavailable (set SUPABASE_DB_URL)"}
-    df["target_date"] = pd.to_datetime(df["target_date"])
-    close = df.pivot_table(index="target_date", columns="analysis_id", values="close").sort_index()
-    volume = df.pivot_table(index="target_date", columns="analysis_id", values="volume").sort_index()
+    close = _panel(df, "close")
+    volume = _panel(df, "volume")
     m, ret1, vol = _sig.monthly_panels(close, volume)
     if len(m) < 18:
         return {**base, "signals": [], "sectors": [], "note": "not enough monthly history for 12m signals"}
@@ -667,6 +719,21 @@ def compute_signal_lab(
     fwd = fwd.loc[win]
     sigs = {name: panel.loc[win] for name, panel in sigs.items()}
 
+    # The daily-as-of battery — the signals /schedule actually trades — measured at
+    # the SAME decision points against the SAME forward return. Keyed by registry
+    # key so `daily.mom_12_1` can't be confused with the month-end `mom_12_1`.
+    daily_panels = _daily_signal_panels(close, volume, win) if include_daily else {}
+
+    # (key, label, group, cadence, panel) for every signal the lab reports.
+    evaluated: list[tuple[str, str, str, str, pd.DataFrame]] = [
+        (s.name, s.label, s.group, "month_end", sigs[s.name]) for s in _sig.SIGNALS
+    ]
+    evaluated += [
+        (s.key, s.label, s.group, "daily_asof", daily_panels[s.key])
+        for s in _DAILY_SPECS
+        if s.key in daily_panels
+    ]
+
     secs = sorted({s for a in close.columns if (s := secmap.get(a))})
     sec_cols = {sec: [a for a in close.columns if secmap.get(a) == sec] for sec in secs}
 
@@ -680,8 +747,7 @@ def compute_signal_lab(
     regime_months = {k: int((reg_month == k).sum()) for k in ("bc", "bt", "rc", "rt")}
 
     out: list[dict] = []
-    for s in _sig.SIGNALS:
-        sig = sigs[s.name]
+    for sig_key, sig_label, sig_group, sig_cadence, sig in evaluated:
         ser = _ic_series(sig, fwd, _MIN_NAMES_PER_MONTH)
         n = int(ser.size)
         if n < 6:
@@ -705,7 +771,8 @@ def compute_signal_lab(
             if len(vals) >= 3:
                 regime_ic[k] = round(float(vals.mean()), 4)
         out.append({
-            "signal": s.name, "label": s.label, "group": s.group,
+            "signal": sig_key, "label": sig_label, "group": sig_group,
+            "cadence": sig_cadence,
             "mean_ic": round(mean_ic, 4), "t_stat": round(t_stat, 2), "p_value": round(p_value, 4),
             "hit_rate": round(float((ser > 0).mean()), 3),
             "quintile_spread": (round(qs, 4) if (qs := _quintile_spread(sig, fwd)) is not None else None),

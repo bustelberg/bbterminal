@@ -1,0 +1,610 @@
+[
+ {
+  "path": "stock/AAPL/zzz_canary_not_an_endpoint",
+  "group": "canary",
+  "note": "CANARY \u2014 must not exist; defines the router-fallback payload",
+  "status": 200,
+  "verdict": "canary",
+  "kind": "list",
+  "size": 46,
+  "keys": [],
+  "item_keys": [],
+  "sample": "[[\"1980-09-28\", 0], [\"1981-09-28\", 0]]"
+ },
+ {
+  "path": "stock/AAPL/summary",
+  "group": "stock",
+  "note": "company_data incl. ISIN, currency, exchange, price \u2014 the reverse of isin/",
+  "status": 200,
+  "verdict": "real",
+  "kind": "dict",
+  "size": 1,
+  "keys": [
+   "summary"
+  ],
+  "item_keys": [],
+  "sample": "{\"summary\": {\"general\": {\"company\": \"Apple Inc\", \"price\": 316.22, \"timestamp\": \"1783652924\", \"gf_score\": \"95\", \"rank_financial_strength\": \"5\", \"rank_profitability\": \"10\", \"rank_gf_value\": \"6\", \"rank_growth\": \"10\", \"rank_"
+ },
+ {
+  "path": "stock/AAPL/financials",
+  "group": "stock",
+  "note": "the 263-field blob; ~36,700 metric_data rows/company if parsed unrestricted",
+  "status": 200,
+  "verdict": "real",
+  "kind": "dict",
+  "size": 1,
+  "keys": [
+   "financials"
+  ],
+  "item_keys": [],
+  "sample": "{\"financials\": {\"financial_template_parameters\": {\"ind_template\": \"N\", \"REITs\": \"N\", \"IsDirect\": \"Indirect Method\", \"financial_report_frequency\": \"Quarterly\"}, \"annuals\": {\"Fiscal Year\": [\"1986-09\", \"1987-09\", \"1988-09\","
+ },
+ {
+  "path": "stock/AAPL/keyratios",
+  "group": "stock",
+  "note": "",
+  "status": 200,
+  "verdict": "real",
+  "kind": "dict",
+  "size": 7,
+  "keys": [
+   "Basic",
+   "Dividends",
+   "Fundamental",
+   "Growth",
+   "Price",
+   "Profitability",
+   "Valuation Ratio"
+  ],
+  "item_keys": [],
+  "sample": "{\"Basic\": {\"Price Updated Time\": \"2026-07-09 23:08:44 (EDT)\", \"Company\": \"Apple Inc\"}, \"Fundamental\": {\"Currency\": \"USD\", \"Reporting Currency\": \"USD\", \"Total Assets (Current)\": \"371082.000\", \"Book Value per Share\": \"7.26"
+ },
+ {
+  "path": "stock/AAPL/quote",
+  "group": "stock",
+  "note": "",
+  "status": 200,
+  "verdict": "real",
+  "kind": "dict",
+  "size": 13,
+  "keys": [
+   "Currency",
+   "Current Price",
+   "Day's Change %",
+   "Day's Volume",
+   "Exchange",
+   "Price",
+   "Price Change",
+   "Price Updated Time",
+   "Symbol",
+   "high",
+   "low",
+   "open"
+  ],
+  "item_keys": [],
+  "sample": "{\"timestamp\": 1783652924, \"Price Updated Time\": \"2026-07-09 23:08:44 (EDT)\", \"Current Price\": 316.22, \"Day's Change %\": 0.88, \"open\": \"310.510000\", \"Day's Volume\": 47863060, \"low\": 308.16, \"high\": 316.53, \"Currency\": \"US"
+ },
+ {
+  "path": "stock/AAPL/price",
+  "group": "stock",
+  "note": "",
+  "status": 200,
+  "verdict": "real",
+  "kind": "list",
+  "size": 11485,
+  "keys": [],
+  "item_keys": [],
+  "sample": "[[\"12-12-1980\", 0.12835], [\"12-15-1980\", 0.121653]]"
+ },
+ {
+  "path": "stock/AAPL/dividend",
+  "group": "stock",
+  "note": "PER-SHARE payments: amount, ex_date, record_date, pay_date, currency, type",
+  "status": 200,
+  "verdict": "real",
+  "kind": "list",
+  "size": 91,
+  "keys": [],
+  "item_keys": [
+   "amount",
+   "currency",
+   "ex_date",
+   "pay_date",
+   "record_date",
+   "type"
+  ],
+  "sample": "[{\"amount\": \"0.27\", \"ex_date\": \"2026-05-11\", \"record_date\": \"2026-05-11\", \"pay_date\": \"2026-05-14\", \"type\": \"Cash Div.\", \"currency\": \"USD\"}, {\"amount\": \"0.26\", \"ex_date\": \"2026-02-09\", \"record_date\": \"2026-02-09\", \"pay_d"
+ },
+ {
+  "path": "stock/AAPL/dividends",
+  "group": "stock",
+  "note": "CASH FLOW for dividends ($ millions, negative) \u2014 NOT per share",
+  "status": 200,
+  "verdict": "real",
+  "kind": "list",
+  "size": 46,
+  "keys": [],
+  "item_keys": [],
+  "sample": "[[\"1980-09-28\", 0], [\"1981-09-28\", 0]]"
+ },
+ {
+  "path": "stock/AAPL/split",
+  "group": "stock",
+  "note": "expected: router fallback",
+  "status": 200,
+  "verdict": "router-fallback",
+  "kind": "list",
+  "size": 46,
+  "keys": [],
+  "item_keys": [],
+  "sample": "[[\"1980-09-28\", 0], [\"1981-09-28\", 0]]"
+ },
+ {
+  "path": "stock/AAPL/splits",
+  "group": "stock",
+  "note": "expected: router fallback",
+  "status": 200,
+  "verdict": "router-fallback",
+  "kind": "list",
+  "size": 46,
+  "keys": [],
+  "item_keys": [],
+  "sample": "[[\"1980-09-28\", 0], [\"1981-09-28\", 0]]"
+ },
+ {
+  "path": "stock/AAPL/analyst_estimate",
+  "group": "stock",
+  "note": "used by the earnings dashboard",
+  "status": 200,
+  "verdict": "real",
+  "kind": "dict",
+  "size": 2,
+  "keys": [
+   "annual",
+   "quarterly"
+  ],
+  "item_keys": [],
+  "sample": "{\"annual\": {\"date\": [\"202609\", \"202709\", \"202809\", \"202909\", \"203009\"], \"revenue_estimate\": [477599.6, 520531.73, 557206.37, 641364, 683200.5], \"ebit_estimate\": [155277.26, 167877.26, 184727.94, 202221.29, 217777.96], \"e"
+ },
+ {
+  "path": "stock/AAPL/analyst_estimates",
+  "group": "stock",
+  "note": "expected: router fallback (the singular is the real one)",
+  "status": 200,
+  "verdict": "router-fallback",
+  "kind": "list",
+  "size": 46,
+  "keys": [],
+  "item_keys": [],
+  "sample": "[[\"1980-09-28\", 0], [\"1981-09-28\", 0]]"
+ },
+ {
+  "path": "stock/AAPL/ownership",
+  "group": "stock",
+  "note": "",
+  "status": 200,
+  "verdict": "real",
+  "kind": "dict",
+  "size": 7,
+  "keys": [
+   "Float_Percentage_of_TSO",
+   "Insider_Ownership",
+   "Institutional_Ownership",
+   "Share_Outstanding",
+   "company",
+   "display_symbol",
+   "exchange"
+  ],
+  "item_keys": [],
+  "sample": "{\"company\": \"Apple Inc\", \"display_symbol\": \"AAPL\", \"exchange\": \"NAS\", \"Share_Outstanding\": {\"value\": \"14687.36(Mil)\"}, \"Institutional_Ownership\": {\"percentage\": \"73.56%\", \"value\": \"10803.83(Mil)\"}, \"Insider_Ownership\": {"
+ },
+ {
+  "path": "stock/AAPL/insider",
+  "group": "stock",
+  "note": "",
+  "status": 200,
+  "verdict": "real",
+  "kind": "dict",
+  "size": 1,
+  "keys": [
+   "AAPL"
+  ],
+  "item_keys": [],
+  "sample": "{\"AAPL\": [{\"position\": \"Principal Accounting Officer\", \"date\": \"2026-06-16\", \"type\": \"S\", \"trans_share\": \"116\", \"final_share\": \"38,713\", \"price\": \"295.14\", \"cost\": \"34.2\", \"insider\": \"Borders Ben\", \"change\": \"7.14\"}, {\"p"
+ },
+ {
+  "path": "stock/AAPL/guru",
+  "group": "stock",
+  "note": "expected: router fallback",
+  "status": 200,
+  "verdict": "router-fallback",
+  "kind": "list",
+  "size": 46,
+  "keys": [],
+  "item_keys": [],
+  "sample": "[[\"1980-09-28\", 0], [\"1981-09-28\", 0]]"
+ },
+ {
+  "path": "stock/AAPL/gurus",
+  "group": "stock",
+  "note": "",
+  "status": 200,
+  "verdict": "real",
+  "kind": "dict",
+  "size": 1,
+  "keys": [
+   "AAPL"
+  ],
+  "item_keys": [],
+  "sample": "{\"AAPL\": {\"picks\": [{\"guru\": \"Assenagon Asset Management S.A.\", \"date\": \"2026-06-30\", \"action\": \"Reduce\", \"impact\": \"-0.44\", \"price_min\": \"253.5\", \"price_max\": \"315.2\", \"Avg\": \"285.52\", \"comment\": \"Reduce -6.85%\", \"curre"
+ },
+ {
+  "path": "stock/AAPL/news",
+  "group": "stock",
+  "note": "expected: router fallback",
+  "status": 200,
+  "verdict": "router-fallback",
+  "kind": "list",
+  "size": 46,
+  "keys": [],
+  "item_keys": [],
+  "sample": "[[\"1980-09-28\", 0], [\"1981-09-28\", 0]]"
+ },
+ {
+  "path": "stock/AAPL/filings",
+  "group": "stock",
+  "note": "",
+  "status": 200,
+  "verdict": "real",
+  "kind": "dict",
+  "size": 2,
+  "keys": [
+   "data",
+   "total"
+  ],
+  "item_keys": [],
+  "sample": "{\"total\": 82, \"data\": [{\"form\": \"4\", \"descrpt\": \"4 - Apple Inc. (0000320193)\", \"display_symbol\": \"AAPL\", \"primary_document\": \"https://www.sec.gov/Archives/edgar/data/320193/000114036126025622/xslF345X06/form4.xml\", \"fili"
+ },
+ {
+  "path": "stock/AAPL/segments",
+  "group": "stock",
+  "note": "expected: router fallback",
+  "status": 200,
+  "verdict": "router-fallback",
+  "kind": "list",
+  "size": 46,
+  "keys": [],
+  "item_keys": [],
+  "sample": "[[\"1980-09-28\", 0], [\"1981-09-28\", 0]]"
+ },
+ {
+  "path": "stock/AAPL/profile",
+  "group": "stock",
+  "note": "expected: router fallback",
+  "status": 200,
+  "verdict": "router-fallback",
+  "kind": "list",
+  "size": 46,
+  "keys": [],
+  "item_keys": [],
+  "sample": "[[\"1980-09-28\", 0], [\"1981-09-28\", 0]]"
+ },
+ {
+  "path": "stock/AAPL/valuation",
+  "group": "stock",
+  "note": "expected: router fallback",
+  "status": 200,
+  "verdict": "router-fallback",
+  "kind": "list",
+  "size": 46,
+  "keys": [],
+  "item_keys": [],
+  "sample": "[[\"1980-09-28\", 0], [\"1981-09-28\", 0]]"
+ },
+ {
+  "path": "stock/AAPL/gf_score",
+  "group": "stock",
+  "note": "",
+  "status": 200,
+  "verdict": "real",
+  "kind": "list",
+  "size": 248,
+  "keys": [],
+  "item_keys": [],
+  "sample": "[[\"2006-01-01\", 67], [\"2006-02-01\", 66]]"
+ },
+ {
+  "path": "stock/AAPL/gfvalue",
+  "group": "stock",
+  "note": "",
+  "status": 200,
+  "verdict": "real",
+  "kind": "list",
+  "size": 46,
+  "keys": [],
+  "item_keys": [],
+  "sample": "[[\"1980-09-28\", 0], [\"1981-09-28\", 0]]"
+ },
+ {
+  "path": "stock/AAPL/rank",
+  "group": "stock",
+  "note": "expected: router fallback",
+  "status": 200,
+  "verdict": "router-fallback",
+  "kind": "list",
+  "size": 46,
+  "keys": [],
+  "item_keys": [],
+  "sample": "[[\"1980-09-28\", 0], [\"1981-09-28\", 0]]"
+ },
+ {
+  "path": "stock/AAPL/earnings",
+  "group": "stock",
+  "note": "expected: router fallback",
+  "status": 200,
+  "verdict": "router-fallback",
+  "kind": "list",
+  "size": 46,
+  "keys": [],
+  "item_keys": [],
+  "sample": "[[\"1980-09-28\", 0], [\"1981-09-28\", 0]]"
+ },
+ {
+  "path": "stock/AAPL/indicator_price",
+  "group": "stock",
+  "note": "expected: router fallback \u2014 prices come from stock/{sym}/price",
+  "status": 200,
+  "verdict": "router-fallback",
+  "kind": "list",
+  "size": 46,
+  "keys": [],
+  "item_keys": [],
+  "sample": "[[\"1980-09-28\", 0], [\"1981-09-28\", 0]]"
+ },
+ {
+  "path": "stock/WBO:ANDR/summary",
+  "group": "stock (non-US)",
+  "note": "non-US form \u00b7 ",
+  "status": 200,
+  "verdict": "real",
+  "kind": "dict",
+  "size": 1,
+  "keys": [
+   "summary"
+  ],
+  "item_keys": [],
+  "sample": "{\"summary\": {\"general\": {\"company\": \"Andritz AG\", \"price\": 72.7, \"timestamp\": \"1783573200\", \"gf_score\": \"80\", \"rank_financial_strength\": \"8\", \"rank_profitability\": \"6\", \"rank_gf_value\": \"5\", \"rank_growth\": \"6\", \"rank_mom"
+ },
+ {
+  "path": "stock/WBO:ANDR/dividends",
+  "group": "stock (non-US)",
+  "note": "non-US form \u00b7 ",
+  "status": 200,
+  "verdict": "real",
+  "kind": "list",
+  "size": 24,
+  "keys": [],
+  "item_keys": [],
+  "sample": "[[\"2002-12-28\", -12.02], [\"2003-12-28\", -12.2]]"
+ },
+ {
+  "path": "stock/WBO:ANDR/financials",
+  "group": "stock (non-US)",
+  "note": "non-US form \u00b7 ",
+  "status": 200,
+  "verdict": "real",
+  "kind": "dict",
+  "size": 1,
+  "keys": [
+   "financials"
+  ],
+  "item_keys": [],
+  "sample": "{\"financials\": {\"financial_template_parameters\": {\"ind_template\": \"N\", \"REITs\": \"N\", \"IsDirect\": \"Indirect Method\", \"financial_report_frequency\": \"Quarterly\"}, \"annuals\": {\"Fiscal Year\": [\"2002-12\", \"2003-12\", \"2004-12\","
+ },
+ {
+  "path": "isin/US0378331005",
+  "group": "lookup",
+  "note": "UNDOCUMENTED \u2014 ISIN -> [{symbol, exchange}] for every listing",
+  "status": 200,
+  "verdict": "real",
+  "kind": "list",
+  "size": 19,
+  "keys": [],
+  "item_keys": [
+   "exchange",
+   "symbol"
+  ],
+  "sample": "[{\"symbol\": \"AAPL\", \"exchange\": \"WBO\"}, {\"symbol\": \"APC\", \"exchange\": \"XBUL\"}]"
+ },
+ {
+  "path": "isin/AT0000730007",
+  "group": "lookup",
+  "note": "UNDOCUMENTED \u2014 the Andritz case (WBO vs XPRA)",
+  "status": 200,
+  "verdict": "real",
+  "kind": "list",
+  "size": 13,
+  "keys": [],
+  "item_keys": [
+   "exchange",
+   "symbol"
+  ],
+  "sample": "[{\"symbol\": \"ANDR\", \"exchange\": \"WBO\"}, {\"symbol\": \"ANDR\", \"exchange\": \"XSWX\"}]"
+ },
+ {
+  "path": "exchange_list",
+  "group": "lookup",
+  "note": "UNDOCUMENTED \u2014 {region: [exchange codes]}",
+  "status": 200,
+  "verdict": "real",
+  "kind": "dict",
+  "size": 98,
+  "keys": [
+   "Argentina",
+   "Australia",
+   "Austria",
+   "Bahrain",
+   "Bangladesh",
+   "Belgium",
+   "Bermuda",
+   "Bosnia and Herzegovina",
+   "Botswana",
+   "Brazil",
+   "Bulgaria",
+   "Canada"
+  ],
+  "item_keys": [],
+  "sample": "{\"USA\": [\"NAS\", \"NYSE\", \"OTCPK\", \"OTCBB\", \"AMEX\", \"ARCA\", \"IEXG\", \"BATS\", \"GREY\"], \"Canada\": [\"TSXV\", \"TSX\", \"XCNQ\", \"NEOE\"], \"UK\": [\"LSE\", \"LTS\", \"XPLU\", \"NEXX\", \"CHIX\", \"IPSX\", \"AQSE\"], \"Japan\": [\"TSE\", \"JAS\", \"OSE\", \""
+ },
+ {
+  "path": "stock_list",
+  "group": "lookup",
+  "note": "",
+  "status": 404,
+  "verdict": "missing",
+  "kind": "",
+  "size": null,
+  "keys": [],
+  "item_keys": [],
+  "sample": ""
+ },
+ {
+  "path": "stock_list/USA",
+  "group": "lookup",
+  "note": "",
+  "status": 404,
+  "verdict": "missing",
+  "kind": "",
+  "size": null,
+  "keys": [],
+  "item_keys": [],
+  "sample": ""
+ },
+ {
+  "path": "country_list",
+  "group": "lookup",
+  "note": "",
+  "status": 404,
+  "verdict": "missing",
+  "kind": "",
+  "size": null,
+  "keys": [],
+  "item_keys": [],
+  "sample": ""
+ },
+ {
+  "path": "sector_list",
+  "group": "lookup",
+  "note": "",
+  "status": 404,
+  "verdict": "missing",
+  "kind": "",
+  "size": null,
+  "keys": [],
+  "item_keys": [],
+  "sample": ""
+ },
+ {
+  "path": "industry_list",
+  "group": "lookup",
+  "note": "",
+  "status": 404,
+  "verdict": "missing",
+  "kind": "",
+  "size": null,
+  "keys": [],
+  "item_keys": [],
+  "sample": ""
+ },
+ {
+  "path": "guru_list",
+  "group": "lookup",
+  "note": "",
+  "status": 404,
+  "verdict": "missing",
+  "kind": "",
+  "size": null,
+  "keys": [],
+  "item_keys": [],
+  "sample": ""
+ },
+ {
+  "path": "insider_list",
+  "group": "lookup",
+  "note": "",
+  "status": 200,
+  "verdict": "real",
+  "kind": "dict",
+  "size": 3,
+  "keys": [
+   "currentPage",
+   "data",
+   "lastPage"
+  ],
+  "item_keys": [],
+  "sample": "{\"data\": [{\"cik\": \"0001181886\", \"name\": \"J Todd Mitchell\", \"address\": \"DEVON ENERGY CORPORATION, 20 N. BROADWAY, OKLAHOMA CITY OK 73102\", \"latest_transaction_date\": \"2011-03-01\", \"Companys\": [\"DVN\"]}, {\"cik\": \"0001177123"
+ },
+ {
+  "path": "economic_indicator_list",
+  "group": "lookup",
+  "note": "",
+  "status": 404,
+  "verdict": "missing",
+  "kind": "",
+  "size": null,
+  "keys": [],
+  "item_keys": [],
+  "sample": ""
+ },
+ {
+  "path": "cusip/037833100",
+  "group": "lookup",
+  "note": "UNDOCUMENTED \u2014 a CUSIP sibling of isin/?",
+  "status": 200,
+  "verdict": "real",
+  "kind": "list",
+  "size": 13,
+  "keys": [],
+  "item_keys": [
+   "exchange",
+   "symbol"
+  ],
+  "sample": "[{\"symbol\": \"AAPL\", \"exchange\": \"BSE\"}, {\"symbol\": \"APC\", \"exchange\": \"FRA\"}]"
+ },
+ {
+  "path": "cusip/US0378331005",
+  "group": "lookup",
+  "note": "an ISIN passed to cusip/ \u2014 expect an empty list",
+  "status": 200,
+  "verdict": "empty",
+  "kind": "list",
+  "size": 0,
+  "keys": [],
+  "item_keys": [],
+  "sample": "[]"
+ },
+ {
+  "path": "figi/US0378331005",
+  "group": "lookup",
+  "note": "does a FIGI sibling exist?",
+  "status": 404,
+  "verdict": "missing",
+  "kind": "",
+  "size": null,
+  "keys": [],
+  "item_keys": [],
+  "sample": ""
+ },
+ {
+  "path": "search/AAPL",
+  "group": "lookup",
+  "note": "",
+  "status": 404,
+  "verdict": "missing",
+  "kind": "",
+  "size": null,
+  "keys": [],
+  "item_keys": [],
+  "sample": ""
+ }
+]

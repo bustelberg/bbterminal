@@ -1582,6 +1582,303 @@
         "title": "DiversifierResult",
         "type": "object"
       },
+      "DividendCoverageEntry": {
+        "properties": {
+          "company_id": {
+            "title": "Company Id",
+            "type": "integer"
+          },
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange"
+          },
+          "gf_unsubscribed": {
+            "default": false,
+            "title": "Gf Unsubscribed",
+            "type": "boolean"
+          },
+          "gurufocus_ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gurufocus Ticker"
+          },
+          "has_data": {
+            "default": false,
+            "title": "Has Data",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "company_id"
+        ],
+        "title": "DividendCoverageEntry",
+        "type": "object"
+      },
+      "DividendCoverageResponse": {
+        "description": "`{ISIN: entry}` for every company we can reach. The grid holds the ISINs;\nthe frontend joins on them client-side. Keyed by ISIN rather than\nexecution_id so the payload is independent of the asset table's size.",
+        "properties": {
+          "by_isin": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DividendCoverageEntry"
+            },
+            "title": "By Isin",
+            "type": "object"
+          }
+        },
+        "required": [
+          "by_isin"
+        ],
+        "title": "DividendCoverageResponse",
+        "type": "object"
+      },
+      "DividendPayment": {
+        "description": "One declared cash payment, from `stock/{sym}/dividend`.\n\nGuruFocus retroactively split-adjusts these to today's share basis (NVIDIA's\n2013 records read 0.001875 = $0.075 / 40x, for the 4:1 and 10:1 splits), so\nthey are directly comparable with the fiscal-year series above. Verified: the\nper-fiscal-year sum equals `annuals__Per Share Data__Dividends per Share`\nexactly, for every year of NVDA's history.",
+        "properties": {
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "ex_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ex Date"
+          },
+          "fx_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fx Rate"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "ttm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttm"
+          },
+          "ttm_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttm Eur"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          },
+          "value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Eur"
+          }
+        },
+        "required": [
+          "date",
+          "value",
+          "currency"
+        ],
+        "title": "DividendPayment",
+        "type": "object"
+      },
+      "DividendPaymentsResponse": {
+        "description": "The LIVE payment feed, which the fiscal-year series structurally cannot show.\n\n`annuals__\u2026__Dividends per Share` only gains a point once a fiscal year closes,\nso a mid-year dividend hike is invisible for up to a year. NVIDIA raised its\nquarterly dividend from $0.01 to $0.25 with an ex-date of 2026-06-04 \u2014 inside\nFY2027, which does not close until 2027-01-31. The annual chart correctly shows\nFY2026 = $0.04; this endpoint shows the $0.25 the day it is declared.",
+        "properties": {
+          "company_id": {
+            "title": "Company Id",
+            "type": "integer"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "fetched": {
+            "default": false,
+            "title": "Fetched",
+            "type": "boolean"
+          },
+          "fx_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fx From"
+          },
+          "payments": {
+            "items": {
+              "$ref": "#/components/schemas/DividendPayment"
+            },
+            "title": "Payments",
+            "type": "array"
+          }
+        },
+        "required": [
+          "company_id",
+          "payments"
+        ],
+        "title": "DividendPaymentsResponse",
+        "type": "object"
+      },
+      "DividendPoint": {
+        "properties": {
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "fx_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fx Rate"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          },
+          "value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Eur"
+          }
+        },
+        "required": [
+          "date",
+          "value"
+        ],
+        "title": "DividendPoint",
+        "type": "object"
+      },
+      "DividendSeriesResponse": {
+        "properties": {
+          "annual": {
+            "items": {
+              "$ref": "#/components/schemas/DividendPoint"
+            },
+            "title": "Annual",
+            "type": "array"
+          },
+          "company_id": {
+            "title": "Company Id",
+            "type": "integer"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "fetched": {
+            "default": false,
+            "title": "Fetched",
+            "type": "boolean"
+          },
+          "fx_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fx From"
+          },
+          "quarterly": {
+            "items": {
+              "$ref": "#/components/schemas/DividendPoint"
+            },
+            "title": "Quarterly",
+            "type": "array"
+          }
+        },
+        "required": [
+          "company_id",
+          "annual",
+          "quarterly"
+        ],
+        "title": "DividendSeriesResponse",
+        "type": "object"
+      },
       "DrawdownInfo": {
         "properties": {
           "depth_pct": {
@@ -6356,6 +6653,181 @@
         ]
       }
     },
+    "/api/asset-pipeline/dividends/coverage": {
+      "get": {
+        "description": "`{ISIN: {company_id, exchange, gf_unsubscribed, has_data}}` for every\ncompany carrying an ISIN (~2.5k). The grid joins this on `isin` client-side \u2014\nan ISIN absent from this map has no GuruFocus company behind it at all, which\nis the majority of the grid (ETFs, crypto, un-ingested equities).",
+        "operationId": "dividend_coverage_api_asset_pipeline_dividends_coverage_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DividendCoverageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Dividend Coverage",
+        "tags": [
+          "asset-pipeline",
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/dividends/{company_id}": {
+      "get": {
+        "description": "The stored dividends-per-share series. Empty lists when nothing has been\nfetched yet \u2014 the caller then POSTs to `/fetch`.",
+        "operationId": "dividend_series_api_asset_pipeline_dividends__company_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DividendSeriesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dividend Series",
+        "tags": [
+          "asset-pipeline",
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/dividends/{company_id}/fetch": {
+      "post": {
+        "description": "Lazily pull this company's dividends from GuruFocus and persist ONLY the\ntwo dividend codes (`metric_codes=DIVIDEND_METRIC_CODES`) \u2014 see the module\ndocstring for why the unrestricted parse is not an option here.\n\nOne GuruFocus call, and only when the Storage cache is stale. 403 for an\nexchange outside the subscription, so the UI's UNSUBSCRIBED badge and this\nendpoint agree.",
+        "operationId": "dividend_fetch_api_asset_pipeline_dividends__company_id__fetch_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "title": "Company Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DividendSeriesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dividend Fetch",
+        "tags": [
+          "asset-pipeline",
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/dividends/{company_id}/payments": {
+      "get": {
+        "description": "Every declared cash payment, with a trailing-twelve-month sum.\n\nThe fiscal-year series only gains a point when a fiscal year closes, so a\nmid-year hike is invisible for up to a year (NVIDIA: $0.01 \u2192 $0.25 with an\nex-date of 2026-06-04, inside FY2027). This endpoint shows it immediately.\n\nOne GuruFocus call, and only when the Storage cache is stale for the payment\nfrequency. `refresh=true` forces it.",
+        "operationId": "dividend_payments_api_asset_pipeline_dividends__company_id__payments_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "title": "Company Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DividendPaymentsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dividend Payments",
+        "tags": [
+          "asset-pipeline",
+          "asset-pipeline"
+        ]
+      }
+    },
     "/api/asset-pipeline/equity-sectors/backfill": {
       "post": {
         "description": "SSE: fill the REAL Yahoo sector on equities still stuck on the `equity`\nfallback (the fast chart-resolver carries no sector). Fetches v10\nassetProfile per symbol, normalizes onto the canonical taxonomy (Apple \u2192\nTechnology, JPMorgan \u2192 Financials), and updates `asset_analysis.sector`.\nEmits per-symbol progress + a final summary. Re-runnable; only touches\nequity-class rows on the fallback. Admin-only.",
@@ -6832,7 +7304,7 @@
     },
     "/api/asset-pipeline/signal-lab": {
       "get": {
-        "description": "Signal Lab \u2014 predictive-power research over the unified price/volume signal\npanel. Per signal: cross-sectional rank IC vs next-month return, t-stat, hit\nrate, quintile spread, decile monotonicity, PER-SECTOR + PER-REGIME IC, and the\nmonthly IC series. `start`/`end` = the train/test evaluation window. Pure\nresearch (no portfolio). Cached ~30 min.",
+        "description": "Signal Lab \u2014 predictive-power research over the unified price/volume signal\npanel. Per signal: cross-sectional rank IC vs next-month return, t-stat, hit\nrate, quintile spread, decile monotonicity, PER-SECTOR + PER-REGIME IC, and the\nmonthly IC series. `start`/`end` = the train/test evaluation window. Pure\nresearch (no portfolio). Cached ~30 min.\n\nEach row carries a `cadence`: `month_end` for the lab's own battery, or\n`daily_asof` for the signals the live /schedule strategy trades. Daily rows are\nkeyed by registry key (`daily.mom_12_1`) because the bare names collide and are\nNOT the same measure \u2014 see `signal_engine.registry.PARITY`.",
         "operationId": "signal_lab_api_asset_pipeline_signal_lab_get",
         "parameters": [
           {
@@ -6930,6 +7402,18 @@
               ],
               "description": "evaluate IC to this month",
               "title": "End"
+            }
+          },
+          {
+            "description": "also score the daily as-of signals /schedule trades (keys prefixed `daily.`). Off by default: `evaluate_panel` loops per entity, so on the 4,006-name 'liquid' universe it takes the call from ~31s to ~110s.",
+            "in": "query",
+            "name": "include_daily",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "also score the daily as-of signals /schedule trades (keys prefixed `daily.`). Off by default: `evaluate_panel` loops per entity, so on the 4,006-name 'liquid' universe it takes the call from ~31s to ~110s.",
+              "title": "Include Daily",
+              "type": "boolean"
             }
           },
           {

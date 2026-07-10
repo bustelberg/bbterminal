@@ -1126,6 +1126,103 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/asset-pipeline/dividends/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dividend Coverage
+         * @description `{ISIN: {company_id, exchange, gf_unsubscribed, has_data}}` for every
+         *     company carrying an ISIN (~2.5k). The grid joins this on `isin` client-side —
+         *     an ISIN absent from this map has no GuruFocus company behind it at all, which
+         *     is the majority of the grid (ETFs, crypto, un-ingested equities).
+         */
+        get: operations["dividend_coverage_api_asset_pipeline_dividends_coverage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/dividends/{company_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dividend Series
+         * @description The stored dividends-per-share series. Empty lists when nothing has been
+         *     fetched yet — the caller then POSTs to `/fetch`.
+         */
+        get: operations["dividend_series_api_asset_pipeline_dividends__company_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/dividends/{company_id}/fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dividend Fetch
+         * @description Lazily pull this company's dividends from GuruFocus and persist ONLY the
+         *     two dividend codes (`metric_codes=DIVIDEND_METRIC_CODES`) — see the module
+         *     docstring for why the unrestricted parse is not an option here.
+         *
+         *     One GuruFocus call, and only when the Storage cache is stale. 403 for an
+         *     exchange outside the subscription, so the UI's UNSUBSCRIBED badge and this
+         *     endpoint agree.
+         */
+        post: operations["dividend_fetch_api_asset_pipeline_dividends__company_id__fetch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/dividends/{company_id}/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dividend Payments
+         * @description Every declared cash payment, with a trailing-twelve-month sum.
+         *
+         *     The fiscal-year series only gains a point when a fiscal year closes, so a
+         *     mid-year hike is invisible for up to a year (NVIDIA: $0.01 → $0.25 with an
+         *     ex-date of 2026-06-04, inside FY2027). This endpoint shows it immediately.
+         *
+         *     One GuruFocus call, and only when the Storage cache is stale for the payment
+         *     frequency. `refresh=true` forces it.
+         */
+        get: operations["dividend_payments_api_asset_pipeline_dividends__company_id__payments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/asset-pipeline/equity-sectors/backfill": {
         parameters: {
             query?: never;
@@ -1468,6 +1565,11 @@ export interface paths {
          *     rate, quintile spread, decile monotonicity, PER-SECTOR + PER-REGIME IC, and the
          *     monthly IC series. `start`/`end` = the train/test evaluation window. Pure
          *     research (no portfolio). Cached ~30 min.
+         *
+         *     Each row carries a `cadence`: `month_end` for the lab's own battery, or
+         *     `daily_asof` for the signals the live /schedule strategy trades. Daily rows are
+         *     keyed by registry key (`daily.mom_12_1`) because the bare names collide and are
+         *     NOT the same measure — see `signal_engine.registry.PARITY`.
          */
         get: operations["signal_lab_api_asset_pipeline_signal_lab_get"];
         put?: never;
@@ -5571,6 +5673,121 @@ export interface components {
             /** Ticker */
             ticker: string;
         };
+        /** DividendCoverageEntry */
+        DividendCoverageEntry: {
+            /** Company Id */
+            company_id: number;
+            /** Exchange */
+            exchange?: string | null;
+            /**
+             * Gf Unsubscribed
+             * @default false
+             */
+            gf_unsubscribed?: boolean;
+            /** Gurufocus Ticker */
+            gurufocus_ticker?: string | null;
+            /**
+             * Has Data
+             * @default false
+             */
+            has_data?: boolean;
+        };
+        /**
+         * DividendCoverageResponse
+         * @description `{ISIN: entry}` for every company we can reach. The grid holds the ISINs;
+         *     the frontend joins on them client-side. Keyed by ISIN rather than
+         *     execution_id so the payload is independent of the asset table's size.
+         */
+        DividendCoverageResponse: {
+            /** By Isin */
+            by_isin: {
+                [key: string]: components["schemas"]["DividendCoverageEntry"];
+            };
+        };
+        /**
+         * DividendPayment
+         * @description One declared cash payment, from `stock/{sym}/dividend`.
+         *
+         *     GuruFocus retroactively split-adjusts these to today's share basis (NVIDIA's
+         *     2013 records read 0.001875 = $0.075 / 40x, for the 4:1 and 10:1 splits), so
+         *     they are directly comparable with the fiscal-year series above. Verified: the
+         *     per-fiscal-year sum equals `annuals__Per Share Data__Dividends per Share`
+         *     exactly, for every year of NVDA's history.
+         */
+        DividendPayment: {
+            /** Currency */
+            currency: string;
+            /** Date */
+            date: string;
+            /** Ex Date */
+            ex_date?: string | null;
+            /** Fx Rate */
+            fx_rate?: number | null;
+            /** Kind */
+            kind?: string | null;
+            /** Ttm */
+            ttm?: number | null;
+            /** Ttm Eur */
+            ttm_eur?: number | null;
+            /** Value */
+            value: number;
+            /** Value Eur */
+            value_eur?: number | null;
+        };
+        /**
+         * DividendPaymentsResponse
+         * @description The LIVE payment feed, which the fiscal-year series structurally cannot show.
+         *
+         *     `annuals__…__Dividends per Share` only gains a point once a fiscal year closes,
+         *     so a mid-year dividend hike is invisible for up to a year. NVIDIA raised its
+         *     quarterly dividend from $0.01 to $0.25 with an ex-date of 2026-06-04 — inside
+         *     FY2027, which does not close until 2027-01-31. The annual chart correctly shows
+         *     FY2026 = $0.04; this endpoint shows the $0.25 the day it is declared.
+         */
+        DividendPaymentsResponse: {
+            /** Company Id */
+            company_id: number;
+            /** Currency */
+            currency?: string | null;
+            /**
+             * Fetched
+             * @default false
+             */
+            fetched?: boolean;
+            /** Fx From */
+            fx_from?: string | null;
+            /** Payments */
+            payments: components["schemas"]["DividendPayment"][];
+        };
+        /** DividendPoint */
+        DividendPoint: {
+            /** Date */
+            date: string;
+            /** Fx Rate */
+            fx_rate?: number | null;
+            /** Value */
+            value: number;
+            /** Value Eur */
+            value_eur?: number | null;
+        };
+        /** DividendSeriesResponse */
+        DividendSeriesResponse: {
+            /** Annual */
+            annual: components["schemas"]["DividendPoint"][];
+            /** Company Id */
+            company_id: number;
+            /** Currency */
+            currency?: string | null;
+            /**
+             * Fetched
+             * @default false
+             */
+            fetched?: boolean;
+            /** Fx From */
+            fx_from?: string | null;
+            /** Quarterly */
+            quarterly: components["schemas"]["DividendPoint"][];
+        };
         /** DrawdownInfo */
         DrawdownInfo: {
             /** Depth Pct */
@@ -7666,6 +7883,123 @@ export interface operations {
             };
         };
     };
+    dividend_coverage_api_asset_pipeline_dividends_coverage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DividendCoverageResponse"];
+                };
+            };
+        };
+    };
+    dividend_series_api_asset_pipeline_dividends__company_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DividendSeriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dividend_fetch_api_asset_pipeline_dividends__company_id__fetch_post: {
+        parameters: {
+            query?: {
+                force?: boolean;
+            };
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DividendSeriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dividend_payments_api_asset_pipeline_dividends__company_id__payments_get: {
+        parameters: {
+            query?: {
+                refresh?: boolean;
+            };
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DividendPaymentsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     equity_sector_backfill_api_asset_pipeline_equity_sectors_backfill_post: {
         parameters: {
             query?: never;
@@ -8062,6 +8396,8 @@ export interface operations {
                 start?: string | null;
                 /** @description evaluate IC to this month */
                 end?: string | null;
+                /** @description also score the daily as-of signals /schedule trades (keys prefixed `daily.`). Off by default: `evaluate_panel` loops per entity, so on the 4,006-name 'liquid' universe it takes the call from ~31s to ~110s. */
+                include_daily?: boolean;
                 refresh?: boolean;
             };
             header?: never;
