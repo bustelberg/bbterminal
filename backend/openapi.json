@@ -64,6 +64,28 @@
             ],
             "title": "Bars"
           },
+          "continent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Continent"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
           "currency": {
             "anyOf": [
               {
@@ -74,6 +96,17 @@
               }
             ],
             "title": "Currency"
+          },
+          "domicile_country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domicile Country"
           },
           "exchange": {
             "anyOf": [
@@ -176,6 +209,17 @@
             "title": "Leonteq Verified",
             "type": "boolean"
           },
+          "listing_country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listing Country"
+          },
           "market_cap_currency": {
             "anyOf": [
               {
@@ -208,6 +252,17 @@
               }
             ],
             "title": "Med Adv Eur"
+          },
+          "msci_region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Msci Region"
           },
           "name": {
             "anyOf": [

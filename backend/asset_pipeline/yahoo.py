@@ -8,6 +8,7 @@ import json
 import os
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote as _urlquote
 
@@ -54,11 +55,15 @@ except Exception:  # noqa: BLE001
 _SEARCH = "https://query2.finance.yahoo.com/v1/finance/search"
 _CHART = "https://query1.finance.yahoo.com/v8/finance/chart"
 _QUOTE = "https://query1.finance.yahoo.com/v7/finance/quote"
+_PROFILE = "https://query1.finance.yahoo.com/v10/finance/quoteSummary"
 
 # v7/quote (market cap, shares, avg volume) 401s without a consent cookie + crumb.
 # Prime once, cache the session + crumb, refresh on a 401.
 _quote_sess = None
 _quote_crumb: str | None = None
+# Priming races when several threads call asset_profile() concurrently (two
+# sessions, one wasted crumb fetch). Double-checked lock around the prime only.
+_sess_lock = threading.Lock()
 
 
 def _quote_session():
@@ -69,52 +74,82 @@ def _quote_session():
         return _quote_sess, _quote_crumb
     if not _HAS_CURL:
         return None, None
-    try:
-        s = _creq.Session(impersonate="chrome")
+    with _sess_lock:
+        if _quote_sess is not None and _quote_crumb:  # primed while we waited
+            return _quote_sess, _quote_crumb
         try:
-            s.get("https://fc.yahoo.com", timeout=10)  # sets the A1 consent cookie
+            s = _creq.Session(impersonate="chrome")
+            try:
+                s.get("https://fc.yahoo.com", timeout=10)  # sets the A1 consent cookie
+            except Exception:  # noqa: BLE001
+                pass
+            r = s.get("https://query1.finance.yahoo.com/v1/test/getcrumb", timeout=10)
+            crumb = (r.text or "").strip()
+            if not crumb or len(crumb) > 40:  # an HTML error page isn't a crumb
+                return None, None
+            _quote_sess, _quote_crumb = s, crumb
+            return s, crumb
         except Exception:  # noqa: BLE001
-            pass
-        r = s.get("https://query1.finance.yahoo.com/v1/test/getcrumb", timeout=10)
-        crumb = (r.text or "").strip()
-        if not crumb or len(crumb) > 40:  # an HTML error page isn't a crumb
             return None, None
-        _quote_sess, _quote_crumb = s, crumb
-        return s, crumb
+
+
+def _profile_raw(sym: str) -> tuple[int | None, str]:
+    """ONE assetProfile GET on the cached session+crumb, refreshing the crumb once
+    on a 401. Returns `(status, text)` so it can be driven by `_Throttle.run` —
+    a transport failure returns `(None, "")`, which the throttle reads as a
+    possible ban and settles with the canary."""
+    global _quote_sess, _quote_crumb
+    s, crumb = _quote_session()
+    if not s:
+        return None, ""
+    url = f"{_PROFILE}/{_urlquote(sym, safe='=^.:-')}"
+    try:
+        r = s.get(url, params={"modules": "assetProfile", "crumb": crumb}, timeout=20)
+        if r.status_code == 401:  # crumb expired — refresh once, retry
+            _quote_sess = _quote_crumb = None
+            s, crumb = _quote_session()
+            if not s:
+                return 401, ""
+            r = s.get(url, params={"modules": "assetProfile", "crumb": crumb}, timeout=20)
+        return r.status_code, (r.text or "")
     except Exception:  # noqa: BLE001
-        return None, None
+        return None, ""
 
 
 def asset_profile(symbols: list[str]) -> dict[str, dict]:
     """Per-symbol v10 quoteSummary assetProfile -> {symbol: {sector, industry,
-    country}}. One request/symbol (no batch), cookie+crumb (refreshed once on a
-    401), lightly paced. Best-effort — the sector source the fast path can't get
-    from the chart endpoint."""
-    global _quote_sess, _quote_crumb
-    s, crumb = _quote_session()
+    country}}. One request/symbol (no batch), cookie+crumb, paced + ban-detected
+    by the shared `_Throttle`.
+
+    A symbol is PRESENT in the result iff Yahoo gave a DEFINITIVE answer:
+      * 200 — a profile (or, for ETFs/crypto/futures, a 200 carrying no
+        assetProfile at all): present, with the missing values as None.
+      * 404 — "No fundamentals data found for symbol" / "Quote not found".
+        That IS an answer: this symbol will never have a profile. Present, all
+        values None, so a caller records it once and stops asking.
+    Anything else (transport error, 401 after a crumb refresh, 429/999) is
+    ABSENT, so a caller retries it instead of recording a false "no country".
+    Raises `YahooThrottled` when Yahoo has banned us past recovery, rather than
+    silently returning a run of empty profiles."""
     out: dict[str, dict] = {}
-    if not s:
+    if not _HAS_CURL:
         return out
+    empty = {"sector": None, "industry": None, "country": None}
     for sym in dict.fromkeys(x for x in symbols if x):
+        status, text = _throttle.run(lambda s=sym: _profile_raw(s))
+        if status == 404:  # definitive: no profile exists for this symbol
+            out[sym] = dict(empty)
+            continue
+        if status != 200:
+            continue  # unanswered — omit, so the caller can retry
         try:
-            r = s.get(f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{sym}",
-                      params={"modules": "assetProfile", "crumb": crumb}, timeout=20)
-            if r.status_code == 401:
-                _quote_sess = _quote_crumb = None
-                s, crumb = _quote_session()
-                if not s:
-                    break
-                r = s.get(f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{sym}",
-                          params={"modules": "assetProfile", "crumb": crumb}, timeout=20)
-            res = (r.json().get("quoteSummary") or {}).get("result")
-            if res:
-                ap = res[0].get("assetProfile") or {}
-                if ap.get("sector"):
-                    out[sym] = {"sector": ap.get("sector"), "industry": ap.get("industry"),
-                                "country": ap.get("country")}
+            res = (json.loads(text).get("quoteSummary") or {}).get("result") or []
         except Exception:  # noqa: BLE001
-            pass
-        time.sleep(0.15)
+            continue
+        ap = (res[0].get("assetProfile") or {}) if res else {}
+        out[sym] = {"sector": ap.get("sector") or None,
+                    "industry": ap.get("industry") or None,
+                    "country": ap.get("country") or None}
     return out
 
 
@@ -248,20 +283,24 @@ class _Throttle:
         if wait > 0:
             time.sleep(wait)
 
-    def get(self, url: str) -> tuple[int | None, str]:
+    def run(self, do_request: "Callable[[], tuple[int | None, str]]") -> tuple[int | None, str]:
+        """Pace + ban-guard ONE request. `do_request()` performs it and returns
+        `(status, text)`; it is retried as-is on a throttle signal, so it must be
+        idempotent. The URL-fetching `get()` is the common case, but the
+        cookie+crumb assetProfile fetch drives the same machinery through here."""
         self._reserve()
         with self._sem:  # cap in-flight requests; network runs OUTSIDE _lock
-            status, text = _raw_get(url)
+            status, text = do_request()
         if not self._is_throttled(status):
             return status, text
 
         # Possible throttle / ban. Recover UNDER THE LOCK so only one thread runs
         # the canary + cooldown (its sleeps block everyone's pacing = all wait).
-        # Recovery raw_gets DON'T take the semaphore (would deadlock vs a normal
+        # Recovery requests DON'T take the semaphore (would deadlock vs a normal
         # thread holding the sem and waiting on the lock).
         with self._lock:
             time.sleep(min(self.delay, 0.5))  # one quick retry first
-            status, text = _raw_get(url)
+            status, text = do_request()
             if not self._is_throttled(status):
                 return status, text
             cooldown = self.cooldown0
@@ -280,9 +319,12 @@ class _Throttle:
                 time.sleep(cooldown)
                 cooldown = min(self.max_cooldown, cooldown * 2)
                 self.delay = min(self.max_delay, self.delay * 1.5)
-                status, text = _raw_get(url)
+                status, text = do_request()
                 if not self._is_throttled(status):
                     return status, text
+
+    def get(self, url: str) -> tuple[int | None, str]:
+        return self.run(lambda: _raw_get(url))
 
 
 _throttle = _Throttle()

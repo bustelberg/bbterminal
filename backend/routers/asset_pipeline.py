@@ -40,6 +40,16 @@ class AssetGridRow(BaseModel):
     sector: str | None = None
     short_multiplier: int | None = None  # -1x/-2x/-3x for a "Short …" sector
     analysis_symbol: str | None = None
+    # Geography (see asset_pipeline/geo.py). `listing_country` is THIS execution's
+    # venue; `domicile_country` is the issuer's HQ (NULL for every ETF/crypto —
+    # they have no Yahoo assetProfile). `country` = domicile, else listing.
+    # `continent` is geographic, `msci_region` financial — they diverge on
+    # purpose (Israel: Asia / Europe).
+    listing_country: str | None = None
+    domicile_country: str | None = None
+    country: str | None = None
+    continent: str | None = None
+    msci_region: str | None = None
     med_adv_eur: float | None = None
     market_cap_eur: float | None = None
     market_cap_currency: str | None = None

@@ -5092,8 +5092,14 @@ export interface components {
             asset_class?: string | null;
             /** Bars */
             bars?: number | null;
+            /** Continent */
+            continent?: string | null;
+            /** Country */
+            country?: string | null;
             /** Currency */
             currency?: string | null;
+            /** Domicile Country */
+            domicile_country?: string | null;
             /** Exchange */
             exchange?: string | null;
             /** Execution Id */
@@ -5119,12 +5125,16 @@ export interface components {
              * @default false
              */
             leonteq_verified?: boolean;
+            /** Listing Country */
+            listing_country?: string | null;
             /** Market Cap Currency */
             market_cap_currency?: string | null;
             /** Market Cap Eur */
             market_cap_eur?: number | null;
             /** Med Adv Eur */
             med_adv_eur?: number | null;
+            /** Msci Region */
+            msci_region?: string | null;
             /** Name */
             name?: string | null;
             /** Openfigi Exch */

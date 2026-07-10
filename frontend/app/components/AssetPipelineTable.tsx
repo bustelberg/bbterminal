@@ -30,7 +30,13 @@ type SortKey =
   | 'leonteq_name' | 'leonteq_product_type' | 'leonteq_currency'
   | 'openfigi_name' | 'identity_status'
   | 'name' | 'analysis_symbol' | 'currency' | 'asset_class' | 'sector'
+  | 'country' | 'continent' | 'msci_region'
   | 'med_adv_eur' | 'market_cap_eur' | 'price_from' | 'price_to' | 'volume_from' | 'volume_to' | 'zero_vol_frac';
+
+// The facets the toolbar offers. Order here is the order they render; the
+// geography trio (country → continent → region) reads outward from the most
+// specific, and sits directly after Sector.
+type FacetKey = 'class' | 'sector' | 'product' | 'country' | 'continent' | 'region';
 
 // `sep` marks the first column of a group (ISIN | Leonteq | OpenFIGI | yfinance)
 // → left border so the families read as sections.
@@ -47,6 +53,9 @@ const COLS: Col[] = [
   { key: 'currency', label: 'Ccy' },
   { key: 'asset_class', label: 'Class' },
   { key: 'sector', label: 'Sector' },
+  { key: 'country', label: 'Country', title: 'Issuer domicile (Yahoo assetProfile), falling back to the listing venue when unknown. An ETF/crypto has no domicile, so it shows its LISTING country.' },
+  { key: 'continent', label: 'Continent', title: 'Geographic continent of the country. Israel → Asia, Turkey → Asia (unlike the MSCI region).' },
+  { key: 'msci_region', label: 'Region', title: 'MSCI ACWI region: North America · Europe · Pacific · Emerging Markets. Financial, not geographic — Israel is Europe, South Korea and Taiwan are Emerging Markets. Blank = the country has no MSCI market.' },
   { key: 'med_adv_eur', label: '€ ADV', align: 'right', title: 'Median daily traded value in EUR (liquidity of THIS listing)' },
   { key: 'market_cap_eur', label: '€ Mkt Cap', align: 'right', title: 'Market cap in EUR — from the company PRIMARY listing, so listing-independent (a stranded thin listing still shows the true size)' },
   { key: 'price_from', label: 'Price from', align: 'right', title: 'First stored price date' },
@@ -115,6 +124,9 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
   const [classFilter, setClassFilter] = useState('');
   const [sectorFilter, setSectorFilter] = useState('');
   const [productFilter, setProductFilter] = useState('');
+  const [countryFilter, setCountryFilter] = useState('');
+  const [continentFilter, setContinentFilter] = useState('');
+  const [regionFilter, setRegionFilter] = useState('');
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'med_adv_eur', dir: -1 });
 
   // Saved universes: filter the grid to a universe's member tickers + create new.
@@ -175,24 +187,27 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
   // One predicate for every filter. `skip` omits a single facet so that facet's
   // option counts reflect all the OTHER active filters — faceted counts, so each
   // dropdown shows what picking an option would yield given the rest.
-  const matches = useCallback((r: AssetGridRow, skip?: 'class' | 'sector' | 'product') => {
+  const matches = useCallback((r: AssetGridRow, skip?: FacetKey) => {
     if (skip !== 'class' && classFilter && r.asset_class !== classFilter) return false;
     if (skip !== 'sector' && sectorFilter && r.sector !== sectorFilter) return false;
     if (skip !== 'product' && productFilter && r.leonteq_product_type !== productFilter) return false;
+    if (skip !== 'country' && countryFilter && r.country !== countryFilter) return false;
+    if (skip !== 'continent' && continentFilter && r.continent !== continentFilter) return false;
+    if (skip !== 'region' && regionFilter && r.msci_region !== regionFilter) return false;
     if (universeFilter && universeMembers && !universeMembers.has(r.analysis_symbol ?? '')) return false;
     const needle = q.trim().toLowerCase();
     if (needle) {
-      const hay = `${r.isin} ${r.name ?? ''} ${r.leonteq_name ?? ''} ${r.openfigi_name ?? ''} ${r.yahoo_symbol ?? ''} ${r.analysis_symbol ?? ''}`.toLowerCase();
+      const hay = `${r.isin} ${r.name ?? ''} ${r.leonteq_name ?? ''} ${r.openfigi_name ?? ''} ${r.yahoo_symbol ?? ''} ${r.analysis_symbol ?? ''} ${r.country ?? ''}`.toLowerCase();
       if (!hay.includes(needle)) return false;
     }
     return true;
-  }, [q, classFilter, sectorFilter, productFilter, universeFilter, universeMembers]);
+  }, [q, classFilter, sectorFilter, productFilter, countryFilter, continentFilter, regionFilter, universeFilter, universeMembers]);
 
   // Distinct values of `key` counted over rows matching all OTHER filters, most
   // common first. Always keeps the current selection selectable (count 0 if it
   // no longer matches). `total` = rows matching the other filters (the "All" count).
   const facet = useCallback((
-    skip: 'class' | 'sector' | 'product',
+    skip: FacetKey,
     key: (r: AssetGridRow) => string | null | undefined,
     selected: string,
   ) => {
@@ -214,6 +229,9 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
   const classFacet = useMemo(() => facet('class', (r) => r.asset_class, classFilter), [facet, classFilter]);
   const sectorFacet = useMemo(() => facet('sector', (r) => r.sector, sectorFilter), [facet, sectorFilter]);
   const productFacet = useMemo(() => facet('product', (r) => r.leonteq_product_type, productFilter), [facet, productFilter]);
+  const countryFacet = useMemo(() => facet('country', (r) => r.country, countryFilter), [facet, countryFilter]);
+  const continentFacet = useMemo(() => facet('continent', (r) => r.continent, continentFilter), [facet, continentFilter]);
+  const regionFacet = useMemo(() => facet('region', (r) => r.msci_region, regionFilter), [facet, regionFilter]);
 
   const view = useMemo(() => {
     const { key, dir } = sort;
@@ -281,14 +299,41 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
               {sectorFacet.opts.map((o) => <option key={o.value} value={o.value}>{sectorLabel(o.value)} ({o.count})</option>)}
             </select>
           </div>
+          {/* Geography trio — country → continent → region, widening outward.
+              Each is faceted against the others, so picking Japan narrows the
+              continent list to Asia rather than offering empty options. */}
+          <div className="flex flex-col items-start gap-1">
+            <SourceBadge source="yfinance" />
+            <select value={countryFilter} onChange={(e) => setCountryFilter(e.target.value)}
+              className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 max-w-[180px]" title="Issuer domicile (falls back to the listing venue)">
+              <option value="">All countries ({countryFacet.total})</option>
+              {countryFacet.opts.map((o) => <option key={o.value} value={o.value}>{o.value} ({o.count})</option>)}
+            </select>
+          </div>
+          <div className="flex flex-col items-start gap-1">
+            <SourceBadge source="yfinance" />
+            <select value={continentFilter} onChange={(e) => setContinentFilter(e.target.value)}
+              className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 max-w-[180px]" title="Geographic continent">
+              <option value="">All continents ({continentFacet.total})</option>
+              {continentFacet.opts.map((o) => <option key={o.value} value={o.value}>{o.value} ({o.count})</option>)}
+            </select>
+          </div>
+          <div className="flex flex-col items-start gap-1">
+            <SourceBadge source="yfinance" />
+            <select value={regionFilter} onChange={(e) => setRegionFilter(e.target.value)}
+              className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 max-w-[180px]" title="MSCI ACWI region">
+              <option value="">All regions ({regionFacet.total})</option>
+              {regionFacet.opts.map((o) => <option key={o.value} value={o.value}>{o.value} ({o.count})</option>)}
+            </select>
+          </div>
           {/* Universe membership filter */}
           <select value={universeFilter} onChange={(e) => setUniverseFilter(e.target.value)} title="Filter to a saved universe's tickers"
             className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 max-w-[200px]">
             <option value="">All universes</option>
             {universes.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.ticker_count.toLocaleString()})</option>)}
           </select>
-          <button type="button" onClick={() => { setQ(''); setClassFilter(''); setSectorFilter(''); setProductFilter(''); setUniverseFilter(''); }}
-            disabled={!q.trim() && !classFilter && !sectorFilter && !productFilter && !universeFilter}
+          <button type="button" onClick={() => { setQ(''); setClassFilter(''); setSectorFilter(''); setProductFilter(''); setCountryFilter(''); setContinentFilter(''); setRegionFilter(''); setUniverseFilter(''); }}
+            disabled={!q.trim() && !classFilter && !sectorFilter && !productFilter && !countryFilter && !continentFilter && !regionFilter && !universeFilter}
             className="text-xs px-3 py-1.5 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
             Clear filters
           </button>
@@ -371,6 +416,11 @@ function GridRow({ r, onChart, onResolve, measureRef, dataIndex }: {
   const attempted = r.status !== 'queued';
   const openfigiMissing = attempted && !r.openfigi_figi;
   const yfinanceMissing = attempted && r.status !== 'ok';
+  // Issuer domiciled somewhere other than the venue it trades on — an ADR (TSM,
+  // ASML), a GDR (SMSN.IL), or a pan-European MTF line (ATCOBS.XC). An ETF has no
+  // domicile at all, so it never reads as cross-listed.
+  const crossListed = !!r.domicile_country && !!r.listing_country
+    && r.domicile_country !== r.listing_country;
   return (
       <tr ref={measureRef} data-index={dataIndex} className="hover:bg-accent-500/10 transition-colors">
         <td className="px-3 py-1.5 font-mono text-fg whitespace-nowrap">
@@ -431,6 +481,27 @@ function GridRow({ r, onChart, onResolve, measureRef, dataIndex }: {
               )}
             </span>
           )}
+        </td>
+        {/* Country — the issuer's domicile. When it lists somewhere else (an ADR,
+            a GDR, a pan-European MTF line) the venue is shown as "via …", the
+            same idiom the Symbol column uses for the tradable listing. */}
+        <td className="px-3 py-1.5 text-fg-subtle whitespace-nowrap">
+          {yfinanceMissing ? <MissingBadge /> : (
+            <span className="inline-flex items-baseline gap-1 max-w-[190px] align-bottom"
+              title={crossListed ? `Domiciled in ${r.domicile_country} · lists in ${r.listing_country}` : (r.country ?? '')}>
+              <span className="truncate">{r.country ?? '—'}</span>
+              {crossListed && (
+                <span className="shrink-0 text-[10px] text-fg-faint">via {r.listing_country}</span>
+              )}
+            </span>
+          )}
+        </td>
+        <td className="px-3 py-1.5 text-fg-subtle whitespace-nowrap">{yfinanceMissing ? <MissingBadge /> : (r.continent ?? '—')}</td>
+        <td className="px-3 py-1.5 text-fg-subtle whitespace-nowrap">
+          {yfinanceMissing ? <MissingBadge />
+            : r.msci_region == null
+              ? <span className="text-fg-faint" title="This country has no MSCI market">—</span>
+              : r.msci_region}
         </td>
         <td className="px-3 py-1.5 text-right font-mono text-fg whitespace-nowrap">{yfinanceMissing ? <MissingBadge /> : adv(r.med_adv_eur)}</td>
         <td className="px-3 py-1.5 text-right font-mono text-fg-soft whitespace-nowrap">{mcap(r.market_cap_eur)}</td>

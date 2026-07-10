@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from deps import supabase
 
-from . import yahoo
+from . import geo, yahoo
 
 _CHUNK = 500
 
@@ -33,9 +33,27 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _analysis_id(symbol: str) -> int | None:
-    r = supabase.table("asset_analysis").select("analysis_id").eq("symbol", symbol).limit(1).execute()
-    return r.data[0]["analysis_id"] if r.data else None
+def _analysis_row(symbol: str) -> dict | None:
+    r = (
+        supabase.table("asset_analysis")
+        .select("analysis_id, domicile_country, continent, msci_region")
+        .eq("symbol", symbol).limit(1).execute()
+    )
+    return r.data[0] if r.data else None
+
+
+def _sync_geo(row: dict, listing_country: str | None) -> None:
+    """Re-derive continent + msci_region for an analysis asset from its (already
+    backfilled) domicile and the listing country we just resolved.
+
+    Reads the STORED domicile rather than clobbering it: a re-store of an
+    existing asset must not downgrade a domicile-derived region back to a
+    listing-derived one (Linde would flip Europe -> North America). Writes only
+    on a real change."""
+    g = geo.resolve_geo(row.get("domicile_country"), listing_country)
+    upd = {k: g[k] for k in ("continent", "msci_region") if g[k] != row.get(k)}
+    if upd:
+        supabase.table("asset_analysis").update(upd).eq("analysis_id", row["analysis_id"]).execute()
 
 
 def upsert_asset(res: dict, figi: dict | None = None) -> dict:
@@ -48,6 +66,9 @@ def upsert_asset(res: dict, figi: dict | None = None) -> dict:
     if not symbol:
         raise ValueError("no analysis symbol to store")
 
+    # Listing country is free — it falls out of the symbol suffix. Domicile needs
+    # a per-symbol assetProfile call, so it's left to scripts/asset_backfill_geo.py.
+    listing_country = geo.country_from_symbol(symbol, res.get("asset_class"))
     supabase.table("asset_analysis").upsert(
         {
             "symbol": symbol,
@@ -57,11 +78,15 @@ def upsert_asset(res: dict, figi: dict | None = None) -> dict:
             "currency": an.get("currency"),
             "first_date": an.get("first_date"),
             "years": an.get("years"),
+            "listing_country": listing_country,
             "updated_at": _now_iso(),
         },
         on_conflict="symbol",
     ).execute()
-    analysis_id = _analysis_id(symbol)
+    arow = _analysis_row(symbol)
+    analysis_id = arow["analysis_id"] if arow else None
+    if arow:
+        _sync_geo(arow, listing_country)
 
     execution_id = None
     if res.get("id_type") == "isin":
@@ -72,6 +97,7 @@ def upsert_asset(res: dict, figi: dict | None = None) -> dict:
             "yahoo_symbol": ex.get("symbol"),
             "name": ex.get("name"),
             "exchange": ex.get("exchange"),
+            "listing_country": geo.country_from_exchange(ex.get("exchange")),
             "currency": ex.get("currency"),
             "med_adv_eur": ex.get("med_adv_eur"),
             "first_date": ex.get("first_date"),
