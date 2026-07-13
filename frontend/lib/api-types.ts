@@ -1149,6 +1149,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/asset-pipeline/dividends/isin/{isin}/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dividend Payments By Isin
+         * @description Payments for an ISIN through whichever bridge reaches it.
+         *
+         *     An ETF has no fiscal-period series (no `financials` blob), so this feed IS its
+         *     dividend history — there is no annual/quarterly cadence to fall back to.
+         */
+        get: operations["dividend_payments_by_isin_api_asset_pipeline_dividends_isin__isin__payments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/dividends/isin/{isin}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dividend Resolve Isin
+         * @description Resolve an ISIN to a GuruFocus listing WITHOUT a `company` row.
+         *
+         *     This is the second bridge, and the only one an ETF can cross: GuruFocus's
+         *     `isin/{ISIN}` -> [{symbol, exchange}] -> the one listing that IS this asset
+         *     (see `_gf_listing.pick_listing` for why choosing is the hard part).
+         *
+         *     ONE API call, cached in `gurufocus_listing` — including the misses, so an
+         *     ISIN GuruFocus can't resolve is never billed twice. `refresh=true` re-asks.
+         *
+         *     A company-backed ISIN short-circuits to its company entry: that bridge is
+         *     richer (fiscal-period series + payments) and costs nothing.
+         */
+        post: operations["dividend_resolve_isin_api_asset_pipeline_dividends_isin__isin__resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/asset-pipeline/dividends/{company_id}": {
         parameters: {
             query?: never;
@@ -5676,7 +5729,7 @@ export interface components {
         /** DividendCoverageEntry */
         DividendCoverageEntry: {
             /** Company Id */
-            company_id: number;
+            company_id?: number | null;
             /** Exchange */
             exchange?: string | null;
             /**
@@ -5691,12 +5744,32 @@ export interface components {
              * @default false
              */
             has_data?: boolean;
+            /** Has Payments */
+            has_payments?: boolean | null;
+            /**
+             * Is Home
+             * @default true
+             */
+            is_home?: boolean;
+            /**
+             * Kind
+             * @default company
+             */
+            kind?: string;
+            /**
+             * Status
+             * @default ok
+             */
+            status?: string;
         };
         /**
          * DividendCoverageResponse
-         * @description `{ISIN: entry}` for every company we can reach. The grid holds the ISINs;
-         *     the frontend joins on them client-side. Keyed by ISIN rather than
+         * @description `{ISIN: entry}` for every ISIN we can reach, by EITHER bridge. The grid holds
+         *     the ISINs; the frontend joins on them client-side. Keyed by ISIN rather than
          *     execution_id so the payload is independent of the asset table's size.
+         *
+         *     An ISIN absent from this map has simply never been resolved — the UI offers a
+         *     Fetch. It does NOT mean "no dividend".
          */
         DividendCoverageResponse: {
             /** By Isin */
@@ -5746,7 +5819,7 @@ export interface components {
          */
         DividendPaymentsResponse: {
             /** Company Id */
-            company_id: number;
+            company_id?: number | null;
             /** Currency */
             currency?: string | null;
             /**
@@ -5756,8 +5829,15 @@ export interface components {
             fetched?: boolean;
             /** Fx From */
             fx_from?: string | null;
+            /**
+             * Is Home
+             * @default true
+             */
+            is_home?: boolean;
             /** Payments */
             payments: components["schemas"]["DividendPayment"][];
+            /** Symbol */
+            symbol?: string | null;
         };
         /** DividendPoint */
         DividendPoint: {
@@ -7899,6 +7979,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DividendCoverageResponse"];
+                };
+            };
+        };
+    };
+    dividend_payments_by_isin_api_asset_pipeline_dividends_isin__isin__payments_get: {
+        parameters: {
+            query?: {
+                refresh?: boolean;
+            };
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DividendPaymentsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dividend_resolve_isin_api_asset_pipeline_dividends_isin__isin__resolve_post: {
+        parameters: {
+            query?: {
+                refresh?: boolean;
+            };
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DividendCoverageEntry"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

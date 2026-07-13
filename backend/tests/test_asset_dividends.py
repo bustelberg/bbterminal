@@ -268,6 +268,28 @@ class TestTrailingTwelveMonths:
         from routers._asset_dividends import _trailing_12m
         assert _trailing_12m([], []) == []
 
+    def test_a_window_spanning_a_gap_is_unknown_not_a_number(self):
+        """A NON-HOME listing's feed can be full of holes, and the holes are silent.
+
+        GuruFocus's Zurich line for Apple lists 2026-05-11 and 2026-02-09 and then
+        jumps straight to 2021-02-05 — about sixteen quarterly payments missing from
+        the middle (63 records against Nasdaq's 91). "Sum the last 4 payments" there
+        spans FIVE YEARS and yields a confident, plausible, entirely fictional annual
+        dividend. The span check makes that unrepresentable: an unknown total must
+        read as unknown, never as a number.
+        """
+        from routers._asset_dividends import _trailing_12m
+        dates = ["2020-11-06", "2021-02-05", "2026-02-09", "2026-05-11"]
+        out = _trailing_12m([0.205, 0.205, 0.26, 0.27], dates)
+        assert out[-1] is None          # 2021-02-05 -> 2026-05-11 is not "12 months"
+
+    def test_the_gap_guard_does_not_fire_on_a_normal_drifting_year(self):
+        """The guard must not eat the ordinary case it sits next to: four quarterly
+        ex-dates that drift forward still span ~365 days, nowhere near the limit."""
+        from routers._asset_dividends import _trailing_12m
+        out = _trailing_12m([0.25] * 8, self._quarterly(8))
+        assert out[-1] == pytest.approx(1.0)
+
 
 class TestFetchGuards:
     @pytest.mark.parametrize("exchange", ["LSE", "NSE", "BOM", "DUB", None])
@@ -277,3 +299,60 @@ class TestFetchGuards:
         dividend' when it means 'no coverage'."""
         from index_universe.acwi.exchange_map import is_gf_subscribed_exchange
         assert not is_gf_subscribed_exchange(exchange)
+
+
+class TestNonEquityProducts:
+    """A bond ISIN can never name an equity listing, so don't buy the answer.
+
+    Measured on the real grid: 4,877 of 16,150 rows (30%) are BONDS, plus 410 futures.
+    A full backfill was spending ~5,300 GuruFocus calls to be told 'not found' — and
+    the question is meaningless anyway, since a bond pays COUPONS, not a dividend per
+    share.
+    """
+
+    @pytest.mark.parametrize("product", ["BONDS", "FUTURE", "FX", "CRYPTO_CURRENCY"])
+    def test_structurally_non_equity_products_are_skipped(self, product):
+        from routers._asset_dividends import _NON_EQUITY_PRODUCTS
+        assert product in _NON_EQUITY_PRODUCTS
+
+    @pytest.mark.parametrize("product", ["EQUITY", "ETF", "FUNDS"])
+    def test_anything_that_COULD_be_an_equity_listing_still_gets_asked(self, product):
+        """FUNDS is deliberately NOT skipped: a 'fund' may well be an ETF GuruFocus
+        carries, and guessing wrong would silently blank a row that has real data —
+        the exact failure this column exists to avoid. Only skip what CANNOT work."""
+        from routers._asset_dividends import _NON_EQUITY_PRODUCTS
+        assert product not in _NON_EQUITY_PRODUCTS
+
+
+class TestNoDividendData:
+    """`null` and `[]` are different claims, and conflating them lies to the user.
+
+    GuruFocus answers a symbol it knows nothing about with `null`, and a listing that
+    simply never paid with `[]`:
+        []    -> NO PAYOUTS  (an answer: an accumulating ETF, a non-paying stock)
+        null  -> NO DATA     (a gap: a dead OTC line of an acquired company)
+    Both turned up in one 50-row sample — OTCPK:MCFUF (Micro Focus, taken over by
+    OpenText) and OTCPK:VGFNF returned `null`. This used to raise a 502, which blamed
+    our server for a delisted ticker.
+    """
+
+    def test_no_data_is_its_own_exception_not_a_502(self):
+        from routers._asset_dividends import NoDividendData
+        e = NoDividendData("OTCPK:MCFUF")
+        assert e.symbol == "OTCPK:MCFUF"
+        assert "no dividend data" in str(e).lower()
+
+    def test_every_dead_end_has_a_reason_the_ui_can_show(self):
+        """A cell that can't be filled must name WHY. Any status the resolver can
+        persist needs an entry here, or the UI falls back to a bare blank — which for
+        a dividend reads as 'pays nothing'."""
+        from routers._asset_dividends import _UNRESOLVED_REASON
+        for status in ("not_found", "unsubscribed", "not_applicable", "no_data"):
+            assert _UNRESOLVED_REASON.get(status), f"{status} has no user-facing reason"
+
+    def test_the_no_data_reason_names_the_listing_it_tried(self):
+        # It interpolates the symbol, so the user can see WHICH dead line we resolved to.
+        from routers._asset_dividends import _UNRESOLVED_REASON
+        msg = _UNRESOLVED_REASON["no_data"].format(symbol="OTCPK:MCFUF")
+        assert "OTCPK:MCFUF" in msg
+        assert "pays nothing" in msg          # explicitly disclaims the NO PAYOUTS reading

@@ -1,56 +1,65 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import { chartTheme } from '../../lib/chartTheme';
-import type { AssetGridRow, DividendPaymentsResponse, DividendSeriesResponse } from '../../lib/types/api';
+import type { AssetGridRow, DividendCoverageEntry, DividendPaymentsResponse } from '../../lib/types/api';
 import LwLineChart from './LwLineChart';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? '';
 
-type Cadence = 'annual' | 'quarterly' | 'payments';
 type PayMode = 'each' | 'ttm';
 type Point = { date: string; value: number };
 
-/** Dividends-per-share for one grid row, from GuruFocus.
+// Why a resolved ISIN still can't be charted — mirrors the backend's resolver
+// statuses (routers/_gf_listing.py). Both negative-cached: the API call is spent.
+const UNRESOLVED: Record<string, string> = {
+  not_found: 'GuruFocus does not know this ISIN, so there is no listing to price.',
+  unsubscribed: 'GuruFocus lists this ISIN only on exchanges outside our subscription.',
+};
+
+/** Cash paid per unit held — ONE primitive, ONE chart, for every instrument.
  *
- * The row is a Yahoo asset; dividends are keyed by GuruFocus `company_id`. The
- * bridge is the ISIN, resolved server-side.
+ * A stock and an ETF have exactly one thing in common on this axis, and it is all we
+ * need: a timeseries of (date, cash per unit). GuruFocus's `stock/{sym}/dividend`
+ * returns precisely that for both, in the DECLARATION currency, retro-adjusted for
+ * splits so the whole history sits on today's share basis.
  *
- * THREE CADENCES, and the third is not a convenience:
- *   annual/quarterly — fiscal-period totals from `financials`. A period only gains
- *     a point once it CLOSES, so a mid-year hike is invisible for up to a year.
- *     NVIDIA went from $0.01 to $0.25 per quarter with an ex-date of 2026-06-04,
- *     inside FY2027; the annual chart correctly reads $0.04 (FY2026) and cannot
- *     show the hike until 2027.
- *   payments — the live per-payment feed. Shows the $0.25 the day it is declared.
+ * The fiscal-period cadences this modal used to offer (annual / quarterly, from
+ * `financials`) are GONE from the UI. They were a company-only detour: DERIVED (the
+ * payments summed inside a fiscal year), unavailable for any ETF, and lagging by up to
+ * a year — NVIDIA's $0.01 → $0.25 hike sat invisible inside FY2027 until 2027. The
+ * payment feed shows it the day it's declared. The endpoints still exist on the API
+ * surface; nothing here calls them.
  *
- * FETCH-ON-OPEN: if nothing is stored, the modal pulls from GuruFocus immediately.
+ * TWO BRIDGES to reach that one series, because the grid holds two kinds of instrument:
+ *   company-backed — ISIN → `company` → GuruFocus. Equities we ingest.
+ *   listing-backed — ISIN → GuruFocus `isin/{ISIN}`. ETFs, which have no `company` row.
+ * An unresolved ISIN is resolved on open (one API call, cached forever, misses included).
  *
- * NATIVE | EUR side by side, mirroring `AssetDualChart` on the price modal. Each
- * payment converts at the FX rate on its own pay date, so the EUR panel carries the
- * currency leg. Points older than our `fx_rate` coverage are omitted from the EUR
- * panel — never drawn as zero. */
+ * NATIVE | EUR, the only two charts. Each payment converts at the FX rate on ITS OWN pay
+ * date, so the EUR line carries the currency leg. Points older than our `fx_rate`
+ * coverage are omitted from the EUR panel — never drawn as zero. */
 export default function AssetDividendModal({
-  row, companyId, onClose, onFetched,
+  row, isin, entry, onClose, onResolved,
 }: {
   row: AssetGridRow;
-  companyId: number;
+  isin: string;
+  /** Undefined when this ISIN has never been resolved — the modal resolves it. */
+  entry?: DividendCoverageEntry;
   onClose: () => void;
-  /** Lets the grid flip this row's `has_data` without refetching the coverage map. */
-  onFetched?: () => void;
+  /** Hands the resolved listing + payout status back so the grid's cells update. */
+  onResolved?: (entry: DividendCoverageEntry) => void;
 }) {
-  const [series, setSeries] = useState<DividendSeriesResponse | null>(null);
+  const [resolved, setResolved] = useState<DividendCoverageEntry | undefined>(entry);
+  const [resolving, setResolving] = useState(!entry);
   const [payments, setPayments] = useState<DividendPaymentsResponse | null>(null);
-  const [cadence, setCadence] = useState<Cadence>('annual');
   const [payMode, setPayMode] = useState<PayMode>('each');
-  const [loading, setLoading] = useState(true);
-  const [fetching, setFetching] = useState(false);
-  const [loadingPayments, setLoadingPayments] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // One auto-fetch per mount. Without this, a fetch that legitimately returns an
-  // empty series (a company that has never paid a dividend) would re-fetch forever.
-  const autoFetched = useRef(false);
+
+  const companyId = resolved?.company_id ?? null;
+  const blocked = resolved?.status && resolved.status !== 'ok' ? resolved.status : null;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -58,39 +67,60 @@ export default function AssetDividendModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const pull = useCallback(async () => {
-    setFetching(true); setError(null);
-    try {
-      const r = await apiFetch(`${API_URL}/api/asset-pipeline/dividends/${companyId}/fetch`, { method: 'POST' });
-      const b = await r.json().catch(() => null);
-      if (!r.ok) setError(b?.detail ?? `HTTP ${r.status}`);
-      else { setSeries(b as DividendSeriesResponse); onFetched?.(); }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally { setFetching(false); }
-  }, [companyId, onFetched]);
+  const onResolvedRef = useRef(onResolved);
+  onResolvedRef.current = onResolved;
+  const resolvedRef = useRef(resolved);
+  resolvedRef.current = resolved;
 
-  // `pull` changes identity whenever the parent re-renders (its `onFetched` is an
-  // inline arrow). Reading it through a ref keeps this effect keyed on `companyId`
-  // alone, so a successful fetch doesn't trigger a second GET.
-  const pullRef = useRef(pull);
-  pullRef.current = pull;
-
+  // Resolve-on-open. Only when the grid had no entry for this ISIN — i.e. we have
+  // never asked GuruFocus about it. One API call, cached server-side forever.
   useEffect(() => {
+    if (entry) return;
+    let cancelled = false;
+    (async () => {
+      setResolving(true); setError(null);
+      try {
+        const r = await apiFetch(`${API_URL}/api/asset-pipeline/dividends/isin/${encodeURIComponent(isin)}/resolve`,
+          { method: 'POST' });
+        const b = await r.json().catch(() => null);
+        if (cancelled) return;
+        if (!r.ok) { setError(b?.detail ?? `HTTP ${r.status}`); return; }
+        const e = b as DividendCoverageEntry;
+        setResolved(e);
+        onResolvedRef.current?.(e);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!cancelled) setResolving(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isin, entry]);
+
+  // THE only data load. Company-backed rows go through their company_id (that bridge
+  // also validates the ticker); everything else through the ISIN.
+  useEffect(() => {
+    if (blocked || !resolved) return;
+    const url = companyId != null
+      ? `${API_URL}/api/asset-pipeline/dividends/${companyId}/payments`
+      : `${API_URL}/api/asset-pipeline/dividends/isin/${encodeURIComponent(isin)}/payments`;
     let cancelled = false;
     (async () => {
       setLoading(true); setError(null);
       try {
-        const r = await apiFetch(`${API_URL}/api/asset-pipeline/dividends/${companyId}`);
+        const r = await apiFetch(url);
         const b = await r.json().catch(() => null);
         if (cancelled) return;
         if (!r.ok) { setError(b?.detail ?? `HTTP ${r.status}`); return; }
-        const s = b as DividendSeriesResponse;
-        setSeries(s);
-        if (!s.annual.length && !s.quarterly.length && !autoFetched.current) {
-          autoFetched.current = true;
-          void pullRef.current();
-        }
+        const p = b as DividendPaymentsResponse;
+        setPayments(p);
+        // Tell the grid whether this instrument pays anything, so its cell can flip to
+        // "NO PAYOUTS" instead of still offering a Fetch. The backend persisted the
+        // same fact; this just saves a coverage reload. `resolved` is read through a
+        // ref, not the dep array — putting it there would re-run this effect the moment
+        // the ISIN resolves, and the cleanup would cancel the request it just started.
+        const entryNow = resolvedRef.current;
+        if (entryNow) onResolvedRef.current?.({ ...entryNow, has_payments: p.payments.length > 0 });
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -98,65 +128,29 @@ export default function AssetDividendModal({
       }
     })();
     return () => { cancelled = true; };
-  }, [companyId]);
+  }, [isin, companyId, resolved, blocked]);
 
-  // The payment feed is a separate GuruFocus endpoint; only pay for it when asked.
-  //
-  // The request-once guard is a REF, not `loadingPayments` state. With state in the
-  // dep array, setting it re-runs the effect, whose cleanup flips `cancelled` and
-  // discards the in-flight response — the spinner then never clears.
-  const paymentsRequested = useRef(false);
-  useEffect(() => { paymentsRequested.current = false; setPayments(null); }, [companyId]);
-
-  useEffect(() => {
-    if (cadence !== 'payments' || paymentsRequested.current) return;
-    paymentsRequested.current = true;
-    let cancelled = false;
-    (async () => {
-      setLoadingPayments(true); setError(null);
-      try {
-        const r = await apiFetch(`${API_URL}/api/asset-pipeline/dividends/${companyId}/payments`);
-        const b = await r.json().catch(() => null);
-        if (cancelled) return;
-        if (!r.ok) { setError(b?.detail ?? `HTTP ${r.status}`); paymentsRequested.current = false; }
-        else setPayments(b as DividendPaymentsResponse);
-      } catch (e) {
-        if (!cancelled) { setError(e instanceof Error ? e.message : String(e)); paymentsRequested.current = false; }
-      } finally {
-        if (!cancelled) setLoadingPayments(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [cadence, companyId]);
-
-  const isPayments = cadence === 'payments';
-  const rawPeriods = (cadence === 'annual' ? series?.annual : series?.quarterly) ?? [];
-  const rawPayments = payments?.payments ?? [];
-
-  // `each` plots the payment; `ttm` plots the trailing annual total. The trailing
-  // line is what compares like-for-like with the annual chart.
-  const nativeVals = isPayments
-    ? rawPayments.map((p) => (payMode === 'ttm' ? p.ttm : p.value))
-    : rawPeriods.map((p) => p.value);
-  const eurVals = isPayments
-    ? rawPayments.map((p) => (payMode === 'ttm' ? p.ttm_eur : p.value_eur))
-    : rawPeriods.map((p) => p.value_eur);
-  const dates = isPayments ? rawPayments.map((p) => p.date) : rawPeriods.map((p) => p.date);
+  const rows = payments?.payments ?? [];
+  // `each` plots the payment itself; `ttm` the trailing annual total. Same two charts —
+  // `each` answers "did it just change?", `ttm` answers "what does one unit pay a year?"
+  // and is the one that compares like-for-like across instruments and frequencies.
+  const dates = rows.map((p) => p.date);
+  const nativeVals = rows.map((p) => (payMode === 'ttm' ? p.ttm : p.value));
+  const eurVals = rows.map((p) => (payMode === 'ttm' ? p.ttm_eur : p.value_eur));
 
   const native: Point[] = dates.flatMap((d, i) => (nativeVals[i] == null ? [] : [{ date: d, value: nativeVals[i]! }]));
   const eur: Point[] = dates.flatMap((d, i) => (eurVals[i] == null ? [] : [{ date: d, value: eurVals[i]! }]));
   const droppedPreFx = native.length - eur.length;
 
-  // Fall back to `series` while the payments feed loads, so switching cadence
-  // doesn't blank the currency out of the header.
-  const src = (isPayments ? payments : series) ?? series;
-  const ccy = (src?.currency ?? '').toUpperCase();
+  const ccy = (payments?.currency ?? '').toUpperCase();
   const isEurNative = ccy === 'EUR';
-  const busy = loading || fetching || (isPayments && loadingPayments);
-  const empty = !busy && dates.length === 0;
+  const busy = resolving || loading;
+  const empty = !busy && !blocked && rows.length === 0;
   const lastNative = native.at(-1);
   const lastEur = eur.at(-1);
-  const latestTtm = rawPayments.at(-1)?.ttm;
+  const latestTtm = rows.at(-1)?.ttm;
+  const notHome = (payments?.is_home ?? resolved?.is_home) === false;
+  const listingOnly = !!resolved && companyId == null;
 
   const panel = (label: string, data: Point[], color: string, unit: string) => (
     <div className="flex-1 min-w-[320px]">
@@ -165,8 +159,8 @@ export default function AssetDividendModal({
         <LwLineChart data={data} scale="linear" unit={unit} color={color} />
       ) : (
         <div className="w-full aspect-[16/9] max-h-[72vh] min-h-[300px] flex items-center justify-center text-center px-6 text-[11px] text-fg-faint border border-neutral-800/40 rounded-lg">
-          {src?.fx_from
-            ? <>Every period predates our FX coverage (from {src.fx_from}).</>
+          {payments?.fx_from
+            ? <>Every payment predates our FX coverage (from {payments.fx_from}).</>
             : <>No FX rate available to convert {ccy || 'this currency'}.</>}
         </div>
       )}
@@ -182,13 +176,15 @@ export default function AssetDividendModal({
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="min-w-0">
             <div className="flex items-baseline gap-2 flex-wrap">
-              <span className="text-base font-semibold text-fg-strong">Dividends per share</span>
-              <span className="text-sm font-mono text-fg-soft">{row.isin}</span>
+              <span className="text-base font-semibold text-fg-strong">Cash paid per unit held</span>
+              <span className="text-sm font-mono text-fg-soft">{isin}</span>
               {row.name && <span className="text-sm text-fg-soft truncate">{row.name}</span>}
             </div>
             <div className="text-[11px] text-fg-faint mt-0.5">
-              GuruFocus · company #{companyId}
-              {ccy && ` · reported in ${ccy}`}
+              GuruFocus
+              {payments?.symbol && ` · ${payments.symbol}`}
+              {companyId != null ? ` · company #${companyId}` : listingOnly ? ' · listing (no company row)' : ''}
+              {ccy && ` · paid in ${ccy}`}
               {lastNative && ` · latest ${fmt(lastNative.value)} ${ccy}`}
               {lastEur && !isEurNative && ` = ${fmt(lastEur.value)} EUR`}
               {lastNative && ` (${lastNative.date})`}
@@ -196,9 +192,9 @@ export default function AssetDividendModal({
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {isPayments && (
+            {!blocked && rows.length > 0 && (
               <div className="flex items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5"
-                title="Each payment, or the trailing annual total (sum of the last k payments).">
+                title="Each payment as declared, or the trailing annual total (the sum of the last k payments). The trailing total is the one that compares across instruments — a quarterly payer's single payment is a quarter of an annual payer's.">
                 {(['each', 'ttm'] as PayMode[]).map((m) => (
                   <button key={m} type="button" onClick={() => setPayMode(m)}
                     className={`text-[11px] px-2.5 py-1 rounded-md transition-colors ${
@@ -208,18 +204,6 @@ export default function AssetDividendModal({
                 ))}
               </div>
             )}
-            <div className="flex items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5">
-              {(['annual', 'quarterly', 'payments'] as Cadence[]).map((c) => (
-                <button key={c} type="button" onClick={() => setCadence(c)}
-                  title={c === 'payments'
-                    ? 'Every declared cash payment — shows a mid-year dividend change immediately'
-                    : `Fiscal-${c === 'annual' ? 'year' : 'quarter'} totals; a period appears only once it closes`}
-                  className={`text-[11px] px-2.5 py-1 rounded-md transition-colors ${
-                    cadence === c ? 'bg-accent-600 text-white' : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/[0.04]'}`}>
-                  {c}
-                </button>
-              ))}
-            </div>
             <button type="button" onClick={onClose} aria-label="Close"
               className="text-fg-faint hover:text-fg-strong text-xl leading-none px-1 -mt-1">×</button>
           </div>
@@ -227,25 +211,54 @@ export default function AssetDividendModal({
 
         {error && <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2 text-xs text-neg-300 mb-3">{error}</div>}
 
-        {busy && (
-          <p className="text-[11px] text-fg-subtle py-16 text-center">
-            {fetching ? 'Fetching from GuruFocus…' : 'Loading…'}
-          </p>
-        )}
-
-        {empty && !error && (
-          <div className="py-16 text-center space-y-3">
-            <p className="text-sm text-fg-subtle">GuruFocus returned no dividend history for this company.</p>
-            <button type="button" onClick={pull} disabled={fetching}
-              className="text-xs px-3 py-1.5 rounded-lg bg-accent-600 hover:bg-accent-500 text-white disabled:opacity-50">
-              Retry fetch
-            </button>
+        {/* Charted off a listing that is NOT this row's own. The AMOUNTS are right —
+            GuruFocus reports a payout in its declaration currency on every listing of
+            the ISIN (Apple: 0.27 USD on Nasdaq, Xetra, Zurich and Milan alike,
+            measured). The HISTORY is what may be short: Milan holds 35 of Apple's 91
+            payments, Zurich 63 with a five-year hole. Warn, don't hide — and the
+            trailing-12m line is suppressed wherever its window would span a gap. */}
+        {!busy && !blocked && notHome && rows.length > 0 && (
+          <div className="bg-warn-500/10 border border-warn-500/20 rounded-lg px-3 py-2 text-[11px] text-warn-300 mb-3">
+            <span className="font-semibold">Not this row’s own listing.</span>{' '}
+            GuruFocus has no {row.currency ?? 'local'} line for this ISIN, so these payments come
+            from {payments?.symbol ?? 'another listing'}. Same security, same per-unit amounts
+            (GuruFocus reports the declaration currency on every listing) — but its history may be{' '}
+            <strong>incomplete</strong>, and a trailing-12m total is hidden wherever its window
+            would span a gap.
           </div>
         )}
 
-        {!busy && dates.length > 0 && (
+        {busy && (
+          <p className="text-[11px] text-fg-subtle py-16 text-center">
+            {resolving ? 'Resolving this ISIN with GuruFocus…' : 'Loading payments…'}
+          </p>
+        )}
+
+        {!busy && blocked && (
+          <div className="py-16 text-center max-w-2xl mx-auto space-y-2">
+            <p className="text-sm text-fg-soft">No payment history available for this ISIN.</p>
+            <p className="text-[11px] text-fg-faint">{UNRESOLVED[blocked] ?? `Unresolved (${blocked}).`}</p>
+          </div>
+        )}
+
+        {/* Zero payments is an ANSWER, not a gap — and for an accumulating fund it's the
+            correct one. Say which, rather than showing an empty chart that reads as a
+            missing fetch. */}
+        {empty && !error && (
+          <div className="py-16 text-center max-w-2xl mx-auto space-y-2">
+            <p className="text-sm text-fg-soft">This {listingOnly ? 'fund' : 'company'} pays nothing out.</p>
+            <p className="text-[11px] text-fg-faint">
+              GuruFocus returned no payments at all for {payments?.symbol ?? 'this listing'}.
+              {listingOnly
+                ? ' An ACCUMULATING ETF reinvests its income into NAV instead of distributing it, so an empty history here is the answer — not a data gap.'
+                : ' This company has never paid a dividend.'}
+            </p>
+          </div>
+        )}
+
+        {!busy && !blocked && rows.length > 0 && (
           <div className="space-y-1">
-            {/* An EUR-reported dividend needs no conversion; a second identical panel
+            {/* A payout already in EUR needs no conversion; a second identical panel
                 would be noise, so it gets the full width. */}
             {isEurNative
               ? <div className="flex gap-4">{panel('EUR', native, chartTheme.accentStrong, ccy)}</div>
@@ -256,14 +269,14 @@ export default function AssetDividendModal({
                 </div>
               )}
             <div className="text-[10px] text-fg-faint">
-              {native.length} {isPayments ? (payMode === 'ttm' ? 'trailing totals' : 'payments') : `${cadence} periods`}
+              {native.length} {payMode === 'ttm' ? 'trailing totals' : 'payments'}
               {' · '}{dates[0]} → {dates.at(-1)}
-              {isPayments
-                ? ' · Live payment feed: a dividend change shows here immediately, while the fiscal-period charts only move once a period closes.'
-                : ' · Fiscal-period totals: a period appears only once it closes, so a mid-year change can lag by up to a year — see the payments cadence.'}
-              {!isEurNative && ' · Right: converted at the ECB rate on each payment date, so the line carries the FX leg.'}
-              {droppedPreFx > 0 && src?.fx_from &&
-                ` · ${droppedPreFx} earlier point${droppedPreFx > 1 ? 's' : ''} omitted from EUR: no rate before ${src.fx_from}.`}
+              {' · '}Cash per unit held, as declared. Split-adjusted to today’s share basis, so the
+              whole history is on one footing.
+              {listingOnly && ' An ETF’s payout is a DISTRIBUTION: it can include return of capital and capital gains, not only dividend income.'}
+              {!isEurNative && ' · Right: converted at the ECB rate on each payment’s own pay date, so the line carries the FX leg.'}
+              {droppedPreFx > 0 && payments?.fx_from &&
+                ` · ${droppedPreFx} earlier point${droppedPreFx > 1 ? 's' : ''} omitted from EUR: no rate before ${payments.fx_from}.`}
               {' · '}Scroll to zoom, drag to pan, double-click to reset.
             </div>
           </div>

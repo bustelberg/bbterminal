@@ -74,8 +74,11 @@ const SOURCE_TONE: Record<string, string> = {
   OpenFIGI: 'bg-warn-500/10 text-warn-300 border-warn-500/20',
   yfinance: 'bg-pos-500/10 text-pos-300 border-pos-500/20',
   // Every other column comes from the Yahoo/OpenFIGI/Leonteq pipeline keyed by
-  // ISIN. Div/share is the one column sourced from GuruFocus, reached by bridging
-  // this row's ISIN to a GuruFocus company — so it earns its own badge.
+  // ISIN. The trailing group (Exchange · Ticker · Div/share) is the only one
+  // sourced from GuruFocus, reached by bridging this row's ISIN to a GuruFocus
+  // company — so it earns its own badge. Exchange + Ticker ARE the two halves of
+  // the `EXCHANGE:TICKER` symbol the Div/share fetch queries, which is why they
+  // sit immediately left of it.
   //
   // Neutral slate, NOT `neg-*`: the three semantic ramps (accent/warn/pos) are
   // taken by the badges above, and `neg-*` means "negative return / error" in this
@@ -394,7 +397,24 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
                   </th>
                 ))}
                 <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap border-l border-neutral-800/40" title="Chart · manual OpenFIGI + yfinance resolve">Actions</th>
+                {/* GuruFocus group — the resolved listing, then its dividends. The
+                    separator sits on Exchange (the group's first column), so the
+                    three read as one section. */}
                 <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap border-l border-neutral-800/40"
+                  title="GuruFocus exchange code of the listing this ISIN resolves to — the EXCHANGE half of the EXCHANGE:TICKER symbol the Div/share fetch queries. Blank until the row is resolved (hit Fetch).">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span>Exchange</span>
+                    <SourceBadge source="GuruFocus" />
+                  </div>
+                </th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap"
+                  title="GuruFocus ticker of the listing this ISIN resolves to. It can differ from the yfinance Symbol — separate id spaces, joined only by ISIN, and GuruFocus may hold a different listing of the same security.">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span>Ticker</span>
+                    <SourceBadge source="GuruFocus" />
+                  </div>
+                </th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap"
                   title="Dividends per share (GuruFocus). Resolved from this row's ISIN to a GuruFocus company — most grid rows (ETFs, crypto, un-ingested equities) have none.">
                   <div className="flex flex-col gap-1 items-start">
                     <span>Div/share</span>
@@ -404,8 +424,8 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800/20">
-              {/* +2: the Div/share and Actions columns live outside COLS. */}
-              {padTop > 0 && <tr aria-hidden><td colSpan={COLS.length + 2} style={{ height: padTop }} /></tr>}
+              {/* +4: Actions + the three GuruFocus columns live outside COLS. */}
+              {padTop > 0 && <tr aria-hidden><td colSpan={COLS.length + 4} style={{ height: padTop }} /></tr>}
               {vItems.map((vi) => {
                 const r = view[vi.index];
                 return (
@@ -416,21 +436,23 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
                     measureRef={rowVirtualizer.measureElement} dataIndex={vi.index} />
                 );
               })}
-              {padBottom > 0 && <tr aria-hidden><td colSpan={COLS.length + 2} style={{ height: padBottom }} /></tr>}
+              {padBottom > 0 && <tr aria-hidden><td colSpan={COLS.length + 4} style={{ height: padBottom }} /></tr>}
             </tbody>
           </table>
         </div>
       )}
 
       {chartRow && <AssetChartModal row={chartRow} onClose={() => setChartRow(null)} />}
-      {dividendRow?.isin && dividends[dividendRow.isin] && (
-        <AssetDividendModal row={dividendRow} companyId={dividends[dividendRow.isin].company_id}
+      {/* Opens for ANY row with an ISIN — including the ~87% with no `company` row.
+          The modal resolves those against GuruFocus and hands the listing back, which
+          is what fills the Exchange / Ticker columns without reloading the coverage map. */}
+      {dividendRow?.isin && (
+        <AssetDividendModal row={dividendRow} isin={dividendRow.isin}
+          entry={dividends[dividendRow.isin]}
           onClose={() => setDividendRow(null)}
-          // Flip has_data locally so the cell stops offering a fetch.
-          onFetched={() => setDividends((d) => {
-            const isin = dividendRow.isin;
-            return isin && d[isin] ? { ...d, [isin]: { ...d[isin], has_data: true } } : d;
-          })} />
+          // Carries back both the resolved listing (fills Exchange/Ticker) and whether
+          // it pays anything (flips the cell to View or NO PAYOUTS).
+          onResolved={(e) => setDividends((d) => ({ ...d, [dividendRow.isin]: e }))} />
       )}
       {resolveRow && (
         <RowResolveModal row={resolveRow}
@@ -447,37 +469,86 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
   );
 }
 
-/** The Div/share cell has four states, and conflating any two of them is a lie:
- *   no GuruFocus company behind this ISIN  -> "—" (majority of the grid)
- *   company found, exchange outside our GF subscription -> UNSUBSCRIBED
- *   company found, series already stored   -> "Chart"
- *   company found, nothing stored yet      -> "Fetch" (one lazy GF call)
- * A blank cell must never read as "this company pays no dividend". */
+// A cell that CAN'T be filled says WHY. An empty cell is a claim ("nothing here"), and
+// for a dividend that claim reads as "pays nothing" — which is a different, and usually
+// false, statement. Each badge below names the actual reason, and each is a dead end we
+// have already paid for once and cached, so it does not invite a pointless retry.
+const DIV_REASON: Record<string, { label: string; tone: string; title: string }> = {
+  not_found: {
+    label: 'NO LISTING', tone: 'bg-overlay/[0.06] text-fg-muted border-neutral-700',
+    title: 'GuruFocus does not know this ISIN — it has no listing for it, so there is nothing to price. (Cached: we asked once.)',
+  },
+  unsubscribed: {
+    label: 'UNSUBSCRIBED', tone: 'bg-warn-500/15 text-warn-300 border-warn-500/25',
+    title: 'GuruFocus lists this ISIN only on exchanges outside our subscription, so no dividend data is obtainable for it.',
+  },
+  no_payouts: {
+    label: 'NO PAYOUTS', tone: 'bg-overlay/[0.06] text-fg-muted border-neutral-700',
+    title: 'Resolved, fetched, and GuruFocus returned no payments at all — this instrument distributes nothing. An ACCUMULATING ETF (e.g. iShares Core MSCI World) reinvests instead of paying out, and plenty of stocks (Berkshire) simply never declare a dividend. An empty history here is the ANSWER, not a gap.',
+  },
+  not_applicable: {
+    label: 'NOT EQUITY', tone: 'bg-overlay/[0.06] text-fg-faint border-neutral-800',
+    title: 'This ISIN is a bond, future or FX instrument — not an equity listing. It pays coupons or nothing at all, never a dividend per share, so the question does not apply. (No API call was spent: 30% of the grid is bonds.)',
+  },
+  no_data: {
+    label: 'NO DATA', tone: 'bg-warn-500/10 text-warn-300/80 border-warn-500/20',
+    title: 'The ISIN resolved to a real listing, but GuruFocus holds no dividend record for it — typically a dead OTC line of an acquired or delisted company (e.g. Micro Focus → OTCPK:MCFUF after the OpenText takeover). This is a GAP, not a claim that it pays nothing — which is exactly why it is not badged NO PAYOUTS.',
+  },
+};
+
+function ReasonBadge({ reason }: { reason: keyof typeof DIV_REASON }) {
+  const r = DIV_REASON[reason];
+  return (
+    <span title={r.title}
+      className={`text-[9px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border cursor-help ${r.tone}`}>
+      {r.label}
+    </span>
+  );
+}
+
+/** The Div/share cell states — the SAME four for a stock and an ETF, because both are
+ * the same thing underneath: a timeseries of (date, cash per unit held).
+ *   never asked GuruFocus about this ISIN     -> "Fetch"        (resolves, then charts)
+ *   asked; GuruFocus has no listing for it    -> NO LISTING     (badge, negative-cached)
+ *   resolved, exchange outside our GF sub     -> UNSUBSCRIBED   (badge)
+ *   resolved + fetched, pays nothing at all   -> NO PAYOUTS     (badge)
+ *   otherwise                                 -> "View"
+ *
+ * Every dead end names ITSELF. "NO PAYOUTS" and "NO LISTING" look identical as a blank
+ * cell and mean opposite things: one is an answer about the instrument (an accumulating
+ * ETF, a non-paying stock), the other is a gap in our reach.
+ *
+ * A row resolved to a listing that is NOT its own (`is_home === false`) still charts:
+ * the amounts are the same declaration-currency numbers (GuruFocus reports Apple's
+ * 0.27 USD on Nasdaq, Xetra, Zurich and Milan alike). Only the HISTORY may be short,
+ * which the modal says out loud. */
 function DividendCell({ entry, onOpen }: { entry?: DividendCoverageEntry; onOpen: () => void }) {
+  // Never resolved. Not "no dividend" — just "we have not asked yet".
   if (!entry) {
     return (
-      <span className="text-fg-faint" title="No GuruFocus company is linked to this ISIN — ETFs, crypto, and equities we have never ingested have no dividend data.">
-        —
-      </span>
+      <button type="button" onClick={onOpen}
+        title="Resolve this ISIN to a GuruFocus listing and fetch its dividends (one API call, cached forever — including the misses)."
+        className="text-[10px] px-2 py-0.5 rounded border border-neutral-700 text-fg-muted hover:text-accent-300 hover:border-accent-500/50 transition-colors">
+        Fetch
+      </button>
     );
   }
-  if (entry.gf_unsubscribed) {
-    return (
-      <span className="text-[9px] uppercase tracking-wider px-1 py-0.5 rounded bg-warn-500/15 text-warn-300"
-        title={`Exchange ${entry.exchange ?? '?'} is outside our GuruFocus subscription — no dividend data is obtainable for this listing.`}>
-        UNSUBSCRIBED
-      </span>
-    );
+  if (entry.status && entry.status !== 'ok') {
+    return <ReasonBadge reason={entry.status in DIV_REASON ? entry.status : 'not_found'} />;
   }
+  if (entry.gf_unsubscribed) return <ReasonBadge reason="unsubscribed" />;
+  // Fetched once, and it pays nothing — an accumulating fund, or a stock that has never
+  // declared a dividend. Three-valued on purpose: `null` (never looked) still offers a
+  // Fetch below, so "we haven't asked" can't masquerade as "there is nothing".
+  if (entry.has_payments === false) return <ReasonBadge reason="no_payouts" />;
   // "View", not "Chart": the Actions column's price-chart button sits immediately
   // to the left and is already labelled Chart. Two adjacent "Chart" buttons that
   // open different things is a trap.
   return (
     <button type="button" onClick={onOpen}
-      title={entry.has_data ? 'View the dividends-per-share history' : 'Fetch dividends from GuruFocus (one API call, cached)'}
-      className={`text-[10px] px-2 py-0.5 rounded border border-neutral-700 transition-colors hover:border-accent-500/50 ${
-        entry.has_data ? 'text-accent-400' : 'text-fg-muted hover:text-accent-300'}`}>
-      {entry.has_data ? 'View' : 'Fetch'}
+      title="Cash paid per unit held — the payment history, in native currency and EUR. Fetched from GuruFocus on first open and cached."
+      className="text-[10px] px-2 py-0.5 rounded border border-neutral-700 text-accent-400 transition-colors hover:border-accent-500/50">
+      View
     </button>
   );
 }
@@ -612,8 +683,30 @@ function GridRow({ r, onChart, onResolve, dividend, onDividends, measureRef, dat
             </button>
           </div>
         </td>
-        {/* Dividends per share (GuruFocus, bridged by ISIN) — the rightmost cell */}
-        <td className="px-3 py-1.5 whitespace-nowrap border-l border-neutral-800/40">
+        {/* GuruFocus group (bridged by ISIN) — the listing we query, then its
+            dividends. An em-dash means this ISIN hasn't been resolved (hit Fetch) or
+            couldn't be, exactly as in the Div/share cell beside it. */}
+        <td className="px-3 py-1.5 font-mono text-fg-muted whitespace-nowrap border-l border-neutral-800/40">
+          {dividend?.exchange ?? <span className="text-fg-faint">—</span>}
+        </td>
+        <td className="px-3 py-1.5 font-mono whitespace-nowrap">
+          {dividend?.gurufocus_ticker
+            ? (
+              // A non-home listing is charted (same declaration-currency amounts) but
+              // its payment HISTORY may be partial — GuruFocus holds 35 of Apple's 91
+              // payments on Milan. Flag it here so it's visible without opening the
+              // modal, which is where the full caveat lives.
+              <span className={dividend.is_home === false ? 'text-warn-300 cursor-help' : 'text-fg'}
+                title={dividend.is_home === false
+                  ? `Not this row's own listing — GuruFocus has no ${r.currency ?? 'local'} line for this ISIN, so we use ${dividend.exchange}:${dividend.gurufocus_ticker}. The amounts are right (GuruFocus reports the declaration currency on every listing), but the payment history may be incomplete.`
+                  : undefined}>
+                {dividend.gurufocus_ticker}
+                {dividend.is_home === false && <span className="ml-1 text-[9px]" aria-hidden>⚠</span>}
+              </span>
+            )
+            : <span className="text-fg-faint">—</span>}
+        </td>
+        <td className="px-3 py-1.5 whitespace-nowrap">
           <DividendCell entry={dividend} onOpen={onDividends} />
         </td>
       </tr>
