@@ -72,6 +72,10 @@ class DividendCoverageEntry(BaseModel):
     # collapsing that into the same blank as "we haven't looked" is the exact lie the
     # old "—" told. Listing-backed rows only.
     has_payments: bool | None = None
+    # Does GuruFocus hold a financials BLOB for this listing? One blob carries every
+    # income-statement line, so this is per-listing, not per-column. Rides the same
+    # coverage map as the payout flag — no second request.
+    has_financials: bool | None = None
 
 
 class DividendCoverageResponse(BaseModel):
@@ -166,7 +170,7 @@ def _load_coverage() -> dict[str, DividendCoverageEntry]:
     companies = list(paginate(
         lambda lo, hi: (
             supabase.table("company")
-            .select("company_id, isin, gurufocus_ticker, exchange_id, has_dividend_payments")
+            .select("company_id, isin, gurufocus_ticker, exchange_id, has_dividend_payments, has_financials")
             .not_.is_("isin", "null")
             .order("company_id")
             .range(lo, hi)
@@ -204,6 +208,7 @@ def _load_coverage() -> dict[str, DividendCoverageEntry]:
             gf_unsubscribed=not is_gf_subscribed_exchange(code),
             has_data=c["company_id"] in with_data,
             has_payments=c.get("has_dividend_payments"),
+            has_financials=c.get("has_financials"),
         )
 
     # Listing-backed entries (ETFs etc.) — every ISIN we've resolved through
@@ -213,7 +218,7 @@ def _load_coverage() -> dict[str, DividendCoverageEntry]:
     for r in paginate(
         lambda lo, hi: (
             supabase.table("gurufocus_listing")
-            .select("isin, gurufocus_ticker, exchange_code, status, is_home")
+            .select("isin, gurufocus_ticker, exchange_code, status, is_home, has_payments, has_financials")
             .order("isin")
             .range(lo, hi)
             .execute()
@@ -381,6 +386,7 @@ def _coverage_entry_for_listing(row: dict) -> DividendCoverageEntry:
         status=row.get("status") or "ok",
         is_home=bool(row.get("is_home")),
         has_payments=row.get("has_payments"),
+        has_financials=row.get("has_financials"),
         # An unresolved listing has no exchange to judge, so it can't be called a
         # coverage gap; only a resolved one can be (and by construction it never is —
         # the picker drops unsubscribed exchanges before scoring).

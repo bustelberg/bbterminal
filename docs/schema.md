@@ -359,6 +359,11 @@ DB-persisted signal-breakdown panels (survives Railway redeploys; shareable acro
 ### `airs_performance`
 Bustelberg AirSPMS broker performance scrape — Dutch column names match the source UI.
 
+### `airs_model_portfolio` + `airs_model_portfolio_position`
+The AIRS **model** portfolios (Stamgegevens › Onderhoud portefeuilles › Model portefeuilles), persisted so `/portfolios` is a DB read instead of a multi-minute scrape. PK is AirSPMS's own row id. `airs_model_portfolio_position` holds ONE snapshot per portfolio (the newest with rows) — deliberately not an archive; AIRS still serves any past date live. Its **`isin`** is the prize: the exact join into `asset_execution` that the AIRS *holdings* sheet never gave us (that one carries only a fund name). `isin` is NULL for the cash line, which is correct — cash is not an instrument and is never counted as one.
+
+**Three absences that must not collapse into each other** (see `airs_model_portfolio_grid`): `portfolio_type` not `fixed (…)` → **no model exists** (a `normaal`/`meervoudig` benchmark; AIRS stores no composition at all, so "0 holdings" would describe a model that isn't there); `positions_scanned_at IS NULL` → **never counted**; a derived `holdings` of **0** → a real, EMPTY fixed model (exactly one portfolio is like this, and it is why the other two can't be flattened into it). `positions_error` records "we asked and it broke" — distinct from all three. ⚠ **`fixed (0)` is a portfolio TYPE, not a holdings count** — 24 rows carry it and they hold 20, 9, 1… instruments.
+
 ### `ticker_override`
 OpenFIGI ticker resolutions: `ticker` is the input we tried to look up, the `gurufocus_*` columns are the resolved values.
 
@@ -366,6 +371,7 @@ OpenFIGI ticker resolutions: `ticker` is the input we tried to look up, the `gur
 
 | View | Type | Purpose |
 |------|------|---------|
+| `airs_model_portfolio_grid` | view | The `/portfolios` table. `holdings` is **derived** from `airs_model_portfolio_position` (ISIN-bearing rows only), never stored — a stored count is a second source of truth that drifts from the rows it claims to count. `has_fixed_model` + `positions_scanned_at` are what let the UI tell the three absences apart. |
 | `universe_monthly_counts` | view | Per-`(universe, month)` member count. |
 | `universe_sector_counts` | view | Per-`(universe, sector)` member count, with `(unknown)` sentinel for null/blank sectors. |
 | `universe_summary` | view | Per-universe aggregate: `total_rows`, `unique_companies`, `unique_tickers`, `month_count`, month range. |

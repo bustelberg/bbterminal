@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 
 const TABS = [
   { href: '/asset-pipeline', label: 'Execution instruments' },
+  { href: '/portfolios', label: 'Portfolios' },
   { href: '/alphalab', label: 'AlphaLab' },
   { href: '/signal-lab', label: 'Signal Lab' },
 ];

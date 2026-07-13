@@ -70,3 +70,17 @@ export type DividendSeriesResponse = components['schemas']['DividendSeriesRespon
 // The live per-payment feed. The fiscal-year series only gains a point when a
 // fiscal year closes, so a mid-year dividend hike is invisible for up to a year.
 export type DividendPaymentsResponse = components['schemas']['DividendPaymentsResponse'];
+// Revenue, in MILLIONS of the LISTING's trading currency — GuruFocus FX-converts
+// financials per fiscal period, so a non-home listing reports a different number
+// (CSX FY2025: 14,092 USD on Nasdaq vs 12,034.6 EUR on Xetra). The opposite of the
+// dividend feed, which reports the declaration currency on every listing.
+export type FinancialSeriesResponse = components['schemas']['FinancialSeriesResponse'];
+
+// AIRS model-portfolio positions — the XLS export that DOES carry an ISIN (the AIRS
+// holdings sheet only has a fund name, which is why name-matching was never safe).
+export type ModelPortfolioPositions = components['schemas']['ModelPortfolioPositions'];
+export type ModelPortfolioPosition = components['schemas']['ModelPortfolioPosition'];
+export type StoredModelPortfolio = components['schemas']['StoredModelPortfolio'];
+export type ModelPortfolioPerformance = components['schemas']['ModelPortfolioPerformance'];
+export type ReconstructedIndex = components['schemas']['ReconstructedIndex'];
+export type IndexMember = components['schemas']['IndexMember'];

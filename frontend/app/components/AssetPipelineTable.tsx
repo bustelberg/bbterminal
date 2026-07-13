@@ -8,6 +8,7 @@ import type { AssetGridRow, DividendCoverageEntry } from '../../lib/types/api';
 import { classLabel, sectorLabel } from '../../lib/assetLabels';
 import AssetChartModal from './AssetChartModal';
 import AssetDividendModal from './AssetDividendModal';
+import AssetFinancialModal, { type LineItem } from './AssetFinancialModal';
 import RowResolveModal from './RowResolveModal';
 import CreateUniverseModal from './CreateUniverseModal';
 
@@ -74,11 +75,10 @@ const SOURCE_TONE: Record<string, string> = {
   OpenFIGI: 'bg-warn-500/10 text-warn-300 border-warn-500/20',
   yfinance: 'bg-pos-500/10 text-pos-300 border-pos-500/20',
   // Every other column comes from the Yahoo/OpenFIGI/Leonteq pipeline keyed by
-  // ISIN. The trailing group (Exchange · Ticker · Div/share) is the only one
-  // sourced from GuruFocus, reached by bridging this row's ISIN to a GuruFocus
-  // company — so it earns its own badge. Exchange + Ticker ARE the two halves of
-  // the `EXCHANGE:TICKER` symbol the Div/share fetch queries, which is why they
-  // sit immediately left of it.
+  // ISIN. The trailing group (Exchange · Ticker · Div/share · Revenue) is the only
+  // one sourced from GuruFocus, reached by bridging this row's ISIN to a GuruFocus
+  // listing — so it earns its own badge. Exchange + Ticker ARE the two halves of the
+  // `EXCHANGE:TICKER` symbol both fetches query, which is why they lead the group.
   //
   // Neutral slate, NOT `neg-*`: the three semantic ramps (accent/warn/pos) are
   // taken by the badges above, and `neg-*` means "negative return / error" in this
@@ -137,6 +137,9 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
   // rendering a blank that reads as "pays no dividend".
   const [dividends, setDividends] = useState<Record<string, DividendCoverageEntry>>({});
   const [dividendRow, setDividendRow] = useState<AssetGridRow | null>(null);
+  // Which row + which income-statement line the modal is showing. One modal serves every
+  // line item, so a third column is a registry entry, not another piece of state.
+  const [financialRow, setFinancialRow] = useState<{ row: AssetGridRow; item: LineItem } | null>(null);
 
   const [q, setQ] = useState('');
   const [classFilter, setClassFilter] = useState('');
@@ -415,17 +418,143 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
                   </div>
                 </th>
                 <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap"
-                  title="Dividends per share (GuruFocus). Resolved from this row's ISIN to a GuruFocus company — most grid rows (ETFs, crypto, un-ingested equities) have none.">
+                  title="Cash paid per unit held (GuruFocus). The same series for a stock and an ETF: (date, cash per unit), charted in native currency and EUR.">
                   <div className="flex flex-col gap-1 items-start">
                     <span>Div/share</span>
+                    <SourceBadge source="GuruFocus" />
+                  </div>
+                </th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap"
+                  title="Revenue (GuruFocus), in MILLIONS of the listing's trading currency + EUR. Only an operating business has one — bonds, futures and funds don't (a fund holds securities, it doesn't trade). NOTE: GuruFocus converts financials into the LISTING's currency per fiscal period, so a non-home listing reports a different number (CSX: 14,092 USD on Nasdaq vs 12,034.6 EUR on Xetra for FY2025).">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span>Revenue</span>
+                    <SourceBadge source="GuruFocus" />
+                  </div>
+                </th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap"
+                  title="Gross profit (GuruFocus), in MILLIONS of the listing's trading currency + EUR. Same financials blob as Revenue, so opening the second column on a company costs no extra API call. NOTE: a BANK has no gross profit line at all — no cost of goods sold — so JPMorgan reports N/A rather than an empty chart.">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span>Gross profit</span>
+                    <SourceBadge source="GuruFocus" />
+                  </div>
+                </th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap"
+                  title="EBIT (GuruFocus), in MILLIONS of the listing's trading currency + EUR. GuruFocus's OWN EBIT line — not Operating Income, which is a different number (Mitsui Chemicals: EBIT 85,035 vs Operating Income 56,602). Same blob as Revenue/Gross profit, so no extra API call. A BANK has no EBIT line either → N/A.">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span>EBIT</span>
+                    <SourceBadge source="GuruFocus" />
+                  </div>
+                </th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap"
+                  title="Interest expense (GuruFocus), in MILLIONS of the listing's trading currency + EUR. Reported NEGATIVE — it is an outflow — and charted as reported, never sign-flipped (Apple −3,933 · JPMorgan −101,350). A 0 is a real value, not a missing period: Apple's last two years net it out. Unlike Gross profit and EBIT, a BANK DOES have this line — interest expense is a bank's core cost.">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span>Interest exp.</span>
+                    <SourceBadge source="GuruFocus" />
+                  </div>
+                </th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap"
+                  title="Pretax income (GuruFocus), in MILLIONS of the listing's trading currency + EUR. Present in EVERY industry template — JPMorgan reports it (75,081) despite having no EBIT and no gross profit. NOT the same as EBIT: EBIT is before interest, pretax is after it (Mitsui Chemicals FY2026: EBIT 85,035 vs Pretax 68,608 — the gap is the interest bill).">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span>Pretax income</span>
+                    <SourceBadge source="GuruFocus" />
+                  </div>
+                </th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap"
+                  title="Income tax (GuruFocus), in MILLIONS of the listing's trading currency + EUR. GuruFocus calls this line 'Tax Provision' — there is no 'Income Tax' key. Reported NEGATIVE (an outflow: Apple −20,719 · JPMorgan −16,610) and charted as reported, never sign-flipped. Present in every template, banks included.">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span>Income tax</span>
+                    <SourceBadge source="GuruFocus" />
+                  </div>
+                </th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap"
+                  title="Net income (GuruFocus), in MILLIONS of the listing's trading currency + EUR. The bottom line ATTRIBUTABLE TO SHAREHOLDERS — what EPS is built from. NOTE: pretax + tax will NOT tie to this for a company with minority interests, and that is correct. Mitsui Chemicals FY2025: pretax 68,608 + tax −21,698 = 46,910 = 'Net Income Including Noncontrolling Interests', while Net Income = 34,378; the 12,532 gap is minority interest.">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span>Net income</span>
+                    <SourceBadge source="GuruFocus" />
+                  </div>
+                </th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap"
+                  title="Depreciation & amortization (GuruFocus 'Depreciation, Depletion and Amortization'), in MILLIONS of the listing's trading currency + EUR. Reported POSITIVE (a magnitude, not an outflow): Apple 11,698 · JPMorgan 8,821 · Mitsui 104,744. Present in every template, banks included. Read from the INCOME statement; the cashflow statement carries an identical twin ('Cash Flow Depreciation…') that we never touch.">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span>D&amp;A</span>
+                    <SourceBadge source="GuruFocus" />
+                  </div>
+                </th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap"
+                  title="Diluted EPS (GuruFocus 'EPS (Diluted)') — the ONLY column here that is PER SHARE, not millions: Apple 7.46 USD/share · JPMorgan 20.02 · Mitsui 91.62 JPY/share. It ties out (Apple: net income 112,010M ÷ 15,004.7M diluted shares = 7.46). Still a currency amount, so the EUR panel converts at each period-end rate exactly as elsewhere. Diluted, not basic — the conservative share count. Present in every template, banks included.">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span>EPS (dil.)</span>
+                    <SourceBadge source="GuruFocus" />
+                  </div>
+                </th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap"
+                  title="Operating cash flow (GuruFocus 'Cash Flow from Operations'), in MILLIONS of the listing's trading currency + EUR. Read from the CASHFLOW statement, not the income statement. Its SIGN is real information, not a convention: Apple +111,482 but JPMorgan −147,782 — a bank's operating cash flow routinely goes negative as loans and trading assets grow. A negative line here is an answer, not a bug.">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span>Operating CF</span>
+                    <SourceBadge source="GuruFocus" />
+                  </div>
+                </th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap"
+                  title="Capex (GuruFocus 'Capital Expenditure'), from the CASHFLOW statement, in MILLIONS + EUR. Reported NEGATIVE — an outflow — and charted as reported. NOT the same as 'Purchase Of Property, Plant, Equipment': capex also picks up intangibles (Mitsui: PP&E −128,242 vs capex −137,759). The mapping ties out: Apple OCF 111,482 + capex −12,715 = 98,767 = GuruFocus's own Free Cash Flow. JPMorgan reports 0 — a real value, not N/A; a bank's capex is negligible here.">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span>Capex</span>
+                    <SourceBadge source="GuruFocus" />
+                  </div>
+                </th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap"
+                  title="Total debt — DERIVED, in MILLIONS + EUR. GuruFocus publishes no 'Total Debt' line, so this is short-term + long-term debt from the BALANCE SHEET (each incl. capital lease obligations). Apple 20,329 + 78,328 = 98,657 · JPMorgan 68,048 + 448,764 = 516,812. The capital-lease variants are used because they are the only keys a BANK has (JPMorgan lacks the plain Short-/Long-Term Debt keys), and for other companies they are identical to the plain ones. A period where one component is missing is dropped, never summed as if it were zero — an understated debt that looks like a real number is worse than a gap.">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span>Total debt</span>
+                    <SourceBadge source="GuruFocus" />
+                  </div>
+                </th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap"
+                  title="Cash & equivalents, from the BALANCE SHEET, in MILLIONS + EUR. GuruFocus RENAMES this line per industry template, so two spellings are coalesced (not summed): 'Cash and Cash Equivalents' for most companies, 'Balance Statement Cash and cash equivalents' for a BANK — JPMorgan has neither of the ordinary keys, so mapping only the first would N/A every bank. NOTE this is the NARROW line: it is NOT 'Cash, Cash Equivalents, Marketable Securities', which is a different and much larger number (Apple: 54,697 vs cash-only 35,934).">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span>Cash &amp; equiv.</span>
+                    <SourceBadge source="GuruFocus" />
+                  </div>
+                </th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap"
+                  title="Shareholders' equity (GuruFocus 'Total Stockholders Equity'), from the BALANCE SHEET, in MILLIONS + EUR. The SHAREHOLDERS' line — what an equity holder owns, and the denominator of book value per share and ROE. NOT 'Total Equity', which includes minority interest: Mitsui Chemicals reports Total Stockholders Equity 864,727 + Minority Interest 124,057 = Total Equity 988,784. JPMorgan's two are identical (362,438, no minorities), so checking there alone would bless either choice.">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span>Equity</span>
+                    <SourceBadge source="GuruFocus" />
+                  </div>
+                </th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap"
+                  title="Shares outstanding (GuruFocus 'Shares Outstanding (Diluted Average)'), in MILLIONS OF SHARES: Apple 15,004.7 (= 15.0bn) · JPMorgan 2,781.5 · Mitsui 375.2. This is a COUNT, not currency — so there is NO EUR chart: dividing a number of shares by an FX rate would mean nothing. It's the diluted average, the same basis as EPS, which is what makes them tie (Apple: 7.46 × 15,004.7 ≈ net income 112,010).">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span>Shares out.</span>
+                    <SourceBadge source="GuruFocus" />
+                  </div>
+                </th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap"
+                  title="Forward EPS — analyst CONSENSUS estimate, per share, NOT a reported result. From GuruFocus's 'analyst_estimate' endpoint (SINGULAR — the plural is a fake endpoint that 200s with junk), a different source from every other column here, which read the reported financials. Apple: FY2026-09 8.76 rising to 14.43 by FY2030. Every date is in the FUTURE, so no FX rate exists for it — the EUR line converts at the LATEST KNOWN rate, which is the only honest choice but means it carries today's FX assumption. An uncovered company has no estimates at all.">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span>Forward EPS</span>
+                    <SourceBadge source="GuruFocus" />
+                  </div>
+                </th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap"
+                  title="Estimated revenue growth — DERIVED, in PERCENT (not currency, so there is no EUR chart). GuruFocus's own 'future_revenue_estimate_growth' is a single long-term SCALAR (Apple 10.09, NVIDIA 45.73), not a series — nothing to plot. So this is the year-over-year change in the consensus REVENUE estimates, with the first forecast year measured against the last REPORTED revenue (Apple: est FY2026 477,600 vs actual FY2025 416,161 = +14.8%). It will NOT equal GuruFocus's scalar: theirs is a long-run average, this is the actual year-on-year step the consensus implies.">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span>Rev growth (est)</span>
+                    <SourceBadge source="GuruFocus" />
+                  </div>
+                </th>
+                <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap"
+                  title="Long-term EPS growth — analyst CONSENSUS, in PERCENT. A SINGLE FIGURE, not a series: GuruFocus publishes one number (Apple 13.01 · NVIDIA 47.57 · JPMorgan 8.66), so there is nothing to chart and the modal shows the number. It is a forecast of the growth RATE, not of earnings. NOT 'future_per_share_eps_estimate_growth' (13.03 / 45.72 / 8.23 — the CAGR implied by the estimate series), which is close enough on Apple to be mistaken for it and diverges on NVIDIA.">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span>EPS LTG (est)</span>
                     <SourceBadge source="GuruFocus" />
                   </div>
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800/20">
-              {/* +4: Actions + the three GuruFocus columns live outside COLS. */}
-              {padTop > 0 && <tr aria-hidden><td colSpan={COLS.length + 4} style={{ height: padTop }} /></tr>}
+              {/* +22: Actions + the twenty-one GuruFocus columns live outside COLS. */}
+              {padTop > 0 && <tr aria-hidden><td colSpan={COLS.length + 22} style={{ height: padTop }} /></tr>}
               {vItems.map((vi) => {
                 const r = view[vi.index];
                 return (
@@ -433,6 +562,7 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
                     onResolve={() => setResolveRow(r)}
                     dividend={r.isin ? dividends[r.isin] : undefined}
                     onDividends={() => setDividendRow(r)}
+                    onFinancial={(item) => setFinancialRow({ row: r, item })}
                     measureRef={rowVirtualizer.measureElement} dataIndex={vi.index} />
                 );
               })}
@@ -453,6 +583,17 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
           // Carries back both the resolved listing (fills Exchange/Ticker) and whether
           // it pays anything (flips the cell to View or NO PAYOUTS).
           onResolved={(e) => setDividends((d) => ({ ...d, [dividendRow.isin]: e }))} />
+      )}
+      {financialRow?.row.isin && (
+        <AssetFinancialModal row={financialRow.row} isin={financialRow.row.isin} item={financialRow.item}
+          onClose={() => setFinancialRow(null)}
+          // Same coverage map as Div/share (one ISIN→listing bridge), so a fetch here
+          // badges NO DATA there too without a reload. `has_financials` is about the
+          // BLOB, so it's shared by both income-statement columns.
+          onLoaded={(hasFinancials) => setDividends((d) => {
+            const i = financialRow.row.isin;
+            return i && d[i] ? { ...d, [i]: { ...d[i], has_financials: hasFinancials } } : d;
+          })} />
       )}
       {resolveRow && (
         <RowResolveModal row={resolveRow}
@@ -492,9 +633,28 @@ const DIV_REASON: Record<string, { label: string; tone: string; title: string }>
   },
   no_data: {
     label: 'NO DATA', tone: 'bg-warn-500/10 text-warn-300/80 border-warn-500/20',
-    title: 'The ISIN resolved to a real listing, but GuruFocus holds no dividend record for it — typically a dead OTC line of an acquired or delisted company (e.g. Micro Focus → OTCPK:MCFUF after the OpenText takeover). This is a GAP, not a claim that it pays nothing — which is exactly why it is not badged NO PAYOUTS.',
+    title: 'The ISIN resolved to a real listing, but GuruFocus holds no record for it — typically a dead OTC line of an acquired or delisted company (e.g. Micro Focus → OTCPK:MCFUF after the OpenText takeover). This is a GAP, not a claim that the value is zero — which is exactly why it is not badged NO PAYOUTS.',
+  },
+  fund: {
+    label: 'FUND', tone: 'bg-overlay/[0.06] text-fg-faint border-neutral-800',
+    title: 'A fund has no revenue: it HOLDS securities, it does not operate a business. GuruFocus agrees — it returns no financials for an ETF at all. A category error, not a data gap, so no API call is spent asking.',
   },
 };
+
+// Products that structurally cannot have the thing a column measures. Answered from the
+// grid row alone — no resolution, no API call. Together these are ~59% of the grid, and
+// spending a GuruFocus call to be told "bonds have no revenue" is the kind of quota burn
+// the dividend backfill already caught once.
+const NON_EQUITY_PRODUCTS = new Set(['BONDS', 'FUTURE', 'FX', 'CRYPTO_CURRENCY']);
+const FUND_PRODUCTS = new Set(['ETF', 'FUNDS']);
+
+/** Revenue exists only for an operating business. Everything else is decided locally. */
+function revenueReason(r: AssetGridRow): keyof typeof DIV_REASON | null {
+  const product = (r.leonteq_product_type ?? '').toUpperCase();
+  if (NON_EQUITY_PRODUCTS.has(product)) return 'not_applicable';
+  if (FUND_PRODUCTS.has(product) || r.asset_class === 'etf') return 'fund';
+  return null;
+}
 
 function ReasonBadge({ reason }: { reason: keyof typeof DIV_REASON }) {
   const r = DIV_REASON[reason];
@@ -553,12 +713,40 @@ function DividendCell({ entry, onOpen }: { entry?: DividendCoverageEntry; onOpen
   );
 }
 
-function GridRow({ r, onChart, onResolve, dividend, onDividends, measureRef, dataIndex }: {
+/** An income-statement cell (Revenue, Gross profit, …). Same bridge and badges as
+ * Div/share, plus one dead end Div/share doesn't have: an ETF PAYS dividends but has no
+ * income statement, so a fund is a category error here and an answer there. Decided from
+ * the grid row before any resolution, so ~59% of rows cost nothing.
+ *
+ * `has_financials` is per-LISTING, not per-column — one blob carries every line — so both
+ * columns share it. Whether a PARTICULAR line exists (a bank has no gross profit) is
+ * computed from the blob and told in the modal, because it needs the blob to know. */
+function FinancialCell({ r, entry, label, onOpen }: {
+  r: AssetGridRow; entry?: DividendCoverageEntry; label: string; onOpen: () => void;
+}) {
+  const local = revenueReason(r);
+  if (local) return <ReasonBadge reason={local} />;
+  if (entry?.status && entry.status !== 'ok') {
+    return <ReasonBadge reason={entry.status in DIV_REASON ? entry.status : 'not_found'} />;
+  }
+  if (entry?.gf_unsubscribed) return <ReasonBadge reason="unsubscribed" />;
+  if (entry?.has_financials === false) return <ReasonBadge reason="no_data" />;
+  return (
+    <button type="button" onClick={onOpen}
+      title={`${label} in millions — the listing's trading currency and EUR. Fetched from GuruFocus on first open and cached (one blob carries every line, and it's shared with the earnings pipeline, so the second column on the same company is free).`}
+      className="text-[10px] px-2 py-0.5 rounded border border-neutral-700 text-accent-400 transition-colors hover:border-accent-500/50">
+      View
+    </button>
+  );
+}
+
+function GridRow({ r, onChart, onResolve, dividend, onDividends, onFinancial, measureRef, dataIndex }: {
   r: AssetGridRow;
   onChart: () => void;
   onResolve: () => void;
   dividend?: DividendCoverageEntry;
   onDividends: () => void;
+  onFinancial: (item: LineItem) => void;
   measureRef?: (el: HTMLTableRowElement | null) => void;
   dataIndex?: number;
 }) {
@@ -708,6 +896,60 @@ function GridRow({ r, onChart, onResolve, dividend, onDividends, measureRef, dat
         </td>
         <td className="px-3 py-1.5 whitespace-nowrap">
           <DividendCell entry={dividend} onOpen={onDividends} />
+        </td>
+        <td className="px-3 py-1.5 whitespace-nowrap">
+          <FinancialCell r={r} entry={dividend} label="Revenue" onOpen={() => onFinancial('revenue')} />
+        </td>
+        <td className="px-3 py-1.5 whitespace-nowrap">
+          <FinancialCell r={r} entry={dividend} label="Gross profit" onOpen={() => onFinancial('gross_profit')} />
+        </td>
+        <td className="px-3 py-1.5 whitespace-nowrap">
+          <FinancialCell r={r} entry={dividend} label="EBIT" onOpen={() => onFinancial('ebit')} />
+        </td>
+        <td className="px-3 py-1.5 whitespace-nowrap">
+          <FinancialCell r={r} entry={dividend} label="Interest expense" onOpen={() => onFinancial('interest_expense')} />
+        </td>
+        <td className="px-3 py-1.5 whitespace-nowrap">
+          <FinancialCell r={r} entry={dividend} label="Pretax income" onOpen={() => onFinancial('pretax_income')} />
+        </td>
+        <td className="px-3 py-1.5 whitespace-nowrap">
+          <FinancialCell r={r} entry={dividend} label="Income tax" onOpen={() => onFinancial('income_tax')} />
+        </td>
+        <td className="px-3 py-1.5 whitespace-nowrap">
+          <FinancialCell r={r} entry={dividend} label="Net income" onOpen={() => onFinancial('net_income')} />
+        </td>
+        <td className="px-3 py-1.5 whitespace-nowrap">
+          <FinancialCell r={r} entry={dividend} label="D&A" onOpen={() => onFinancial('depreciation_amort')} />
+        </td>
+        <td className="px-3 py-1.5 whitespace-nowrap">
+          <FinancialCell r={r} entry={dividend} label="Diluted EPS" onOpen={() => onFinancial('eps_diluted')} />
+        </td>
+        <td className="px-3 py-1.5 whitespace-nowrap">
+          <FinancialCell r={r} entry={dividend} label="Operating CF" onOpen={() => onFinancial('operating_cash_flow')} />
+        </td>
+        <td className="px-3 py-1.5 whitespace-nowrap">
+          <FinancialCell r={r} entry={dividend} label="Capex" onOpen={() => onFinancial('capex')} />
+        </td>
+        <td className="px-3 py-1.5 whitespace-nowrap">
+          <FinancialCell r={r} entry={dividend} label="Total debt" onOpen={() => onFinancial('total_debt')} />
+        </td>
+        <td className="px-3 py-1.5 whitespace-nowrap">
+          <FinancialCell r={r} entry={dividend} label="Cash & equivalents" onOpen={() => onFinancial('cash_and_equivalents')} />
+        </td>
+        <td className="px-3 py-1.5 whitespace-nowrap">
+          <FinancialCell r={r} entry={dividend} label="Shareholders' equity" onOpen={() => onFinancial('shareholders_equity')} />
+        </td>
+        <td className="px-3 py-1.5 whitespace-nowrap">
+          <FinancialCell r={r} entry={dividend} label="Shares outstanding" onOpen={() => onFinancial('shares_outstanding')} />
+        </td>
+        <td className="px-3 py-1.5 whitespace-nowrap">
+          <FinancialCell r={r} entry={dividend} label="Forward EPS" onOpen={() => onFinancial('forward_eps')} />
+        </td>
+        <td className="px-3 py-1.5 whitespace-nowrap">
+          <FinancialCell r={r} entry={dividend} label="Est. revenue growth" onOpen={() => onFinancial('revenue_growth_est')} />
+        </td>
+        <td className="px-3 py-1.5 whitespace-nowrap">
+          <FinancialCell r={r} entry={dividend} label="Est. long-term EPS growth" onOpen={() => onFinancial('eps_lt_growth_est')} />
         </td>
       </tr>
   );

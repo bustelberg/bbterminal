@@ -1627,6 +1627,17 @@
             "title": "Has Data",
             "type": "boolean"
           },
+          "has_financials": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Financials"
+          },
           "has_payments": {
             "anyOf": [
               {
@@ -2050,6 +2061,183 @@
         "title": "FeeConfigIn",
         "type": "object"
       },
+      "FinancialPoint": {
+        "properties": {
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "fx_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fx Rate"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          },
+          "value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Eur"
+          }
+        },
+        "required": [
+          "date",
+          "value"
+        ],
+        "title": "FinancialPoint",
+        "type": "object"
+      },
+      "FinancialSeriesResponse": {
+        "description": "One income-statement line, in MILLIONS of `currency` \u2014 the LISTING's trading\ncurrency, because that is what GuruFocus converts the financials into (see the\nmodule header).",
+        "properties": {
+          "annual": {
+            "items": {
+              "$ref": "#/components/schemas/FinancialPoint"
+            },
+            "title": "Annual",
+            "type": "array"
+          },
+          "applicable": {
+            "default": true,
+            "title": "Applicable",
+            "type": "boolean"
+          },
+          "company_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Id"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "fetched": {
+            "default": false,
+            "title": "Fetched",
+            "type": "boolean"
+          },
+          "fx_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fx From"
+          },
+          "is_home": {
+            "default": true,
+            "title": "Is Home",
+            "type": "boolean"
+          },
+          "item": {
+            "title": "Item",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "phrase": {
+            "default": "",
+            "title": "Phrase",
+            "type": "string"
+          },
+          "quarterly": {
+            "items": {
+              "$ref": "#/components/schemas/FinancialPoint"
+            },
+            "title": "Quarterly",
+            "type": "array"
+          },
+          "scalar_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scalar Value"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbol"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
+          },
+          "unit": {
+            "default": "millions",
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item",
+          "label",
+          "annual",
+          "quarterly"
+        ],
+        "title": "FinancialSeriesResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2134,6 +2322,103 @@
           "target_user_id"
         ],
         "title": "ImpersonateRequest",
+        "type": "object"
+      },
+      "IndexMember": {
+        "properties": {
+          "company_id": {
+            "title": "Company Id",
+            "type": "integer"
+          },
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "end_date": {
+            "title": "End Date",
+            "type": "string"
+          },
+          "end_price": {
+            "title": "End Price",
+            "type": "number"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "market_cap_eur": {
+            "title": "Market Cap Eur",
+            "type": "number"
+          },
+          "return_eur_pct": {
+            "title": "Return Eur Pct",
+            "type": "number"
+          },
+          "return_local_pct": {
+            "title": "Return Local Pct",
+            "type": "number"
+          },
+          "start_date": {
+            "title": "Start Date",
+            "type": "string"
+          },
+          "start_price": {
+            "title": "Start Price",
+            "type": "number"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "company_id",
+          "weight_pct",
+          "return_local_pct",
+          "return_eur_pct",
+          "market_cap_eur",
+          "start_date",
+          "start_price",
+          "end_date",
+          "end_price"
+        ],
+        "title": "IndexMember",
         "type": "object"
       },
       "IndicatorRequest": {
@@ -2380,6 +2665,254 @@
           "company_id"
         ],
         "title": "MemberRow",
+        "type": "object"
+      },
+      "ModelPortfolioPerformance": {
+        "description": "One model portfolio's YTD, in EUR.\n\n\u26a0 `ytd_pct` is a buy-and-hold of the composition WE HOLD, which is the CURRENT one. AIRS\nkeeps only 2-3 snapshot dates and no monthly history, so the January composition is not\nrecoverable. Read `model_changed_in_period` before trusting the number:\n\n  * false (29 of 56) \u2014 the model has held these weights since before Jan 1, so this IS\n    what it earned.\n  * true  (27 of 56) \u2014 the weights are NEWER than the window. Applying them back to Jan 1\n    backtests a basket chosen knowing how the year went. Measured: MoTopSelectie_FX shows\n    +75.85% YTD on a model defined 8 DAYS AGO \u2014 its return since that model took effect\n    is +0.86%.\n\n`since_model_pct` is that honest number: the return since the composition's own effective\ndate. It never borrows hindsight, for any portfolio.\n\n`ytd_pct` is NULL when `low_coverage` \u2014 under 60% of the model's weight is priceable, so a\nrenormalised return would be an invention (TOPS_OFF_BEH once reported \"+0.00%\" off its 1%\ncash line while 99% of it, in structured products, was silently dropped).",
+        "properties": {
+          "cash_pct": {
+            "default": 0.0,
+            "title": "Cash Pct",
+            "type": "number"
+          },
+          "covered_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Covered Pct"
+          },
+          "low_coverage": {
+            "default": false,
+            "title": "Low Coverage",
+            "type": "boolean"
+          },
+          "model_changed_in_period": {
+            "default": false,
+            "title": "Model Changed In Period",
+            "type": "boolean"
+          },
+          "model_effective": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Effective"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "partial_coverage": {
+            "default": false,
+            "title": "Partial Coverage",
+            "type": "boolean"
+          },
+          "portfolio_id": {
+            "title": "Portfolio Id",
+            "type": "integer"
+          },
+          "priced_holdings": {
+            "default": 0,
+            "title": "Priced Holdings",
+            "type": "integer"
+          },
+          "since_model_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since Model Pct"
+          },
+          "unpriced_holdings": {
+            "default": 0,
+            "title": "Unpriced Holdings",
+            "type": "integer"
+          },
+          "ytd_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ytd Pct"
+          }
+        },
+        "required": [
+          "portfolio_id",
+          "name"
+        ],
+        "title": "ModelPortfolioPerformance",
+        "type": "object"
+      },
+      "ModelPortfolioPosition": {
+        "description": "One row of the portfolio's XLS export. `isin` is the point of the whole exercise \u2014\nit is the exact join into `asset_execution`, and it's the identifier the AIRS\n*holdings* sheet never gave us (that one only has a fund NAME).",
+        "properties": {
+          "categorie": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Categorie"
+          },
+          "fonds": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fonds"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "known_instrument": {
+            "default": false,
+            "title": "Known Instrument",
+            "type": "boolean"
+          },
+          "percentage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percentage"
+          },
+          "regio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regio"
+          },
+          "sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector"
+          },
+          "valuta": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valuta"
+          }
+        },
+        "title": "ModelPortfolioPosition",
+        "type": "object"
+      },
+      "ModelPortfolioPositions": {
+        "properties": {
+          "cached_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cached At"
+          },
+          "dates": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dates",
+            "type": "array"
+          },
+          "datum": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datum"
+          },
+          "matched": {
+            "title": "Matched",
+            "type": "integer"
+          },
+          "portfolio": {
+            "title": "Portfolio",
+            "type": "string"
+          },
+          "portfolio_id": {
+            "title": "Portfolio Id",
+            "type": "integer"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ModelPortfolioPosition"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "unmatched": {
+            "title": "Unmatched",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "portfolio",
+          "portfolio_id",
+          "dates",
+          "rows",
+          "matched",
+          "unmatched"
+        ],
+        "title": "ModelPortfolioPositions",
         "type": "object"
       },
       "MonthStatInfo": {
@@ -3035,6 +3568,112 @@
         "title": "RecomputeRequest",
         "type": "object"
       },
+      "ReconstructedIndex": {
+        "description": "A cap-weighted index rebuilt from our own membership + prices + FX.\n\nValidated against the real thing: for 2026 YTD this returns +9.10% in USD against SPY's\n+9.02% \u2014 8bp apart. It is NOT a replacement for SPY (which is exact); it exists so a\nbenchmark is computed the same way a portfolio is, and is therefore comparable to one.",
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "member_count": {
+            "title": "Member Count",
+            "type": "integer"
+          },
+          "members": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/IndexMember"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "priced_of_universe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priced Of Universe"
+          },
+          "split_adjusted": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SplitAdjustment"
+            },
+            "title": "Split Adjusted",
+            "type": "array"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Date"
+          },
+          "year": {
+            "title": "Year",
+            "type": "integer"
+          },
+          "ytd_eur_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ytd Eur Pct"
+          },
+          "ytd_local_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ytd Local Pct"
+          }
+        },
+        "required": [
+          "label",
+          "year",
+          "member_count"
+        ],
+        "title": "ReconstructedIndex",
+        "type": "object"
+      },
       "RenameBacktestRequest": {
         "properties": {
           "name": {
@@ -3628,6 +4267,164 @@
           "holdings"
         ],
         "title": "SimulateRequest",
+        "type": "object"
+      },
+      "SplitAdjustment": {
+        "description": "A price series we had to rescale. Surfaced, never applied silently.",
+        "properties": {
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "factor": {
+            "title": "Factor",
+            "type": "number"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          }
+        },
+        "required": [
+          "factor"
+        ],
+        "title": "SplitAdjustment",
+        "type": "object"
+      },
+      "StoredModelPortfolio": {
+        "description": "A stored portfolio row. `holdings` is derived by the view from the positions, so it\ncannot drift from them \u2014 and it keeps three absences apart that are NOT the same thing:\n\n  has_fixed_model=false   -> NO MODEL EXISTS (a `normaal`/`meervoudig` portfolio). AIRS\n                             stores no composition at all; \"0 holdings\" would describe a\n                             model that isn't there.\n  positions_scanned_at=None -> never counted. Unknown, not zero.\n  no_snapshot=true        -> we looked, and AIRS had no DATED composition: its date\n                             dropdown held nothing but the empty \"today\" placeholder.\n                             Measured on BUS_DUTD_DEF_AFS + EuropaTopSelect OFF FX, both\n                             of which I first mis-reported as \"0 holdings\".\n  holdings=0              -> a real, EMPTY fixed model. Not currently observed on any\n                             portfolio, but expressible \u2014 and it must stay distinct from\n                             the three absences above.\n\n`holdings` counts DISTINCT ISINs: a portfolio can list one instrument on two lines\n(VTopSelectie OFF FX holds CapitaLand at 2% and again at 3%), and that is one instrument.",
+        "properties": {
+          "fixed_datum": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixed Datum"
+          },
+          "has_fixed_model": {
+            "default": false,
+            "title": "Has Fixed Model",
+            "type": "boolean"
+          },
+          "holdings": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdings"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "no_snapshot": {
+            "default": false,
+            "title": "No Snapshot",
+            "type": "boolean"
+          },
+          "omschrijving": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Omschrijving"
+          },
+          "portfolio_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Type"
+          },
+          "positions_datum": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Positions Datum"
+          },
+          "positions_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Positions Error"
+          },
+          "positions_scanned_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Positions Scanned At"
+          },
+          "scanned_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scanned At"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "StoredModelPortfolio",
         "type": "object"
       },
       "StrategyStats": {
@@ -5761,6 +6558,175 @@
         ]
       }
     },
+    "/api/airs/model-portfolios": {
+      "get": {
+        "description": "The stored portfolios \u2014 an instant DB read. The page opens on this; `/scan` is the\nexplicit refresh, because re-scraping AirSPMS costs minutes.",
+        "operationId": "airs_model_portfolios_stored_api_airs_model_portfolios_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StoredModelPortfolio"
+                  },
+                  "title": "Response Airs Model Portfolios Stored Api Airs Model Portfolios Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Airs Model Portfolios Stored",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/model-portfolios/performance": {
+      "get": {
+        "description": "YTD (EUR) for every stored model portfolio. Read `ModelPortfolioPerformance`'s\ndocstring \u2014 for half of them the number is a backtest, not a track record.",
+        "operationId": "airs_model_portfolio_performance_api_airs_model_portfolios_performance_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "year",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Year"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ModelPortfolioPerformance"
+                  },
+                  "title": "Response Airs Model Portfolio Performance Api Airs Model Portfolios Performance Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Model Portfolio Performance",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/model-portfolios/scan": {
+      "get": {
+        "description": "Every model portfolio from Stamgegevens > Onderhoud portefeuilles > Model\nportefeuilles, with its FULL name (the list page truncates them). Persists as it goes.",
+        "operationId": "airs_model_portfolios_scan_api_airs_model_portfolios_scan_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Airs Model Portfolios Scan",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/model-portfolios/{portfolio_id}/positions": {
+      "get": {
+        "description": "One model portfolio's positions \u2014 the XLS export that DOES carry an ISIN (the AIRS\n*holdings* sheet does not; it has only a fund name).\n\nSERVED FROM OUR CACHE by default: the scan already downloaded this XLS to count the\nportfolio's holdings, so re-scraping AirSPMS on every expand is pure waste (and a\nseveral-second wait on an authenticated round-trip). Goes to AIRS only when:\n  * `refresh=true`   \u2014 the user explicitly wants the current truth, or\n  * `datum` is given \u2014 a historical snapshot, of which we cache only the newest, or\n  * we have nothing stored for this portfolio yet.\n\nA cached answer carries `cached_at` and the UI says so. A cached response presented as\nfresh is exactly how a stale holding gets trusted.\n\n`known_instrument` is NEVER cached \u2014 it is a join against `asset_execution`, which grows\nevery time we add an instrument, so it is recomputed on every read. Cached, a \"not in\ngrid\" flag would be wrong the moment the grid catches up.",
+        "operationId": "airs_model_portfolio_positions_api_airs_model_portfolios__portfolio_id__positions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "datum",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Datum"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelPortfolioPositions"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Model Portfolio Positions",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/portfolio/{portfolio_name}": {
       "get": {
         "description": "Return performance data. Serves from DB cache unless refresh=true or no cache.",
@@ -7128,6 +8094,69 @@
         ]
       }
     },
+    "/api/asset-pipeline/financials/isin/{isin}/{item}": {
+      "get": {
+        "description": "One income-statement line (MILLIONS, listing currency + EUR) for any grid row.\n\n`item` is a key of `_ITEMS` \u2014 `revenue`, `gross_profit`. Adding a column is adding an\nentry there; there is no per-item endpoint to write.\n\nOne GuruFocus call, and only when the Storage cache is stale \u2014 shared with the\nearnings pipeline's `financials.json`, so a company already pulled there is FREE, and\nthe second line item on the same company is free regardless (one blob, every line).\n\n200 with `applicable=false` when the company's industry template has no such line (a\nbank has no gross profit); 404 only when there is genuinely nothing to show.",
+        "operationId": "financial_line_by_isin_api_asset_pipeline_financials_isin__isin___item__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "isin",
+            "required": true,
+            "schema": {
+              "title": "Isin",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item",
+            "required": true,
+            "schema": {
+              "title": "Item",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinancialSeriesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Financial Line By Isin",
+        "tags": [
+          "asset-pipeline",
+          "asset-pipeline"
+        ]
+      }
+    },
     "/api/asset-pipeline/grid": {
       "get": {
         "description": "The flat one-row-per-ISIN grid (from the `asset_grid` view): every input\nISIN \u2014 mapped OR unmapped \u2014 with the resolved yfinance-request fields\n(symbol/exchange/currency), history + liquidity, Yahoo price coverage (span +\nbar count), and its resolution status. Offset-paginated to beat PostgREST's\n1000-row cap. Read-only.",
@@ -7635,7 +8664,7 @@
     },
     "/api/asset-pipeline/store": {
       "post": {
-        "description": "Persist ONE identifier (from the single-ISIN view): resolve \u2192 upsert the\nanalysis asset + execution \u2192 store the analysis series' close+volume. Returns\nwhat was stored, incl. the exact `stored_fields`.",
+        "description": "ADD one row by ISIN: resolve \u2192 upsert the analysis asset + execution \u2192 store the\nanalysis series' close+volume.\n\n\u26a0 IT REFUSES TO TOUCH AN ISIN THAT IS ALREADY IN THE GRID, and that guard is not\npoliteness \u2014 it is the difference between adding a row and CORRUPTING one.\n\n`store_one` re-resolves from scratch, and resolution is not stable: it ranks Yahoo's\ncandidates by median traded value, but Yahoo answers a search with an EMPTY list under\nload instead of a 429 (see `asset_pipeline/fast_resolve.py`). When the right listing is\nmissing from the candidate set, the ranking cannot pick it, and a thin foreign line wins\nby default. Measured on Alphabet Class A (US02079K3059): a re-resolve repointed a row\nfrom GOOGL (EUR 8.79bn median daily traded value, 5,502 bars back to 2004) to GOOA.VI \u2014\nVIENNA, EUR 76,634 ADV, 2,302 bars. A 75,000x thinner listing, silently, with no error.\nThat is the NVDA-on-Stuttgart failure mode (see `resolve.same_company`) reached by a\ndifferent road.\n\nSo: an existing ISIN returns 409 and is left ALONE. Re-resolving a row is a deliberate\nact with its own control \u2014 the per-row \"Resolve\" action \u2014 not a side effect of trying to\nadd it again.\n\nThe other status codes matter too. When `store_one` cannot resolve a NEW ISIN it still\nRECORDS it (`upsert_unmapped` \u2192 a not_found/bond row) and then raises; collapsing that\ninto a blanket 502 told the user \"store failed\" while the row had in fact been added.\nIt is now a 422 carrying the resolver's own reason.",
         "operationId": "store_one_api_asset_pipeline_store_post",
         "requestBody": {
           "content": {
@@ -8399,6 +9428,65 @@
           }
         },
         "summary": "Create Benchmark",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/benchmarks/index/{label}": {
+      "get": {
+        "description": "Cap-weighted YTD for a reconstructed index (e.g. `SP500`), in EUR and local currency.\n\nWeights are as of the START of the period. Weighting by TODAY's market cap would be\nlook-ahead bias \u2014 measured, it turns this index's +9.10% into +21.70%.",
+        "operationId": "benchmark_reconstructed_index_api_benchmarks_index__label__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "label",
+            "required": true,
+            "schema": {
+              "title": "Label",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "year",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Year"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconstructedIndex"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Benchmark Reconstructed Index",
         "tags": [
           "benchmarks"
         ]

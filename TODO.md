@@ -1,7 +1,34 @@
 # Open follow-ups — resume here
 
 Running list of unfinished / offered-but-not-built work, newest context first.
-Last updated **2026-07-10**. Delete items as they're done.
+Last updated **2026-07-13**. Delete items as they're done.
+
+---
+
+## 🐞 GuruFocus RENAMED the financials sections — `/earnings` metric codes are drifting
+
+Found 2026-07-13 while building the /asset-pipeline Revenue column. GuruFocus's
+`financials` blob changed shape, and our Storage cache now holds **both**:
+
+```
+live API today   annuals.income_statement.Revenue        annuals.per_share_data_array.*
+cached blobs     annuals["Income Statement"].Revenue     annuals["Per Share Data"].*
+```
+
+`ingest/earnings/financials.py::_parse_financials` derives each `metric_code` from the
+**section name it happens to see**, so a company re-fetched TODAY writes
+`annuals__income_statement__Revenue`, while every constant and every stored row says
+`annuals__Income Statement__Revenue`. Nothing errors — the new rows simply land under
+codes nobody queries, and the /earnings dashboard shows a company as having no data.
+
+Blast radius: `/earnings` (its whole metric_data contract), `ANNUAL_CODE` /
+`QUARTERLY_CODE` in `routers/_asset_dividends.py`, and `has_data` in the dividend
+coverage map. NOT the asset-pipeline Div/share or Revenue charts — both read the raw
+blob and already accept **both** spellings (`_asset_revenue._SECTIONS`).
+
+Fix: normalise the section names in `_parse_financials` (map snake → the legacy Title
+Case codes, or migrate the codes and backfill). Do it before the next earnings refresh
+re-fetches anything, or the two schemas interleave inside one company's history.
 
 ---
 

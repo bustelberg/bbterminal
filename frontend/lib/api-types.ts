@@ -808,6 +808,104 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/model-portfolios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Model Portfolios Stored
+         * @description The stored portfolios — an instant DB read. The page opens on this; `/scan` is the
+         *     explicit refresh, because re-scraping AirSPMS costs minutes.
+         */
+        get: operations["airs_model_portfolios_stored_api_airs_model_portfolios_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolios/performance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Model Portfolio Performance
+         * @description YTD (EUR) for every stored model portfolio. Read `ModelPortfolioPerformance`'s
+         *     docstring — for half of them the number is a backtest, not a track record.
+         */
+        get: operations["airs_model_portfolio_performance_api_airs_model_portfolios_performance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolios/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Model Portfolios Scan
+         * @description Every model portfolio from Stamgegevens > Onderhoud portefeuilles > Model
+         *     portefeuilles, with its FULL name (the list page truncates them). Persists as it goes.
+         */
+        get: operations["airs_model_portfolios_scan_api_airs_model_portfolios_scan_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolios/{portfolio_id}/positions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Model Portfolio Positions
+         * @description One model portfolio's positions — the XLS export that DOES carry an ISIN (the AIRS
+         *     *holdings* sheet does not; it has only a fund name).
+         *
+         *     SERVED FROM OUR CACHE by default: the scan already downloaded this XLS to count the
+         *     portfolio's holdings, so re-scraping AirSPMS on every expand is pure waste (and a
+         *     several-second wait on an authenticated round-trip). Goes to AIRS only when:
+         *       * `refresh=true`   — the user explicitly wants the current truth, or
+         *       * `datum` is given — a historical snapshot, of which we cache only the newest, or
+         *       * we have nothing stored for this portfolio yet.
+         *
+         *     A cached answer carries `cached_at` and the UI says so. A cached response presented as
+         *     fresh is exactly how a stale holding gets trusted.
+         *
+         *     `known_instrument` is NEVER cached — it is a join against `asset_execution`, which grows
+         *     every time we add an instrument, so it is recomputed on every read. Cached, a "not in
+         *     grid" flag would be wrong the moment the grid catches up.
+         */
+        get: operations["airs_model_portfolio_positions_api_airs_model_portfolios__portfolio_id__positions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/portfolio/{portfolio_name}": {
         parameters: {
             query?: never;
@@ -1401,6 +1499,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/asset-pipeline/financials/isin/{isin}/{item}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Financial Line By Isin
+         * @description One income-statement line (MILLIONS, listing currency + EUR) for any grid row.
+         *
+         *     `item` is a key of `_ITEMS` — `revenue`, `gross_profit`. Adding a column is adding an
+         *     entry there; there is no per-item endpoint to write.
+         *
+         *     One GuruFocus call, and only when the Storage cache is stale — shared with the
+         *     earnings pipeline's `financials.json`, so a company already pulled there is FREE, and
+         *     the second line item on the same company is free regardless (one blob, every line).
+         *
+         *     200 with `applicable=false` when the company's industry template has no such line (a
+         *     bank has no gross profit); 404 only when there is genuinely nothing to show.
+         */
+        get: operations["financial_line_by_isin_api_asset_pipeline_financials_isin__isin___item__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/asset-pipeline/grid": {
         parameters: {
             query?: never;
@@ -1664,9 +1792,30 @@ export interface paths {
         put?: never;
         /**
          * Store One
-         * @description Persist ONE identifier (from the single-ISIN view): resolve → upsert the
-         *     analysis asset + execution → store the analysis series' close+volume. Returns
-         *     what was stored, incl. the exact `stored_fields`.
+         * @description ADD one row by ISIN: resolve → upsert the analysis asset + execution → store the
+         *     analysis series' close+volume.
+         *
+         *     ⚠ IT REFUSES TO TOUCH AN ISIN THAT IS ALREADY IN THE GRID, and that guard is not
+         *     politeness — it is the difference between adding a row and CORRUPTING one.
+         *
+         *     `store_one` re-resolves from scratch, and resolution is not stable: it ranks Yahoo's
+         *     candidates by median traded value, but Yahoo answers a search with an EMPTY list under
+         *     load instead of a 429 (see `asset_pipeline/fast_resolve.py`). When the right listing is
+         *     missing from the candidate set, the ranking cannot pick it, and a thin foreign line wins
+         *     by default. Measured on Alphabet Class A (US02079K3059): a re-resolve repointed a row
+         *     from GOOGL (EUR 8.79bn median daily traded value, 5,502 bars back to 2004) to GOOA.VI —
+         *     VIENNA, EUR 76,634 ADV, 2,302 bars. A 75,000x thinner listing, silently, with no error.
+         *     That is the NVDA-on-Stuttgart failure mode (see `resolve.same_company`) reached by a
+         *     different road.
+         *
+         *     So: an existing ISIN returns 409 and is left ALONE. Re-resolving a row is a deliberate
+         *     act with its own control — the per-row "Resolve" action — not a side effect of trying to
+         *     add it again.
+         *
+         *     The other status codes matter too. When `store_one` cannot resolve a NEW ISIN it still
+         *     RECORDS it (`upsert_unmapped` → a not_found/bond row) and then raises; collapsing that
+         *     into a blanket 502 told the user "store failed" while the row had in fact been added.
+         *     It is now a 422 carrying the resolver's own reason.
          */
         post: operations["store_one_api_asset_pipeline_store_post"];
         delete?: never;
@@ -1959,6 +2108,29 @@ export interface paths {
          * @description Create a benchmark and fetch its prices from GuruFocus.
          */
         post: operations["create_benchmark_api_benchmarks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/benchmarks/index/{label}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Benchmark Reconstructed Index
+         * @description Cap-weighted YTD for a reconstructed index (e.g. `SP500`), in EUR and local currency.
+         *
+         *     Weights are as of the START of the period. Weighting by TODAY's market cap would be
+         *     look-ahead bias — measured, it turns this index's +9.10% into +21.70%.
+         */
+        get: operations["benchmark_reconstructed_index_api_benchmarks_index__label__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5744,6 +5916,8 @@ export interface components {
              * @default false
              */
             has_data?: boolean;
+            /** Has Financials */
+            has_financials?: boolean | null;
             /** Has Payments */
             has_payments?: boolean | null;
             /**
@@ -5922,6 +6096,72 @@ export interface components {
             /** Transaction Bps */
             transaction_bps: number;
         };
+        /** FinancialPoint */
+        FinancialPoint: {
+            /** Date */
+            date: string;
+            /** Fx Rate */
+            fx_rate?: number | null;
+            /** Value */
+            value: number;
+            /** Value Eur */
+            value_eur?: number | null;
+        };
+        /**
+         * FinancialSeriesResponse
+         * @description One income-statement line, in MILLIONS of `currency` — the LISTING's trading
+         *     currency, because that is what GuruFocus converts the financials into (see the
+         *     module header).
+         */
+        FinancialSeriesResponse: {
+            /** Annual */
+            annual: components["schemas"]["FinancialPoint"][];
+            /**
+             * Applicable
+             * @default true
+             */
+            applicable?: boolean;
+            /** Company Id */
+            company_id?: number | null;
+            /** Currency */
+            currency?: string | null;
+            /**
+             * Fetched
+             * @default false
+             */
+            fetched?: boolean;
+            /** Fx From */
+            fx_from?: string | null;
+            /**
+             * Is Home
+             * @default true
+             */
+            is_home?: boolean;
+            /** Item */
+            item: string;
+            /** Label */
+            label: string;
+            /** Note */
+            note?: string | null;
+            /**
+             * Phrase
+             * @default
+             */
+            phrase?: string;
+            /** Quarterly */
+            quarterly: components["schemas"]["FinancialPoint"][];
+            /** Scalar Value */
+            scalar_value?: number | null;
+            /** Symbol */
+            symbol?: string | null;
+            /** Template */
+            template?: string | null;
+            /**
+             * Unit
+             * @default millions
+             */
+            unit?: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -5950,6 +6190,35 @@ export interface components {
         ImpersonateRequest: {
             /** Target User Id */
             target_user_id: string;
+        };
+        /** IndexMember */
+        IndexMember: {
+            /** Company Id */
+            company_id: number;
+            /** Company Name */
+            company_name?: string | null;
+            /** Currency */
+            currency?: string | null;
+            /** End Date */
+            end_date: string;
+            /** End Price */
+            end_price: number;
+            /** Isin */
+            isin?: string | null;
+            /** Market Cap Eur */
+            market_cap_eur: number;
+            /** Return Eur Pct */
+            return_eur_pct: number;
+            /** Return Local Pct */
+            return_local_pct: number;
+            /** Start Date */
+            start_date: string;
+            /** Start Price */
+            start_price: number;
+            /** Ticker */
+            ticker?: string | null;
+            /** Weight Pct */
+            weight_pct: number;
         };
         /** IndicatorRequest */
         IndicatorRequest: {
@@ -6023,6 +6292,118 @@ export interface components {
             isin?: string | null;
             /** Ticker */
             ticker?: string | null;
+        };
+        /**
+         * ModelPortfolioPerformance
+         * @description One model portfolio's YTD, in EUR.
+         *
+         *     ⚠ `ytd_pct` is a buy-and-hold of the composition WE HOLD, which is the CURRENT one. AIRS
+         *     keeps only 2-3 snapshot dates and no monthly history, so the January composition is not
+         *     recoverable. Read `model_changed_in_period` before trusting the number:
+         *
+         *       * false (29 of 56) — the model has held these weights since before Jan 1, so this IS
+         *         what it earned.
+         *       * true  (27 of 56) — the weights are NEWER than the window. Applying them back to Jan 1
+         *         backtests a basket chosen knowing how the year went. Measured: MoTopSelectie_FX shows
+         *         +75.85% YTD on a model defined 8 DAYS AGO — its return since that model took effect
+         *         is +0.86%.
+         *
+         *     `since_model_pct` is that honest number: the return since the composition's own effective
+         *     date. It never borrows hindsight, for any portfolio.
+         *
+         *     `ytd_pct` is NULL when `low_coverage` — under 60% of the model's weight is priceable, so a
+         *     renormalised return would be an invention (TOPS_OFF_BEH once reported "+0.00%" off its 1%
+         *     cash line while 99% of it, in structured products, was silently dropped).
+         */
+        ModelPortfolioPerformance: {
+            /**
+             * Cash Pct
+             * @default 0
+             */
+            cash_pct?: number;
+            /** Covered Pct */
+            covered_pct?: number | null;
+            /**
+             * Low Coverage
+             * @default false
+             */
+            low_coverage?: boolean;
+            /**
+             * Model Changed In Period
+             * @default false
+             */
+            model_changed_in_period?: boolean;
+            /** Model Effective */
+            model_effective?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Partial Coverage
+             * @default false
+             */
+            partial_coverage?: boolean;
+            /** Portfolio Id */
+            portfolio_id: number;
+            /**
+             * Priced Holdings
+             * @default 0
+             */
+            priced_holdings?: number;
+            /** Since Model Pct */
+            since_model_pct?: number | null;
+            /**
+             * Unpriced Holdings
+             * @default 0
+             */
+            unpriced_holdings?: number;
+            /** Ytd Pct */
+            ytd_pct?: number | null;
+        };
+        /**
+         * ModelPortfolioPosition
+         * @description One row of the portfolio's XLS export. `isin` is the point of the whole exercise —
+         *     it is the exact join into `asset_execution`, and it's the identifier the AIRS
+         *     *holdings* sheet never gave us (that one only has a fund NAME).
+         */
+        ModelPortfolioPosition: {
+            /** Categorie */
+            categorie?: string | null;
+            /** Fonds */
+            fonds?: string | null;
+            /** Isin */
+            isin?: string | null;
+            /**
+             * Known Instrument
+             * @default false
+             */
+            known_instrument?: boolean;
+            /** Percentage */
+            percentage?: number | null;
+            /** Regio */
+            regio?: string | null;
+            /** Sector */
+            sector?: string | null;
+            /** Valuta */
+            valuta?: string | null;
+        };
+        /** ModelPortfolioPositions */
+        ModelPortfolioPositions: {
+            /** Cached At */
+            cached_at?: string | null;
+            /** Dates */
+            dates: string[];
+            /** Datum */
+            datum?: string | null;
+            /** Matched */
+            matched: number;
+            /** Portfolio */
+            portfolio: string;
+            /** Portfolio Id */
+            portfolio_id: number;
+            /** Rows */
+            rows: components["schemas"]["ModelPortfolioPosition"][];
+            /** Unmatched */
+            unmatched: number;
         };
         /** MonthStatInfo */
         MonthStatInfo: {
@@ -6223,6 +6604,44 @@ export interface components {
         RecomputeRequest: {
             /** Universe Ids */
             universe_ids?: number[] | null;
+        };
+        /**
+         * ReconstructedIndex
+         * @description A cap-weighted index rebuilt from our own membership + prices + FX.
+         *
+         *     Validated against the real thing: for 2026 YTD this returns +9.10% in USD against SPY's
+         *     +9.02% — 8bp apart. It is NOT a replacement for SPY (which is exact); it exists so a
+         *     benchmark is computed the same way a portfolio is, and is therefore comparable to one.
+         */
+        ReconstructedIndex: {
+            /** As Of */
+            as_of?: string | null;
+            /** Label */
+            label: string;
+            /** Member Count */
+            member_count: number;
+            /**
+             * Members
+             * @default []
+             */
+            members?: components["schemas"]["IndexMember"][];
+            /** Note */
+            note?: string | null;
+            /** Priced Of Universe */
+            priced_of_universe?: string | null;
+            /**
+             * Split Adjusted
+             * @default []
+             */
+            split_adjusted?: components["schemas"]["SplitAdjustment"][];
+            /** Start Date */
+            start_date?: string | null;
+            /** Year */
+            year: number;
+            /** Ytd Eur Pct */
+            ytd_eur_pct?: number | null;
+            /** Ytd Local Pct */
+            ytd_local_pct?: number | null;
         };
         /** RenameBacktestRequest */
         RenameBacktestRequest: {
@@ -6428,6 +6847,75 @@ export interface components {
             risk_free_rate_pct?: number;
             /** Variant Key */
             variant_key?: string | null;
+        };
+        /**
+         * SplitAdjustment
+         * @description A price series we had to rescale. Surfaced, never applied silently.
+         */
+        SplitAdjustment: {
+            /** Company Name */
+            company_name?: string | null;
+            /** Factor */
+            factor: number;
+            /** Ticker */
+            ticker?: string | null;
+        };
+        /**
+         * StoredModelPortfolio
+         * @description A stored portfolio row. `holdings` is derived by the view from the positions, so it
+         *     cannot drift from them — and it keeps three absences apart that are NOT the same thing:
+         *
+         *       has_fixed_model=false   -> NO MODEL EXISTS (a `normaal`/`meervoudig` portfolio). AIRS
+         *                                  stores no composition at all; "0 holdings" would describe a
+         *                                  model that isn't there.
+         *       positions_scanned_at=None -> never counted. Unknown, not zero.
+         *       no_snapshot=true        -> we looked, and AIRS had no DATED composition: its date
+         *                                  dropdown held nothing but the empty "today" placeholder.
+         *                                  Measured on BUS_DUTD_DEF_AFS + EuropaTopSelect OFF FX, both
+         *                                  of which I first mis-reported as "0 holdings".
+         *       holdings=0              -> a real, EMPTY fixed model. Not currently observed on any
+         *                                  portfolio, but expressible — and it must stay distinct from
+         *                                  the three absences above.
+         *
+         *     `holdings` counts DISTINCT ISINs: a portfolio can list one instrument on two lines
+         *     (VTopSelectie OFF FX holds CapitaLand at 2% and again at 3%), and that is one instrument.
+         */
+        StoredModelPortfolio: {
+            /** Fixed Datum */
+            fixed_datum?: string | null;
+            /**
+             * Has Fixed Model
+             * @default false
+             */
+            has_fixed_model?: boolean;
+            /** Holdings */
+            holdings?: number | null;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /**
+             * No Snapshot
+             * @default false
+             */
+            no_snapshot?: boolean;
+            /** Omschrijving */
+            omschrijving?: string | null;
+            /** Portfolio Type */
+            portfolio_type?: string | null;
+            /** Positions Datum */
+            positions_datum?: string | null;
+            /** Positions Error */
+            positions_error?: string | null;
+            /** Positions Scanned At */
+            positions_scanned_at?: string | null;
+            /** Scanned At */
+            scanned_at?: string | null;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated?: boolean;
         };
         /** StrategyStats */
         StrategyStats: {
@@ -7542,6 +8030,111 @@ export interface operations {
             };
         };
     };
+    airs_model_portfolios_stored_api_airs_model_portfolios_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoredModelPortfolio"][];
+                };
+            };
+        };
+    };
+    airs_model_portfolio_performance_api_airs_model_portfolios_performance_get: {
+        parameters: {
+            query?: {
+                year?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelPortfolioPerformance"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_model_portfolios_scan_api_airs_model_portfolios_scan_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    airs_model_portfolio_positions_api_airs_model_portfolios__portfolio_id__positions_get: {
+        parameters: {
+            query?: {
+                datum?: string | null;
+                refresh?: boolean;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelPortfolioPositions"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     airs_portfolio_download_api_airs_portfolio__portfolio_name__get: {
         parameters: {
             query?: {
@@ -8259,6 +8852,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    financial_line_by_isin_api_asset_pipeline_financials_isin__isin___item__get: {
+        parameters: {
+            query?: {
+                refresh?: boolean;
+            };
+            header?: never;
+            path: {
+                isin: string;
+                item: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FinancialSeriesResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9094,6 +9721,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    benchmark_reconstructed_index_api_benchmarks_index__label__get: {
+        parameters: {
+            query?: {
+                year?: number | null;
+            };
+            header?: never;
+            path: {
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconstructedIndex"];
                 };
             };
             /** @description Validation Error */

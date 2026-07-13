@@ -249,3 +249,63 @@ async def get_benchmark_prices(benchmark_id: int, start_date: str = "", end_date
         offset += page_size
 
     return rows
+
+
+# ── Reconstructed cap-weighted index (currently: the S&P 500) ──────────────────────────
+
+
+class IndexMember(BaseModel):
+    company_id: int
+    company_name: str | None = None
+    ticker: str | None = None
+    isin: str | None = None
+    currency: str | None = None
+    weight_pct: float                 # as of the START of the year — see `_benchmark_index`
+    return_local_pct: float
+    return_eur_pct: float
+    market_cap_eur: float
+    start_date: str
+    start_price: float
+    end_date: str
+    end_price: float
+
+
+class SplitAdjustment(BaseModel):
+    """A price series we had to rescale. Surfaced, never applied silently."""
+
+    company_name: str | None = None
+    ticker: str | None = None
+    factor: float
+
+
+class ReconstructedIndex(BaseModel):
+    """A cap-weighted index rebuilt from our own membership + prices + FX.
+
+    Validated against the real thing: for 2026 YTD this returns +9.10% in USD against SPY's
+    +9.02% — 8bp apart. It is NOT a replacement for SPY (which is exact); it exists so a
+    benchmark is computed the same way a portfolio is, and is therefore comparable to one.
+    """
+
+    label: str
+    year: int
+    member_count: int
+    priced_of_universe: str | None = None
+    start_date: str | None = None
+    as_of: str | None = None
+    ytd_eur_pct: float | None = None
+    ytd_local_pct: float | None = None
+    members: list[IndexMember] = []
+    split_adjusted: list[SplitAdjustment] = []
+    note: str | None = None
+
+
+@router.get("/api/benchmarks/index/{label}", response_model=ReconstructedIndex)
+async def benchmark_reconstructed_index(label: str, year: int | None = None):
+    """Cap-weighted YTD for a reconstructed index (e.g. `SP500`), in EUR and local currency.
+
+    Weights are as of the START of the period. Weighting by TODAY's market cap would be
+    look-ahead bias — measured, it turns this index's +9.10% into +21.70%.
+    """
+    from routers._benchmark_index import compute_index_async  # noqa: PLC0415
+
+    return await compute_index_async(label, year)

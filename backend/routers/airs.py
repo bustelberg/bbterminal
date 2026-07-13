@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+from routers import _airs_portfolio_store as store
 from routers._sse import sse_event, sse_message
 import queue as thread_queue
 import threading
@@ -22,8 +23,15 @@ from datetime import date as dt_date
 import pandas as pd
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
-from airs_scanner import download_portfolio_sync, scan_portfolios_sync
+from airs_scanner import (
+    download_portfolio_sync,
+    count_model_portfolio_holdings_sync,
+    fetch_model_portfolios_sync,
+    fetch_portfolio_positions_sync,
+    scan_portfolios_sync,
+)
 from deps import supabase
 from portfolio import parse_airs_excel
 
@@ -125,6 +133,262 @@ async def airs_scan():
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+async def _model_portfolios_stream():
+    """SSE because it is SLOW and chatty: one request per list page, plus one per row whose
+    name the list truncated (the full name lives only on the edit page). ~95 portfolios is
+    a couple of minutes of authenticated round-trips, so it streams progress rather than
+    hanging a GET."""
+    q: thread_queue.Queue = thread_queue.Queue()
+
+    def send_event(msg_type: str, **kwargs):
+        q.put(sse_event({"type": msg_type, **kwargs}))
+
+    def run():
+        try:
+            # Two phases, deliberately. The LIST is fast (~6s) and is emitted as
+            # "portfolios" the moment it's ready, so the table renders. Counting each
+            # portfolio's holdings is an edit-page GET + an XLS download per row and takes
+            # minutes — it streams "count" events into the already-visible table instead of
+            # holding the whole thing back for its slowest part.
+            #
+            # Both phases WRITE as they go, rather than at the end: a scan that dies halfway
+            # should leave behind the portfolios it did reach, not nothing.
+            rows = fetch_model_portfolios_sync(send_event)
+            store.save_portfolios(rows)
+            count_model_portfolio_holdings_sync(
+                rows, send_event,
+                # Counting a portfolio means downloading its XLS — so persisting the
+                # positions costs no extra AIRS traffic, and `isin` is the whole prize.
+                on_positions=store.save_positions,
+                on_error=store.save_positions_error,
+            )
+            send_event("done", count=len(rows), portfolios=rows)
+        except Exception as e:  # noqa: BLE001 — surface it to the client, don't 500 the stream
+            q.put(sse_message("error", f"{type(e).__name__}: {e}"))
+        finally:
+            q.put(None)
+
+    threading.Thread(target=run, daemon=True).start()
+
+    while True:
+        item = await asyncio.to_thread(q.get)
+        if item is None:
+            break
+        yield item
+
+
+@router.get("/api/airs/model-portfolios/scan")
+async def airs_model_portfolios_scan():
+    """Every model portfolio from Stamgegevens > Onderhoud portefeuilles > Model
+    portefeuilles, with its FULL name (the list page truncates them). Persists as it goes."""
+    return StreamingResponse(
+        _model_portfolios_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+class StoredModelPortfolio(BaseModel):
+    """A stored portfolio row. `holdings` is derived by the view from the positions, so it
+    cannot drift from them — and it keeps three absences apart that are NOT the same thing:
+
+      has_fixed_model=false   -> NO MODEL EXISTS (a `normaal`/`meervoudig` portfolio). AIRS
+                                 stores no composition at all; "0 holdings" would describe a
+                                 model that isn't there.
+      positions_scanned_at=None -> never counted. Unknown, not zero.
+      no_snapshot=true        -> we looked, and AIRS had no DATED composition: its date
+                                 dropdown held nothing but the empty "today" placeholder.
+                                 Measured on BUS_DUTD_DEF_AFS + EuropaTopSelect OFF FX, both
+                                 of which I first mis-reported as "0 holdings".
+      holdings=0              -> a real, EMPTY fixed model. Not currently observed on any
+                                 portfolio, but expressible — and it must stay distinct from
+                                 the three absences above.
+
+    `holdings` counts DISTINCT ISINs: a portfolio can list one instrument on two lines
+    (VTopSelectie OFF FX holds CapitaLand at 2% and again at 3%), and that is one instrument.
+    """
+
+    id: int
+    name: str
+    truncated: bool = False
+    omschrijving: str | None = None
+    portfolio_type: str | None = None
+    fixed_datum: str | None = None
+    has_fixed_model: bool = False
+    no_snapshot: bool = False
+    holdings: int | None = None
+    positions_datum: str | None = None
+    positions_scanned_at: str | None = None
+    positions_error: str | None = None
+    scanned_at: str | None = None
+
+
+@router.get("/api/airs/model-portfolios", response_model=list[StoredModelPortfolio])
+async def airs_model_portfolios_stored():
+    """The stored portfolios — an instant DB read. The page opens on this; `/scan` is the
+    explicit refresh, because re-scraping AirSPMS costs minutes."""
+    return await asyncio.to_thread(store.load_portfolios)
+
+
+class ModelPortfolioPerformance(BaseModel):
+    """One model portfolio's YTD, in EUR.
+
+    ⚠ `ytd_pct` is a buy-and-hold of the composition WE HOLD, which is the CURRENT one. AIRS
+    keeps only 2-3 snapshot dates and no monthly history, so the January composition is not
+    recoverable. Read `model_changed_in_period` before trusting the number:
+
+      * false (29 of 56) — the model has held these weights since before Jan 1, so this IS
+        what it earned.
+      * true  (27 of 56) — the weights are NEWER than the window. Applying them back to Jan 1
+        backtests a basket chosen knowing how the year went. Measured: MoTopSelectie_FX shows
+        +75.85% YTD on a model defined 8 DAYS AGO — its return since that model took effect
+        is +0.86%.
+
+    `since_model_pct` is that honest number: the return since the composition's own effective
+    date. It never borrows hindsight, for any portfolio.
+
+    `ytd_pct` is NULL when `low_coverage` — under 60% of the model's weight is priceable, so a
+    renormalised return would be an invention (TOPS_OFF_BEH once reported "+0.00%" off its 1%
+    cash line while 99% of it, in structured products, was silently dropped).
+    """
+
+    portfolio_id: int
+    name: str
+    model_effective: str | None = None
+    model_changed_in_period: bool = False
+    ytd_pct: float | None = None
+    since_model_pct: float | None = None
+    priced_holdings: int = 0
+    unpriced_holdings: int = 0
+    covered_pct: float | None = None
+    low_coverage: bool = False
+    partial_coverage: bool = False
+    cash_pct: float = 0.0
+
+
+@router.get("/api/airs/model-portfolios/performance",
+            response_model=list[ModelPortfolioPerformance])
+async def airs_model_portfolio_performance(year: int | None = None):
+    """YTD (EUR) for every stored model portfolio. Read `ModelPortfolioPerformance`'s
+    docstring — for half of them the number is a backtest, not a track record."""
+    from routers._airs_portfolio_perf import (  # noqa: PLC0415
+        compute_portfolio_performance_async,
+    )
+
+    return await compute_portfolio_performance_async(year)
+
+
+class ModelPortfolioPosition(BaseModel):
+    """One row of the portfolio's XLS export. `isin` is the point of the whole exercise —
+    it is the exact join into `asset_execution`, and it's the identifier the AIRS
+    *holdings* sheet never gave us (that one only has a fund NAME)."""
+
+    fonds: str | None = None
+    isin: str | None = None            # NULL for the cash line ("Liquiditeiten")
+    percentage: float | None = None
+    valuta: str | None = None
+    categorie: str | None = None
+    sector: str | None = None
+    regio: str | None = None
+    # True when this ISIN is already an instrument in our grid (`asset_execution`).
+    known_instrument: bool = False
+
+
+class ModelPortfolioPositions(BaseModel):
+    portfolio: str
+    portfolio_id: int
+    datum: str | None = None           # the snapshot actually used
+    dates: list[str]                   # every snapshot AIRS offers, for a date picker
+    rows: list[ModelPortfolioPosition]
+    matched: int                       # how many ISINs we already hold
+    unmatched: int
+    # When this came from OUR cache rather than a live AirSPMS fetch, and when it was taken.
+    # The UI says so — a cached answer presented as fresh is how a stale holding gets trusted.
+    cached_at: str | None = None
+
+
+def _shape_positions(raw: dict) -> ModelPortfolioPositions:
+    from deps import IN_CHUNK_SIZE  # noqa: PLC0415
+
+    rows = raw["rows"]
+    isins = sorted({str(r.get("ISINCode")).strip() for r in rows if r.get("ISINCode")})
+
+    known: set[str] = set()
+    for i in range(0, len(isins), IN_CHUNK_SIZE):
+        chunk = isins[i:i + IN_CHUNK_SIZE]
+        got = (supabase.table("asset_execution").select("isin")
+               .in_("isin", chunk).execute().data or [])
+        known.update(r["isin"] for r in got)
+
+    out: list[ModelPortfolioPosition] = []
+    for r in rows:
+        isin = (str(r["ISINCode"]).strip() if r.get("ISINCode") else None) or None
+        out.append(ModelPortfolioPosition(
+            fonds=(str(r["Fonds"]).strip() if r.get("Fonds") else None),
+            isin=isin,
+            percentage=(float(r["Percentage"]) if r.get("Percentage") is not None else None),
+            valuta=(str(r["valuta"]).strip() if r.get("valuta") else None),
+            categorie=(str(r["Beleggingscategorie"]).strip() if r.get("Beleggingscategorie") else None),
+            sector=(str(r["Beleggingssector"]).strip() if r.get("Beleggingssector") else None),
+            regio=(str(r["regio"]).strip() if r.get("regio") else None),
+            known_instrument=bool(isin and isin in known),
+        ))
+
+    matched = sum(1 for r in out if r.known_instrument)
+    return ModelPortfolioPositions(
+        portfolio=raw["portfolio"], portfolio_id=raw["portfolio_id"],
+        datum=raw["datum"], dates=raw["dates"], rows=out,
+        matched=matched, unmatched=len([r for r in out if r.isin]) - matched,
+        cached_at=raw.get("cached_at"),
+    )
+
+
+def _live_positions(portfolio_id: int, datum: str | None) -> dict:
+    """Fetch from AIRS and REFRESH THE CACHE with what came back — a live read that left the
+    stored copy behind would guarantee the two disagree."""
+    raw = fetch_portfolio_positions_sync(portfolio_id, datum=datum)
+    # Only the DEFAULT snapshot is cached: we store one composition per portfolio (the newest
+    # with rows). Persisting an ad-hoc historical `datum` the user picked would overwrite the
+    # current one with an old one — the cache would silently rot backwards.
+    if datum is None:
+        try:
+            store.save_positions(portfolio_id, raw["datum"], raw["rows"], raw.get("dates"))
+        except Exception:  # noqa: BLE001 — a cache write must never fail the read
+            pass
+    return raw
+
+
+@router.get("/api/airs/model-portfolios/{portfolio_id}/positions",
+            response_model=ModelPortfolioPositions)
+async def airs_model_portfolio_positions(
+    portfolio_id: int, datum: str | None = None, refresh: bool = False,
+):
+    """One model portfolio's positions — the XLS export that DOES carry an ISIN (the AIRS
+    *holdings* sheet does not; it has only a fund name).
+
+    SERVED FROM OUR CACHE by default: the scan already downloaded this XLS to count the
+    portfolio's holdings, so re-scraping AirSPMS on every expand is pure waste (and a
+    several-second wait on an authenticated round-trip). Goes to AIRS only when:
+      * `refresh=true`   — the user explicitly wants the current truth, or
+      * `datum` is given — a historical snapshot, of which we cache only the newest, or
+      * we have nothing stored for this portfolio yet.
+
+    A cached answer carries `cached_at` and the UI says so. A cached response presented as
+    fresh is exactly how a stale holding gets trusted.
+
+    `known_instrument` is NEVER cached — it is a join against `asset_execution`, which grows
+    every time we add an instrument, so it is recomputed on every read. Cached, a "not in
+    grid" flag would be wrong the moment the grid catches up.
+    """
+    if not refresh and datum is None:
+        cached = await asyncio.to_thread(store.load_positions, portfolio_id)
+        if cached is not None:
+            return await asyncio.to_thread(_shape_positions, cached)
+
+    raw = await asyncio.to_thread(_live_positions, portfolio_id, datum)
+    return await asyncio.to_thread(_shape_positions, raw)
 
 
 @router.get("/api/airs/portfolio/{portfolio_name}")

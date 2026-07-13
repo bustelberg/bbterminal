@@ -16,10 +16,9 @@ from __future__ import annotations
 
 from .resolve import (
     _asset_class,
-    _name_score,
-    _NAME_MATCH,
     _score,
     resolve_analysis_instrument,
+    same_company,
 )
 
 
@@ -181,7 +180,15 @@ def fast_resolve(isin: str, rows: list[dict], figi_name: str | None,
         sc = _score_retry(sym)
         if not sc or (sc.get("med_adv_eur") or 0) <= 0:
             continue
-        if figi_name and _name_score(sc.get("name"), figi_name) < _NAME_MATCH:
+        # The candidates are ISIN-anchored, so this cannot swap in a different company —
+        # but `_clean(ticker) + suffix` CONSTRUCTS a Yahoo symbol, and a ticker is reused
+        # across venues, so the constructed symbol can land on an unrelated instrument.
+        # Hence the name check. It must be `same_company` (which strips corporate forms),
+        # NOT a raw `_name_score` floor: token_set_ratio scores "NVIDIA Corporation" vs
+        # OpenFIGI's "NVIDIA CORP" at 75.9, under the 80 floor. Here a false reject doesn't
+        # corrupt anything — it just drops the LIQUID listing and leaves us on the thin
+        # cross-listing, which is the very bug this function exists to prevent.
+        if figi_name and not same_company(sc.get("name"), figi_name):
             continue
         if picked is None or (sc.get("med_adv_eur") or 0) > (picked.get("med_adv_eur") or 0):
             picked = sc

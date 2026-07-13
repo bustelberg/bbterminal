@@ -22,12 +22,14 @@ from asset_pipeline.resolve import resolve as _resolve
 from asset_pipeline.yahoo import YahooThrottled
 
 from ._asset_dividends import router as _dividends_router
+from ._asset_financials import router as _financials_router
 
 router = APIRouter(tags=["asset-pipeline"])
 # GuruFocus dividends for the grid's rightmost column. Kept in its own module
 # because it is the ONLY place the Yahoo asset universe is bridged to the
 # GuruFocus company universe (by ISIN) — see its docstring for the coverage math.
 router.include_router(_dividends_router)
+router.include_router(_financials_router)
 
 
 class AssetGridRow(BaseModel):
@@ -119,17 +121,63 @@ class _StoreBody(BaseModel):
 
 @router.post("/api/asset-pipeline/store")
 async def store_one(body: _StoreBody):
-    """Persist ONE identifier (from the single-ISIN view): resolve → upsert the
-    analysis asset + execution → store the analysis series' close+volume. Returns
-    what was stored, incl. the exact `stored_fields`."""
-    ident = body.identifier.strip()
+    """ADD one row by ISIN: resolve → upsert the analysis asset + execution → store the
+    analysis series' close+volume.
+
+    ⚠ IT REFUSES TO TOUCH AN ISIN THAT IS ALREADY IN THE GRID, and that guard is not
+    politeness — it is the difference between adding a row and CORRUPTING one.
+
+    `store_one` re-resolves from scratch, and resolution is not stable: it ranks Yahoo's
+    candidates by median traded value, but Yahoo answers a search with an EMPTY list under
+    load instead of a 429 (see `asset_pipeline/fast_resolve.py`). When the right listing is
+    missing from the candidate set, the ranking cannot pick it, and a thin foreign line wins
+    by default. Measured on Alphabet Class A (US02079K3059): a re-resolve repointed a row
+    from GOOGL (EUR 8.79bn median daily traded value, 5,502 bars back to 2004) to GOOA.VI —
+    VIENNA, EUR 76,634 ADV, 2,302 bars. A 75,000x thinner listing, silently, with no error.
+    That is the NVDA-on-Stuttgart failure mode (see `resolve.same_company`) reached by a
+    different road.
+
+    So: an existing ISIN returns 409 and is left ALONE. Re-resolving a row is a deliberate
+    act with its own control — the per-row "Resolve" action — not a side effect of trying to
+    add it again.
+
+    The other status codes matter too. When `store_one` cannot resolve a NEW ISIN it still
+    RECORDS it (`upsert_unmapped` → a not_found/bond row) and then raises; collapsing that
+    into a blanket 502 told the user "store failed" while the row had in fact been added.
+    It is now a 422 carrying the resolver's own reason."""
+    ident = body.identifier.strip().upper()
     if not ident:
         raise HTTPException(400, "identifier required")
+
     from asset_pipeline import store  # noqa: PLC0415
+
+    def _existing() -> dict | None:
+        from deps import supabase  # noqa: PLC0415
+
+        rows = (supabase.table("asset_grid")
+                .select("isin, name, analysis_symbol, status, bars")
+                .eq("isin", ident).limit(1).execute().data or [])
+        return rows[0] if rows else None
+
+    already = await asyncio.to_thread(_existing)
+    if already:
+        raise HTTPException(409, (
+            f"{ident} is already in the grid"
+            f"{' as ' + already['analysis_symbol'] if already.get('analysis_symbol') else ''}"
+            f" (status {already.get('status')}). Not re-resolving it: a re-resolve can "
+            f"silently repoint a good row onto a thin foreign listing when Yahoo's search "
+            f"comes back empty. Use the row's own Resolve action if you want to re-run it."
+        ))
+
     try:
         return await asyncio.to_thread(store.store_one, ident)
+    except YahooThrottled as e:
+        raise HTTPException(429, f"Yahoo rate-limited — try again shortly. {e}") from e
+    except ValueError as e:
+        # Resolvable-but-unresolved: the ISIN IS now a row in the grid, just unmapped.
+        raise HTTPException(422, str(e)) from e
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"store failed: {type(e).__name__}: {e}")
+        raise HTTPException(502, f"store failed: {type(e).__name__}: {e}") from e
 
 
 class _RowRefreshBody(BaseModel):

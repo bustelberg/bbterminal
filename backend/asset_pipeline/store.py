@@ -249,6 +249,29 @@ def store_one(identifier: str) -> dict:
         raise ValueError(reason)
     ids = upsert_asset(res, figi=fig)
     rows = store_series(ids["analysis_id"], an["symbol"], an.get("first_ts"))
+
+    # A RESOLUTION WITH NO PRICE SERIES IS NOT A RESOLUTION.
+    #
+    # Measured 2026-07-13: ten distinct Leonteq structured products (CH ISINs, Guernsey
+    # branch) each resolved to the SAME symbol GODE.DE -- a German certificate with zero
+    # bars, no price_from, no price_to. Yahoo has no listing for a structured product, so
+    # its search returned a name-alike, the ranker took it (nothing better was on offer),
+    # and ten unrelated instruments were written as `status='ok'` pointing at one empty
+    # series. Ten confident rows, no data behind any of them.
+    #
+    # Zero bars is the tell, and it is unambiguous: this grid exists to price instruments,
+    # so an instrument with no prices was not found. Record the ISIN as unmapped -- which
+    # is the honest answer for a structured product -- instead of keeping a mapping that
+    # only looks like one.
+    if not rows:
+        reason = (f"resolved to {an['symbol']} but it has NO price series "
+                  f"(0 bars) — treating as unresolved rather than storing an empty mapping")
+        if res.get("id_type") == "isin":
+            ac = res.get("asset_class")
+            upsert_unmapped(identifier, "bond" if ac == "bond" else "not_found",
+                            reason, ac, res.get("sector"), figi=fig)
+        raise ValueError(reason)
+
     try:
         set_default_executions()
     except Exception:  # noqa: BLE001
