@@ -37,8 +37,9 @@ WHY REBUILD SOMETHING WE ALREADY HAVE
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+from datetime import date, timedelta
 
+from asset_pipeline.fx import SUBUNIT
 from deps import IN_CHUNK_SIZE, supabase
 
 # The `universe.label` of the reconstructed membership (Wikipedia + OpenFIGI, the /sp500 page).
@@ -129,7 +130,12 @@ def _fx_to_eur(currencies: set[str], start: str, end: str) -> dict[str, dict[str
     FX move.
     """
     out: dict[str, dict[str, float]] = {}
-    cur = sorted(c for c in currencies if c and c != "EUR")
+    # Ask for the MAJOR currency. `fx_rate` has GBP; it has never had `GBp`, because pence is a
+    # quoting convention and not a currency — so requesting the literal code returns zero rows,
+    # `_rate` finds no table, and the holding reads as unpriceable with all its bars present.
+    # Keyed by base too: `_rate` resolves the same way, and the divisor is applied there.
+    cur = sorted({SUBUNIT.get(c, (c, 1.0))[0]
+                  for c in currencies if c and c != "EUR"})
     for i in range(0, len(cur), IN_CHUNK_SIZE):
         rows = (supabase.table("fx_rate")
                 .select("currency_code,rate_date,rate")
@@ -226,39 +232,41 @@ def _at_or_before(series: list[tuple[str, float]], when: str) -> tuple[str, floa
 
 
 def _rate(fx: dict[str, dict[str, float]], ccy: str | None, when: str) -> float | None:
-    """FX on `when`, else the most recent earlier rate (the table is not dense on holidays)."""
+    """FX on `when`, else the most recent earlier rate (the table is not dense on holidays).
+
+    Returns UNITS OF `ccy` PER EUR, so `eur = native / rate`.
+
+    ⚠ MINOR UNITS. Yahoo quotes London in PENCE (`GBp`), and `fx_rate` has no such code — so
+    passing it through returned None, and every caller reads a missing rate as "unpriceable".
+    343 asset rows are quoted that way: Judges Scientific has 5,930 bars going back to 2003 and
+    was dropped from every portfolio holding it, silently, as if we had no prices for it.
+
+    The rate is scaled by the divisor rather than the price being divided, which is the same
+    arithmetic (`eur = pence/100/rate_gbp == pence/(100*rate_gbp)`) but keeps it in ONE place:
+    a caller that converts a price can no longer forget the ÷100 and quote a £46.75 share at
+    £4,675. `SUBUNIT` is `asset_pipeline.fx`'s map — shared, not re-derived.
+    """
     if not ccy or ccy == "EUR":
         return 1.0
-    tbl = fx.get(ccy)
+    base, divisor = SUBUNIT.get(ccy, (ccy, 1.0))
+    tbl = fx.get(base)
     if not tbl:
         return None
     if when in tbl:
-        return tbl[when]
+        return tbl[when] * divisor
     earlier = [d for d in tbl if d <= when]
-    return tbl[max(earlier)] if earlier else None
+    return tbl[max(earlier)] * divisor if earlier else None
 
 
-def compute_index(label: str = SP500_LABEL, year: int | None = None) -> dict:
-    """Cap-weighted YTD for `label`, in EUR and in local (USD for the S&P).
+def _window_rows(members: list[dict], closes: dict[int, list[tuple[str, float]]],
+                 fx: dict[str, dict[str, float]],
+                 start_anchor: str) -> tuple[list[dict], list[dict]]:
+    """Per-member return + start-of-window cap, for ONE window. Returns (rows, split_adjusted).
 
-    Returns the members too, each with the weight it ACTUALLY had at the start of the year —
-    so the number can be audited rather than believed.
+    Extracted so a caller can price SEVERAL windows off ONE price load — and, more importantly,
+    so they all use the SAME weighting. A second copy of this loop is a second place for the
+    look-ahead bias to creep back in.
     """
-    year = year or date.today().year
-    start_anchor = f"{year}-01-01"          # the mark is the last close ON OR BEFORE this
-    lookback = f"{year - 1}-12-01"          # enough to find it across the New Year holiday
-    today = date.today().isoformat()
-
-    members = _members(label)
-    if not members:
-        return {"label": label, "year": year, "members": [], "member_count": 0,
-                "ytd_eur_pct": None, "ytd_local_pct": None,
-                "note": f"No universe labelled {label!r}."}
-
-    ids = [m["company_id"] for m in members]
-    closes = _closes(ids, lookback, today)
-    fx = _fx_to_eur({(m.get("currency") or "USD") for m in members}, lookback, today)
-
     rows: list[dict] = []
     adjusted: list[dict] = []
     for m in members:
@@ -273,7 +281,7 @@ def compute_index(label: str = SP500_LABEL, year: int | None = None) -> dict:
             continue                        # no opening mark -> it was not in the basket
         last_d, last_p = s[-1]
         first_d, first_p = first
-        if first_p <= 0:
+        if first_p <= 0 or last_d <= first_d:
             continue
 
         ccy = m.get("currency") or "USD"
@@ -300,6 +308,77 @@ def compute_index(label: str = SP500_LABEL, year: int | None = None) -> dict:
             "market_cap_eur": cap_now_eur,
             "start_cap_eur": cap_start_eur,
         })
+    return rows, adjusted
+
+
+def index_returns(label: str, starts: list[str]) -> dict[str, dict]:
+    """Cap-weighted EUR/local return for `label` over SEVERAL windows, from ONE price load.
+
+    Exists because a benchmark must be measured over the SAME window as whatever it is compared
+    against — a model portfolio's YTD opens at `max(1 Jan, inception)` and its since-inception
+    window earlier still, and putting either beside a 1-January index return compares two
+    different periods and calls the difference alpha. Two `compute_index` calls would reload
+    every close twice (4–9s each); this loads once and prices each window off it, through the
+    same `_window_rows` — so they cannot weight differently from each other or from /benchmarks.
+    """
+    members = _members(label)
+    if not members or not starts:
+        return {}
+    earliest = min(starts)
+    lookback = (date.fromisoformat(earliest) - timedelta(days=45)).isoformat()
+    today = date.today().isoformat()
+
+    closes = _closes([m["company_id"] for m in members], lookback, today)
+    fx = _fx_to_eur({(m.get("currency") or "USD") for m in members}, lookback, today)
+
+    out: dict[str, dict] = {}
+    for s in sorted(set(starts)):
+        rows, _ = _window_rows(members, closes, fx, s)
+        total = sum(r["start_cap_eur"] for r in rows)
+        if not rows or total <= 0:
+            out[s] = {"eur_pct": None, "local_pct": None, "members": 0, "start_date": None}
+            continue
+        eur = sum(r["start_cap_eur"] / total * r["return_eur_pct"] for r in rows)
+        loc = sum(r["start_cap_eur"] / total * r["return_local_pct"] for r in rows)
+        out[s] = {"eur_pct": eur, "local_pct": loc, "members": len(rows),
+                  "start_date": min(r["start_date"] for r in rows)}
+    return out
+
+
+def compute_index(label: str = SP500_LABEL, year: int | None = None,
+                  start: str | None = None) -> dict:
+    """Cap-weighted return for `label` from `start` (default: 1 Jan of `year`) to today, in EUR
+    and in local (USD for the S&P).
+
+    Returns the members too, each with the weight it ACTUALLY had at the start of the WINDOW —
+    so the number can be audited rather than believed.
+
+    `start` exists so a benchmark can be measured over the SAME window as whatever it is being
+    compared against. A model portfolio's "YTD" opens at `max(1 Jan, its inception)`, and its
+    since-inception window opens earlier still — putting either beside a 1-January index return
+    would compare two different periods and call the difference alpha. The start-of-window
+    weighting below is what makes an arbitrary window safe: the weights are rolled back to
+    `start`, never taken as of today (that is the look-ahead bias documented on `_split_adjust`'s
+    neighbours — it turned +9.10% into +21.70%).
+    """
+    year = year or date.today().year
+    start_anchor = start or f"{year}-01-01"   # the mark is the last close ON OR BEFORE this
+    # Far enough back to find that mark across a holiday break — and, for an arbitrary start, a
+    # thin name may not have traded for weeks.
+    lookback = (date.fromisoformat(start_anchor) - timedelta(days=45)).isoformat()
+    today = date.today().isoformat()
+
+    members = _members(label)
+    if not members:
+        return {"label": label, "year": year, "members": [], "member_count": 0,
+                "ytd_eur_pct": None, "ytd_local_pct": None,
+                "note": f"No universe labelled {label!r}."}
+
+    ids = [m["company_id"] for m in members]
+    closes = _closes(ids, lookback, today)
+    fx = _fx_to_eur({(m.get("currency") or "USD") for m in members}, lookback, today)
+
+    rows, adjusted = _window_rows(members, closes, fx, start_anchor)
 
     total_start = sum(r["start_cap_eur"] for r in rows)
     if not rows or total_start <= 0:

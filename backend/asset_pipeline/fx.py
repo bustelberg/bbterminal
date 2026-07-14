@@ -12,12 +12,27 @@ from datetime import date as _date
 
 # Minor-unit quotes → (major currency, divisor). Normalise the minor unit into
 # its major unit before FX.
-_SUBUNIT: dict[str, tuple[str, float]] = {
+#
+# ⚠ `GBp` IS NOT A CURRENCY CODE — it is PENCE, and `fx_rate` has no row for it.
+#     Yahoo quotes every London listing in pence, so `asset_execution.currency`
+#     says "GBp" for 343 of our rows. Any FX lookup that passes that string
+#     straight to `fx_rate` gets NOTHING back, and a caller that then treats a
+#     missing rate as "unpriceable" silently drops the holding — with all of its
+#     bars sitting right there. Judges Scientific (`GB0032398678`) has 5,930 bars
+#     from 2003 and read as unpriced in every AIRS portfolio holding it.
+#
+#     The failure is quiet in BOTH directions, which is why the map has to be
+#     shared rather than re-derived: forget to normalise the CODE and the
+#     holding vanishes; forget to divide by the DIVISOR and a £46.75 share
+#     prices at £4,675 — a hundredfold error that still looks like a number.
+SUBUNIT: dict[str, tuple[str, float]] = {
     "GBp": ("GBP", 100.0),   # London pence
     "GBX": ("GBP", 100.0),
     "ZAc": ("ZAR", 100.0),   # SA cents
     "ILA": ("ILS", 100.0),   # Tel-Aviv agorot
 }
+
+_SUBUNIT = SUBUNIT          # legacy private alias — this module's own callers
 
 # Asset classes where Yahoo reports `volume` as a quote-currency NOTIONAL amount
 # (already money) rather than a share COUNT — so EUR volume is volume×fx, NOT

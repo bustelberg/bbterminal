@@ -87,3 +87,194 @@ class TestFastResolveUsesSameCompanyNotARawFloor:
 
         assert _name_score("NVIDIA Corporation", "NVIDIA CORP") < _NAME_MATCH   # 75.9
         assert same_company("NVIDIA Corporation", "NVIDIA CORP") is True
+
+
+class TestResolvingAQueuedFund:
+    """A `queued` ETF has NEVER been resolved: no symbol, no prices, invisible everywhere. It is
+    the row that most needs an ISIN-anchored resolve — and the one the tool could not touch.
+
+        IE00BP3QZ825   iShares Edge MSCI World Momentum   status=queued, no Yahoo symbol
+
+    THE ANCHOR PROBLEM
+        `_same_fund` gates a candidate against the INCUMBENT'S YAHOO NAME. A queued row has no
+        incumbent, so there is no such name — and the two names it does have are both unusable,
+        for the identical reason documented on `_same_fund`: they are vowel-crushed.
+
+            OpenFIGI:  ISHR EDGE MSCI WRLD MOMENTUM
+            Leonteq:   ISHR EDGE MSCI WRLD MOMENTUM
+            Yahoo:     iShares Edge MSCI World Momentum Factor UCITS ETF
+
+        Anchoring on either rejects every candidate, including the right one.
+
+    THE ANSWER IS STRUCTURAL, NOT A LOOSER MATCHER
+        The candidates all come from OpenFIGI's listings OF THIS ONE ISIN, and a fund's venues
+        report near-identical names *to Yahoo* — same source, same convention. So the anchor is
+        their AGREEMENT. A constructed ticker that collided with an unrelated instrument on some
+        venue is the outlier that agrees with nobody. A lone candidate is NOT a consensus.
+    """
+
+    def test_venues_of_one_fund_agree_and_the_consensus_is_the_anchor(self):
+        from scripts.repoint_etf_listing import _consensus_anchor
+
+        names = [
+            "iShares Edge MSCI World Momentum Factor UCITS ETF",       # IS3R.DE
+            "iShares Edge MSCI World Momentum Factor UCITS ETF USD",   # IWMO.L
+            "iShares Edge MSCI World Momentum Factor UCITS ETF",       # IWFM.L
+            "Some Unrelated Mining Corp",                              # a ticker collision
+        ]
+        anchor = _consensus_anchor(names)
+        assert anchor is not None
+        assert "Momentum" in anchor
+        assert "Mining" not in anchor          # the outlier can never BE the anchor
+
+    def test_a_lone_candidate_is_not_a_consensus(self):
+        """One name agrees with itself. That is not corroboration, it is an unchecked guess —
+        and an unchecked swap is the one thing this file exists to refuse."""
+        from scripts.repoint_etf_listing import _consensus_anchor
+
+        assert _consensus_anchor(["iShares Edge MSCI World Momentum Factor UCITS ETF"]) is None
+        assert _consensus_anchor([]) is None
+
+    def test_disagreeing_candidates_yield_no_anchor(self):
+        from scripts.repoint_etf_listing import _consensus_anchor
+
+        assert _consensus_anchor(["Alpha Mining Corp", "Beta Software Inc"]) is None
+
+    def test_an_explicit_isin_reaches_a_queued_row(self):
+        """The sweep only looks at `status='ok'` rows with an incumbent — correctly, since a
+        queued row has no thinness to measure. Named explicitly, it must be judged anyway."""
+        from scripts import repoint_etf_listing as r
+
+        src = inspect.getsource(r._thin_etfs)
+        assert 'q = q.eq("isin", isin)' in src
+        assert 'q.eq("status", "ok")' in src
+        # ...and the status filter must NOT be applied on the explicit-ISIN branch. (Match the
+        # CALL, not the word — the branch's comment says "whatever its status".)
+        explicit = src.split("if isin:", 1)[1].split("else:", 1)[0]
+        assert '.eq("status"' not in explicit
+
+    def test_the_incumbent_checks_are_skipped_when_there_is_no_incumbent(self):
+        """`old` is None for a queued row. Guarding on it is what stops "the incumbent failed its
+        own name gate" firing against a row that never had one."""
+        from scripts import repoint_etf_listing as r
+
+        src = inspect.getsource(r.main)
+        assert "if old and old not in symbols:" in src
+        assert "if old and not any(" in src
+
+
+class TestTheConstructedSymbolCannotReachEveryVenue:
+    """The hole `yahoo_isin` closes, measured on DE000A0F5UH1 (iShares STOXX Global Select
+    Dividend 100), which sat QUEUED — unresolved, unpriced, invisible.
+
+    Every other candidate source CONSTRUCTS a Yahoo symbol as `ticker + venue suffix`. That
+    quietly assumes OpenFIGI and Yahoo agree on the ticker. On the German venues they do not:
+
+        OpenFIGI, exchCode GR/GF/GD/GS/... :  SDGPEX     -> we build SDGPEX.DE  (does not exist)
+        Yahoo, XETRA                       :  ISPA.DE    <- EUR 5,483,388/day
+
+    So Xetra — the fund's most liquid line by 58x — was UNREACHABLE BY CONSTRUCTION, and the
+    only candidates on offer were Vienna (EUR 31,824/day) and Zurich (EUR 94,776/day). No name
+    gate, liquidity rank or consensus anchor can rescue a candidate set that never contained
+    the right answer; this is the same shape as the empty-search that put Alphabet on Vienna.
+
+    Asking Yahoo to resolve the ISIN returns ISPA.DE with no ticker guess in the middle.
+    """
+
+    def test_yahoo_isin_is_a_candidate_source_never_an_answer(self):
+        """⚠ THE LOAD-BEARING ONE. Yahoo resolves an ISIN to *a* listing, not the *liquid* one,
+        and its pick is routinely the wrong end of that — it answers Alphabet's ISIN with
+        `1GOOGL.MI` (Milan) and this momentum ETF with the thinner London line:
+
+            IE00BP3QZ825  ->  IWFM.L   EUR 1,442,631/day     (Yahoo's ISIN pick)
+                              IS3R.DE  EUR 5,627,530/day     (the incumbent; 3.9x more liquid)
+
+        Taking it as the answer would rebuild the exact wrong-listing bug this file exists to
+        prevent. It may only ever ADD to the pool: the ranker and the name gate still decide.
+        """
+        from asset_pipeline import fast_resolve
+
+        src = inspect.getsource(fast_resolve.build_candidates)
+        # It appends into the same list the other sources feed, and returns that list — it does
+        # not short-circuit to Yahoo's answer.
+        assert "cands.append(s)" in src
+        assert "return cands[:limit]" in src
+        assert "_from_yahoo_isin" in src
+
+        # And the repointer still ranks by traded value and gates on the name afterwards.
+        from scripts import repoint_etf_listing as r
+        main = inspect.getsource(r.main)
+        assert "yahoo_isin=True" in main
+        assert 'max(scored, key=lambda s: float(s.get("med_adv_eur") or 0))' in main
+        assert "_same_fund(sc.get(\"name\"), anchor)" in main
+
+    def test_it_is_off_by_default_so_the_bulk_path_stays_one_call_per_isin(self):
+        """`fast_resolve` exists to be ~1 Yahoo call/ISIN on a bulk run. An extra search per
+        ISIN is how you get throttled — and Yahoo answers a throttled caller with an EMPTY
+        list, not a 429, which is precisely how a row lands on a thin foreign listing. Only the
+        deliberate, per-row repointers opt in."""
+        import inspect as _i
+
+        from asset_pipeline import fast_resolve
+
+        sig = _i.signature(fast_resolve.build_candidates)
+        assert sig.parameters["yahoo_isin"].default is False
+
+    def test_an_empty_search_costs_the_improvement_never_the_correctness(self):
+        """Yahoo returns [] under load rather than a 429. Since this source only ADDS
+        candidates, an empty (or raising) search degrades to the constructed set — the previous
+        behaviour — instead of corrupting the pick or claiming 'no listing'."""
+        from asset_pipeline import fast_resolve, yahoo
+
+        orig = yahoo.search
+        try:
+            yahoo.search = lambda *a, **k: []          # the throttled-empty response
+            assert fast_resolve._from_yahoo_isin("DE000A0F5UH1") == []
+
+            def _boom(*a, **k):
+                raise RuntimeError("yahoo is down")
+
+            yahoo.search = _boom
+            assert fast_resolve._from_yahoo_isin("DE000A0F5UH1") == []
+        finally:
+            yahoo.search = orig
+
+    def test_the_isin_pseudo_symbol_is_dropped(self):
+        """For some funds Yahoo hands back the ISIN ITSELF plus a venue suffix — a Stuttgart
+        placeholder, not a listing we can price:
+
+            IE00BNDS1P30  ->  IE00BNDS1P30.SG   (quoteType MUTUALFUND)
+
+        Left in, it is a candidate that can only fail a probe. Dropped here."""
+        from asset_pipeline import fast_resolve, yahoo
+
+        orig = yahoo.search
+        try:
+            yahoo.search = lambda *a, **k: [
+                {"symbol": "IE00BNDS1P30.SG", "quoteType": "MUTUALFUND"},
+                {"symbol": "V3GF.MI", "quoteType": "ETF"},
+                {"symbol": "EURUSD=X", "quoteType": "CURRENCY"},
+            ]
+            assert fast_resolve._from_yahoo_isin("IE00BNDS1P30") == ["V3GF.MI"]
+        finally:
+            yahoo.search = orig
+
+    def test_the_yahoo_candidate_outranks_the_constructed_ones(self):
+        """Order matters because `build_candidates` truncates at `limit`. Yahoo resolved the
+        ISIN itself — no ticker guess — so it must not be the candidate that falls off the
+        cliff. (A UCITS ETF genuinely lists on 6-10 venues; the repointer probes 12.)"""
+        from asset_pipeline import fast_resolve, yahoo
+
+        figi = [{"ticker": "SDGPEX", "exchCode": "GR", "securityType": "ETP"},
+                {"ticker": "EX46", "exchCode": "AV", "securityType": "ETP"}]
+        orig = yahoo.search
+        try:
+            yahoo.search = lambda *a, **k: [{"symbol": "ISPA.DE", "quoteType": "ETF"}]
+            got = fast_resolve.build_candidates(
+                "DE000A0F5UH1", figi, None, limit=12, yahoo_isin=True)
+        finally:
+            yahoo.search = orig
+
+        assert got[0] == "ISPA.DE"
+        # ...and it did not REPLACE the constructed set, only lead it.
+        assert "SDGPEX.DE" in got and "EX46.VI" in got

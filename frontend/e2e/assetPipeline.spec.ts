@@ -32,6 +32,36 @@ test.describe('/asset-pipeline geography', () => {
     await expect(page.getByRole('link', symbol('AAPL'))).toBeVisible();
   });
 
+  test('the toolbar does not MOVE when you type in the search box', async ({ page }) => {
+    /**
+     * A <select> sizes itself to its widest <option>, and these options are FACETED — their
+     * labels carry live counts ("All sectors (9)" -> "All sectors (1)") and options drop out
+     * entirely as the search narrows. So every keystroke used to resize six dropdowns at once,
+     * shifting each control sideways and re-flowing the wrapped row under the cursor.
+     *
+     * The CONTENT of the dropdowns must keep changing — that is the whole point of faceting.
+     * Their GEOMETRY must not. This pins the difference.
+     */
+    const controls = [
+      page.getByPlaceholder('Search ISIN / name / symbol / FIGI…'),
+      ...Object.values(FILTER_TITLES).map((t) => filter(page, t)),
+      page.getByRole('button', { name: 'Clear filters' }),
+      page.getByRole('button', { name: '+ Create universe' }),
+    ];
+    const geometry = async () =>
+      Promise.all(controls.map(async (c) => JSON.stringify(await c.boundingBox())));
+
+    const before = await geometry();
+
+    await page.getByPlaceholder('Search ISIN / name / symbol / FIGI…').fill('AAPL');
+    await expect(page.getByRole('link', symbol('AAPL'))).toBeVisible();
+
+    // The facets DID narrow — otherwise this test would pass on a broken-but-frozen toolbar.
+    await expect(filter(page, FILTER_TITLES.sector)).toContainText('All sectors (1)');
+    // ...and not one control moved a pixel.
+    expect(await geometry()).toEqual(before);
+  });
+
   test('renders country, continent and region per row', async ({ page }) => {
     const tsm = page.getByRole('row').filter({ has: page.getByRole('link', symbol('TSM')) });
     await expect(tsm).toContainText('Taiwan');

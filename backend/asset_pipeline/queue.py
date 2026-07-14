@@ -70,12 +70,59 @@ def enqueue(identifiers: list[str], skip_existing: bool = True) -> dict:
 
 
 def status() -> dict:
-    """Queue counts by status + whether there's outstanding work."""
+    """Queue counts by status + whether there's outstanding work.
+
+    ⚠ `working` means "there is work OUTSTANDING", NOT "a worker is running". A backlog nobody is
+    draining reports `working: True` for ever — this queue sat at 9,945 pending, untouched since
+    2026-07-07, and still called itself working. To ask whether a worker is ALIVE (e.g. before
+    adding Yahoo load of your own), use `is_worker_active()`, which reads the heartbeat.
+    """
     def _count(st: str) -> int:
         return supabase.table("asset_ingest_queue").select("isin", count="exact").eq("status", st).limit(1).execute().count or 0
     pending, done, failed = _count("pending"), _count("done"), _count("failed")
     return {"pending": pending, "done": done, "failed": failed, "total": pending + done + failed,
             "working": pending > 0}
+
+
+def last_activity() -> str | None:
+    """When the worker last MOVED a row out of `pending` — the queue's only heartbeat.
+
+    A worker stamps `updated_at` as it marks each ISIN done/failed, so the newest of those IS the
+    last moment anything was actually being resolved. `pending` cannot tell you this: it counts
+    what is LEFT, which stays high precisely when nobody is working.
+    """
+    r = (supabase.table("asset_ingest_queue").select("updated_at")
+         .in_("status", ["done", "failed"])
+         .order("updated_at", desc=True).limit(1).execute().data or [])
+    return r[0]["updated_at"] if r else None
+
+
+def is_worker_active(within_minutes: int = 10) -> bool:
+    """Is something draining this queue RIGHT NOW — i.e. consuming Yahoo?
+
+    THE QUESTION THAT MATTERS TO ANY OTHER YAHOO CALLER. The ingest queue is *the* single Yahoo
+    consumer by design: Yahoo answers an overloaded caller with an EMPTY result rather than a 429,
+    and an empty candidate set is how a resolution silently lands on a thin foreign listing
+    (NVDA-on-Stuttgart, Alphabet-on-Vienna). So a second consumer must stand down while the
+    resolver is mid-search.
+
+    But it must stand down for the WORKER, not for the BACKLOG. Gating on `pending > 0` reads a
+    week-old abandoned queue as "busy" and disables the other job for ever — which is exactly what
+    happened the first time the price refresh tried it (9,945 pending, last touched seven days
+    earlier, and the refresh skipped every tick).
+    """
+    from datetime import datetime, timedelta, timezone  # noqa: PLC0415
+
+    seen = last_activity()
+    if not seen:
+        return False
+    try:
+        ts = datetime.fromisoformat(seen.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts > datetime.now(timezone.utc) - timedelta(minutes=within_minutes)
 
 
 def _mark(isin: str, st: str, reason: str | None = None) -> None:

@@ -143,15 +143,25 @@ class Stats:
     win_rate: float | None = None        # fraction of months with return > 0
 
 
-def annualized_stats(returns: list[float], rf_annual: float = 0.0) -> Stats:
-    """Annualized return / vol / Sharpe / Sortino for a monthly return
+def annualized_stats(
+    returns: list[float],
+    rf_annual: float = 0.0,
+    periods_per_year: float = PERIODS_PER_YEAR,
+) -> Stats:
+    """Annualized return / vol / Sharpe / Sortino for a periodic return
     series (fractions). `rf_annual` is the annual risk-free rate as a
     fraction (0.02 = 2%).
 
-      ann_return = prod(1+r)^(12/n) - 1                 (geometric)
-      ann_vol    = std(r, ddof=1) * sqrt(12)
+      ann_return = prod(1+r)^(ppy/n) - 1                (geometric)
+      ann_vol    = std(r, ddof=1) * sqrt(ppy)
       sharpe     = (ann_return - rf_annual) / ann_vol
-      sortino    = (ann_return - rf_annual) / (downside_dev * sqrt(12))
+      sortino    = (ann_return - rf_annual) / (downside_dev * sqrt(ppy))
+
+    `periods_per_year` defaults to 12 — this function grew up serving the
+    monthly diversifier and its callers pass monthly returns. Pass 252 for a
+    daily series (the AIRS model-portfolio Sharpe does); the annualization is
+    the only thing that changes, so both cadences read off ONE definition of
+    Sharpe/Sortino rather than each rolling its own.
 
     Sharpe/Sortino are None when their denominator is 0 (flat or never-
     below-target series) so the caller can render "n/a" instead of inf.
@@ -162,17 +172,17 @@ def annualized_stats(returns: list[float], rf_annual: float = 0.0) -> Stats:
     r = np.asarray(returns, dtype=float)
 
     growth = float(np.prod(1.0 + r))
-    ann_return = growth ** (PERIODS_PER_YEAR / n) - 1.0 if growth > 0 else -1.0
+    ann_return = growth ** (periods_per_year / n) - 1.0 if growth > 0 else -1.0
 
-    ann_vol = float(np.std(r, ddof=1) * np.sqrt(PERIODS_PER_YEAR)) if n >= 2 else None
+    ann_vol = float(np.std(r, ddof=1) * np.sqrt(periods_per_year)) if n >= 2 else None
     if ann_vol is not None and ann_vol < _ZERO_TOL:
         ann_vol = 0.0   # snap float noise so a flat series reads as zero-vol
     sharpe = (ann_return - rf_annual) / ann_vol if ann_vol else None
 
     # Downside deviation vs the per-period risk-free target.
-    rf_period = (1.0 + rf_annual) ** (1.0 / PERIODS_PER_YEAR) - 1.0
+    rf_period = (1.0 + rf_annual) ** (1.0 / periods_per_year) - 1.0
     downside = np.minimum(r - rf_period, 0.0)
-    dd = float(np.sqrt(np.mean(downside ** 2)) * np.sqrt(PERIODS_PER_YEAR))
+    dd = float(np.sqrt(np.mean(downside ** 2)) * np.sqrt(periods_per_year))
     sortino = (ann_return - rf_annual) / dd if dd > 0 else None
 
     return Stats(

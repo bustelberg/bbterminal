@@ -16,7 +16,19 @@ import { useLayoutEffect, useRef, useState } from 'react';
  * Originated in EarningsDashboard; lifted here so any future "help
  * icon next to a label" usage can drop it in.
  */
-export default function InfoTip({ text }: { text: string }) {
+export default function InfoTip({ text, children }: {
+  text: string;
+  /**
+   * Optional TRIGGER. Without it you get the "i" icon (every existing call site). With it, the
+   * children ARE the trigger — hover the thing itself, no icon needed.
+   *
+   * This exists because the native `title=` attribute is unusable for anything a reader needs:
+   * the browser sits on it for ~1-2 SECONDS before showing it, and that delay is not
+   * configurable. A tooltip that arrives after the reader has given up explaining a column to
+   * themselves — wrongly — is worse than no tooltip. This one appears on hover, immediately.
+   */
+  children?: React.ReactNode;
+}) {
   const [show, setShow] = useState(false);
   // Off-screen initial position; useLayoutEffect snaps the tooltip to
   // its real position after measuring the rendered size, before the
@@ -83,7 +95,9 @@ export default function InfoTip({ text }: { text: string }) {
 
   return (
     <span className="relative cursor-help" onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
-      <span ref={iconRef} className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-neutral-600 text-fg-subtle text-[10px] leading-none hover:border-accent-400 hover:text-accent-400 transition-colors">i</span>
+      {children
+        ? <span ref={iconRef}>{children}</span>
+        : <span ref={iconRef} className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-neutral-600 text-fg-subtle text-[10px] leading-none hover:border-accent-400 hover:text-accent-400 transition-colors">i</span>}
       {show && (
         <span
           ref={tooltipRef}
@@ -93,7 +107,13 @@ export default function InfoTip({ text }: { text: string }) {
           // scroll inside it; in that case the most important content
           // (whyEmpty paragraph) is below the metric definition, so
           // ideally we'd reverse the order — left as a future tweak.
-          className="fixed w-72 max-h-[80vh] overflow-hidden px-3 py-2 bg-popover border border-neutral-700 rounded-lg text-xs text-fg-soft leading-relaxed z-[9999] shadow-xl pointer-events-none whitespace-pre-line"
+          // ⚠ `normal-case` + `text-left` + `tracking-normal` + `font-normal` are RESETS, not
+          // styling. The tooltip renders inside its trigger, so it inherits whatever the trigger
+          // sits in — and a table header carries `uppercase tracking-wide text-right`. Hovering a
+          // column header therefore rendered the whole explanation SHOUTED IN CAPS, right-aligned:
+          // three paragraphs of prose, unreadable, and it looked like the copy had been written
+          // that way. It hadn't. Inheritance did it.
+          className="fixed w-72 max-h-[80vh] overflow-hidden px-3 py-2 bg-popover border border-neutral-700 rounded-lg text-xs text-fg-soft leading-relaxed z-[9999] shadow-xl pointer-events-none whitespace-pre-line normal-case text-left tracking-normal font-normal"
           style={{ top: pos.top, left: pos.left }}
         >
           {text}

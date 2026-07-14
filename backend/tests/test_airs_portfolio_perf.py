@@ -10,41 +10,76 @@ import inspect
 
 import pytest
 
+from momentum.diversification import annualized_stats
 from routers._airs_portfolio_perf import (
     GOOD_COVERAGE_PCT,
+    MIN_CAGR_DAYS,
     MIN_COVERAGE_PCT,
+    MIN_STAT_DAYS,
+    TRADING_DAYS,
+    _daily_returns,
+    _eur_return,
+    _index,
+    _mark_at,
+    _MAX_INTERP_SPAN_DAYS,
+    compute_holding_marks,
     compute_portfolio_performance,
+    ytd_anchor_for,
 )
+from routers.airs import _shape_positions
 
 
 class TestHindsight:
-    """Applying TODAY's weights back to 1 January backtests a basket that was chosen knowing
-    how the year went. When the model predates the year that is harmless — the weights really
-    were held throughout. When it does not, the number is not a track record.
+    """Pricing TODAY's weights back to 1 January backtests a basket that was chosen knowing how
+    the year went. When the model predates the year that is harmless — the weights really were
+    held throughout. When it does not, the number is not a track record.
 
-    This is not a theoretical worry. Measured 2026-07-13:
+    This was not a theoretical worry. Measured 2026-07-13, with the YTD anchored at Jan 1:
 
         MoTopSelectie_FX    YTD +75.85%    model effective 2026-07-05  (EIGHT DAYS EARLIER)
-                            since that model took effect:  +0.86%
+                            realized over those eight days:  +0.51%
 
-    Unflagged, it is the best-performing portfolio in the list.
+    It was the best-performing portfolio in the list, on weights it had never held. So the YTD
+    window now OPENS at the inception instead: `ytd_anchor = max(Jan 1, inception)`.
     """
 
-    def test_a_model_defined_during_the_year_is_flagged(self):
+    def test_the_ytd_window_never_opens_before_the_composition_existed(self):
+        """The fix. A model younger than the year is measured from its own inception, so there
+        is no stretch of the window in which we price weights it had not chosen yet."""
+        assert ytd_anchor_for("2025-04-08", 2026) == "2026-01-01"   # older -> a real YTD
+        assert ytd_anchor_for("2026-07-05", 2026) == "2026-07-05"   # younger -> from inception
+        assert ytd_anchor_for("2026-01-01", 2026) == "2026-01-01"   # exactly Jan 1 -> Jan 1
+        assert ytd_anchor_for(None, 2026) == "2026-01-01"
+
         src = inspect.getsource(compute_portfolio_performance)
-        assert 'eff > jan1' in src, "a model newer than the window must be flagged"
+        assert "ytd_anchor = ytd_anchor_for(eff, year)" in src
+        assert "_index(legs, ytd_anchor)" in src
+
+    def test_the_expanded_price_marks_share_that_anchor(self):
+        """ONE definition of the window, used by the portfolio figure AND by the per-holding
+        marks shown when the row is expanded. Two definitions and the entry prices printed under
+        a +51.48% would belong to a different window — and reconcile with nothing."""
+        src = inspect.getsource(_shape_positions)
+        assert "ytd_anchor_for(" in src
+        assert "compute_holding_marks(" in src
+
+    def test_a_model_younger_than_the_year_is_still_flagged(self):
+        """The flag survives the fix, with a NEW meaning: not "this is a backtest" (it isn't any
+        more) but "this is a PARTIAL year". Six days of return and twelve months of it are not
+        comparable merely by sharing a column, and the table sorts on that column."""
+        src = inspect.getsource(compute_portfolio_performance)
+        assert 'eff > jan1' in src
         assert "model_changed_in_period" in src
+        assert '"ytd_from": ytd_anchor' in src, "the window it opened must be reported"
 
     def test_since_model_is_measured_from_the_models_own_date(self):
-        """The honest number, and the reason it exists: it never borrows hindsight, because
-        its window starts when the composition did."""
+        """Unchanged, and still the longer window: since-inception spans the model's WHOLE life,
+        with no January floor under it. For a model younger than the year the two windows
+        coincide — that is the point, not a bug — but for the 29 that predate it, this one
+        reaches back years and the YTD does not."""
         src = inspect.getsource(compute_portfolio_performance)
-        assert "eff_anchor = eff if eff and eff > jan1 else jan1" in src
-
-    def test_the_gap_between_them_is_the_hindsight(self):
-        """75.85 vs 0.86 — the arithmetic of what the flag is protecting against."""
-        ytd_backtested, since_model = 75.85, 0.86
-        assert ytd_backtested / since_model > 80
+        assert "since_curve, since_w = _index(legs, eff)" in src
+        assert "jan1" not in src.split("since_curve, since_w", 1)[1].split("since_pct", 1)[0]
 
 
 class TestCoverageFloor:
@@ -66,7 +101,11 @@ class TestCoverageFloor:
     def test_below_the_floor_no_number_is_returned(self):
         src = inspect.getsource(compute_portfolio_performance)
         assert "enough = covered >= MIN_COVERAGE_PCT" in src
-        assert '"ytd_pct": (ytd_num / ytd_den) if enough else None' in src
+        # The curve is emptied, and every figure read off it therefore goes with it — rather
+        # than the number being suppressed at one output site and surviving at another.
+        assert "if not enough:\n            ytd_curve = []" in src
+        assert '"ytd_pct": ytd_pct' in src
+        assert "ytd_pct = (ytd_curve[-1] - 1.0) * 100.0 if ytd_curve else None" in src
 
     def test_coverage_is_reported_even_when_the_number_is_refused(self):
         """`covered_pct` IS the reason for the refusal — withholding it would leave the reader
@@ -87,11 +126,15 @@ class TestCoverageFloor:
 class TestCashIsPricedNotSkipped:
     def test_cash_counts_toward_the_return_at_zero(self):
         """Cash's drag is a FACT, not a gap. Dropping it from the denominator would silently
-        scale a 20%-cash portfolio's return up by 25%."""
+        scale a 20%-cash portfolio's return up by 25%.
+
+        It enters as a LEG with no price series, which `_index` holds flat at 1.0 — so it is in
+        the weight the curve renormalises over, and it contributes zero return to it. (The
+        arithmetic of that is pinned in `test_cash_is_a_leg_that_never_moves`.)"""
         src = inspect.getsource(compute_portfolio_performance)
         cash_branch = src.split("Cash. A 0% return is a FACT", 1)[1].split("continue", 1)[0]
-        assert "ytd_den += w" in cash_branch              # in the denominator...
-        assert "ytd_num" not in cash_branch               # ...contributing zero to the numerator
+        assert "legs.append((w, None))" in cash_branch     # priced, at a flat zero...
+        assert "unpriced" not in cash_branch               # ...never dropped as unpriceable
 
     def test_dropping_cash_would_inflate_the_return(self):
         """80% equities at +10%, 20% cash. Including cash: +8%. Dropping it: +10%."""
@@ -103,12 +146,302 @@ class TestCashIsPricedNotSkipped:
 
 class TestPostgrestPaging:
     def test_the_price_read_pages(self):
-        """223 holdings x ~130 trading days is ~29,000 rows. PostgREST caps a response at
-        1,000 and TRUNCATES SILENTLY — unpaged, this computes a confident number off 3% of the
-        data. (I hit exactly this while probing coverage: it reported 102 priced holdings when
-        the answer was 221.)"""
+        """223 holdings x ~500 trading days (since-inception reaches back to 2024-06) is
+        ~118,000 rows. PostgREST caps a response at 1,000 and TRUNCATES SILENTLY — unpaged,
+        this computes a confident number off 1% of the data. (I hit exactly this while probing
+        coverage: it reported 102 priced holdings when the answer was 221.)"""
+        from routers._airs_portfolio_perf import _closes_paged
+
+        src = inspect.getsource(_closes_paged)
+        assert ".range(off, off + 999)" in src
+        assert "off += 1000" in src
+
+    def test_the_copy_path_falls_back_rather_than_failing(self):
+        """COPY is an optimisation, not a dependency: `asset_price` has no PostgREST fallback
+        inside `load_series`, so an unconfigured `SUPABASE_DB_URL` raises. This endpoint must
+        answer anyway — it did before COPY existed."""
         from routers._airs_portfolio_perf import _closes
 
         src = inspect.getsource(_closes)
-        assert ".range(off, off + 999)" in src
-        assert "off += 1000" in src
+        assert "except SeriesUnavailable:" in src
+        assert "return _closes_paged(" in src
+
+
+class TestSinceInceptionCurve:
+    """Sharpe and Sortino need a daily curve, and the curve is where a portfolio return can go
+    quietly wrong: holdings sit on different exchange calendars, and they list and delist."""
+
+    def test_the_curve_ends_where_the_weighted_return_does(self):
+        """THE identity that lets `since_model_pct` be read off the curve instead of computed a
+        second way. A buy-and-hold's final value IS the weighted sum of its holdings' returns —
+        so if these two ever disagree, one of them is wrong, and having only one means neither
+        can drift from the other on some surface nobody re-checked."""
+        a = [("2026-01-01", 100.0), ("2026-01-02", 110.0)]   # +10%
+        b = [("2026-01-01", 50.0), ("2026-01-02", 45.0)]     # -10%
+        legs = [(60.0, a), (40.0, b)]
+
+        curve, held = _index(legs, "2026-01-01")
+        assert held == 100.0
+        from_curve = (curve[-1] - 1.0) * 100.0
+        weighted = (60.0 * _eur_return(a, "2026-01-01")
+                    + 40.0 * _eur_return(b, "2026-01-01")) / 100.0
+        assert from_curve == pytest.approx(weighted)
+        assert from_curve == pytest.approx(2.0)              # 0.6*10 + 0.4*(-10)
+
+    def test_a_holding_that_did_not_trade_holds_its_price_it_does_not_go_to_zero(self):
+        """A Tokyo holiday is a normal Wednesday in Paris. Sampling on the union of both
+        calendars, the missing bar means "still held, last price" — not a 0% day and certainly
+        not a missing one. Read either other way, the daily vol underneath Sharpe is fiction."""
+        paris = [("2026-01-01", 100.0), ("2026-01-02", 100.0), ("2026-01-03", 120.0)]
+        tokyo = [("2026-01-01", 100.0), ("2026-01-03", 100.0)]     # no bar on the 2nd
+        curve, _ = _index([(50.0, paris), (50.0, tokyo)], "2026-01-01")
+
+        assert len(curve) == 3                                  # anchor + 2 union dates
+        assert curve[1] == pytest.approx(1.0)                   # the 2nd: neither leg moved
+        assert curve[-1] == pytest.approx(1.10)                 # +20% on half the book
+
+    def test_cash_is_a_leg_that_never_moves(self):
+        """Not skipped. A 20%-cash model that returns 10% on its equities made 8%, and dropping
+        the cash line would report 10% — scaling the return up by 25% for free."""
+        eq = [("2026-01-01", 100.0), ("2026-01-02", 110.0)]
+        curve, held = _index([(80.0, eq), (20.0, None)], "2026-01-01")
+        assert held == 100.0
+        assert (curve[-1] - 1.0) * 100.0 == pytest.approx(8.0)
+
+    def test_a_holding_not_yet_listed_at_inception_comes_OUT_of_the_weight(self):
+        """The gate. An ETF that listed in 2025 was NOT in a model whose inception is 2024 — it
+        has no opening mark, so it cannot be held from there. `_index` renormalises over what is
+        left, which is exactly why the weight it kept has to come back out: without it, a curve
+        built from a quarter of the portfolio renders identically to one built from all of it."""
+        late = [("2026-06-01", 10.0), ("2026-06-02", 20.0)]     # listed long after the anchor
+        early = [("2024-06-01", 100.0), ("2026-06-02", 100.0)]
+        _, held = _index([(30.0, early), (70.0, late)], "2024-06-01")
+        assert held == 30.0                                     # the 70% could not be held there
+
+    def test_the_since_coverage_floor_is_its_own_not_ytds(self):
+        """Coverage at the YTD anchor says nothing about coverage two years earlier, so the
+        since-inception figures are gated on the weight THEIR OWN curve could hold."""
+        src = inspect.getsource(compute_portfolio_performance)
+        assert "since_covered = (since_w / total_w * 100.0)" in src
+        assert "if since_covered < MIN_COVERAGE_PCT:" in src
+
+
+class TestHoldingMarks:
+    """The per-holding entry/exit marks shown when a portfolio row is expanded. They are not a
+    second calculation of the portfolio's return — they are the SAME one, itemised."""
+
+    def test_weighting_the_marks_reproduces_the_portfolio_return(self):
+        """THE property. Weight each holding's `return_pct` by the model's percentages and you
+        get the row's YTD back — because both come from the same EUR series and the same anchor.
+        (Measured against the live DB: AITopSelectie OFF FX, 51.4812% both ways.)
+
+        If these ever diverge, the expanded rows quietly "explain" a number they do not add up
+        to, and a reader has no way to tell which half is wrong."""
+        a = [("2026-01-01", 100.0), ("2026-06-01", 125.0)]        # +25%
+        b = [("2026-01-01", 200.0), ("2026-06-01", 180.0)]        # -10%
+        legs = [(60.0, a), (40.0, b)]
+
+        curve, _ = _index(legs, "2026-01-01")
+        portfolio = (curve[-1] - 1.0) * 100.0
+        itemised = (60.0 * _eur_return(a, "2026-01-01")
+                    + 40.0 * _eur_return(b, "2026-01-01")) / 100.0
+
+        assert portfolio == pytest.approx(itemised)
+        assert portfolio == pytest.approx(11.0)                   # 0.6*25 + 0.4*(-10)
+
+    def test_the_marks_are_in_eur_because_the_return_is(self):
+        """A EUR return beside NATIVE prices shows two numbers whose ratio is not the third: a
+        USD holding can rise in dollars and fall in euros on the same days. The local close is
+        carried for the tooltip, never as the arithmetic."""
+        from routers._airs_portfolio_perf import compute_holding_marks
+
+        src = inspect.getsource(compute_holding_marks)
+        # The return is computed off the EUR series...
+        assert '"return_pct": (p1 / p0 - 1.0) * 100.0' in src
+        assert "eur = _eur_series(" in src
+        # ...and the native close rides along only as a separate, clearly-named field.
+        assert '"start_price_local":' in src
+        assert "native.get(d1)" in src
+
+    def test_a_holding_not_yet_listed_gets_no_marks_rather_than_a_zero(self):
+        """No close on or before the window opened = it was not held there. A 0% return would be
+        a claim; an absence is the truth."""
+        from routers._airs_portfolio_perf import compute_holding_marks
+
+        src = inspect.getsource(compute_holding_marks)
+        assert "if not mark:" in src
+        assert "out[isin] = base" in src        # last_close only — no prices, no return
+
+        # And the primitive itself: nothing before the anchor, nothing to mark it with.
+        assert _mark_at([("2026-06-01", 10.0)], "2026-01-01") is None
+
+    def test_last_close_is_returned_even_when_no_marks_can_be(self):
+        """The ONLY thing separating "the prices are STALE" from "this holding is broken" — and
+        they render identically as a blank row. Meta Platforms is correctly mapped to META with
+        3,556 bars, but its last close was 2026-07-02 while BUS_2.0_NEU_FX's window opens
+        2026-07-09: no price inside the window, so no return over it can exist. Without
+        `last_close` the reader is sent hunting for a mapping bug that does not exist."""
+        from routers._airs_portfolio_perf import compute_holding_marks
+
+        src = inspect.getsource(compute_holding_marks)
+        assert '"last_close": eur[-1][0]' in src
+        # It is in `base`, which is what BOTH no-mark branches return.
+        assert src.index('"last_close"') < src.index("if not mark:")
+
+
+class TestSparseSeriesInterpolation:
+    """Some holdings have no price ANYWHERE NEAR the date a window opens.
+
+    Measured 2026-07-14: iShares Euro HY Corp Bd (`IE00B66F4759`) is mapped to `ISHHF`, a US OTC
+    line with **54 bars in TEN YEARS**. Its last close before 1 Jan 2026 was 2025-11-03 and its
+    next was 2026-03-10 — a 127-day hole straddling the anchor. Marking the position at a close
+    two months stale, or dropping it (it is 25% of BUS_MTS_DEF_AFS), are both worse than
+    straight-lining between the two real closes and SAYING SO.
+    """
+
+    def test_a_normal_close_just_before_the_anchor_is_not_interpolated(self):
+        """The 99% case, and the one a careless fix breaks: markets are shut on 1 January, so
+        31 December IS the mark. Interpolating there would replace every observed opening price
+        in the table with a modelled one."""
+        s = [("2025-12-31", 100.0), ("2026-01-02", 110.0)]
+        d, p, interp, gap = _mark_at(s, "2026-01-01")
+        assert (d, p) == ("2025-12-31", 100.0)
+        assert interp is False and gap == 0
+
+    def test_a_hole_around_the_anchor_is_interpolated_and_flagged(self):
+        s = [("2025-11-02", 100.0), ("2026-03-02", 200.0)]      # 120 days apart
+        d, p, interp, gap = _mark_at(s, "2025-12-02")           # 30 days in: a quarter of the way
+        assert interp is True
+        assert d == "2025-12-02"                                # the ANCHOR, not a trade date
+        assert p == pytest.approx(125.0)
+        assert gap == 120                                       # the span, so the UI can state it
+
+    def test_a_bracket_wider_than_a_year_is_REFUSED_not_estimated(self):
+        """Straight-lining a price across more than a year is not interpolation, it is invention
+        — and it would render exactly like a real price. Same refusal as `_trailing_12m`'s
+        450-day span cap."""
+        s = [("2024-01-02", 100.0), ("2026-03-02", 200.0)]      # ~790 days
+        assert _MAX_INTERP_SPAN_DAYS < 790
+        assert _mark_at(s, "2026-01-01") is None
+
+    def test_a_series_that_ends_before_the_window_is_not_extrapolated(self):
+        """Nothing after the anchor to bracket with. The honest answer is the last real close —
+        never a straight line pushed forward into a window it has no evidence for."""
+        s = [("2025-11-03", 100.0)]
+        d, p, interp, _ = _mark_at(s, "2026-01-01")
+        assert (d, p, interp) == ("2025-11-03", 100.0, False)   # real, stale, and not invented
+
+    def test_the_curve_and_the_expanded_rows_interpolate_THE_SAME_WAY(self):
+        """The reconciliation invariant, under interpolation. `_index` builds the portfolio's
+        curve and `compute_holding_marks` itemises it — if only ONE of them interpolated, the
+        expanded rows would no longer weight to the number above them, and the table would be
+        explaining its own figure with different arithmetic."""
+        assert "_mark_at(s, anchor)" in inspect.getsource(_index)
+        assert "_mark_at(eur, anchor)" in inspect.getsource(compute_holding_marks)
+
+        # ...and it holds numerically: a sparse leg + a dense one, weighted, off the same marks.
+        # Nov 2 -> Mar 2 is 120 days and Jan 1 sits 60 of them in, so the sparse leg opens at the
+        # midpoint, 150.0 — interpolated. The dense leg opens at its real 31-Dec close.
+        sparse = [("2025-11-02", 100.0), ("2026-03-02", 200.0)]
+        dense = [("2025-12-31", 50.0), ("2026-03-02", 60.0)]
+        assert _mark_at(sparse, "2026-01-01")[1] == pytest.approx(150.0)
+
+        curve, _ = _index([(50.0, sparse), (50.0, dense)], "2026-01-01")
+        itemised = (50.0 * (200.0 / 150.0 - 1.0) * 100.0
+                    + 50.0 * (60.0 / 50.0 - 1.0) * 100.0) / 100.0
+        assert (curve[-1] - 1.0) * 100.0 == pytest.approx(itemised)
+
+    def test_the_opening_bar_is_fetched_however_far_back_it_sits(self):
+        """The bug this all started from. The load window is a PERFORMANCE bound; treating it as
+        a correctness one meant the expanded row (45-day lookback) could not see an opening bar
+        that the portfolio figure (loading from the earliest inception) could — so one showed a
+        blank while the other priced 23.6% of the same portfolio, with no error anywhere."""
+        src = inspect.getsource(compute_holding_marks)
+        assert "_prepend_opening_bars(closes, ids, anchor)" in src
+        # ...and FX must reach back to whatever bar that turned up, or `_eur_series` drops it.
+        assert "fx_from = min([lookback, *(s[0][0] for s in closes.values() if s)])" in src
+
+    def test_an_interpolated_price_has_no_native_close_behind_it(self):
+        """There was no trade that day. Handing back a neighbouring day's local price would dress
+        the estimate up as an observation."""
+        src = inspect.getsource(compute_holding_marks)
+        assert '"start_price_local": None if interpolated else native.get(d0)' in src
+
+
+class TestCagrIsNotExtrapolated:
+    """A CAGR compounds a window's return out to a year. A SHORT window is therefore not merely
+    noisy — it is systematically amplified, and the result sits in the same column, same font, as
+    a rate earned over two years.
+
+    Measured 2026-07-14:
+
+        AITopSelectie OFF FX   +50.61% over 135 trading days   ->  annualized: +114.8%
+        BUS_Risicodragend      +48.26% over 323 trading days   ->  annualized:  +35.97%
+
+    The first is 0.54 years of evidence. Fund reporting does not annualize a sub-year period for
+    exactly this reason — it shows the cumulative return, which `since_model_pct` already is.
+    """
+
+    def test_the_floor_is_a_full_year(self):
+        assert MIN_CAGR_DAYS == TRADING_DAYS == 252
+
+    def test_no_cagr_below_it(self):
+        src = inspect.getsource(compute_portfolio_performance)
+        assert "len(rets) >= MIN_CAGR_DAYS" in src
+
+    def test_the_arithmetic_it_prevents(self):
+        """135 days of +50.61% compounds to a figure nobody earned."""
+        short = (1 + 50.61 / 100) ** (252 / 135) - 1
+        long_ = (1 + 48.26 / 100) ** (252 / 323) - 1
+        assert short * 100 == pytest.approx(114.8, abs=0.5)     # the number we refuse to print...
+        assert long_ * 100 == pytest.approx(35.97, abs=0.5)     # ...beside the one we do
+        assert short > 3 * long_                                # on a THIRD of the evidence
+
+    def test_a_sharpe_survives_a_short_window_but_a_cagr_does_not(self):
+        """Why the two floors differ (20 days vs 252). Sharpe is a RATIO — annualization scales
+        both halves, so a short sample is noisy but not biased. A CAGR compounds only the
+        numerator, so a short sample is inflated. Same window, different failure."""
+        assert MIN_STAT_DAYS < MIN_CAGR_DAYS
+
+    def test_years_running_is_reported_so_the_absence_is_legible(self):
+        src = inspect.getsource(compute_portfolio_performance)
+        assert '"years_running": (_days_between(today, eff) / 365.25) if eff else None' in src
+
+
+class TestRatiosNeedASample:
+    """27 of 56 models were (re)defined this year; MoTopSelectie_FX was defined 8 days before
+    it was measured. Its Sharpe would render in the same column, same font, as one measured
+    over two years of trading — and be noise."""
+
+    def test_a_week_old_model_gets_no_ratio_at_all(self):
+        assert MIN_STAT_DAYS >= 20
+        src = inspect.getsource(compute_portfolio_performance)
+        assert "if len(rets) >= MIN_STAT_DAYS else None" in src
+        assert '"sharpe": stats.sharpe if stats else None' in src
+
+    def test_the_sample_size_is_returned_so_the_two_can_be_told_apart(self):
+        src = inspect.getsource(compute_portfolio_performance)
+        assert '"stat_days": len(rets)' in src
+
+    def test_the_ratios_are_annualized_daily_not_monthly(self):
+        """The shared helper defaults to 12 — the diversifier's cadence. A daily series
+        annualized at sqrt(12) understates vol by ~4.6x and overstates Sharpe by the same."""
+        assert TRADING_DAYS == 252
+        src = inspect.getsource(compute_portfolio_performance)
+        assert "periods_per_year=TRADING_DAYS" in src
+
+    def test_a_flat_curve_has_no_sharpe_rather_than_an_infinite_one(self):
+        flat = [1.0] * 30
+        rets = _daily_returns(flat)
+        assert len(rets) == 29
+        st = annualized_stats(rets, periods_per_year=TRADING_DAYS)
+        assert st.sharpe is None and st.sortino is None      # 0/0 is undefined, not infinite
+
+    def test_a_never_down_curve_has_no_sortino(self):
+        """Sortino's denominator is downside deviation. A series that never fell has none —
+        that is 'undefined', and rendering it as a very large number would be a lie about a
+        portfolio's risk."""
+        rising = [1.0 + 0.001 * i for i in range(40)]
+        st = annualized_stats(_daily_returns(rising), periods_per_year=TRADING_DAYS)
+        assert st.sortino is None
+        assert st.sharpe is not None                          # vol is real; downside isn't

@@ -6,7 +6,7 @@ series (once per asset). Idempotent — safe to re-run over the same ISIN list."
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from deps import supabase
 
@@ -225,6 +225,101 @@ def store_series(analysis_id: int, symbol: str, first_ts: int | None) -> int:
     except Exception:  # noqa: BLE001
         pass
     supabase.table("asset_analysis").update(upd).eq("analysis_id", analysis_id).execute()
+    return stored
+
+
+def extend_series(analysis_id: int, symbol: str, since: str) -> int | None:
+    """Fetch ONLY the bars after `since` and append them. Returns rows stored, or None when the
+    caller must fall back to a full `store_series` (see below).
+
+    ⚠ WHY THIS IS NOT JUST `store_series` WITH A LATER `first_ts`.
+        `store_series` derives the grid's denormalized coverage stats — `price_from`, `bars`,
+        `zero_vol_frac` — FROM THE ROWS IT JUST FETCHED, and rewrites the parquet archive from
+        the same window. Hand it a two-week window and it will faithfully record that Meta
+        Platforms has 8 bars beginning in July 2026, and truncate its archive to match. The stats
+        are not a cache of the series; they ARE what `asset_grid` reads (they exist because the
+        correlated subqueries over 14M rows blew the statement timeout).
+
+        So an incremental append MUST recompute those stats from the DATABASE, over the whole
+        series, not from the slice it happened to fetch. That is what this does — one grouped
+        query — and it needs the COPY path to do it exactly. Without COPY it returns None rather
+        than guessing, and the caller re-runs the full path: slower, correct, never wrong.
+
+    The parquet archive is deliberately left alone (it is a full-history artifact and this only
+    saw a window; AlphaLab reads `asset_price` via COPY, not parquet). It therefore lags an
+    incremental refresh — worth knowing before anything starts trusting it as current.
+
+    Why it matters: refreshing 197 stale held instruments through `store_series` re-downloads and
+    re-upserts every bar of every one of them — decades of history — to add eight days.
+    """
+    from common.pg import _run_copy  # noqa: PLC0415
+
+    # Start a few days before the last stored close: Yahoo's window is inclusive-ish and a
+    # re-fetched overlapping bar is an idempotent upsert, whereas a missed one is a hole.
+    start = datetime.fromisoformat(since).replace(tzinfo=timezone.utc) - timedelta(days=5)
+    w = yahoo.chart_window(symbol, int(start.timestamp()), int(time.time()), "1d")
+    if not w:
+        return 0
+
+    ts = w.get("timestamp") or []
+    q = ((w.get("indicators") or {}).get("quote") or [{}])[0]
+    closes = q.get("close") or []
+    series = {ykey: (q.get(ykey) or []) for ykey, _col in STORED_FIELDS}
+    rows = []
+    for i in range(len(ts)):
+        c = closes[i] if i < len(closes) else None
+        if c is None or not yahoo.is_closed_bar(ts[i]):
+            continue
+        row: dict = {
+            "analysis_id": analysis_id,
+            "target_date": yahoo.utc_dt(ts[i]).date().isoformat(),
+        }
+        for ykey, col in STORED_FIELDS:
+            arr = series[ykey]
+            val = arr[i] if i < len(arr) else None
+            if col == "volume" and val is None:
+                val = 0
+            row[col] = val
+        rows.append(row)
+    # NOT `trim_leading_no_volume` — that trims the head of a FULL series (the settlement-only
+    # backfill). Here the "head" is just wherever this window happens to start, and trimming it
+    # would silently drop real bars.
+
+    stored = 0
+    for i in range(0, len(rows), _CHUNK):
+        supabase.table("asset_price").upsert(
+            rows[i:i + _CHUNK], on_conflict="analysis_id,target_date",
+        ).execute()
+        stored += len(rows[i:i + _CHUNK])
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    supabase.table("asset_price").delete().eq("analysis_id", analysis_id).gte(
+        "target_date", today).execute()
+
+    # Stats over the WHOLE stored series, from the DB. Anything else corrupts the grid.
+    buf = _run_copy(
+        "COPY (SELECT min(target_date)::text, max(target_date)::text, count(*), "
+        "min(target_date) FILTER (WHERE volume > 0)::text, "
+        "max(target_date) FILTER (WHERE volume > 0)::text, "
+        "count(*) FILTER (WHERE coalesce(volume, 0) = 0) "
+        "FROM asset_price WHERE analysis_id = %s AND close IS NOT NULL) TO STDOUT WITH CSV",
+        (analysis_id,),
+    )
+    if buf is None:
+        return None                       # no exact stats -> caller falls back to the full path
+
+    line = buf.getvalue().decode().strip()
+    if not line:
+        return stored
+    p_from, p_to, n, v_from, v_to, n_zero = line.split(",")
+    if not n or int(n) == 0:
+        return stored
+    supabase.table("asset_analysis").update({
+        "updated_at": _now_iso(),
+        "price_from": p_from, "price_to": p_to, "bars": int(n),
+        "volume_from": v_from or None, "volume_to": v_to or None,
+        "zero_vol_frac": round(int(n_zero) / int(n), 6),
+    }).eq("analysis_id", analysis_id).execute()
     return stored
 
 

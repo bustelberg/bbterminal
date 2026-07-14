@@ -542,6 +542,193 @@
         "title": "AssetWeight",
         "type": "object"
       },
+      "AttributionBucket": {
+        "properties": {
+          "allocation_pct": {
+            "default": 0.0,
+            "title": "Allocation Pct",
+            "type": "number"
+          },
+          "benchmark_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Return Pct"
+          },
+          "benchmark_weight_pct": {
+            "default": 0.0,
+            "title": "Benchmark Weight Pct",
+            "type": "number"
+          },
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "interaction_pct": {
+            "default": 0.0,
+            "title": "Interaction Pct",
+            "type": "number"
+          },
+          "portfolio_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Return Pct"
+          },
+          "portfolio_weight_pct": {
+            "default": 0.0,
+            "title": "Portfolio Weight Pct",
+            "type": "number"
+          },
+          "selection_pct": {
+            "default": 0.0,
+            "title": "Selection Pct",
+            "type": "number"
+          },
+          "total_pct": {
+            "default": 0.0,
+            "title": "Total Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "bucket"
+        ],
+        "title": "AttributionBucket",
+        "type": "object"
+      },
+      "AttributionExcluded": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Pct"
+          },
+          "weight_pct": {
+            "default": 0.0,
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "bucket"
+        ],
+        "title": "AttributionExcluded",
+        "type": "object"
+      },
+      "AttributionName": {
+        "properties": {
+          "contribution_pct": {
+            "default": 0.0,
+            "title": "Contribution Pct",
+            "type": "number"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Pct"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          },
+          "weight_pct": {
+            "default": 0.0,
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "title": "AttributionName",
+        "type": "object"
+      },
       "BacktestRequest": {
         "properties": {
           "backfill_below_min_score": {
@@ -2667,9 +2854,307 @@
         "title": "MemberRow",
         "type": "object"
       },
-      "ModelPortfolioPerformance": {
-        "description": "One model portfolio's YTD, in EUR.\n\n\u26a0 `ytd_pct` is a buy-and-hold of the composition WE HOLD, which is the CURRENT one. AIRS\nkeeps only 2-3 snapshot dates and no monthly history, so the January composition is not\nrecoverable. Read `model_changed_in_period` before trusting the number:\n\n  * false (29 of 56) \u2014 the model has held these weights since before Jan 1, so this IS\n    what it earned.\n  * true  (27 of 56) \u2014 the weights are NEWER than the window. Applying them back to Jan 1\n    backtests a basket chosen knowing how the year went. Measured: MoTopSelectie_FX shows\n    +75.85% YTD on a model defined 8 DAYS AGO \u2014 its return since that model took effect\n    is +0.86%.\n\n`since_model_pct` is that honest number: the return since the composition's own effective\ndate. It never borrows hindsight, for any portfolio.\n\n`ytd_pct` is NULL when `low_coverage` \u2014 under 60% of the model's weight is priceable, so a\nrenormalised return would be an invention (TOPS_OFF_BEH once reported \"+0.00%\" off its 1%\ncash line while 99% of it, in structured products, was silently dropped).",
+      "ModelPortfolioAnalysis": {
+        "description": "A model portfolio's composition beside a benchmark's, on ONE set of buckets.\n\nBoth sides are classified from `asset_grid`'s yfinance attributes, joined by ISIN \u2014 the\nportfolio lives in the ISIN world and the benchmark in the `company` world, and putting two\ndifferent sector taxonomies in one chart invents differences that are not there. (All 493\nSP500 members are present in `asset_grid` with a sector, so nothing is lost.)\n\n\u26a0 FUNDS ARE NOT LOOKED THROUGH, and the payload says so rather than pretending. An ETF's\nlisting tells you nothing about what it holds \u2014 24 of the 26 held ETFs have a \"sector\" of\nliterally `etf` or `Equity`; an Amsterdam-listed MSCI World ETF is not European exposure; and\nquoted in EUR it still holds mostly USD assets. So every fund lands in ONE bucket, \"Fund (not\nlooked through)\", on ALL THREE axes. A 40%-ETF portfolio shows a 40% bar that means \"we\ncannot see inside this\" \u2014 true, and more useful than a confident wrong split.",
         "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "axes": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PortfolioAnalysisAxis"
+            },
+            "title": "Axes",
+            "type": "array"
+          },
+          "benchmark": {
+            "title": "Benchmark",
+            "type": "string"
+          },
+          "benchmark_coverage_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Coverage Pct"
+          },
+          "benchmark_covered_pct": {
+            "default": 0.0,
+            "title": "Benchmark Covered Pct",
+            "type": "number"
+          },
+          "benchmark_foreign_listings": {
+            "default": 0,
+            "title": "Benchmark Foreign Listings",
+            "type": "integer"
+          },
+          "benchmark_members": {
+            "default": 0,
+            "title": "Benchmark Members",
+            "type": "integer"
+          },
+          "benchmark_priced": {
+            "default": 0,
+            "title": "Benchmark Priced",
+            "type": "integer"
+          },
+          "benchmark_universe_members": {
+            "default": 0,
+            "title": "Benchmark Universe Members",
+            "type": "integer"
+          },
+          "covered_pct": {
+            "default": 0.0,
+            "title": "Covered Pct",
+            "type": "number"
+          },
+          "foreign_listings": {
+            "default": 0,
+            "title": "Foreign Listings",
+            "type": "integer"
+          },
+          "holdings": {
+            "default": 0,
+            "title": "Holdings",
+            "type": "integer"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "portfolio_id": {
+            "title": "Portfolio Id",
+            "type": "integer"
+          },
+          "returns": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PortfolioAnalysisReturns"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "portfolio_id",
+          "benchmark"
+        ],
+        "title": "ModelPortfolioAnalysis",
+        "type": "object"
+      },
+      "ModelPortfolioAttribution": {
+        "description": "WHY a model beat or lagged the index \u2014 Brinson-Fachler, plus the names that drove it.\n\nAn excess return is a fact, not an explanation: \"-11.60% vs ACWI\" says nothing about whether\nthe failed bet was the SECTORS chosen or the STOCKS chosen inside them. Those are different\nmistakes with different fixes.\n\n    allocation  = (w_p - w_b) x (R_b,bucket - R_b_total)   the right buckets?\n    selection   =  w_b        x (R_p,bucket - R_b,bucket)  the right names inside them?\n    interaction = the cross term\n\n\u26a0 THE IDENTITY IS ASSERTED, NOT ASSUMED: sum(allocation + selection + interaction) == excess.\n`residual_pct` and `reconciles` carry the proof. Three columns that do not sum to the excess\nare not a decomposition of it.\n\n\u26a0 FUNDS AND CASH ARE EXCLUDED. An ETF has no sector \u2014 the benchmark's weight in the fund\nbucket is zero, so Brinson would report holding a world tracker as a *sector bet*.\n`attributable_pct` says how much of the model the table explains.\n\n\u26a0 `unpriced_pct` IS NOT THE SAME AS `excluded_pct`, AND IT IS THE DANGEROUS ONE. A fund is\nexcluded because it is not a sector bet. An UNPRICED equity is excluded because we failed to\nprice it \u2014 and its sector then reads as UNOWNED, so the allocation effect on that row is a\nFALSE finding. (Measured: a model holding 6% Healthcare, unpriceable, was credited +1.73pp of\nallocation for \"avoiding\" Healthcare.) `unpriced_buckets` names the rows to discount.",
+        "properties": {
+          "attributable_pct": {
+            "default": 0.0,
+            "title": "Attributable Pct",
+            "type": "number"
+          },
+          "attributed_pct": {
+            "default": 0.0,
+            "title": "Attributed Pct",
+            "type": "number"
+          },
+          "axis": {
+            "title": "Axis",
+            "type": "string"
+          },
+          "benchmark": {
+            "title": "Benchmark",
+            "type": "string"
+          },
+          "benchmark_coverage_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Coverage Pct"
+          },
+          "benchmark_return_pct": {
+            "default": 0.0,
+            "title": "Benchmark Return Pct",
+            "type": "number"
+          },
+          "excess_pct": {
+            "default": 0.0,
+            "title": "Excess Pct",
+            "type": "number"
+          },
+          "excluded": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AttributionExcluded"
+            },
+            "title": "Excluded",
+            "type": "array"
+          },
+          "excluded_pct": {
+            "default": 0.0,
+            "title": "Excluded Pct",
+            "type": "number"
+          },
+          "excluded_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Excluded Return Pct"
+          },
+          "missed_winners": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AttributionName"
+            },
+            "title": "Missed Winners",
+            "type": "array"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "portfolio_id": {
+            "title": "Portfolio Id",
+            "type": "integer"
+          },
+          "portfolio_return_pct": {
+            "default": 0.0,
+            "title": "Portfolio Return Pct",
+            "type": "number"
+          },
+          "reconciles": {
+            "default": false,
+            "title": "Reconciles",
+            "type": "boolean"
+          },
+          "residual_pct": {
+            "default": 0.0,
+            "title": "Residual Pct",
+            "type": "number"
+          },
+          "rows": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AttributionBucket"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "top_contributors": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AttributionName"
+            },
+            "title": "Top Contributors",
+            "type": "array"
+          },
+          "top_detractors": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AttributionName"
+            },
+            "title": "Top Detractors",
+            "type": "array"
+          },
+          "unpriced_buckets": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Unpriced Buckets",
+            "type": "array"
+          },
+          "unpriced_pct": {
+            "default": 0.0,
+            "title": "Unpriced Pct",
+            "type": "number"
+          },
+          "window": {
+            "title": "Window",
+            "type": "string"
+          }
+        },
+        "required": [
+          "portfolio_id",
+          "benchmark",
+          "window",
+          "axis"
+        ],
+        "title": "ModelPortfolioAttribution",
+        "type": "object"
+      },
+      "ModelPortfolioPerformance": {
+        "description": "One model portfolio's performance, in EUR: YTD, since-inception, Sharpe, Sortino.\n\n\u26a0 `ytd_pct` IS NOT ALWAYS A FULL YEAR. It is a buy-and-hold of the composition WE HOLD,\nwhich is the CURRENT one \u2014 AIRS keeps only 2-3 snapshot dates and no monthly history, so\nJanuary's composition is not recoverable. The window therefore opens at\n`max(Jan 1, inception)`, never before the weights existed, and `ytd_from` is that date:\n\n  * `model_changed_in_period` false (29 of 56) \u2014 the model has held these weights since\n    before Jan 1. `ytd_from` is Jan 1 and this is a true, full YTD.\n  * true (27 of 56) \u2014 the model is YOUNGER than the year, so `ytd_from` is its inception\n    and the figure covers a PARTIAL year. Realized, not backtested \u2014 but do not rank it\n    against a 12-month return without noticing (MoTopSelectie_FX has held its weights for\n    eight days: +0.51%. Priced back to Jan 1 it would read +75.85%, on a basket it never\n    held, and be the best portfolio in the list).\n\n`since_model_pct` is the same composition's return over its WHOLE life (`model_effective` \u2014\nits inception), not clipped to this year. For a model younger than the year the two windows\ncoincide and the two numbers are equal, by construction.\n\n`sharpe` / `sortino` ride that SAME window, annualized from the daily EUR curve at rf = 0.\nA ratio is only as honest as the return underneath it, and a YTD-anchored one is a backtest\nfor half the list. They are NULL \u2014 not zero \u2014 below `MIN_STAT_DAYS` (20) daily returns: a\nratio off a model defined last week is noise with two decimals, and it would render in the\nsame column, same font, as one measured over two years. `stat_days` is how many it had.\n\n`ytd_pct` is NULL when `low_coverage` \u2014 under 60% of the model's weight is priceable, so a\nrenormalised return would be an invention (TOPS_OFF_BEH once reported \"+0.00%\" off its 1%\ncash line while 99% of it, in structured products, was silently dropped). The since-\ninception figures carry their OWN floor (`since_covered_pct`), because a holding that had\nnot listed yet at inception is unpriceable there whatever its coverage at Jan 1 was.",
+        "properties": {
+          "ann_vol_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ann Vol Pct"
+          },
+          "cagr_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cagr Pct"
+          },
           "cash_pct": {
             "default": 0.0,
             "title": "Cash Pct",
@@ -2685,6 +3170,11 @@
               }
             ],
             "title": "Covered Pct"
+          },
+          "interpolated_holdings": {
+            "default": 0,
+            "title": "Interpolated Holdings",
+            "type": "integer"
           },
           "low_coverage": {
             "default": false,
@@ -2725,6 +3215,33 @@
             "title": "Priced Holdings",
             "type": "integer"
           },
+          "resolved_holdings": {
+            "default": 0,
+            "title": "Resolved Holdings",
+            "type": "integer"
+          },
+          "sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe"
+          },
+          "since_covered_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since Covered Pct"
+          },
           "since_model_pct": {
             "anyOf": [
               {
@@ -2736,10 +3253,53 @@
             ],
             "title": "Since Model Pct"
           },
+          "sortino": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sortino"
+          },
+          "stat_days": {
+            "default": 0,
+            "title": "Stat Days",
+            "type": "integer"
+          },
           "unpriced_holdings": {
             "default": 0,
             "title": "Unpriced Holdings",
             "type": "integer"
+          },
+          "unresolved_holdings": {
+            "default": 0,
+            "title": "Unresolved Holdings",
+            "type": "integer"
+          },
+          "years_running": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Years Running"
+          },
+          "ytd_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ytd From"
           },
           "ytd_pct": {
             "anyOf": [
@@ -2761,7 +3321,7 @@
         "type": "object"
       },
       "ModelPortfolioPosition": {
-        "description": "One row of the portfolio's XLS export. `isin` is the point of the whole exercise \u2014\nit is the exact join into `asset_execution`, and it's the identifier the AIRS\n*holdings* sheet never gave us (that one only has a fund NAME).",
+        "description": "One row of the portfolio's XLS export. `isin` is the point of the whole exercise \u2014\nit is the exact join into `asset_execution`, and it's the identifier the AIRS\n*holdings* sheet never gave us (that one only has a fund NAME).\n\nThe price marks are the ARITHMETIC BEHIND the portfolio's YTD, one holding at a time: each\nis bought at its last close on or before `ytd_from` and held to its latest close, and\n`return_pct` is exactly the quantity the portfolio figure weights together.\n\n\u26a0 `start_price_eur` / `end_price_eur` are in EUR, not the listing's currency, because\n`return_pct` is an EUR return and carries the FX leg. Printing the native closes as the\narithmetic would show two numbers whose ratio is not the third \u2014 a USD holding can rise in\ndollars and fall in euros. The native closes ride along (`*_price_local`, `currency`) for a\ntooltip, never as the sum.\n\nAll of them are NULL for a holding with no price series (an unresolved ETF, a structured\nproduct) and for the cash line \u2014 which has no ISIN, and is not an instrument.",
         "properties": {
           "categorie": {
             "anyOf": [
@@ -2773,6 +3333,50 @@
               }
             ],
             "title": "Categorie"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Date"
+          },
+          "end_price_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Price Eur"
+          },
+          "end_price_local": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Price Local"
           },
           "fonds": {
             "anyOf": [
@@ -2801,6 +3405,17 @@
             "title": "Known Instrument",
             "type": "boolean"
           },
+          "last_close": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Close"
+          },
           "percentage": {
             "anyOf": [
               {
@@ -2823,6 +3438,17 @@
             ],
             "title": "Regio"
           },
+          "return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Pct"
+          },
           "sector": {
             "anyOf": [
               {
@@ -2833,6 +3459,49 @@
               }
             ],
             "title": "Sector"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Date"
+          },
+          "start_gap_days": {
+            "default": 0,
+            "title": "Start Gap Days",
+            "type": "integer"
+          },
+          "start_interpolated": {
+            "default": false,
+            "title": "Start Interpolated",
+            "type": "boolean"
+          },
+          "start_price_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Price Eur"
+          },
+          "start_price_local": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Price Local"
           },
           "valuta": {
             "anyOf": [
@@ -2902,6 +3571,17 @@
           "unmatched": {
             "title": "Unmatched",
             "type": "integer"
+          },
+          "ytd_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ytd From"
           }
         },
         "required": [
@@ -3189,6 +3869,155 @@
           "annual"
         ],
         "title": "OptimizeResponse",
+        "type": "object"
+      },
+      "PortfolioAnalysisAxis": {
+        "properties": {
+          "axis": {
+            "title": "Axis",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/PortfolioAnalysisRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "axis",
+          "rows"
+        ],
+        "title": "PortfolioAnalysisAxis",
+        "type": "object"
+      },
+      "PortfolioAnalysisReturns": {
+        "description": "The model's EUR return beside the benchmark's \u2014 over the SAME windows, both times.\n\n\u26a0 A BENCHMARK MEASURED OVER A DIFFERENT WINDOW IS NOT A BENCHMARK, IT IS A NUMBER. A model's\n\"YTD\" opens at `max(1 Jan, its inception)`, and for the 27 models younger than the year that\nis NOT 1 January. Putting a 9-day portfolio return beside the index's full-year return and\ncalling the gap out-performance would be nonsense that looks exactly like a finding. So the\nindex is priced from the model's OWN `ytd_from`, and again from its OWN inception.\n\n`ytd_is_since` is true when the model is younger than the year: the two windows coincide, so\nthe two rows are the same number by construction, and the UI says so.",
+        "properties": {
+          "benchmark_since_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Since Pct"
+          },
+          "benchmark_ytd_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Ytd Pct"
+          },
+          "portfolio_since_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Since Pct"
+          },
+          "portfolio_ytd_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Ytd Pct"
+          },
+          "since_excess_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since Excess Pct"
+          },
+          "since_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since From"
+          },
+          "ytd_excess_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ytd Excess Pct"
+          },
+          "ytd_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ytd From"
+          },
+          "ytd_is_since": {
+            "default": false,
+            "title": "Ytd Is Since",
+            "type": "boolean"
+          }
+        },
+        "title": "PortfolioAnalysisReturns",
+        "type": "object"
+      },
+      "PortfolioAnalysisRow": {
+        "properties": {
+          "benchmark_pct": {
+            "default": 0.0,
+            "title": "Benchmark Pct",
+            "type": "number"
+          },
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "diff_pct": {
+            "default": 0.0,
+            "title": "Diff Pct",
+            "type": "number"
+          },
+          "portfolio_pct": {
+            "default": 0.0,
+            "title": "Portfolio Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "bucket"
+        ],
+        "title": "PortfolioAnalysisRow",
         "type": "object"
       },
       "PortfolioCreate": {
@@ -6653,6 +7482,132 @@
           }
         },
         "summary": "Airs Model Portfolios Scan",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/model-portfolios/{portfolio_id}/analysis": {
+      "get": {
+        "description": "Sector / region / currency split of one model portfolio, beside the benchmark's.",
+        "operationId": "airs_model_portfolio_analysis_api_airs_model_portfolios__portfolio_id__analysis_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "SP500",
+              "title": "Benchmark",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelPortfolioAnalysis"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Model Portfolio Analysis",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/model-portfolios/{portfolio_id}/attribution": {
+      "get": {
+        "description": "Brinson-Fachler attribution of one model against a benchmark, over one window.",
+        "operationId": "airs_model_portfolio_attribution_api_airs_model_portfolios__portfolio_id__attribution_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "SP500",
+              "title": "Benchmark",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "default": "ytd",
+              "title": "Window",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "axis",
+            "required": false,
+            "schema": {
+              "default": "sector",
+              "title": "Axis",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelPortfolioAttribution"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Model Portfolio Attribution",
         "tags": [
           "airs"
         ]

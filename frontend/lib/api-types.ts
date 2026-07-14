@@ -871,6 +871,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/model-portfolios/{portfolio_id}/analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Model Portfolio Analysis
+         * @description Sector / region / currency split of one model portfolio, beside the benchmark's.
+         */
+        get: operations["airs_model_portfolio_analysis_api_airs_model_portfolios__portfolio_id__analysis_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolios/{portfolio_id}/attribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Model Portfolio Attribution
+         * @description Brinson-Fachler attribution of one model against a benchmark, over one window.
+         */
+        get: operations["airs_model_portfolio_attribution_api_airs_model_portfolios__portfolio_id__attribution_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/model-portfolios/{portfolio_id}/positions": {
         parameters: {
             query?: never;
@@ -5521,6 +5561,84 @@ export interface components {
             /** Weight */
             weight: number;
         };
+        /** AttributionBucket */
+        AttributionBucket: {
+            /**
+             * Allocation Pct
+             * @default 0
+             */
+            allocation_pct?: number;
+            /** Benchmark Return Pct */
+            benchmark_return_pct?: number | null;
+            /**
+             * Benchmark Weight Pct
+             * @default 0
+             */
+            benchmark_weight_pct?: number;
+            /** Bucket */
+            bucket: string;
+            /**
+             * Interaction Pct
+             * @default 0
+             */
+            interaction_pct?: number;
+            /** Portfolio Return Pct */
+            portfolio_return_pct?: number | null;
+            /**
+             * Portfolio Weight Pct
+             * @default 0
+             */
+            portfolio_weight_pct?: number;
+            /**
+             * Selection Pct
+             * @default 0
+             */
+            selection_pct?: number;
+            /**
+             * Total Pct
+             * @default 0
+             */
+            total_pct?: number;
+        };
+        /** AttributionExcluded */
+        AttributionExcluded: {
+            /** Bucket */
+            bucket: string;
+            /** Isin */
+            isin?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Return Pct */
+            return_pct?: number | null;
+            /**
+             * Weight Pct
+             * @default 0
+             */
+            weight_pct?: number;
+        };
+        /** AttributionName */
+        AttributionName: {
+            /**
+             * Contribution Pct
+             * @default 0
+             */
+            contribution_pct?: number;
+            /** Isin */
+            isin?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Return Pct */
+            return_pct?: number | null;
+            /** Ticker */
+            ticker?: string | null;
+            /**
+             * Weight Pct
+             * @default 0
+             */
+            weight_pct?: number;
+        };
         /** BacktestRequest */
         BacktestRequest: {
             /**
@@ -6294,28 +6412,236 @@ export interface components {
             ticker?: string | null;
         };
         /**
+         * ModelPortfolioAnalysis
+         * @description A model portfolio's composition beside a benchmark's, on ONE set of buckets.
+         *
+         *     Both sides are classified from `asset_grid`'s yfinance attributes, joined by ISIN — the
+         *     portfolio lives in the ISIN world and the benchmark in the `company` world, and putting two
+         *     different sector taxonomies in one chart invents differences that are not there. (All 493
+         *     SP500 members are present in `asset_grid` with a sector, so nothing is lost.)
+         *
+         *     ⚠ FUNDS ARE NOT LOOKED THROUGH, and the payload says so rather than pretending. An ETF's
+         *     listing tells you nothing about what it holds — 24 of the 26 held ETFs have a "sector" of
+         *     literally `etf` or `Equity`; an Amsterdam-listed MSCI World ETF is not European exposure; and
+         *     quoted in EUR it still holds mostly USD assets. So every fund lands in ONE bucket, "Fund (not
+         *     looked through)", on ALL THREE axes. A 40%-ETF portfolio shows a 40% bar that means "we
+         *     cannot see inside this" — true, and more useful than a confident wrong split.
+         */
+        ModelPortfolioAnalysis: {
+            /** As Of */
+            as_of?: string | null;
+            /**
+             * Axes
+             * @default []
+             */
+            axes?: components["schemas"]["PortfolioAnalysisAxis"][];
+            /** Benchmark */
+            benchmark: string;
+            /** Benchmark Coverage Pct */
+            benchmark_coverage_pct?: number | null;
+            /**
+             * Benchmark Covered Pct
+             * @default 0
+             */
+            benchmark_covered_pct?: number;
+            /**
+             * Benchmark Foreign Listings
+             * @default 0
+             */
+            benchmark_foreign_listings?: number;
+            /**
+             * Benchmark Members
+             * @default 0
+             */
+            benchmark_members?: number;
+            /**
+             * Benchmark Priced
+             * @default 0
+             */
+            benchmark_priced?: number;
+            /**
+             * Benchmark Universe Members
+             * @default 0
+             */
+            benchmark_universe_members?: number;
+            /**
+             * Covered Pct
+             * @default 0
+             */
+            covered_pct?: number;
+            /**
+             * Foreign Listings
+             * @default 0
+             */
+            foreign_listings?: number;
+            /**
+             * Holdings
+             * @default 0
+             */
+            holdings?: number;
+            /** Name */
+            name?: string | null;
+            /** Portfolio Id */
+            portfolio_id: number;
+            returns?: components["schemas"]["PortfolioAnalysisReturns"] | null;
+        };
+        /**
+         * ModelPortfolioAttribution
+         * @description WHY a model beat or lagged the index — Brinson-Fachler, plus the names that drove it.
+         *
+         *     An excess return is a fact, not an explanation: "-11.60% vs ACWI" says nothing about whether
+         *     the failed bet was the SECTORS chosen or the STOCKS chosen inside them. Those are different
+         *     mistakes with different fixes.
+         *
+         *         allocation  = (w_p - w_b) x (R_b,bucket - R_b_total)   the right buckets?
+         *         selection   =  w_b        x (R_p,bucket - R_b,bucket)  the right names inside them?
+         *         interaction = the cross term
+         *
+         *     ⚠ THE IDENTITY IS ASSERTED, NOT ASSUMED: sum(allocation + selection + interaction) == excess.
+         *     `residual_pct` and `reconciles` carry the proof. Three columns that do not sum to the excess
+         *     are not a decomposition of it.
+         *
+         *     ⚠ FUNDS AND CASH ARE EXCLUDED. An ETF has no sector — the benchmark's weight in the fund
+         *     bucket is zero, so Brinson would report holding a world tracker as a *sector bet*.
+         *     `attributable_pct` says how much of the model the table explains.
+         *
+         *     ⚠ `unpriced_pct` IS NOT THE SAME AS `excluded_pct`, AND IT IS THE DANGEROUS ONE. A fund is
+         *     excluded because it is not a sector bet. An UNPRICED equity is excluded because we failed to
+         *     price it — and its sector then reads as UNOWNED, so the allocation effect on that row is a
+         *     FALSE finding. (Measured: a model holding 6% Healthcare, unpriceable, was credited +1.73pp of
+         *     allocation for "avoiding" Healthcare.) `unpriced_buckets` names the rows to discount.
+         */
+        ModelPortfolioAttribution: {
+            /**
+             * Attributable Pct
+             * @default 0
+             */
+            attributable_pct?: number;
+            /**
+             * Attributed Pct
+             * @default 0
+             */
+            attributed_pct?: number;
+            /** Axis */
+            axis: string;
+            /** Benchmark */
+            benchmark: string;
+            /** Benchmark Coverage Pct */
+            benchmark_coverage_pct?: number | null;
+            /**
+             * Benchmark Return Pct
+             * @default 0
+             */
+            benchmark_return_pct?: number;
+            /**
+             * Excess Pct
+             * @default 0
+             */
+            excess_pct?: number;
+            /**
+             * Excluded
+             * @default []
+             */
+            excluded?: components["schemas"]["AttributionExcluded"][];
+            /**
+             * Excluded Pct
+             * @default 0
+             */
+            excluded_pct?: number;
+            /** Excluded Return Pct */
+            excluded_return_pct?: number | null;
+            /**
+             * Missed Winners
+             * @default []
+             */
+            missed_winners?: components["schemas"]["AttributionName"][];
+            /** Name */
+            name?: string | null;
+            /** Portfolio Id */
+            portfolio_id: number;
+            /**
+             * Portfolio Return Pct
+             * @default 0
+             */
+            portfolio_return_pct?: number;
+            /**
+             * Reconciles
+             * @default false
+             */
+            reconciles?: boolean;
+            /**
+             * Residual Pct
+             * @default 0
+             */
+            residual_pct?: number;
+            /**
+             * Rows
+             * @default []
+             */
+            rows?: components["schemas"]["AttributionBucket"][];
+            /** Start */
+            start?: string | null;
+            /**
+             * Top Contributors
+             * @default []
+             */
+            top_contributors?: components["schemas"]["AttributionName"][];
+            /**
+             * Top Detractors
+             * @default []
+             */
+            top_detractors?: components["schemas"]["AttributionName"][];
+            /**
+             * Unpriced Buckets
+             * @default []
+             */
+            unpriced_buckets?: string[];
+            /**
+             * Unpriced Pct
+             * @default 0
+             */
+            unpriced_pct?: number;
+            /** Window */
+            window: string;
+        };
+        /**
          * ModelPortfolioPerformance
-         * @description One model portfolio's YTD, in EUR.
+         * @description One model portfolio's performance, in EUR: YTD, since-inception, Sharpe, Sortino.
          *
-         *     ⚠ `ytd_pct` is a buy-and-hold of the composition WE HOLD, which is the CURRENT one. AIRS
-         *     keeps only 2-3 snapshot dates and no monthly history, so the January composition is not
-         *     recoverable. Read `model_changed_in_period` before trusting the number:
+         *     ⚠ `ytd_pct` IS NOT ALWAYS A FULL YEAR. It is a buy-and-hold of the composition WE HOLD,
+         *     which is the CURRENT one — AIRS keeps only 2-3 snapshot dates and no monthly history, so
+         *     January's composition is not recoverable. The window therefore opens at
+         *     `max(Jan 1, inception)`, never before the weights existed, and `ytd_from` is that date:
          *
-         *       * false (29 of 56) — the model has held these weights since before Jan 1, so this IS
-         *         what it earned.
-         *       * true  (27 of 56) — the weights are NEWER than the window. Applying them back to Jan 1
-         *         backtests a basket chosen knowing how the year went. Measured: MoTopSelectie_FX shows
-         *         +75.85% YTD on a model defined 8 DAYS AGO — its return since that model took effect
-         *         is +0.86%.
+         *       * `model_changed_in_period` false (29 of 56) — the model has held these weights since
+         *         before Jan 1. `ytd_from` is Jan 1 and this is a true, full YTD.
+         *       * true (27 of 56) — the model is YOUNGER than the year, so `ytd_from` is its inception
+         *         and the figure covers a PARTIAL year. Realized, not backtested — but do not rank it
+         *         against a 12-month return without noticing (MoTopSelectie_FX has held its weights for
+         *         eight days: +0.51%. Priced back to Jan 1 it would read +75.85%, on a basket it never
+         *         held, and be the best portfolio in the list).
          *
-         *     `since_model_pct` is that honest number: the return since the composition's own effective
-         *     date. It never borrows hindsight, for any portfolio.
+         *     `since_model_pct` is the same composition's return over its WHOLE life (`model_effective` —
+         *     its inception), not clipped to this year. For a model younger than the year the two windows
+         *     coincide and the two numbers are equal, by construction.
+         *
+         *     `sharpe` / `sortino` ride that SAME window, annualized from the daily EUR curve at rf = 0.
+         *     A ratio is only as honest as the return underneath it, and a YTD-anchored one is a backtest
+         *     for half the list. They are NULL — not zero — below `MIN_STAT_DAYS` (20) daily returns: a
+         *     ratio off a model defined last week is noise with two decimals, and it would render in the
+         *     same column, same font, as one measured over two years. `stat_days` is how many it had.
          *
          *     `ytd_pct` is NULL when `low_coverage` — under 60% of the model's weight is priceable, so a
          *     renormalised return would be an invention (TOPS_OFF_BEH once reported "+0.00%" off its 1%
-         *     cash line while 99% of it, in structured products, was silently dropped).
+         *     cash line while 99% of it, in structured products, was silently dropped). The since-
+         *     inception figures carry their OWN floor (`since_covered_pct`), because a holding that had
+         *     not listed yet at inception is unpriceable there whatever its coverage at Jan 1 was.
          */
         ModelPortfolioPerformance: {
+            /** Ann Vol Pct */
+            ann_vol_pct?: number | null;
+            /** Cagr Pct */
+            cagr_pct?: number | null;
             /**
              * Cash Pct
              * @default 0
@@ -6323,6 +6649,11 @@ export interface components {
             cash_pct?: number;
             /** Covered Pct */
             covered_pct?: number | null;
+            /**
+             * Interpolated Holdings
+             * @default 0
+             */
+            interpolated_holdings?: number;
             /**
              * Low Coverage
              * @default false
@@ -6349,13 +6680,38 @@ export interface components {
              * @default 0
              */
             priced_holdings?: number;
+            /**
+             * Resolved Holdings
+             * @default 0
+             */
+            resolved_holdings?: number;
+            /** Sharpe */
+            sharpe?: number | null;
+            /** Since Covered Pct */
+            since_covered_pct?: number | null;
             /** Since Model Pct */
             since_model_pct?: number | null;
+            /** Sortino */
+            sortino?: number | null;
+            /**
+             * Stat Days
+             * @default 0
+             */
+            stat_days?: number;
             /**
              * Unpriced Holdings
              * @default 0
              */
             unpriced_holdings?: number;
+            /**
+             * Unresolved Holdings
+             * @default 0
+             */
+            unresolved_holdings?: number;
+            /** Years Running */
+            years_running?: number | null;
+            /** Ytd From */
+            ytd_from?: string | null;
             /** Ytd Pct */
             ytd_pct?: number | null;
         };
@@ -6364,10 +6720,31 @@ export interface components {
          * @description One row of the portfolio's XLS export. `isin` is the point of the whole exercise —
          *     it is the exact join into `asset_execution`, and it's the identifier the AIRS
          *     *holdings* sheet never gave us (that one only has a fund NAME).
+         *
+         *     The price marks are the ARITHMETIC BEHIND the portfolio's YTD, one holding at a time: each
+         *     is bought at its last close on or before `ytd_from` and held to its latest close, and
+         *     `return_pct` is exactly the quantity the portfolio figure weights together.
+         *
+         *     ⚠ `start_price_eur` / `end_price_eur` are in EUR, not the listing's currency, because
+         *     `return_pct` is an EUR return and carries the FX leg. Printing the native closes as the
+         *     arithmetic would show two numbers whose ratio is not the third — a USD holding can rise in
+         *     dollars and fall in euros. The native closes ride along (`*_price_local`, `currency`) for a
+         *     tooltip, never as the sum.
+         *
+         *     All of them are NULL for a holding with no price series (an unresolved ETF, a structured
+         *     product) and for the cash line — which has no ISIN, and is not an instrument.
          */
         ModelPortfolioPosition: {
             /** Categorie */
             categorie?: string | null;
+            /** Currency */
+            currency?: string | null;
+            /** End Date */
+            end_date?: string | null;
+            /** End Price Eur */
+            end_price_eur?: number | null;
+            /** End Price Local */
+            end_price_local?: number | null;
             /** Fonds */
             fonds?: string | null;
             /** Isin */
@@ -6377,12 +6754,32 @@ export interface components {
              * @default false
              */
             known_instrument?: boolean;
+            /** Last Close */
+            last_close?: string | null;
             /** Percentage */
             percentage?: number | null;
             /** Regio */
             regio?: string | null;
+            /** Return Pct */
+            return_pct?: number | null;
             /** Sector */
             sector?: string | null;
+            /** Start Date */
+            start_date?: string | null;
+            /**
+             * Start Gap Days
+             * @default 0
+             */
+            start_gap_days?: number;
+            /**
+             * Start Interpolated
+             * @default false
+             */
+            start_interpolated?: boolean;
+            /** Start Price Eur */
+            start_price_eur?: number | null;
+            /** Start Price Local */
+            start_price_local?: number | null;
             /** Valuta */
             valuta?: string | null;
         };
@@ -6404,6 +6801,8 @@ export interface components {
             rows: components["schemas"]["ModelPortfolioPosition"][];
             /** Unmatched */
             unmatched: number;
+            /** Ytd From */
+            ytd_from?: string | null;
         };
         /** MonthStatInfo */
         MonthStatInfo: {
@@ -6500,6 +6899,69 @@ export interface components {
             ytd_after?: number | null;
             /** Ytd Before */
             ytd_before?: number | null;
+        };
+        /** PortfolioAnalysisAxis */
+        PortfolioAnalysisAxis: {
+            /** Axis */
+            axis: string;
+            /** Rows */
+            rows: components["schemas"]["PortfolioAnalysisRow"][];
+        };
+        /**
+         * PortfolioAnalysisReturns
+         * @description The model's EUR return beside the benchmark's — over the SAME windows, both times.
+         *
+         *     ⚠ A BENCHMARK MEASURED OVER A DIFFERENT WINDOW IS NOT A BENCHMARK, IT IS A NUMBER. A model's
+         *     "YTD" opens at `max(1 Jan, its inception)`, and for the 27 models younger than the year that
+         *     is NOT 1 January. Putting a 9-day portfolio return beside the index's full-year return and
+         *     calling the gap out-performance would be nonsense that looks exactly like a finding. So the
+         *     index is priced from the model's OWN `ytd_from`, and again from its OWN inception.
+         *
+         *     `ytd_is_since` is true when the model is younger than the year: the two windows coincide, so
+         *     the two rows are the same number by construction, and the UI says so.
+         */
+        PortfolioAnalysisReturns: {
+            /** Benchmark Since Pct */
+            benchmark_since_pct?: number | null;
+            /** Benchmark Ytd Pct */
+            benchmark_ytd_pct?: number | null;
+            /** Portfolio Since Pct */
+            portfolio_since_pct?: number | null;
+            /** Portfolio Ytd Pct */
+            portfolio_ytd_pct?: number | null;
+            /** Since Excess Pct */
+            since_excess_pct?: number | null;
+            /** Since From */
+            since_from?: string | null;
+            /** Ytd Excess Pct */
+            ytd_excess_pct?: number | null;
+            /** Ytd From */
+            ytd_from?: string | null;
+            /**
+             * Ytd Is Since
+             * @default false
+             */
+            ytd_is_since?: boolean;
+        };
+        /** PortfolioAnalysisRow */
+        PortfolioAnalysisRow: {
+            /**
+             * Benchmark Pct
+             * @default 0
+             */
+            benchmark_pct?: number;
+            /** Bucket */
+            bucket: string;
+            /**
+             * Diff Pct
+             * @default 0
+             */
+            diff_pct?: number;
+            /**
+             * Portfolio Pct
+             * @default 0
+             */
+            portfolio_pct?: number;
         };
         /** PortfolioCreate */
         PortfolioCreate: {
@@ -8097,6 +8559,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    airs_model_portfolio_analysis_api_airs_model_portfolios__portfolio_id__analysis_get: {
+        parameters: {
+            query?: {
+                benchmark?: string;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelPortfolioAnalysis"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_model_portfolio_attribution_api_airs_model_portfolios__portfolio_id__attribution_get: {
+        parameters: {
+            query?: {
+                benchmark?: string;
+                window?: string;
+                axis?: string;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelPortfolioAttribution"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

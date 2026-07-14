@@ -61,12 +61,56 @@ from asset_pipeline.resolve import resolve  # noqa: E402
 
 _FIGI_COLS = ("openfigi_figi", "openfigi_name", "openfigi_ticker", "openfigi_exch", "openfigi_type")
 
+# ⚠ THIS SCRIPT RESOLVES BY NAME, SO IT MAY ONLY TOUCH AN OPERATING COMPANY.
+#
+# `resolve()` searches Yahoo by NAME and gates identity with `same_company()`. That is right for
+# a company and DANGEROUS for a fund, whose siblings share almost every word of their names.
+# Measured, on a real candidate this script produced:
+#
+#     JE00BN7KB557  WisdomTree Coffee (an ETC on coffee futures, OpenFIGI "WT COFFEE")
+#                -> LKNCY             (Luckin Coffee Inc, a Chinese coffee RETAILER)
+#
+#     same_company("Luckin Coffee Inc", "WT COFFEE") -> True   (token_set_ratio 80.0)
+#
+# The word "coffee" carried it over the floor, and the identity gate waved through a swap from a
+# futures ETC to an operating company. Nothing downstream would have caught it: the new listing
+# is real, liquid, and priced.
+#
+# Until now a market cap was required, and funds do not report one (all 29 ETP rows have none) —
+# so the cap check was, by accident, the fence keeping funds away from a name-based resolver.
+# Once `--no-cap-max-adv` removed that accident, the hole was immediate. So the fence is now
+# EXPLICIT and structural: an allowlist of types where a name IS an identity.
+#
+# A fund is repointed by ISIN instead — `scripts/repoint_etf_listing.py` enumerates the venues
+# OpenFIGI lists for THAT ISIN, so the candidate set cannot contain another instrument at all.
+# (Closed-End Funds mostly DO have a cap, so they were already reachable by the ratio path — the
+# hole predates the sweep.)
+_NAME_RESOLVABLE_TYPES = {
+    "Common Stock", "ADR", "GDR", "REIT", "Preference", "Preferred Stock",
+    "Stapled Security", "CDI", "NY Reg Shrs", "Dutch Cert", "Receipt",
+}
 
-def _candidates(sb, max_ratio: float, isin: str | None) -> list[dict]:
+
+def _candidates(sb, max_ratio: float, isin: str | None,
+                no_cap_max_adv: float = 0.0) -> list[dict]:
     """Equity executions whose listing is implausibly illiquid for its market cap.
 
     `wrapper` rows are excluded: a Bitcoin ETF legitimately analyses as `BTC-USD`,
     and its ADV/market-cap ratio means nothing.
+
+    ⚠ A MISSING MARKET CAP IS A SIGNAL, NOT A REASON TO SKIP (`no_cap_max_adv`).
+        The ratio needs a cap, so a row without one cannot be scored — and for years that meant
+        it was passed over. But a DEAD listing is exactly what fails to report a cap: Brown &
+        Brown sat on BTW.DE (Xetra, €7,836/day, no cap, NO PRICE BARS AT ALL) while its real
+        market, NYSE `BRO`, does €154m/day — 19,698x. The detector could not see it *because*
+        it was broken enough to have no cap.
+
+        221 equity rows are in that blind spot and 112 of them trade under €1m/day (Pool Corp
+        on Milan at €1,042/day; the Warsaw Stock Exchange on Düsseldorf; Remgro on Munich). So
+        `--no-cap-max-adv` sweeps them in on ADV alone. It over-includes on purpose — plenty of
+        genuine German micro-caps are down there too (publity AG really does trade like that) —
+        and that is safe: a wrong candidate costs a Yahoo call and is then rejected by the
+        identity + liquidity gates below, never a rewrite.
     """
     cols = ("isin,yahoo_symbol,analysis_symbol,name,med_adv_eur,market_cap_eur,"
             "asset_class,status,wrapper," + ",".join(_FIGI_COLS))
@@ -82,15 +126,52 @@ def _candidates(sb, max_ratio: float, isin: str | None) -> list[dict]:
         off += 1000
 
     out = []
+    skipped_funds = 0
     for r in rows:
         if r.get("wrapper"):
             continue
+
+        # A NAME is only an identity for an operating company. Everything else — an ETP, a
+        # closed-end fund, an unknown type, or a row with no OpenFIGI name to check against at
+        # all (the gate below is `if figi_name and ...`, so no name = NO gate) — is off limits
+        # to a by-name resolver. See `_NAME_RESOLVABLE_TYPES`: this is the WisdomTree-Coffee-to-
+        # Luckin-Coffee fence, and it holds even when `--isin` is passed. Repoint a fund with
+        # `repoint_etf_listing.py`, which enumerates venues from the ISIN itself.
+        if r.get("openfigi_type") not in _NAME_RESOLVABLE_TYPES or not r.get("openfigi_name"):
+            skipped_funds += 1
+            continue
+
         adv, cap = r.get("med_adv_eur"), r.get("market_cap_eur")
-        if not adv or not cap or float(cap) <= 0 or float(adv) <= 0:
+        priced = bool(adv) and bool(cap) and float(cap) > 0 and float(adv) > 0
+
+        # An EXPLICIT `--isin` bypasses the ratio ENTIRELY — including the market cap the ratio
+        # is computed from. That guard exists to *detect* a bad listing; when the caller has
+        # already named one, requiring a cap only hides the worst rows there are.
+        #
+        # Brown & Brown (`US1152361010`) is exactly that: mapped to BTW.DE (Xetra, EUR, €8k
+        # median daily traded value) instead of BRO (NYSE, USD), with NO market cap and NO price
+        # bars at all. A dead listing yields no cap, so the row that most needs repointing was
+        # the one row the detector could not see — and `--isin`, documented as "bypassing the
+        # ratio filter", silently returned "0 candidates" for it.
+        if isin:
+            r["_ratio"] = (float(adv) / float(cap)) if priced else None
+            out.append(r)
+            continue
+
+        if not priced:
+            # No cap = unscoreable, not innocent. Sweep it in on ADV alone when asked.
+            if no_cap_max_adv and adv and float(adv) < no_cap_max_adv:
+                r["_ratio"] = None
+                out.append(r)
             continue
         r["_ratio"] = float(adv) / float(cap)
-        if isin or r["_ratio"] < max_ratio:
+        if r["_ratio"] < max_ratio:
             out.append(r)
+    if skipped_funds:
+        # Never silent. A row this script refuses is not a row that is fine — it is one that has
+        # to be repointed by ISIN instead, and saying nothing would read as "nothing to do".
+        print(f"  ({skipped_funds} row(s) skipped: not name-resolvable — a fund/ETP, or no "
+              f"OpenFIGI name to verify against. Use scripts/repoint_etf_listing.py)", flush=True)
     out.sort(key=lambda r: -(float(r.get("market_cap_eur") or 0)))
     return out
 
@@ -102,14 +183,19 @@ def main() -> int:
                     help="flag rows whose ADV/market-cap is below this (p5 = 1.07e-5)")
     ap.add_argument("--min-gain", type=float, default=2.0,
                     help="require the new listing to be this many times more liquid")
-    ap.add_argument("--isin", help="fix a single ISIN, bypassing the ratio filter")
+    ap.add_argument("--isin", help="fix a single ISIN, bypassing the ratio filter entirely "
+                                   "(including the market cap that filter needs)")
+    ap.add_argument("--no-cap-max-adv", type=float, default=0.0,
+                    help="ALSO sweep equity rows with NO market cap — invisible to the ratio — "
+                         "whose median daily traded value is under this (try 1e6). A dead "
+                         "listing is precisely what reports no cap: Brown & Brown hid here.")
     ap.add_argument("--limit", type=int, default=0, help="stop after N candidates (0 = all)")
     a = ap.parse_args()
 
     from asset_pipeline.resolve import same_company  # noqa: PLC0415
 
     sb = deps.supabase
-    cands = _candidates(sb, a.max_ratio, a.isin)
+    cands = _candidates(sb, a.max_ratio, a.isin, a.no_cap_max_adv)
     if a.limit:
         cands = cands[: a.limit]
 

@@ -95,13 +95,48 @@ def _same_fund(candidate_name: str | None, anchor: str | None) -> bool:
     return same_company(candidate_name, anchor)
 
 
+def _consensus_anchor(names: list[str]) -> str | None:
+    """The anchor for a row that has NO incumbent — a `queued` ETF, never resolved, so there is
+    no Yahoo name to compare a candidate against.
+
+    Neither of the other names will do, and both failures are documented above: OpenFIGI
+    abbreviates a fund past what any matcher can recover ("ISH STO WOR EQT MU UC ET-USD"), and
+    Leonteq's is the same vowel-crushing ("ISHR EDGE MSCI WRLD MOMENTUM"). Anchoring on either
+    rejects every candidate, including the right one.
+
+    But the candidates all come from OpenFIGI's listings OF THIS ONE ISIN, and a fund's venues
+    report near-identical names *to Yahoo* — same source, same convention. So the anchor is
+    their AGREEMENT: whichever name the most candidates concur with is the fund, and a
+    constructed ticker that collided with an unrelated instrument on some venue is the outlier
+    that agrees with nobody.
+
+    Requires a real majority of 2+. One lone candidate is not a consensus — it is an unchecked
+    guess, and an unchecked swap is the one thing this file exists to refuse.
+    """
+    best, best_n = None, 0
+    for i, n in enumerate(names):
+        agree = 1 + sum(1 for j, m in enumerate(names) if j != i and same_company(n, m))
+        if agree > best_n:
+            best, best_n = n, agree
+    return best if best_n >= 2 else None
+
+
 def _thin_etfs(sb, isin: str | None) -> list[dict]:
     cols = ("isin,name,analysis_symbol,med_adv_eur,asset_class,status,wrapper,"
             + ",".join(_FIGI_COLS))
     rows, off = [], 0
     while True:
-        q = sb.table("asset_grid").select(cols).eq("status", "ok")
-        q = q.eq("isin", isin) if isin else q.eq("asset_class", "etf")
+        q = sb.table("asset_grid").select(cols)
+        if isin:
+            # An EXPLICIT ISIN is judged whatever its status. A `queued` row has never been
+            # resolved at all — no symbol, no prices, invisible everywhere — and it is exactly
+            # the row that most needs an ISIN-anchored resolve, because the by-name path
+            # (`resolve()`) is the one that swaps a fund for its sibling share class.
+            # IE00BP3QZ825 (iShares Edge MSCI World Momentum) sat queued: OpenFIGI lists its
+            # LSE line as IWFM, and nothing was reaching it.
+            q = q.eq("isin", isin)
+        else:
+            q = q.eq("status", "ok").eq("asset_class", "etf")
         batch = q.range(off, off + 999).execute().data or []
         rows += batch
         if len(batch) < 1000:
@@ -112,7 +147,11 @@ def _thin_etfs(sb, isin: str | None) -> list[dict]:
     for r in rows:
         # A wrapper (a Bitcoin ETP analysed as BTC-USD) is priced off its underlying — its
         # own listing's traded value says nothing about the series we actually use.
-        if r.get("wrapper") or not r.get("analysis_symbol"):
+        if r.get("wrapper"):
+            continue
+        # In a SWEEP, a row with no incumbent has no thinness to measure and is skipped. Named
+        # explicitly, it is the whole point.
+        if not isin and not r.get("analysis_symbol"):
             continue
         adv = float(r.get("med_adv_eur") or 0)
         if isin or (0 < adv < THIN_ADV_EUR):
@@ -140,33 +179,60 @@ def main() -> int:
     fixed = kept = failed = 0
 
     for r in cands:
-        isin, old = r["isin"], r["analysis_symbol"]
+        isin, old = r["isin"], r.get("analysis_symbol")     # `old` is None for a QUEUED row
         old_adv = float(r.get("med_adv_eur") or 0)
         # Yahoo's own name for the incumbent listing — the only anchor that survives a fund
-        # name. See `_same_fund` for why OpenFIGI's cannot be used here.
+        # name. See `_same_fund` for why OpenFIGI's cannot be used here. A queued row has no
+        # incumbent and therefore no such name; its anchor is derived below, by consensus.
         anchor = r.get("name")
         fig = {k: r.get(k) for k in _FIGI_COLS}
 
-        print(f"  {isin}  {old:<11} EUR {old_adv:>11,.0f}/day   {(r.get('name') or '')[:40]}",
+        label = old or f"(queued: {r.get('status')})"
+        print(f"  {isin}  {label:<11} EUR {old_adv:>11,.0f}/day   {(r.get('name') or '')[:40]}",
               flush=True)
 
         # Every venue THIS share class trades on. ISIN-anchored: a sibling share class
         # (a different ISIN) can never appear here.
+        #
+        # `yahoo_isin=True` adds Yahoo's own resolution of the ISIN to the pool. The other
+        # candidates are CONSTRUCTED (`ticker + venue suffix`), which assumes OpenFIGI and
+        # Yahoo agree on the ticker — on German venues they frequently do not, and the liquid
+        # listing then cannot be reached at all: DE000A0F5UH1 is `SDGPEX` to OpenFIGI and
+        # `ISPA` to Yahoo, so we built the non-existent SDGPEX.DE and never saw Xetra. It is
+        # only ever an extra candidate — Yahoo's ISIN pick is liquidity-blind (it answers
+        # Alphabet with 1GOOGL.MI) and is ranked and name-gated below like any other.
         figi_rows = openfigi.lookup_isin(isin)
-        symbols = build_candidates(isin, figi_rows, None, limit=CAND_LIMIT)
+        symbols = build_candidates(isin, figi_rows, None, limit=CAND_LIMIT, yahoo_isin=True)
         if not symbols:
             kept += 1
             print("      keep — OpenFIGI lists no venue we can map to a Yahoo symbol\n",
                   flush=True)
             continue
 
-        scored: list[dict] = []
+        # PROBE FIRST, GATE SECOND. A queued row's anchor is the agreement among these very
+        # candidates, so it cannot be known until they have all been scored.
+        probed: list[dict] = []
         for sym in symbols:
             sc = _score_retry(sym)
             adv = float((sc or {}).get("med_adv_eur") or 0)
             if not sc or adv <= 0:
                 print(f"      {sym:<12} —  no price series", flush=True)
                 continue
+            probed.append(sc)
+            time.sleep(PAUSE_S)
+
+        if anchor is None:
+            anchor = _consensus_anchor([str(s.get("name") or "") for s in probed])
+            if anchor is None:
+                kept += 1
+                print("      keep — no incumbent to anchor on, and this ISIN's venues do not "
+                      "agree on a name. Unverifiable; NOT judged.\n", flush=True)
+                continue
+            print(f"      anchor (consensus of this ISIN's venues): {anchor[:48]!r}", flush=True)
+
+        scored: list[dict] = []
+        for sc in probed:
+            sym, adv = sc["symbol"], float(sc.get("med_adv_eur") or 0)
             # A constructed symbol can collide with an unrelated instrument on that venue,
             # so the candidate's name still has to be checked — but NOT against OpenFIGI's.
             if not _same_fund(sc.get("name"), anchor):
@@ -176,7 +242,6 @@ def main() -> int:
             mark = "  <- incumbent" if sym == old else ""
             print(f"      {sym:<12} EUR {adv:>11,.0f}/day{mark}", flush=True)
             scored.append(sc)
-            time.sleep(PAUSE_S)
 
         if not scored:
             kept += 1
@@ -186,16 +251,18 @@ def main() -> int:
         # THE INCUMBENT MUST SURVIVE ITS OWN COMPARISON. If it doesn't, we are not looking at
         # a complete picture of this ISIN's venues, and every "keep" below would be a false
         # negative wearing a clean bill of health. Two distinct causes, and they are not the
-        # same bug — say which:
-        if old not in symbols:
-            #  (a) OpenFIGI's listings for this ISIN never produced the symbol we already
-            #      hold. The candidate set is INCOMPLETE, so "most liquid" is unknowable —
-            #      exactly the empty-candidate-set trap that put Alphabet on Vienna.
+        # same bug — say which. (A queued row has no incumbent, so there is nothing to survive:
+        # the consensus above IS its check, and it is a stricter one.)
+        if old and old not in symbols:
+            #  (a) Neither OpenFIGI's listings for this ISIN nor Yahoo's own resolution of it
+            #      produced the symbol we already hold. The candidate set is INCOMPLETE, so
+            #      "most liquid" is unknowable — exactly the empty-candidate-set trap that put
+            #      Alphabet on Vienna.
             kept += 1
-            print(f"      keep — !! {old} is not among OpenFIGI's listings for this ISIN, so "
-                  f"the candidate set is incomplete. NOT judged.\n", flush=True)
+            print(f"      keep — !! {old} is not among this ISIN's listings (OpenFIGI + "
+                  f"Yahoo), so the candidate set is incomplete. NOT judged.\n", flush=True)
             continue
-        if not any(s["symbol"] == old for s in scored):
+        if old and not any(s["symbol"] == old for s in scored):
             #  (b) It WAS a candidate and its own name gate threw it out. The gate is broken.
             kept += 1
             print(f"      keep — !! the incumbent {old} failed its own name gate. The gate is "
@@ -205,19 +272,23 @@ def main() -> int:
         best = max(scored, key=lambda s: float(s.get("med_adv_eur") or 0))
         new, new_adv = best["symbol"], float(best.get("med_adv_eur") or 0)
 
-        if new == old:
+        if old and new == old:
             kept += 1
             print("      keep — the incumbent IS the most liquid listing of this ISIN\n",
                   flush=True)
             continue
-        if new_adv < old_adv * a.min_gain:
+        if old and new_adv < old_adv * a.min_gain:
             kept += 1
             print(f"      keep — {new} is not {a.min_gain}x more liquid "
                   f"({new_adv:,.0f} vs {old_adv:,.0f})\n", flush=True)
             continue
 
-        gain = (new_adv / old_adv) if old_adv else float("inf")
-        print(f"      FIX  {old} -> {new}   ({gain:,.1f}x more liquid)\n", flush=True)
+        if old:
+            gain = (new_adv / old_adv) if old_adv else float("inf")
+            print(f"      FIX  {old} -> {new}   ({gain:,.1f}x more liquid)\n", flush=True)
+        else:
+            print(f"      RESOLVE  (queued) -> {new}   EUR {new_adv:,.0f}/day — the most liquid "
+                  f"listing of this ISIN\n", flush=True)
         fixed += 1
 
         if a.apply:
@@ -229,7 +300,8 @@ def main() -> int:
                 "is_leveraged": ai["is_leveraged"], "candidates": [best],
                 "execution": ai["execution"], "analysis": ai["analysis"],
                 "chosen": ai["analysis"], "underlying": None,
-                "reason": f"Repointed to {new} — most liquid listing of this ISIN.",
+                "reason": (f"{'Repointed' if old else 'Resolved'} to {new} — most liquid "
+                           f"listing of this ISIN (OpenFIGI-anchored)."),
                 "analysis_note": ai["analysis_note"], "sector": ai["analysis_asset_class"],
                 "candles": None, "ibkr": None,
             }

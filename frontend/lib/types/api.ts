@@ -82,5 +82,13 @@ export type ModelPortfolioPositions = components['schemas']['ModelPortfolioPosit
 export type ModelPortfolioPosition = components['schemas']['ModelPortfolioPosition'];
 export type StoredModelPortfolio = components['schemas']['StoredModelPortfolio'];
 export type ModelPortfolioPerformance = components['schemas']['ModelPortfolioPerformance'];
+// Composition of a model portfolio beside a benchmark's, on ONE set of buckets. Funds are NOT
+// looked through — they land in a single "Fund (not looked through)" bucket on every axis,
+// because an ETF's listing tells you nothing about what it holds.
+export type ModelPortfolioAnalysis = components['schemas']['ModelPortfolioAnalysis'];
+// Brinson-Fachler: WHY a model beat or lagged the index. Allocation (the right buckets?) vs
+// selection (the right names inside them?) — different mistakes with different fixes. The three
+// effects SUM to the excess; `reconciles` carries the proof.
+export type ModelPortfolioAttribution = components['schemas']['ModelPortfolioAttribution'];
 export type ReconstructedIndex = components['schemas']['ReconstructedIndex'];
 export type IndexMember = components['schemas']['IndexMember'];

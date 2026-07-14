@@ -233,25 +233,36 @@ async def airs_model_portfolios_stored():
 
 
 class ModelPortfolioPerformance(BaseModel):
-    """One model portfolio's YTD, in EUR.
+    """One model portfolio's performance, in EUR: YTD, since-inception, Sharpe, Sortino.
 
-    ⚠ `ytd_pct` is a buy-and-hold of the composition WE HOLD, which is the CURRENT one. AIRS
-    keeps only 2-3 snapshot dates and no monthly history, so the January composition is not
-    recoverable. Read `model_changed_in_period` before trusting the number:
+    ⚠ `ytd_pct` IS NOT ALWAYS A FULL YEAR. It is a buy-and-hold of the composition WE HOLD,
+    which is the CURRENT one — AIRS keeps only 2-3 snapshot dates and no monthly history, so
+    January's composition is not recoverable. The window therefore opens at
+    `max(Jan 1, inception)`, never before the weights existed, and `ytd_from` is that date:
 
-      * false (29 of 56) — the model has held these weights since before Jan 1, so this IS
-        what it earned.
-      * true  (27 of 56) — the weights are NEWER than the window. Applying them back to Jan 1
-        backtests a basket chosen knowing how the year went. Measured: MoTopSelectie_FX shows
-        +75.85% YTD on a model defined 8 DAYS AGO — its return since that model took effect
-        is +0.86%.
+      * `model_changed_in_period` false (29 of 56) — the model has held these weights since
+        before Jan 1. `ytd_from` is Jan 1 and this is a true, full YTD.
+      * true (27 of 56) — the model is YOUNGER than the year, so `ytd_from` is its inception
+        and the figure covers a PARTIAL year. Realized, not backtested — but do not rank it
+        against a 12-month return without noticing (MoTopSelectie_FX has held its weights for
+        eight days: +0.51%. Priced back to Jan 1 it would read +75.85%, on a basket it never
+        held, and be the best portfolio in the list).
 
-    `since_model_pct` is that honest number: the return since the composition's own effective
-    date. It never borrows hindsight, for any portfolio.
+    `since_model_pct` is the same composition's return over its WHOLE life (`model_effective` —
+    its inception), not clipped to this year. For a model younger than the year the two windows
+    coincide and the two numbers are equal, by construction.
+
+    `sharpe` / `sortino` ride that SAME window, annualized from the daily EUR curve at rf = 0.
+    A ratio is only as honest as the return underneath it, and a YTD-anchored one is a backtest
+    for half the list. They are NULL — not zero — below `MIN_STAT_DAYS` (20) daily returns: a
+    ratio off a model defined last week is noise with two decimals, and it would render in the
+    same column, same font, as one measured over two years. `stat_days` is how many it had.
 
     `ytd_pct` is NULL when `low_coverage` — under 60% of the model's weight is priceable, so a
     renormalised return would be an invention (TOPS_OFF_BEH once reported "+0.00%" off its 1%
-    cash line while 99% of it, in structured products, was silently dropped).
+    cash line while 99% of it, in structured products, was silently dropped). The since-
+    inception figures carry their OWN floor (`since_covered_pct`), because a holding that had
+    not listed yet at inception is unpriceable there whatever its coverage at Jan 1 was.
     """
 
     portfolio_id: int
@@ -259,10 +270,34 @@ class ModelPortfolioPerformance(BaseModel):
     model_effective: str | None = None
     model_changed_in_period: bool = False
     ytd_pct: float | None = None
+    ytd_from: str | None = None
     since_model_pct: float | None = None
-    priced_holdings: int = 0
+    sharpe: float | None = None
+    sortino: float | None = None
+    # Geometric annualized return over the since-inception window. NULL under a YEAR of trading
+    # days — annualizing a shorter period extrapolates it (+11.20% over 99 days compounds to
+    # +30.6%/yr), which is why fund reporting shows a cumulative return there instead. That
+    # cumulative number is `since_model_pct`, and it is always present.
+    cagr_pct: float | None = None
+    ann_vol_pct: float | None = None
+    stat_days: int = 0
+    # How long the model has been running: inception -> today, in calendar years. The unit the
+    # ratios above have to be read against — and the reason a CAGR can be absent (under 1.00).
+    years_running: float | None = None
+    # DISTINCT instruments with a Yahoo price series, and those without. Both EXCLUDE cash (it
+    # has no ISIN and no series, and the `holdings` count they are read against excludes it
+    # too), and both count distinct ISINs rather than rows — a model may list one instrument on
+    # two lines. So `resolved + unresolved == holdings`, exactly.
+    resolved_holdings: int = 0
+    unresolved_holdings: int = 0
+    # ⚠ How many holdings were marked at an INTERPOLATED opening price rather than a real close.
+    # Non-zero means part of this return is an estimate — it is 23.6% of BUS_OBL_HighY, whose
+    # iShares Euro HY line is mapped to a US OTC listing that trades a handful of times a year.
+    interpolated_holdings: int = 0
+    priced_holdings: int = 0        # every leg the curve holds — cash INCLUDED
     unpriced_holdings: int = 0
     covered_pct: float | None = None
+    since_covered_pct: float | None = None
     low_coverage: bool = False
     partial_coverage: bool = False
     cash_pct: float = 0.0
@@ -280,10 +315,204 @@ async def airs_model_portfolio_performance(year: int | None = None):
     return await compute_portfolio_performance_async(year)
 
 
+class PortfolioAnalysisRow(BaseModel):
+    bucket: str
+    portfolio_pct: float = 0.0
+    benchmark_pct: float = 0.0
+    diff_pct: float = 0.0              # the TILT — the reason the two are side by side
+
+
+class PortfolioAnalysisAxis(BaseModel):
+    axis: str                          # sector | region | currency
+    rows: list[PortfolioAnalysisRow]
+
+
+class PortfolioAnalysisReturns(BaseModel):
+    """The model's EUR return beside the benchmark's — over the SAME windows, both times.
+
+    ⚠ A BENCHMARK MEASURED OVER A DIFFERENT WINDOW IS NOT A BENCHMARK, IT IS A NUMBER. A model's
+    "YTD" opens at `max(1 Jan, its inception)`, and for the 27 models younger than the year that
+    is NOT 1 January. Putting a 9-day portfolio return beside the index's full-year return and
+    calling the gap out-performance would be nonsense that looks exactly like a finding. So the
+    index is priced from the model's OWN `ytd_from`, and again from its OWN inception.
+
+    `ytd_is_since` is true when the model is younger than the year: the two windows coincide, so
+    the two rows are the same number by construction, and the UI says so.
+    """
+
+    ytd_from: str | None = None
+    since_from: str | None = None
+    portfolio_ytd_pct: float | None = None
+    benchmark_ytd_pct: float | None = None
+    ytd_excess_pct: float | None = None
+    portfolio_since_pct: float | None = None
+    benchmark_since_pct: float | None = None
+    since_excess_pct: float | None = None
+    ytd_is_since: bool = False
+
+
+class ModelPortfolioAnalysis(BaseModel):
+    """A model portfolio's composition beside a benchmark's, on ONE set of buckets.
+
+    Both sides are classified from `asset_grid`'s yfinance attributes, joined by ISIN — the
+    portfolio lives in the ISIN world and the benchmark in the `company` world, and putting two
+    different sector taxonomies in one chart invents differences that are not there. (All 493
+    SP500 members are present in `asset_grid` with a sector, so nothing is lost.)
+
+    ⚠ FUNDS ARE NOT LOOKED THROUGH, and the payload says so rather than pretending. An ETF's
+    listing tells you nothing about what it holds — 24 of the 26 held ETFs have a "sector" of
+    literally `etf` or `Equity`; an Amsterdam-listed MSCI World ETF is not European exposure; and
+    quoted in EUR it still holds mostly USD assets. So every fund lands in ONE bucket, "Fund (not
+    looked through)", on ALL THREE axes. A 40%-ETF portfolio shows a 40% bar that means "we
+    cannot see inside this" — true, and more useful than a confident wrong split.
+    """
+
+    portfolio_id: int
+    name: str | None = None
+    as_of: str | None = None
+    benchmark: str
+    benchmark_members: int = 0
+    holdings: int = 0
+    covered_pct: float = 0.0
+    benchmark_covered_pct: float = 0.0
+    # Rows priced on a venue whose currency differs from the company's own — the wrong-listing
+    # bug, surfaced rather than absorbed. 40 of the S&P's 491 sit on European/Canadian lines.
+    foreign_listings: int = 0
+    benchmark_foreign_listings: int = 0
+    # ⚠ How much of the INDEX we could price. ACWI's missing names go a whole country at a time
+    # (GuruFocus sells no UK/India; yfinance has them, but some were never ingested), and a
+    # cap-weighted index renormalised over the rest does not lose that weight — it redistributes
+    # it into everything else. Stated, never assumed to be 100%.
+    benchmark_universe_members: int = 0
+    benchmark_priced: int = 0
+    benchmark_coverage_pct: float | None = None
+    returns: PortfolioAnalysisReturns | None = None
+    axes: list[PortfolioAnalysisAxis] = []
+
+
+@router.get("/api/airs/model-portfolios/{portfolio_id}/analysis",
+            response_model=ModelPortfolioAnalysis)
+async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP500"):
+    """Sector / region / currency split of one model portfolio, beside the benchmark's."""
+    from routers._airs_portfolio_analysis import (  # noqa: PLC0415
+        compute_portfolio_analysis_async,
+    )
+
+    return await compute_portfolio_analysis_async(portfolio_id, benchmark)
+
+
+class AttributionBucket(BaseModel):
+    bucket: str
+    portfolio_weight_pct: float = 0.0
+    benchmark_weight_pct: float = 0.0
+    portfolio_return_pct: float | None = None
+    benchmark_return_pct: float | None = None
+    allocation_pct: float = 0.0
+    selection_pct: float = 0.0
+    interaction_pct: float = 0.0
+    total_pct: float = 0.0
+
+
+class AttributionName(BaseModel):
+    isin: str | None = None
+    name: str | None = None
+    ticker: str | None = None
+    weight_pct: float = 0.0
+    return_pct: float | None = None
+    contribution_pct: float = 0.0
+
+
+class AttributionExcluded(BaseModel):
+    bucket: str
+    name: str | None = None
+    isin: str | None = None
+    weight_pct: float = 0.0
+    return_pct: float | None = None
+    reason: str | None = None       # fund | cash | unpriced | unclassified
+
+
+class ModelPortfolioAttribution(BaseModel):
+    """WHY a model beat or lagged the index — Brinson-Fachler, plus the names that drove it.
+
+    An excess return is a fact, not an explanation: "-11.60% vs ACWI" says nothing about whether
+    the failed bet was the SECTORS chosen or the STOCKS chosen inside them. Those are different
+    mistakes with different fixes.
+
+        allocation  = (w_p - w_b) x (R_b,bucket - R_b_total)   the right buckets?
+        selection   =  w_b        x (R_p,bucket - R_b,bucket)  the right names inside them?
+        interaction = the cross term
+
+    ⚠ THE IDENTITY IS ASSERTED, NOT ASSUMED: sum(allocation + selection + interaction) == excess.
+    `residual_pct` and `reconciles` carry the proof. Three columns that do not sum to the excess
+    are not a decomposition of it.
+
+    ⚠ FUNDS AND CASH ARE EXCLUDED. An ETF has no sector — the benchmark's weight in the fund
+    bucket is zero, so Brinson would report holding a world tracker as a *sector bet*.
+    `attributable_pct` says how much of the model the table explains.
+
+    ⚠ `unpriced_pct` IS NOT THE SAME AS `excluded_pct`, AND IT IS THE DANGEROUS ONE. A fund is
+    excluded because it is not a sector bet. An UNPRICED equity is excluded because we failed to
+    price it — and its sector then reads as UNOWNED, so the allocation effect on that row is a
+    FALSE finding. (Measured: a model holding 6% Healthcare, unpriceable, was credited +1.73pp of
+    allocation for "avoiding" Healthcare.) `unpriced_buckets` names the rows to discount.
+    """
+
+    portfolio_id: int
+    name: str | None = None
+    benchmark: str
+    benchmark_coverage_pct: float | None = None
+    window: str                      # ytd | since
+    axis: str                        # sector | region | currency
+    start: str | None = None
+    portfolio_return_pct: float = 0.0
+    benchmark_return_pct: float = 0.0
+    excess_pct: float = 0.0
+    attributed_pct: float = 0.0
+    residual_pct: float = 0.0
+    reconciles: bool = False
+    attributable_pct: float = 0.0
+    excluded_pct: float = 0.0
+    excluded_return_pct: float | None = None
+    unpriced_pct: float = 0.0
+    unpriced_buckets: list[str] = []
+    excluded: list[AttributionExcluded] = []
+    rows: list[AttributionBucket] = []
+    top_contributors: list[AttributionName] = []
+    top_detractors: list[AttributionName] = []
+    missed_winners: list[AttributionName] = []
+
+
+@router.get("/api/airs/model-portfolios/{portfolio_id}/attribution",
+            response_model=ModelPortfolioAttribution)
+async def airs_model_portfolio_attribution(
+    portfolio_id: int, benchmark: str = "SP500", window: str = "ytd", axis: str = "sector",
+):
+    """Brinson-Fachler attribution of one model against a benchmark, over one window."""
+    from routers._airs_portfolio_attribution import (  # noqa: PLC0415
+        compute_attribution_async,
+    )
+
+    return await compute_attribution_async(portfolio_id, benchmark, window, axis)
+
+
 class ModelPortfolioPosition(BaseModel):
     """One row of the portfolio's XLS export. `isin` is the point of the whole exercise —
     it is the exact join into `asset_execution`, and it's the identifier the AIRS
-    *holdings* sheet never gave us (that one only has a fund NAME)."""
+    *holdings* sheet never gave us (that one only has a fund NAME).
+
+    The price marks are the ARITHMETIC BEHIND the portfolio's YTD, one holding at a time: each
+    is bought at its last close on or before `ytd_from` and held to its latest close, and
+    `return_pct` is exactly the quantity the portfolio figure weights together.
+
+    ⚠ `start_price_eur` / `end_price_eur` are in EUR, not the listing's currency, because
+    `return_pct` is an EUR return and carries the FX leg. Printing the native closes as the
+    arithmetic would show two numbers whose ratio is not the third — a USD holding can rise in
+    dollars and fall in euros. The native closes ride along (`*_price_local`, `currency`) for a
+    tooltip, never as the sum.
+
+    All of them are NULL for a holding with no price series (an unresolved ETF, a structured
+    product) and for the cash line — which has no ISIN, and is not an instrument.
+    """
 
     fonds: str | None = None
     isin: str | None = None            # NULL for the cash line ("Liquiditeiten")
@@ -295,6 +524,27 @@ class ModelPortfolioPosition(BaseModel):
     # True when this ISIN is already an instrument in our grid (`asset_execution`).
     known_instrument: bool = False
 
+    currency: str | None = None        # the LISTING's currency (may differ from AIRS `valuta`)
+    # The holding's LATEST close, returned even when no marks could be computed — it is the only
+    # thing that separates "the price series is STALE" from "this holding is broken". A series
+    # whose last close predates the window has no price inside it, so no return over it exists;
+    # the mapping is fine (Meta Platforms is correctly on META and simply hasn't been refreshed).
+    last_close: str | None = None
+    start_date: str | None = None      # last close on or before the window opened
+    start_price_eur: float | None = None
+    start_price_local: float | None = None
+    # ⚠ The opening price is an ESTIMATE, not a close: this holding's series has no price near
+    # the anchor (it trades rarely, or is pointed at a listing that does), so the value was
+    # linearly interpolated between the two real closes bracketing the date — `start_gap_days`
+    # apart. `start_price_local` is NULL for these: there was no trade that day, and printing a
+    # neighbouring day's local price would dress the estimate up as an observation.
+    start_interpolated: bool = False
+    start_gap_days: int = 0
+    end_date: str | None = None        # its latest close (can lag: vendors publish unevenly)
+    end_price_eur: float | None = None
+    end_price_local: float | None = None
+    return_pct: float | None = None    # EUR, start -> end
+
 
 class ModelPortfolioPositions(BaseModel):
     portfolio: str
@@ -304,6 +554,10 @@ class ModelPortfolioPositions(BaseModel):
     rows: list[ModelPortfolioPosition]
     matched: int                       # how many ISINs we already hold
     unmatched: int
+    # The day the per-row price marks are measured FROM — `max(1 Jan, this composition's date)`,
+    # the same anchor the row's YTD uses. Stated, because "since when" is half of what a return
+    # means and the answer is not 1 January for half the portfolios.
+    ytd_from: str | None = None
     # When this came from OUR cache rather than a live AirSPMS fetch, and when it was taken.
     # The UI says so — a cached answer presented as fresh is how a stale holding gets trusted.
     cached_at: str | None = None
@@ -311,6 +565,10 @@ class ModelPortfolioPositions(BaseModel):
 
 def _shape_positions(raw: dict) -> ModelPortfolioPositions:
     from deps import IN_CHUNK_SIZE  # noqa: PLC0415
+    from routers._airs_portfolio_perf import (  # noqa: PLC0415
+        compute_holding_marks,
+        ytd_anchor_for,
+    )
 
     rows = raw["rows"]
     isins = sorted({str(r.get("ISINCode")).strip() for r in rows if r.get("ISINCode")})
@@ -322,9 +580,19 @@ def _shape_positions(raw: dict) -> ModelPortfolioPositions:
                .in_("isin", chunk).execute().data or [])
         known.update(r["isin"] for r in got)
 
+    # Anchored on the composition BEING SHOWN — for the default (newest) snapshot that is the
+    # portfolio's `positions_datum`, so these marks are the ones the table's YTD was computed
+    # from and the two reconcile. Pick a historical snapshot and the anchor moves with it, which
+    # is right: those are different weights, and their window opened when they did.
+    #
+    # NEVER cached. A price mark is true for one day; the composition it prices is not.
+    anchor = ytd_anchor_for(raw.get("datum")) if raw.get("datum") else None
+    marks = compute_holding_marks(isins, anchor) if (anchor and isins) else {}
+
     out: list[ModelPortfolioPosition] = []
     for r in rows:
         isin = (str(r["ISINCode"]).strip() if r.get("ISINCode") else None) or None
+        m = marks.get(isin) if isin else None
         out.append(ModelPortfolioPosition(
             fonds=(str(r["Fonds"]).strip() if r.get("Fonds") else None),
             isin=isin,
@@ -334,6 +602,7 @@ def _shape_positions(raw: dict) -> ModelPortfolioPositions:
             sector=(str(r["Beleggingssector"]).strip() if r.get("Beleggingssector") else None),
             regio=(str(r["regio"]).strip() if r.get("regio") else None),
             known_instrument=bool(isin and isin in known),
+            **(m or {}),
         ))
 
     matched = sum(1 for r in out if r.known_instrument)
@@ -341,6 +610,7 @@ def _shape_positions(raw: dict) -> ModelPortfolioPositions:
         portfolio=raw["portfolio"], portfolio_id=raw["portfolio_id"],
         datum=raw["datum"], dates=raw["dates"], rows=out,
         matched=matched, unmatched=len([r for r in out if r.isin]) - matched,
+        ytd_from=anchor,
         cached_at=raw.get("cached_at"),
     )
 

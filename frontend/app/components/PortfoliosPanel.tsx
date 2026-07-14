@@ -7,6 +7,7 @@ import { API_URL } from '../../lib/apiUrl';
 import type {
   ModelPortfolioPerformance, ModelPortfolioPositions, StoredModelPortfolio,
 } from '../../lib/types/api';
+import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
 
 type StoredPortfolio = StoredModelPortfolio;
 
@@ -38,20 +39,25 @@ type Portfolio = {
 
 type Perf = ModelPortfolioPerformance;
 
-/** YTD is a buy-and-hold of the composition WE HOLD — which is the CURRENT one. AIRS keeps
- *  only 2–3 snapshot dates, so January's composition is not recoverable. When the model was
- *  (re)defined DURING the year, applying today's weights back to Jan 1 backtests a basket
- *  chosen knowing how the year went. It flatters, and not subtly: MoTopSelectie_FX shows
- *  +75.85% YTD on a model defined EIGHT DAYS AGO — its return since that model took effect is
- *  +0.86%. So the flag is not a footnote, and `since_model_pct` is the honest number. */
-const isHindsight = (p: Perf) => p.model_changed_in_period;
+/** YTD is a buy-and-hold of the composition WE HOLD — which is the CURRENT one. AIRS keeps only
+ *  2–3 snapshot dates, so January's composition is not recoverable, and the YTD window
+ *  therefore opens at `max(1 Jan, inception)` — never before these weights existed.
+ *
+ *  So this flag no longer means "the number is a backtest" (it isn't any more). It means the
+ *  window is SHORT: the model is younger than the year, so its "YTD" covers days rather than
+ *  months. MoTopSelectie_FX has held its weights for eight days — +0.51%. Priced back to 1 Jan
+ *  it would read +75.85%, on a basket it never held, and top the table. Both facts are why the
+ *  ⚠ stays: a partial year is honest, but it is not comparable to a full one. */
+const isPartialYear = (p: Perf) => p.model_changed_in_period;
 
 type PosState = { loading: boolean; data?: ModelPortfolioPositions; error?: string };
 
 /** AirSPMS only stores a composition for a `fixed (…)` portfolio. */
 const hasFixedModel = (p: Portfolio) => p.fixed?.trim().toLowerCase().startsWith('fixed');
 
-type SortKey = 'name' | 'holdings' | 'ytd' | 'fixed' | 'id';
+type SortKey =
+  | 'name' | 'holdings' | 'resolved' | 'ytd' | 'since' | 'sharpe' | 'sortino' | 'cagr' | 'years'
+  | 'fixed' | 'id';
 type Sort = { key: SortKey; dir: 'asc' | 'desc' };
 
 /** Sorting on `holdings` has to answer "where do the un-counted and the model-less rows
@@ -60,6 +66,37 @@ type Sort = { key: SortKey; dir: 'asc' | 'desc' };
  *  benchmark above a portfolio that genuinely holds one instrument. */
 const holdingsRank = (p: Portfolio) =>
   typeof p.holdings === 'number' ? p.holdings : null;
+
+/** "Hide small portfolios" keeps ONLY the rows with a counted model holding more than this —
+ *  42 of 95. Everything else goes, and that is deliberate: a row we cannot show a real holdings
+ *  count for is not a portfolio worth comparing on this table, whether the count is small (the
+ *  single-instrument TOPS_*_L / BUS_BM_* wrappers), absent because the portfolio has no fixed
+ *  model at all (`normaal`/`meervoudig`), or absent because AIRS has no dated composition
+ *  ("no snapshot") or the count failed.
+ *
+ *  So this is a KEEP rule, not a drop rule — the filter is "show me the real models", and the
+ *  three kinds of absence are excluded BY the rule rather than exempted from it. The Holdings
+ *  cell still keeps them strictly apart once they are on screen (unchecking the box shows all
+ *  53 again); it is only this filter that treats "no countable model" as one thing. */
+const MIN_HOLDINGS_SHOWN = 5;
+const isSmall = (p: Portfolio) =>
+  !(typeof p.holdings === 'number' && p.holdings > MIN_HOLDINGS_SHOWN);
+
+/** The numeric columns, and how each one ranks. Every one of them can be ABSENT, and absent is
+ *  never a value: a model too young for a Sharpe is not a Sharpe of 0, and a portfolio we
+ *  cannot price is not flat. They all sink in both directions (see the comparator). */
+const NUMERIC: Record<string, (p: Portfolio) => number | null> = {
+  holdings: holdingsRank,
+  // A portfolio we have not priced at all has no perf row, so it has no resolved count either —
+  // that is unknown, not zero, and it sinks like every other absence.
+  resolved: (p) => p.perf?.resolved_holdings ?? null,
+  ytd: (p) => p.perf?.ytd_pct ?? null,
+  since: (p) => p.perf?.since_model_pct ?? null,
+  sharpe: (p) => p.perf?.sharpe ?? null,
+  sortino: (p) => p.perf?.sortino ?? null,
+  cagr: (p) => p.perf?.cagr_pct ?? null,
+  years: (p) => p.perf?.years_running ?? null,
+};
 
 /** The AirSPMS model portfolios — Stamgegevens > Onderhoud portefeuilles > Model
  * portefeuilles.
@@ -78,6 +115,8 @@ export default function PortfoliosPanel() {
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState('');
+  const [hideSmall, setHideSmall] = useState(true);
+  const [analyse, setAnalyse] = useState<{ id: number; name: string } | null>(null);
   const [sort, setSort] = useState<Sort>({ key: 'name', dir: 'asc' });
 
   // The stored copy — instant. Scraping AirSPMS costs minutes, so it is never what a page
@@ -196,14 +235,14 @@ export default function PortfoliosPanel() {
   };
 
   const needle = q.trim().toLowerCase();
+  const smallCount = (rows ?? []).filter(isSmall).length;
   const view = (rows ?? [])
+    .filter((r) => !hideSmall || !isSmall(r))
     .filter((r) => !needle || `${r.name} ${r.omschrijving}`.toLowerCase().includes(needle))
     .sort((a, b) => {
       const dir = sort.dir === 'asc' ? 1 : -1;
-      if (sort.key === 'holdings' || sort.key === 'ytd') {
-        const rank = sort.key === 'holdings'
-          ? holdingsRank
-          : (p: Portfolio) => (p.perf?.ytd_pct ?? null);
+      const rank = NUMERIC[sort.key];
+      if (rank) {
         const x = rank(a), y = rank(b);
         // Absent is not a value — a portfolio we cannot price is not "0% YTD", so it sinks
         // in BOTH directions rather than sorting as if it were flat.
@@ -222,8 +261,9 @@ export default function PortfoliosPanel() {
 
   // Tailwind scans for LITERAL class strings, so `text-${align}` would only ever work by
   // accident (when the same literal happens to appear elsewhere in the file). Full strings.
-  const th = (key: SortKey, label: string, align: 'text-left' | 'text-right' = 'text-left') => (
-    <th className={`px-3 py-1.5 font-medium ${align}`}>
+  const th = (key: SortKey, label: string, align: 'text-left' | 'text-right' = 'text-left',
+              title?: string) => (
+    <th className={`px-3 py-1.5 font-medium ${align}`} title={title}>
       <button type="button"
         onClick={() => setSort((s) => ({ key, dir: s.key === key && s.dir === 'asc' ? 'desc' : 'asc' }))}
         className={`inline-flex items-center gap-1 hover:text-fg-soft transition-colors ${sort.key === key ? 'text-accent-400' : ''}`}>
@@ -260,12 +300,23 @@ export default function PortfoliosPanel() {
         </div>
         <div className="flex items-center gap-2">
           {rows && (
+            <label className="flex items-center gap-1.5 text-xs text-fg-muted cursor-pointer select-none whitespace-nowrap"
+              title={`Shows only the portfolios whose counted model holds more than ${MIN_HOLDINGS_SHOWN} instruments. Hides ${smallCount}: the single-instrument wrappers, plus every row with no countable model at all — no fixed model, no snapshot, or a count that failed.`}>
+              <input type="checkbox" checked={hideSmall} onChange={(e) => setHideSmall(e.target.checked)}
+                className="accent-accent-600 cursor-pointer" />
+              Hide small portfolios
+              {smallCount > 0 && (
+                <span className="font-mono text-fg-faint">({smallCount})</span>
+              )}
+            </label>
+          )}
+          {rows && (
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name / description…"
               className="bg-page border border-neutral-700 rounded-lg px-3 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 w-60" />
           )}
           <button type="button" onClick={() => void scan()} disabled={scanning}
             className="text-sm px-4 py-2 rounded-lg bg-accent-600 hover:bg-accent-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-            {scanning ? 'Scanning…' : rows ? 'Rescan' : 'Scan AIRS'}
+            {scanning ? 'Scanning…' : rows ? 'Refresh from AIRS' : 'Scan AIRS'}
           </button>
         </div>
       </div>
@@ -286,30 +337,38 @@ export default function PortfoliosPanel() {
         </p>
       )}
 
-      {/* The ⚠ is on half the rows, so it needs to mean something specific and stated. */}
-      {(rows ?? []).some((r) => r.perf && isHindsight(r.perf)) && (
-        <p className="text-[11px] text-fg-subtle leading-relaxed">
-          <span className="text-warn-400">⚠</span> YTD is a buy-and-hold of the model&apos;s{' '}
-          <em>current</em> composition — AIRS keeps no January snapshot to recover. Where the
-          model was (re)defined <em>during</em> the year, that makes the figure a{' '}
-          <strong>backtest of weights chosen with hindsight</strong>, not a track record
-          (MoTopSelectie_FX reads +75.85% on a model defined 8 days ago; since it took effect
-          it has made +0.86%). Hover any ⚠ for that portfolio&apos;s real number.{' '}
-          <span className="text-fg-faint">~</span> marks partial price coverage.
-        </p>
-      )}
-
       {rows && rows.length > 0 && (
         <div className="overflow-auto rounded-lg border border-neutral-800/40 max-h-[70vh]">
           <table className="w-full text-xs">
             <thead className="bg-card sticky top-0 z-10">
               <tr className="group text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+                <th className="px-3 py-1.5 font-medium text-left w-[5.5rem]"
+                  title="Composition of this model — sector, region and currency — beside the SP500 benchmark, on one set of buckets.">
+                  Analyse
+                </th>
                 {th('name', 'Portfolio')}
                 <th className="px-3 py-1.5 font-medium text-left">Description</th>
                 {th('holdings', 'Holdings', 'text-right')}
+                {th('resolved', 'Resolved', 'text-right',
+                  'How many of those instruments we can actually price — i.e. have a Yahoo (yfinance) price series for. The gap is what the returns are renormalised over, and under 60% of the weight it is why a row shows n/a.')}
                 {th('ytd', 'YTD (€)', 'text-right')}
+                {/* The since-inception block. All three ride ONE window — from the model's own
+                    fixed date — because that is the only stretch in which the weights we hold
+                    were the weights it held. A ratio is only as honest as the return under it. */}
+                {th('since', 'Since incep. (€)', 'text-right',
+                  'Return in EUR since the model\'s fixed date — the composition\'s own effective date. Never borrows hindsight, for any portfolio.')}
+                {th('sharpe', 'Sharpe', 'text-right',
+                  'Annualized return ÷ annualized volatility of the daily EUR curve since the fixed date, rf = 0. Absent under 20 trading days — a ratio off a week-old model is noise.')}
+                {th('sortino', 'Sortino', 'text-right',
+                  'Same, but divided by DOWNSIDE deviation only — it does not penalise a portfolio for rising. Absent when the curve never fell (undefined, not infinite).')}
+                {th('cagr', 'CAGR', 'text-right',
+                  'Geometric annualized return since the fixed date. ABSENT under one year of trading — compounding a four-month return out to a year extrapolates it (AITopSelectie would read +114.8% off 135 days). For those, the realized number is in Since incep.')}
+                {th('years', 'Years', 'text-right',
+                  'How long this model has been running: its fixed date to today, in calendar years. The unit the ratios to the left have to be read against — and why a CAGR can be missing (under 1.00, there is none).')}
                 {th('fixed', 'Type')}
-                <th className="px-3 py-1.5 font-medium text-left">Fixed date</th>
+                <th className="px-3 py-1.5 font-medium text-left" title="The model's own effective date — when this composition took effect. It is the inception the three columns to the left are measured from.">
+                  Fixed date
+                </th>
                 {th('id', 'AIRS id', 'text-right')}
               </tr>
             </thead>
@@ -318,6 +377,19 @@ export default function PortfoliosPanel() {
                 <Fragment key={r.id}>
                 <tr onClick={() => toggle(r.id)}
                   className="hover:bg-accent-500/10 transition-colors cursor-pointer">
+                  <td className="px-3 py-1.5">
+                    {/* stopPropagation: the row's own onClick expands the positions table, and a
+                        button that also expanded the row would do two things on one press. */}
+                    <button type="button"
+                      onClick={(e) => { e.stopPropagation(); setAnalyse({ id: r.id, name: r.name }); }}
+                      disabled={noComposition(r)}
+                      title={noComposition(r)
+                        ? 'This portfolio has no fixed model — AIRS stores no composition for it, so there is nothing to analyse.'
+                        : 'Sector / region / currency split vs the SP500 benchmark'}
+                      className="text-[11px] px-2 py-1 rounded-lg border border-neutral-700 text-accent-400 hover:border-accent-500/50 hover:bg-overlay/5 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+                      Analyse
+                    </button>
+                  </td>
                   <td className="px-3 py-1.5 font-mono text-fg whitespace-nowrap">
                     <span className="text-fg-faint mr-1.5">{open === r.id ? '▾' : '▸'}</span>
                     {r.name}
@@ -336,15 +408,35 @@ export default function PortfoliosPanel() {
                     <HoldingsCell p={r} />
                   </td>
                   <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
+                    <ResolvedCell p={r} />
+                  </td>
+                  <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
                     <YtdCell p={r} />
                   </td>
+                  <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
+                    <SinceCell p={r} />
+                  </td>
+                  <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
+                    <RatioCell p={r} kind="sharpe" />
+                  </td>
+                  <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
+                    <RatioCell p={r} kind="sortino" />
+                  </td>
+                  <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
+                    <CagrCell p={r} />
+                  </td>
+                  <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
+                    <YearsCell p={r} />
+                  </td>
                   <td className="px-3 py-1.5 text-fg-subtle whitespace-nowrap">{r.fixed || '—'}</td>
-                  <td className="px-3 py-1.5 font-mono text-fg-subtle whitespace-nowrap">{r.fixed_datum || '—'}</td>
+                  <td className="px-3 py-1.5 font-mono text-fg-subtle whitespace-nowrap">
+                    <FixedDateCell p={r} />
+                  </td>
                   <td className="px-3 py-1.5 text-right font-mono text-fg-faint">{r.id}</td>
                 </tr>
                 {open === r.id && (
                   <tr>
-                    <td colSpan={7} className="px-3 py-3 bg-inset">
+                    <td colSpan={14} className="px-3 py-3 bg-inset">
                       <Positions
                         state={pos[r.id]}
                         onPickDate={(d) => void loadPositions(r.id, d)}
@@ -359,6 +451,11 @@ export default function PortfoliosPanel() {
           </table>
         </div>
       )}
+
+      {analyse && (
+        <PortfolioAnalysisModal id={analyse.id} name={analyse.name}
+          onClose={() => setAnalyse(null)} />
+      )}
     </section>
   );
 }
@@ -369,38 +466,277 @@ export default function PortfoliosPanel() {
  *                 funds). We return NOTHING rather than renormalise 1% of a portfolio up to
  *                 100% and print it to two decimals. That actually happened: TOPS_OFF_BEH
  *                 read "+0.00%", which was its cash line, alone.
- *   ⚠ (amber)   — the model was (re)defined DURING the year, so this YTD is a BACKTEST of
- *                 today's weights, not what the portfolio earned. Hover for the real number.
+ *   ⚠ (amber)   — a PARTIAL year. The model is younger than the year, so the window opens at
+ *                 its inception rather than 1 Jan (it never held these weights in January, and
+ *                 pricing them back there would be a backtest). The figure is real — it is just
+ *                 not a year, and it is sitting in a column of them. Hover for the window.
  *   plain       — the model predates Jan 1: it held these weights all year, so this IS its
- *                 return.
+ *                 return, over the full year.
  */
 function YtdCell({ p }: { p: Portfolio }) {
   const f = p.perf;
-  if (!f) return <span className="text-fg-faint" title="Not computed yet.">…</span>;
+  if (!f) return <NoNumber p={p} />;
 
   if (f.ytd_pct == null) {
     return (
-      <span title={`Only ${(f.covered_pct ?? 0).toFixed(0)}% of this model's weight can be priced (${f.unpriced_holdings} holding(s) have no price series — typically Leonteq structured products or in-house funds). A return renormalised over the rest would be an invention, so none is shown.`}
-        className="text-[9px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-neutral-500/10 text-fg-faint border-neutral-600/30">
-        n/a
-      </span>
+      <NotAvailable title={`Only ${(f.covered_pct ?? 0).toFixed(0)}% of this model's weight can be priced (${f.unpriced_holdings} holding(s) have no price series — typically Leonteq structured products or in-house funds). A return renormalised over the rest would be an invention, so none is shown.`} />
     );
   }
 
   const v = f.ytd_pct;
   const colour = v >= 0 ? 'text-pos-400' : 'text-neg-400';
-  const hint = isHindsight(f)
-    ? `⚠ BACKTEST, not a track record. This model's weights took effect ${f.model_effective} — DURING the year — so applying them back to 1 Jan uses a basket chosen with hindsight. Its return since the model actually took effect is ${f.since_model_pct?.toFixed(2)}%.`
-    : `Real: this model has held these weights since ${f.model_effective}, before the year began.`;
+  const hint = isPartialYear(f)
+    ? `⚠ PARTIAL YEAR — measured from ${f.ytd_from}, not 1 January. This model took effect on ${f.model_effective}, DURING the year: it never held these weights in January, and pricing them back there would backtest a basket chosen with hindsight (that would read very differently). So this is ${statDays(f)} trading day(s) of realized return, sitting in a column of full years — do not rank it against one.`
+    : `Full year — measured from ${f.ytd_from}. This model has held these weights since ${f.model_effective}, before the year began, so this IS what it earned.`;
+  // ONE approximation marker, not two. Renormalised coverage and an interpolated opening mark
+  // are different CAUSES, but to a reader they are the same fact — this number is an estimate —
+  // and two symbols side by side read as two separate problems rather than one. The tooltip
+  // says which cause(s) apply; the glyph just says "approximate". Same size as the percentage:
+  // it qualifies that number, so it is not a footnote to it.
   const cov = f.partial_coverage
-    ? ` Only ${(f.covered_pct ?? 0).toFixed(0)}% of its weight is priceable; the rest is assumed to have behaved the same.`
+    ? ` ≈ Only ${(f.covered_pct ?? 0).toFixed(0)}% of its weight is priceable; the rest is assumed to have behaved the same.`
     : '';
+  const est = (f.interpolated_holdings ?? 0) > 0;
+  const estWhy = est
+    ? ` ≈ ${f.interpolated_holdings} holding(s) had no close near the start of the window, so their opening price was INTERPOLATED between the closes either side of it — this return is partly modelled. Expand the row to see which.`
+    : '';
+  const approx = f.partial_coverage || est;
 
   return (
-    <span title={hint + cov} className="inline-flex items-center gap-1">
-      {isHindsight(f) && <span className="text-warn-400" aria-label="backtest">⚠</span>}
-      {f.partial_coverage && <span className="text-fg-faint text-[9px]">~</span>}
+    <span title={hint + cov + estWhy} className="inline-flex items-center gap-1">
+      {isPartialYear(f) && <span className="text-warn-400" aria-label="partial year">⚠</span>}
+      {approx && <span className="text-warn-400" aria-label="approximate">≈</span>}
       <span className={colour}>{v >= 0 ? '+' : ''}{v.toFixed(2)}%</span>
+    </span>
+  );
+}
+
+/** How many of the model's instruments we can actually PRICE — i.e. have a Yahoo (`asset_price`)
+ *  series for. Read against the Holdings column to its left, which it reconciles with exactly:
+ *  `resolved + unresolved == holdings` (both count DISTINCT ISINs and both exclude cash, which
+ *  has no ISIN and is not an instrument).
+ *
+ *  This is the number behind every `n/a` on the row. BUS_Alternatives_FX holds 9 and we can
+ *  price 5 — 45% of its weight is a Global X / YieldMax / WisdomTree ETF still `queued` in the
+ *  grid, plus an in-house fund with no listing at all — so its coverage is 55%, under the 60%
+ *  floor, and no return is shown. Without this column that refusal has no visible cause.
+ *
+ *  Amber whenever it is short of the holdings count: a gap here is not cosmetic, it is the
+ *  weight the returns are renormalised over. */
+function ResolvedCell({ p }: { p: Portfolio }) {
+  const f = p.perf;
+  if (!f) return <NoNumber p={p} />;
+
+  const n = f.resolved_holdings ?? 0;
+  const missing = f.unresolved_holdings ?? 0;
+  const total = n + missing;
+  if (missing === 0) {
+    return (
+      <span className="text-fg" title={`All ${n} instrument(s) have a Yahoo price series.`}>
+        {n}
+      </span>
+    );
+  }
+  return (
+    <span className="text-warn-300"
+      title={`${n} of ${total} instrument(s) have a Yahoo price series — ${missing} do not (typically a Leonteq structured product, an in-house fund with no listing, or an ETF still unresolved in the instrument grid). That is ${(100 - (f.covered_pct ?? 0)).toFixed(0)}% of this model's weight, and the returns are renormalised over the rest.`}>
+      {n}<span className="text-fg-faint">/{total}</span>
+    </span>
+  );
+}
+
+/** "We cannot say" — ONE rendering of it, used by every derived column (YTD, Since incep.,
+ *  Sharpe, Sortino, CAGR). They all refuse for the same reason and they must therefore LOOK the
+ *  same: five refusals in three different styles reads as three different problems across a row
+ *  where there is only one. The `title` is where the columns differ, not the badge. */
+function NotAvailable({ title }: { title: string }) {
+  return (
+    <span title={title}
+      className="text-[9px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-neutral-500/10 text-fg-faint border-neutral-600/30">
+      n/a
+    </span>
+  );
+}
+
+/** A `%` return, coloured. The one place the sign is turned into a colour. */
+function Pct({ v }: { v: number }) {
+  return (
+    <span className={v >= 0 ? 'text-pos-400' : 'text-neg-400'}>
+      {v >= 0 ? '+' : ''}{v.toFixed(2)}%
+    </span>
+  );
+}
+
+/** A row with no fixed model has no performance row and never will — AIRS stores no
+ *  composition for a `normaal`/`meervoudig` portfolio at all. Rendering that as the same "…"
+ *  the priced rows wear while they load leaves a benchmark wrapper looking like a row that is
+ *  still loading, for ever. It isn't pending; there is nothing to price. */
+const noComposition = (p: Portfolio) => p.holdings === null;
+
+function NoNumber({ p }: { p: Portfolio }) {
+  return noComposition(p)
+    ? (
+      <span className="text-fg-faint"
+        title="This portfolio is not of type fixed (…) — AIRS stores no composition for it, so there is nothing to price. Not a pending number: an absent one.">
+        —
+      </span>
+    )
+    : <span className="text-fg-faint" title="Not computed yet.">…</span>;
+}
+
+/** Trading days of daily return the backend needs before it will report a ratio at all
+ *  (mirrors `MIN_STAT_DAYS` in `_airs_portfolio_perf.py`). Used here only to EXPLAIN the
+ *  absence — the backend decides it; a disagreement would show as a wrong tooltip, never as a
+ *  ratio the backend withheld. */
+const MIN_STAT_DAYS = 20;
+
+/** Daily returns behind a portfolio's ratios. Optional in the payload (Pydantic-defaulted), and
+ *  a missing sample is 0 days of it, not an unknown number of them. */
+const statDays = (f: Perf) => f.stat_days ?? 0;
+
+/** Why a since-inception figure is missing — and the three reasons are NOT the same thing. The
+ *  cell must never render a bare blank: a blank reads as "flat", and "we could not measure it"
+ *  is not "it made 0%". */
+function absentSince(f: Perf): string | null {
+  if (f.low_coverage) {
+    return `Only ${(f.covered_pct ?? 0).toFixed(0)}% of this model's weight can be priced (${f.unpriced_holdings} holding(s) have no price series — typically Leonteq structured products or in-house funds). A return renormalised over the rest would be an invention, so none is shown.`;
+  }
+  if (f.since_model_pct == null) {
+    return `At this model's inception (${f.model_effective}) only ${(f.since_covered_pct ?? 0).toFixed(0)}% of its weight had a price series — a holding that had not listed yet cannot be held from there. Its YTD is still measurable; this window is not.`;
+  }
+  return null;
+}
+
+/** The since-inception cell — the model's return since ITS OWN effective date.
+ *
+ * This is the honest number for every portfolio, hindsight-flagged or not, which is exactly why
+ * it sits next to the YTD: where the ⚠ says the YTD is a backtest, this column says what the
+ * portfolio actually did. MoTopSelectie_FX: +75.85% YTD, +0.51% since the model took effect.
+ *
+ * NOTE the window is the COMPOSITION's effective date, which is not always AIRS's "Fixed date"
+ * column (they disagree on 39 of 56, usually by days but once by five weeks). Anchoring on the
+ * Fixed date where it is EARLIER — 33 of them — would price the weights before they were
+ * chosen, which is the hindsight bug this whole module exists to refuse. The Fixed date cell
+ * shows the model date underneath itself wherever the two differ. */
+function SinceCell({ p }: { p: Portfolio }) {
+  const f = p.perf;
+  if (!f) return <NoNumber p={p} />;
+
+  const absent = absentSince(f);
+  if (absent || f.since_model_pct == null) {
+    return <NotAvailable title={absent ?? 'No return since inception.'} />;
+  }
+  return (
+    <span title={`EUR return since this composition took effect on ${f.model_effective} — ${statDays(f)} trading day(s) ago. Realized, not backtested: these are the weights it has held for that whole window.`}>
+      <Pct v={f.since_model_pct} />
+    </span>
+  );
+}
+
+/** Sharpe / Sortino over the since-inception window. Absent is not a small number.
+ *
+ *   n/a   — the return underneath the ratio doesn't exist (see `absentSince`).
+ *   —     — the window is too SHORT (under 20 trading days: 27 of 56 models were redefined this
+ *           year, one of them eight days before it was measured), or the denominator is
+ *           undefined: a flat curve has no volatility, and a curve that never fell has no
+ *           downside deviation. Rendering that as a big number would be a lie about its risk.
+ */
+function RatioCell({ p, kind }: { p: Portfolio; kind: 'sharpe' | 'sortino' }) {
+  const f = p.perf;
+  if (!f) return <NoNumber p={p} />;
+
+  const v = kind === 'sharpe' ? f.sharpe : f.sortino;
+  if (v == null) {
+    const absent = absentSince(f);
+    const why = absent
+      ? absent
+      : statDays(f) < MIN_STAT_DAYS
+        ? `Only ${statDays(f)} trading day(s) since this model took effect (${f.model_effective}). A ratio off that few points is noise with two decimals — and it would render exactly like one measured over two years. So none is shown.`
+        : kind === 'sortino'
+          ? 'Its curve never fell over this window, so downside deviation is zero — Sortino is undefined, not infinite.'
+          : 'Its curve never moved, so volatility is zero — Sharpe is undefined, not infinite.';
+    // `n/a` = we cannot say (no priceable return underneath). `—` = we CAN say, and the answer is
+    // "undefined" or "too short a window". Different facts, so different marks — but every `n/a`
+    // in the row wears the same badge.
+    return absent
+      ? <NotAvailable title={why} />
+      : <span className="text-fg-faint" title={why}>—</span>;
+  }
+
+  const vol = f.ann_vol_pct != null ? ` Annualized volatility ${f.ann_vol_pct.toFixed(1)}%.` : '';
+  return (
+    <span className={v >= 0 ? 'text-fg' : 'text-neg-400'}
+      title={`${kind === 'sharpe' ? 'Sharpe' : 'Sortino'} of the daily EUR curve since ${f.model_effective}, annualized over ${statDays(f)} trading days at rf = 0.${vol}`}>
+      {v.toFixed(2)}
+    </span>
+  );
+}
+
+/** The geometric annualized return since the fixed date.
+ *
+ *  ⚠ ABSENT under a year of trading, and that is the whole design of the cell. A CAGR compounds
+ *  a window's return out to a year, so a short window is not merely noisy — it is systematically
+ *  amplified: AITopSelectie OFF FX made +50.61% in 135 trading days, which annualizes to
+ *  +114.8%. That number would sit in this column, same font, beside one earned over two years.
+ *  Fund reporting does not annualize a sub-year period for exactly this reason; it shows the
+ *  cumulative return, which is the `Since incep.` column and is always there. */
+function CagrCell({ p }: { p: Portfolio }) {
+  const f = p.perf;
+  if (!f) return <NoNumber p={p} />;
+
+  if (f.cagr_pct == null) {
+    const absent = absentSince(f);
+    const yrs = f.years_running;
+    const why = absent
+      ?? (yrs != null && yrs < 1
+        ? `This model has been running ${yrs.toFixed(2)} years — under one. Annualizing a shorter window extrapolates it (${f.since_model_pct?.toFixed(2)}% over ${statDays(f)} trading days would compound to a far larger yearly figure on the strength of a few months), so no CAGR is shown. Its realized return is the Since incep. column.`
+        : 'Not enough of a window to annualize.');
+    return absent
+      ? <NotAvailable title={why} />
+      : <span className="text-fg-faint" title={why}>—</span>;
+  }
+  return (
+    <span title={`Geometric annualized return since ${f.model_effective}, over ${f.years_running?.toFixed(2)} years. Compounding this rate for that long reproduces the ${f.since_model_pct?.toFixed(2)}% in Since incep.`}>
+      <Pct v={f.cagr_pct} />
+    </span>
+  );
+}
+
+/** How long the model has been running — its fixed date to today, in calendar years.
+ *
+ *  Not decoration: it is the unit every annualized figure to its left has to be read against,
+ *  and it is the visible reason a CAGR is missing (under 1.00, there isn't one). */
+function YearsCell({ p }: { p: Portfolio }) {
+  const f = p.perf;
+  if (!f || f.years_running == null) return <NoNumber p={p} />;
+  const y = f.years_running;
+  return (
+    <span className={y < 1 ? 'text-warn-300' : 'text-fg'}
+      title={`Running since ${f.model_effective} — ${statDays(f)} trading day(s).${y < 1 ? ' Under a year, so it has no CAGR and its Sharpe/Sortino rest on a short sample.' : ''}`}>
+      {y.toFixed(2)}
+    </span>
+  );
+}
+
+/** AIRS's own "Fixed date" — and, where it differs, the date the numbers are ACTUALLY measured
+ *  from.
+ *
+ *  These are two different AIRS fields and they disagree on 39 of 56 portfolios. The one on the
+ *  list page is `fixed_datum`; the composition we hold and price is the one dated
+ *  `positions_datum`, its effective date. Showing only the first, beside three columns measured
+ *  from the second, invites the reader to check a return against a window it was never computed
+ *  over — so where they differ, both are shown. */
+function FixedDateCell({ p }: { p: Portfolio }) {
+  const eff = p.perf?.model_effective;
+  const differs = eff && p.fixed_datum && eff !== p.fixed_datum;
+  return (
+    <span title={differs
+      ? `AIRS's list shows ${p.fixed_datum}, but the composition we hold is dated ${eff} — that is the inception the Since / Sharpe / Sortino columns measure from.`
+      : undefined}>
+      {p.fixed_datum || '—'}
+      {differs && (
+        <span className="block text-[10px] text-fg-faint">model {eff}</span>
+      )}
     </span>
   );
 }
@@ -449,6 +785,90 @@ function HoldingsCell({ p }: { p: Portfolio }) {
   return <span className="text-fg">{p.holdings}</span>;
 }
 
+type Position = ModelPortfolioPositions['rows'][number];
+
+/** The five price columns of a position row: what it was worth when the YTD window opened, what
+ *  it is worth now, and the EUR return between them — the arithmetic BEHIND the portfolio's YTD.
+ *  Weight these returns by the model's percentages and you get that number back exactly (checked:
+ *  AITopSelectie OFF FX, 51.4812% both ways).
+ *
+ *  ⚠ The prices are in EUR, deliberately, because the return is an EUR return and carries the FX
+ *  leg. Showing the LOCAL closes here would print two numbers whose ratio is not the third — a
+ *  USD holding can rise in dollars and fall in euros on the same days. The local close and its
+ *  currency are in the tooltip, where they inform without pretending to be the sum.
+ *
+ *  Three rows have no marks, and none of them is a zero return:
+ *    cash          — no ISIN, no series. It IS priced, at a flat 0%, inside the portfolio figure.
+ *    unresolved    — no Yahoo listing (a structured product, an in-house fund, a queued ETF).
+ *    not-yet-held  — no close on or before the window opened, so it cannot be marked from there.
+ */
+function MarkCells({ p, ytdFrom }: { p: Position; ytdFrom?: string | null }) {
+  const eur = (v: number) => v.toLocaleString('en-GB', {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  });
+
+  if (p.start_price_eur == null || p.end_price_eur == null) {
+    // ⚠ A STALE SERIES IS NOT A BROKEN MAPPING, and the blank looks identical. Meta Platforms is
+    // correctly mapped to META with years of data — but its last close is 2026-07-02 while
+    // BUS_2.0_NEU_FX's window opens 2026-07-09, so there is NO PRICE INSIDE THE WINDOW and no
+    // return over it can exist. Telling the reader "it listed later" (the old text) sends them
+    // hunting for a mapping bug that isn't there. Name the last close and let it speak.
+    const stale = p.isin && p.last_close && ytdFrom && p.last_close < ytdFrom;
+    const why = !p.isin
+      ? 'Cash — it has no price series. It is not skipped: it is priced at a flat 0% inside the portfolio return, because its drag is real.'
+      : !p.known_instrument
+        ? 'This ISIN is not an instrument in our grid, so we have no price series for it — typically an in-house fund, or an ETF still queued for resolution.'
+        : stale
+          ? `⚠ STALE PRICES, not a bad mapping. This holding's latest close is ${p.last_close} — BEFORE this window opened on ${ytdFrom} — so there is no price inside the window and no return over it can exist. The instrument and its listing are fine; the price series just hasn't been refreshed. Refresh it from the instrument grid.`
+          : `No close on or before ${ytdFrom ?? 'the window'}, so the holding cannot be marked from there — it listed later, or its series has no data that far back.${p.last_close ? ` Its latest close is ${p.last_close}.` : ''}`;
+    return (
+      <>
+        {[0, 1, 2, 3, 4].map((i) => (
+          <td key={i} className={`px-3 py-1.5 font-mono text-right ${stale ? 'text-warn-300' : 'text-fg-faint'}`}>
+            <span title={why}>{stale && i === 0 ? '⚠ ' : ''}—</span>
+          </td>
+        ))}
+      </>
+    );
+  }
+
+  const local = (v: number | null | undefined, d: string | null | undefined) =>
+    v != null && p.currency
+      ? `${p.currency} ${v.toLocaleString('en-GB', { maximumFractionDigits: 2 })} on ${d} — converted at that date's own FX rate.`
+      : undefined;
+
+  // ⚠ The opening price is an ESTIMATE, not a close. This holding has no price near the date the
+  // window opened — it trades rarely, or is pointed at a listing that does — so the value was
+  // straight-lined between the two real closes either side of it. It renders in the same column,
+  // same font, as an observed price, so it must SAY it is not one.
+  const est = p.start_interpolated;
+  const estWhy = `⚠ ESTIMATE, not a traded price. This holding has no close near ${p.start_date} — the two real closes bracketing that date are ${p.start_gap_days} days apart — so its opening value was linearly INTERPOLATED between them. Everything downstream of it (this row's return, and its share of the portfolio's) is therefore partly modelled. Usually the real cause is a bad listing: check the instrument's Yahoo symbol.`;
+
+  return (
+    <>
+      <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
+        <span className={est ? 'text-warn-300' : 'text-fg'}
+          title={est ? estWhy : local(p.start_price_local, p.start_date)}>
+          {est && <span aria-label="interpolated" className="text-warn-400 mr-1">⚠</span>}
+          {eur(p.start_price_eur)}
+        </span>
+      </td>
+      <td className="px-3 py-1.5 font-mono whitespace-nowrap">
+        <span className={est ? 'text-warn-300' : 'text-fg-subtle'} title={est ? estWhy : undefined}>
+          {p.start_date}{est && <span className="text-fg-faint"> (est)</span>}
+        </span>
+      </td>
+      <td className="px-3 py-1.5 text-right font-mono text-fg whitespace-nowrap">
+        <span title={local(p.end_price_local, p.end_date)}>{eur(p.end_price_eur)}</span>
+      </td>
+      <td className="px-3 py-1.5 font-mono text-fg-subtle whitespace-nowrap">{p.end_date}</td>
+      <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
+        {p.return_pct != null ? <Pct v={p.return_pct} /> : <span className="text-fg-faint">—</span>}
+      </td>
+    </>
+  );
+}
+
 /** One portfolio's positions, from its AIRS XLS export — the sheet that carries an ISIN.
  *
  * The ISIN is the whole point: it's an EXACT join into `asset_execution`, where the AIRS
@@ -493,6 +913,15 @@ function Positions({ state, onPickDate, onRefresh }: {
           <span className="text-pos-400 font-mono">{d.matched}</span> matched to our instruments ·{' '}
           <span className={d.unmatched ? 'text-warn-300 font-mono' : 'text-fg-faint font-mono'}>{d.unmatched}</span> not ·{' '}
           <span className="font-mono">{total.toFixed(2)}%</span> total
+          {/* "Since when" is half of what a return means, and the answer is NOT 1 January for
+              half the portfolios — it is the date the composition took effect. */}
+          {d.ytd_from && (
+            <> · marks from{' '}
+              <span className="font-mono text-fg" title="The YTD window: max(1 Jan, this composition's effective date). Weighting the Return (€) column by these percentages reproduces the portfolio's YTD exactly.">
+                {d.ytd_from}
+              </span>
+            </>
+          )}
         </span>
         {/* AirSPMS's date dropdown always LEADS with today, which is an empty placeholder —
             so the default is the newest snapshot that actually has rows, not the first one. */}
@@ -525,17 +954,38 @@ function Positions({ state, onPickDate, onRefresh }: {
         <table className="w-full text-xs">
           <thead className="bg-card sticky top-0">
             <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+              {/* Position in the model as AIRS lists it — these rows are not re-sorted here, so
+                  the number is stable and can be read back against the XLS export. */}
+              <th className="px-3 py-1.5 font-medium text-right w-8">#</th>
               <th className="px-3 py-1.5 font-medium text-left">ISIN</th>
               <th className="px-3 py-1.5 font-medium text-left">Fund</th>
               <th className="px-3 py-1.5 font-medium text-right">Weight</th>
               <th className="px-3 py-1.5 font-medium text-left">Ccy</th>
               <th className="px-3 py-1.5 font-medium text-left">Sector</th>
               <th className="px-3 py-1.5 font-medium text-left">Region</th>
+              {/* The arithmetic behind the portfolio's YTD, one holding at a time. Weight these
+                  returns and you get the number in the row above, exactly. */}
+              <th className="px-3 py-1.5 font-medium text-right" title="The holding's price in EUR when the YTD window opened — its last close on or before that date.">
+                Start (€)
+              </th>
+              <th className="px-3 py-1.5 font-medium text-left" title="The date of that close. It can sit a day or two before the window opened (a weekend, a holiday) — it is the last price at which the position was actually marked.">
+                Start date
+              </th>
+              <th className="px-3 py-1.5 font-medium text-right" title="Its latest close, in EUR.">
+                End (€)
+              </th>
+              <th className="px-3 py-1.5 font-medium text-left" title="The date of that close. It LAGS for some holdings — vendors publish unevenly — so these dates are not all the same day, and the stale ones are marked at their last known price.">
+                End date
+              </th>
+              <th className="px-3 py-1.5 font-medium text-right" title="Return in EUR from start to end. This is the exact quantity the portfolio's YTD weights together — it carries the FX leg, so a USD holding can rise in dollars and fall here.">
+                Return (€)
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-800/20">
             {d.rows.map((p, i) => (
               <tr key={`${p.isin ?? 'cash'}-${i}`} className="hover:bg-overlay/[0.02]">
+                <td className="px-3 py-1.5 text-right font-mono text-fg-faint tabular-nums">{i + 1}</td>
                 <td className="px-3 py-1.5 font-mono whitespace-nowrap">
                   {p.isin ? (
                     <span className={p.known_instrument ? 'text-fg' : 'text-warn-300'}>
@@ -559,6 +1009,7 @@ function Positions({ state, onPickDate, onRefresh }: {
                 <td className="px-3 py-1.5 font-mono text-fg-muted">{p.valuta ?? '—'}</td>
                 <td className="px-3 py-1.5 text-fg-subtle">{p.sector ?? '—'}</td>
                 <td className="px-3 py-1.5 text-fg-subtle">{p.regio ?? '—'}</td>
+                <MarkCells p={p} ytdFrom={d.ytd_from} />
               </tr>
             ))}
           </tbody>

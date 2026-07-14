@@ -29,6 +29,7 @@ const STATUS_DOT: Record<string, string> = {
 
 type SortKey =
   | 'isin'
+  | 'leonteq_verified'
   | 'leonteq_name' | 'leonteq_product_type' | 'leonteq_currency'
   | 'openfigi_name' | 'identity_status'
   | 'name' | 'analysis_symbol' | 'currency' | 'asset_class' | 'sector'
@@ -45,6 +46,11 @@ type FacetKey = 'class' | 'sector' | 'product' | 'country' | 'continent' | 'regi
 type Col = { key: SortKey; label: string; align?: 'right'; title?: string; sep?: boolean };
 const COLS: Col[] = [
   { key: 'isin', label: 'ISIN' },
+  // The Leonteq membership badge lives in its OWN column rather than riding inside the ISIN
+  // cell. Two reasons: the ISIN is a fixed-width identifier and a badge glued to it made the
+  // column jump between rows that had one and rows that did not; and as a column it becomes
+  // SORTABLE, which is the only way to see the Leonteq-listed rows as a block.
+  { key: 'leonteq_verified', label: 'Leonteq', title: 'Present in the uploaded Leonteq (lynqs) list. Sort to group the listed rows together.' },
   { key: 'leonteq_name', label: 'Ltq Name', title: 'Name from the uploaded Leonteq (lynqs) list' },
   { key: 'leonteq_product_type', label: 'Product', title: 'Leonteq productType (EQUITY, ETF, …)' },
   { key: 'leonteq_currency', label: 'Ltq Ccy', title: 'Currency from the Leonteq list' },
@@ -87,7 +93,7 @@ const SOURCE_TONE: Record<string, string> = {
 };
 const _OPENFIGI_KEYS = new Set<SortKey>(['openfigi_name', 'identity_status']);
 // ISIN + the Leonteq metadata columns all come from the uploaded Leonteq list.
-const _LEONTEQ_KEYS = new Set<SortKey>(['isin', 'leonteq_name', 'leonteq_product_type', 'leonteq_currency']);
+const _LEONTEQ_KEYS = new Set<SortKey>(['isin', 'leonteq_verified', 'leonteq_name', 'leonteq_product_type', 'leonteq_currency']);
 const sourceOf = (key: SortKey): keyof typeof SOURCE_TONE =>
   _LEONTEQ_KEYS.has(key) ? 'Leonteq' : _OPENFIGI_KEYS.has(key) ? 'OpenFIGI' : 'yfinance';
 
@@ -299,6 +305,14 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
         <h3 className="text-sm font-semibold text-fg-strong">
           Execution instruments{rows ? ` · ${view.length}/${rows.length}` : ''}
         </h3>
+        {/* ⚠ EVERY CONTROL IN HERE HAS A FIXED WIDTH, ON PURPOSE.
+            A <select> sizes itself to its widest <option>, and these options are FACETED — their
+            labels carry live counts ("All sectors (16,150)" -> "All sectors (3)") and options
+            drop out entirely as a search narrows. So without a fixed width, every keystroke
+            resizes six selects at once, and in a wrapping row that shifts each control sideways
+            and re-flows the line under the cursor. Pin the widths and the toolbar holds still
+            while the CONTENT of the dropdowns changes underneath it, which is what a filter bar
+            is supposed to do. Do not swap these back to `max-w-*`. */}
         <div className="flex items-end gap-2 flex-wrap">
           <input
             value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search ISIN / name / symbol / FIGI…"
@@ -308,7 +322,7 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
           <div className="flex flex-col items-start gap-1">
             <SourceBadge source="Leonteq" />
             <select value={productFilter} onChange={(e) => setProductFilter(e.target.value)}
-              className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 max-w-[160px]" title="Leonteq productType">
+              className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 w-[160px]" title="Leonteq productType">
               <option value="">All products ({productFacet.total})</option>
               {productFacet.opts.map((o) => <option key={o.value} value={o.value}>{o.value} ({o.count})</option>)}
             </select>
@@ -317,7 +331,7 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
           <div className="flex flex-col items-start gap-1">
             <SourceBadge source="yfinance" />
             <select value={classFilter} onChange={(e) => setClassFilter(e.target.value)}
-              className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30" title="yfinance asset class">
+              className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 w-[150px]" title="yfinance asset class">
               <option value="">All classes ({classFacet.total})</option>
               {classFacet.opts.map((o) => <option key={o.value} value={o.value}>{classLabel(o.value)} ({o.count})</option>)}
             </select>
@@ -326,7 +340,7 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
           <div className="flex flex-col items-start gap-1">
             <SourceBadge source="yfinance" />
             <select value={sectorFilter} onChange={(e) => setSectorFilter(e.target.value)}
-              className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 max-w-[180px]" title="yfinance sector">
+              className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 w-[180px]" title="yfinance sector">
               <option value="">All sectors ({sectorFacet.total})</option>
               {sectorFacet.opts.map((o) => <option key={o.value} value={o.value}>{sectorLabel(o.value)} ({o.count})</option>)}
             </select>
@@ -337,7 +351,7 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
           <div className="flex flex-col items-start gap-1">
             <SourceBadge source="yfinance" />
             <select value={countryFilter} onChange={(e) => setCountryFilter(e.target.value)}
-              className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 max-w-[180px]" title="Issuer domicile (falls back to the listing venue)">
+              className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 w-[170px]" title="Issuer domicile (falls back to the listing venue)">
               <option value="">All countries ({countryFacet.total})</option>
               {countryFacet.opts.map((o) => <option key={o.value} value={o.value}>{o.value} ({o.count})</option>)}
             </select>
@@ -345,7 +359,7 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
           <div className="flex flex-col items-start gap-1">
             <SourceBadge source="yfinance" />
             <select value={continentFilter} onChange={(e) => setContinentFilter(e.target.value)}
-              className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 max-w-[180px]" title="Geographic continent">
+              className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 w-[160px]" title="Geographic continent">
               <option value="">All continents ({continentFacet.total})</option>
               {continentFacet.opts.map((o) => <option key={o.value} value={o.value}>{o.value} ({o.count})</option>)}
             </select>
@@ -353,14 +367,14 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
           <div className="flex flex-col items-start gap-1">
             <SourceBadge source="yfinance" />
             <select value={regionFilter} onChange={(e) => setRegionFilter(e.target.value)}
-              className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 max-w-[180px]" title="MSCI ACWI region">
+              className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 w-[160px]" title="MSCI ACWI region">
               <option value="">All regions ({regionFacet.total})</option>
               {regionFacet.opts.map((o) => <option key={o.value} value={o.value}>{o.value} ({o.count})</option>)}
             </select>
           </div>
           {/* Universe membership filter */}
           <select value={universeFilter} onChange={(e) => setUniverseFilter(e.target.value)} title="Filter to a saved universe's tickers"
-            className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 max-w-[200px]">
+            className="bg-page border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 w-[200px]">
             <option value="">All universes</option>
             {universes.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.ticker_count.toLocaleString()})</option>)}
           </select>
@@ -768,12 +782,20 @@ function GridRow({ r, onChart, onResolve, dividend, onDividends, onFinancial, me
           <span title={`${r.status}${r.reason ? ' — ' + r.reason : ''}`}
             className={`inline-block h-2 w-2 rounded-full align-middle mr-2 ${STATUS_DOT[r.status] ?? 'bg-neutral-500'}`} />
           {r.isin}
-          {r.leonteq_verified && (
-            <span title="In the uploaded Leonteq (lynqs) list"
-              className="ml-2 align-middle text-[8px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-accent-600/15 text-accent-400 border-accent-600/30">
-              Leonteq ✓
-            </span>
-          )}
+        </td>
+        {/* Leonteq membership — its OWN column. Inside the ISIN cell the badge made a fixed-width
+            identifier ragged, and it could not be sorted on. A row that is NOT in the list gets a
+            dash, not a blank: absent from the Leonteq universe is a fact about the row, and a
+            blank cell reads as "we didn't check". */}
+        <td className="px-3 py-1.5 whitespace-nowrap">
+          {r.leonteq_verified
+            ? (
+              <span title="In the uploaded Leonteq (lynqs) list"
+                className="align-middle text-[8px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-accent-600/15 text-accent-400 border-accent-600/30">
+                Leonteq ✓
+              </span>
+            )
+            : <span className="text-fg-faint" title="Not in the uploaded Leonteq (lynqs) list.">—</span>}
         </td>
         {/* Leonteq (lynqs) group — from the uploaded list (no separator: ISIN is Leonteq too) */}
         <td className="px-3 py-1.5 text-fg-soft">

@@ -14,11 +14,6 @@ export default function Page() {
       <AssetNav />
       <div className="px-8 py-5 border-b border-neutral-800/40">
         <h1 className="text-xl font-semibold text-fg-strong">Portfolios</h1>
-        <p className="text-sm text-fg-subtle mt-1">
-          AIRS model portfolios (Stamgegevens › Onderhoud portefeuilles › Model portefeuilles).
-          Expand one to see its positions — that export carries an <span className="font-mono">ISIN</span>,
-          which is the exact join into the instrument grid.
-        </p>
       </div>
 
       <div className="px-8 py-6 space-y-6">
