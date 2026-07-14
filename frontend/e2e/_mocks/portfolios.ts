@@ -269,10 +269,35 @@ export const FIXTURE_POSITIONS = {
       return_pct: -1.31,
     },
     {
+      // NOT AN INSTRUMENT — another model portfolio, wrapped as a Leonteq certificate so it can
+      // be held like a security. Yahoo has no listing for a structured product, so it can never
+      // be priced directly (`known_instrument: false`, no marks); the LINK is what lets us look
+      // through to the model behind it. The guess is confident here, and the badge says so.
+      fonds: 'Star Selection Index', isin: 'CH1381833321', percentage: 10, valuta: 'EUR',
+      categorie: 'Aandelen', sector: null, regio: null, known_instrument: false,
+      linked_portfolio_id: 2094, linked_portfolio_name: 'StarTopSelectie OFF FX',
+      link_source: 'auto', link_confidence: 0.99,
+      link_reason: "name 'Star Selection Index' matches 'StarTopSelectie OFF FX'",
+    },
+    {
       fonds: 'Liquiditeiten', isin: null, percentage: 5, valuta: 'EUR',
       categorie: 'Liquiditeiten', sector: null, regio: null, known_instrument: false,
     },
   ],
+};
+
+/**
+ * What the row dropdowns may offer. `excluded_by_isin` is the CYCLE guard: TOPS_STS_L (2082)
+ * holds the Star certificate at 100%, so linking the certificate to it walks straight back to
+ * the row you started from. The owning portfolio (2015) is already absent from `options`.
+ */
+export const FIXTURE_LINKABLE = {
+  options: [
+    { id: 2094, name: 'StarTopSelectie OFF FX', omschrijving: 'StarTopSelectie Offensief fixed', positions: 24 },
+    { id: 2082, name: 'TOPS_STS_L', omschrijving: 'StarTopSelectie', positions: 1 },
+    { id: 1973, name: 'BUS_EUR_OFF_FX', omschrijving: 'Europa Offensief FX', positions: 27 },
+  ],
+  excluded_by_isin: { CH1381833321: [2082] },
 };
 
 /**
@@ -378,6 +403,13 @@ export async function mockPortfolios(page: Page) {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify(FIXTURE_POSITIONS),
+    });
+  });
+  await page.route('**/api/airs/model-portfolios/*/linkable**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(FIXTURE_LINKABLE),
     });
   });
   await page.route('**/api/airs/model-portfolios', async (route) => {

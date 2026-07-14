@@ -2747,6 +2747,40 @@
         "title": "IsinCompareResponse",
         "type": "object"
       },
+      "LinkablePortfolio": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "omschrijving": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Omschrijving"
+          },
+          "positions": {
+            "title": "Positions",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "positions"
+        ],
+        "title": "LinkablePortfolio",
+        "type": "object"
+      },
       "LongEquitySaveUniverseRequest": {
         "properties": {
           "description": {
@@ -3415,6 +3449,61 @@
               }
             ],
             "title": "Last Close"
+          },
+          "link_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Confidence"
+          },
+          "link_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Reason"
+          },
+          "link_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Source"
+          },
+          "linked_portfolio_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linked Portfolio Id"
+          },
+          "linked_portfolio_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linked Portfolio Name"
           },
           "percentage": {
             "anyOf": [
@@ -4944,6 +5033,41 @@
           "cash_pct"
         ],
         "title": "SetCashRequest",
+        "type": "object"
+      },
+      "SetLinkRequest": {
+        "properties": {
+          "fonds": {
+            "title": "Fonds",
+            "type": "string"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "linked_portfolio_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linked Portfolio Id"
+          }
+        },
+        "required": [
+          "fonds"
+        ],
+        "title": "SetLinkRequest",
         "type": "object"
       },
       "SetRoleRequest": {
@@ -7608,6 +7732,185 @@
           }
         },
         "summary": "Airs Model Portfolio Attribution",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/model-portfolios/{portfolio_id}/link": {
+      "delete": {
+        "description": "Forget the human decision for this holding and fall back to the automatic guess. This is\nNOT the same as linking it to nothing \u2014 that is a decision too, and is stored as a null.",
+        "operationId": "airs_clear_portfolio_link_api_airs_model_portfolios__portfolio_id__link_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "isin",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Isin"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fonds",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Fonds",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Clear Portfolio Link",
+        "tags": [
+          "airs"
+        ]
+      },
+      "put": {
+        "description": "Point a holding at the model portfolio it IS (or, with a null target, record that it is\nNOT one). Stored against the HOLDING, not the (parent, holding) pair: 'Star Selection Index'\nis `StarTopSelectie OFF FX` in all 11 models that hold it, and eleven copies of one fact are\neleven chances to disagree. So this edit takes effect in every portfolio holding it.",
+        "operationId": "airs_set_portfolio_link_api_airs_model_portfolios__portfolio_id__link_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Set Portfolio Link",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/model-portfolios/{portfolio_id}/linkable": {
+      "get": {
+        "description": "What a row of this portfolio may be linked TO. Every model except the ones a link to\nwould be a cycle: the portfolio itself (no self-reference) and any portfolio that already\nHOLDS this holding (TOPS_STS_L holds 'Star Selection Index' at 100% \u2014 a link there walks\nstraight back to the row you started from).",
+        "operationId": "airs_linkable_portfolios_api_airs_model_portfolios__portfolio_id__linkable_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "isin",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Isin"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LinkablePortfolio"
+                  },
+                  "title": "Response Airs Linkable Portfolios Api Airs Model Portfolios  Portfolio Id  Linkable Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Linkable Portfolios",
         "tags": [
           "airs"
         ]

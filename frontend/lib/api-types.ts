@@ -911,6 +911,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/model-portfolios/{portfolio_id}/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Airs Set Portfolio Link
+         * @description Point a holding at the model portfolio it IS (or, with a null target, record that it is
+         *     NOT one). Stored against the HOLDING, not the (parent, holding) pair: 'Star Selection Index'
+         *     is `StarTopSelectie OFF FX` in all 11 models that hold it, and eleven copies of one fact are
+         *     eleven chances to disagree. So this edit takes effect in every portfolio holding it.
+         */
+        put: operations["airs_set_portfolio_link_api_airs_model_portfolios__portfolio_id__link_put"];
+        post?: never;
+        /**
+         * Airs Clear Portfolio Link
+         * @description Forget the human decision for this holding and fall back to the automatic guess. This is
+         *     NOT the same as linking it to nothing — that is a decision too, and is stored as a null.
+         */
+        delete: operations["airs_clear_portfolio_link_api_airs_model_portfolios__portfolio_id__link_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolios/{portfolio_id}/linkable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Linkable Portfolios
+         * @description What a row of this portfolio may be linked TO. Every model except the ones a link to
+         *     would be a cycle: the portfolio itself (no self-reference) and any portfolio that already
+         *     HOLDS this holding (TOPS_STS_L holds 'Star Selection Index' at 100% — a link there walks
+         *     straight back to the row you started from).
+         */
+        get: operations["airs_linkable_portfolios_api_airs_model_portfolios__portfolio_id__linkable_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/model-portfolios/{portfolio_id}/positions": {
         parameters: {
             query?: never;
@@ -6387,6 +6438,17 @@ export interface components {
             /** Unmatched Count */
             unmatched_count: number;
         };
+        /** LinkablePortfolio */
+        LinkablePortfolio: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Omschrijving */
+            omschrijving?: string | null;
+            /** Positions */
+            positions: number;
+        };
         /** LongEquitySaveUniverseRequest */
         LongEquitySaveUniverseRequest: {
             /** Description */
@@ -6756,6 +6818,16 @@ export interface components {
             known_instrument?: boolean;
             /** Last Close */
             last_close?: string | null;
+            /** Link Confidence */
+            link_confidence?: number | null;
+            /** Link Reason */
+            link_reason?: string | null;
+            /** Link Source */
+            link_source?: string | null;
+            /** Linked Portfolio Id */
+            linked_portfolio_id?: number | null;
+            /** Linked Portfolio Name */
+            linked_portfolio_name?: string | null;
             /** Percentage */
             percentage?: number | null;
             /** Regio */
@@ -7254,6 +7326,15 @@ export interface components {
         SetCashRequest: {
             /** Cash Pct */
             cash_pct: number;
+        };
+        /** SetLinkRequest */
+        SetLinkRequest: {
+            /** Fonds */
+            fonds: string;
+            /** Isin */
+            isin?: string | null;
+            /** Linked Portfolio Id */
+            linked_portfolio_id?: number | null;
         };
         /** SetRoleRequest */
         SetRoleRequest: {
@@ -8618,6 +8699,108 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelPortfolioAttribution"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_set_portfolio_link_api_airs_model_portfolios__portfolio_id__link_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_clear_portfolio_link_api_airs_model_portfolios__portfolio_id__link_delete: {
+        parameters: {
+            query?: {
+                isin?: string | null;
+                fonds?: string;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_linkable_portfolios_api_airs_model_portfolios__portfolio_id__linkable_get: {
+        parameters: {
+            query?: {
+                isin?: string | null;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkablePortfolio"][];
                 };
             };
             /** @description Validation Error */

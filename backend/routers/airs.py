@@ -18,6 +18,7 @@ from routers import _airs_portfolio_store as store
 from routers._sse import sse_event, sse_message
 import queue as thread_queue
 import threading
+from datetime import UTC, datetime
 from datetime import date as dt_date
 
 import pandas as pd
@@ -545,6 +546,18 @@ class ModelPortfolioPosition(BaseModel):
     end_price_local: float | None = None
     return_pct: float | None = None    # EUR, start -> end
 
+    # The model portfolio this holding IS. Some positions are not instruments at all but other
+    # models, wrapped as a Leonteq certificate ("Star Selection Index" IS StarTopSelectie OFF
+    # FX). NULL when it is a plain instrument — which is almost every row.
+    linked_portfolio_id: int | None = None
+    linked_portfolio_name: str | None = None
+    # 'manual' — a human set it, and it is authoritative (including a manual NULL: "this is NOT
+    # a portfolio", which has to survive a re-read or a wrong guess could never be dismissed).
+    # 'auto'   — our educated guess, with the confidence that earned it.
+    link_source: str | None = None
+    link_confidence: float | None = None   # 0-1; NULL for a manual link — a choice is not a guess
+    link_reason: str | None = None
+
 
 class ModelPortfolioPositions(BaseModel):
     portfolio: str
@@ -589,13 +602,32 @@ def _shape_positions(raw: dict) -> ModelPortfolioPositions:
     anchor = ytd_anchor_for(raw.get("datum")) if raw.get("datum") else None
     marks = compute_holding_marks(isins, anchor) if (anchor and isins) else {}
 
+    # Which of these rows are themselves model portfolios. NEVER cached, for the same reason
+    # `known_instrument` isn't: the guess is a fuzzy match against the CURRENT portfolio list,
+    # so a stored one would be wrong the moment a portfolio is renamed or gains a composition.
+    # A stored *manual* link wins over the guess — see `resolve_links`.
+    from routers._airs_portfolio_links import link_key, resolve_links  # noqa: PLC0415
+    _lrows = [{"isin": (str(r["ISINCode"]).strip() if r.get("ISINCode") else None),
+               "fonds": (str(r["Fonds"]).strip() if r.get("Fonds") else "")} for r in rows]
+    links = resolve_links(supabase, raw["portfolio_id"], _lrows)
+    _pf_names = {p["id"]: p["name"] for p in (
+        supabase.table("airs_model_portfolio").select("id,name").execute().data or [])}
+
     out: list[ModelPortfolioPosition] = []
     for r in rows:
         isin = (str(r["ISINCode"]).strip() if r.get("ISINCode") else None) or None
         m = marks.get(isin) if isin else None
+        fonds = (str(r["Fonds"]).strip() if r.get("Fonds") else None)
+        lk = links.get(link_key(isin, fonds))
         out.append(ModelPortfolioPosition(
-            fonds=(str(r["Fonds"]).strip() if r.get("Fonds") else None),
+            fonds=fonds,
             isin=isin,
+            linked_portfolio_id=(lk.linked_portfolio_id if lk else None),
+            linked_portfolio_name=(
+                _pf_names.get(lk.linked_portfolio_id) if lk and lk.linked_portfolio_id else None),
+            link_source=(lk.source if lk else None),
+            link_confidence=(lk.confidence if lk else None),
+            link_reason=(lk.reason if lk else None),
             percentage=(float(r["Percentage"]) if r.get("Percentage") is not None else None),
             valuta=(str(r["valuta"]).strip() if r.get("valuta") else None),
             categorie=(str(r["Beleggingscategorie"]).strip() if r.get("Beleggingscategorie") else None),
@@ -659,6 +691,99 @@ async def airs_model_portfolio_positions(
 
     raw = await asyncio.to_thread(_live_positions, portfolio_id, datum)
     return await asyncio.to_thread(_shape_positions, raw)
+
+
+class LinkablePortfolio(BaseModel):
+    id: int
+    name: str
+    omschrijving: str | None = None
+    positions: int          # how many holdings it has — a 0 has nothing to look through to
+
+
+class SetLinkRequest(BaseModel):
+    isin: str | None = None
+    fonds: str
+    # NULL is a real answer: "this holding is explicitly NOT a portfolio". It has to be storable,
+    # or a wrong guess could only be re-pointed at another portfolio, never dismissed.
+    linked_portfolio_id: int | None = None
+
+
+class LinkableContext(BaseModel):
+    options: list[LinkablePortfolio]
+    # holding ISIN -> the portfolios that already HOLD it. A link to one of those is a cycle, so
+    # the row's dropdown drops them. Keyed by ISIN and small: few holdings are portfolios.
+    excluded_by_isin: dict[str, list[int]]
+
+
+@router.get("/api/airs/model-portfolios/{portfolio_id}/linkable",
+            response_model=LinkableContext)
+async def airs_linkable_portfolios(portfolio_id: int):
+    """What the rows of this portfolio may be linked TO — every model except the ones a link to
+    would be a cycle: the portfolio itself (no self-reference), and per row, any portfolio that
+    already HOLDS that holding (TOPS_STS_L holds 'Star Selection Index' at 100% — a link there
+    walks straight back to the row you started from).
+
+    ONE call for the whole table. Per row it would be ~30 requests to open one portfolio.
+    """
+    from routers._airs_portfolio_links import linkable_context  # noqa: PLC0415
+    return await asyncio.to_thread(linkable_context, supabase, portfolio_id)
+
+
+def _save_link(owner_id: int, body: SetLinkRequest) -> dict:
+    from routers._airs_portfolio_links import link_key, linkable_portfolios  # noqa: PLC0415
+
+    target = body.linked_portfolio_id
+    if target is not None:
+        # Re-validate SERVER-SIDE. The dropdown already excludes these, but a cycle written
+        # through the API is a cycle all the same — and a look-through that loops does not
+        # fail loudly, it recurses.
+        allowed = {p["id"] for p in linkable_portfolios(supabase, owner_id, body.isin)}
+        if target not in allowed:
+            raise HTTPException(
+                400,
+                "That portfolio cannot be linked here: it is either this portfolio itself or one "
+                "that already holds this position — either way the link would be a cycle.",
+            )
+
+    key = link_key(body.isin, body.fonds)
+    existing = (supabase.table("airs_model_portfolio_link")
+                .select("id,isin,fonds").execute().data or [])
+    row_id = next((r["id"] for r in existing if link_key(r.get("isin"), r.get("fonds")) == key),
+                  None)
+    payload = {"isin": body.isin, "fonds": body.fonds, "linked_portfolio_id": target,
+               "updated_at": datetime.now(UTC).isoformat()}
+    if row_id:
+        supabase.table("airs_model_portfolio_link").update(payload).eq("id", row_id).execute()
+    else:
+        supabase.table("airs_model_portfolio_link").insert(payload).execute()
+    return {"ok": True, "linked_portfolio_id": target}
+
+
+@router.put("/api/airs/model-portfolios/{portfolio_id}/link")
+async def airs_set_portfolio_link(portfolio_id: int, body: SetLinkRequest):
+    """Point a holding at the model portfolio it IS (or, with a null target, record that it is
+    NOT one). Stored against the HOLDING, not the (parent, holding) pair: 'Star Selection Index'
+    is `StarTopSelectie OFF FX` in all 11 models that hold it, and eleven copies of one fact are
+    eleven chances to disagree. So this edit takes effect in every portfolio holding it."""
+    return await asyncio.to_thread(_save_link, portfolio_id, body)
+
+
+@router.delete("/api/airs/model-portfolios/{portfolio_id}/link")
+async def airs_clear_portfolio_link(portfolio_id: int, isin: str | None = None, fonds: str = ""):
+    """Forget the human decision for this holding and fall back to the automatic guess. This is
+    NOT the same as linking it to nothing — that is a decision too, and is stored as a null."""
+    from routers._airs_portfolio_links import link_key  # noqa: PLC0415
+
+    def _run() -> dict:
+        key = link_key(isin, fonds)
+        rows = (supabase.table("airs_model_portfolio_link")
+                .select("id,isin,fonds").execute().data or [])
+        for r in rows:
+            if link_key(r.get("isin"), r.get("fonds")) == key:
+                supabase.table("airs_model_portfolio_link").delete().eq("id", r["id"]).execute()
+        return {"ok": True}
+
+    return await asyncio.to_thread(_run)
 
 
 @router.get("/api/airs/portfolio/{portfolio_name}")

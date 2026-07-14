@@ -377,4 +377,29 @@ test.describe('/portfolios', () => {
     expect(asc.slice(0, 2).join()).toContain(withRatio[0]);
     expect(asc.at(-1)).not.toContain('AITopSelectie OFF FX');
   });
+
+  test('a holding that IS a portfolio gets a Link, and the cycle is not offered', async ({ page }) => {
+    // Some positions are not instruments — they are other models, wrapped as a Leonteq
+    // certificate. "Star Selection Index" IS StarTopSelectie OFF FX, and can never be priced
+    // directly, so the link is the only way to see through it.
+    await page.getByText('AITopSelectie OFF FX').click();
+    const row = page.locator('tr').filter({ hasText: 'Star Selection Index' }).last();
+    await expect(row).toBeVisible();
+
+    const select = row.locator('select');
+    await expect(select).toHaveValue('2094');                       // the guess is pre-filled
+    await expect(row).toContainText('99%');                         // ...and says how sure it is
+
+    // ⚠ THE CYCLE. TOPS_STS_L is the CLOSEST name match in the whole list — its description is
+    // literally "StarTopSelectie" — and it is the one answer that is definitely wrong: it HOLDS
+    // this certificate at 100%. Offering it would be offering a loop.
+    const labels = await select.locator('option').allInnerTexts();
+    expect(labels.join('|')).toContain('StarTopSelectie OFF FX');
+    expect(labels.join('|')).not.toContain('TOPS_STS_L');
+
+    // A plain instrument is not linked to anything, and its dropdown says so rather than
+    // guessing — "not a portfolio" is an answer, and most rows are exactly that.
+    const amazon = page.locator('tr', { hasText: 'Amazon' }).last();
+    await expect(amazon.locator('select')).toHaveValue('');
+  });
 });

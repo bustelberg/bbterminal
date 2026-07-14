@@ -441,6 +441,9 @@ export default function PortfoliosPanel() {
                         state={pos[r.id]}
                         onPickDate={(d) => void loadPositions(r.id, d)}
                         onRefresh={() => void loadPositions(r.id, undefined, true)}
+                        // A link edit re-reads from OUR cache, never from AIRS: the composition
+                        // did not change, only what we say one of its rows is.
+                        onLinkSaved={() => void loadPositions(r.id)}
                       />
                     </td>
                   </tr>
@@ -869,16 +872,153 @@ function MarkCells({ p, ytdFrom }: { p: Position; ytdFrom?: string | null }) {
   );
 }
 
+type LinkOption = { id: number; name: string; omschrijving?: string | null; positions: number };
+type LinkCtx = { options: LinkOption[]; excluded_by_isin: Record<string, number[]> };
+
+/** The model portfolio a holding IS.
+ *
+ * Some positions are not instruments at all — they are other models, wrapped as a Leonteq
+ * certificate so they can be held like a security. "Star Selection Index" (CH1381833321) is held
+ * by 11 models and IS `StarTopSelectie OFF FX`. Yahoo has no listing for a structured product,
+ * so those rows can never be priced directly; the link is what lets us look through.
+ *
+ * The dropdown offers every model EXCEPT the ones a link to would be a cycle — this portfolio
+ * itself, and any portfolio that already holds this position. The confidence badge is on the
+ * GUESS only: once a human picks, it is a decision, not an estimate, and showing a number next
+ * to it would imply we were still unsure.
+ *
+ * ⚠ The edit applies to the HOLDING, not to this row: the same certificate in the other ten
+ * portfolios that hold it gets the same link. One fact, stored once. */
+function LinkCell({ p, ctx, ownerId, onSaved }: {
+  p: Position;
+  ctx: LinkCtx | null;
+  ownerId: number;
+  onSaved: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  // Cash is not a holding, so it cannot be a portfolio.
+  if (!p.isin && (p.fonds ?? '').toLowerCase().includes('liquiditeit')) {
+    return <td className="px-3 py-1.5 text-fg-faint">—</td>;
+  }
+  if (!ctx) return <td className="px-3 py-1.5 text-fg-faint">…</td>;
+
+  const banned = new Set(p.isin ? (ctx.excluded_by_isin[p.isin] ?? []) : []);
+  const options = ctx.options.filter((o) => o.id !== ownerId && !banned.has(o.id));
+  const value = p.linked_portfolio_id ?? '';
+  const isGuess = p.link_source === 'auto' && p.linked_portfolio_id != null;
+  const conf = p.link_confidence ?? 0;
+
+  const save = async (raw: string) => {
+    setBusy(true);
+    try {
+      await apiFetch(`/api/airs/model-portfolios/${ownerId}/link`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          isin: p.isin ?? null,
+          fonds: p.fonds ?? '',
+          // '' is the user saying "not a portfolio" — a DECISION, stored as a null, not a
+          // reset. Clearing it back to the guess is a separate action (the ↺).
+          linked_portfolio_id: raw === '' ? null : Number(raw),
+        }),
+      });
+      onSaved();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reset = async () => {
+    setBusy(true);
+    try {
+      await apiFetch(
+        `/api/airs/model-portfolios/${ownerId}/link?isin=${encodeURIComponent(p.isin ?? '')}` +
+        `&fonds=${encodeURIComponent(p.fonds ?? '')}`,
+        { method: 'DELETE' },
+      );
+      onSaved();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <td className="px-3 py-1.5 whitespace-nowrap">
+      <span className="inline-flex items-center gap-1.5">
+        <select
+          value={value}
+          disabled={busy}
+          onChange={(e) => void save(e.target.value)}
+          className={`bg-page border rounded-lg px-1.5 py-0.5 text-[11px] max-w-[11rem] focus:border-accent-500 disabled:opacity-50 ${
+            p.linked_portfolio_id != null
+              ? 'border-accent-600/40 text-accent-400'
+              : 'border-neutral-800/40 text-fg-faint'
+          }`}
+        >
+          <option value="">— not a portfolio —</option>
+          {options.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.name}{o.positions ? ` (${o.positions})` : ''}
+            </option>
+          ))}
+        </select>
+
+        {/* The confidence belongs to the GUESS. A low one is not a worse link — it is a link we
+            are not sure about, and the two must not look the same. */}
+        {isGuess && (
+          <span
+            title={`Automatic guess — ${(conf * 100).toFixed(0)}% confidence.${p.link_reason ? ` ${p.link_reason}` : ''} Pick from the dropdown to overrule it.`}
+            className={`text-[9px] font-mono px-1 py-0.5 rounded border ${
+              conf >= 0.9
+                ? 'bg-pos-500/15 text-pos-400 border-pos-500/25'
+                : conf >= 0.7
+                  ? 'bg-warn-500/15 text-warn-300 border-warn-500/25'
+                  : 'bg-neg-500/10 text-neg-300 border-neg-500/25'
+            }`}
+          >
+            {(conf * 100).toFixed(0)}%
+          </span>
+        )}
+        {p.link_source === 'manual' && (
+          <button
+            type="button"
+            onClick={() => void reset()}
+            disabled={busy}
+            title="Forget this manual choice and fall back to the automatic guess."
+            className="text-[10px] text-fg-faint hover:text-accent-400 transition-colors"
+          >
+            ↺
+          </button>
+        )}
+      </span>
+    </td>
+  );
+}
+
 /** One portfolio's positions, from its AIRS XLS export — the sheet that carries an ISIN.
  *
  * The ISIN is the whole point: it's an EXACT join into `asset_execution`, where the AIRS
  * holdings sheet only ever gave us a fund name ("Alphabet - C", "L` Oreal") that no amount
  * of fuzzy matching resolves safely. */
-function Positions({ state, onPickDate, onRefresh }: {
+function Positions({ state, onPickDate, onRefresh, onLinkSaved }: {
   state?: PosState;
   onPickDate: (datum: string) => void;
   onRefresh: () => void;
+  onLinkSaved: () => void;
 }) {
+  const pid = state?.data?.portfolio_id;
+  const [linkCtx, setLinkCtx] = useState<LinkCtx | null>(null);
+  useEffect(() => {
+    if (pid == null) return;
+    let alive = true;
+    apiFetch(`/api/airs/model-portfolios/${pid}/linkable`)
+      .then((r) => r.json())
+      .then((j: LinkCtx) => { if (alive) setLinkCtx(j); })
+      .catch(() => { if (alive) setLinkCtx(null); });
+    return () => { alive = false; };
+  }, [pid]);
+
   if (!state || state.loading) {
     return <p className="text-[11px] text-fg-subtle">Loading positions…</p>;
   }
@@ -959,6 +1099,11 @@ function Positions({ state, onPickDate, onRefresh }: {
               <th className="px-3 py-1.5 font-medium text-right w-8">#</th>
               <th className="px-3 py-1.5 font-medium text-left">ISIN</th>
               <th className="px-3 py-1.5 font-medium text-left">Fund</th>
+              {/* Some holdings are not instruments — they are other model portfolios, wrapped as
+                  a Leonteq certificate. "Star Selection Index" IS StarTopSelectie OFF FX. */}
+              <th className="px-3 py-1.5 font-medium text-left" title="The model portfolio this holding IS. A few positions are not instruments at all but other models, held via a Leonteq certificate — those can never be priced directly, so the link is what lets us look through to the model behind them. The badge is the confidence of our automatic guess; pick from the dropdown to overrule it. An edit applies to the holding everywhere it is held, not just to this row.">
+                Link
+              </th>
               <th className="px-3 py-1.5 font-medium text-right">Weight</th>
               <th className="px-3 py-1.5 font-medium text-left">Ccy</th>
               <th className="px-3 py-1.5 font-medium text-left">Sector</th>
@@ -1003,6 +1148,7 @@ function Positions({ state, onPickDate, onRefresh }: {
                   )}
                 </td>
                 <td className="px-3 py-1.5 text-fg-soft">{p.fonds ?? '—'}</td>
+                <LinkCell p={p} ctx={linkCtx} ownerId={d.portfolio_id} onSaved={onLinkSaved} />
                 <td className="px-3 py-1.5 text-right font-mono text-fg">
                   {p.percentage != null ? `${p.percentage.toFixed(2)}%` : '—'}
                 </td>
