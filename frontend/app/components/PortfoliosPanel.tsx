@@ -847,24 +847,37 @@ function MarkCells({ p, ytdFrom }: { p: Position; ytdFrom?: string | null }) {
   const est = p.start_interpolated;
   const estWhy = `⚠ ESTIMATE, not a traded price. This holding has no close near ${p.start_date} — the two real closes bracketing that date are ${p.start_gap_days} days apart — so its opening value was linearly INTERPOLATED between them. Everything downstream of it (this row's return, and its share of the portfolio's) is therefore partly modelled. Usually the real cause is a bad listing: check the instrument's Yahoo symbol.`;
 
+  // ⚠ These marks are a LOOK-THROUGH, not a traded price: this holding is a certificate wrapping
+  // another model, which Yahoo cannot price. Start/End are that model's BASKET indexed to 100 at
+  // the window open — only the Return between them is a real number (and it weights into the
+  // portfolio total exactly like a priced holding). The index must never read as a share price,
+  // so it wears the accent colour and says what it is.
+  const lt = p.lookthrough;
+  const ltWhy = `Look-through, not a traded price. This holding is a certificate wrapping the model portfolio “${p.linked_portfolio_name ?? 'linked'}”, which Yahoo cannot price directly. Start and End are that model's basket indexed to 100 when the window opened — only the Return between them is a real number, and it weights into this portfolio's total exactly like a priced holding.`;
+
+  const startTitle = lt ? ltWhy : est ? estWhy : local(p.start_price_local, p.start_date);
+  const startClass = lt ? 'text-accent-400' : est ? 'text-warn-300' : 'text-fg';
+
   return (
     <>
       <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
-        <span className={est ? 'text-warn-300' : 'text-fg'}
-          title={est ? estWhy : local(p.start_price_local, p.start_date)}>
+        <span className={startClass} title={startTitle}>
           {est && <span aria-label="interpolated" className="text-warn-400 mr-1">⚠</span>}
+          {lt && <span aria-label="look-through" className="text-accent-400 mr-1">↳</span>}
           {eur(p.start_price_eur)}
         </span>
       </td>
       <td className="px-3 py-1.5 font-mono whitespace-nowrap">
-        <span className={est ? 'text-warn-300' : 'text-fg-subtle'} title={est ? estWhy : undefined}>
+        <span className={est ? 'text-warn-300' : lt ? 'text-accent-400/80' : 'text-fg-subtle'}
+          title={lt ? ltWhy : est ? estWhy : undefined}>
           {p.start_date}{est && <span className="text-fg-faint"> (est)</span>}
         </span>
       </td>
-      <td className="px-3 py-1.5 text-right font-mono text-fg whitespace-nowrap">
-        <span title={local(p.end_price_local, p.end_date)}>{eur(p.end_price_eur)}</span>
+      <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
+        <span className={lt ? 'text-accent-400' : 'text-fg'}
+          title={lt ? ltWhy : local(p.end_price_local, p.end_date)}>{eur(p.end_price_eur)}</span>
       </td>
-      <td className="px-3 py-1.5 font-mono text-fg-subtle whitespace-nowrap">{p.end_date}</td>
+      <td className={`px-3 py-1.5 font-mono whitespace-nowrap ${lt ? 'text-accent-400/80' : 'text-fg-subtle'}`}>{p.end_date}</td>
       <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
         {p.return_pct != null ? <Pct v={p.return_pct} /> : <span className="text-fg-faint">—</span>}
       </td>
@@ -909,10 +922,27 @@ function LinkCell({ p, ctx, ownerId, onSaved }: {
   const isGuess = p.link_source === 'auto' && p.linked_portfolio_id != null;
   const conf = p.link_confidence ?? 0;
 
+  // The currently-linked portfolio must ALWAYS have an option to render against — otherwise the
+  // native <select> shows a blank instead of its name, and the holdings count in parentheses (the
+  // whole point of this cell for a manual link, just as for an auto one) never appears. A linked
+  // target could be missing from `options` if it now holds this ISIN (`banned`); surface it anyway
+  // so the selection reads correctly.
+  const linkedOpt = p.linked_portfolio_id != null
+    ? ctx.options.find((o) => o.id === p.linked_portfolio_id)
+    : undefined;
+  const shown = linkedOpt && !options.some((o) => o.id === linkedOpt.id)
+    ? [linkedOpt, ...options]
+    : options;
+  // The full "Name (count)" — the select clips long *TopSelectie names, so the count also lives
+  // in the tooltip where it can never be truncated away.
+  const linkedLabel = linkedOpt
+    ? `${linkedOpt.name}${linkedOpt.positions ? ` (${linkedOpt.positions})` : ''}`
+    : undefined;
+
   const save = async (raw: string) => {
     setBusy(true);
     try {
-      await apiFetch(`/api/airs/model-portfolios/${ownerId}/link`, {
+      await apiFetch(`${API_URL}/api/airs/model-portfolios/${ownerId}/link`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -933,8 +963,8 @@ function LinkCell({ p, ctx, ownerId, onSaved }: {
     setBusy(true);
     try {
       await apiFetch(
-        `/api/airs/model-portfolios/${ownerId}/link?isin=${encodeURIComponent(p.isin ?? '')}` +
-        `&fonds=${encodeURIComponent(p.fonds ?? '')}`,
+        `${API_URL}/api/airs/model-portfolios/${ownerId}/link` +
+        `?isin=${encodeURIComponent(p.isin ?? '')}&fonds=${encodeURIComponent(p.fonds ?? '')}`,
         { method: 'DELETE' },
       );
       onSaved();
@@ -950,14 +980,15 @@ function LinkCell({ p, ctx, ownerId, onSaved }: {
           value={value}
           disabled={busy}
           onChange={(e) => void save(e.target.value)}
-          className={`bg-page border rounded-lg px-1.5 py-0.5 text-[11px] max-w-[11rem] focus:border-accent-500 disabled:opacity-50 ${
+          title={linkedLabel}
+          className={`bg-page border rounded-lg px-1.5 py-0.5 text-[11px] max-w-[15rem] focus:border-accent-500 disabled:opacity-50 ${
             p.linked_portfolio_id != null
               ? 'border-accent-600/40 text-accent-400'
               : 'border-neutral-800/40 text-fg-faint'
           }`}
         >
           <option value="">— not a portfolio —</option>
-          {options.map((o) => (
+          {shown.map((o) => (
             <option key={o.id} value={o.id}>
               {o.name}{o.positions ? ` (${o.positions})` : ''}
             </option>
@@ -1012,7 +1043,10 @@ function Positions({ state, onPickDate, onRefresh, onLinkSaved }: {
   useEffect(() => {
     if (pid == null) return;
     let alive = true;
-    apiFetch(`/api/airs/model-portfolios/${pid}/linkable`)
+    // ⚠ `API_URL`. A bare `/api/...` goes to the Next.js origin, not the backend — it 404s,
+    // `.json()` throws, and the cell renders a permanent "…" with nothing in the console to
+    // say why. Every apiFetch in this file is absolute for that reason.
+    apiFetch(`${API_URL}/api/airs/model-portfolios/${pid}/linkable`)
       .then((r) => r.json())
       .then((j: LinkCtx) => { if (alive) setLinkCtx(j); })
       .catch(() => { if (alive) setLinkCtx(null); });

@@ -238,14 +238,20 @@ def _load_context(supabase) -> tuple[list[dict], dict[int, list[dict]], dict[str
     return portfolios, comp, stored
 
 
-def resolve_links(supabase, owner_id: int, rows: list[dict]) -> dict[str, ResolvedLink]:
+def resolve_links(supabase, owner_id: int, rows: list[dict],
+                  *, context: tuple[list[dict], dict[int, list[dict]], dict[str, dict]] | None = None,
+                  ) -> dict[str, ResolvedLink]:
     """Every row's link, keyed by `link_key`. A STORED row is a human decision and always wins —
     including a stored NULL, which means "explicitly not a portfolio" and must survive, or a
     wrong guess could only ever be re-pointed, never dismissed.
 
     `rows` are `{isin, fonds}` dicts (the position rows of `owner_id`).
+
+    `context` is the `_load_context` triple, passed in when resolving MANY portfolios in one pass
+    (the perf loop resolves all 56): `_load_context` is three full-table reads, so re-loading it
+    per portfolio would be 168 queries for data that does not change between them.
     """
-    portfolios, comp, stored = _load_context(supabase)
+    portfolios, comp, stored = context if context is not None else _load_context(supabase)
     out: dict[str, ResolvedLink] = {}
     for r in rows:
         isin, fonds = (r.get("isin") or None), (r.get("fonds") or "")

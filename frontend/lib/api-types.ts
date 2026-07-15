@@ -948,10 +948,12 @@ export interface paths {
         };
         /**
          * Airs Linkable Portfolios
-         * @description What a row of this portfolio may be linked TO. Every model except the ones a link to
-         *     would be a cycle: the portfolio itself (no self-reference) and any portfolio that already
-         *     HOLDS this holding (TOPS_STS_L holds 'Star Selection Index' at 100% — a link there walks
-         *     straight back to the row you started from).
+         * @description What the rows of this portfolio may be linked TO — every model except the ones a link to
+         *     would be a cycle: the portfolio itself (no self-reference), and per row, any portfolio that
+         *     already HOLDS that holding (TOPS_STS_L holds 'Star Selection Index' at 100% — a link there
+         *     walks straight back to the row you started from).
+         *
+         *     ONE call for the whole table. Per row it would be ~30 requests to open one portfolio.
          */
         get: operations["airs_linkable_portfolios_api_airs_model_portfolios__portfolio_id__linkable_get"];
         put?: never;
@@ -6438,6 +6440,15 @@ export interface components {
             /** Unmatched Count */
             unmatched_count: number;
         };
+        /** LinkableContext */
+        LinkableContext: {
+            /** Excluded By Isin */
+            excluded_by_isin: {
+                [key: string]: number[];
+            };
+            /** Options */
+            options: components["schemas"]["LinkablePortfolio"][];
+        };
         /** LinkablePortfolio */
         LinkablePortfolio: {
             /** Id */
@@ -6828,6 +6839,11 @@ export interface components {
             linked_portfolio_id?: number | null;
             /** Linked Portfolio Name */
             linked_portfolio_name?: string | null;
+            /**
+             * Lookthrough
+             * @default false
+             */
+            lookthrough?: boolean;
             /** Percentage */
             percentage?: number | null;
             /** Regio */
@@ -8783,9 +8799,7 @@ export interface operations {
     };
     airs_linkable_portfolios_api_airs_model_portfolios__portfolio_id__linkable_get: {
         parameters: {
-            query?: {
-                isin?: string | null;
-            };
+            query?: never;
             header?: never;
             path: {
                 portfolio_id: number;
@@ -8800,7 +8814,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LinkablePortfolio"][];
+                    "application/json": components["schemas"]["LinkableContext"];
                 };
             };
             /** @description Validation Error */

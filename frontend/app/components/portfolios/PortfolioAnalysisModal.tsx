@@ -163,43 +163,45 @@ function Chart({ axis, rows, benchmark }: {
     <section className="bg-card border border-neutral-800/40 rounded-xl p-4">
       <h4 className="text-sm font-semibold text-fg-strong">{AXIS_LABEL[axis] ?? axis}</h4>
       <p className="text-[11px] text-fg-faint mt-0.5 mb-2">{AXIS_NOTE[axis]}</p>
-      <div style={{ height }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={rows} layout="vertical" barGap={2}
-            margin={{ top: 4, right: 46, bottom: 4, left: 8 }}>
-            <CartesianGrid stroke={chartTheme.grid} horizontal={false} />
-            <XAxis type="number" unit="%" tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
-              stroke={chartTheme.zeroLine} />
-            <YAxis type="category" dataKey="bucket" width={148}
-              tick={{ fill: chartTheme.axisTick, fontSize: 11 }} stroke={chartTheme.zeroLine} />
-            <Tooltip
-              {...chartTheme.tooltip}
-              formatter={(v: unknown, name: unknown) => [`${Number(v).toFixed(1)}%`, String(name)]}
-              // The TILT is why the two are side by side at all — put it in the tooltip rather
-              // than making the reader subtract two bars by eye.
-              labelFormatter={(label: unknown) => {
-                const key = String(label);
-                const r = rows.find((x: Row) => x.bucket === key);
-                const d = r?.diff_pct ?? 0;
-                return `${key}  ·  tilt ${d >= 0 ? '+' : ''}${d.toFixed(1)}pp`;
-              }}
-            />
-            <Legend wrapperStyle={{ fontSize: 11, color: chartTheme.axisLabel }} />
-            <Bar dataKey="portfolio_pct" name="Portfolio" fill={SERIES.portfolio}
-              radius={[0, 4, 4, 0]} barSize={11}>
-              {/* Direct labels: the relief the amber's sub-3:1 contrast obliges, and useful
-                  regardless. Ink, not the series colour. */}
-              <LabelList dataKey="portfolio_pct" position="right" formatter={pct}
-                style={{ fill: chartTheme.axisLabel, fontSize: 10 }} />
-            </Bar>
-            <Bar dataKey="benchmark_pct" name={benchmark} fill={SERIES.benchmark}
-              radius={[0, 4, 4, 0]} barSize={11}>
-              <LabelList dataKey="benchmark_pct" position="right" formatter={pct}
-                style={{ fill: chartTheme.axisLabel, fontSize: 10 }} />
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+      {/* Numeric height, not "100%": recharts' ResponsiveContainer starts at {-1,-1} and only
+          measures on the next frame, so height="100%" reads -1 on the first paint and warns
+          "width(-1) and height(-1)". An explicit numeric height is >0 from the first render
+          (the same reason every other chart here passes a number) and skips the warning. */}
+      <ResponsiveContainer width="100%" height={height}>
+        <BarChart data={rows} layout="vertical" barGap={2}
+          margin={{ top: 4, right: 46, bottom: 4, left: 8 }}>
+          <CartesianGrid stroke={chartTheme.grid} horizontal={false} />
+          <XAxis type="number" unit="%" tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
+            stroke={chartTheme.zeroLine} />
+          <YAxis type="category" dataKey="bucket" width={148}
+            tick={{ fill: chartTheme.axisTick, fontSize: 11 }} stroke={chartTheme.zeroLine} />
+          <Tooltip
+            {...chartTheme.tooltip}
+            formatter={(v: unknown, name: unknown) => [`${Number(v).toFixed(1)}%`, String(name)]}
+            // The TILT is why the two are side by side at all — put it in the tooltip rather
+            // than making the reader subtract two bars by eye.
+            labelFormatter={(label: unknown) => {
+              const key = String(label);
+              const r = rows.find((x: Row) => x.bucket === key);
+              const d = r?.diff_pct ?? 0;
+              return `${key}  ·  tilt ${d >= 0 ? '+' : ''}${d.toFixed(1)}pp`;
+            }}
+          />
+          <Legend wrapperStyle={{ fontSize: 11, color: chartTheme.axisLabel }} />
+          <Bar dataKey="portfolio_pct" name="Portfolio" fill={SERIES.portfolio}
+            radius={[0, 4, 4, 0]} barSize={11}>
+            {/* Direct labels: the relief the amber's sub-3:1 contrast obliges, and useful
+                regardless. Ink, not the series colour. */}
+            <LabelList dataKey="portfolio_pct" position="right" formatter={pct}
+              style={{ fill: chartTheme.axisLabel, fontSize: 10 }} />
+          </Bar>
+          <Bar dataKey="benchmark_pct" name={benchmark} fill={SERIES.benchmark}
+            radius={[0, 4, 4, 0]} barSize={11}>
+            <LabelList dataKey="benchmark_pct" position="right" formatter={pct}
+              style={{ fill: chartTheme.axisLabel, fontSize: 10 }} />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
     </section>
   );
 }

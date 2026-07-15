@@ -271,13 +271,20 @@ export const FIXTURE_POSITIONS = {
     {
       // NOT AN INSTRUMENT — another model portfolio, wrapped as a Leonteq certificate so it can
       // be held like a security. Yahoo has no listing for a structured product, so it can never
-      // be priced directly (`known_instrument: false`, no marks); the LINK is what lets us look
-      // through to the model behind it. The guess is confident here, and the badge says so.
+      // be priced DIRECTLY (`known_instrument: false`); the LINK is what lets us look through to
+      // the model behind it. The guess is confident here, and the badge says so. And because it
+      // is linked, its Start/End/Return are a LOOK-THROUGH: the wrapped model's basket indexed to
+      // 100 at the window open — only the Return is a real number, so the row wears the accent
+      // colour and a ↳ rather than reading as a share price.
       fonds: 'Star Selection Index', isin: 'CH1381833321', percentage: 10, valuta: 'EUR',
       categorie: 'Aandelen', sector: null, regio: null, known_instrument: false,
       linked_portfolio_id: 2094, linked_portfolio_name: 'StarTopSelectie OFF FX',
       link_source: 'auto', link_confidence: 0.99,
       link_reason: "name 'Star Selection Index' matches 'StarTopSelectie OFF FX'",
+      lookthrough: true, currency: null,
+      start_date: '2026-01-01', start_price_eur: 100.0, start_price_local: null,
+      end_date: '2026-07-13', end_price_eur: 107.3, end_price_local: null,
+      return_pct: 7.3,
     },
     {
       fonds: 'Liquiditeiten', isin: null, percentage: 5, valuta: 'EUR',

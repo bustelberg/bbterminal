@@ -382,13 +382,30 @@ test.describe('/portfolios', () => {
     // Some positions are not instruments — they are other models, wrapped as a Leonteq
     // certificate. "Star Selection Index" IS StarTopSelectie OFF FX, and can never be priced
     // directly, so the link is the only way to see through it.
+    // ⚠ The call must go to the BACKEND origin, not the page's. A bare `/api/...` hits the
+    // Next.js server, 404s, and the cell renders a permanent "…" — which is exactly what
+    // shipped, because `page.route`'s glob matches BOTH origins and so cannot see the
+    // difference. Assert the origin, or the mock hides the bug it exists to exercise.
+    const linkableReq = page.waitForRequest(
+      (r) => r.url().includes('/linkable') && r.url().startsWith('http://127.0.0.1:8099'),
+    );
+
     await page.getByText('AITopSelectie OFF FX').click();
+    await linkableReq;
+
     const row = page.locator('tr').filter({ hasText: 'Star Selection Index' }).last();
     await expect(row).toBeVisible();
 
     const select = row.locator('select');
     await expect(select).toHaveValue('2094');                       // the guess is pre-filled
     await expect(row).toContainText('99%');                         // ...and says how sure it is
+
+    // The certificate is no longer a dead row: it is priced by looking THROUGH to the model it
+    // wraps, so its Start/End/Return fill in — the ↳ marks it as a look-through index (base 100),
+    // not a traded price, and the Return is the wrapped model's return over the window.
+    await expect(row).toContainText('↳');
+    await expect(row).toContainText('100.00');                      // basket indexed to 100 at open
+    await expect(row).toContainText('+7.30%');                      // the look-through return
 
     // ⚠ THE CYCLE. TOPS_STS_L is the CLOSEST name match in the whole list — its description is
     // literally "StarTopSelectie" — and it is the one answer that is definitely wrong: it HOLDS

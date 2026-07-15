@@ -2747,6 +2747,33 @@
         "title": "IsinCompareResponse",
         "type": "object"
       },
+      "LinkableContext": {
+        "properties": {
+          "excluded_by_isin": {
+            "additionalProperties": {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "title": "Excluded By Isin",
+            "type": "object"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/LinkablePortfolio"
+            },
+            "title": "Options",
+            "type": "array"
+          }
+        },
+        "required": [
+          "options",
+          "excluded_by_isin"
+        ],
+        "title": "LinkableContext",
+        "type": "object"
+      },
       "LinkablePortfolio": {
         "properties": {
           "id": {
@@ -3504,6 +3531,11 @@
               }
             ],
             "title": "Linked Portfolio Name"
+          },
+          "lookthrough": {
+            "default": false,
+            "title": "Lookthrough",
+            "type": "boolean"
           },
           "percentage": {
             "anyOf": [
@@ -7855,7 +7887,7 @@
     },
     "/api/airs/model-portfolios/{portfolio_id}/linkable": {
       "get": {
-        "description": "What a row of this portfolio may be linked TO. Every model except the ones a link to\nwould be a cycle: the portfolio itself (no self-reference) and any portfolio that already\nHOLDS this holding (TOPS_STS_L holds 'Star Selection Index' at 100% \u2014 a link there walks\nstraight back to the row you started from).",
+        "description": "What the rows of this portfolio may be linked TO \u2014 every model except the ones a link to\nwould be a cycle: the portfolio itself (no self-reference), and per row, any portfolio that\nalready HOLDS that holding (TOPS_STS_L holds 'Star Selection Index' at 100% \u2014 a link there\nwalks straight back to the row you started from).\n\nONE call for the whole table. Per row it would be ~30 requests to open one portfolio.",
         "operationId": "airs_linkable_portfolios_api_airs_model_portfolios__portfolio_id__linkable_get",
         "parameters": [
           {
@@ -7866,22 +7898,6 @@
               "title": "Portfolio Id",
               "type": "integer"
             }
-          },
-          {
-            "in": "query",
-            "name": "isin",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Isin"
-            }
           }
         ],
         "responses": {
@@ -7889,11 +7905,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/LinkablePortfolio"
-                  },
-                  "title": "Response Airs Linkable Portfolios Api Airs Model Portfolios  Portfolio Id  Linkable Get",
-                  "type": "array"
+                  "$ref": "#/components/schemas/LinkableContext"
                 }
               }
             },

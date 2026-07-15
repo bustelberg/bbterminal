@@ -545,6 +545,11 @@ class ModelPortfolioPosition(BaseModel):
     end_price_eur: float | None = None
     end_price_local: float | None = None
     return_pct: float | None = None    # EUR, start -> end
+    # These marks are a LOOK-THROUGH, not a traded price: this row is a certificate wrapping
+    # another model (see `linked_portfolio_id`), and its Start/End are that model's basket indexed
+    # to 100 at the window open — only the return between them is a real number. Rendered distinctly
+    # so a synthetic index is never mistaken for a share price.
+    lookthrough: bool = False
 
     # The model portfolio this holding IS. Some positions are not instruments at all but other
     # models, wrapped as a Leonteq certificate ("Star Selection Index" IS StarTopSelectie OFF
@@ -593,25 +598,36 @@ def _shape_positions(raw: dict) -> ModelPortfolioPositions:
                .in_("isin", chunk).execute().data or [])
         known.update(r["isin"] for r in got)
 
-    # Anchored on the composition BEING SHOWN — for the default (newest) snapshot that is the
-    # portfolio's `positions_datum`, so these marks are the ones the table's YTD was computed
-    # from and the two reconcile. Pick a historical snapshot and the anchor moves with it, which
-    # is right: those are different weights, and their window opened when they did.
-    #
-    # NEVER cached. A price mark is true for one day; the composition it prices is not.
-    anchor = ytd_anchor_for(raw.get("datum")) if raw.get("datum") else None
-    marks = compute_holding_marks(isins, anchor) if (anchor and isins) else {}
-
     # Which of these rows are themselves model portfolios. NEVER cached, for the same reason
     # `known_instrument` isn't: the guess is a fuzzy match against the CURRENT portfolio list,
     # so a stored one would be wrong the moment a portfolio is renamed or gains a composition.
-    # A stored *manual* link wins over the guess — see `resolve_links`.
+    # A stored *manual* link wins over the guess — see `resolve_links`. Resolved BEFORE the marks
+    # because a certificate row's marks come from the model it links to (the look-through).
     from routers._airs_portfolio_links import link_key, resolve_links  # noqa: PLC0415
     _lrows = [{"isin": (str(r["ISINCode"]).strip() if r.get("ISINCode") else None),
                "fonds": (str(r["Fonds"]).strip() if r.get("Fonds") else "")} for r in rows]
     links = resolve_links(supabase, raw["portfolio_id"], _lrows)
     _pf_names = {p["id"]: p["name"] for p in (
         supabase.table("airs_model_portfolio").select("id,name").execute().data or [])}
+
+    # Anchored on the composition BEING SHOWN — for the default (newest) snapshot that is the
+    # portfolio's `positions_datum`, so these marks are the ones the table's YTD was computed
+    # from and the two reconcile. Pick a historical snapshot and the anchor moves with it, which
+    # is right: those are different weights, and their window opened when they did.
+    #
+    # A row linked to another model is a certificate with no Yahoo price of its own; `linked`
+    # tells `compute_holding_marks` to price it by looking THROUGH to that model's basket, so its
+    # once-dead Start/End/Return columns fill with the wrapped model's return over this window.
+    #
+    # NEVER cached. A price mark is true for one day; the composition it prices is not.
+    anchor = ytd_anchor_for(raw.get("datum")) if raw.get("datum") else None
+    linked_map: dict[str, int] = {}
+    for _lr in _lrows:
+        _lk = links.get(link_key(_lr["isin"], _lr["fonds"]))
+        if _lr["isin"] and _lk and _lk.linked_portfolio_id:
+            linked_map[_lr["isin"]] = _lk.linked_portfolio_id
+    marks = (compute_holding_marks(isins, anchor, linked=linked_map)
+             if (anchor and isins) else {})
 
     out: list[ModelPortfolioPosition] = []
     for r in rows:

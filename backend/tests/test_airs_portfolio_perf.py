@@ -13,6 +13,7 @@ import pytest
 from momentum.diversification import annualized_stats
 from routers._airs_portfolio_perf import (
     GOOD_COVERAGE_PCT,
+    LOOKTHROUGH_MIN_COVERAGE,
     MIN_CAGR_DAYS,
     MIN_COVERAGE_PCT,
     MIN_STAT_DAYS,
@@ -20,6 +21,7 @@ from routers._airs_portfolio_perf import (
     _daily_returns,
     _eur_return,
     _index,
+    _lookthrough_series,
     _mark_at,
     _MAX_INTERP_SPAN_DAYS,
     compute_holding_marks,
@@ -258,7 +260,8 @@ class TestHoldingMarks:
         src = inspect.getsource(compute_holding_marks)
         # The return is computed off the EUR series...
         assert '"return_pct": (p1 / p0 - 1.0) * 100.0' in src
-        assert "eur = _eur_series(" in src
+        assert "_eur_series(" in src                # the EUR series (per analysis_id) is built here
+        assert "eur = eur_by_aid.get(" in src       # ...and the mark is taken off it
         # ...and the native close rides along only as a separate, clearly-named field.
         assert '"start_price_local":' in src
         assert "native.get(d1)" in src
@@ -445,3 +448,82 @@ class TestRatiosNeedASample:
         st = annualized_stats(_daily_returns(rising), periods_per_year=TRADING_DAYS)
         assert st.sortino is None
         assert st.sharpe is not None                          # vol is real; downside isn't
+
+
+class TestLookThrough:
+    """A certificate wrapping another model (CH1381833321 "Star Selection Index" IS
+    StarTopSelectie OFF FX) has no Yahoo price of its own, so it used to sit in the table as a
+    dead row — no Start, no End, no Return — and its weight fell out of the coverage denominator.
+    Look-through prices it from the model it wraps instead.
+    """
+
+    # `ex` maps ISIN -> execution row; `eur` maps analysis_id -> its EUR close series. This is the
+    # shape both `compute_portfolio_performance` and `compute_holding_marks` hand to the builder.
+    EX = {"A": {"analysis_id": 1}, "B": {"analysis_id": 2}}
+    EUR = {
+        1: [("2026-01-01", 100.0), ("2026-02-01", 110.0)],   # +10%
+        2: [("2026-01-01", 50.0), ("2026-02-01", 45.0)],     # -10%
+    }
+
+    def test_the_basket_is_a_weighted_index_of_the_model_it_wraps(self):
+        """60/40 of +10% and -10% is +2%, and the level is indexed to 100 at the base."""
+        rows = [{"isin": "A", "percentage": 60}, {"isin": "B", "percentage": 40}]
+        s = _lookthrough_series(rows, self.EX, self.EUR)
+        assert s[0] == ("2026-01-01", pytest.approx(100.0))
+        assert s[-1] == ("2026-02-01", pytest.approx(102.0))   # 0.6*110/100 + 0.4*45/50 = 1.02
+
+    def test_the_certificate_reconciles_into_the_parent_exactly_like_a_stock(self):
+        """The whole point of an anchor-INDEPENDENT level: fed to `_index` as the certificate's
+        leg, `level(t)/level(anchor)` is the wrapped model's return, so weighting the row's return
+        reproduces the parent's figure — the same invariant a real holding obeys."""
+        rows = [{"isin": "A", "percentage": 60}, {"isin": "B", "percentage": 40}]
+        s = _lookthrough_series(rows, self.EX, self.EUR)
+
+        # A parent holding this certificate at 100% earns exactly the basket's +2%.
+        curve, _ = _index([(100.0, s)], "2026-01-01")
+        assert (curve[-1] - 1.0) * 100.0 == pytest.approx(2.0)
+
+        # And the per-holding mark the expanded row shows is that same +2%.
+        d0, p0, _i, _g = _mark_at(s, "2026-01-01")
+        d1, p1 = s[-1]
+        assert (p1 / p0 - 1.0) * 100.0 == pytest.approx(2.0)
+
+    def test_cash_inside_the_wrapped_model_is_a_flat_leg(self):
+        """A 50% cash sleeve holds its value — so 50% of +10% and 50% flat is +5%."""
+        rows = [{"isin": "A", "percentage": 50}, {"isin": None, "percentage": 50}]
+        s = _lookthrough_series(rows, self.EX, self.EUR)
+        assert s[-1][1] == pytest.approx(105.0)
+
+    def test_too_little_of_the_wrapped_model_priceable_looks_through_to_nothing(self):
+        """The same coverage floor a portfolio's own figure obeys, applied to the model behind a
+        certificate: renormalising a return over a sliver of the basket is a fabrication, so below
+        the floor it returns nothing and the row stays dead rather than confidently wrong."""
+        assert LOOKTHROUGH_MIN_COVERAGE == MIN_COVERAGE_PCT / 100.0
+        # 40% priceable (A), 60% an ISIN we cannot price (not in `ex`) — under the 60% floor.
+        rows = [{"isin": "A", "percentage": 40}, {"isin": "Z", "percentage": 60}]
+        assert _lookthrough_series(rows, self.EX, self.EUR) == []
+
+    def test_an_all_cash_basket_has_no_price_path(self):
+        """Cash is priceable (flat), but a basket that is ONLY cash has no series to track — it is
+        not a return we can chart, and inventing a flat line would imply we looked through to
+        something."""
+        rows = [{"isin": None, "percentage": 100}]
+        assert _lookthrough_series(rows, self.EX, self.EUR) == []
+
+    def test_it_is_one_level_deep_no_recursion_into_nested_certificates(self):
+        """A certificate held INSIDE the wrapped model has no execution row of its own, so it is
+        just an unpriceable leg here — renormalised out, never recursed into. That is also what
+        makes a link cycle impossible to loop on."""
+        # C is a nested certificate: no entry in `ex`, so it drops out and A carries the basket.
+        rows = [{"isin": "A", "percentage": 100}, {"isin": "C", "percentage": 0}]
+        s = _lookthrough_series(rows, self.EX, self.EUR)
+        assert s[-1][1] == pytest.approx(110.0)     # 100% A, +10%
+
+    def test_the_portfolio_figure_and_the_row_marks_both_look_through(self):
+        """Source invariant: a certificate is priced the SAME way in the headline figure and in
+        the itemised marks — one builder, one anchor — or the two would disagree about the row."""
+        assert "_lookthrough_series(" in inspect.getsource(compute_portfolio_performance)
+        assert "_lookthrough_series(" in inspect.getsource(compute_holding_marks)
+        # ...and a direct listing, if it ever existed, wins over the look-through.
+        assert 'if out.get(isin, {}).get("return_pct") is not None:' in \
+            inspect.getsource(compute_holding_marks)

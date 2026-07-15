@@ -387,6 +387,113 @@ def _daily_returns(values: list[float]) -> list[float]:
             for i in range(1, len(values)) if values[i - 1] > 0]
 
 
+# Look-through pricing needs at least this share of the LINKED model to be priceable, or the
+# certificate's return is a renormalisation over too little of the basket to mean anything — the
+# same floor `compute_portfolio_performance` applies to a portfolio, applied to the model behind
+# a certificate. Below it, we look through to nothing and the row stays a dead row.
+LOOKTHROUGH_MIN_COVERAGE = MIN_COVERAGE_PCT / 100.0
+
+# The index base for a look-through level. Arbitrary — only ratios of it are ever read — but 100
+# is the convention a reader expects from an "indexed to 100 at the start" series, and it keeps
+# the synthetic value visibly distinct from a real share price.
+_LOOKTHROUGH_BASE = 100.0
+
+
+def _lookthrough_series(
+    linked_rows: list[dict],
+    ex: dict[str, dict],
+    eur: dict[int, list[tuple[str, float]]],
+) -> list[tuple[str, float]]:
+    """A linked model's basket as a single EUR PRICE SERIES — the certificate's price we cannot
+    get from Yahoo, reconstructed from the model it wraps.
+
+    Some AIRS holdings are not instruments, they are other models wrapped as a Leonteq
+    certificate (CH1381833321 "Star Selection Index" IS StarTopSelectie OFF FX). Yahoo has no
+    listing for a structured product, so those rows are dead — no price, no return, weight lost
+    from the coverage denominator. This looks THROUGH the certificate to the model and prices the
+    basket instead.
+
+    ⚠ ANCHOR-INDEPENDENT, ON PURPOSE. It returns an absolute level (a buy-and-hold return index
+    of the model's CURRENT weights, based at 100 on the date the whole basket is first priceable),
+    NOT a curve normalised to one anchor. That is what lets the SAME series price the certificate
+    at the parent's YTD anchor AND at its inception: `level(t) / level(anchor)` is the model's
+    buy-and-hold return over `[anchor, t]`, so the certificate reconciles into the parent exactly
+    like a stock does, at any window. A per-anchor normalised curve would need rebuilding for
+    every parent that holds it and could not be marked before its own anchor.
+
+    We hold only the CURRENT composition (AIRS keeps no weight history), so the weights are
+    applied from the base date — the standard approximation for a certificate whose NAV history
+    we cannot see. Priced from the SAME EUR series as everything else (`eur`), renormalised over
+    what is priceable, cash held flat. ONE LEVEL DEEP: a certificate held INSIDE the linked model
+    is just unpriceable here and drops out — which also makes a link cycle impossible to recurse
+    into.
+
+    `ex`  : isin -> execution row (as `_executions` returns).
+    `eur` : analysis_id -> EUR close series (as `compute_portfolio_performance` builds).
+    Returns [] when too little of the linked model is priceable to look through to honestly.
+    """
+    total_w = 0.0
+    # (weight, eur_series | None-for-cash), only the legs we can actually price.
+    legs: list[tuple[float, list[tuple[str, float]] | None]] = []
+    priced_w = 0.0
+    for r in linked_rows:
+        w = float(r.get("percentage") or 0)
+        if w <= 0:
+            continue
+        total_w += w
+        isin = r.get("isin")
+        if not isin:
+            legs.append((w, None))          # cash — holds its value, a flat leg
+            priced_w += w
+            continue
+        e = ex.get(isin)
+        s = eur.get(e["analysis_id"]) if e else None
+        if s:
+            legs.append((w, s))
+            priced_w += w
+        # else: unpriceable within the linked model (its own structured products / nested
+        # certificates) — renormalised over the rest, exactly as a portfolio's own figure is.
+
+    if total_w <= 0 or priced_w / total_w < LOOKTHROUGH_MIN_COVERAGE:
+        return []
+    stock_legs = [(w, s) for w, s in legs if s is not None]
+    if not stock_legs:
+        return []                            # an all-cash basket has no price path to track
+
+    # Base = the date by which EVERY priced stock leg has a close, so none is dropped for "not
+    # held at the base" and the index opens with the full basket. A model whose newest holding
+    # listed recently is therefore only priceable FROM then — honest: we cannot price the whole
+    # basket back before its last constituent existed.
+    base = max(s[0][0] for _, s in stock_legs)
+    per_base: list[tuple[float, list[tuple[str, float]] | None, float | None]] = []
+    for w, s in legs:
+        if s is None:
+            per_base.append((w, None, None))
+            continue
+        b = _at_or_before(s, base)
+        per_base.append((w, s, b[1] if b else None))
+
+    dates = sorted({d for _, s, _ in per_base if s for d, _ in s if d >= base})
+    if not dates:
+        return []
+
+    cursor = [0] * len(per_base)
+    rel = [1.0] * len(per_base)              # price relative to base; 1.0 at the base by construction
+    out: list[tuple[str, float]] = []
+    for d in dates:
+        v = 0.0
+        for i, (w, s, b0) in enumerate(per_base):
+            if s is not None and b0:
+                j = cursor[i]
+                while j < len(s) and s[j][0] <= d:
+                    rel[i] = s[j][1] / b0
+                    j += 1
+                cursor[i] = j
+            v += w * rel[i]
+        out.append((d, _LOOKTHROUGH_BASE * v / priced_w))
+    return out
+
+
 def ytd_anchor_for(effective: str | None, year: int | None = None) -> str:
     """The date a YTD window opens for a composition that took effect on `effective`:
     `max(1 Jan, inception)`.
@@ -413,10 +520,23 @@ def compute_portfolio_performance(year: int | None = None) -> list[dict]:
         return []
 
     pos = (supabase.table("airs_model_portfolio_position")
-           .select("portfolio_id,isin,percentage").execute().data or [])
+           .select("portfolio_id,isin,percentage,fonds").execute().data or [])
     by_pf: dict[int, list[dict]] = {}
     for r in pos:
         by_pf.setdefault(r["portfolio_id"], []).append(r)
+
+    # Link context, loaded ONCE for the whole pass: which holdings are certificates wrapping
+    # another model, so those dead rows can be priced by looking THROUGH to the model behind them.
+    # `_load_context` is three full-table reads — resolving each portfolio off a shared copy keeps
+    # this a single load rather than one per portfolio. A stored manual link wins over the guess.
+    from routers._airs_portfolio_links import (  # noqa: PLC0415
+        _load_context,
+        link_key,
+        resolve_links,
+    )
+    link_ctx = _load_context(supabase)
+    # A linked model's basket, priced once and shared by every parent that holds its certificate.
+    lookthrough_cache: dict[int, list[tuple[str, float]]] = {}
 
     # Prices have to reach back to the OLDEST inception, not just to January: since-inception is
     # measured from the model's own date, and the oldest is 2024-06-29.
@@ -480,6 +600,12 @@ def compute_portfolio_performance(year: int | None = None) -> list[dict]:
         # count travels with the number rather than living only in the expanded row.
         interpolated: set[str] = set()
 
+        # Which of this portfolio's rows are certificates wrapping another model — resolved off
+        # the shared context, so a dead certificate row can be priced by looking THROUGH it.
+        links = resolve_links(supabase, p["id"],
+                              [{"isin": r.get("isin"), "fonds": r.get("fonds")} for r in rows],
+                              context=link_ctx)
+
         for r in rows:
             w = float(r.get("percentage") or 0)
             if w <= 0:
@@ -497,11 +623,22 @@ def compute_portfolio_performance(year: int | None = None) -> list[dict]:
                 continue
             e = ex.get(isin)
             s = eur.get(e["analysis_id"]) if e else None
+            # No Yahoo series, but the row may be a certificate wrapping ANOTHER model — price it
+            # by looking through to that model's basket. Anchor-independent, so the one series
+            # marks correctly at both `ytd_anchor` and `eff` below.
+            if s is None:
+                lk = links.get(link_key(isin, r.get("fonds")))
+                tgt = lk.linked_portfolio_id if lk else None
+                if tgt and tgt != p["id"]:
+                    if tgt not in lookthrough_cache:
+                        lookthrough_cache[tgt] = _lookthrough_series(
+                            by_pf.get(tgt, []), ex, eur)
+                    s = lookthrough_cache[tgt] or None
             # No opening mark at the anchor = not held there. `ytd_anchor >= eff` always, so a
             # holding with no mark HERE has none at inception either: it is priceable in neither
             # window and drops out of both.
             mark = _mark_at(s, ytd_anchor) if s else None
-            if not e or not s or not mark:
+            if not s or not mark:
                 unresolved.add(isin)
                 continue
             resolved.add(isin)
@@ -601,7 +738,8 @@ async def compute_portfolio_performance_async(year: int | None = None) -> list[d
     return await asyncio.to_thread(compute_portfolio_performance, year)
 
 
-def compute_holding_marks(isins: list[str], anchor: str) -> dict[str, dict]:
+def compute_holding_marks(isins: list[str], anchor: str,
+                          *, linked: dict[str, int] | None = None) -> dict[str, dict]:
     """Per-ISIN entry/exit marks over the window opening at `anchor`: what each holding was
     worth when the window opened, what it is worth now, and the EUR return between them.
 
@@ -614,14 +752,34 @@ def compute_holding_marks(isins: list[str], anchor: str) -> dict[str, dict]:
     ratio is not the third: Main Street Capital's local close can rise while the euro figure
     falls, purely on USD/EUR. The native close and the currency ride along too — but as the
     tooltip, never as the arithmetic.
+
+    `linked` maps a certificate's ISIN to the model portfolio it wraps. Those rows have no Yahoo
+    series of their own, so their marks are priced by looking THROUGH to that model's basket —
+    the SAME `_lookthrough_series` the portfolio figure uses, at the SAME anchor, so the row's
+    return is exactly the leg the parent's YTD weights in.
     """
     if not isins:
         return {}
+    linked = linked or {}
     lookback = (date.fromisoformat(anchor)
                 - timedelta(days=_ANCHOR_LOOKBACK_DAYS)).isoformat()
     today = date.today().isoformat()
 
-    ex = _executions(sorted(set(isins)))
+    # A certificate is priced from the model it wraps, so those models' compositions join the
+    # price load — their member ISINs are what the look-through basket is built from.
+    linked_rows_by_pf: dict[int, list[dict]] = {}
+    if linked:
+        pids = sorted(set(linked.values()))
+        for i in range(0, len(pids), IN_CHUNK_SIZE):
+            got = (supabase.table("airs_model_portfolio_position")
+                   .select("portfolio_id,isin,percentage")
+                   .in_("portfolio_id", pids[i:i + IN_CHUNK_SIZE]).execute().data or [])
+            for r in got:
+                linked_rows_by_pf.setdefault(r["portfolio_id"], []).append(r)
+    member_isins = {r["isin"] for rows in linked_rows_by_pf.values()
+                    for r in rows if r.get("isin")}
+
+    ex = _executions(sorted(set(isins) | member_isins))
     ids = sorted({e["analysis_id"] for e in ex.values()})
     closes = _closes(ids, lookback, today)
     # THE SAME opening-bar guarantee the portfolio figure gets. Without it this loader's shorter
@@ -632,14 +790,28 @@ def compute_holding_marks(isins: list[str], anchor: str) -> dict[str, dict]:
     fx_from = min([lookback, *(s[0][0] for s in closes.values() if s)])
     fx = _fx({e.get("currency") for e in ex.values()}, fx_from, today)
 
+    # EUR series per analysis_id — reused by BOTH the itemised holdings below and the
+    # look-through baskets, so a certificate is priced off the identical closes as everything.
+    eur_by_aid: dict[int, list[tuple[str, float]]] = {}
+    for e in ex.values():
+        raw = closes.get(e["analysis_id"])
+        if not raw:
+            continue
+        s = _eur_series(raw, e.get("currency"), fx)
+        if s:
+            eur_by_aid[e["analysis_id"]] = s
+
     out: dict[str, dict] = {}
-    for isin, e in ex.items():
+    for isin in sorted(set(isins)):
+        e = ex.get(isin)
+        if not e:
+            continue
         raw = closes.get(e["analysis_id"])
         if not raw:
             continue
         adjusted, _ = _split_adjust(raw)
         native = dict(adjusted)
-        eur = _eur_series(raw, e.get("currency"), fx)
+        eur = eur_by_aid.get(e["analysis_id"])
         if not eur:
             continue
 
@@ -684,5 +856,41 @@ def compute_holding_marks(isins: list[str], anchor: str) -> dict[str, dict]:
             "end_price_eur": p1,
             "end_price_local": native.get(d1),
             "return_pct": (p1 / p0 - 1.0) * 100.0,
+        }
+
+    # LOOK-THROUGH marks: a certificate wrapping another model has no traded price of its own, so
+    # its Start/End/Return come from that model's basket — indexed to 100 when the window opened
+    # (a basket has no single share price; only its ratio, the return, is meaningful). Marked
+    # through the SAME `_mark_at` at the SAME anchor as `_index` uses in the portfolio figure, so
+    # weighting this row's return reproduces the parent's YTD exactly, just as a stock's does.
+    # A direct listing, if one ever existed, always wins — look-through only fills a dead row.
+    for isin, pid in linked.items():
+        if out.get(isin, {}).get("return_pct") is not None:
+            continue
+        series = _lookthrough_series(linked_rows_by_pf.get(pid, []), ex, eur_by_aid)
+        if not series:
+            continue
+        mark = _mark_at(series, anchor)
+        if not mark:
+            continue
+        d0, p0, _interp, _gap = mark
+        d1, p1 = series[-1]
+        if p0 <= 0 or d1 <= d0:
+            continue
+        out[isin] = {
+            # A basket is not quoted in one currency and has no native close — the EUR level IS
+            # the number, and the tooltip says it is a look-through index, not a traded price.
+            "currency": None,
+            "last_close": d1,
+            "start_date": d0,
+            "start_price_eur": p0,
+            "start_price_local": None,
+            "start_interpolated": False,
+            "start_gap_days": 0,
+            "end_date": d1,
+            "end_price_eur": p1,
+            "end_price_local": None,
+            "return_pct": (p1 / p0 - 1.0) * 100.0,
+            "lookthrough": True,
         }
     return out
