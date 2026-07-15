@@ -506,7 +506,22 @@ export const FIXTURE_ATTRIBUTION = {
   rows: [
     { bucket: 'Industrials', portfolio_weight_pct: 10.6, benchmark_weight_pct: 9.4, portfolio_return_pct: -30.1, benchmark_return_pct: 38.2, allocation_pct: 0.12, selection_pct: -7.51, interaction_pct: -0.97, total_pct: -8.36 },
     { bucket: 'Consumer Cyclical', portfolio_weight_pct: 34.0, benchmark_weight_pct: 13.0, portfolio_return_pct: 12.4, benchmark_return_pct: 21.2, allocation_pct: -5.07, selection_pct: -1.14, interaction_pct: -1.84, total_pct: -8.05 },
-    { bucket: 'Technology', portfolio_weight_pct: 20.2, benchmark_weight_pct: 22.7, portfolio_return_pct: 30.0, benchmark_return_pct: 52.9, allocation_pct: -0.98, selection_pct: -5.19, interaction_pct: 0.56, total_pct: -5.61 },
+    {
+      bucket: 'Technology', portfolio_weight_pct: 20.2, benchmark_weight_pct: 22.7, portfolio_return_pct: 30.0, benchmark_return_pct: 52.9, allocation_pct: -0.98, selection_pct: -5.19, interaction_pct: 0.56, total_pct: -5.61,
+      // The names behind the bar — the click-through detail. Your holdings (with contribution)
+      // and the index's top constituents in the same bucket, capped with the true count.
+      portfolio_holdings: [
+        { isin: 'US0404131064', name: 'Arista Networks', ticker: null, weight_pct: 8, return_pct: 55.4, contribution_pct: 4.43, in_both: false },
+        { isin: 'NL0010273215', name: 'ASML Holding', ticker: null, weight_pct: 6, return_pct: -4.0, contribution_pct: -0.24, in_both: false },
+        // Held on BOTH sides — you hold "Microsoft", the index holds "Microsoft Corp".
+        { isin: 'US5949181045', name: 'Microsoft', ticker: null, weight_pct: 6, return_pct: 14.0, contribution_pct: 0.84, in_both: true },
+      ],
+      benchmark_holdings: [
+        { isin: 'US67066G1040', name: 'NVIDIA Corp', ticker: 'NVDA', weight_pct: 7.1, return_pct: 31.0, contribution_pct: 2.2, in_both: false },
+        { isin: 'US5949181045', name: 'Microsoft Corp', ticker: 'MSFT', weight_pct: 6.2, return_pct: 14.0, contribution_pct: 0.87, in_both: true },
+      ],
+      benchmark_holdings_count: 82,
+    },
     { bucket: 'Healthcare', portfolio_weight_pct: 0, benchmark_weight_pct: 9.7, portfolio_return_pct: null, benchmark_return_pct: 19.1, allocation_pct: 1.73, selection_pct: 0, interaction_pct: 0, total_pct: 1.73 },
     { bucket: 'Communication Services', portfolio_weight_pct: 12.8, benchmark_weight_pct: 9.0, portfolio_return_pct: 60.2, benchmark_return_pct: 46.7, allocation_pct: 0.15, selection_pct: 1.21, interaction_pct: 0.52, total_pct: 1.88 },
     { bucket: 'Energy', portfolio_weight_pct: 0, benchmark_weight_pct: 5.4, portfolio_return_pct: null, benchmark_return_pct: 21.6, allocation_pct: 0.82, selection_pct: 0, interaction_pct: 0, total_pct: 0.82 },

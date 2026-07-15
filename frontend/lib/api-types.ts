@@ -5641,6 +5641,16 @@ export interface components {
              * @default 0
              */
             allocation_pct?: number;
+            /**
+             * Benchmark Holdings
+             * @default []
+             */
+            benchmark_holdings?: components["schemas"]["AttributionName"][];
+            /**
+             * Benchmark Holdings Count
+             * @default 0
+             */
+            benchmark_holdings_count?: number;
             /** Benchmark Return Pct */
             benchmark_return_pct?: number | null;
             /**
@@ -5655,6 +5665,11 @@ export interface components {
              * @default 0
              */
             interaction_pct?: number;
+            /**
+             * Portfolio Holdings
+             * @default []
+             */
+            portfolio_holdings?: components["schemas"]["AttributionName"][];
             /** Portfolio Return Pct */
             portfolio_return_pct?: number | null;
             /**
@@ -5698,6 +5713,11 @@ export interface components {
              * @default 0
              */
             contribution_pct?: number;
+            /**
+             * In Both
+             * @default false
+             */
+            in_both?: boolean;
             /** Isin */
             isin?: string | null;
             /** Name */

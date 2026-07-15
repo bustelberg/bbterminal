@@ -215,31 +215,45 @@ function Names({ title, rows, hint }: {
     <div>
       <h5 className="text-[11px] font-semibold text-fg-strong">{title}</h5>
       <p className="text-[10px] text-fg-faint mb-1">{hint}</p>
-      <table className="w-full text-[11px]">
+      {/* `table-fixed` + this colgroup pin the numeric columns to a fixed width and let the Name
+          column take the rest and TRUNCATE — without it the table sizes to its content and, in the
+          narrower dock, spills past its grid cell and overlaps the neighbouring list. */}
+      <table className="w-full text-[11px] table-fixed">
+        <colgroup>
+          <col />
+          <col className="w-9" />
+          <col className="w-14" />
+          <col className="w-14" />
+        </colgroup>
         {/* Three bare percentages in a row (10.0% · +59.2% · +5.92%) are unreadable without
             labels — worse than an unexplained header, because there is nothing to hover. */}
         <thead>
           <tr className="text-fg-faint text-[9px] uppercase tracking-wide">
             <th className="py-0.5 pr-2 text-left font-medium">Name</th>
-            <Th label="Wt" help="Its weight in the model over this window." />
-            <Th label="Return" help="What it returned over the window, in EUR." />
-            <Th label="Contrib."
-              help={"Weight × return — how many percentage points of the model's return this single company is responsible for.\n\nA big move in a tiny position contributes little, so this is the column that says which companies actually mattered."} />
+            <th className="py-0.5 px-1 text-right font-medium">
+              <InfoTip text="Its weight in the model over this window."><span className="decoration-dotted underline decoration-neutral-600 underline-offset-2">Wt</span></InfoTip>
+            </th>
+            <th className="py-0.5 px-1 text-right font-medium">
+              <InfoTip text="What it returned over the window, in EUR."><span className="decoration-dotted underline decoration-neutral-600 underline-offset-2">Ret.</span></InfoTip>
+            </th>
+            <th className="py-0.5 pl-1 text-right font-medium">
+              <InfoTip text={"Weight × return — how many percentage points of the model's return this single company is responsible for.\n\nA big move in a tiny position contributes little, so this is the column that says which companies actually mattered."}><span className="decoration-dotted underline decoration-neutral-600 underline-offset-2">Contr.</span></InfoTip>
+            </th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
             <tr key={`${r.isin ?? r.ticker ?? r.name}`} className="border-t border-neutral-800/20">
-              <td className="py-1 pr-2 text-fg truncate max-w-[11rem]">
+              <td className="py-1 pr-2 text-fg truncate" title={r.name ?? r.ticker ?? r.isin ?? ''}>
                 {r.name ?? r.ticker ?? r.isin}
               </td>
-              <td className="py-1 px-2 text-right font-mono text-fg-subtle">
+              <td className="py-1 px-1 text-right font-mono text-fg-subtle">
                 {n(r.weight_pct).toFixed(1)}%
               </td>
-              <td className="py-1 px-2 text-right font-mono text-fg-subtle">
+              <td className="py-1 px-1 text-right font-mono text-fg-subtle">
                 {pct(r.return_pct, 1)}
               </td>
-              <td className="py-1 pl-2 text-right font-mono font-semibold">
+              <td className="py-1 pl-1 text-right font-mono font-semibold">
                 <Eff v={r.contribution_pct} />
               </td>
             </tr>
@@ -282,7 +296,7 @@ export default function AttributionPanel({ id, benchmark, window, onClose }: {
   const w = AXIS_WORD[data?.axis ?? axis] ?? 'group';
 
   return (
-    <section className="bg-card border border-neutral-800/40 rounded-xl p-4 lg:col-span-2">
+    <section className="bg-card border border-neutral-800/40 rounded-xl p-4">
       <div className="flex items-start justify-between gap-3 mb-2">
         <div>
           <h4 className="text-sm font-semibold text-fg-strong">

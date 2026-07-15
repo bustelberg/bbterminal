@@ -10,6 +10,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
 import AttributionPanel from './AttributionPanel';
+import BucketDetailPanel from './BucketDetailPanel';
 
 /**
  * A model portfolio's composition — sector / region / currency — beside the SP500 benchmark's.
@@ -150,19 +151,23 @@ function ReturnsTile({ r, benchmark, why, onWhy }: {
   );
 }
 
-function Chart({ axis, rows, benchmark }: {
+function Chart({ axis, rows, benchmark, onBucket, selected }: {
   axis: string;
   rows: Row[];
   benchmark: string;
+  onBucket: (axis: string, bucket: string) => void;
+  selected: string | null;
 }) {
   // Recharts sizes a category axis by its slots, so the height has to grow with the buckets or
   // the labels collide — a chart that renders on top of itself is not a chart.
   const height = Math.max(160, rows.length * 34 + 44);
 
   return (
-    <section className="bg-card border border-neutral-800/40 rounded-xl p-4">
+    <section className={`bg-card border rounded-xl p-4 ${
+      selected ? 'border-accent-500/40' : 'border-neutral-800/40'}`}>
       <h4 className="text-sm font-semibold text-fg-strong">{AXIS_LABEL[axis] ?? axis}</h4>
-      <p className="text-[11px] text-fg-faint mt-0.5 mb-2">{AXIS_NOTE[axis]}</p>
+      <p className="text-[11px] text-fg-faint mt-0.5">{AXIS_NOTE[axis]}</p>
+      <p className="text-[10px] text-accent-400/80 mb-2">Click a bar for the holdings behind it.</p>
       {/* Numeric height, not "100%": recharts' ResponsiveContainer starts at {-1,-1} and only
           measures on the next frame, so height="100%" reads -1 on the first paint and warns
           "width(-1) and height(-1)". An explicit numeric height is >0 from the first render
@@ -189,14 +194,16 @@ function Chart({ axis, rows, benchmark }: {
           />
           <Legend wrapperStyle={{ fontSize: 11, color: chartTheme.axisLabel }} />
           <Bar dataKey="portfolio_pct" name="Portfolio" fill={SERIES.portfolio}
-            radius={[0, 4, 4, 0]} barSize={11}>
+            radius={[0, 4, 4, 0]} barSize={11} cursor="pointer"
+            onClick={(_entry: unknown, index: number) => onBucket(axis, rows[index].bucket)}>
             {/* Direct labels: the relief the amber's sub-3:1 contrast obliges, and useful
                 regardless. Ink, not the series colour. */}
             <LabelList dataKey="portfolio_pct" position="right" formatter={pct}
               style={{ fill: chartTheme.axisLabel, fontSize: 10 }} />
           </Bar>
           <Bar dataKey="benchmark_pct" name={benchmark} fill={SERIES.benchmark}
-            radius={[0, 4, 4, 0]} barSize={11}>
+            radius={[0, 4, 4, 0]} barSize={11} cursor="pointer"
+            onClick={(_entry: unknown, index: number) => onBucket(axis, rows[index].bucket)}>
             <LabelList dataKey="benchmark_pct" position="right" formatter={pct}
               style={{ fill: chartTheme.axisLabel, fontSize: 10 }} />
           </Bar>
@@ -217,6 +224,8 @@ export default function PortfolioAnalysisModal({ id, name, onClose }: {
   const [benchmark, setBenchmark] = useState<string>('SP500');
   // Which window's excess the reader asked "why" about. Null = not asked.
   const [why, setWhy] = useState<'ytd' | 'since' | null>(null);
+  // Which composition bar the reader clicked, to drill into its holdings. {axis, bucket}.
+  const [bucket, setBucket] = useState<{ axis: string; bucket: string } | null>(null);
   const [data, setData] = useState<ModelPortfolioAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -250,7 +259,10 @@ export default function PortfolioAnalysisModal({ id, name, onClose }: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim/60"
       onClick={onClose} role="dialog" aria-modal="true">
-      <div className="bg-page border border-neutral-800/40 rounded-xl shadow-xl w-[96vw] max-w-[1100px] max-h-[92vh] overflow-auto p-5"
+      {/* The modal auto-sizes to what's open: charts only (narrow), the bucket detail (wider),
+          or the full Brinson table (widest). One detail at a time — see the shared dock below. */}
+      <div className={`bg-page border border-neutral-800/40 rounded-xl shadow-xl w-[96vw] max-h-[92vh] overflow-auto p-5 transition-[max-width] duration-200 ${
+        why ? 'max-w-[1780px]' : bucket ? 'max-w-[1460px]' : 'max-w-[1080px]'}`}
         onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3 mb-4">
           <div className="min-w-0">
@@ -266,7 +278,7 @@ export default function PortfolioAnalysisModal({ id, name, onClose }: {
             <label className="flex items-center gap-1.5 text-[11px] text-fg-muted">
               Benchmark
               <select value={benchmark}
-                onChange={(e) => { setData(null); setError(null); setBenchmark(e.target.value); }}
+                onChange={(e) => { setData(null); setError(null); setBucket(null); setBenchmark(e.target.value); }}
                 className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[11px] font-mono text-fg focus:border-accent-500 w-[6.5rem]">
                 {BENCHMARKS.map((b) => <option key={b} value={b}>{b}</option>)}
               </select>
@@ -331,21 +343,38 @@ export default function PortfolioAnalysisModal({ id, name, onClose }: {
               </p>
             )}
 
-            <div className="grid gap-4 lg:grid-cols-2">
-              {data.returns && (
-                <ReturnsTile r={data.returns} benchmark={data.benchmark ?? 'SP500'}
-                  why={why} onWhy={setWhy} />
+            {/* Main content on the left, the bucket click-through docked on the RIGHT when open —
+                so a new click swaps the panel in place rather than pushing it below the fold. */}
+            <div className="flex flex-col lg:flex-row gap-4 items-start">
+              <div className="min-w-0 w-full lg:flex-1 grid gap-4 lg:grid-cols-2">
+                {data.returns && (
+                  <ReturnsTile r={data.returns} benchmark={data.benchmark ?? 'SP500'}
+                    why={why} onWhy={(w) => { setBucket(null); setWhy(w); }} />
+                )}
+                {(data.axes ?? []).map((a) => (
+                  <Chart key={a.axis} axis={a.axis} rows={a.rows}
+                    benchmark={data.benchmark ?? 'SP500'}
+                    onBucket={(axis, b) => { setWhy(null); setBucket(
+                      (prev) => prev && prev.axis === axis && prev.bucket === b ? null : { axis, bucket: b }); }}
+                    selected={bucket?.axis === a.axis ? bucket.bucket : null} />
+                ))}
+              </div>
+              {/* ONE detail dock, shared by the "why" Brinson attribution (from a return row) and
+                  the per-bucket breakdown (from a bar). They are MUTUALLY EXCLUSIVE — opening one
+                  clears the other — so a new drill-down replaces whatever occupied this space, and
+                  the modal above widens to fit whichever is up. */}
+              {(why || bucket) && (
+                <div className={`w-full lg:shrink-0 lg:sticky lg:top-2 self-stretch lg:self-start lg:max-h-[82vh] overflow-auto ${
+                  why ? 'lg:w-[840px]' : 'lg:w-[480px]'}`}>
+                  {why ? (
+                    <AttributionPanel id={id} benchmark={data.benchmark ?? 'SP500'} window={why}
+                      onClose={() => setWhy(null)} />
+                  ) : bucket ? (
+                    <BucketDetailPanel id={id} benchmark={data.benchmark ?? 'SP500'}
+                      axis={bucket.axis} bucket={bucket.bucket} onClose={() => setBucket(null)} />
+                  ) : null}
+                </div>
               )}
-              {/* The "why" — Brinson, for the window whose row was clicked. Spans both columns:
-                  it is a nine-column table, not a tile. */}
-              {why && (
-                <AttributionPanel id={id} benchmark={data.benchmark ?? 'SP500'} window={why}
-                  onClose={() => setWhy(null)} />
-              )}
-              {(data.axes ?? []).map((a) => (
-                <Chart key={a.axis} axis={a.axis} rows={a.rows}
-                  benchmark={data.benchmark ?? 'SP500'} />
-              ))}
             </div>
           </>
         )}

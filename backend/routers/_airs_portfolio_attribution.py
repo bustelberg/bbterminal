@@ -58,6 +58,10 @@ _NON_ATTRIBUTABLE = {FUND_BUCKET, CASH_BUCKET, UNKNOWN_BUCKET}
 
 _AXIS_IDX = {"sector": 0, "region": 1, "currency": 2}
 
+# An index sector can list ~70 constituents; the click-through shows only the largest few (the
+# count travels alongside), so the payload stays bounded even for the ~1,400-name ACWI.
+_BUCKET_HOLDINGS_CAP = 15
+
 
 def _weighted(rows: list[tuple[float, float]]) -> float:
     """Weighted return of (weight, return_pct) pairs, renormalised over the weights given."""
@@ -135,12 +139,31 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     bench, coverage = index_rows(benchmark_label, start)
     bgrid = _grid(sorted({b["isin"] for b in bench if b.get("isin")}))
     b_by_bucket: dict[str, list[tuple[float, float]]] = {}
+    # The index's NAMES per bucket, for the click-through detail (b_by_bucket keeps only the
+    # (weight, return) the math needs; this keeps the identity so a reader can see the names).
+    bench_holdings_by_bucket: dict[str, list[dict]] = {}
     for b in bench:
         row = bgrid.get(b.get("isin") or "")
         if not row:
             continue
         bucket = _buckets(row, is_cash=False, isin=b.get("isin"), codes=codes)[idx]
         b_by_bucket.setdefault(bucket, []).append((b["weight_pct"], b["return_eur_pct"]))
+        bench_holdings_by_bucket.setdefault(bucket, []).append({
+            "isin": b.get("isin"), "name": b.get("company_name"), "ticker": b.get("ticker"),
+            "weight_pct": b["weight_pct"], "return_pct": b["return_eur_pct"],
+            "contribution_pct": b["weight_pct"] / 100.0 * b["return_eur_pct"],
+        })
+
+    # The model's OWN holdings per bucket — raw weight (matches the composition chart) + the EUR
+    # return over this window and its contribution. Only the attributable equities; funds/cash/
+    # unpriced live in `excluded` (the UI reads those for their own buckets).
+    port_holdings_by_bucket: dict[str, list[dict]] = {}
+    for i in attributable:
+        port_holdings_by_bucket.setdefault(i["bucket"], []).append({
+            "isin": i["isin"], "name": i["name"], "ticker": None,
+            "weight_pct": i["weight_pct"], "return_pct": i["return_pct"],
+            "contribution_pct": i["weight_pct"] / 100.0 * (i["return_pct"] or 0.0),
+        })
 
     # Renormalise BOTH sides over what each can attribute. The identity below needs weights that
     # sum to 1 on each side; anything else and the residual is just the missing weight.
@@ -162,6 +185,10 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     r_p_total = sum(w / 100.0 * ret for rows in p_by_bucket.values() for w, ret in rows)
     r_b_total = sum(w / 100.0 * ret for rows in b_norm.values() for w, ret in rows)
 
+    # Overlap below is matched by COMPANY, not ISIN. Imported here, not at module top, to keep
+    # clear of a circular import through asset_pipeline.
+    from asset_pipeline.resolve import same_company  # noqa: PLC0415
+
     rows_out: list[dict] = []
     for bucket in sorted(set(p_by_bucket) | set(b_norm)):
         pr = p_by_bucket.get(bucket, [])
@@ -181,6 +208,23 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         interaction = (w_p - w_b) * (R_p - R_b) if br and pr else 0.0
         # A bucket the PORTFOLIO does not hold: selection/interaction are undefined (there are no
         # picks to judge), and the entire effect is the decision not to own it — allocation.
+        p_hold = sorted(port_holdings_by_bucket.get(bucket, []),
+                        key=lambda h: -h["weight_pct"])
+        b_hold_all = sorted(bench_holdings_by_bucket.get(bucket, []),
+                            key=lambda h: -h["weight_pct"])
+        # HELD ON BOTH SIDES — matched by COMPANY, not ISIN: your "Nvidia" is the index's "NVIDIA
+        # Corp", AMD is "Advanced Micro Devices Inc", and a share class is not a different business
+        # (ISIN-matching would miss all three). Marked so the overlap between what you hold and what
+        # the index holds is visible at a glance — and, by contrast, so are the genuinely different
+        # bets. The portfolio side matches against the FULL index bucket (not the capped top-15),
+        # so a match to a smaller index name is not missed.
+        p_names = [h["name"] for h in p_hold if h.get("name")]
+        b_names = [h["name"] for h in b_hold_all if h.get("name")]
+        for h in p_hold:
+            h["in_both"] = bool(h.get("name")) and any(same_company(h["name"], bn) for bn in b_names)
+        b_hold = b_hold_all[:_BUCKET_HOLDINGS_CAP]
+        for h in b_hold:
+            h["in_both"] = bool(h.get("name")) and any(same_company(h["name"], pn) for pn in p_names)
         rows_out.append({
             "bucket": bucket,
             "portfolio_weight_pct": w_p * 100.0,
@@ -191,6 +235,9 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
             "selection_pct": selection,
             "interaction_pct": interaction,
             "total_pct": allocation + selection + interaction,
+            "portfolio_holdings": p_hold,
+            "benchmark_holdings": b_hold,
+            "benchmark_holdings_count": len(b_hold_all),
         })
     rows_out.sort(key=lambda r: r["total_pct"])
 
@@ -211,9 +258,7 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     # ISINs, one business. Matching on the ISIN reported GOOGL as a winner they MISSED, at
     # +3.23pp, while they were holding it and it was their single largest contributor. A
     # "missed opportunity" that the portfolio actually captured is the worst kind of false
-    # finding: it is actionable, and the action is wrong.
-    from asset_pipeline.resolve import same_company  # noqa: PLC0415
-
+    # finding: it is actionable, and the action is wrong. (`same_company` imported above.)
     held_names = [str(grid[i]["name"]) for i in held_isins
                   if grid.get(i) and grid[i].get("name")]
 

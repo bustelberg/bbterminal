@@ -438,4 +438,27 @@ test.describe('/portfolios', () => {
     await section.locator('td').nth(6).hover();
     await expect(section).toContainText('+0.12');
   });
+
+  test('clicking a composition bar drills into the holdings behind it', async ({ page }) => {
+    await row(page, 'AITopSelectie OFF FX').getByRole('button', { name: 'Analyse' }).click();
+    const modal = page.getByRole('dialog');
+    await expect(modal).toContainText('Composition vs');
+
+    // Click Technology (index 0) in the Sector chart's portfolio bar.
+    const sector = modal.locator('section').filter({ has: page.getByRole('heading', { name: 'Sector', exact: true }) });
+    await sector.locator('.recharts-bar-rectangle').first().click();
+
+    // The bucket-detail panel opens with BOTH sides + the Brinson tilt.
+    await expect(modal.getByRole('heading', { name: /Sector: *Technology/ })).toBeVisible();
+    await expect(modal).toContainText('Arista Networks');   // your holding in the bucket
+    await expect(modal).toContainText('NVIDIA Corp');       // an index constituent in the bucket
+    await expect(modal).toContainText('top 2 of 82');       // the cap + true count
+    await expect(modal).toContainText('selection');         // the tilt decomposition
+    // Contribution (weight × return) is shown for BOTH sides — your names and the index's.
+    await expect(modal).toContainText('+4.43');             // Arista's contribution to the model
+    await expect(modal).toContainText('+2.20');             // NVIDIA's contribution to the index
+    // Overlap: Microsoft is held on BOTH sides (you hold "Microsoft", the index "Microsoft Corp")
+    // — matched by company, marked, and the legend explains the dot.
+    await expect(modal).toContainText('held in both your portfolio');
+  });
 });

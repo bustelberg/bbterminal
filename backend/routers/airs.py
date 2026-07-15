@@ -434,6 +434,20 @@ async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP5
     return await compute_portfolio_analysis_async(portfolio_id, benchmark)
 
 
+class AttributionName(BaseModel):
+    isin: str | None = None
+    name: str | None = None
+    ticker: str | None = None
+    weight_pct: float = 0.0
+    return_pct: float | None = None
+    contribution_pct: float = 0.0
+    # True when this company is held on BOTH sides — in the model AND the benchmark bucket.
+    # Matched by company (same_company), not ISIN, so a share class still counts as the same name.
+    # Only populated for the per-bucket holdings lists; the contributor/detractor lists leave it
+    # false.
+    in_both: bool = False
+
+
 class AttributionBucket(BaseModel):
     bucket: str
     portfolio_weight_pct: float = 0.0
@@ -444,15 +458,13 @@ class AttributionBucket(BaseModel):
     selection_pct: float = 0.0
     interaction_pct: float = 0.0
     total_pct: float = 0.0
-
-
-class AttributionName(BaseModel):
-    isin: str | None = None
-    name: str | None = None
-    ticker: str | None = None
-    weight_pct: float = 0.0
-    return_pct: float | None = None
-    contribution_pct: float = 0.0
+    # The names BEHIND this bucket, for the click-through detail: the model's holdings in it, and
+    # the index's constituents in it. Weights are the RAW (un-renormalised) ones, so they line up
+    # with the composition chart. `benchmark_holdings` is capped to the largest few — an index
+    # sector can hold ~70 names — with `benchmark_holdings_count` the true total.
+    portfolio_holdings: list[AttributionName] = []
+    benchmark_holdings: list[AttributionName] = []
+    benchmark_holdings_count: int = 0
 
 
 class AttributionExcluded(BaseModel):

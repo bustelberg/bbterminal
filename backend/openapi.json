@@ -549,6 +549,19 @@
             "title": "Allocation Pct",
             "type": "number"
           },
+          "benchmark_holdings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AttributionName"
+            },
+            "title": "Benchmark Holdings",
+            "type": "array"
+          },
+          "benchmark_holdings_count": {
+            "default": 0,
+            "title": "Benchmark Holdings Count",
+            "type": "integer"
+          },
           "benchmark_return_pct": {
             "anyOf": [
               {
@@ -573,6 +586,14 @@
             "default": 0.0,
             "title": "Interaction Pct",
             "type": "number"
+          },
+          "portfolio_holdings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AttributionName"
+            },
+            "title": "Portfolio Holdings",
+            "type": "array"
           },
           "portfolio_return_pct": {
             "anyOf": [
@@ -675,6 +696,11 @@
             "default": 0.0,
             "title": "Contribution Pct",
             "type": "number"
+          },
+          "in_both": {
+            "default": false,
+            "title": "In Both",
+            "type": "boolean"
           },
           "isin": {
             "anyOf": [
