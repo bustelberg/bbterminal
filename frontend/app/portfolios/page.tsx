@@ -2,6 +2,7 @@
 
 import AssetNav from '../components/AssetNav';
 import BenchmarksPanel from '../components/BenchmarksPanel';
+import CorrelationMatrix from '../components/CorrelationMatrix';
 import PortfoliosPanel from '../components/PortfoliosPanel';
 
 /** The AIRS model portfolios — a sibling of Execution instruments in the asset-pipeline
@@ -18,6 +19,7 @@ export default function Page() {
 
       <div className="px-8 py-6 space-y-6">
         <PortfoliosPanel />
+        <CorrelationMatrix />
         <BenchmarksPanel />
       </div>
     </div>

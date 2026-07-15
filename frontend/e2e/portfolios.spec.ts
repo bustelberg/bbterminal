@@ -419,4 +419,23 @@ test.describe('/portfolios', () => {
     const amazon = page.locator('tr', { hasText: 'Amazon' }).last();
     await expect(amazon.locator('select')).toHaveValue('');
   });
+
+  test('the correlation matrix colour-codes cells and reads a pair on hover', async ({ page }) => {
+    const section = page.locator('section', { hasText: 'Portfolio correlations' });
+    await expect(section.getByRole('heading', { name: 'Portfolio correlations' })).toBeVisible();
+
+    // Full 3×3 matrix (row-major tds): the (Corr Beta, Corr Alpha) cell is row 1, col 0 → td
+    // index 3, and it holds the +0.82 pair.
+    await section.locator('td').nth(3).hover();
+    await expect(section).toContainText('Corr Beta FX');
+    await expect(section).toContainText('+0.82');
+    await expect(section).toContainText('overlapping days');
+
+    // The two windows are separate matrices — the (Corr Gamma, Corr Alpha) cell at row 2, col 0
+    // (td index 6) is null in YTD but +0.12 in trailing 12m, so the toggle must swap the data.
+    await expect(section).toContainText('YTD corr');
+    await page.getByRole('button', { name: 'Trailing 12m' }).click();
+    await section.locator('td').nth(6).hover();
+    await expect(section).toContainText('+0.12');
+  });
 });

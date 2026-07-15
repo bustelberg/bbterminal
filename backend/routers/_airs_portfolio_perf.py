@@ -317,9 +317,15 @@ def _eur_return(series: list[tuple[str, float]], anchor: str) -> float | None:
 
 
 def _index(legs: list[tuple[float, list[tuple[str, float]] | None]],
-           anchor: str) -> tuple[list[float], float]:
+           anchor: str, *, return_dates: bool = False):
     """Daily EUR value of a buy-and-hold of `legs` from `anchor`, starting at 1.0, and the
     weight it was actually able to hold there.
+
+    `return_dates=True` additionally returns the trading dates the curve is sampled on, as
+    `(dates, values, w_total)` — `dates` aligns with `values[1:]` (`values[0]` is the anchor
+    base 1.0). This exists so the SAME buy-and-hold curve every /portfolios figure is read off
+    can be turned into a DATED daily-return series and correlated across portfolios, without a
+    second builder where the look-ahead bias could creep back in.
 
     That second number is not a diagnostic, it is a GATE. A leg with no close on or before the
     anchor was not held at the anchor — an ETF that listed in 2025 cannot be in a model whose
@@ -359,11 +365,11 @@ def _index(legs: list[tuple[float, list[tuple[str, float]] | None]],
         tracks.append((w, s, m[1]))
         w_total += w
     if not tracks or w_total <= 0:
-        return [], 0.0
+        return ([], [], 0.0) if return_dates else ([], 0.0)
 
     dates = sorted({d for _, s, _ in tracks if s for d, _ in s if d > anchor})
     if not dates:
-        return [], w_total
+        return ([], [], w_total) if return_dates else ([], w_total)
 
     cursor = [0] * len(tracks)
     rel = [1.0] * len(tracks)            # price relative to base; 1.0 at the anchor by construction
@@ -379,6 +385,8 @@ def _index(legs: list[tuple[float, list[tuple[str, float]] | None]],
                 cursor[i] = j
             v += w * rel[i]
         values.append(v / w_total)
+    if return_dates:
+        return dates, values, w_total
     return values, w_total
 
 

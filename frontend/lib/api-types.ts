@@ -829,6 +829,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/model-portfolios/correlations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Model Portfolio Correlations
+         * @description YTD + trailing-12m return-correlation matrices over the listed (> 5-holding) models.
+         */
+        get: operations["airs_model_portfolio_correlations_api_airs_model_portfolios_correlations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/model-portfolios/performance": {
         parameters: {
             query?: never;
@@ -7051,6 +7071,36 @@ export interface components {
              */
             portfolio_pct?: number;
         };
+        /**
+         * PortfolioCorrelationMatrix
+         * @description Pairwise Pearson correlation of the LISTED model portfolios' daily EUR returns, for two
+         *     windows. Same return series the /portfolios YTD column is read off, correlated pairwise-
+         *     complete. Covers exactly the > 5-holding models the table shows by default ("42 of 95").
+         *
+         *     `ytd` / `trailing_12m` are NxN over `portfolio_ids` (row i = column i = `portfolio_ids[i]`,
+         *     `labels[i]`). A cell is `null` when the pair share fewer than `min_overlap_days` common daily
+         *     returns (or a side has no priceable series / zero variance). The diagonal is 1.0 where the
+         *     portfolio has enough of its own returns, else null. `*_obs` is each portfolio's daily-return
+         *     count in that window.
+         */
+        PortfolioCorrelationMatrix: {
+            /** As Of */
+            as_of: string;
+            /** Labels */
+            labels: string[];
+            /** Min Overlap Days */
+            min_overlap_days: number;
+            /** Portfolio Ids */
+            portfolio_ids: number[];
+            /** Trailing 12M */
+            trailing_12m: (number | null)[][];
+            /** Trailing 12M Obs */
+            trailing_12m_obs: number[];
+            /** Ytd */
+            ytd: (number | null)[][];
+            /** Ytd Obs */
+            ytd_obs: number[];
+        };
         /** PortfolioCreate */
         PortfolioCreate: {
             /**
@@ -8605,6 +8655,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StoredModelPortfolio"][];
+                };
+            };
+        };
+    };
+    airs_model_portfolio_correlations_api_airs_model_portfolios_correlations_get: {
+        parameters: {
+            query?: {
+                year?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioCorrelationMatrix"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

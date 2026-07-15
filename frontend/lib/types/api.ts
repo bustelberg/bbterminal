@@ -82,6 +82,10 @@ export type ModelPortfolioPositions = components['schemas']['ModelPortfolioPosit
 export type ModelPortfolioPosition = components['schemas']['ModelPortfolioPosition'];
 export type StoredModelPortfolio = components['schemas']['StoredModelPortfolio'];
 export type ModelPortfolioPerformance = components['schemas']['ModelPortfolioPerformance'];
+// Pairwise correlation of the listed (>5-holding) models' daily EUR returns — YTD + trailing
+// 12m, NxN over portfolio_ids. Null cell = <min_overlap_days common returns. Same return series
+// the YTD column is read off, so the matrix cannot disagree with the table above it.
+export type PortfolioCorrelationMatrix = components['schemas']['PortfolioCorrelationMatrix'];
 // Composition of a model portfolio beside a benchmark's, on ONE set of buckets. Funds are NOT
 // looked through — they land in a single "Fund (not looked through)" bucket on every axis,
 // because an ETF's listing tells you nothing about what it holds.

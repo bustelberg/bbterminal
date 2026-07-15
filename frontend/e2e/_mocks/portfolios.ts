@@ -433,12 +433,46 @@ export async function mockPortfolios(page: Page) {
       body: JSON.stringify(FIXTURE_PERFORMANCE),
     });
   });
+  // The correlation matrix sits between the table and the benchmarks panel; stub it too.
+  await page.route('**/api/airs/model-portfolios/correlations**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(FIXTURE_CORRELATIONS),
+    });
+  });
   // The page also renders the benchmarks panel below the table; stub it so nothing hangs
   // against the unreachable mock host.
   await page.route('**/api/benchmarks**', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
   });
 }
+
+/**
+ * A 3×3 correlation fixture. Symmetric, diagonal 1.0, and one null pair (C is too young to
+ * overlap A) so the hatched "too few overlapping days" cell is exercised.
+ */
+// Deliberately DISTINCT labels from the perf-table fixtures above — the real matrix shows the
+// same portfolio names as the table, but reusing them here would make the other tests' broad
+// getByText selectors match twice (the table row AND the matrix header) and fail strict mode.
+export const FIXTURE_CORRELATIONS = {
+  portfolio_ids: [2015, 2001, 2099],
+  labels: ['Corr Alpha FX', 'Corr Beta FX', 'Corr Gamma FX'],
+  as_of: '2026-07-15',
+  min_overlap_days: 20,
+  ytd: [
+    [1.0, 0.82, null],
+    [0.82, 1.0, -0.31],
+    [null, -0.31, 1.0],
+  ],
+  ytd_obs: [136, 137, 8],
+  trailing_12m: [
+    [1.0, 0.79, 0.12],
+    [0.79, 1.0, -0.24],
+    [0.12, -0.24, 1.0],
+  ],
+  trailing_12m_obs: [257, 257, 8],
+};
 
 /**
  * Brinson-Fachler attribution. The fixture is built so the identity HOLDS:

@@ -316,6 +316,38 @@ async def airs_model_portfolio_performance(year: int | None = None):
     return await compute_portfolio_performance_async(year)
 
 
+class PortfolioCorrelationMatrix(BaseModel):
+    """Pairwise Pearson correlation of the LISTED model portfolios' daily EUR returns, for two
+    windows. Same return series the /portfolios YTD column is read off, correlated pairwise-
+    complete. Covers exactly the > 5-holding models the table shows by default ("42 of 95").
+
+    `ytd` / `trailing_12m` are NxN over `portfolio_ids` (row i = column i = `portfolio_ids[i]`,
+    `labels[i]`). A cell is `null` when the pair share fewer than `min_overlap_days` common daily
+    returns (or a side has no priceable series / zero variance). The diagonal is 1.0 where the
+    portfolio has enough of its own returns, else null. `*_obs` is each portfolio's daily-return
+    count in that window."""
+
+    portfolio_ids: list[int]
+    labels: list[str]
+    as_of: str
+    min_overlap_days: int
+    ytd: list[list[float | None]]
+    ytd_obs: list[int]
+    trailing_12m: list[list[float | None]]
+    trailing_12m_obs: list[int]
+
+
+@router.get("/api/airs/model-portfolios/correlations",
+            response_model=PortfolioCorrelationMatrix)
+async def airs_model_portfolio_correlations(year: int | None = None):
+    """YTD + trailing-12m return-correlation matrices over the listed (> 5-holding) models."""
+    from routers._airs_portfolio_correlation import (  # noqa: PLC0415
+        compute_portfolio_correlations_async,
+    )
+
+    return await compute_portfolio_correlations_async(year)
+
+
 class PortfolioAnalysisRow(BaseModel):
     bucket: str
     portfolio_pct: float = 0.0

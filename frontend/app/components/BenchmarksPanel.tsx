@@ -5,8 +5,16 @@ import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
 import type { ReconstructedIndex } from '../../lib/types/api';
 
-/** The indices we rebuild from our own constituents. One for now. */
-const INDICES = [{ label: 'SP500', name: 'S&P 500' }];
+/** The indices we rebuild from our own constituents.
+ *
+ * ACWI is deliberately included even though it is NOT fully priced: GuruFocus does not cover
+ * the UK, India, Ireland or AU/NZ, so a slice of the published index is absent and a
+ * cap-weighted rebuild renormalises that weight across the rest. The panel surfaces the
+ * coverage ratio and calls it indicative rather than exact. */
+const INDICES = [
+  { label: 'SP500', name: 'S&P 500' },
+  { label: 'ACWI', name: 'ACWI' },
+];
 
 const pct = (v: number | null | undefined, dp = 2) =>
   v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(dp)}%`;
@@ -35,19 +43,25 @@ export default function BenchmarksPanel() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      try {
-        const out: Record<string, ReconstructedIndex> = {};
-        for (const ix of INDICES) {
+      // Independently, in parallel: ACWI is ~8s and one index failing must not blank the
+      // other. Only surface an error if EVERY index failed.
+      const results = await Promise.allSettled(
+        INDICES.map(async (ix) => {
           const r = await apiFetch(`${API_URL}/api/benchmarks/index/${ix.label}`);
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          out[ix.label] = (await r.json()) as ReconstructedIndex;
-        }
-        if (!cancelled) setData(out);
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        if (!cancelled) setLoading(false);
+          if (!r.ok) throw new Error(`${ix.label}: HTTP ${r.status}`);
+          return [ix.label, (await r.json()) as ReconstructedIndex] as const;
+        }),
+      );
+      if (cancelled) return;
+      const out: Record<string, ReconstructedIndex> = {};
+      const errs: string[] = [];
+      for (const res of results) {
+        if (res.status === 'fulfilled') out[res.value[0]] = res.value[1];
+        else errs.push(res.reason instanceof Error ? res.reason.message : String(res.reason));
       }
+      setData(out);
+      if (Object.keys(out).length === 0) setError(errs.join('; ') || 'Failed to load');
+      setLoading(false);
     })();
     return () => { cancelled = true; };
   }, []);
@@ -183,10 +197,22 @@ function IndexDetail({ d }: { d: ReconstructedIndex }) {
       <p className="text-[10px] text-fg-faint leading-relaxed">
         {d.note} Weights are as of the <strong>start of the year</strong>: weighting by
         today&apos;s market cap is look-ahead bias — it retroactively overweights whatever
-        went up, and would print <span className="font-mono">+21.70%</span> instead of{' '}
-        <span className="font-mono">{pct(d.ytd_local_pct)}</span>. Checked against SPY (the
-        real index), which is <span className="font-mono">+9.02%</span> USD for the same
-        window.
+        went up.{' '}
+        {d.label === 'SP500' ? (
+          <>
+            It would print <span className="font-mono">+21.70%</span> instead of{' '}
+            <span className="font-mono">{pct(d.ytd_local_pct)}</span>. Checked against SPY (the
+            real index), which is <span className="font-mono">+9.02%</span> USD for the same
+            window.
+          </>
+        ) : (
+          <>
+            Coverage is <strong>partial</strong> (<span className="font-mono">{d.priced_of_universe}</span>{' '}
+            priced): GuruFocus does not cover the UK, India, Ireland or AU/NZ, so those
+            constituents are absent and their weight is renormalised across the rest. Treat this
+            as indicative, not exact.
+          </>
+        )}
       </p>
     </div>
   );

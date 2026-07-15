@@ -4141,6 +4141,93 @@
         "title": "PortfolioAnalysisRow",
         "type": "object"
       },
+      "PortfolioCorrelationMatrix": {
+        "description": "Pairwise Pearson correlation of the LISTED model portfolios' daily EUR returns, for two\nwindows. Same return series the /portfolios YTD column is read off, correlated pairwise-\ncomplete. Covers exactly the > 5-holding models the table shows by default (\"42 of 95\").\n\n`ytd` / `trailing_12m` are NxN over `portfolio_ids` (row i = column i = `portfolio_ids[i]`,\n`labels[i]`). A cell is `null` when the pair share fewer than `min_overlap_days` common daily\nreturns (or a side has no priceable series / zero variance). The diagonal is 1.0 where the\nportfolio has enough of its own returns, else null. `*_obs` is each portfolio's daily-return\ncount in that window.",
+        "properties": {
+          "as_of": {
+            "title": "As Of",
+            "type": "string"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "array"
+          },
+          "min_overlap_days": {
+            "title": "Min Overlap Days",
+            "type": "integer"
+          },
+          "portfolio_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Portfolio Ids",
+            "type": "array"
+          },
+          "trailing_12m": {
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "title": "Trailing 12M",
+            "type": "array"
+          },
+          "trailing_12m_obs": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Trailing 12M Obs",
+            "type": "array"
+          },
+          "ytd": {
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "title": "Ytd",
+            "type": "array"
+          },
+          "ytd_obs": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Ytd Obs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "portfolio_ids",
+          "labels",
+          "as_of",
+          "min_overlap_days",
+          "ytd",
+          "ytd_obs",
+          "trailing_12m",
+          "trailing_12m_obs"
+        ],
+        "title": "PortfolioCorrelationMatrix",
+        "type": "object"
+      },
       "PortfolioCreate": {
         "properties": {
           "members": {
@@ -7564,6 +7651,56 @@
           }
         },
         "summary": "Airs Model Portfolios Stored",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/model-portfolios/correlations": {
+      "get": {
+        "description": "YTD + trailing-12m return-correlation matrices over the listed (> 5-holding) models.",
+        "operationId": "airs_model_portfolio_correlations_api_airs_model_portfolios_correlations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "year",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Year"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioCorrelationMatrix"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Model Portfolio Correlations",
         "tags": [
           "airs"
         ]
