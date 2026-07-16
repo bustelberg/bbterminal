@@ -1,6 +1,297 @@
 {
   "components": {
     "schemas": {
+      "AirsAccount": {
+        "description": "One AIRS account, on AIRS's own numbers.\n\n\u26a0 `ytd_pct` IS `cumulatief_rendement` \u2014 AIRS's own, flow-aware. It is NOT\n`end_value_eur / begin_value_eur - 1`; that ratio is `value_ratio_pct` below, and it is the\nWRONG number. AIRS publishes both and they disagree by more than a point in 31 of 38 accounts\n(AITopSelectie OFF DYN: the ratio says -5.85% on a book that made +46.12%). A value ratio is a\nreturn only when nothing was deposited or withdrawn, and these are real accounts.",
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "begin_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Begin Value Eur"
+          },
+          "end_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Value Eur"
+          },
+          "holdings": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdings"
+          },
+          "income_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Income Eur"
+          },
+          "investment_result_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Investment Result Eur"
+          },
+          "periode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Periode"
+          },
+          "portefeuille": {
+            "title": "Portefeuille",
+            "type": "string"
+          },
+          "price_result_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Result Eur"
+          },
+          "value_ratio_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Ratio Pct"
+          },
+          "ytd_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ytd Pct"
+          }
+        },
+        "required": [
+          "portefeuille"
+        ],
+        "title": "AirsAccount",
+        "type": "object"
+      },
+      "AirsAccountDetail": {
+        "description": "One account's freshest snapshot.\n\n\u26a0 THE ROWS DO NOT SUM TO `ytd_pct`, AND THAT IS CORRECT. Each row is a PRICE return (AIRS\nrestates `Beginwaarde lopend jaar` to the current quantity, so a purchase does not contaminate\nit). The account's figure is flow-aware AND includes `income_eur`, which no price return\ncontains. The /portfolios MODEL view has the opposite property \u2014 its holdings weight exactly\nto its total \u2014 so a reader arriving from there will expect these to tie.",
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "income_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Income Eur"
+          },
+          "portefeuille": {
+            "title": "Portefeuille",
+            "type": "string"
+          },
+          "price_result_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Result Eur"
+          },
+          "rows": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AirsAccountHolding"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "ytd_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ytd Pct"
+          }
+        },
+        "required": [
+          "portefeuille"
+        ],
+        "title": "AirsAccountDetail",
+        "type": "object"
+      },
+      "AirsAccountHolding": {
+        "properties": {
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "current_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Value Eur"
+          },
+          "holding_name": {
+            "title": "Holding Name",
+            "type": "string"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity"
+          },
+          "start_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Value Eur"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight"
+          },
+          "ytd_return_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ytd Return Eur"
+          },
+          "ytd_return_local_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ytd Return Local Pct"
+          },
+          "ytd_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ytd Return Pct"
+          }
+        },
+        "required": [
+          "holding_name"
+        ],
+        "title": "AirsAccountHolding",
+        "type": "object"
+      },
       "AssetGridResponse": {
         "properties": {
           "rows": {
@@ -2462,6 +2753,225 @@
         "title": "FinancialSeriesResponse",
         "type": "object"
       },
+      "FundamentalPoint": {
+        "properties": {
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "date",
+          "value"
+        ],
+        "title": "FundamentalPoint",
+        "type": "object"
+      },
+      "FundamentalSeries": {
+        "properties": {
+          "dropped": {
+            "default": 0,
+            "title": "Dropped",
+            "type": "integer"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "non_positive": {
+            "default": 0,
+            "title": "Non Positive",
+            "type": "integer"
+          },
+          "period_count": {
+            "default": 0,
+            "title": "Period Count",
+            "type": "integer"
+          },
+          "points": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FundamentalPoint"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "field",
+          "label"
+        ],
+        "title": "FundamentalSeries",
+        "type": "object"
+      },
+      "FundamentalsResponse": {
+        "description": "The four soundness charts, off ONE cached blob plus one yfinance price read.",
+        "properties": {
+          "cadence": {
+            "default": "annuals",
+            "title": "Cadence",
+            "type": "string"
+          },
+          "company_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Id"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "fair_values_eur": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FundamentalSeries"
+            },
+            "title": "Fair Values Eur",
+            "type": "array"
+          },
+          "fetched": {
+            "default": false,
+            "title": "Fetched",
+            "type": "boolean"
+          },
+          "has_earnings_yield": {
+            "default": true,
+            "title": "Has Earnings Yield",
+            "type": "boolean"
+          },
+          "has_roic": {
+            "default": true,
+            "title": "Has Roic",
+            "type": "boolean"
+          },
+          "is_home": {
+            "default": true,
+            "title": "Is Home",
+            "type": "boolean"
+          },
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          },
+          "period_count": {
+            "default": 0,
+            "title": "Period Count",
+            "type": "integer"
+          },
+          "price_crosscheck_eur": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FundamentalPoint"
+            },
+            "title": "Price Crosscheck Eur",
+            "type": "array"
+          },
+          "price_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Currency"
+          },
+          "price_eur": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FundamentalPoint"
+            },
+            "title": "Price Eur",
+            "type": "array"
+          },
+          "quality": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/QualityMetric"
+            },
+            "title": "Quality",
+            "type": "array"
+          },
+          "returns": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FundamentalSeries"
+            },
+            "title": "Returns",
+            "type": "array"
+          },
+          "safety": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FundamentalSeries"
+            },
+            "title": "Safety",
+            "type": "array"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
+          },
+          "yahoo_symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Yahoo Symbol"
+          },
+          "yields": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FundamentalSeries"
+            },
+            "title": "Yields",
+            "type": "array"
+          }
+        },
+        "required": [
+          "isin",
+          "symbol"
+        ],
+        "title": "FundamentalsResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -4643,6 +5153,62 @@
           "remaining_member_count"
         ],
         "title": "PruneResponse",
+        "type": "object"
+      },
+      "QualityMetric": {
+        "description": "One of the four quality numbers, and its verdict.\n\n\u26a0 FOUR STATES, AND ONLY ONE OF THEM IS \"BAD\".\n    ok       measured, and it passes\n    fail     measured, and it does not\n    n_a      the LINE DOES NOT EXIST for this company. A bank has no ROIC and no gross margin\n             at all (JPMorgan, template 'B' \u2014 structurally absent, not empty), so two of the\n             four are inapplicable to one. That is an answer about the industry template.\n    unknown  the line exists but there is too little history to say \u2014 a 10y median off three\n             points is not a median.\nCollapsing `n_a` or `unknown` into `fail` marks every bank a bad business and every young\ncompany a suspect one.",
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "periods": {
+            "default": 0,
+            "title": "Periods",
+            "type": "integer"
+          },
+          "status": {
+            "default": "unknown",
+            "title": "Status",
+            "type": "string"
+          },
+          "unit": {
+            "default": "",
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "title": "QualityMetric",
         "type": "object"
       },
       "RecomputeRequest": {
@@ -7709,6 +8275,75 @@
         ]
       }
     },
+    "/api/airs/accounts": {
+      "get": {
+        "description": "The AIRS ACCOUNTS \u2014 what the books actually made, on AIRS's own EUR values.\n\nA different object from the model portfolios: a model is a COMPOSITION (weights), which AIRS\nhas nothing to value \u2014 of 58 models and 39 valued accounts, the overlap is zero. The models\nanswer \"would this strategy work\" (and need yfinance, since nothing else can price a set of\nweights); these answer \"what did this book make\", and AIRS is the system of record.",
+        "operationId": "airs_accounts_api_airs_accounts_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AirsAccount"
+                  },
+                  "title": "Response Airs Accounts Api Airs Accounts Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Airs Accounts",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/accounts/{portefeuille}/holdings": {
+      "get": {
+        "description": "One account's positions, with AIRS's own EUR values \u2014 including the Leonteq certificates\nYahoo cannot price at all (TOPS_OFF_BEH_DYN: AIRS values 7 of 7 where the yfinance path\nprices 0 of 9).",
+        "operationId": "airs_account_holdings_api_airs_accounts__portefeuille__holdings_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirsAccountDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Account Holdings",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/crm-relaties": {
       "get": {
         "description": "The latest stored CRM 'Alle relaties' export, parsed on the fly from the\nraw .xls in `airs_crm_relaties_raw` into a generic `{columns, rows}` table\n(whatever columns the export has). Empty until the daily job has run it.",
@@ -9708,6 +10343,60 @@
           }
         },
         "summary": "Financial Line By Isin",
+        "tags": [
+          "asset-pipeline",
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/fundamentals/isin/{isin}": {
+      "get": {
+        "description": "Everything the four soundness charts need, in ONE call off ONE cached blob.\n\nPrice vs fair value \u00b7 yield \u00b7 ROIC vs WACC \u00b7 safety. Free for any company that already has a\nfinancials column (the blob carries 262 line items; the charts are reads).\n\n\u26a0 The price line is yfinance daily, in EUR, and never GuruFocus's \u2014 /portfolios prices\neverything from `asset_price`, and a second vendor on that page would compare two price\nuniverses. Both legs of chart 1 are therefore EUR; see `_asset_fundamentals`.",
+        "operationId": "fundamentals_by_isin_api_asset_pipeline_fundamentals_isin__isin__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "isin",
+            "required": true,
+            "schema": {
+              "title": "Isin",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cadence",
+            "required": false,
+            "schema": {
+              "default": "annuals",
+              "title": "Cadence",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundamentalsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fundamentals By Isin",
         "tags": [
           "asset-pipeline",
           "asset-pipeline"

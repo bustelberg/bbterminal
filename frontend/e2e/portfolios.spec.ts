@@ -553,4 +553,56 @@ test.describe('/portfolios', () => {
       el.querySelector('table')!.getBoundingClientRect().left - el.getBoundingClientRect().left);
     expect(left).toBeLessThan(2);
   });
+
+  test('the Sound? button opens the four soundness charts', async ({ page }) => {
+    await page.getByText('AITopSelectie OFF FX').click();
+    const posRow = (t: string) => page.locator('tr').filter({ hasText: t }).last();
+
+    // A real, resolved instrument gets the button.
+    await posRow('US0231351067').getByRole('button', { name: 'Sound?' }).click();
+
+    const modal = page.getByRole('dialog');
+    await expect(modal).toContainText('Price vs fair value');
+    await expect(modal).toContainText('What a euro of price buys');
+    await expect(modal).toContainText('ROIC vs WACC');
+    await expect(modal).toContainText('Is cheap, cheap for a reason?');
+
+    // The provenance is ON the chart, not in a doc: the price is ours, the valuation is not, and
+    // the figures are restated. Every one of those changes what the reader should conclude.
+    await expect(modal).toContainText('yfinance daily close');
+    await expect(modal).toContainText('restated');
+
+    // The axis choice is DEFENDED on the chart, not just made.
+    await expect(modal).toContainText('Log scale, because the gap is a ratio');
+
+    // ⚠ The two absences must read as DIFFERENT sentences.  = the method published
+    // nothing;  = it published a value <= 0, which is an ANSWER a log axis
+    // cannot draw. The fixture has one of each.
+    await expect(modal).toContainText('GuruFocus published none for the rest');
+    await expect(modal).toContainText('BREAK rather than bridge');
+
+    // The VERDICT strip: four numbers, above the evidence.
+    await expect(modal).toContainText('ROIC − WACC');
+    await expect(modal).toContainText('+18.8pp');
+    await expect(modal).toContainText('-17.1pp');      // the melting moat, as a fail
+    await expect(modal).toContainText('1.07×');
+    // n/a is NOT a failure — a bank has no gross margin at all. It must read differently.
+    await expect(modal).toContainText('n/a');
+    await expect(modal).toContainText('not applicable');
+  });
+
+  test('rows with nothing to chart get no button, for their own reasons', async ({ page }) => {
+    // A dead button that opens a "no data" modal is worse than no button: it invites a click on
+    // every row and answers nothing. Cash has no accounts; an in-house fund has no listing.
+    await page.getByText('AITopSelectie OFF FX').click();
+    const posRow = (t: string) => page.locator('tr').filter({ hasText: t }).last();
+
+    const cash = posRow('Liquiditeit');
+    await expect(cash.getByRole('button', { name: 'Sound?' })).toHaveCount(0);
+    await expect(cash.getByTitle(/Cash has no accounts/)).toBeVisible();
+
+    // 'not in grid' — the ISIN is not an instrument we hold, so there is nothing to bridge.
+    const inhouse = posRow('IE00077FRP95');
+    await expect(inhouse.getByRole('button', { name: 'Sound?' })).toHaveCount(0);
+  });
 });

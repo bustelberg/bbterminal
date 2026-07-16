@@ -443,6 +443,17 @@ export async function mockPortfolios(page: Page) {
   });
   // The page also renders the benchmarks panel below the table; stub it so nothing hangs
   // against the unreachable mock host.
+  // The four soundness charts, launched from the positions table's  button.
+  // ⚠ The price line here is DAILY and yfinance's; the fair values are GuruFocus's, already
+  // converted to the same EUR by the backend. A fixture that made them share a currency by
+  // accident would not exercise the thing that matters.
+  await page.route('**/api/asset-pipeline/fundamentals/isin/**', async (route) => {
+    await route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify(FIXTURE_FUNDAMENTALS),
+    });
+  });
+
   await page.route('**/api/benchmarks**', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
   });
@@ -552,4 +563,74 @@ export const FIXTURE_ATTRIBUTION = {
     { isin: 'US0378331005', name: 'Apple Inc', ticker: 'AAPL', weight_pct: 4.2, return_pct: 51.0, contribution_pct: 2.14 },
     { isin: 'US8740391003', name: 'Taiwan Semiconductor', ticker: 'TSM', weight_pct: 2.1, return_pct: 84.3, contribution_pct: 1.77 },
   ],
+};
+
+/**
+ * One company's soundness payload. Small but SHAPED like the real thing:
+ *  - the price is daily (three consecutive days), the ratios are annual — different cadences on
+ *    one chart is the actual layout problem;
+ *  -  is non-zero on a fair value, because that is the field whose whole job is
+ *    admitting a gap (Apple loses 13 of 40 periods to thin FX history).
+ */
+export const FIXTURE_FUNDAMENTALS = {
+  isin: 'US0231351067',
+  symbol: 'NASDAQ:AMZN',
+  company_id: 42,
+  currency: 'USD',
+  yahoo_symbol: 'AMZN',
+  price_currency: 'USD',
+  is_home: true,
+  template: 'normal',
+  cadence: 'annuals',
+  period_count: 4,
+  fetched: false,
+  price_eur: [
+    { date: '2026-07-01', value: 190.1 },
+    { date: '2026-07-02', value: 192.4 },
+    { date: '2026-07-03', value: 191.2 },
+  ],
+  fair_values_eur: [
+    { field: 'Graham Number', label: 'Graham Number',
+      points: [{ date: '2024-12-31', value: 88.0 }, { date: '2025-12-31', value: 95.5 }],
+      period_count: 4, dropped: 2 },
+    // ⚠ A NEGATIVE fair value — Peter Lynch needs positive earnings growth, so a loss year has
+    // none. Log cannot plot it; the line must BREAK, not bridge. A fixture without one would
+    // never exercise that path.
+    { field: 'Peter Lynch Fair Value', label: 'Peter Lynch',
+      points: [{ date: '2023-12-31', value: -4.0 }, { date: '2024-12-31', value: 150.0 }, { date: '2025-12-31', value: 162.0 }],
+      period_count: 4, dropped: 1, non_positive: 1 },
+  ],
+  price_crosscheck_eur: [{ date: '2025-12-31', value: 188.0 }],
+  yields: [
+    { field: 'FCF Yield %', label: 'FCF yield',
+      points: [{ date: '2024-12-31', value: 2.1 }, { date: '2025-12-31', value: 2.63 }],
+      period_count: 4, dropped: 0 },
+  ],
+  returns: [
+    { field: 'ROIC %', label: 'ROIC',
+      points: [{ date: '2024-12-31', value: 30.2 }, { date: '2025-12-31', value: 39.38 }],
+      period_count: 4, dropped: 0 },
+    { field: 'WACC %', label: 'WACC',
+      points: [{ date: '2024-12-31', value: 9.1 }, { date: '2025-12-31', value: 9.86 }],
+      period_count: 4, dropped: 0 },
+  ],
+  safety: [
+    { field: 'Piotroski F-Score', label: 'Piotroski F',
+      points: [{ date: '2024-12-31', value: 7 }, { date: '2025-12-31', value: 8 }],
+      period_count: 4, dropped: 0 },
+    { field: 'Altman Z-Score', label: 'Altman Z',
+      points: [{ date: '2024-12-31', value: 9.4 }, { date: '2025-12-31', value: 10.17 }],
+      period_count: 4, dropped: 0 },
+  ],
+  // ⚠ ONE OF EACH STATUS. A fixture where all four pass would never show that the strip keeps
+  // fail / n_a / unknown visibly APART — and n_a (a bank has no ROIC at all) reading as a
+  // failure is the specific thing that would make the card untrustworthy.
+  quality: [
+    { key: 'spread', label: 'ROIC − WACC', unit: 'pp', value: 18.8, periods: 10, status: 'ok', note: '10y median.' },
+    { key: 'trend', label: 'ROIC trend', unit: 'pp', value: -17.1, periods: 10, status: 'fail', note: 'The moat is melting.' },
+    { key: 'conversion', label: 'FCF / net income', unit: 'x', value: 1.07, periods: 10, status: 'ok', note: '10y median.' },
+    { key: 'gm_sd', label: 'Gross margin σ', unit: 'pp', value: null, periods: 0, status: 'n_a', note: 'No gross margin for this template.' },
+  ],
+  has_roic: true,
+  has_earnings_yield: true,
 };

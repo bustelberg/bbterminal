@@ -786,6 +786,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Accounts
+         * @description The AIRS ACCOUNTS — what the books actually made, on AIRS's own EUR values.
+         *
+         *     A different object from the model portfolios: a model is a COMPOSITION (weights), which AIRS
+         *     has nothing to value — of 58 models and 39 valued accounts, the overlap is zero. The models
+         *     answer "would this strategy work" (and need yfinance, since nothing else can price a set of
+         *     weights); these answer "what did this book make", and AIRS is the system of record.
+         */
+        get: operations["airs_accounts_api_airs_accounts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/accounts/{portefeuille}/holdings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Account Holdings
+         * @description One account's positions, with AIRS's own EUR values — including the Leonteq certificates
+         *     Yahoo cannot price at all (TOPS_OFF_BEH_DYN: AIRS values 7 of 7 where the yfinance path
+         *     prices 0 of 9).
+         */
+        get: operations["airs_account_holdings_api_airs_accounts__portefeuille__holdings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/crm-relaties": {
         parameters: {
             query?: never;
@@ -1657,6 +1704,33 @@ export interface paths {
          *     bank has no gross profit); 404 only when there is genuinely nothing to show.
          */
         get: operations["financial_line_by_isin_api_asset_pipeline_financials_isin__isin___item__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/fundamentals/isin/{isin}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fundamentals By Isin
+         * @description Everything the four soundness charts need, in ONE call off ONE cached blob.
+         *
+         *     Price vs fair value · yield · ROIC vs WACC · safety. Free for any company that already has a
+         *     financials column (the blob carries 262 line items; the charts are reads).
+         *
+         *     ⚠ The price line is yfinance daily, in EUR, and never GuruFocus's — /portfolios prices
+         *     everything from `asset_price`, and a second vendor on that page would compare two price
+         *     universes. Both legs of chart 1 are therefore EUR; see `_asset_fundamentals`.
+         */
+        get: operations["fundamentals_by_isin_api_asset_pipeline_fundamentals_isin__isin__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5544,6 +5618,88 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AirsAccount
+         * @description One AIRS account, on AIRS's own numbers.
+         *
+         *     ⚠ `ytd_pct` IS `cumulatief_rendement` — AIRS's own, flow-aware. It is NOT
+         *     `end_value_eur / begin_value_eur - 1`; that ratio is `value_ratio_pct` below, and it is the
+         *     WRONG number. AIRS publishes both and they disagree by more than a point in 31 of 38 accounts
+         *     (AITopSelectie OFF DYN: the ratio says -5.85% on a book that made +46.12%). A value ratio is a
+         *     return only when nothing was deposited or withdrawn, and these are real accounts.
+         */
+        AirsAccount: {
+            /** As Of */
+            as_of?: string | null;
+            /** Begin Value Eur */
+            begin_value_eur?: number | null;
+            /** End Value Eur */
+            end_value_eur?: number | null;
+            /** Holdings */
+            holdings?: number | null;
+            /** Income Eur */
+            income_eur?: number | null;
+            /** Investment Result Eur */
+            investment_result_eur?: number | null;
+            /** Periode */
+            periode?: string | null;
+            /** Portefeuille */
+            portefeuille: string;
+            /** Price Result Eur */
+            price_result_eur?: number | null;
+            /** Value Ratio Pct */
+            value_ratio_pct?: number | null;
+            /** Ytd Pct */
+            ytd_pct?: number | null;
+        };
+        /**
+         * AirsAccountDetail
+         * @description One account's freshest snapshot.
+         *
+         *     ⚠ THE ROWS DO NOT SUM TO `ytd_pct`, AND THAT IS CORRECT. Each row is a PRICE return (AIRS
+         *     restates `Beginwaarde lopend jaar` to the current quantity, so a purchase does not contaminate
+         *     it). The account's figure is flow-aware AND includes `income_eur`, which no price return
+         *     contains. The /portfolios MODEL view has the opposite property — its holdings weight exactly
+         *     to its total — so a reader arriving from there will expect these to tie.
+         */
+        AirsAccountDetail: {
+            /** As Of */
+            as_of?: string | null;
+            /** Income Eur */
+            income_eur?: number | null;
+            /** Portefeuille */
+            portefeuille: string;
+            /** Price Result Eur */
+            price_result_eur?: number | null;
+            /**
+             * Rows
+             * @default []
+             */
+            rows?: components["schemas"]["AirsAccountHolding"][];
+            /** Ytd Pct */
+            ytd_pct?: number | null;
+        };
+        /** AirsAccountHolding */
+        AirsAccountHolding: {
+            /** Currency */
+            currency?: string | null;
+            /** Current Value Eur */
+            current_value_eur?: number | null;
+            /** Holding Name */
+            holding_name: string;
+            /** Quantity */
+            quantity?: number | null;
+            /** Start Value Eur */
+            start_value_eur?: number | null;
+            /** Weight */
+            weight?: number | null;
+            /** Ytd Return Eur */
+            ytd_return_eur?: number | null;
+            /** Ytd Return Local Pct */
+            ytd_return_local_pct?: number | null;
+            /** Ytd Return Pct */
+            ytd_return_pct?: number | null;
+        };
         /** AssetGridResponse */
         AssetGridResponse: {
             /** Rows */
@@ -6408,6 +6564,125 @@ export interface components {
              */
             unit?: string;
         };
+        /** FundamentalPoint */
+        FundamentalPoint: {
+            /** Date */
+            date: string;
+            /** Value */
+            value: number;
+        };
+        /** FundamentalSeries */
+        FundamentalSeries: {
+            /**
+             * Dropped
+             * @default 0
+             */
+            dropped?: number;
+            /** Field */
+            field: string;
+            /** Label */
+            label: string;
+            /**
+             * Non Positive
+             * @default 0
+             */
+            non_positive?: number;
+            /**
+             * Period Count
+             * @default 0
+             */
+            period_count?: number;
+            /**
+             * Points
+             * @default []
+             */
+            points?: components["schemas"]["FundamentalPoint"][];
+        };
+        /**
+         * FundamentalsResponse
+         * @description The four soundness charts, off ONE cached blob plus one yfinance price read.
+         */
+        FundamentalsResponse: {
+            /**
+             * Cadence
+             * @default annuals
+             */
+            cadence?: string;
+            /** Company Id */
+            company_id?: number | null;
+            /** Currency */
+            currency?: string | null;
+            /**
+             * Fair Values Eur
+             * @default []
+             */
+            fair_values_eur?: components["schemas"]["FundamentalSeries"][];
+            /**
+             * Fetched
+             * @default false
+             */
+            fetched?: boolean;
+            /**
+             * Has Earnings Yield
+             * @default true
+             */
+            has_earnings_yield?: boolean;
+            /**
+             * Has Roic
+             * @default true
+             */
+            has_roic?: boolean;
+            /**
+             * Is Home
+             * @default true
+             */
+            is_home?: boolean;
+            /** Isin */
+            isin: string;
+            /**
+             * Period Count
+             * @default 0
+             */
+            period_count?: number;
+            /**
+             * Price Crosscheck Eur
+             * @default []
+             */
+            price_crosscheck_eur?: components["schemas"]["FundamentalPoint"][];
+            /** Price Currency */
+            price_currency?: string | null;
+            /**
+             * Price Eur
+             * @default []
+             */
+            price_eur?: components["schemas"]["FundamentalPoint"][];
+            /**
+             * Quality
+             * @default []
+             */
+            quality?: components["schemas"]["QualityMetric"][];
+            /**
+             * Returns
+             * @default []
+             */
+            returns?: components["schemas"]["FundamentalSeries"][];
+            /**
+             * Safety
+             * @default []
+             */
+            safety?: components["schemas"]["FundamentalSeries"][];
+            /** Symbol */
+            symbol: string;
+            /** Template */
+            template?: string | null;
+            /** Yahoo Symbol */
+            yahoo_symbol?: string | null;
+            /**
+             * Yields
+             * @default []
+             */
+            yields?: components["schemas"]["FundamentalSeries"][];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -7264,6 +7539,46 @@ export interface components {
             remaining_member_count: number;
             /** Universe Label */
             universe_label: string;
+        };
+        /**
+         * QualityMetric
+         * @description One of the four quality numbers, and its verdict.
+         *
+         *     ⚠ FOUR STATES, AND ONLY ONE OF THEM IS "BAD".
+         *         ok       measured, and it passes
+         *         fail     measured, and it does not
+         *         n_a      the LINE DOES NOT EXIST for this company. A bank has no ROIC and no gross margin
+         *                  at all (JPMorgan, template 'B' — structurally absent, not empty), so two of the
+         *                  four are inapplicable to one. That is an answer about the industry template.
+         *         unknown  the line exists but there is too little history to say — a 10y median off three
+         *                  points is not a median.
+         *     Collapsing `n_a` or `unknown` into `fail` marks every bank a bad business and every young
+         *     company a suspect one.
+         */
+        QualityMetric: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Note */
+            note?: string | null;
+            /**
+             * Periods
+             * @default 0
+             */
+            periods?: number;
+            /**
+             * Status
+             * @default unknown
+             */
+            status?: string;
+            /**
+             * Unit
+             * @default
+             */
+            unit?: string;
+            /** Value */
+            value?: number | null;
         };
         /** RecomputeRequest */
         RecomputeRequest: {
@@ -8693,6 +9008,57 @@ export interface operations {
             };
         };
     };
+    airs_accounts_api_airs_accounts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AirsAccount"][];
+                };
+            };
+        };
+    };
+    airs_account_holdings_api_airs_accounts__portefeuille__holdings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AirsAccountDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     airs_crm_relaties_api_airs_crm_relaties_get: {
         parameters: {
             query?: never;
@@ -9803,6 +10169,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FinancialSeriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fundamentals_by_isin_api_asset_pipeline_fundamentals_isin__isin__get: {
+        parameters: {
+            query?: {
+                cadence?: string;
+            };
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundamentalsResponse"];
                 };
             };
             /** @description Validation Error */

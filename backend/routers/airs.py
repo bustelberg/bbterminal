@@ -1129,3 +1129,83 @@ async def parse_portfolio(file: UploadFile = File(...)):
         "total_ytd_eur": total_ytd_eur,
         "total_ytd_pct": total_ytd_pct,
     }
+
+
+class AirsAccount(BaseModel):
+    """One AIRS account, on AIRS's own numbers.
+
+    ⚠ `ytd_pct` IS `cumulatief_rendement` — AIRS's own, flow-aware. It is NOT
+    `end_value_eur / begin_value_eur - 1`; that ratio is `value_ratio_pct` below, and it is the
+    WRONG number. AIRS publishes both and they disagree by more than a point in 31 of 38 accounts
+    (AITopSelectie OFF DYN: the ratio says -5.85% on a book that made +46.12%). A value ratio is a
+    return only when nothing was deposited or withdrawn, and these are real accounts.
+    """
+
+    portefeuille: str
+    periode: str | None = None          # the window's END; the window opens 1 Jan
+    as_of: str | None = None            # the holdings snapshot we hold, if any
+    begin_value_eur: float | None = None
+    end_value_eur: float | None = None
+    ytd_pct: float | None = None        # cumulatief_rendement — the answer
+    # Carried ONLY so the gap to `ytd_pct` can be shown. Not an alternative; the wrong one.
+    value_ratio_pct: float | None = None
+    price_result_eur: float | None = None      # koersresultaat — the "price gains"
+    income_eur: float | None = None            # opbrengsten — dividends/coupons
+    investment_result_eur: float | None = None
+    holdings: int | None = None
+
+
+class AirsAccountHolding(BaseModel):
+    holding_name: str
+    quantity: float | None = None
+    currency: str | None = None
+    weight: float | None = None
+    start_value_eur: float | None = None       # Beginwaarde lopend jaar EUR
+    current_value_eur: float | None = None     # Huidige waarde EUR
+    ytd_return_eur: float | None = None
+    # ⚠ None = UNDEFINED, not 0%. A position not held at the year's open (or a cash line) has a
+    # Beginwaarde of 0; dividing by it is infinite and calling it flat is a claim.
+    ytd_return_pct: float | None = None
+    ytd_return_local_pct: float | None = None
+
+
+class AirsAccountDetail(BaseModel):
+    """One account's freshest snapshot.
+
+    ⚠ THE ROWS DO NOT SUM TO `ytd_pct`, AND THAT IS CORRECT. Each row is a PRICE return (AIRS
+    restates `Beginwaarde lopend jaar` to the current quantity, so a purchase does not contaminate
+    it). The account's figure is flow-aware AND includes `income_eur`, which no price return
+    contains. The /portfolios MODEL view has the opposite property — its holdings weight exactly
+    to its total — so a reader arriving from there will expect these to tie.
+    """
+
+    portefeuille: str
+    as_of: str | None = None
+    ytd_pct: float | None = None
+    price_result_eur: float | None = None
+    income_eur: float | None = None
+    rows: list[AirsAccountHolding] = []
+
+
+@router.get("/api/airs/accounts", response_model=list[AirsAccount])
+async def airs_accounts():
+    """The AIRS ACCOUNTS — what the books actually made, on AIRS's own EUR values.
+
+    A different object from the model portfolios: a model is a COMPOSITION (weights), which AIRS
+    has nothing to value — of 58 models and 39 valued accounts, the overlap is zero. The models
+    answer "would this strategy work" (and need yfinance, since nothing else can price a set of
+    weights); these answer "what did this book make", and AIRS is the system of record.
+    """
+    from routers._airs_accounts import list_accounts_async  # noqa: PLC0415
+
+    return await list_accounts_async()
+
+
+@router.get("/api/airs/accounts/{portefeuille}/holdings", response_model=AirsAccountDetail)
+async def airs_account_holdings(portefeuille: str):
+    """One account's positions, with AIRS's own EUR values — including the Leonteq certificates
+    Yahoo cannot price at all (TOPS_OFF_BEH_DYN: AIRS values 7 of 7 where the yfinance path
+    prices 0 of 9)."""
+    from routers._airs_accounts import account_holdings_async  # noqa: PLC0415
+
+    return await account_holdings_async(portefeuille)

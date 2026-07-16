@@ -1,5 +1,6 @@
 'use client';
 
+import AirsAccountsPanel from '../components/AirsAccountsPanel';
 import AssetNav from '../components/AssetNav';
 import BenchmarksPanel from '../components/BenchmarksPanel';
 import CorrelationMatrix from '../components/CorrelationMatrix';
@@ -19,6 +20,12 @@ export default function Page() {
 
       <div className="px-8 py-6 space-y-6">
         <PortfoliosPanel />
+        {/* The MODELS above (compositions, priced from yfinance — nothing else can value a set of
+            weights) and the ACCOUNTS here (AIRS's own EUR values) are different objects answering
+            different questions: "would the strategy work" vs "what did the book make". Their
+            overlap is literally zero — no model has AIRS values, and none can. Adjacent, not
+            merged, because the gap between them IS implementation drift. */}
+        <AirsAccountsPanel />
         <CorrelationMatrix />
         <BenchmarksPanel />
       </div>

@@ -9,6 +9,7 @@ import type {
   ModelPortfolioPerformance, ModelPortfolioPositions, StoredModelPortfolio,
 } from '../../lib/types/api';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
+import FundamentalsModal from './portfolios/FundamentalsModal';
 
 type StoredPortfolio = StoredModelPortfolio;
 
@@ -65,6 +66,9 @@ type Perf = ModelPortfolioPerformance;
 const isPartialYear = (p: Perf) => p.model_changed_in_period;
 
 type PosState = { loading: boolean; data?: ModelPortfolioPositions; error?: string };
+/** One row of a model's composition, as the API shapes it — derived, never re-declared, so it
+ *  cannot drift from the contract. */
+type PositionRow = NonNullable<ModelPortfolioPositions['rows']>[number];
 
 /** AirSPMS only stores a composition for a `fixed (…)` portfolio. */
 const hasFixedModel = (p: Portfolio) => p.fixed?.trim().toLowerCase().startsWith('fixed');
@@ -1005,6 +1009,45 @@ function DisplayNameCell({ p, onSaved }: { p: Portfolio; onSaved: (v: string) =>
   );
 }
 
+/** The "is this sound?" launcher.
+ *
+ * ⚠ IT ONLY OFFERS ITSELF WHERE IT CAN WORK, and the reasons it cannot are DIFFERENT reasons, not
+ * one blank. A dead button that opens a modal saying "no data" is worse than no button: it invites
+ * a click on every row and answers nothing, and after the third one nobody trusts the column.
+ *
+ *   cash          no ISIN, no company, no accounts. There is no question to ask.
+ *   not in grid   the ISIN is not an instrument we hold (an in-house fund) — nothing to bridge.
+ *   a portfolio   a Leonteq certificate that IS another model. It has no accounts of its own;
+ *                 the Link column is what looks through it.
+ *
+ * Everything else gets the button. It may still 404 (GuruFocus does not cover every listing), and
+ * the modal says so — that is a real answer about coverage, not a row we could have known about
+ * in advance.
+ */
+function SoundnessCell({ p, onOpen }: {
+  p: PositionRow;
+  onOpen: (v: { isin: string; fonds: string }) => void;
+}) {
+  if (!p.isin) {
+    return <span className="text-fg-faint" title="Cash has no accounts to read.">—</span>;
+  }
+  if (!p.known_instrument) {
+    return (
+      <span className="text-fg-faint"
+        title="This ISIN is not an instrument in our grid — usually an in-house fund, which has no listing to resolve and therefore no financials to read.">
+        —
+      </span>
+    );
+  }
+  return (
+    <button type="button" onClick={() => onOpen({ isin: p.isin!, fonds: p.fonds ?? p.isin! })}
+      title={`Is ${p.fonds ?? p.isin} fundamentally sound? Price vs fair value, yield, ROIC vs WACC, safety.`}
+      className="text-[10px] px-1.5 py-0.5 rounded border border-neutral-700 text-accent-400 hover:bg-overlay/5 transition-colors whitespace-nowrap">
+      Sound?
+    </button>
+  );
+}
+
 type LinkOption = { id: number; name: string; omschrijving?: string | null; positions: number };
 type LinkCtx = { options: LinkOption[]; excluded_by_isin: Record<string, number[]> };
 
@@ -1160,6 +1203,8 @@ function Positions({ state, onPickDate, onRefresh, onLinkSaved }: {
 }) {
   const pid = state?.data?.portfolio_id;
   const [linkCtx, setLinkCtx] = useState<LinkCtx | null>(null);
+  // Which holding's soundness charts are open. Null = none.
+  const [fundamentals, setFundamentals] = useState<{ isin: string; fonds: string } | null>(null);
   useEffect(() => {
     if (pid == null) return;
     let alive = true;
@@ -1253,6 +1298,10 @@ function Positions({ state, onPickDate, onRefresh, onLinkSaved }: {
               <th className="px-3 py-1.5 font-medium text-right w-8">#</th>
               <th className="px-3 py-1.5 font-medium text-left">ISIN</th>
               <th className="px-3 py-1.5 font-medium text-left">Fund</th>
+              <th className="px-3 py-1.5 font-medium text-left w-16"
+                title="Is this company fundamentally sound, and are we paying a sensible price for it? Four charts off one already-cached GuruFocus blob: price against five independent fair values, what a euro of price buys (FCF / earnings / shareholder yield), ROIC against WACC, and the value-trap screen (Piotroski, Altman, Beneish, interest coverage). The price line is our own daily yfinance close in EUR — never GuruFocus's.">
+                Sound?
+              </th>
               {/* Some holdings are not instruments — they are other model portfolios, wrapped as
                   a Leonteq certificate. "Star Selection Index" IS StarTopSelectie OFF FX. */}
               <th className="px-3 py-1.5 font-medium text-left" title="The model portfolio this holding IS. A few positions are not instruments at all but other models, held via a Leonteq certificate — those can never be priced directly, so the link is what lets us look through to the model behind them. The badge is the confidence of our automatic guess; pick from the dropdown to overrule it. An edit applies to the holding everywhere it is held, not just to this row.">
@@ -1302,6 +1351,9 @@ function Positions({ state, onPickDate, onRefresh, onLinkSaved }: {
                   )}
                 </td>
                 <td className="px-3 py-1.5 text-fg-soft">{p.fonds ?? '—'}</td>
+                <td className="px-3 py-1.5">
+                  <SoundnessCell p={p} onOpen={setFundamentals} />
+                </td>
                 <LinkCell p={p} ctx={linkCtx} ownerId={d.portfolio_id} onSaved={onLinkSaved} />
                 <td className="px-3 py-1.5 text-right font-mono text-fg">
                   {p.percentage != null ? `${p.percentage.toFixed(2)}%` : '—'}
@@ -1315,6 +1367,11 @@ function Positions({ state, onPickDate, onRefresh, onLinkSaved }: {
           </tbody>
         </table>
       </div>
+
+      {fundamentals && (
+        <FundamentalsModal isin={fundamentals.isin} fonds={fundamentals.fonds}
+          onClose={() => setFundamentals(null)} />
+      )}
     </div>
   );
 }

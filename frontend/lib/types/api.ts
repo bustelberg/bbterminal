@@ -96,3 +96,16 @@ export type ModelPortfolioAnalysis = components['schemas']['ModelPortfolioAnalys
 export type ModelPortfolioAttribution = components['schemas']['ModelPortfolioAttribution'];
 export type ReconstructedIndex = components['schemas']['ReconstructedIndex'];
 export type IndexMember = components['schemas']['IndexMember'];
+
+/** The four soundness charts — price vs fair value, yield, ROIC vs WACC, safety.
+ *  One payload off one cached GuruFocus blob + our own daily yfinance price in EUR. */
+export type FundamentalsResponse = components['schemas']['FundamentalsResponse'];
+export type FundamentalSeries = components['schemas']['FundamentalSeries'];
+
+/** One of the four quality numbers + its verdict (ok | fail | n_a | unknown). */
+export type QualityMetric = components['schemas']['QualityMetric'];
+
+/** An AIRS ACCOUNT — what a book actually made, on AIRS's own EUR values.
+ *  A different object from a model portfolio (which is a composition of weights). */
+export type AirsAccount = components['schemas']['AirsAccount'];
+export type AirsAccountDetail = components['schemas']['AirsAccountDetail'];

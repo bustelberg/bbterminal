@@ -104,6 +104,26 @@ _SECTION_ALIASES: dict[str, tuple[str, ...]] = {
     "income": ("income_statement", "Income Statement"),
     "cashflow": ("cashflow_statement", "Cashflow Statement"),
     "balance": ("balance_sheet", "Balance Sheet"),
+    # The RATIO sections, read by `_asset_fundamentals` (the four soundness charts) and by
+    # nothing in `_ITEMS`. Naming a section here does NOT make it a column: every `_ITEMS` entry
+    # is FX-converted, which is why that registry bans ratios ("13.3% in EUR"). `_series` is
+    # unit-agnostic — it reads numbers off an axis — so the two concerns stay apart.
+    #
+    # ⚠ BOTH SPELLINGS, ALWAYS, AND THE OLD ONE IS NOT THE NEW ONE TITLE-CASED.
+    # GuruFocus renamed these sections and Storage holds blobs from before and after. Every name
+    # on the right was READ OFF A REAL CACHED BLOB — two of them are not what mechanical
+    # title-casing predicts, and guessing produced a chart that was silently EMPTY rather than an
+    # error (the section simply is not there, so `_series` finds no values and returns []):
+    #
+    #     common_size_ratios  ->  "Ratios"              NOT "Common Size Ratios"
+    #     gurufocus_rankings  ->  "Gurufocus Rankings"  NOT "GuruFocus Rankings"  (lowercase f)
+    #
+    # If you add a section here, dump `financials.annuals`' keys from Storage. Do not infer it.
+    "valuation": ("valuation_ratios", "Valuation Ratios"),
+    "quality": ("valuation_and_quality", "Valuation and Quality"),
+    "common_size": ("common_size_ratios", "Ratios"),
+    "rankings": ("gurufocus_rankings", "Gurufocus Rankings"),
+    "per_share": ("per_share_data_array", "Per Share Data"),
 }
 _DEFAULT_SECTION = "income"
 
@@ -785,8 +805,19 @@ def _convert_to_eur(points: list[FinancialPoint], currency: str | None) -> str |
     return start
 
 
-def _line_item_for_isin(isin: str, item: str, *, force: bool = False) -> FinancialSeriesResponse:
-    """One income-statement line, via whichever bridge reaches this ISIN."""
+def resolve_gf_listing(isin: str, *, phrase: str = "this") -> dict:
+    """Which GuruFocus listing answers for this ISIN, via whichever of the two bridges reaches it.
+
+    `{company_id, ticker, exchange, currency, is_home}` — `currency` being the listing's TRADING
+    currency, which is what GuruFocus converts the financials into (see the module docstring).
+
+    Extracted so `_asset_fundamentals` can reach the same listing by the same rule. A second copy
+    of this would be a second answer to "which GuruFocus listing IS this ISIN", and the two would
+    disagree the first time `pick_listing`'s scoring changed — the fundamentals modal would then
+    chart one listing's numbers under another listing's name.
+
+    `phrase` only shapes the fund refusal's wording ("a fund has no EBIT").
+    """
     from deps import supabase  # noqa: PLC0415
 
     from ._asset_dividends import (  # noqa: PLC0415
@@ -797,14 +828,10 @@ def _line_item_for_isin(isin: str, item: str, *, force: bool = False) -> Financi
         _resolve_listing,
     )
 
-    spec = _ITEMS.get(item)
-    if not spec:
-        raise HTTPException(404, f"unknown line item '{item}' (have: {', '.join(_ITEMS)})")
-
     asset = _asset_row(isin)
     product = (asset.get("leonteq_product_type") or "").upper()
     if product in _FUND_PRODUCTS:
-        raise HTTPException(404, _FUND_REASON.format(phrase=spec["phrase"]))
+        raise HTTPException(404, _FUND_REASON.format(phrase=phrase))
 
     co = (supabase.table("company")
           .select("company_id, gurufocus_ticker, exchange_id, has_financials")
@@ -814,21 +841,33 @@ def _line_item_for_isin(isin: str, item: str, *, force: bool = False) -> Financi
         company_id = co[0]["company_id"]
         ticker = co[0].get("gurufocus_ticker")
         exchange, currency = _exchange(co[0].get("exchange_id"))
-        is_home = True
         if not ticker:
             raise HTTPException(422, f"company {company_id} has no gurufocus_ticker")
-    else:
-        row = _resolve_listing(isin)
-        status = row.get("status") or "ok"
-        if status != "ok" or not row.get("gurufocus_ticker"):
-            reason = _UNRESOLVED_REASON.get(status, f"unresolved ISIN ({status})")
-            symbol = f"{row.get('exchange_code')}:{row.get('gurufocus_ticker')}"
-            raise HTTPException(
-                404, reason.format(symbol=symbol) if "{symbol}" in reason else reason)
-        company_id = None
-        ticker, exchange = row["gurufocus_ticker"], row["exchange_code"]
-        _, currency = _exchange_by_code(exchange)
-        is_home = bool(row.get("is_home"))
+        return {"company_id": company_id, "ticker": ticker, "exchange": exchange,
+                "currency": currency, "is_home": True}
+
+    row = _resolve_listing(isin)
+    status = row.get("status") or "ok"
+    if status != "ok" or not row.get("gurufocus_ticker"):
+        reason = _UNRESOLVED_REASON.get(status, f"unresolved ISIN ({status})")
+        symbol = f"{row.get('exchange_code')}:{row.get('gurufocus_ticker')}"
+        raise HTTPException(404, reason.format(symbol=symbol) if "{symbol}" in reason else reason)
+    exchange = row["exchange_code"]
+    _, currency = _exchange_by_code(exchange)
+    return {"company_id": None, "ticker": row["gurufocus_ticker"], "exchange": exchange,
+            "currency": currency, "is_home": bool(row.get("is_home"))}
+
+
+def _line_item_for_isin(isin: str, item: str, *, force: bool = False) -> FinancialSeriesResponse:
+    """One income-statement line, via whichever bridge reaches this ISIN."""
+    spec = _ITEMS.get(item)
+    if not spec:
+        raise HTTPException(404, f"unknown line item '{item}' (have: {', '.join(_ITEMS)})")
+
+    _resolved = resolve_gf_listing(isin, phrase=spec["phrase"])
+    company_id = _resolved["company_id"]
+    ticker, exchange = _resolved["ticker"], _resolved["exchange"]
+    currency, is_home = _resolved["currency"], _resolved["is_home"]
 
     source = spec.get("source", _SOURCE_FINANCIALS)
     if source == _SOURCE_ESTIMATES:
@@ -975,3 +1014,105 @@ async def financial_line_by_isin(isin: str, item: str, refresh: bool = False):
     200 with `applicable=false` when the company's industry template has no such line (a
     bank has no gross profit); 404 only when there is genuinely nothing to show."""
     return await asyncio.to_thread(_line_item_for_isin, isin, item, force=refresh)
+
+
+class FundamentalPoint(BaseModel):
+    date: str
+    value: float
+
+
+class FundamentalSeries(BaseModel):
+    field: str
+    label: str
+    points: list[FundamentalPoint] = []
+    # ⚠ `dropped` IS THE HONEST PART. GuruFocus writes "" / "N/A" / "-" for a period it has no
+    # value for, and those are far commoner in the ratio sections than in the statements: on a
+    # real blob Piotroski has 17 points where Revenue has 24, Interest Coverage 20, GF Value 11.
+    # A loss year HAS no PE. Read a 17-point line as a 24-year history and you are reading only
+    # the periods that worked.
+    period_count: int = 0
+    dropped: int = 0
+    # How many of the DRAWN points are <= 0. A fair value <= 0 is an ANSWER (Peter Lynch needs
+    # positive earnings growth; EPV <= 0 says the business earns nothing) — a quarter of the band
+    # is <= 0 in-window on a real sample. It stays in the payload; a LOG axis cannot plot it, so
+    # the chart breaks its line there rather than bridging a decade the method had no value for.
+    non_positive: int = 0
+
+
+class QualityMetric(BaseModel):
+    """One of the four quality numbers, and its verdict.
+
+    ⚠ FOUR STATES, AND ONLY ONE OF THEM IS "BAD".
+        ok       measured, and it passes
+        fail     measured, and it does not
+        n_a      the LINE DOES NOT EXIST for this company. A bank has no ROIC and no gross margin
+                 at all (JPMorgan, template 'B' — structurally absent, not empty), so two of the
+                 four are inapplicable to one. That is an answer about the industry template.
+        unknown  the line exists but there is too little history to say — a 10y median off three
+                 points is not a median.
+    Collapsing `n_a` or `unknown` into `fail` marks every bank a bad business and every young
+    company a suspect one.
+    """
+
+    key: str
+    label: str
+    unit: str = ""
+    value: float | None = None
+    periods: int = 0
+    status: str = "unknown"          # ok | fail | n_a | unknown
+    note: str | None = None
+
+
+class FundamentalsResponse(BaseModel):
+    """The four soundness charts, off ONE cached blob plus one yfinance price read."""
+
+    isin: str
+    symbol: str                       # GuruFocus's EXCHANGE:TICKER
+    company_id: int | None = None
+    currency: str | None = None       # the GuruFocus listing's trading currency
+    yahoo_symbol: str | None = None
+    price_currency: str | None = None
+    is_home: bool = True
+    template: str | None = None
+    cadence: str = "annuals"
+    period_count: int = 0
+    fetched: bool = False
+
+    # Chart 1. `price_eur` is YFINANCE, DAILY — never GuruFocus. The band is GuruFocus's
+    # per-share fair values converted to the SAME EUR, because GF denominates them in ITS
+    # listing's currency and that listing need not be the one we price.
+    price_eur: list[FundamentalPoint] = []
+    fair_values_eur: list[FundamentalSeries] = []
+    # Never drawn — GuruFocus's own month-end price in EUR. If it and `price_eur` diverge after
+    # FX, the ISIN reached two different securities and the band belongs to the other one.
+    price_crosscheck_eur: list[FundamentalPoint] = []
+
+    # Charts 2-4: percentages and scores. No EUR leg exists — a ROIC of 18% is 18% everywhere.
+    yields: list[FundamentalSeries] = []
+    returns: list[FundamentalSeries] = []
+    safety: list[FundamentalSeries] = []
+
+    # The four-number quality verdict — does it create value, is the moat melting, is the profit
+    # real, is there pricing power. Deliberately NOT a composite score: a single 0-100 hides the
+    # disagreement between them, which is the part worth reading.
+    quality: list[QualityMetric] = []
+
+    has_roic: bool = True
+    has_earnings_yield: bool = True
+
+
+@router.get("/api/asset-pipeline/fundamentals/isin/{isin}",
+            response_model=FundamentalsResponse)
+async def fundamentals_by_isin(isin: str, cadence: str = "annuals"):
+    """Everything the four soundness charts need, in ONE call off ONE cached blob.
+
+    Price vs fair value · yield · ROIC vs WACC · safety. Free for any company that already has a
+    financials column (the blob carries 262 line items; the charts are reads).
+
+    ⚠ The price line is yfinance daily, in EUR, and never GuruFocus's — /portfolios prices
+    everything from `asset_price`, and a second vendor on that page would compare two price
+    universes. Both legs of chart 1 are therefore EUR; see `_asset_fundamentals`.
+    """
+    from routers._asset_fundamentals import compute_fundamentals_async  # noqa: PLC0415
+
+    return await compute_fundamentals_async(isin, cadence)
