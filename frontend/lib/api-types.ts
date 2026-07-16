@@ -931,6 +931,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/model-portfolios/{portfolio_id}/display-name": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Airs Set Portfolio Display Name
+         * @description Give a model a human name, or clear it back to AIRS's code with a null/empty value.
+         *
+         *     Admin-only by default: `_USER_WRITE_PREFIXES` is empty, so the auth gate 403s a non-admin
+         *     write to any /api/airs path without this needing its own check.
+         */
+        put: operations["airs_set_portfolio_display_name_api_airs_model_portfolios__portfolio_id__display_name_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/model-portfolios/{portfolio_id}/link": {
         parameters: {
             query?: never;
@@ -2236,10 +2259,20 @@ export interface paths {
         };
         /**
          * Benchmark Reconstructed Index
-         * @description Cap-weighted YTD for a reconstructed index (e.g. `SP500`), in EUR and local currency.
+         * @description Cap-weighted YTD for a reconstructed index (`SP500`, `ACWI`, `AEX`), in EUR and local.
          *
          *     Weights are as of the START of the period. Weighting by TODAY's market cap would be
-         *     look-ahead bias — measured, it turns this index's +9.10% into +21.70%.
+         *     look-ahead bias — measured, it turns the S&P's +9.10% into +21.70%.
+         *
+         *     ⚠ THE ASSET PATH, NOT THE GURUFOCUS ONE (2026-07-16). This panel's whole claim is that its
+         *     numbers are comparable to the portfolios beside them — and those are priced from `asset_price`
+         *     (yfinance). Pricing the benchmark from GuruFocus instead compared two price universes and
+         *     called the difference alpha. It was also structurally unable to price two of the three
+         *     indices: GuruFocus is blind to 31.96% of the AEX (Shell, Unilever, RELX are LSE rows with no
+         *     GuruFocus market cap) and to ~7.8% of ACWI, and a cap-weighted rebuild redistributes that
+         *     weight rather than losing it — the GuruFocus AEX printed +14.80% against the true +12.12%,
+         *     and looked entirely plausible doing it. `_benchmark_index.compute_index` remains as the SPY
+         *     cross-check (+9.05% vs SPY's +9.02%), which validates the METHOD; it is not the basis.
          */
         get: operations["benchmark_reconstructed_index_api_benchmarks_index__label__get"];
         put?: never;
@@ -5708,6 +5741,8 @@ export interface components {
         };
         /** AttributionName */
         AttributionName: {
+            /** Airs Name */
+            airs_name?: string | null;
             /**
              * Contribution Pct
              * @default 0
@@ -7106,6 +7141,11 @@ export interface components {
         PortfolioCorrelationMatrix: {
             /** As Of */
             as_of: string;
+            /**
+             * Codes
+             * @default []
+             */
+            codes?: string[];
             /** Labels */
             labels: string[];
             /** Min Overlap Days */
@@ -7116,6 +7156,11 @@ export interface components {
             trailing_12m: (number | null)[][];
             /** Trailing 12M Obs */
             trailing_12m_obs: number[];
+            /**
+             * Variants
+             * @default []
+             */
+            variants?: (string | null)[];
             /** Ytd */
             ytd: (number | null)[][];
             /** Ytd Obs */
@@ -7413,6 +7458,11 @@ export interface components {
             /** Cash Pct */
             cash_pct: number;
         };
+        /** SetDisplayNameRequest */
+        SetDisplayNameRequest: {
+            /** Display Name */
+            display_name?: string | null;
+        };
         /** SetLinkRequest */
         SetLinkRequest: {
             /** Fonds */
@@ -7510,6 +7560,8 @@ export interface components {
          *     (VTopSelectie OFF FX holds CapitaLand at 2% and again at 3%), and that is one instrument.
          */
         StoredModelPortfolio: {
+            /** Display Name */
+            display_name?: string | null;
             /** Fixed Datum */
             fixed_datum?: string | null;
             /**
@@ -7545,6 +7597,8 @@ export interface components {
              * @default false
              */
             truncated?: boolean;
+            /** Variant */
+            variant?: string | null;
         };
         /** StrategyStats */
         StrategyStats: {
@@ -8816,6 +8870,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelPortfolioAttribution"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_set_portfolio_display_name_api_airs_model_portfolios__portfolio_id__display_name_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetDisplayNameRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

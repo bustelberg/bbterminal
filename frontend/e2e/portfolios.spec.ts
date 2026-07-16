@@ -427,7 +427,7 @@ test.describe('/portfolios', () => {
     // Full 3×3 matrix (row-major tds): the (Corr Beta, Corr Alpha) cell is row 1, col 0 → td
     // index 3, and it holds the +0.82 pair.
     await section.locator('td').nth(3).hover();
-    await expect(section).toContainText('Corr Beta FX');
+    await expect(section).toContainText('Corr Beta Considerably Longer Name FX');
     await expect(section).toContainText('+0.82');
     await expect(section).toContainText('overlapping days');
 
@@ -437,6 +437,46 @@ test.describe('/portfolios', () => {
     await page.getByRole('button', { name: 'Trailing 12m' }).click();
     await section.locator('td').nth(6).hover();
     await expect(section).toContainText('+0.12');
+  });
+
+  test('hovering does not move the matrix', async ({ page }) => {
+    // ⚠ A REAL BROWSER IS THE ONLY PLACE THIS IS VISIBLE. Hovering bolds the row header, semibold
+    // text is WIDER than normal, and the row-header column is auto-width — so the column grew and
+    // shoved the whole matrix sideways under the cursor. It reads as the chart twitching as you
+    // move across it. No unit test can see it: it is font metrics, resolved at layout.
+    const section = page.locator('section', { hasText: 'Portfolio correlations' });
+    const table = section.locator('table');
+
+    const before = await table.boundingBox();
+    // Hover the row whose label is LONGEST — it is the one that sets the column's width, so it is
+    // the only one whose bolding can resize it. (Row 1 = 'Corr Beta Considerably Longer Name FX'.)
+    await section.locator('td').nth(3).hover();
+    await expect(section).toContainText('Corr Beta Considerably Longer Name FX');
+    const during = await table.boundingBox();
+
+    expect(before).not.toBeNull();
+    expect(during).not.toBeNull();
+    // Sub-pixel tolerance only: the column must not resize at all.
+    expect(Math.abs(during!.width - before!.width)).toBeLessThan(1);
+    expect(Math.abs(during!.x - before!.x)).toBeLessThan(1);
+  });
+
+  test('the risk-profile filter narrows the matrix on both axes', async ({ page }) => {
+    const section = page.locator('section', { hasText: 'Portfolio correlations' });
+    // 3 portfolios -> 3 rows x 3 cols = 9 cells.
+    await expect(section.locator('td')).toHaveCount(9);
+
+    // Only 'Corr Alpha FX' is Offensief -> a 1x1 matrix. If the filter sliced rows only, this
+    // would be 1x3 = 3 cells and every cell after the first would be the wrong pair.
+    await section.getByRole('button', { name: 'Offensief', exact: true }).click();
+    await expect(section.locator('td')).toHaveCount(1);
+    await expect(section).toContainText('Corr Alpha FX');
+    await expect(section).not.toContainText('Corr Gamma FX');
+
+    // Beta has NO profile — it appears only under All, never under a profile filter.
+    await section.getByRole('button', { name: 'All', exact: true }).click();
+    await expect(section.locator('td')).toHaveCount(9);
+    await expect(section).toContainText('Corr Beta Considerably Longer Name FX');
   });
 
   test('clicking a composition bar drills into the holdings behind it', async ({ page }) => {
@@ -460,5 +500,57 @@ test.describe('/portfolios', () => {
     // Overlap: Microsoft is held on BOTH sides (you hold "Microsoft", the index "Microsoft Corp")
     // — matched by company, marked, and the legend explains the dot.
     await expect(modal).toContainText('held in both your portfolio');
+  });
+
+  test('the correlation matrix shows whole, centred, with no inner scrollbar', async ({ page }) => {
+    // ⚠ "No scroll" is about the HEIGHT CAP, not about `overflow-auto`. The container keeps its
+    // overflow so a matrix wider than a laptop scrolls inside the panel instead of stretching the
+    // page sideways (the design system's rule). With no `max-h` it simply never overflows
+    // vertically, so no scrollbar appears when there is room.
+    const section = page.locator('section', { hasText: 'Portfolio correlations' });
+    const box = section.locator('div.overflow-auto').filter({ has: page.locator('table') });
+
+    const scroll = await box.evaluate((el) => ({
+      vScroll: el.scrollHeight - el.clientHeight,
+      hScroll: el.scrollWidth - el.clientWidth,
+    }));
+    expect(scroll.vScroll).toBeLessThanOrEqual(1);   // the height cap is gone
+    expect(scroll.hScroll).toBeLessThanOrEqual(1);   // the 3-col fixture fits easily
+
+    // Centred: equal slack either side of the table within its container.
+    const centred = await box.evaluate((el) => {
+      const t = el.querySelector('table')!;
+      const left = t.getBoundingClientRect().left - el.getBoundingClientRect().left;
+      const right = el.getBoundingClientRect().right - t.getBoundingClientRect().right;
+      return { left, right };
+    });
+    expect(Math.abs(centred.left - centred.right)).toBeLessThan(2);
+  });
+
+  test('a matrix too wide for the viewport scrolls in the panel, not the page', async ({ page }) => {
+    // The other half of the same rule: `mx-auto` must fall back to left-aligned rather than
+    // centring a too-wide table and clipping its own first column off the scrollable area.
+    //
+    // 360px, not 520: the fixture matrix is only 3 columns (~440px incl. its long row header and
+    // the diagonal spacer), so at 520 it genuinely FITS and there is nothing to scroll — the
+    // first version of this test asserted an overflow the fixture could not produce. The real
+    // 42-column matrix is ~1,240px and overflows a laptop, but the fixture has to be squeezed to
+    // reach the same code path.
+    await page.setViewportSize({ width: 360, height: 900 });
+    const section = page.locator('section', { hasText: 'Portfolio correlations' });
+    const box = section.locator('div.overflow-auto').filter({ has: page.locator('table') });
+    await expect(box).toBeVisible();
+
+    const overflows = await box.evaluate((el) => el.scrollWidth > el.clientWidth + 1);
+    expect(overflows).toBe(true);                      // it scrolls INSIDE the panel…
+
+    const pageOverflows = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
+    expect(pageOverflows).toBe(false);                 // …and never stretches the page
+
+    // Left-aligned when it cannot fit: the first column must be reachable at scrollLeft 0.
+    const left = await box.evaluate((el) =>
+      el.querySelector('table')!.getBoundingClientRect().left - el.getBoundingClientRect().left);
+    expect(left).toBeLessThan(2);
   });
 });

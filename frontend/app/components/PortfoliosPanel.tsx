@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
+import { VARIANT_FILTERS } from './portfolioVariants';
 import { runSSE } from '../../lib/stream';
 import { API_URL } from '../../lib/apiUrl';
 import type {
@@ -14,6 +15,19 @@ type StoredPortfolio = StoredModelPortfolio;
 type Portfolio = {
   id: number;
   name: string;
+  /** A name WE chose. Empty = none chosen, and the row falls back to AIRS's `name`.
+   *
+   *  It sits BESIDE the code, never instead of it: `BUS_BM_AAN_kw_USD_2026_d` is what you search
+   *  for in AIRS itself, so replacing it would cost more than the prettier label gives. AIRS caps
+   *  `Portefeuille` at 24 chars — the code is an identifier squeezed through a legacy form field,
+   *  not a label anyone chose. */
+  display_name: string;
+  /** The risk profile AIRS offers this model at, or '' when it is not offered at one.
+   *
+   *  Classified in the BACKEND (`_airs_portfolio_variant`), never here — "bep offensief" contains
+   *  "offensief", and a second copy of that rule in TypeScript would put the same portfolio in
+   *  different filters on this panel and the correlation matrix below it. */
+  variant: string;
   truncated: boolean;
   omschrijving: string;
   fixed: string;
@@ -56,8 +70,8 @@ type PosState = { loading: boolean; data?: ModelPortfolioPositions; error?: stri
 const hasFixedModel = (p: Portfolio) => p.fixed?.trim().toLowerCase().startsWith('fixed');
 
 type SortKey =
-  | 'name' | 'holdings' | 'resolved' | 'ytd' | 'since' | 'sharpe' | 'sortino' | 'cagr' | 'years'
-  | 'fixed' | 'id';
+  | 'name' | 'display_name' | 'holdings' | 'resolved' | 'ytd' | 'since' | 'sharpe' | 'sortino'
+  | 'cagr' | 'years' | 'fixed' | 'id';
 type Sort = { key: SortKey; dir: 'asc' | 'desc' };
 
 /** Sorting on `holdings` has to answer "where do the un-counted and the model-less rows
@@ -116,6 +130,7 @@ export default function PortfoliosPanel() {
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [hideSmall, setHideSmall] = useState(true);
+  const [variant, setVariant] = useState<string>('all');
   const [analyse, setAnalyse] = useState<{ id: number; name: string } | null>(null);
   const [sort, setSort] = useState<Sort>({ key: 'name', dir: 'asc' });
 
@@ -131,6 +146,8 @@ export default function PortfoliosPanel() {
         setRows(b.map((p) => ({
           id: p.id,
           name: p.name,
+          display_name: p.display_name ?? '',
+          variant: p.variant ?? '',
           truncated: p.truncated ?? false,
           omschrijving: p.omschrijving ?? '',
           fixed: p.portfolio_type ?? '',
@@ -238,7 +255,13 @@ export default function PortfoliosPanel() {
   const smallCount = (rows ?? []).filter(isSmall).length;
   const view = (rows ?? [])
     .filter((r) => !hideSmall || !isSmall(r))
-    .filter((r) => !needle || `${r.name} ${r.omschrijving}`.toLowerCase().includes(needle))
+    // Risk profile. A model not offered at one ('') matches no profile — it is not a hidden
+    // Neutraal, it is a product sold without a risk axis, so it appears only under "All".
+    .filter((r) => variant === 'all' || r.variant === variant)
+    // The chosen name is searchable too — it is the name a reader now knows the model BY, so a
+    // search box that could not find it would be worse than not having the column.
+    .filter((r) => !needle
+      || `${r.name} ${r.display_name} ${r.omschrijving}`.toLowerCase().includes(needle))
     .sort((a, b) => {
       const dir = sort.dir === 'asc' ? 1 : -1;
       const rank = NUMERIC[sort.key];
@@ -252,6 +275,17 @@ export default function PortfoliosPanel() {
         return (x - y) * dir || a.name.localeCompare(b.name);
       }
       if (sort.key === 'id') return (a.id - b.id) * dir;
+      if (sort.key === 'display_name') {
+        // A row with NO chosen name is not a row whose name sorts first — it is a row with
+        // nothing to sort. It sinks in BOTH directions, exactly like an unpriceable YTD above:
+        // absent is not an empty string. (Falling back to `name` here would silently interleave
+        // AIRS codes among the chosen labels and make the column look half-populated.)
+        const x = a.display_name || null, y = b.display_name || null;
+        if (!x && !y) return a.name.localeCompare(b.name);
+        if (!x) return 1;
+        if (!y) return -1;
+        return x.localeCompare(y) * dir || a.name.localeCompare(b.name);
+      }
       const s = sort.key === 'fixed' ? [a.fixed, b.fixed] : [a.name, b.name];
       return s[0].localeCompare(s[1]) * dir;
     });
@@ -299,6 +333,19 @@ export default function PortfoliosPanel() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {rows && (
+            <div className="flex rounded-lg border border-neutral-800/40 overflow-hidden text-[11px]"
+              title="Filter to one risk profile. Read off AIRS's own name, so renaming a model in the Name column cannot change its profile. The models not offered at a profile — the themed TopSelectie and WereldTopSelectie funds, and Risicodragend/Risicomijdend (a different axis entirely) — appear only under All. Same classifier the correlation matrix uses, so the two panels always agree.">
+              {VARIANT_FILTERS.map((v) => (
+                <button key={v.key} type="button" onClick={() => setVariant(v.key)}
+                  className={`px-2.5 py-1 transition-colors whitespace-nowrap ${
+                    variant === v.key ? 'bg-accent-600 text-white' : 'text-fg-soft hover:bg-overlay/5'
+                  }`}>
+                  {v.label}
+                </button>
+              ))}
+            </div>
+          )}
           {rows && (
             <label className="flex items-center gap-1.5 text-xs text-fg-muted cursor-pointer select-none whitespace-nowrap"
               title={`Shows only the portfolios whose counted model holds more than ${MIN_HOLDINGS_SHOWN} instruments. Hides ${smallCount}: the single-instrument wrappers, plus every row with no countable model at all — no fixed model, no snapshot, or a count that failed.`}>
@@ -348,6 +395,8 @@ export default function PortfoliosPanel() {
                 </th>
                 {th('name', 'Portfolio')}
                 <th className="px-3 py-1.5 font-medium text-left">Description</th>
+                {th('display_name', 'Name', 'text-left',
+                  "A name you choose, for reading. AIRS's own is a 24-char code squeezed through a legacy form field — this is the label. Click a cell to set it; clear it to fall back to the code. Sortable, and rows with no chosen name sort last in both directions — absent is not an empty string.")}
                 {th('holdings', 'Holdings', 'text-right')}
                 {th('resolved', 'Resolved', 'text-right',
                   'How many of those instruments we can actually price — i.e. have a Yahoo (yfinance) price series for. The gap is what the returns are renormalised over, and under 60% of the weight it is why a row shows n/a.')}
@@ -404,6 +453,10 @@ export default function PortfoliosPanel() {
                     )}
                   </td>
                   <td className="px-3 py-1.5 text-fg-soft">{r.omschrijving || '—'}</td>
+                  <td className="px-3 py-1.5">
+                    <DisplayNameCell p={r} onSaved={(v) => setRows((rs) => (rs ?? []).map(
+                      (x) => (x.id === r.id ? { ...x, display_name: v } : x)))} />
+                  </td>
                   <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
                     <HoldingsCell p={r} />
                   </td>
@@ -882,6 +935,73 @@ function MarkCells({ p, ytdFrom }: { p: Position; ytdFrom?: string | null }) {
         {p.return_pct != null ? <Pct v={p.return_pct} /> : <span className="text-fg-faint">—</span>}
       </td>
     </>
+  );
+}
+
+/** The chosen name — click to edit, blank to clear back to AIRS's code.
+ *
+ * ⚠ THE FALLBACK IS SHOWN, NOT SUBSTITUTED. A row with no chosen name renders a muted "—", not a
+ * greyed-out copy of the AIRS code: a cell that quietly repeats the column to its left makes the
+ * table look fully populated and gives you no way to see which models still need naming — which
+ * is the only thing this column is for while it is being filled in.
+ *
+ * Saves on blur or Enter, reverts on Escape. There is no Save button because there is nothing to
+ * batch: one field, one row, one call.
+ */
+function DisplayNameCell({ p, onSaved }: { p: Portfolio; onSaved: (v: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(p.display_name);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(false);
+
+  const commit = async () => {
+    const next = draft.trim();
+    setEditing(false);
+    if (next === p.display_name) return;        // nothing changed — don't spend a request
+    setBusy(true);
+    setErr(false);
+    try {
+      const r = await apiFetch(`${API_URL}/api/airs/model-portfolios/${p.id}/display-name`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        // '' clears it. The backend maps blank -> NULL, so the row falls back to AIRS's code
+        // rather than storing a deliberate-looking empty label.
+        body: JSON.stringify({ display_name: next || null }),
+      });
+      if (!r.ok) throw new Error(String(r.status));
+      onSaved(next);
+    } catch {
+      // Don't keep an optimistic value the server rejected — the whole point of the column is
+      // that the name shown IS the name stored.
+      setErr(true);
+      setDraft(p.display_name);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <input autoFocus value={draft} disabled={busy}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') void commit();
+          if (e.key === 'Escape') { setDraft(p.display_name); setEditing(false); }
+        }}
+        placeholder="a name you choose…"
+        className="bg-page border border-neutral-700 rounded-lg px-2 py-0.5 text-xs text-fg w-44 focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30" />
+    );
+  }
+  return (
+    <button type="button" onClick={() => { setDraft(p.display_name); setEditing(true); }}
+      title={p.display_name ? `Chosen name — click to edit. AIRS calls this ${p.name}.`
+        : `No chosen name — click to give this model one. AIRS calls it ${p.name}.`}
+      className={`text-left rounded px-1 -mx-1 hover:bg-overlay/5 transition-colors ${
+        p.display_name ? 'text-fg' : 'text-fg-faint'}`}>
+      {p.display_name || '—'}
+      {err && <span className="ml-1.5 text-[10px] text-neg-400" title="Save failed — not stored.">failed</span>}
+    </button>
   );
 }
 

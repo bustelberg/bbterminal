@@ -457,7 +457,15 @@ export async function mockPortfolios(page: Page) {
 // getByText selectors match twice (the table row AND the matrix header) and fail strict mode.
 export const FIXTURE_CORRELATIONS = {
   portfolio_ids: [2015, 2001, 2099],
-  labels: ['Corr Alpha FX', 'Corr Beta FX', 'Corr Gamma FX'],
+  // ⚠ WILDLY UNEVEN LENGTHS, ON PURPOSE. The row-header column is auto-width, so it is as wide as
+  // its LONGEST label — and the hover-stability test below only means something if bolding the
+  // longest one could actually move the column. Three same-length labels would pass that test
+  // whether or not the bug is fixed.
+  labels: ['Corr Alpha FX', 'Corr Beta Considerably Longer Name FX', 'Corr Gamma FX'],
+  // AIRS's own codes, shown in the tooltip beside a chosen name.
+  codes: ['CORR_A_FX', 'CORR_B_FX', 'CORR_G_FX'],
+  // Risk profiles — Beta has none, so the "not offered at a profile" path is exercised too.
+  variants: ['Offensief', null, 'Neutraal'],
   as_of: '2026-07-15',
   min_overlap_days: 20,
   ytd: [

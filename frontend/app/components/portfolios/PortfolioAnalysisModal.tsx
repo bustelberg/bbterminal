@@ -213,10 +213,14 @@ function Chart({ axis, rows, benchmark, onBucket, selected }: {
   );
 }
 
-/** The benchmarks a model can be measured against. Both are rebuilt from OUR constituents, OUR
+/** The benchmarks a model can be measured against. All are rebuilt from OUR constituents, OUR
  *  yfinance prices and OUR FX — the same world the portfolio is priced in. A benchmark drawn from
- *  a different price vendor would compare two price universes and call the difference alpha. */
-const BENCHMARKS = ['SP500', 'ACWI'] as const;
+ *  a different price vendor would compare two price universes and call the difference alpha.
+ *
+ *  AEX is the one that CAPS: 25 names, and uncapped ASML is 37.5% of it (the real index caps a
+ *  constituent at 15% at each review, for exactly that reason). The cap is applied server-side in
+ *  `_benchmark_index.INDEX_CAP_PCT` — not here, and not per-caller. */
+const BENCHMARKS = ['SP500', 'ACWI', 'AEX'] as const;
 
 export default function PortfolioAnalysisModal({ id, name, onClose }: {
   id: number; name: string; onClose: () => void;

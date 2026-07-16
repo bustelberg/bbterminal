@@ -311,6 +311,88 @@ def _window_rows(members: list[dict], closes: dict[int, list[tuple[str, float]]]
     return rows, adjusted
 
 
+# ── the cap ──────────────────────────────────────────────────────────────────────────────────
+# A CAP IS A PROPERTY OF THE INDEX, NOT OF THE ARITHMETIC.
+#
+# The S&P 500 and ACWI are uncapped: no constituent is near a level where a cap would bind, so
+# raw cap weights ARE the index's weights. The AEX is not that kind of index. It holds 25 names
+# and Euronext caps a constituent at 15% at each review — precisely BECAUSE ASML would otherwise
+# swallow it. Measured on our own data: uncapped, ASML is 37.53% of the AEX; the real index says
+# 15.00%. Shipping the uncapped number would not be an approximation of the AEX, it would be an
+# ASML tracker wearing the AEX's name.
+#
+# So the cap lives here, keyed by label, and `index_weights` is the ONE place a weight is formed.
+# It had already leaked into FOUR copies of `start_cap_eur / total` (two here, two in
+# `_asset_benchmark`) — exactly what `_window_rows`' own docstring warns about, and a cap applied
+# to three of four would be worse than no cap at all.
+INDEX_CAP_PCT: dict[str, float] = {
+    "AEX": 15.0,
+}
+
+
+def index_weights(rows: list[dict], label: str) -> list[float]:
+    """Start-of-window weights in PERCENT, aligned to `rows`, summing to 100.
+
+    Uncapped (the default, and every index but the AEX) this is just `start_cap_eur / total` —
+    bit-identical to what the four call sites each used to compute inline.
+
+    Where the index caps, the excess above the cap is redistributed pro rata across the members
+    still under it, repeatedly: lifting the others can push one of THEM over, so a single pass
+    silently leaves a constituent above the cap. The loop is bounded — each pass adds at least
+    one member to the capped set, so it cannot run longer than there are rows.
+
+    ⚠ THE CAP IS APPLIED AT THE WINDOW OPEN, NOT AT THE INDEX'S REVIEW DATE. Euronext caps at a
+    quarterly review and then lets the weights DRIFT with prices until the next one; this engine
+    is buy-and-hold from the window open, so what we produce is "capped as at the window open,
+    then held". For a YTD window that is close (the last real review was December). For an
+    arbitrary window it is an approximation, and it is the honest one available: capping at the
+    true review date would need the review calendar AND a rebalance the rest of this engine does
+    not model.
+
+    ⚠ A CAP IS NOT A FLOAT ADJUSTMENT, AND IT DOES NOT STAND IN FOR ONE. The AEX weights on free
+    float; `market_cap_eur` is a FULL cap (see the module docstring — it over-weights family- and
+    state-held names whatever the price source). Heineken is ~50% held by Heineken Holding and
+    Prosus carries the Naspers cross-holding, so both stay over-weighted here even after capping.
+    The cap fixes the ASML problem. It does not fix that one.
+    """
+    total = sum(r["start_cap_eur"] for r in rows)
+    if total <= 0 or not rows:
+        return [0.0] * len(rows)
+    w = [r["start_cap_eur"] / total * 100.0 for r in rows]
+
+    cap = INDEX_CAP_PCT.get(label)
+    if cap is None:
+        return w
+
+    # ⚠ REFUSED, NOT FUDGED. With n members a cap of `cap`% can hold at most n*cap% of weight; if
+    # that is under 100 the constituents cannot sum to the index and no redistribution exists.
+    # Silently returning weights that sum to 75% would understate every return by a quarter. For
+    # the AEX (25 names, 15%) the ceiling is 375% — so this fires only when the universe itself
+    # has collapsed to a handful of priced names, which is a fact worth raising, not smoothing.
+    if len(w) * cap <= 100.0:
+        raise ValueError(
+            f"{label}: a {cap}% cap over {len(w)} priced members caps out at {len(w) * cap:.0f}% "
+            f"— the weights cannot sum to 100%. The universe is too thin to cap, not the cap "
+            f"too tight.")
+
+    capped: set[int] = set()
+    for _ in range(len(w) + 1):
+        over = [i for i, x in enumerate(w) if x > cap + 1e-9]
+        if not over:
+            break
+        excess = sum(w[i] - cap for i in over)
+        for i in over:
+            w[i] = cap
+        capped.update(over)
+        rest = [i for i in range(len(w)) if i not in capped]
+        rest_total = sum(w[i] for i in rest)
+        if rest_total <= 0:
+            break                    # unreachable given the guard above; never divide by zero
+        for i in rest:
+            w[i] += excess * w[i] / rest_total
+    return w
+
+
 def index_returns(label: str, starts: list[str]) -> dict[str, dict]:
     """Cap-weighted EUR/local return for `label` over SEVERAL windows, from ONE price load.
 
@@ -338,8 +420,9 @@ def index_returns(label: str, starts: list[str]) -> dict[str, dict]:
         if not rows or total <= 0:
             out[s] = {"eur_pct": None, "local_pct": None, "members": 0, "start_date": None}
             continue
-        eur = sum(r["start_cap_eur"] / total * r["return_eur_pct"] for r in rows)
-        loc = sum(r["start_cap_eur"] / total * r["return_local_pct"] for r in rows)
+        w = index_weights(rows, label)
+        eur = sum(x / 100.0 * r["return_eur_pct"] for x, r in zip(w, rows))
+        loc = sum(x / 100.0 * r["return_local_pct"] for x, r in zip(w, rows))
         out[s] = {"eur_pct": eur, "local_pct": loc, "members": len(rows),
                   "start_date": min(r["start_date"] for r in rows)}
     return out
@@ -386,8 +469,8 @@ def compute_index(label: str = SP500_LABEL, year: int | None = None,
                 "ytd_eur_pct": None, "ytd_local_pct": None,
                 "note": "No constituent had a price on both ends of the window."}
 
-    for r in rows:
-        r["weight_pct"] = r["start_cap_eur"] / total_start * 100.0
+    for r, x in zip(rows, index_weights(rows, label)):
+        r["weight_pct"] = x
 
     ytd_eur = sum(r["weight_pct"] / 100.0 * r["return_eur_pct"] for r in rows)
     ytd_loc = sum(r["weight_pct"] / 100.0 * r["return_local_pct"] for r in rows)

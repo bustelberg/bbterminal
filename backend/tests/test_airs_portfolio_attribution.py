@@ -105,13 +105,99 @@ class TestMissedWinnersAreMatchedByCOMPANY:
 
     def test_the_isin_is_not_the_identity(self):
         src = inspect.getsource(at.compute_attribution)
-        assert "same_company" in src
+        # The name leg now lives in the shared `_overlaps`, so assert the delegation rather than
+        # the call — see TestTheOverlapMatcherNeedsBOTHKeys.
+        assert "_overlaps(" in src
+        assert "same_company" in inspect.getsource(at._overlaps)
         assert "for b in bench if not _held(b)" in src
 
     def test_same_company_sees_through_a_share_class(self):
         from asset_pipeline.resolve import same_company
 
         assert same_company("Alphabet Inc.", "Alphabet Inc") is True
+
+
+class TestTheOverlapMatcherNeedsBOTHKeys:
+    """⚠ ONE ISIN UNDER TWO NAMES, AND TWO ISINS UNDER ONE BUSINESS — both are real, and NEITHER
+    matcher alone catches both.
+
+    The model's "AMD" is the index's "Advanced Micro Devices Inc". `same_company` scores that pair
+    **16.0** — the roots reduce to 'amd' vs 'advanced micro devices', sharing no tokens at all —
+    so a name-only check marked the model's 2nd-largest contributor (+7.83pp) as a bet held
+    OUTSIDE the index, while the index held it at 0.55%. Measured 2026-07-16 on the Technology
+    bucket of a 16-name model: AMD was the ONE of 16 that the name matcher failed.
+
+    Alphabet is the mirror image — class A in the index, class C in the model: two ISINs, one
+    business, which no ISIN check can ever see. Hence both legs, ISIN first.
+    """
+
+    def test_an_acronym_defeats_the_name_matcher(self):
+        """The measured fact the ISIN leg exists for. If this ever starts passing, the name
+        matcher improved — it does NOT make the ISIN leg redundant (Alphabet still needs name)."""
+        from asset_pipeline.resolve import same_company
+
+        assert same_company("AMD", "Advanced Micro Devices Inc") is False
+
+    def test_the_isin_wins_when_the_names_disagree(self):
+        """AMD: one ISIN, two names."""
+        h = {"isin": "US0079031078", "name": "AMD"}
+        assert at._overlaps(h, {"US0079031078"}, ["Advanced Micro Devices Inc"]) is True
+
+    def test_the_name_wins_when_the_isins_disagree(self):
+        """Alphabet: two ISINs, one business."""
+        h = {"isin": "US02079K1079", "name": "Alphabet Inc"}
+        assert at._overlaps(h, {"US02079K3059"}, ["Alphabet Inc"]) is True
+
+    def test_a_genuinely_different_bet_is_not_marked_held(self):
+        """The flag has to be able to say NO, or it says nothing."""
+        h = {"isin": "US23283R1005", "name": "Cytokinetics Inc"}
+        assert at._overlaps(h, {"US0079031078"}, ["Advanced Micro Devices Inc"]) is False
+
+    def test_a_holding_with_neither_key_is_not_claimed_as_held(self):
+        assert at._overlaps({}, {"US0079031078"}, ["Advanced Micro Devices Inc"]) is False
+
+    def test_in_both_goes_through_the_shared_matcher(self):
+        """It was a bare name check until 2026-07-16, with the ISIN sitting unused in both dicts.
+        A regression to comparing names is silently wrong about AMD again."""
+        src = inspect.getsource(at.compute_attribution)
+        assert "_overlaps(h, b_isins, b_names)" in src
+        assert "_overlaps(h, p_isins, p_names)" in src
+
+    def test_held_and_in_both_are_ONE_definition(self):
+        """They drifted once: `_held` had the ISIN check and `in_both` did not, so only `in_both`
+        was wrong about AMD. Three call sites, one function — it cannot happen twice."""
+        src = inspect.getsource(at.compute_attribution)
+        assert src.count("_overlaps(") >= 3
+
+
+class TestOneNameVocabularyAcrossBothSides:
+    """The model side speaks AIRS's fund label ("AMD", "Applied"); the index side speaks the
+    reconstruction's `company_name` ("Advanced Micro Devices Inc"). One security under two labels,
+    set side by side in a single comparison table, reads as a data bug — and it is the first thing
+    a reader asks about. Both sides already join `asset_grid` by ISIN, so both can say one thing.
+
+    ⚠ DISPLAY ONLY — if this ever becomes what makes the overlap match succeed, a rename silently
+    breaks correctness. See TestTheOverlapMatcherNeedsBOTHKeys.
+    """
+
+    def test_the_canonical_name_wins(self):
+        assert (at._display_name({"name": "Advanced Micro Devices, Inc."}, "AMD")
+                == "Advanced Micro Devices, Inc.")
+
+    def test_the_source_label_is_the_fallback(self):
+        """No grid row (an unresolved ISIN) — AIRS's label is all we have, and a blank is worse."""
+        assert at._display_name(None, "AMD") == "AMD"
+        assert at._display_name({}, "AMD") == "AMD"
+        assert at._display_name({"name": ""}, "AMD") == "AMD"
+
+    def test_nothing_to_show_is_none_not_empty_string(self):
+        assert at._display_name(None, None) is None
+
+    def test_the_airs_label_is_kept_not_overwritten(self):
+        """It is the row's identity in AIRS itself — canonicalising the DISPLAY must not throw the
+        source vocabulary away."""
+        src = inspect.getsource(at.compute_attribution)
+        assert '"airs_name": r.get("fonds")' in src
 
 
 class TestCashIsCarriedAtZeroNotDropped:

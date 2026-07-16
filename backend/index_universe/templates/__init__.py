@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from .acwi import ACWITemplate
 from .acwi_leonteq import ACWILeonteqTemplate
+from .aex import AEXTemplate
 from .base import (
     ProgressCallback,
     RefreshResult,
@@ -40,6 +41,7 @@ TEMPLATES: dict[str, type[UniverseTemplate]] = {
     LongEquityTemplate.template_key: LongEquityTemplate,
     ACWITemplate.template_key: ACWITemplate,
     LeonteqTemplate.template_key: LeonteqTemplate,
+    AEXTemplate.template_key: AEXTemplate,
 }
 
 

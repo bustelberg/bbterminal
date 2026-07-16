@@ -80,3 +80,80 @@ class TestTheLoadersAskForTheBaseCurrency:
 
         src = inspect.getsource(_fx_to_eur)
         assert "SUBUNIT.get(c, (c, 1.0))[0]" in src
+
+
+class TestAMarketCapIsNotAPrice:
+    """⚠ ONE `currency` FIELD, TWO DIFFERENT UNITS — and the divisor belongs to only one of them.
+
+    Yahoo quotes a London listing's PRICE in pence and, in the SAME v7 payload, reports its
+    `marketCap` in POUNDS. Both are labelled `"GBp"`. So the rule the price path lives by — always
+    apply the divisor — is exactly wrong for a market cap, which never had it:
+
+        SHEL.L   native 166.43bn GBP  ->  stored EUR   1.95bn   (a EUR 195bn company)
+        HSBA.L          251.26bn GBP  ->  stored EUR   2.94bn
+        AZN.L           223.92bn GBP  ->  stored EUR   2.62bn
+
+    100x too small and still a plausible number, which is why it sat there. Measured across ACWI:
+    the 36 minor-unit members carried **0.02%** of index weight where they should carry **~1.93%**
+    — ingested (UK 0 -> 44), then weighted to nothing. `covered_pct` could not see it: it counts
+    members PRICED, and every one of those counted as covered.
+
+    This is the OPPOSITE half of the module docstring's symmetry. The price bug is "forget the
+    divisor and £46.75 prices at £4,675". This is "apply the divisor where it does not belong" —
+    and being 100x SMALL is quieter than being 100x large, because a small weight just looks like
+    a small company.
+    """
+
+    def test_a_cap_currency_is_always_the_major_unit(self):
+        from scripts.asset_backfill_marketcap import _cap_currency
+
+        assert _cap_currency("GBp") == "GBP"
+        assert _cap_currency("GBX") == "GBP"
+        assert _cap_currency("ZAc") == "ZAR"
+        assert _cap_currency("ILA") == "ILS"
+
+    def test_a_major_currency_passes_through_untouched(self):
+        from scripts.asset_backfill_marketcap import _cap_currency
+
+        assert _cap_currency("USD") == "USD"
+        assert _cap_currency("EUR") == "EUR"
+        assert _cap_currency(None) is None
+
+    def test_the_cap_writer_normalises_before_converting(self):
+        """The whole bug in one line: `fx_to_eur(q["currency"])` on a cap. If the raw quote
+        currency ever reaches the conversion again, Shell is a EUR 1.95bn company again."""
+        import inspect
+
+        from scripts import asset_backfill_marketcap as m
+
+        src = inspect.getsource(m.main)
+        assert "_cap_currency(q.get(\"currency\"))" in src
+
+    def test_shell_reconstructs_to_the_right_order_of_magnitude(self):
+        """The arithmetic, pinned end to end against the measured figures. Yahoo hands back
+        166.43bn for SHEL.L; at ~0.8555 GBP/EUR that is a ~EUR 195bn company, not EUR 1.95bn."""
+        from scripts.asset_backfill_marketcap import _cap_currency
+
+        native, quote_ccy = 166.43e9, "GBp"
+        gbp_per_eur = 0.8555
+        rate_major = 1.0 / gbp_per_eur                      # EUR per 1 GBP
+
+        broken = native * (rate_major / 100.0)              # what shipped: the pence divisor
+        fixed = native * rate_major if _cap_currency(quote_ccy) == "GBP" else None
+
+        assert 150e9 < fixed < 250e9                        # a EUR ~195bn company
+        assert broken < 5e9                                 # ...that read as EUR ~1.9bn
+        assert fixed == pytest.approx(broken * 100.0)
+
+    def test_fx_to_eur_knows_every_minor_unit_not_just_pence(self):
+        """`fx_to_eur` special-cased "GBp" inline, so ZAc/ILA asked Yahoo for a nonexistent
+        "ZAcEUR=X" and got None. A cap of NULL drops the company from a cap-weighted index
+        ENTIRELY — a louder failure than being under-weighted, and it hit Johannesburg's
+        `med_adv_eur` too, where a zero loses the liquidity ranking in `resolve()`."""
+        import inspect
+
+        from asset_pipeline import yahoo
+
+        src = inspect.getsource(yahoo.fx_to_eur)
+        assert "SUBUNIT" in src
+        assert '"GBp"' not in src.split('"""')[-1]      # no inline special-case left in the body

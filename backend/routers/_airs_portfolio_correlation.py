@@ -35,6 +35,8 @@ import pandas as pd
 
 from deps import supabase
 from routers._airs_portfolio_links import _load_context, link_key, resolve_links
+from routers._airs_portfolio_store import portfolio_label
+from routers._airs_portfolio_variant import portfolio_variant
 from routers._airs_portfolio_perf import (
     _ANCHOR_LOOKBACK_DAYS,
     _closes,
@@ -111,20 +113,33 @@ def compute_portfolio_correlations(year: int | None = None) -> dict:
 
     # ── the "42": fixed models with > 5 distinct instruments, off the same grid view the UI reads
     grid = (supabase.table("airs_model_portfolio_grid")
-            .select("id,name,positions_datum,has_fixed_model,holdings")
+            .select("id,name,display_name,omschrijving,positions_datum,has_fixed_model,holdings")
             .execute().data or [])
     ports = [g for g in grid
              if g.get("has_fixed_model")
              and isinstance(g.get("holdings"), int) and g["holdings"] > _MIN_HOLDINGS
              and g.get("positions_datum")]
-    ports.sort(key=lambda g: (g.get("name") or "").lower())
+    # ⚠ SORTED BY WHAT IS SHOWN, not by AIRS's code. Both axes are labelled with
+    # `portfolio_label`, so ordering by `name` while displaying the chosen name would render a
+    # matrix whose axes look shuffled — alphabetical by a key the reader cannot see is
+    # indistinguishable from unsorted.
+    ports.sort(key=lambda g: portfolio_label(g).lower())
     if not ports:
-        return {"portfolio_ids": [], "labels": [], "as_of": today,
+        return {"portfolio_ids": [], "labels": [], "codes": [], "variants": [], "as_of": today,
                 "min_overlap_days": MIN_OVERLAP_DAYS, "ytd": [], "ytd_obs": [],
                 "trailing_12m": [], "trailing_12m_obs": []}
 
     ids_order = [g["id"] for g in ports]
-    names = {g["id"]: g["name"] for g in ports}
+    # The chosen name where there is one, else AIRS's code — an axis needs a label, so unlike the
+    # /portfolios table this cannot render a "—". `codes` carries AIRS's own name alongside, so a
+    # renamed model can still be found in AIRS itself (the axis truncates at 11rem; the tooltip
+    # is where the identifier survives).
+    names = {g["id"]: portfolio_label(g) for g in ports}
+    codes = {g["id"]: (g.get("name") or "") for g in ports}
+    # The risk profile, read off AIRS's OWN name — never off the chosen `display_name`. A name you
+    # picked is a label, not a taxonomy: rename BUS_Neutraal_FX to "Steady Eddie" and its profile
+    # must not change, nor must naming something "Offensive Growth" invent one.
+    variants = {g["id"]: portfolio_variant(g.get("name"), g.get("omschrijving")) for g in ports}
     eff_by_pf = {g["id"]: g["positions_datum"] for g in ports}
     ytd_anchor = {pid: ytd_anchor_for(eff_by_pf[pid], year) for pid in ids_order}
     # Trailing 12m opens 365d back, but never before the composition took effect — pricing these
@@ -202,6 +217,12 @@ def compute_portfolio_correlations(year: int | None = None) -> dict:
     return {
         "portfolio_ids": ids_order,
         "labels": [names[pid] for pid in ids_order],
+        # AIRS's own code, aligned to `labels`. Kept so a renamed model is still identifiable in
+        # AIRS — the label is for reading, this is for finding.
+        "codes": [codes[pid] for pid in ids_order],
+        # The risk profile, aligned to `labels`. `null` = this model is not offered at one (8 of
+        # the 42) — an answer, not a gap. See `_airs_portfolio_variant`.
+        "variants": [variants[pid] for pid in ids_order],
         "as_of": today,
         "min_overlap_days": MIN_OVERLAP_DAYS,
         "ytd": ytd_m,

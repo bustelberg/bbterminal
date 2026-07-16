@@ -69,6 +69,54 @@ def _weighted(rows: list[tuple[float, float]]) -> float:
     return sum(x[0] * x[1] for x in rows) / w if w > 0 else 0.0
 
 
+def _display_name(row: dict | None, source_name: str | None) -> str | None:
+    """ONE name vocabulary across both sides of the comparison.
+
+    The two sides speak different languages for the same security: the model side carries AIRS's
+    own fund label ("AMD", "Applied", "Nvidia"), the index side carries `company.company_name`
+    from the S&P/ACWI reconstruction ("Advanced Micro Devices Inc"). Set side by side in one
+    table, one security under two names reads as a data bug — and it is the first thing a reader
+    asks about. Both sides already join `asset_grid` by ISIN, so both can simply say the same
+    thing; the source label rides along (`airs_name`) rather than being thrown away.
+
+    ⚠ DISPLAY ONLY — this is NOT what makes the overlap match work, and must never become that.
+    See `_overlaps`: the ISIN is the key, and a LABEL must not be load-bearing for correctness.
+    """
+    return (row or {}).get("name") or source_name
+
+
+def _overlaps(h: dict, other_isins: set[str], other_names: list[str]) -> bool:
+    """Is this holding held on the OTHER side too? ISIN first (exact), name as the fallback.
+
+    ⚠ THE TWO MATCHERS ARE COMPLEMENTARY AND NEITHER ALONE IS ENOUGH.
+
+      ISIN  catches ONE ISIN under TWO NAMES — the model's "AMD" is the index's "Advanced Micro
+            Devices Inc". `same_company` scores that pair **16.0**: the roots reduce to 'amd' vs
+            'advanced micro devices', which share no tokens at all. An acronym against a
+            spelled-out name is exactly what a token matcher cannot bridge, and AMD was the ONE
+            of 16 tech names in the measured case that failed.
+      NAME  catches TWO ISINs under ONE BUSINESS — Alphabet class A in the index vs class C in
+            the model. No ISIN comparison can ever see that.
+
+    `_held` (the missed-winners gate) has had this shape all along; this check was NAME-ONLY
+    until 2026-07-16 and so marked AMD as a bet held OUTSIDE the index — while the index held it
+    at 0.55% and it was the model's 2nd-largest contributor at +7.83pp. Precisely the module's
+    own "false finding that is actionable, and the action is wrong".
+
+    ⚠ Do NOT re-route this through a shared display name to make the fuzzy match succeed. The
+    ISIN is already in both dicts; deriving a name FROM it only to fuzzy-match the names is
+    strictly lossier, and it would make correctness depend on a LABEL — so a rename (the
+    /companies "GF name" correction, a Yahoo refresh) would silently break the match months
+    later, out of an unrelated change. Structural, not incidental.
+    """
+    if h.get("isin") and h["isin"] in other_isins:
+        return True
+    # Imported here, not at module top, to keep clear of a circular import through asset_pipeline.
+    from asset_pipeline.resolve import same_company  # noqa: PLC0415
+    n = h.get("name")
+    return bool(n) and any(same_company(n, o) for o in other_names)
+
+
 def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
                         window: str = "ytd", axis: str = "sector") -> dict:
     """Brinson-Fachler over one window, plus the names that drove it."""
@@ -128,7 +176,11 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
                   else "unpriced" if ret is None
                   else "unclassified" if bucket == UNKNOWN_BUCKET
                   else None)
-        item = {"isin": isin, "name": r.get("fonds"), "weight_pct": w,
+        # `name` is the CANONICAL label (asset_grid, joined by ISIN) so this table and the index's
+        # speak one vocabulary; `airs_name` keeps AIRS's own label, which is what you see in AIRS
+        # itself and is the row's identity there. Display only — see `_display_name`.
+        item = {"isin": isin, "name": _display_name(row, r.get("fonds")),
+                "airs_name": r.get("fonds"), "weight_pct": w,
                 "return_pct": ret, "bucket": bucket, "reason": reason}
         if reason:
             excluded.append(item)
@@ -149,7 +201,10 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         bucket = _buckets(row, is_cash=False, isin=b.get("isin"), codes=codes)[idx]
         b_by_bucket.setdefault(bucket, []).append((b["weight_pct"], b["return_eur_pct"]))
         bench_holdings_by_bucket.setdefault(bucket, []).append({
-            "isin": b.get("isin"), "name": b.get("company_name"), "ticker": b.get("ticker"),
+            # Canonical label from the SAME `asset_grid` row the buckets above are read off, so
+            # this table and the model's speak one vocabulary — see `_display_name`.
+            "isin": b.get("isin"), "name": _display_name(row, b.get("company_name")),
+            "ticker": b.get("ticker"),
             "weight_pct": b["weight_pct"], "return_pct": b["return_eur_pct"],
             "contribution_pct": b["weight_pct"] / 100.0 * b["return_eur_pct"],
         })
@@ -185,10 +240,6 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     r_p_total = sum(w / 100.0 * ret for rows in p_by_bucket.values() for w, ret in rows)
     r_b_total = sum(w / 100.0 * ret for rows in b_norm.values() for w, ret in rows)
 
-    # Overlap below is matched by COMPANY, not ISIN. Imported here, not at module top, to keep
-    # clear of a circular import through asset_pipeline.
-    from asset_pipeline.resolve import same_company  # noqa: PLC0415
-
     rows_out: list[dict] = []
     for bucket in sorted(set(p_by_bucket) | set(b_norm)):
         pr = p_by_bucket.get(bucket, [])
@@ -212,19 +263,21 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
                         key=lambda h: -h["weight_pct"])
         b_hold_all = sorted(bench_holdings_by_bucket.get(bucket, []),
                             key=lambda h: -h["weight_pct"])
-        # HELD ON BOTH SIDES — matched by COMPANY, not ISIN: your "Nvidia" is the index's "NVIDIA
-        # Corp", AMD is "Advanced Micro Devices Inc", and a share class is not a different business
-        # (ISIN-matching would miss all three). Marked so the overlap between what you hold and what
-        # the index holds is visible at a glance — and, by contrast, so are the genuinely different
-        # bets. The portfolio side matches against the FULL index bucket (not the capped top-15),
-        # so a match to a smaller index name is not missed.
+        # HELD ON BOTH SIDES — ISIN first, name as the share-class fallback. See `_overlaps` for
+        # why both matchers are needed and why a shared display name is NOT the fix. Marked so the
+        # overlap between what you hold and what the index holds is visible at a glance — and, by
+        # contrast, so are the genuinely different bets. The portfolio side matches against the
+        # FULL index bucket (not the capped top-15), so a match to a smaller index name is not
+        # missed.
         p_names = [h["name"] for h in p_hold if h.get("name")]
         b_names = [h["name"] for h in b_hold_all if h.get("name")]
+        p_isins = {h["isin"] for h in p_hold if h.get("isin")}
+        b_isins = {h["isin"] for h in b_hold_all if h.get("isin")}
         for h in p_hold:
-            h["in_both"] = bool(h.get("name")) and any(same_company(h["name"], bn) for bn in b_names)
+            h["in_both"] = _overlaps(h, b_isins, b_names)
         b_hold = b_hold_all[:_BUCKET_HOLDINGS_CAP]
         for h in b_hold:
-            h["in_both"] = bool(h.get("name")) and any(same_company(h["name"], pn) for pn in p_names)
+            h["in_both"] = _overlaps(h, p_isins, p_names)
         rows_out.append({
             "bucket": bucket,
             "portfolio_weight_pct": w_p * 100.0,
@@ -253,24 +306,29 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     contrib.sort(key=lambda c: -c["contribution_pct"])
     held_isins = {i["isin"] for i in attributable if i.get("isin")}
 
-    # ⚠ "DID NOT OWN" IS A STATEMENT ABOUT THE COMPANY, NOT ABOUT THE ISIN.
-    # Alphabet is GOOGL (class A) in the index and "Alphabet - C" (class C) in this model — two
-    # ISINs, one business. Matching on the ISIN reported GOOGL as a winner they MISSED, at
-    # +3.23pp, while they were holding it and it was their single largest contributor. A
+    # ⚠ "DID NOT OWN" IS A STATEMENT ABOUT THE COMPANY, NOT ABOUT THE ISIN — and equally, not
+    # about the NAME. Alphabet is GOOGL (class A) in the index and "Alphabet - C" (class C) in
+    # this model — two ISINs, one business — and matching on the ISIN alone reported GOOGL as a
+    # winner they MISSED, at +3.23pp, while they were holding it and it was their single largest
+    # contributor. AMD is the mirror image: one ISIN, two names, which no name match survives. A
     # "missed opportunity" that the portfolio actually captured is the worst kind of false
-    # finding: it is actionable, and the action is wrong. (`same_company` imported above.)
+    # finding: it is actionable, and the action is wrong.
+    #
+    # SAME `_overlaps` as the per-bucket `in_both` above — one definition of "held on both
+    # sides", so the two cannot drift. They already did once: this gate had the ISIN check and
+    # `in_both` did not, and only `in_both` was wrong about AMD.
     held_names = [str(grid[i]["name"]) for i in held_isins
                   if grid.get(i) and grid[i].get("name")]
 
     def _held(b: dict) -> bool:
-        if b.get("isin") in held_isins:
-            return True
-        n = b.get("company_name")
-        return bool(n) and any(same_company(n, h) for h in held_names)
+        return _overlaps({"isin": b.get("isin"), "name": b.get("company_name")},
+                         held_isins, held_names)
 
     # The index's biggest winners you did NOT own — the other half of "why", and the half a
     # holdings-only view can never show.
-    missed = [{"isin": b.get("isin"), "name": b.get("company_name"),
+    missed = [{"isin": b.get("isin"),
+               # Same canonical vocabulary as every other name in this payload.
+               "name": _display_name(bgrid.get(b.get("isin") or ""), b.get("company_name")),
                # `_window_rows` emits this as `ticker`, not `gurufocus_ticker` — and here it is a
                # yfinance symbol regardless.
                "ticker": b.get("ticker"), "weight_pct": b["weight_pct"],

@@ -27,6 +27,29 @@ from deps import supabase  # noqa: E402
 
 from asset_pipeline import yahoo  # noqa: E402
 from asset_pipeline.fast_resolve import _from_leonteq  # noqa: E402
+from asset_pipeline.fx import SUBUNIT  # noqa: E402
+
+
+def _cap_currency(quote_ccy: str | None) -> str | None:
+    """The currency a MARKET CAP is denominated in, given the quote's `currency` field.
+
+    ⚠ YAHOO REPORTS ONE `currency` FOR TWO DIFFERENT UNITS. It quotes a London listing's PRICE in
+    pence and that same payload's `marketCap` in POUNDS — both labelled `"GBp"`. A market cap is
+    always in the MAJOR unit, so the quote currency must be normalised before it is stored or
+    converted; taking it at face value applies the pence divisor to a figure that never had it.
+
+    Measured 2026-07-16, before this existed: Shell's cap came back 166.43bn (GBP) and was stored
+    as EUR 1.95bn — a EUR 195bn company, wrong by exactly 100x, and still a plausible-looking
+    number. Across ACWI the 36 minor-unit members held 0.02% of index weight instead of ~1.93%:
+    they were ingested, then weighted to nothing. `covered_pct` never saw it — it counts members
+    PRICED, and every one of those counted as covered.
+
+    `SUBUNIT` is `asset_pipeline.fx`'s map — shared, never re-derived (same rule as the price
+    path); it also carries `ZAc`/`ILA`, whose caps landed as NULL rather than merely small.
+    """
+    if not quote_ccy:
+        return None
+    return SUBUNIT.get(quote_ccy, (quote_ccy, 1.0))[0]
 
 
 def _load_leonteq(path: Path) -> dict[str, tuple[str, str]]:
@@ -110,7 +133,7 @@ def main() -> None:
         for c in cand_by_analysis.get(aid, []):
             q = quotes.get(c)
             if q and q.get("marketCap"):
-                native, ccy = q["marketCap"], q.get("currency")
+                native, ccy = q["marketCap"], _cap_currency(q.get("currency"))
                 break
         eur = None
         if native and ccy:

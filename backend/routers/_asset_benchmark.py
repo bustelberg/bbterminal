@@ -42,7 +42,7 @@ import asyncio
 
 from deps import IN_CHUNK_SIZE, supabase
 from routers._airs_portfolio_perf import _closes as _asset_closes
-from routers._benchmark_index import _fx_to_eur, _window_rows
+from routers._benchmark_index import INDEX_CAP_PCT, _fx_to_eur, _window_rows, index_weights
 
 
 def _universe_company_ids(label: str) -> list[int]:
@@ -143,8 +143,12 @@ def index_returns(label: str, starts: list[str]) -> dict[str, dict]:
             out[s] = {"eur_pct": None, "local_pct": None, "members": 0,
                       "start_date": None, **coverage}
             continue
-        eur = sum(r["start_cap_eur"] / total * r["return_eur_pct"] for r in rows)
-        loc = sum(r["start_cap_eur"] / total * r["return_local_pct"] for r in rows)
+        # ONE weighting, shared with `index_rows` below and with /benchmarks — an index whose
+        # headline return is weighted differently from the constituents behind it reconciles
+        # against nothing. This is also where a capped index (AEX) gets its cap.
+        w = index_weights(rows, label)
+        eur = sum(x / 100.0 * r["return_eur_pct"] for x, r in zip(w, rows))
+        loc = sum(x / 100.0 * r["return_local_pct"] for x, r in zip(w, rows))
         out[s] = {"eur_pct": eur, "local_pct": loc, "members": len(rows),
                   "start_date": min(r["start_date"] for r in rows), **coverage}
     return out
@@ -173,9 +177,104 @@ def index_rows(label: str, start: str) -> tuple[list[dict], dict]:
     total = sum(r["start_cap_eur"] for r in rows)
     if total <= 0:
         return [], coverage
-    for r in rows:
-        r["weight_pct"] = r["start_cap_eur"] / total * 100.0
+    # Same `index_weights` as `index_returns` — Brinson reconciles the constituents against the
+    # index total, so the two MUST be the same weights (capped ones included).
+    for r, x in zip(rows, index_weights(rows, label)):
+        r["weight_pct"] = x
     return rows, coverage
+
+
+def compute_index(label: str, year: int | None = None, start: str | None = None) -> dict:
+    """The `/benchmarks` panel's index — the ASSET-path twin of `_benchmark_index.compute_index`,
+    returning the identical shape.
+
+    ⚠ WHY THE PANEL MOVED HERE (2026-07-16). Its own subtitle promises "same basis as a portfolio,
+    so the numbers are comparable" — and every portfolio on that page is priced from `asset_price`
+    (yfinance) while the panel was priced from GuruFocus. Two price vendors, two adjustment
+    conventions, two FX sources; the difference between them reads as alpha. That is the rule the
+    composition modal was built on, applied to the panel that states it out loud.
+
+    The measured cost, stated rather than buried: against SPY's +9.02% USD, the GuruFocus rebuild
+    was +9.05% and this one is +9.23% — so for the S&P specifically, the vendor we left was ~0.2pp
+    closer. That trade is deliberate. GuruFocus is closer on the ONE index whose constituents it
+    fully covers, and structurally unable to price the others:
+
+        ACWI   ~7.8% of published weight in countries GuruFocus will never price
+        AEX    31.96% — Shell, Unilever and RELX are all LSE rows with no GuruFocus market cap
+
+    A cap-weighted rebuild does not LOSE that weight, it redistributes it: the GuruFocus AEX
+    printed +14.80% against this path's +12.12%, with Prosus capped at 15% — a name that is really
+    10.46% of the index, pushed onto the cap by absorbing the missing third. Nothing about that
+    output looks wrong. Trading 0.2pp on the S&P for that is not a close call.
+
+    `_benchmark_index.compute_index` stays exactly where it is: it is the SPY cross-check, which
+    validates the METHOD (start-of-window weights, split-adjustment, per-date FX) against a real
+    ETF. It is no longer any route's basis — with this move its GuruFocus price loader
+    (`_benchmark_index._closes`, the last reader of `metric_data` on this page's side of the app)
+    has NO production caller left. That is the point, not an oversight: keep the cross-check,
+    retire the vendor as a basis.
+    """
+    from datetime import date, timedelta  # noqa: PLC0415
+
+    year = year or date.today().year
+    start_anchor = start or f"{year}-01-01"
+    lookback = (date.fromisoformat(start_anchor) - timedelta(days=45)).isoformat()
+    today = date.today().isoformat()
+
+    mem, coverage = members(label)
+    if not mem:
+        return {"label": label, "year": year, "members": [], "member_count": 0,
+                "ytd_eur_pct": None, "ytd_local_pct": None,
+                "note": f"No universe labelled {label!r}."}
+
+    closes = _asset_closes([m["company_id"] for m in mem], lookback, today)
+    fx = _fx_to_eur({(m.get("currency") or "USD") for m in mem}, lookback, today)
+
+    # `adjusted` is KEPT here, not dropped. Our stored closes are not split-adjusted and cannot
+    # self-heal; a rescaled price is a CLAIM and the panel shows it. (The `index_returns` /
+    # `index_rows` callers above discard it because their surfaces have nowhere to say so — this
+    # one does.)
+    rows, adjusted = _window_rows(mem, closes, fx, start_anchor)
+    if not rows or sum(r["start_cap_eur"] for r in rows) <= 0:
+        return {"label": label, "year": year, "members": [], "member_count": 0,
+                "ytd_eur_pct": None, "ytd_local_pct": None,
+                "note": "No constituent had a price on both ends of the window."}
+
+    # THE SAME `index_weights` as every other surface — capped where the index caps.
+    for r, x in zip(rows, index_weights(rows, label)):
+        r["weight_pct"] = x
+    ytd_eur = sum(r["weight_pct"] / 100.0 * r["return_eur_pct"] for r in rows)
+    ytd_loc = sum(r["weight_pct"] / 100.0 * r["return_local_pct"] for r in rows)
+    rows.sort(key=lambda r: -r["weight_pct"])
+
+    cap = INDEX_CAP_PCT.get(label)
+    note = ("Cap-weighted on FULL market cap (the real index float-adjusts) using "
+            "start-of-year weights; membership is a snapshot, so mid-year index changes are not "
+            "replayed. Price return, not total return — dividends are not included. "
+            "Priced from yfinance, the same source as the portfolios above.")
+    if cap:
+        note += (f" Capped at {cap:.0f}% per constituent, as the real index is — applied at the "
+                 f"window open rather than at the index's review date.")
+
+    return {
+        "label": label,
+        "year": year,
+        "member_count": len(rows),
+        # `priced_of_universe` is the honest denominator: `coverage` counts what the UNIVERSE has,
+        # `rows` what actually had a price on both ends of this window.
+        "priced_of_universe": f"{len(rows)}/{coverage['universe_members']}",
+        "as_of": max(r["end_date"] for r in rows),
+        "start_date": min(r["start_date"] for r in rows),
+        "ytd_eur_pct": ytd_eur,
+        "ytd_local_pct": ytd_loc,
+        "members": rows,
+        "split_adjusted": adjusted,
+        "note": note,
+    }
+
+
+async def compute_index_async(label: str, year: int | None = None) -> dict:
+    return await asyncio.to_thread(compute_index, label, year)
 
 
 async def index_returns_async(label: str, starts: list[str]) -> dict[str, dict]:

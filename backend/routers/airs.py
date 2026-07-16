@@ -213,6 +213,17 @@ class StoredModelPortfolio(BaseModel):
 
     id: int
     name: str
+    # A name WE chose. NULL = none chosen, fall back to `name` (AIRS's 24-char code). It sits
+    # BESIDE the code rather than replacing it: the code is what you search for in AIRS itself.
+    # Never written by the scan — see the migration header; putting it in that payload wipes
+    # every chosen name.
+    display_name: str | None = None
+    # The risk profile this model is offered at — Offensief / Beperkt Offensief / Neutraal /
+    # Defensief — DERIVED from AIRS's name, not stored (see `load_portfolios`). `null` means the
+    # model is not offered at one: the themed TopSelectie and WTS funds, and
+    # Risicodragend/Risicomijdend, which are a different axis. Same classifier the correlation
+    # matrix filters on, so the two panels cannot disagree.
+    variant: str | None = None
     truncated: bool = False
     omschrijving: str | None = None
     portfolio_type: str | None = None
@@ -231,6 +242,33 @@ async def airs_model_portfolios_stored():
     """The stored portfolios — an instant DB read. The page opens on this; `/scan` is the
     explicit refresh, because re-scraping AirSPMS costs minutes."""
     return await asyncio.to_thread(store.load_portfolios)
+
+
+class SetDisplayNameRequest(BaseModel):
+    # `None` (or "") CLEARS the chosen name and falls back to AIRS's code. Distinguishing the two
+    # would be a distinction without a difference here: there is no such thing as a deliberate
+    # blank label, and storing "" would render an empty cell that reads as a bug rather than as
+    # a choice. (Contrast the link table, where a stored NULL genuinely means "explicitly not a
+    # portfolio" and MUST be separable from "never decided".)
+    display_name: str | None = None
+
+
+@router.put("/api/airs/model-portfolios/{portfolio_id}/display-name")
+async def airs_set_portfolio_display_name(portfolio_id: int, body: SetDisplayNameRequest):
+    """Give a model a human name, or clear it back to AIRS's code with a null/empty value.
+
+    Admin-only by default: `_USER_WRITE_PREFIXES` is empty, so the auth gate 403s a non-admin
+    write to any /api/airs path without this needing its own check.
+    """
+    def _run() -> dict:
+        name = (body.display_name or "").strip() or None
+        res = (supabase.table("airs_model_portfolio")
+               .update({"display_name": name}).eq("id", portfolio_id).execute())
+        if not res.data:
+            raise HTTPException(404, f"No model portfolio with id {portfolio_id}.")
+        return {"ok": True, "id": portfolio_id, "display_name": name}
+
+    return await asyncio.to_thread(_run)
 
 
 class ModelPortfolioPerformance(BaseModel):
@@ -328,7 +366,18 @@ class PortfolioCorrelationMatrix(BaseModel):
     count in that window."""
 
     portfolio_ids: list[int]
+    # What to CALL each model: its chosen `display_name`, else AIRS's code. An axis needs a
+    # label, so unlike the /portfolios table this cannot render a "—" for an unnamed model.
     labels: list[str]
+    # AIRS's own name, aligned to `labels`. The label is for reading; this is for finding the
+    # model in AIRS itself once someone has renamed it.
+    codes: list[str] = []
+    # Each model's risk profile — Offensief / Beperkt Offensief / Neutraal / Defensief — aligned
+    # to `labels`, so the matrix can be filtered to one profile and its rows become comparable.
+    # `null` means the model is NOT offered at a risk profile (8 of the 42: the themed TopSelectie
+    # and WTS funds, and Risicodragend/Risicomijdend, which are a different axis). That is an
+    # answer about the product, not a classification failure. See `_airs_portfolio_variant`.
+    variants: list[str | None] = []
     as_of: str
     min_overlap_days: int
     ytd: list[list[float | None]]
@@ -436,13 +485,21 @@ async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP5
 
 class AttributionName(BaseModel):
     isin: str | None = None
+    # The CANONICAL label (asset_grid, joined by ISIN) — the model side and the index side speak
+    # one vocabulary here, so the same security cannot appear under two names in one comparison.
     name: str | None = None
+    # AIRS's OWN label for the row ("AMD", "Applied"), where there is one — the identity this
+    # holding has in AIRS itself. Kept beside `name` rather than replaced by it; index rows and
+    # the contributor lists leave it null.
+    airs_name: str | None = None
     ticker: str | None = None
     weight_pct: float = 0.0
     return_pct: float | None = None
     contribution_pct: float = 0.0
     # True when this company is held on BOTH sides — in the model AND the benchmark bucket.
-    # Matched by company (same_company), not ISIN, so a share class still counts as the same name.
+    # Matched by ISIN first, then by company, so BOTH "AMD" == "Advanced Micro Devices Inc" (one
+    # ISIN, two names) and Alphabet class A == class C (two ISINs, one business) resolve. See
+    # `_airs_portfolio_attribution._overlaps` — neither key alone is sufficient.
     # Only populated for the per-bucket holdings lists; the contributor/detractor lists leave it
     # false.
     in_both: bool = False

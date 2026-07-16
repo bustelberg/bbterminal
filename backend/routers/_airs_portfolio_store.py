@@ -19,6 +19,24 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def portfolio_label(row: dict) -> str:
+    """What to CALL this model on a surface that has room for exactly one name.
+
+    The chosen `display_name` if there is one, else AIRS's `name` — its 24-char code. ONE
+    definition, because "which name do we show" is the kind of rule that gets re-answered
+    slightly differently in each place until two screens disagree about what a portfolio is
+    called.
+
+    ⚠ THE FALLBACK IS NOT UNIVERSAL, AND THAT IS DELIBERATE. The /portfolios table does NOT use
+    this: it shows the code and the chosen name in two SEPARATE columns, so an unnamed row renders
+    a muted "—" rather than repeating the code — while the names are being filled in, the blanks
+    are the only thing showing which models still need one. This helper is for the surfaces with a
+    single slot (a correlation axis, a chart legend), where "—" is not a label, it is an unlabelled
+    axis. Two rules, because the surfaces genuinely differ; the shared part is what the name IS.
+    """
+    return (row.get("display_name") or "").strip() or (row.get("name") or "")
+
+
 def save_portfolios(rows: list[dict]) -> None:
     """Upsert the list. Only the columns the LIST page knows about — it says nothing about
     positions, so it must not touch `positions_*` (that would wipe a count we already have)."""
@@ -108,9 +126,22 @@ def save_positions_error(portfolio_id: int, error: str) -> None:
 
 def load_portfolios() -> list[dict]:
     """The stored grid — `holdings` is DERIVED by the view from the positions, so it can
-    never disagree with them."""
-    return (supabase.table("airs_model_portfolio_grid")
+    never disagree with them.
+
+    `variant` (the risk profile) is derived here rather than stored: it is a fact about AIRS's
+    NAME, so it cannot drift from the name the way a column would, and it costs a regex over 95
+    rows. ONE classifier, shared with the correlation matrix — a second copy in the frontend
+    would put the same portfolio in different filters on two panels of the same page.
+    """
+    from routers._airs_portfolio_variant import portfolio_variant  # noqa: PLC0415
+
+    rows = (supabase.table("airs_model_portfolio_grid")
             .select("*").order("name").execute().data or [])
+    for r in rows:
+        # ⚠ AIRS's `name`, never the chosen `display_name`: a label you picked must not be able
+        # to invent or destroy a risk profile.
+        r["variant"] = portfolio_variant(r.get("name"), r.get("omschrijving"))
+    return rows
 
 
 def load_positions(portfolio_id: int) -> dict | None:

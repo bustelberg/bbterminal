@@ -57,7 +57,8 @@ function Holdings({ rows }: { rows: Name[] }) {
             <td className="py-1 pr-2" title={h.name ?? ''}>
               <span className="flex items-center gap-1.5 min-w-0">
                 {/* Held on BOTH sides — a dot so the overlap between your book and the index is
-                    visible at a glance (matched by company, not ISIN). */}
+                    visible at a glance. Matched by ISIN first, then by company so a share class
+                    still counts as one business (backend `_overlaps`). */}
                 {h.in_both && (
                   <span className="w-1.5 h-1.5 rounded-full bg-accent-500 shrink-0"
                     title="Held in both your portfolio and the benchmark" />
@@ -215,7 +216,7 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, onClose
               {(row.portfolio_holdings ?? []).some((h) => h.in_both) && (
                 <p className="text-[10px] text-fg-faint flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-accent-500 inline-block shrink-0" />
-                  marked rows are held in both your portfolio and {benchmark} (matched by company, not ISIN)
+                  marked rows are held in both your portfolio and {benchmark} (a share class counts as the same company)
                 </p>
               )}
             </div>

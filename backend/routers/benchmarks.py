@@ -301,11 +301,21 @@ class ReconstructedIndex(BaseModel):
 
 @router.get("/api/benchmarks/index/{label}", response_model=ReconstructedIndex)
 async def benchmark_reconstructed_index(label: str, year: int | None = None):
-    """Cap-weighted YTD for a reconstructed index (e.g. `SP500`), in EUR and local currency.
+    """Cap-weighted YTD for a reconstructed index (`SP500`, `ACWI`, `AEX`), in EUR and local.
 
     Weights are as of the START of the period. Weighting by TODAY's market cap would be
-    look-ahead bias — measured, it turns this index's +9.10% into +21.70%.
+    look-ahead bias — measured, it turns the S&P's +9.10% into +21.70%.
+
+    ⚠ THE ASSET PATH, NOT THE GURUFOCUS ONE (2026-07-16). This panel's whole claim is that its
+    numbers are comparable to the portfolios beside them — and those are priced from `asset_price`
+    (yfinance). Pricing the benchmark from GuruFocus instead compared two price universes and
+    called the difference alpha. It was also structurally unable to price two of the three
+    indices: GuruFocus is blind to 31.96% of the AEX (Shell, Unilever, RELX are LSE rows with no
+    GuruFocus market cap) and to ~7.8% of ACWI, and a cap-weighted rebuild redistributes that
+    weight rather than losing it — the GuruFocus AEX printed +14.80% against the true +12.12%,
+    and looked entirely plausible doing it. `_benchmark_index.compute_index` remains as the SPY
+    cross-check (+9.05% vs SPY's +9.02%), which validates the METHOD; it is not the basis.
     """
-    from routers._benchmark_index import compute_index_async  # noqa: PLC0415
+    from routers._asset_benchmark import compute_index_async  # noqa: PLC0415
 
     return await compute_index_async(label, year)

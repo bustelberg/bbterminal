@@ -7,13 +7,18 @@ import type { ReconstructedIndex } from '../../lib/types/api';
 
 /** The indices we rebuild from our own constituents.
  *
- * ACWI is deliberately included even though it is NOT fully priced: GuruFocus does not cover
- * the UK, India, Ireland or AU/NZ, so a slice of the published index is absent and a
- * cap-weighted rebuild renormalises that weight across the rest. The panel surfaces the
- * coverage ratio and calls it indicative rather than exact. */
+ * All three are priced from yfinance (`asset_price`) — the SAME source as the portfolios on this
+ * page. That is the panel's entire claim ("same basis as a portfolio"), and until 2026-07-16 it
+ * was false: the panel ran on GuruFocus while the portfolios ran on yfinance, which compares two
+ * price universes and calls the difference alpha.
+ *
+ * ACWI is still not FULLY priced (the published index has names we hold no series for), so its
+ * coverage ratio is surfaced and it is called indicative rather than exact. AEX is fully covered
+ * (25/25) and is the one index that CAPS: uncapped, ASML is 37.5% of it. */
 const INDICES = [
   { label: 'SP500', name: 'S&P 500' },
   { label: 'ACWI', name: 'ACWI' },
+  { label: 'AEX', name: 'AEX' },
 ];
 
 const pct = (v: number | null | undefined, dp = 2) =>
@@ -198,19 +203,29 @@ function IndexDetail({ d }: { d: ReconstructedIndex }) {
         {d.note} Weights are as of the <strong>start of the year</strong>: weighting by
         today&apos;s market cap is look-ahead bias — it retroactively overweights whatever
         went up.{' '}
-        {d.label === 'SP500' ? (
+        {d.label === 'SP500' && (
           <>
             It would print <span className="font-mono">+21.70%</span> instead of{' '}
             <span className="font-mono">{pct(d.ytd_local_pct)}</span>. Checked against SPY (the
-            real index), which is <span className="font-mono">+9.02%</span> USD for the same
-            window.
+            real index), which is <span className="font-mono">+9.02%</span> USD.
           </>
-        ) : (
+        )}
+        {d.label === 'ACWI' && (
           <>
             Coverage is <strong>partial</strong> (<span className="font-mono">{d.priced_of_universe}</span>{' '}
-            priced): GuruFocus does not cover the UK, India, Ireland or AU/NZ, so those
-            constituents are absent and their weight is renormalised across the rest. Treat this
-            as indicative, not exact.
+            priced): we hold no price series for some published constituents, and a cap-weighted
+            rebuild does not lose that weight — it renormalises it across the rest. Treat this as
+            indicative, not exact.
+          </>
+        )}
+        {d.label === 'AEX' && (
+          <>
+            Fully covered (<span className="font-mono">{d.priced_of_universe}</span> priced) and{' '}
+            <strong>capped at 15%</strong> per constituent, as the real index is — uncapped, ASML
+            alone would be <span className="font-mono">37.5%</span> of it. Composition is
+            Wikipedia&apos;s, as of the date above; the cap is applied at the start of the window
+            rather than at Euronext&apos;s review date, and full market cap is not the index&apos;s
+            free float.
           </>
         )}
       </p>

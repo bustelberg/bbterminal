@@ -221,8 +221,9 @@ def _returns(portfolio_id: int, effective: str | None, benchmark_label: str) -> 
     # not GuruFocus (`metric_data`). The portfolio's return comes from `asset_price`; pricing the
     # index off a different vendor would compare two price universes with different adjustment
     # conventions and different FX, and call the difference alpha. (It is also the only source
-    # that can price ACWI at all: GuruFocus does not sell us the UK or India.) `/benchmarks`
-    # keeps the GuruFocus reconstruction — that one exists to be validated against SPY.
+    # that can price ACWI at all: GuruFocus does not sell us the UK or India.) Since 2026-07-16
+    # the /portfolios Benchmarks panel is on this path too — `_benchmark_index.compute_index` is
+    # no longer any route's basis and survives only as the SPY cross-check of the METHOD.
     bench = index_returns(benchmark_label, windows) if windows else {}
 
     b_ytd = (bench.get(ytd_from) or {}).get("eur_pct") if ytd_from else None

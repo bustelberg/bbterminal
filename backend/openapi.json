@@ -692,6 +692,17 @@
       },
       "AttributionName": {
         "properties": {
+          "airs_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Airs Name"
+          },
           "contribution_pct": {
             "default": 0.0,
             "title": "Contribution Pct",
@@ -4174,6 +4185,14 @@
             "title": "As Of",
             "type": "string"
           },
+          "codes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Codes",
+            "type": "array"
+          },
           "labels": {
             "items": {
               "type": "string"
@@ -4214,6 +4233,21 @@
               "type": "integer"
             },
             "title": "Trailing 12M Obs",
+            "type": "array"
+          },
+          "variants": {
+            "default": [],
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Variants",
             "type": "array"
           },
           "ytd": {
@@ -5180,6 +5214,23 @@
         "title": "SetCashRequest",
         "type": "object"
       },
+      "SetDisplayNameRequest": {
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          }
+        },
+        "title": "SetDisplayNameRequest",
+        "type": "object"
+      },
       "SetLinkRequest": {
         "properties": {
           "fonds": {
@@ -5406,6 +5457,17 @@
       "StoredModelPortfolio": {
         "description": "A stored portfolio row. `holdings` is derived by the view from the positions, so it\ncannot drift from them \u2014 and it keeps three absences apart that are NOT the same thing:\n\n  has_fixed_model=false   -> NO MODEL EXISTS (a `normaal`/`meervoudig` portfolio). AIRS\n                             stores no composition at all; \"0 holdings\" would describe a\n                             model that isn't there.\n  positions_scanned_at=None -> never counted. Unknown, not zero.\n  no_snapshot=true        -> we looked, and AIRS had no DATED composition: its date\n                             dropdown held nothing but the empty \"today\" placeholder.\n                             Measured on BUS_DUTD_DEF_AFS + EuropaTopSelect OFF FX, both\n                             of which I first mis-reported as \"0 holdings\".\n  holdings=0              -> a real, EMPTY fixed model. Not currently observed on any\n                             portfolio, but expressible \u2014 and it must stay distinct from\n                             the three absences above.\n\n`holdings` counts DISTINCT ISINs: a portfolio can list one instrument on two lines\n(VTopSelectie OFF FX holds CapitaLand at 2% and again at 3%), and that is one instrument.",
         "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
           "fixed_datum": {
             "anyOf": [
               {
@@ -5516,6 +5578,17 @@
             "default": false,
             "title": "Truncated",
             "type": "boolean"
+          },
+          "variant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant"
           }
         },
         "required": [
@@ -7927,6 +8000,57 @@
           }
         },
         "summary": "Airs Model Portfolio Attribution",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/model-portfolios/{portfolio_id}/display-name": {
+      "put": {
+        "description": "Give a model a human name, or clear it back to AIRS's code with a null/empty value.\n\nAdmin-only by default: `_USER_WRITE_PREFIXES` is empty, so the auth gate 403s a non-admin\nwrite to any /api/airs path without this needing its own check.",
+        "operationId": "airs_set_portfolio_display_name_api_airs_model_portfolios__portfolio_id__display_name_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDisplayNameRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Set Portfolio Display Name",
         "tags": [
           "airs"
         ]
@@ -10868,7 +10992,7 @@
     },
     "/api/benchmarks/index/{label}": {
       "get": {
-        "description": "Cap-weighted YTD for a reconstructed index (e.g. `SP500`), in EUR and local currency.\n\nWeights are as of the START of the period. Weighting by TODAY's market cap would be\nlook-ahead bias \u2014 measured, it turns this index's +9.10% into +21.70%.",
+        "description": "Cap-weighted YTD for a reconstructed index (`SP500`, `ACWI`, `AEX`), in EUR and local.\n\nWeights are as of the START of the period. Weighting by TODAY's market cap would be\nlook-ahead bias \u2014 measured, it turns the S&P's +9.10% into +21.70%.\n\n\u26a0 THE ASSET PATH, NOT THE GURUFOCUS ONE (2026-07-16). This panel's whole claim is that its\nnumbers are comparable to the portfolios beside them \u2014 and those are priced from `asset_price`\n(yfinance). Pricing the benchmark from GuruFocus instead compared two price universes and\ncalled the difference alpha. It was also structurally unable to price two of the three\nindices: GuruFocus is blind to 31.96% of the AEX (Shell, Unilever, RELX are LSE rows with no\nGuruFocus market cap) and to ~7.8% of ACWI, and a cap-weighted rebuild redistributes that\nweight rather than losing it \u2014 the GuruFocus AEX printed +14.80% against the true +12.12%,\nand looked entirely plausible doing it. `_benchmark_index.compute_index` remains as the SPY\ncross-check (+9.05% vs SPY's +9.02%), which validates the METHOD; it is not the basis.",
         "operationId": "benchmark_reconstructed_index_api_benchmarks_index__label__get",
         "parameters": [
           {
