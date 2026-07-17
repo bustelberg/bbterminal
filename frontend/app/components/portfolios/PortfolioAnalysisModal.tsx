@@ -273,6 +273,10 @@ export default function PortfolioAnalysisModal({ id, name, onClose }: {
   id: number; name: string; onClose: () => void;
 }) {
   const [benchmark, setBenchmark] = useState<string>('SP500');
+  // Weight the portfolio bars by the strategy's nominal weights ('model') or the paired AIRS
+  // book's actual EUR holdings ('book'). Only the WEIGHTS change — the classification and the
+  // benchmark are identical, because the benchmark can only be priced in the yfinance world.
+  const [weightBy, setWeightBy] = useState<'model' | 'book'>('model');
   // Which window's excess the reader asked "why" about. Null = not asked.
   const [why, setWhy] = useState<'ytd' | 'since' | null>(null);
   // Which composition bar the reader clicked, to drill into its holdings. {axis, bucket}.
@@ -293,7 +297,7 @@ export default function PortfolioAnalysisModal({ id, name, onClose }: {
     void (async () => {
       try {
         const r = await apiFetch(
-          `${API_URL}/api/airs/model-portfolios/${id}/analysis?benchmark=${benchmark}`);
+          `${API_URL}/api/airs/model-portfolios/${id}/analysis?benchmark=${benchmark}&weight_by=${weightBy}`);
         const b = await r.json().catch(() => null);
         if (cancelled) return;
         if (!r.ok) { setError(b?.detail ?? `HTTP ${r.status}`); return; }
@@ -303,7 +307,7 @@ export default function PortfolioAnalysisModal({ id, name, onClose }: {
       }
     })();
     return () => { cancelled = true; };
-  }, [id, benchmark]);
+  }, [id, benchmark, weightBy]);
 
   const partial = data && (data.covered_pct ?? 100) < 99.5;
 
@@ -323,12 +327,35 @@ export default function PortfolioAnalysisModal({ id, name, onClose }: {
               {data && <> · <span className="font-mono">{data.holdings}</span> holdings ·{' '}
                 <span className="font-mono">{data.benchmark_members}</span>{' '}index members
                 {data.as_of && <> · as of <span className="font-mono">{data.as_of}</span></>}</>}
+              {data?.weight_basis === 'book' && (
+                <span className="text-accent-400"
+                  title="Portfolio bars weighted by the paired AIRS book's actual EUR holdings, not the model's nominal weights.">
+                  {' '}· book weights
+                </span>
+              )}
             </p>
+            {data?.weight_note && (
+              <p className="text-[11px] text-warn-300 mt-0.5">⚠ {data.weight_note}</p>
+            )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            {/* Weight the portfolio bars by the STRATEGY's nominal weights, or by what the paired
+                AIRS BOOK actually holds. Only the weights move — the benchmark and the sector /
+                region / currency vocabulary stay yfinance, because the benchmark cannot be priced
+                any other way. */}
+            <label className="flex items-center gap-1.5 text-[11px] text-fg-muted"
+              title="Weights: Model = the strategy's nominal percentages. Book = the paired AIRS book's actual EUR holdings (implementation drift). Classification and benchmark are unchanged either way.">
+              Weights
+              <select value={weightBy} aria-label="Weights"
+                onChange={(e) => { setData(null); setError(null); setBucket(null); setWeightBy(e.target.value as 'model' | 'book'); }}
+                className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[11px] text-fg focus:border-accent-500 w-[5.5rem]">
+                <option value="model">Model</option>
+                <option value="book">Book (AIRS)</option>
+              </select>
+            </label>
             <label className="flex items-center gap-1.5 text-[11px] text-fg-muted">
               Benchmark
-              <select value={benchmark}
+              <select value={benchmark} aria-label="Benchmark"
                 onChange={(e) => { setData(null); setError(null); setBucket(null); setBenchmark(e.target.value); }}
                 className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[11px] font-mono text-fg focus:border-accent-500 w-[6.5rem]">
                 {BENCHMARKS.map((b) => <option key={b} value={b}>{b}</option>)}

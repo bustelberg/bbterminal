@@ -105,6 +105,20 @@ test.describe('/portfolios overview', () => {
     await expect(page.getByText(/\+5\.36% drift/)).toBeVisible();
   });
 
+  test('the Weights toggle reweights the portfolio bars by the AIRS book', async ({ page }) => {
+    // ⚠ Book weights change ONLY the portfolio side — the benchmark and the sector/region/
+    // currency vocabulary stay yfinance, because the benchmark cannot be priced any other way.
+    // The toggle re-fetches; the mock returns Technology at 45% (model) vs 52% (book).
+    await row(page, 'Bustelberg Defensief').getByRole('button', { name: 'Analyse' }).click();
+    const modal = page.getByRole('dialog');
+    await expect(modal.getByText(/Composition vs/)).toBeVisible();
+
+    await modal.getByRole('combobox', { name: 'Weights' }).selectOption('book');
+    // The subtitle names the active basis, and a Technology bar re-weights.
+    await expect(modal.getByText(/book weights/)).toBeVisible();
+    await expect(modal.getByText('52%').first()).toBeVisible();
+  });
+
   test('an unlinked portfolio offers no Analyse button', async ({ page }) => {
     // Analyse needs a Fixed portfolio to describe. An unlinked book has none.
     await page.getByText(/Linked only/).click();
@@ -366,7 +380,7 @@ test.describe('/portfolios', () => {
     // The S&P rebuilds almost completely (488/493) — no warning worth interrupting for.
     await expect(modal.getByText(/This index is rebuilt from/)).toHaveCount(0);
 
-    await modal.getByRole('combobox').selectOption('ACWI');
+    await modal.getByRole('combobox', { name: 'Benchmark' }).selectOption('ACWI');
 
     // ⚠ ACWI does NOT. Its missing constituents are a whole country at a time (GuruFocus sells
     // no UK or India; some yfinance ISINs were never ingested), and a cap-weighted index

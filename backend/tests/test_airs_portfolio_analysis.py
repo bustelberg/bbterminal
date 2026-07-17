@@ -236,3 +236,74 @@ class TestTheAxesAreComparable:
 
     def test_an_empty_side_does_not_divide_by_zero(self):
         assert pa._weigh([]) == {"sector": {}, "region": {}, "currency": {}}
+
+
+class TestBookWeighting:
+    """`weight_by="book"` reweights the portfolio bars by the paired AIRS book's actual EUR
+    holdings. The invariant that makes it honest: ONLY the weights come from AIRS — the
+    classification stays yfinance, because the benchmark is classified that way and two
+    taxonomies in one chart invent a tilt."""
+
+    def _wire(self, monkeypatch, *, rows, link=True):
+        import routers._airs_account_links as links
+        import routers._airs_holding_isin as hisin
+
+        monkeypatch.setattr(links, "list_account_links", lambda: {
+            "accounts": ([{"portefeuille": "X_DYN", "model_portfolio_id": 7}] if link else [])})
+        monkeypatch.setattr(hisin, "resolve_account_isins", lambda p: {"rows": rows})
+        # The classification grid — yfinance attributes, the SAME source the model side uses.
+        monkeypatch.setattr(pa, "_grid", lambda isins: {
+            "US1": {"sector": "Technology", "msci_region": "North America",
+                    "market_cap_currency": "USD", "asset_class": "equity"},
+            "US2": {"sector": "Financials", "msci_region": "North America",
+                    "market_cap_currency": "USD", "asset_class": "equity"},
+        })
+        monkeypatch.setattr(pa, "_country_by_code", lambda: {})
+
+    def test_weights_come_from_eur_value_not_count(self, monkeypatch):
+        self._wire(monkeypatch, rows=[
+            {"isin": "US1", "current_value_eur": 750, "asset_class": "Equity"},
+            {"isin": "US2", "current_value_eur": 250, "asset_class": "Equity"},
+        ])
+        out = pa._book_port_items(7, {})
+        assert out["total_w"] == 1000
+        assert out["holdings"] == 2
+        # 750/1000 of the book is US1's sector.
+        pw = pa._weigh(out["items"])
+        assert pw["sector"]["Technology"] == 75.0
+
+    def test_a_short_or_overdraft_is_excluded_from_the_composition(self, monkeypatch):
+        # ⚠ Negative value = a short (Nestle India) or an overdraft cash line. A bar chart of
+        # what the book is LONG drops it — same rule the model side applies to a 0% weight.
+        self._wire(monkeypatch, rows=[
+            {"isin": "US1", "current_value_eur": 1000, "asset_class": "Equity"},
+            {"isin": "US2", "current_value_eur": -400, "asset_class": "Equity"},
+        ])
+        out = pa._book_port_items(7, {})
+        assert out["holdings"] == 1
+        assert out["total_w"] == 1000
+
+    def test_classification_is_yfinance_not_airs(self, monkeypatch):
+        # The row carries AIRS's own category, but the bucket must come from the grid — Financials
+        # for US2, not whatever AIRS calls it. Otherwise the portfolio and benchmark speak two
+        # languages.
+        self._wire(monkeypatch, rows=[
+            {"isin": "US2", "current_value_eur": 100, "asset_class": "Equity",
+             "categorie": "AAND", "sector": "BU-Fin Dienst"},
+        ])
+        out = pa._book_port_items(7, {})
+        pw = pa._weigh(out["items"])
+        assert set(pw["sector"]) == {"Financials"}   # the grid's word, not AIRS's
+
+    def test_cash_is_its_own_bucket(self, monkeypatch):
+        self._wire(monkeypatch, rows=[
+            {"isin": "US1", "current_value_eur": 900, "asset_class": "Equity"},
+            {"isin": None, "current_value_eur": 100, "asset_class": "Cash"},
+        ])
+        out = pa._book_port_items(7, {})
+        pw = pa._weigh(out["items"])
+        assert pw["sector"].get(pa.CASH_BUCKET) == 10.0
+
+    def test_no_book_returns_none_so_the_caller_falls_back(self, monkeypatch):
+        self._wire(monkeypatch, rows=[], link=False)
+        assert pa._book_port_items(7, {}) is None

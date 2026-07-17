@@ -4504,6 +4504,22 @@
                 "type": "null"
               }
             ]
+          },
+          "weight_basis": {
+            "default": "model",
+            "title": "Weight Basis",
+            "type": "string"
+          },
+          "weight_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight Note"
           }
         },
         "required": [
@@ -9675,7 +9691,7 @@
     },
     "/api/airs/model-portfolios/{portfolio_id}/analysis": {
       "get": {
-        "description": "Sector / region / currency split of one model portfolio, beside the benchmark's.",
+        "description": "Sector / region / currency split of one model portfolio, beside the benchmark's.\n\n`weight_by=book` weights the portfolio bars by the paired AIRS book's actual EUR holdings\ninstead of the model's nominal weights; the benchmark and the classification are unchanged.",
         "operationId": "airs_model_portfolio_analysis_api_airs_model_portfolios__portfolio_id__analysis_get",
         "parameters": [
           {
@@ -9694,6 +9710,16 @@
             "schema": {
               "default": "SP500",
               "title": "Benchmark",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "weight_by",
+            "required": false,
+            "schema": {
+              "default": "model",
+              "title": "Weight By",
               "type": "string"
             }
           }

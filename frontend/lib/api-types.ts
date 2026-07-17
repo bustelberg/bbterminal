@@ -1025,6 +1025,9 @@ export interface paths {
         /**
          * Airs Model Portfolio Analysis
          * @description Sector / region / currency split of one model portfolio, beside the benchmark's.
+         *
+         *     `weight_by=book` weights the portfolio bars by the paired AIRS book's actual EUR holdings
+         *     instead of the model's nominal weights; the benchmark and the classification are unchanged.
          */
         get: operations["airs_model_portfolio_analysis_api_airs_model_portfolios__portfolio_id__analysis_get"];
         put?: never;
@@ -7268,6 +7271,13 @@ export interface components {
             /** Portfolio Id */
             portfolio_id: number;
             returns?: components["schemas"]["PortfolioAnalysisReturns"] | null;
+            /**
+             * Weight Basis
+             * @default model
+             */
+            weight_basis?: string;
+            /** Weight Note */
+            weight_note?: string | null;
         };
         /**
          * ModelPortfolioAttribution
@@ -9677,6 +9687,7 @@ export interface operations {
         parameters: {
             query?: {
                 benchmark?: string;
+                weight_by?: string;
             };
             header?: never;
             path: {

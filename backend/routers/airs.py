@@ -513,6 +513,13 @@ class ModelPortfolioAnalysis(BaseModel):
     name: str | None = None
     as_of: str | None = None
     benchmark: str
+    # Which side the portfolio bars weight by: "model" (nominal strategy weights) or "book" (the
+    # paired AIRS book's actual EUR holdings). Only the WEIGHTS change — classification and the
+    # benchmark are identical, because the benchmark can only be priced in the yfinance world and
+    # a book-vs-yfinance-index comparison would not be a comparison. `weight_note` is set only
+    # when "book" was requested but no priced book exists, so the model weights are shown instead.
+    weight_basis: str = "model"
+    weight_note: str | None = None
     benchmark_members: int = 0
     holdings: int = 0
     covered_pct: float = 0.0
@@ -534,13 +541,19 @@ class ModelPortfolioAnalysis(BaseModel):
 
 @router.get("/api/airs/model-portfolios/{portfolio_id}/analysis",
             response_model=ModelPortfolioAnalysis)
-async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP500"):
-    """Sector / region / currency split of one model portfolio, beside the benchmark's."""
+async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP500",
+                                        weight_by: str = "model"):
+    """Sector / region / currency split of one model portfolio, beside the benchmark's.
+
+    `weight_by=book` weights the portfolio bars by the paired AIRS book's actual EUR holdings
+    instead of the model's nominal weights; the benchmark and the classification are unchanged.
+    """
     from routers._airs_portfolio_analysis import (  # noqa: PLC0415
         compute_portfolio_analysis_async,
     )
 
-    return await compute_portfolio_analysis_async(portfolio_id, benchmark)
+    basis = weight_by if weight_by in ("model", "book") else "model"
+    return await compute_portfolio_analysis_async(portfolio_id, benchmark, basis)
 
 
 class AttributionName(BaseModel):

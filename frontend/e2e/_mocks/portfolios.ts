@@ -360,6 +360,8 @@ export const FIXTURE_ANALYSIS = {
   name: 'AITopSelectie OFF FX',
   as_of: '2025-12-30',
   benchmark: 'SP500',
+  weight_basis: 'model',
+  weight_note: null,
   benchmark_members: 491,
   holdings: 24,
   covered_pct: 100,
@@ -438,10 +440,14 @@ export async function mockPortfolios(page: Page) {
     });
   });
   await page.route('**/api/airs/model-portfolios/*/analysis**', async (route) => {
+    const params = new URL(route.request().url()).searchParams;
     // The benchmark is a query param, and ACWI is the one that cannot be fully rebuilt — its
     // missing constituents are a whole country at a time, so the coverage warning must appear.
-    const acwi = new URL(route.request().url()).searchParams.get('benchmark') === 'ACWI';
-    const body = acwi
+    const acwi = params.get('benchmark') === 'ACWI';
+    // Book weights change ONLY the portfolio bars, never the benchmark — the fixture below has
+    // Technology at 45% under the model, 52% under the book, so a test can see the toggle bite.
+    const book = params.get('weight_by') === 'book';
+    let body = acwi
       ? {
         ...FIXTURE_ANALYSIS,
         benchmark: 'ACWI',
@@ -450,6 +456,18 @@ export async function mockPortfolios(page: Page) {
         benchmark_coverage_pct: 67,
       }
       : FIXTURE_ANALYSIS;
+    if (book) {
+      body = {
+        ...body,
+        weight_basis: 'book',
+        holdings: 41,
+        axes: body.axes.map((ax) => ax.axis !== 'sector' ? ax : {
+          ...ax,
+          rows: ax.rows.map((r) => r.bucket !== 'Technology' ? r
+            : { ...r, portfolio_pct: 52, diff_pct: 52 - r.benchmark_pct }),
+        }),
+      };
+    }
     await route.fulfill({
       status: 200,
       contentType: 'application/json',

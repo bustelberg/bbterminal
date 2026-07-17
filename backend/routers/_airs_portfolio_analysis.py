@@ -303,9 +303,74 @@ def _book_return(portfolio_id: int, ytd_from: str | None, model_ytd: float | Non
     }
 
 
+def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
+    """The composition as the BOOK actually holds it — weighted by AIRS's EUR values, not the
+    model's nominal percentages.
+
+    ⚠ ONLY THE WEIGHTS COME FROM AIRS. The classification (sector / region / currency) still runs
+    through the SAME `_grid` + `_buckets` the model side and the benchmark use — yfinance's
+    `asset_grid`, joined by ISIN. It has to: the benchmark is classified that way, and two
+    taxonomies in one chart invent a tilt ("Technology" vs "Information Technology" is not a bet).
+    AIRS's own `BU-Inf.Technol` vocabulary would be exactly that mistake.
+
+    The ISIN comes from the book's own name→ISIN resolution (`resolve_account_isins`, the
+    price-gated match), because `airs_holding` carries no ISIN. A wrong SHARE CLASS there is
+    harmless for classification — both classes of a fund share sector/region/currency — even
+    where it would be a wrong price.
+
+    Returns None when the model has no paired book, or the book resolves to nothing priceable.
+    """
+    from routers._airs_account_links import list_account_links  # noqa: PLC0415
+    from routers._airs_holding_isin import resolve_account_isins  # noqa: PLC0415
+
+    link = next((a for a in list_account_links()["accounts"]
+                 if a.get("model_portfolio_id") == portfolio_id), None)
+    if not link:
+        return None
+    rows = (resolve_account_isins(link["portefeuille"]).get("rows") or [])
+    if not rows:
+        return None
+
+    grid = _grid(sorted({r["isin"] for r in rows if r.get("isin")}))
+    items: list[tuple[float, tuple[str, str, str]]] = []
+    classified_w = total_w = 0.0
+    foreign = holdings = 0
+    for r in rows:
+        # ⚠ Weight is the position VALUE, and a non-positive one is skipped — same rule the model
+        # side applies to a 0% weight. That drops a short (Nestle India at -EUR 44,680) and an
+        # overdraft cash line from the *composition*: a bar chart of what the book is LONG.
+        w = float(r.get("current_value_eur") or 0)
+        if w <= 0:
+            continue
+        total_w += w
+        holdings += 1
+        isin = r.get("isin")
+        is_cash = r.get("asset_class") == "Cash" or not isin
+        grow = grid.get(isin) if isin else None
+        b = _buckets(grow, is_cash=is_cash, isin=isin, codes=codes)
+        if b[0] != UNKNOWN_BUCKET:
+            classified_w += w
+        if grow and _foreign_listing(grow):
+            foreign += 1
+        items.append((w, b))
+    if not items:
+        return None
+    return {"items": items, "classified_w": classified_w, "total_w": total_w,
+            "foreign": foreign, "holdings": holdings, "portefeuille": link["portefeuille"]}
+
+
 def compute_portfolio_analysis(portfolio_id: int,
-                               benchmark_label: str = SP500_LABEL) -> dict:
-    """The portfolio's composition beside the benchmark's, on one set of buckets."""
+                               benchmark_label: str = SP500_LABEL,
+                               weight_by: str = "model") -> dict:
+    """The portfolio's composition beside the benchmark's, on one set of buckets.
+
+    `weight_by`:
+      "model" (default) — the strategy's nominal weights (`percentage`). What it is DESIGNED to
+                          hold. The panel is about the strategy, so this is the default.
+      "book"            — what the paired AIRS book ACTUALLY holds, weighted by EUR value. Only
+                          the weights change; the classification and the benchmark are identical.
+                          Falls back to "model" (with `weight_note`) when there is no book.
+    """
     p = (supabase.table("airs_model_portfolio")
          .select("id,name,positions_datum").eq("id", portfolio_id).limit(1).execute().data or [])
     if not p:
@@ -361,6 +426,22 @@ def compute_portfolio_analysis(portfolio_id: int,
             bench_foreign += 1
         bench_items.append((cap, b))
 
+    # ── Book weighting override ─────────────────────────────────────────────────────────────
+    # The model side is always built (it is the fallback). When the reader asks for book weights
+    # and a priced book exists, swap the portfolio items for the book's — nothing else moves, so
+    # the benchmark and the classification stay exactly as they were.
+    weight_basis, weight_note = "model", None
+    port_holdings = len([r for r in pos if r.get("isin")])
+    if weight_by == "book":
+        book = _book_port_items(portfolio_id, codes)
+        if book:
+            port_items = book["items"]
+            classified_w, total_w = book["classified_w"], book["total_w"]
+            port_foreign, port_holdings = book["foreign"], book["holdings"]
+            weight_basis = "book"
+        else:
+            weight_note = "No priced book to weight by — showing the model's own weights."
+
     pw, bw = _weigh(port_items), _weigh(bench_items)
 
     axes = []
@@ -382,7 +463,11 @@ def compute_portfolio_analysis(portfolio_id: int,
         "as_of": p.get("positions_datum"),
         "benchmark": benchmark_label,
         "benchmark_members": len(bench_items),
-        "holdings": len([r for r in pos if r.get("isin")]),
+        "holdings": port_holdings,
+        # Which side the portfolio bars describe: the model's nominal weights, or the book's
+        # actual EUR holdings. `weight_note` is set only when "book" was asked for and refused.
+        "weight_basis": weight_basis,
+        "weight_note": weight_note,
         # Coverage, always — a composition renormalised over a fraction of the model is the same
         # invention the returns refuse to make. The reader gets to see it.
         "covered_pct": (classified_w / total_w * 100.0) if total_w > 0 else 0.0,
@@ -408,5 +493,7 @@ def compute_portfolio_analysis(portfolio_id: int,
 
 
 async def compute_portfolio_analysis_async(portfolio_id: int,
-                                           benchmark_label: str = SP500_LABEL) -> dict:
-    return await asyncio.to_thread(compute_portfolio_analysis, portfolio_id, benchmark_label)
+                                           benchmark_label: str = SP500_LABEL,
+                                           weight_by: str = "model") -> dict:
+    return await asyncio.to_thread(compute_portfolio_analysis, portfolio_id, benchmark_label,
+                                   weight_by)
