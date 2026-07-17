@@ -138,7 +138,7 @@ export default function AddRow({
             ))}
           </ul>
           <div className="text-[11px] text-fg-subtle mt-2">
-            Click <span className="text-warn-300">Add anyway</span> to create a new row regardless, or <span className="text-fg-soft">Cancel</span> and use the existing match.
+            Click <span className="text-warn-300">Add anyway</span> to create a new row regardless, or <span className="text-fg-soft">Cancel</span>{' '}and use the existing match.
           </div>
         </td>
       </tr>

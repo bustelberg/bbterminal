@@ -1523,7 +1523,7 @@ function FullPriceRefreshSection({
       }
     >
       <div className="text-fg-soft">
-        Re-prices <span className="text-fg">every company</span> in the database (most-stale first), capped by the
+        Re-prices <span className="text-fg">every company</span>{' '}in the database (most-stale first), capped by the
         monthly GuruFocus quota that resets on the 1st — so the remaining budget is spent before it&apos;s lost.
         {nextRunAt && <> Runs automatically <span className="font-mono text-fg">{relTime(nextRunAt, nowMs)}</span> (last day of the month).</>}
       </div>

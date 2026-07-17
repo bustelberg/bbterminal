@@ -217,7 +217,7 @@ export default function MonthlyReturnsHeatmap({
     <div className="space-y-1">
       <div className="font-medium text-warn-300">Incomplete data — {monthLabel(staleWarning.month)}</div>
       <div className="text-fg-muted">
-        No close for <span className="font-mono">{staleWarning.reference_date}</span> yet; carried forward at an older price, so this month&apos;s return is partial:
+        No close for <span className="font-mono">{staleWarning.reference_date}</span>{' '}yet; carried forward at an older price, so this month&apos;s return is partial:
       </div>
       <ul className="space-y-0.5">
         {staleWarning.missing.slice(0, 12).map((m) => (
@@ -356,7 +356,7 @@ export default function MonthlyReturnsHeatmap({
       )}
       {view === 'excess' && (
         <div className="mb-2 px-1 text-[11px] text-fg-subtle">
-          Showing <span className="text-fg-soft">strategy − {benchLabel}</span> per month/day — green = strategy outperformed, red = underperformed.
+          Showing <span className="text-fg-soft">strategy − {benchLabel}</span>{' '}per month/day — green = strategy outperformed, red = underperformed.
         </div>
       )}
       <div className="overflow-x-auto">

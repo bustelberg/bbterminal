@@ -48,8 +48,14 @@ def _save_performance_to_db(portfolio_name: str, rows: list[dict]):
             "portefeuille": portfolio_name,
             "periode": r["periode"],
             "beginvermogen": r["beginvermogen"],
+            # The flows. Without these the two returns we store disagree with no stated cause.
+            "stortingen": r.get("stortingen"),
+            "onttrekkingen": r.get("onttrekkingen"),
             "koersresultaat": r["koersresultaat"],
             "opbrengsten": r["opbrengsten"],
+            # The two terms that close beleggingsresultaat = koers + opbrengsten - kosten + rente.
+            "kosten": r.get("kosten"),
+            "mutatie_opgelopen_rente": r.get("mutatie_opgelopen_rente"),
             "beleggingsresultaat": r["beleggingsresultaat"],
             "eindvermogen": r["eindvermogen"],
             "rendement": r["rendement"],
@@ -58,19 +64,59 @@ def _save_performance_to_db(portfolio_name: str, rows: list[dict]):
 
 
 def _parse_att_excel(content: bytes) -> list[dict]:
-    """Parse AT&T Excel bytes into a list of performance row dicts."""
+    """Parse the ATT (Rendementen) Excel bytes into a list of performance row dicts.
+
+    The sheet has TWELVE columns and we long read seven of them:
+
+        Periode · Beginvermogen · Stortingen · Onttrekkingen · Koersresultaat ·
+        Opbrengsten · Kosten · Mutatie opgelopen rente · Beleggingsresultaat ·
+        Eindvermogen · Rendement · Cumulatief rendement
+
+    ⚠ EVERY ROW IS ONE MONTH, AND EVERY MONEY COLUMN IS THAT MONTH'S. The sheet is a
+    chain — each row's `Beginvermogen` is the previous row's `Eindvermogen` — so the year
+    is the SUM of these rows, not the last of them. `_airs_accounts._year_perf` is the only
+    place that assembly happens; read its docstring before using anything here.
+
+    ⚠ `Stortingen`/`Onttrekkingen` are the flows, and they are the term that closes the
+    year: eind - begin - stortingen + onttrekkingen == sum(beleggingsresultaat), to -0.00
+    on AITopSelectie. They are NOT why `rendement` and `cumulatief_rendement` differ — that
+    is the month-vs-year thing above, and AITopSelectie has zero flows all year.
+
+    ⚠ `Mutatie opgelopen rente` closes the per-row result:
+
+        beleggingsresultaat = koersresultaat + opbrengsten + mutatie_opgelopen_rente
+
+    measured on BUS_BepOffensief_Dyn (-1358.33 + 1734.67 + 21.37 = 397.71 exactly). Where
+    it is 0 the shorter form holds exactly too (23343.756055 + 1706.29 = 25050.05), which
+    is how checking a single portfolio talks you into the wrong rule.
+
+    ⚠ `Kosten` is 0.00 on every portfolio read so far, so its SIGN is unverified — the
+    identity cannot tell `- kosten` from `+ kosten` while the term is zero. Parsed and
+    stored; kept out of arithmetic until a book with real costs turns up.
+    """
     df = pd.read_excel(io.BytesIO(content), engine="xlrd")
+
+    def num(r, col, digits=2):
+        """`col` off the row, rounded — or None. Absent column and absent value are the same
+        answer here: we did not read a number. Never 0, which would be a claim."""
+        v = r.get(col)
+        return round(float(v), digits) if pd.notna(v) else None
+
     rows = []
     for _, r in df.iterrows():
         rows.append({
             "periode": str(r.get("Periode", ""))[:10],
-            "beginvermogen": round(float(r["Beginvermogen"]), 2) if pd.notna(r.get("Beginvermogen")) else None,
-            "koersresultaat": round(float(r["Koersresultaat"]), 2) if pd.notna(r.get("Koersresultaat")) else None,
-            "opbrengsten": round(float(r["Opbrengsten"]), 2) if pd.notna(r.get("Opbrengsten")) else None,
-            "beleggingsresultaat": round(float(r["Beleggingsresultaat"]), 2) if pd.notna(r.get("Beleggingsresultaat")) else None,
-            "eindvermogen": round(float(r["Eindvermogen"]), 2) if pd.notna(r.get("Eindvermogen")) else None,
-            "rendement": round(float(r["Rendement"]), 6) if pd.notna(r.get("Rendement")) else None,
-            "cumulatief_rendement": round(float(r["Cumulatief rendement"]), 6) if pd.notna(r.get("Cumulatief rendement")) else None,
+            "beginvermogen": num(r, "Beginvermogen"),
+            "stortingen": num(r, "Stortingen"),
+            "onttrekkingen": num(r, "Onttrekkingen"),
+            "koersresultaat": num(r, "Koersresultaat"),
+            "opbrengsten": num(r, "Opbrengsten"),
+            "kosten": num(r, "Kosten"),
+            "mutatie_opgelopen_rente": num(r, "Mutatie opgelopen rente"),
+            "beleggingsresultaat": num(r, "Beleggingsresultaat"),
+            "eindvermogen": num(r, "Eindvermogen"),
+            "rendement": num(r, "Rendement", 6),
+            "cumulatief_rendement": num(r, "Cumulatief rendement", 6),
         })
     return rows
 
@@ -431,6 +477,20 @@ class PortfolioAnalysisReturns(BaseModel):
     benchmark_since_pct: float | None = None
     since_excess_pct: float | None = None
     ytd_is_since: bool = False
+
+    # ── The BOOK, beside the STRATEGY this modal describes ──────────────────────────────────
+    # This modal is the FIXED portfolio (weights, yfinance). The row that opened it is the
+    # DYNAMIC book (real positions, AIRS). `book_gap_pct` = strategy − book is the drift between
+    # them, and it is the whole reason the two-table split exists.
+    #
+    # ⚠ `book_comparable` GUARDS THE SUBTRACTION. The book is always the calendar year; the
+    # model's YTD is partial for 9 of 28. Where the windows differ, `book_gap_pct` is None and
+    # `book_reason` says why — a gap across two windows is not drift.
+    book_portefeuille: str | None = None
+    book_ytd_pct: float | None = None
+    book_comparable: bool | None = None
+    book_gap_pct: float | None = None
+    book_reason: str | None = None
 
 
 class ModelPortfolioAnalysis(BaseModel):
@@ -1132,26 +1192,43 @@ async def parse_portfolio(file: UploadFile = File(...)):
 
 
 class AirsAccount(BaseModel):
-    """One AIRS account, on AIRS's own numbers.
+    """One AIRS account's YEAR, on AIRS's own numbers.
 
-    ⚠ `ytd_pct` IS `cumulatief_rendement` — AIRS's own, flow-aware. It is NOT
-    `end_value_eur / begin_value_eur - 1`; that ratio is `value_ratio_pct` below, and it is the
-    WRONG number. AIRS publishes both and they disagree by more than a point in 31 of 38 accounts
-    (AITopSelectie OFF DYN: the ratio says -5.85% on a book that made +46.12%). A value ratio is a
-    return only when nothing was deposited or withdrawn, and these are real accounts.
+    ⚠ EVERY MONEY FIELD HERE IS THE YEAR'S, SUMMED ACROSS AIRS'S MONTHLY ROWS. One ATT row is
+    one MONTH — reading the freshest as "the year" served AITopSelectie's July price result of
+    -130,063 where the year made +420,225: wrong sign, third of the size, beside a +42% YTD.
+    `_airs_accounts._year_perf` does the assembly; read it before adding a field here.
+
+    ⚠ `ytd_pct` IS `cumulatief_rendement` — AIRS's own, flow-aware, and never
+    `end_value_eur / begin_value_eur - 1`.
+
+    ⚠ `latest_month_pct` IS NOT A RIVAL YTD. It is AIRS's `rendement` off the newest row: the
+    latest month's return. It was once served as `value_ratio_pct` and described as "the wrong
+    number", on the theory that deposits inflated it — but AITopSelectie has zero deposits in
+    every month of 2026 and still reads -5.85% there against +46.12% for the year. Different
+    windows, both correct.
     """
 
     portefeuille: str
-    periode: str | None = None          # the window's END; the window opens 1 Jan
+    periode: str | None = None          # the newest month's END
     as_of: str | None = None            # the holdings snapshot we hold, if any
-    begin_value_eur: float | None = None
+    months: int | None = None           # monthly rows behind these figures
+    begin_value_eur: float | None = None       # the YEAR's opening (the first month's)
     end_value_eur: float | None = None
     ytd_pct: float | None = None        # cumulatief_rendement — the answer
-    # Carried ONLY so the gap to `ytd_pct` can be shown. Not an alternative; the wrong one.
-    value_ratio_pct: float | None = None
-    price_result_eur: float | None = None      # koersresultaat — the "price gains"
-    income_eur: float | None = None            # opbrengsten — dividends/coupons
-    investment_result_eur: float | None = None
+    latest_month_pct: float | None = None      # rendement, newest row — a different window
+    price_result_eur: float | None = None      # koersresultaat — the "price gains", year
+    income_eur: float | None = None            # opbrengsten — dividends/coupons, year
+    investment_result_eur: float | None = None  # beleggingsresultaat, year
+    costs_eur: float | None = None             # kosten (0 everywhere measured; sign unverified)
+    accrued_interest_change_eur: float | None = None   # mutatie opgelopen rente
+    deposits_eur: float | None = None          # stortingen
+    withdrawals_eur: float | None = None       # onttrekkingen
+    # AIRS's own identity, asserted not assumed:
+    #   end - begin - deposits + withdrawals == investment_result_eur
+    # A month missing from our copy shortens the year while still looking like one.
+    residual_eur: float | None = None
+    reconciles: bool | None = None
     holdings: int | None = None
 
 
@@ -1209,3 +1286,214 @@ async def airs_account_holdings(portefeuille: str):
     from routers._airs_accounts import account_holdings_async  # noqa: PLC0415
 
     return await account_holdings_async(portefeuille)
+
+
+class AirsAccountModelLink(BaseModel):
+    """One account, and the model it runs.
+
+    `source` says where the pairing came from and is the whole point of the row:
+      manual — a human decided (always wins, including a decision of "none")
+      guess  — an exact stem match, recomputed on every read, never stored
+      none   — nobody has decided and we will not guess
+    """
+
+    portefeuille: str
+    ytd_pct: float | None = None
+    months: int | None = None
+    model_portfolio_id: int | None = None
+    model_name: str | None = None
+    model_positions: int | None = None
+    source: str
+    reason: str | None = None
+
+
+class AirsModelChoice(BaseModel):
+    id: int
+    name: str
+    positions: int
+
+
+class AirsAccountModelLinks(BaseModel):
+    accounts: list[AirsAccountModelLink]
+    models: list[AirsModelChoice]
+
+
+class AirsAccountLinkRequest(BaseModel):
+    # None IS a value: "this account runs none of our models" (every benchmark). Distinct from
+    # DELETE, which forgets the decision and lets the guess speak again.
+    model_portfolio_id: int | None = None
+    note: str | None = None
+
+
+class AirsPortfolioOverview(BaseModel):
+    """A portfolio: your name for it, AIRS's numbers for it.
+
+    ⚠ `link_source` IS PART OF THE ROW, NOT A DETAIL. `name` comes from the Fixed portfolio this
+    book is paired with, and 27 of 28 pairings are an unconfirmed name match. A wrong pairing
+    puts a real book's money under another strategy's name, and — because the risk variants of a
+    strategy hold the SAME instruments — nothing else on the row would look wrong.
+    """
+
+    name: str
+    description: str | None = None
+    dynamic_portefeuille: str
+    fixed_name: str | None = None
+    fixed_portfolio_id: int | None = None
+    fixed_type: str | None = None
+    isins: int | None = None            # None = unlinked; NOT 0
+    link_source: str
+    link_reason: str | None = None
+    as_of: str | None = None
+    periode: str | None = None
+    months: int | None = None
+    ytd_pct: float | None = None
+    latest_month_pct: float | None = None
+    price_result_eur: float | None = None
+    income_eur: float | None = None
+    investment_result_eur: float | None = None
+    deposits_eur: float | None = None
+    withdrawals_eur: float | None = None
+    begin_value_eur: float | None = None
+    end_value_eur: float | None = None
+    holdings: int | None = None
+    reconciles: bool | None = None
+    residual_eur: float | None = None
+
+
+@router.get("/api/airs/portfolios/overview", response_model=list[AirsPortfolioOverview])
+async def airs_portfolios_overview():
+    """Every AIRS book in one table: named by the Fixed portfolio it runs, valued by AIRS.
+
+    The Fixed side has the ISINs and your nickname and AIRS values none of it; the Dynamic side
+    has the money and no ISIN. Overlap between the two: zero. This is the pair, composed.
+    """
+    from routers._airs_overview import list_overview_async  # noqa: PLC0415
+
+    return await list_overview_async()
+
+
+class AirsHoldingIsin(BaseModel):
+    """One account holding, with the ISIN we believe it is — and how much to believe it.
+
+    ⚠ `verdict` IS THE FIELD THAT MATTERS, AND `name_score` IS NOT.
+      ok             the implied price agrees with that ISIN's own close (FX-converted)
+      price_mismatch it does NOT — the ISIN is not what the book holds, or the book drifted
+      unpriced       we have no series for it, so there is NOTHING confirming the name match
+
+    `unpriced` is not a pass. The name matched and nothing checked it — which for a fund is
+    exactly where the Acc/Inc share-class trap lives.
+    """
+
+    holding_name: str
+    lines: int = 1                 # >1 = AIRS billed this instrument on several rows
+    # AIRS's own Beleggingscategorie, mapped. ⚠ It classifies what a holding INVESTS IN, not its
+    # wrapper — an equity ETF is Equity, a bond ETF is Bonds. `is_etf` is the second axis.
+    asset_class: str | None = None
+    categorie: str | None = None
+    sector: str | None = None
+    is_etf: bool | None = None
+    quantity: float | None = None
+    currency: str | None = None
+    weight: float | None = None
+    current_value_eur: float | None = None
+    start_value_eur: float | None = None
+    ytd_return_eur: float | None = None
+    isin: str | None = None
+    model_fonds: str | None = None
+    model_pct: float | None = None
+    name_score: float | None = None
+    weak_name: bool | None = None
+    implied_price_eur: float | None = None
+    our_price_eur: float | None = None
+    price_ratio: float | None = None
+    verdict: str
+    our_instrument: str | None = None
+
+
+class AirsHoldingSegment(BaseModel):
+    """One asset class within a portfolio: the exposure, and what it returned.
+
+    ⚠ `return_pct` AND `weight_pct` DO NOT COVER THE SAME HOLDINGS. A holding with no opening
+    value has an undefined return but real exposure, so it counts in the weight and not in the
+    return — otherwise its whole value reads as gain (cash is exactly this, and so is a short:
+    Nestle India at -3,504 shares). `priced_value_eur` states how much the return spans.
+
+    ⚠ It is a PRICE return, like the rows it is built from: no income, not flow-aware. The
+    segments do not sum to the portfolio's own figure.
+    """
+
+    asset_class: str
+    holdings: int
+    value_eur: float | None = None
+    # Sums the Start column beneath it — including the zeros of holdings with no opening value.
+    # So value - start != gain wherever such a holding sits: the gap is exposure, not gain.
+    start_value_eur: float | None = None
+    weight_pct: float | None = None
+    gain_eur: float | None = None
+    return_pct: float | None = None
+    priced_value_eur: float | None = None
+    etf_value_eur: float | None = None   # ETFs are counted here, never bucketed as a sibling
+
+
+class AirsModelPositionLeftover(BaseModel):
+    fonds: str | None = None
+    isin: str | None = None
+    percentage: float | None = None
+
+
+class AirsAccountIsins(BaseModel):
+    portefeuille: str
+    model_name: str | None = None
+    model_source: str | None = None
+    as_of: str | None = None
+    reason: str | None = None
+    rows: list[AirsHoldingIsin] = []
+    segments: list[AirsHoldingSegment] = []
+    unmatched_model_positions: list[AirsModelPositionLeftover] = []
+
+
+@router.get("/api/airs/accounts/{portefeuille}/isins", response_model=AirsAccountIsins)
+async def airs_account_isins(portefeuille: str):
+    """An account's holdings with an ISIN attached to each, price-checked.
+
+    The account has the money and no ISIN; its model has the ISINs and nothing AIRS values.
+    This joins them row-by-row inside the pair confirmed on `/account-model-links`, and then
+    REFUSES TO TRUST ITS OWN NAME MATCH: every row is checked against the instrument's own
+    close, because a name cannot see a share class (IE00BNDS1P30 vs IE00BNDS1Q47 are both
+    "Vanguard ESG Global Corporate Bond UCITS ETF EUR Hedged" — Acc and Inc, €4.79 vs €3.99,
+    and they compound differently).
+    """
+    from routers._airs_holding_isin import resolve_account_isins_async  # noqa: PLC0415
+
+    return await resolve_account_isins_async(portefeuille)
+
+
+@router.get("/api/airs/account-model-links", response_model=AirsAccountModelLinks)
+async def airs_account_model_links():
+    """Which MODEL is each AIRS ACCOUNT running — decided, guessed, or neither.
+
+    This is the only bridge between the ISINs (models have them, and AIRS values nothing) and
+    the money (accounts have it, and carry no ISIN). It cannot be derived: the holdings do not
+    identify the model — BUS_FTS_Bepoff/DEF/NEU_AFS hold the IDENTICAL 27 ISINs — so the name
+    is the only discriminator, and the name is four conventions and a typo. Hence a guess that
+    refuses rather than approximates, plus a stored human decision.
+    """
+    from routers._airs_account_links import list_account_links_async  # noqa: PLC0415
+
+    return await list_account_links_async()
+
+
+@router.put("/api/airs/account-model-links/{portefeuille}", response_model=dict)
+async def set_airs_account_model_link(portefeuille: str, body: AirsAccountLinkRequest):
+    """Record which model an account runs. `model_portfolio_id: null` means "explicitly none"."""
+    from routers._airs_account_links import set_account_link_async  # noqa: PLC0415
+
+    return await set_account_link_async(portefeuille, body.model_portfolio_id, body.note)
+
+
+@router.delete("/api/airs/account-model-links/{portefeuille}", response_model=dict)
+async def clear_airs_account_model_link(portefeuille: str):
+    """Forget the decision — the guess speaks again. NOT the same as storing "none"."""
+    from routers._airs_account_links import clear_account_link_async  # noqa: PLC0415
+
+    return await clear_account_link_async(portefeuille)

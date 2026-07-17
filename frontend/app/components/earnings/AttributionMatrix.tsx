@@ -156,8 +156,8 @@ export default function AttributionMatrix({ basketA, basketB }: { basketA: Baske
 
           <p className="text-xs text-fg-subtle leading-relaxed">
             Diagonal (shaded) = each portfolio&apos;s actual {data.year} return.
-            Down a column → same stock returns, different sector weights = <span className="text-fg-soft">allocation</span> effect.
-            Across a row → same weights, different stocks = <span className="text-fg-soft">selection</span> effect.
+            Down a column → same stock returns, different sector weights = <span className="text-fg-soft">allocation</span>{' '}effect.
+            Across a row → same weights, different stocks = <span className="text-fg-soft">selection</span>{' '}effect.
             Sectors: {data.universe}.
           </p>
 

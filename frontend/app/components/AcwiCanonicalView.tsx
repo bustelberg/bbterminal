@@ -332,7 +332,7 @@ export default function AcwiCanonicalView() {
 
       {!hasData ? (
         <div className="px-5 py-6 text-sm text-fg-muted border-t border-neutral-800/40">
-          No membership captured yet. Click <span className="text-fg">Refresh now</span> to build the current ACWI snapshot (takes ~30-60s).
+          No membership captured yet. Click <span className="text-fg">Refresh now</span>{' '}to build the current ACWI snapshot (takes ~30-60s).
         </div>
       ) : (
         <div className="border-t border-neutral-800/40">

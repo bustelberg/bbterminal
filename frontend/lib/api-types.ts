@@ -786,6 +786,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/account-model-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Account Model Links
+         * @description Which MODEL is each AIRS ACCOUNT running — decided, guessed, or neither.
+         *
+         *     This is the only bridge between the ISINs (models have them, and AIRS values nothing) and
+         *     the money (accounts have it, and carry no ISIN). It cannot be derived: the holdings do not
+         *     identify the model — BUS_FTS_Bepoff/DEF/NEU_AFS hold the IDENTICAL 27 ISINs — so the name
+         *     is the only discriminator, and the name is four conventions and a typo. Hence a guess that
+         *     refuses rather than approximates, plus a stored human decision.
+         */
+        get: operations["airs_account_model_links_api_airs_account_model_links_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/account-model-links/{portefeuille}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Airs Account Model Link
+         * @description Record which model an account runs. `model_portfolio_id: null` means "explicitly none".
+         */
+        put: operations["set_airs_account_model_link_api_airs_account_model_links__portefeuille__put"];
+        post?: never;
+        /**
+         * Clear Airs Account Model Link
+         * @description Forget the decision — the guess speaks again. NOT the same as storing "none".
+         */
+        delete: operations["clear_airs_account_model_link_api_airs_account_model_links__portefeuille__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/accounts": {
         parameters: {
             query?: never;
@@ -825,6 +875,33 @@ export interface paths {
          *     prices 0 of 9).
          */
         get: operations["airs_account_holdings_api_airs_accounts__portefeuille__holdings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/accounts/{portefeuille}/isins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Account Isins
+         * @description An account's holdings with an ISIN attached to each, price-checked.
+         *
+         *     The account has the money and no ISIN; its model has the ISINs and nothing AIRS values.
+         *     This joins them row-by-row inside the pair confirmed on `/account-model-links`, and then
+         *     REFUSES TO TRUST ITS OWN NAME MATCH: every row is checked against the instrument's own
+         *     close, because a name cannot see a share class (IE00BNDS1P30 vs IE00BNDS1Q47 are both
+         *     "Vanguard ESG Global Corporate Bond UCITS ETF EUR Hedged" — Acc and Inc, €4.79 vs €3.99,
+         *     and they compound differently).
+         */
+        get: operations["airs_account_isins_api_airs_accounts__portefeuille__isins_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1121,6 +1198,29 @@ export interface paths {
          * @description Portfolios we already have performance data for, with latest YTD.
          */
         get: operations["airs_portfolios_from_db_api_airs_portfolios_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/portfolios/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Portfolios Overview
+         * @description Every AIRS book in one table: named by the Fixed portfolio it runs, valued by AIRS.
+         *
+         *     The Fixed side has the ISINs and your nickname and AIRS values none of it; the Dynamic side
+         *     has the money and no ISIN. Overlap between the two: zero. This is the pair, composed.
+         */
+        get: operations["airs_portfolios_overview_api_airs_portfolios_overview_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5620,19 +5720,33 @@ export interface components {
     schemas: {
         /**
          * AirsAccount
-         * @description One AIRS account, on AIRS's own numbers.
+         * @description One AIRS account's YEAR, on AIRS's own numbers.
          *
-         *     ⚠ `ytd_pct` IS `cumulatief_rendement` — AIRS's own, flow-aware. It is NOT
-         *     `end_value_eur / begin_value_eur - 1`; that ratio is `value_ratio_pct` below, and it is the
-         *     WRONG number. AIRS publishes both and they disagree by more than a point in 31 of 38 accounts
-         *     (AITopSelectie OFF DYN: the ratio says -5.85% on a book that made +46.12%). A value ratio is a
-         *     return only when nothing was deposited or withdrawn, and these are real accounts.
+         *     ⚠ EVERY MONEY FIELD HERE IS THE YEAR'S, SUMMED ACROSS AIRS'S MONTHLY ROWS. One ATT row is
+         *     one MONTH — reading the freshest as "the year" served AITopSelectie's July price result of
+         *     -130,063 where the year made +420,225: wrong sign, third of the size, beside a +42% YTD.
+         *     `_airs_accounts._year_perf` does the assembly; read it before adding a field here.
+         *
+         *     ⚠ `ytd_pct` IS `cumulatief_rendement` — AIRS's own, flow-aware, and never
+         *     `end_value_eur / begin_value_eur - 1`.
+         *
+         *     ⚠ `latest_month_pct` IS NOT A RIVAL YTD. It is AIRS's `rendement` off the newest row: the
+         *     latest month's return. It was once served as `value_ratio_pct` and described as "the wrong
+         *     number", on the theory that deposits inflated it — but AITopSelectie has zero deposits in
+         *     every month of 2026 and still reads -5.85% there against +46.12% for the year. Different
+         *     windows, both correct.
          */
         AirsAccount: {
+            /** Accrued Interest Change Eur */
+            accrued_interest_change_eur?: number | null;
             /** As Of */
             as_of?: string | null;
             /** Begin Value Eur */
             begin_value_eur?: number | null;
+            /** Costs Eur */
+            costs_eur?: number | null;
+            /** Deposits Eur */
+            deposits_eur?: number | null;
             /** End Value Eur */
             end_value_eur?: number | null;
             /** Holdings */
@@ -5641,14 +5755,22 @@ export interface components {
             income_eur?: number | null;
             /** Investment Result Eur */
             investment_result_eur?: number | null;
+            /** Latest Month Pct */
+            latest_month_pct?: number | null;
+            /** Months */
+            months?: number | null;
             /** Periode */
             periode?: string | null;
             /** Portefeuille */
             portefeuille: string;
             /** Price Result Eur */
             price_result_eur?: number | null;
-            /** Value Ratio Pct */
-            value_ratio_pct?: number | null;
+            /** Reconciles */
+            reconciles?: boolean | null;
+            /** Residual Eur */
+            residual_eur?: number | null;
+            /** Withdrawals Eur */
+            withdrawals_eur?: number | null;
             /** Ytd Pct */
             ytd_pct?: number | null;
         };
@@ -5699,6 +5821,245 @@ export interface components {
             ytd_return_local_pct?: number | null;
             /** Ytd Return Pct */
             ytd_return_pct?: number | null;
+        };
+        /** AirsAccountIsins */
+        AirsAccountIsins: {
+            /** As Of */
+            as_of?: string | null;
+            /** Model Name */
+            model_name?: string | null;
+            /** Model Source */
+            model_source?: string | null;
+            /** Portefeuille */
+            portefeuille: string;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Rows
+             * @default []
+             */
+            rows?: components["schemas"]["AirsHoldingIsin"][];
+            /**
+             * Segments
+             * @default []
+             */
+            segments?: components["schemas"]["AirsHoldingSegment"][];
+            /**
+             * Unmatched Model Positions
+             * @default []
+             */
+            unmatched_model_positions?: components["schemas"]["AirsModelPositionLeftover"][];
+        };
+        /** AirsAccountLinkRequest */
+        AirsAccountLinkRequest: {
+            /** Model Portfolio Id */
+            model_portfolio_id?: number | null;
+            /** Note */
+            note?: string | null;
+        };
+        /**
+         * AirsAccountModelLink
+         * @description One account, and the model it runs.
+         *
+         *     `source` says where the pairing came from and is the whole point of the row:
+         *       manual — a human decided (always wins, including a decision of "none")
+         *       guess  — an exact stem match, recomputed on every read, never stored
+         *       none   — nobody has decided and we will not guess
+         */
+        AirsAccountModelLink: {
+            /** Model Name */
+            model_name?: string | null;
+            /** Model Portfolio Id */
+            model_portfolio_id?: number | null;
+            /** Model Positions */
+            model_positions?: number | null;
+            /** Months */
+            months?: number | null;
+            /** Portefeuille */
+            portefeuille: string;
+            /** Reason */
+            reason?: string | null;
+            /** Source */
+            source: string;
+            /** Ytd Pct */
+            ytd_pct?: number | null;
+        };
+        /** AirsAccountModelLinks */
+        AirsAccountModelLinks: {
+            /** Accounts */
+            accounts: components["schemas"]["AirsAccountModelLink"][];
+            /** Models */
+            models: components["schemas"]["AirsModelChoice"][];
+        };
+        /**
+         * AirsHoldingIsin
+         * @description One account holding, with the ISIN we believe it is — and how much to believe it.
+         *
+         *     ⚠ `verdict` IS THE FIELD THAT MATTERS, AND `name_score` IS NOT.
+         *       ok             the implied price agrees with that ISIN's own close (FX-converted)
+         *       price_mismatch it does NOT — the ISIN is not what the book holds, or the book drifted
+         *       unpriced       we have no series for it, so there is NOTHING confirming the name match
+         *
+         *     `unpriced` is not a pass. The name matched and nothing checked it — which for a fund is
+         *     exactly where the Acc/Inc share-class trap lives.
+         */
+        AirsHoldingIsin: {
+            /** Asset Class */
+            asset_class?: string | null;
+            /** Categorie */
+            categorie?: string | null;
+            /** Currency */
+            currency?: string | null;
+            /** Current Value Eur */
+            current_value_eur?: number | null;
+            /** Holding Name */
+            holding_name: string;
+            /** Implied Price Eur */
+            implied_price_eur?: number | null;
+            /** Is Etf */
+            is_etf?: boolean | null;
+            /** Isin */
+            isin?: string | null;
+            /**
+             * Lines
+             * @default 1
+             */
+            lines?: number;
+            /** Model Fonds */
+            model_fonds?: string | null;
+            /** Model Pct */
+            model_pct?: number | null;
+            /** Name Score */
+            name_score?: number | null;
+            /** Our Instrument */
+            our_instrument?: string | null;
+            /** Our Price Eur */
+            our_price_eur?: number | null;
+            /** Price Ratio */
+            price_ratio?: number | null;
+            /** Quantity */
+            quantity?: number | null;
+            /** Sector */
+            sector?: string | null;
+            /** Start Value Eur */
+            start_value_eur?: number | null;
+            /** Verdict */
+            verdict: string;
+            /** Weak Name */
+            weak_name?: boolean | null;
+            /** Weight */
+            weight?: number | null;
+            /** Ytd Return Eur */
+            ytd_return_eur?: number | null;
+        };
+        /**
+         * AirsHoldingSegment
+         * @description One asset class within a portfolio: the exposure, and what it returned.
+         *
+         *     ⚠ `return_pct` AND `weight_pct` DO NOT COVER THE SAME HOLDINGS. A holding with no opening
+         *     value has an undefined return but real exposure, so it counts in the weight and not in the
+         *     return — otherwise its whole value reads as gain (cash is exactly this, and so is a short:
+         *     Nestle India at -3,504 shares). `priced_value_eur` states how much the return spans.
+         *
+         *     ⚠ It is a PRICE return, like the rows it is built from: no income, not flow-aware. The
+         *     segments do not sum to the portfolio's own figure.
+         */
+        AirsHoldingSegment: {
+            /** Asset Class */
+            asset_class: string;
+            /** Etf Value Eur */
+            etf_value_eur?: number | null;
+            /** Gain Eur */
+            gain_eur?: number | null;
+            /** Holdings */
+            holdings: number;
+            /** Priced Value Eur */
+            priced_value_eur?: number | null;
+            /** Return Pct */
+            return_pct?: number | null;
+            /** Start Value Eur */
+            start_value_eur?: number | null;
+            /** Value Eur */
+            value_eur?: number | null;
+            /** Weight Pct */
+            weight_pct?: number | null;
+        };
+        /** AirsModelChoice */
+        AirsModelChoice: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Positions */
+            positions: number;
+        };
+        /** AirsModelPositionLeftover */
+        AirsModelPositionLeftover: {
+            /** Fonds */
+            fonds?: string | null;
+            /** Isin */
+            isin?: string | null;
+            /** Percentage */
+            percentage?: number | null;
+        };
+        /**
+         * AirsPortfolioOverview
+         * @description A portfolio: your name for it, AIRS's numbers for it.
+         *
+         *     ⚠ `link_source` IS PART OF THE ROW, NOT A DETAIL. `name` comes from the Fixed portfolio this
+         *     book is paired with, and 27 of 28 pairings are an unconfirmed name match. A wrong pairing
+         *     puts a real book's money under another strategy's name, and — because the risk variants of a
+         *     strategy hold the SAME instruments — nothing else on the row would look wrong.
+         */
+        AirsPortfolioOverview: {
+            /** As Of */
+            as_of?: string | null;
+            /** Begin Value Eur */
+            begin_value_eur?: number | null;
+            /** Deposits Eur */
+            deposits_eur?: number | null;
+            /** Description */
+            description?: string | null;
+            /** Dynamic Portefeuille */
+            dynamic_portefeuille: string;
+            /** End Value Eur */
+            end_value_eur?: number | null;
+            /** Fixed Name */
+            fixed_name?: string | null;
+            /** Fixed Portfolio Id */
+            fixed_portfolio_id?: number | null;
+            /** Fixed Type */
+            fixed_type?: string | null;
+            /** Holdings */
+            holdings?: number | null;
+            /** Income Eur */
+            income_eur?: number | null;
+            /** Investment Result Eur */
+            investment_result_eur?: number | null;
+            /** Isins */
+            isins?: number | null;
+            /** Latest Month Pct */
+            latest_month_pct?: number | null;
+            /** Link Reason */
+            link_reason?: string | null;
+            /** Link Source */
+            link_source: string;
+            /** Months */
+            months?: number | null;
+            /** Name */
+            name: string;
+            /** Periode */
+            periode?: string | null;
+            /** Price Result Eur */
+            price_result_eur?: number | null;
+            /** Reconciles */
+            reconciles?: boolean | null;
+            /** Residual Eur */
+            residual_eur?: number | null;
+            /** Withdrawals Eur */
+            withdrawals_eur?: number | null;
+            /** Ytd Pct */
+            ytd_pct?: number | null;
         };
         /** AssetGridResponse */
         AssetGridResponse: {
@@ -7363,6 +7724,16 @@ export interface components {
             benchmark_since_pct?: number | null;
             /** Benchmark Ytd Pct */
             benchmark_ytd_pct?: number | null;
+            /** Book Comparable */
+            book_comparable?: boolean | null;
+            /** Book Gap Pct */
+            book_gap_pct?: number | null;
+            /** Book Portefeuille */
+            book_portefeuille?: string | null;
+            /** Book Reason */
+            book_reason?: string | null;
+            /** Book Ytd Pct */
+            book_ytd_pct?: number | null;
             /** Portfolio Since Pct */
             portfolio_since_pct?: number | null;
             /** Portfolio Ytd Pct */
@@ -9008,6 +9379,96 @@ export interface operations {
             };
         };
     };
+    airs_account_model_links_api_airs_account_model_links_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AirsAccountModelLinks"];
+                };
+            };
+        };
+    };
+    set_airs_account_model_link_api_airs_account_model_links__portefeuille__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AirsAccountLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_airs_account_model_link_api_airs_account_model_links__portefeuille__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     airs_accounts_api_airs_accounts_get: {
         parameters: {
             query?: never;
@@ -9046,6 +9507,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AirsAccountDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_account_isins_api_airs_accounts__portefeuille__isins_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AirsAccountIsins"];
                 };
             };
             /** @description Validation Error */
@@ -9469,6 +9961,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    airs_portfolios_overview_api_airs_portfolios_overview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AirsPortfolioOverview"][];
                 };
             };
         };

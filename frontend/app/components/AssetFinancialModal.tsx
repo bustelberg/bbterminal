@@ -229,7 +229,7 @@ export default function AssetFinancialModal({
           <div className="bg-warn-500/10 border border-warn-500/20 rounded-lg px-3 py-2 text-[11px] text-warn-300 mb-3">
             <span className="font-semibold">Not this row’s own listing.</span>{' '}
             These figures come from {data?.symbol}, and GuruFocus reports financials in the{' '}
-            <strong>listing’s</strong> currency — converted per fiscal period, not the company’s
+            <strong>listing’s</strong>{' '}currency — converted per fiscal period, not the company’s
             reporting currency. So this series is on a different currency basis than the row’s own
             listing would give (CSX: 14,092 USD on Nasdaq vs 12,034.6 EUR on Xetra, FY2025).
           </div>
@@ -302,10 +302,10 @@ export default function AssetFinancialModal({
             <div className="text-[10px] text-fg-faint">
               {native.length} {cadence} periods · {rows[0].date} → {rows.at(-1)?.date}
               {' · '}Values are {isCount
-                ? <>a <strong>share count</strong> in millions — <em>not</em> currency, so there is no EUR
+                ? <>a <strong>share count</strong> in millions — <em>not</em>{' '}currency, so there is no EUR
                   version: converting a number of shares at an FX rate would mean nothing.</>
                 : isPercent
-                ? <>a <strong>rate, in percent</strong> — <em>not</em> currency, so there is no EUR version:
+                ? <>a <strong>rate, in percent</strong> — <em>not</em>{' '}currency, so there is no EUR version:
                   dividing a growth rate by an FX rate would mean nothing.</>
                 : perShare
                 ? <>per <strong>share</strong> in {ccy || 'the listing currency'} — <em>not</em> millions.</>

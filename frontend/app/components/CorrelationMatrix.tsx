@@ -220,10 +220,10 @@ export default function CorrelationMatrix() {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h3 className="text-sm font-semibold text-fg-strong">Portfolio correlations</h3>
-          <p className="text-[11px] text-fg-faint mt-0.5">
-            Pairwise correlation of daily EUR returns across the listed model portfolios
-            {data ? ` · ${labels.length}` : ''} — the same return series their YTD is read off.
-            Blue = moves oppositely (diversifying), amber = moves together.
+          <p className="text-[11px] text-fg-faint mt-0.5"
+            title="Computed from the same daily EUR return series the portfolios' YTD is read off.">
+            Pairwise correlation of daily EUR returns
+            {data ? ` · ${labels.length}` : ''}. Blue = diverging, amber = moving together.
           </p>
         </div>
         <div className="flex flex-col items-end gap-2">

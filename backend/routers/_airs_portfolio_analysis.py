@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
+from datetime import date
 
 from asset_pipeline.geo import msci_region_of
 from deps import IN_CHUNK_SIZE, supabase
@@ -245,6 +246,60 @@ def _returns(portfolio_id: int, effective: str | None, benchmark_label: str) -> 
         # A young model's YTD *is* its since-inception return — same window, by construction. The
         # UI says so rather than showing the reader two identical rows and letting them wonder.
         "ytd_is_since": bool(effective and ytd_from == effective),
+        **_book_return(portfolio_id, ytd_from, p_ytd),
+    }
+
+
+def _book_return(portfolio_id: int, ytd_from: str | None, model_ytd: float | None) -> dict:
+    """What the BOOK made, beside what the STRATEGY made — and the gap, when there is one.
+
+    This modal describes the FIXED portfolio: a set of weights, priced from yfinance. The row
+    that opens it shows the DYNAMIC book: real positions, valued by AIRS. They are different
+    objects and they disagree — measured across the 28 linked pairs, median 3.12pp and up to
+    6.58pp (EuropaTopSelectie: the book -1.28%, the strategy +5.30%). THAT GAP IS THE POINT — it
+    is implementation drift, timing and fees, and nothing else on the page answers it.
+
+    ⚠ THE GAP IS ONLY A GAP WHEN THE TWO WINDOWS ARE THE SAME, and for 9 of 28 they are not.
+        AIRS's `cumulatief_rendement` is always the calendar year (measured: all 51 accounts hold
+        7 months, so the book side is never partial). The model's YTD opens at
+        `max(1 Jan, inception)`. MomentumTopSelectie's model is TWELVE DAYS old: setting its
+        -3.04% against the book's -2.67% for the year and subtracting produces a number that
+        reads exactly like drift and means nothing. So the difference is computed ONLY when the
+        model's window opens on 1 January; otherwise `comparable` is false and the reason is
+        carried instead of a figure.
+
+    ⚠ THE BOOK'S RETURN IS *READ*, NEVER RECOMPUTED — same rule the portfolio side already
+        follows. `_year_perf` is where a book's year is assembled; re-deriving it here is how
+        this modal would quietly disagree with the row that opened it.
+    """
+    from routers._airs_account_links import list_account_links  # noqa: PLC0415
+
+    link = next((a for a in list_account_links()["accounts"]
+                 if a.get("model_portfolio_id") == portfolio_id), None)
+    if not link:
+        return {"book_portefeuille": None, "book_ytd_pct": None,
+                "book_comparable": None,
+                "book_reason": "No Dynamic portfolio is paired with this one."}
+
+    book_ytd = link.get("ytd_pct")
+    aligned = ytd_from == f"{date.today().year}-01-01"
+    if book_ytd is None:
+        reason = "AIRS reports no return for the paired book."
+    elif not aligned:
+        reason = (f"Not comparable: this strategy's window opens {ytd_from}, while AIRS measures "
+                  f"the book over the whole year. Different windows — the difference would not "
+                  f"be drift.")
+    else:
+        reason = None
+    return {
+        "book_portefeuille": link["portefeuille"],
+        "book_ytd_pct": book_ytd,
+        "book_comparable": bool(aligned and book_ytd is not None),
+        "book_reason": reason,
+        # The strategy minus the book: what the weights promised, less what the book delivered.
+        "book_gap_pct": (round(model_ytd - book_ytd, 2)
+                         if (aligned and book_ytd is not None and model_ytd is not None)
+                         else None),
     }
 
 

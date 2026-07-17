@@ -44,7 +44,7 @@ export default function StrategyModeSelect({
             <span className="text-neg-400">{sectorEtfsError}</span>
           ) : Object.keys(sectorEtfs).length === 0 ? (
             <span className="text-warn-400">
-              No sector→ETF mappings yet. Open <a href="/benchmarks" className="underline">/benchmarks</a> and tag at least one benchmark with a sector.
+              No sector→ETF mappings yet. Open <a href="/benchmarks" className="underline">/benchmarks</a>{' '}and tag at least one benchmark with a sector.
             </span>
           ) : (
             <span className="text-fg-subtle">

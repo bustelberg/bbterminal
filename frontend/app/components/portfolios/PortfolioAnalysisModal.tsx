@@ -147,7 +147,54 @@ function ReturnsTile({ r, benchmark, why, onWhy }: {
           {'window — the two rows are the same number by construction, not a coincidence.'}
         </p>
       )}
+      <BookVsStrategy r={r} />
     </section>
+  );
+}
+
+/**
+ * The STRATEGY (this modal, priced from yfinance) beside the BOOK (the row that opened it, valued
+ * by AIRS). Their difference is implementation drift, timing and fees — the reason the Fixed and
+ * Dynamic tables exist as two things, and the one number nothing else on the page shows.
+ *
+ * ⚠ THE GAP IS ONLY SHOWN WHEN THE WINDOWS MATCH. The book is always the calendar year; 9 of 28
+ *   models have a partial-year YTD. Where they differ (`book_comparable === false`), the two
+ *   numbers still appear — but the subtraction does not, and the reason is stated. A gap across
+ *   two windows is not drift, and it would read exactly like one.
+ */
+function BookVsStrategy({ r }: { r: NonNullable<ModelPortfolioAnalysis['returns']> }) {
+  if (!r.book_portefeuille) return null;   // an unlinked model has no book to compare against
+  const pct = (v: number | null | undefined) =>
+    v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
+  const tone = (v: number | null | undefined) =>
+    v == null ? 'text-fg-faint' : v >= 0 ? 'text-pos-400' : 'text-neg-400';
+  return (
+    <div className="mt-3 pt-3 border-t border-neutral-800/40">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[11px] uppercase tracking-wide text-fg-faint">Book vs strategy (YTD)</span>
+        {r.book_comparable && r.book_gap_pct != null && (
+          <span className={`text-xs font-mono font-semibold ${tone(r.book_gap_pct)}`}
+            title="Strategy return minus the book's. Positive = the weights out-performed the book AIRS actually holds — implementation drift, timing and fees.">
+            {pct(r.book_gap_pct)} drift
+          </span>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-2 mt-1.5 text-xs">
+        <div className="bg-inset rounded-lg px-3 py-2">
+          <div className="text-[10px] text-fg-faint">Strategy (our prices)</div>
+          <div className={`font-mono ${tone(r.portfolio_ytd_pct)}`}>{pct(r.portfolio_ytd_pct)}</div>
+        </div>
+        <div className="bg-inset rounded-lg px-3 py-2">
+          <div className="text-[10px] text-fg-faint" title={`AIRS's own return for ${r.book_portefeuille}.`}>
+            Book (AIRS)
+          </div>
+          <div className={`font-mono ${tone(r.book_ytd_pct)}`}>{pct(r.book_ytd_pct)}</div>
+        </div>
+      </div>
+      {!r.book_comparable && r.book_reason && (
+        <p className="text-[11px] text-warn-300 mt-1.5">⚠ {r.book_reason}</p>
+      )}
+    </div>
   );
 }
 
@@ -274,7 +321,7 @@ export default function PortfolioAnalysisModal({ id, name, onClose }: {
             <p className="text-[11px] text-fg-subtle mt-0.5">
               Composition vs <span className="font-mono">{data?.benchmark ?? 'SP500'}</span>
               {data && <> · <span className="font-mono">{data.holdings}</span> holdings ·{' '}
-                <span className="font-mono">{data.benchmark_members}</span> index members
+                <span className="font-mono">{data.benchmark_members}</span>{' '}index members
                 {data.as_of && <> · as of <span className="font-mono">{data.as_of}</span></>}</>}
             </p>
           </div>

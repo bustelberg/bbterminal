@@ -318,13 +318,16 @@ export default function PortfoliosPanel() {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h3 className="text-sm font-semibold text-fg-strong">
-            AIRS model portfolios{rows ? ` · ${view.length}/${rows.length}` : ''}
+            {/* "Fixed" is AIRS's own word: these are the `fixed (…)` portfolio types, the ones
+                that store a composition — and the `_FX` suffix in every name means exactly this.
+                Their counterpart is the Dynamic table below. */}
+            AIRS Fixed Portfolio&apos;s{rows ? ` · ${view.length}/${rows.length}` : ''}
           </h3>
           <p className="text-[11px] text-fg-faint mt-0.5">
             Stamgegevens › Onderhoud portefeuilles › Model portefeuilles
             {counted.length > 0 && (
-              <> · <span className="font-mono text-fg-subtle">{totalHoldings}</span> positions
-                across <span className="font-mono text-fg-subtle">{counted.length}</span> counted
+              <> · <span className="font-mono text-fg-subtle">{totalHoldings}</span>{' '}positions
+                across <span className="font-mono text-fg-subtle">{counted.length}</span>{' '}counted
                 model{counted.length === 1 ? '' : 's'}</>
             )}
             {scannedAt && !scanning && (
@@ -1251,7 +1254,7 @@ function Positions({ state, onPickDate, onRefresh, onLinkSaved }: {
           <span className="font-mono text-fg">{d.rows.length}</span> positions ·{' '}
           <span className="text-pos-400 font-mono">{d.matched}</span> matched to our instruments ·{' '}
           <span className={d.unmatched ? 'text-warn-300 font-mono' : 'text-fg-faint font-mono'}>{d.unmatched}</span> not ·{' '}
-          <span className="font-mono">{total.toFixed(2)}%</span> total
+          <span className="font-mono">{total.toFixed(2)}%</span>{' '}total
           {/* "Since when" is half of what a return means, and the answer is NOT 1 January for
               half the portfolios — it is the date the composition took effect. */}
           {d.ytd_from && (

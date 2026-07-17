@@ -83,6 +83,14 @@ def _save_holdings(portefeuille: str, as_of: str, holdings) -> int:
             "ytd_return_eur": h.ytd_return_eur,
             "ytd_return_pct": h.ytd_return_pct,
             "ytd_return_local_pct": h.ytd_return_local_pct,
+            # AIRS's own columns, as reported. Stored beside ours rather than instead of
+            # them: two statements of the same quantity are the cross-check.
+            "cost_basis_local": h.cost_basis_local,
+            "current_price_local": h.current_price_local,
+            "airs_weight": h.airs_weight,
+            "fund_result_eur": h.fund_result_eur,
+            "fx_result_eur": h.fx_result_eur,
+            "airs_result_pct": h.airs_result_pct,
         }
         for h in holdings
         if h.holding_name

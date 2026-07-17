@@ -246,7 +246,7 @@ export default function RebalanceDayReturnsCard({
       <p className="text-[10px] text-fg-faint mt-2">
         Each step is the strategy&apos;s 1-day return on a month&apos;s rebalance day — the close of that day vs the prior
         trading day&apos;s close — compounded into a random walk. It isolates how much of the strategy&apos;s performance lands
-        on rebalance days: the line is what you&apos;d earn (or forgo) by being in the market <em>only</em> on those days.
+        on rebalance days: the line is what you&apos;d earn (or forgo) by being in the market <em>only</em>{' '}on those days.
       </p>
     </CollapsibleCard>
   );

@@ -578,8 +578,8 @@ export default function ApiExplorer() {
           <p className="mt-1">
             For external scripts (IBKR rebalancer, monitoring crons), hit{' '}
             <span className="font-mono text-fg-muted">{`POST ${process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://<supabase>'}/auth/v1/token?grant_type=password`}</span>{' '}
-            with <span className="font-mono text-fg-muted">{`{email, password}`}</span> to mint a token, then use it as
-            <span className="font-mono text-fg-muted"> Authorization: Bearer …</span> on the admin endpoints. See CLAUDE.md for full curl examples.
+            with <span className="font-mono text-fg-muted">{`{email, password}`}</span>{' '}to mint a token, then use it as
+            <span className="font-mono text-fg-muted"> Authorization: Bearer …</span>{' '}on the admin endpoints. See CLAUDE.md for full curl examples.
           </p>
         </div>
       </div>

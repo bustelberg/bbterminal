@@ -365,7 +365,7 @@ export default function LeonteqUniverse() {
           <div className="rounded-lg border border-warn-500/30 bg-warn-500/5 px-4 py-3">
             <p className="text-xs font-medium text-warn-300">
               {missingMktCap.length} compan{missingMktCap.length === 1 ? 'y' : 'ies'} dropped — no market cap (but GuruFocus-covered, so they should have one).
-              Run <span className="font-mono">Refresh market caps</span> on /companies, then delete this snapshot and re-freeze.
+              Run <span className="font-mono">Refresh market caps</span>{' '}on /companies, then delete this snapshot and re-freeze.
             </p>
             <div className="mt-2 max-h-48 overflow-auto">
               <table className="w-full text-xs">
@@ -445,7 +445,7 @@ export default function LeonteqUniverse() {
           <div className="text-sm text-fg-subtle"><LoadingDots label="Loading Leonteq universe" /></div>
         ) : !data || data.total_equities === 0 ? (
           <div className="bg-card rounded-xl border border-neutral-800/40 px-5 py-6 text-sm text-fg-muted">
-            No equities scraped yet. Click <span className="text-fg">Refresh now</span> to scrape the Leonteq page.
+            No equities scraped yet. Click <span className="text-fg">Refresh now</span>{' '}to scrape the Leonteq page.
             The first scrape takes ~30-60 seconds (headless Chromium has to load the SPA).
           </div>
         ) : (

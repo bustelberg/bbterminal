@@ -264,7 +264,7 @@ export default function DiversifierAnalysis() {
         {/* ── Portfolio optimization ────────────────────────────────── */}
         {d.optimizeResult && d.compareBenchmarkId != null && d.optimizeResult.benchmark?.benchmark_id !== d.compareBenchmarkId && (
           <div className="rounded-lg bg-warn-500/10 border border-warn-500/20 px-4 py-2.5 text-sm text-warn-400">
-            Click <span className="font-medium">Optimize portfolio</span> to apply the selected benchmark comparison.
+            Click <span className="font-medium">Optimize portfolio</span>{' '}to apply the selected benchmark comparison.
           </div>
         )}
         {d.optimizeResult && <OptimizeCard result={d.optimizeResult} onSetIsin={d.setBenchmarkIsin} />}
@@ -647,7 +647,7 @@ function OptimizeCard({ result: r, title, onSetIsin }: {
             <span className="font-medium">After</span> is that monthly-rebalanced blend</>
         )}{' '}
         over the common window where every selected fund has data{r.limited_by ? ` (bounded by ${r.limited_by})` : ''};
-        {' '}<span className="font-medium">Before</span> is your strategy alone.
+        {' '}<span className="font-medium">Before</span>{' '}is your strategy alone.
       </p>
     </div>
   );
@@ -710,10 +710,10 @@ function ResultsCard({ result }: { result: CorrelationResponse }) {
         </table>
       </div>
       <p className="text-xs text-fg-subtle mt-3 leading-relaxed">
-        Sorted by correlation (lowest first). <span className="text-fg-faint">*</span> Each row is computed over
-        that ETF&apos;s own overlap window using <span className="font-medium">monthly</span> returns (needed to align with
+        Sorted by correlation (lowest first). <span className="text-fg-faint">*</span>{' '}Each row is computed over
+        that ETF&apos;s own overlap window using <span className="font-medium">monthly</span>{' '}returns (needed to align with
         ETF prices), so <span className="font-medium">Strat Sharpe/Sortino</span> — the strategy alone over that window —
-        is the baseline the blend is measured against, and <span className="font-medium">Δ = blend − Strat</span> on the
+        is the baseline the blend is measured against, and <span className="font-medium">Δ = blend − Strat</span>{' '}on the
         same window. These won&apos;t match the headline above, which is the backtest&apos;s reported (daily-based) figure
         over its full history — both because an ETF may have less history (e.g. launched 2019) and because monthly vs
         daily returns annualize differently. A 0% mix means no allocation improved the objective, so Δ = 0.

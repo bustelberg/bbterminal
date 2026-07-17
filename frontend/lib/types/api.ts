@@ -109,3 +109,10 @@ export type QualityMetric = components['schemas']['QualityMetric'];
  *  A different object from a model portfolio (which is a composition of weights). */
 export type AirsAccount = components['schemas']['AirsAccount'];
 export type AirsAccountDetail = components['schemas']['AirsAccountDetail'];
+export type AirsPortfolioOverview = components['schemas']['AirsPortfolioOverview'];
+export type AirsAccountIsins = components['schemas']['AirsAccountIsins'];
+export type AirsHoldingSegment = components['schemas']['AirsHoldingSegment'];
+export type AirsHoldingIsin = components['schemas']['AirsHoldingIsin'];
+export type AirsAccountModelLink = components['schemas']['AirsAccountModelLink'];
+export type AirsAccountModelLinks = components['schemas']['AirsAccountModelLinks'];
+export type AirsModelChoice = components['schemas']['AirsModelChoice'];

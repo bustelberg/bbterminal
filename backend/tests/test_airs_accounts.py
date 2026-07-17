@@ -64,11 +64,18 @@ class TestTheReturnIsAIRSsOwnNeverAValueRatio:
         account's return comes from `airs_performance`; the holdings are never aggregated."""
         assert 'sum(' not in code(acc.account_holdings)
 
-    def test_the_wrong_number_is_carried_but_labelled(self):
-        """It is shown ONLY beside the right one. Hiding it would mean the next person recomputes
-        it by hand and trusts it; showing it alone would be worse."""
+    def test_rendement_is_labelled_as_the_month_it_measures(self):
+        """`rendement` is NOT a rival YTD, and calling it one was this module's own bug.
+
+        It was served as `value_ratio_pct` — "the naive value ratio... the wrong one".
+        Measured 2026-07-17: one ATT row is one MONTH, so AITopSelectie's -8.37% is simply
+        July's return, and its `stortingen` are 0 in every month of 2026 — the flows the old
+        story blamed do not exist. Both figures are AIRS's own and both are right, of
+        different windows. The name must say which.
+        """
         src = code(acc.list_accounts)
-        assert '"value_ratio_pct": r.get("rendement")' in src
+        assert '"latest_month_pct": r.get("rendement_latest_month")' in src
+        assert 'value_ratio_pct' not in src, "names the window, not a verdict on the number"
 
 
 class TestTheAccountsAreNotTheModels:
@@ -116,7 +123,17 @@ class TestTheSnapshotIsTheFreshestOnly:
         assert 'as_of = max(str(r["as_of_date"]) for r in rows)' in src
         assert 'if str(r["as_of_date"]) == as_of' in src
 
-    def test_the_perf_row_is_the_freshest_per_account(self):
-        src = code(acc._latest_perf)
-        assert 'order("periode", desc=True)' in src
-        assert "setdefault" in src          # first seen under desc order == freshest
+    def test_the_year_is_assembled_from_every_month_not_the_freshest_row(self):
+        """The freshest ATT row is JULY, not the year — taking it served a price result of
+        -130,063 (July, negative) as the year's +420,225. `_year_perf` sums the months; the
+        behaviour is pinned properly in test_airs_year_perf.py."""
+        assert not hasattr(acc, "_latest_perf"), \
+            "_latest_perf read one month as the year — do not reintroduce it"
+        src = code(acc.list_accounts)
+        assert "_year_perf()" in src
+
+    def test_the_money_columns_are_summed_over_months(self):
+        src = code(acc._year_perf)
+        assert "_PER_PERIOD_SUMS" in src
+        # A month re-measured by each daily run must not be counted twice.
+        assert "per_month" in src

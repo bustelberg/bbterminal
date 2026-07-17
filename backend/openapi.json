@@ -2,8 +2,19 @@
   "components": {
     "schemas": {
       "AirsAccount": {
-        "description": "One AIRS account, on AIRS's own numbers.\n\n\u26a0 `ytd_pct` IS `cumulatief_rendement` \u2014 AIRS's own, flow-aware. It is NOT\n`end_value_eur / begin_value_eur - 1`; that ratio is `value_ratio_pct` below, and it is the\nWRONG number. AIRS publishes both and they disagree by more than a point in 31 of 38 accounts\n(AITopSelectie OFF DYN: the ratio says -5.85% on a book that made +46.12%). A value ratio is a\nreturn only when nothing was deposited or withdrawn, and these are real accounts.",
+        "description": "One AIRS account's YEAR, on AIRS's own numbers.\n\n\u26a0 EVERY MONEY FIELD HERE IS THE YEAR'S, SUMMED ACROSS AIRS'S MONTHLY ROWS. One ATT row is\none MONTH \u2014 reading the freshest as \"the year\" served AITopSelectie's July price result of\n-130,063 where the year made +420,225: wrong sign, third of the size, beside a +42% YTD.\n`_airs_accounts._year_perf` does the assembly; read it before adding a field here.\n\n\u26a0 `ytd_pct` IS `cumulatief_rendement` \u2014 AIRS's own, flow-aware, and never\n`end_value_eur / begin_value_eur - 1`.\n\n\u26a0 `latest_month_pct` IS NOT A RIVAL YTD. It is AIRS's `rendement` off the newest row: the\nlatest month's return. It was once served as `value_ratio_pct` and described as \"the wrong\nnumber\", on the theory that deposits inflated it \u2014 but AITopSelectie has zero deposits in\nevery month of 2026 and still reads -5.85% there against +46.12% for the year. Different\nwindows, both correct.",
         "properties": {
+          "accrued_interest_change_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accrued Interest Change Eur"
+          },
           "as_of": {
             "anyOf": [
               {
@@ -25,6 +36,28 @@
               }
             ],
             "title": "Begin Value Eur"
+          },
+          "costs_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Costs Eur"
+          },
+          "deposits_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deposits Eur"
           },
           "end_value_eur": {
             "anyOf": [
@@ -70,6 +103,28 @@
             ],
             "title": "Investment Result Eur"
           },
+          "latest_month_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Month Pct"
+          },
+          "months": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Months"
+          },
           "periode": {
             "anyOf": [
               {
@@ -96,7 +151,18 @@
             ],
             "title": "Price Result Eur"
           },
-          "value_ratio_pct": {
+          "reconciles": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reconciles"
+          },
+          "residual_eur": {
             "anyOf": [
               {
                 "type": "number"
@@ -105,7 +171,18 @@
                 "type": "null"
               }
             ],
-            "title": "Value Ratio Pct"
+            "title": "Residual Eur"
+          },
+          "withdrawals_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawals Eur"
           },
           "ytd_pct": {
             "anyOf": [
@@ -290,6 +367,870 @@
           "holding_name"
         ],
         "title": "AirsAccountHolding",
+        "type": "object"
+      },
+      "AirsAccountIsins": {
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name"
+          },
+          "model_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Source"
+          },
+          "portefeuille": {
+            "title": "Portefeuille",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "rows": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AirsHoldingIsin"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "segments": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AirsHoldingSegment"
+            },
+            "title": "Segments",
+            "type": "array"
+          },
+          "unmatched_model_positions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AirsModelPositionLeftover"
+            },
+            "title": "Unmatched Model Positions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "portefeuille"
+        ],
+        "title": "AirsAccountIsins",
+        "type": "object"
+      },
+      "AirsAccountLinkRequest": {
+        "properties": {
+          "model_portfolio_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Portfolio Id"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "title": "AirsAccountLinkRequest",
+        "type": "object"
+      },
+      "AirsAccountModelLink": {
+        "description": "One account, and the model it runs.\n\n`source` says where the pairing came from and is the whole point of the row:\n  manual \u2014 a human decided (always wins, including a decision of \"none\")\n  guess  \u2014 an exact stem match, recomputed on every read, never stored\n  none   \u2014 nobody has decided and we will not guess",
+        "properties": {
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name"
+          },
+          "model_portfolio_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Portfolio Id"
+          },
+          "model_positions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Positions"
+          },
+          "months": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Months"
+          },
+          "portefeuille": {
+            "title": "Portefeuille",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "ytd_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ytd Pct"
+          }
+        },
+        "required": [
+          "portefeuille",
+          "source"
+        ],
+        "title": "AirsAccountModelLink",
+        "type": "object"
+      },
+      "AirsAccountModelLinks": {
+        "properties": {
+          "accounts": {
+            "items": {
+              "$ref": "#/components/schemas/AirsAccountModelLink"
+            },
+            "title": "Accounts",
+            "type": "array"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/AirsModelChoice"
+            },
+            "title": "Models",
+            "type": "array"
+          }
+        },
+        "required": [
+          "accounts",
+          "models"
+        ],
+        "title": "AirsAccountModelLinks",
+        "type": "object"
+      },
+      "AirsHoldingIsin": {
+        "description": "One account holding, with the ISIN we believe it is \u2014 and how much to believe it.\n\n\u26a0 `verdict` IS THE FIELD THAT MATTERS, AND `name_score` IS NOT.\n  ok             the implied price agrees with that ISIN's own close (FX-converted)\n  price_mismatch it does NOT \u2014 the ISIN is not what the book holds, or the book drifted\n  unpriced       we have no series for it, so there is NOTHING confirming the name match\n\n`unpriced` is not a pass. The name matched and nothing checked it \u2014 which for a fund is\nexactly where the Acc/Inc share-class trap lives.",
+        "properties": {
+          "asset_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Class"
+          },
+          "categorie": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Categorie"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "current_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Value Eur"
+          },
+          "holding_name": {
+            "title": "Holding Name",
+            "type": "string"
+          },
+          "implied_price_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Implied Price Eur"
+          },
+          "is_etf": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Etf"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "lines": {
+            "default": 1,
+            "title": "Lines",
+            "type": "integer"
+          },
+          "model_fonds": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Fonds"
+          },
+          "model_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Pct"
+          },
+          "name_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Score"
+          },
+          "our_instrument": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Our Instrument"
+          },
+          "our_price_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Our Price Eur"
+          },
+          "price_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Ratio"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity"
+          },
+          "sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector"
+          },
+          "start_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Value Eur"
+          },
+          "verdict": {
+            "title": "Verdict",
+            "type": "string"
+          },
+          "weak_name": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weak Name"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight"
+          },
+          "ytd_return_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ytd Return Eur"
+          }
+        },
+        "required": [
+          "holding_name",
+          "verdict"
+        ],
+        "title": "AirsHoldingIsin",
+        "type": "object"
+      },
+      "AirsHoldingSegment": {
+        "description": "One asset class within a portfolio: the exposure, and what it returned.\n\n\u26a0 `return_pct` AND `weight_pct` DO NOT COVER THE SAME HOLDINGS. A holding with no opening\nvalue has an undefined return but real exposure, so it counts in the weight and not in the\nreturn \u2014 otherwise its whole value reads as gain (cash is exactly this, and so is a short:\nNestle India at -3,504 shares). `priced_value_eur` states how much the return spans.\n\n\u26a0 It is a PRICE return, like the rows it is built from: no income, not flow-aware. The\nsegments do not sum to the portfolio's own figure.",
+        "properties": {
+          "asset_class": {
+            "title": "Asset Class",
+            "type": "string"
+          },
+          "etf_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etf Value Eur"
+          },
+          "gain_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gain Eur"
+          },
+          "holdings": {
+            "title": "Holdings",
+            "type": "integer"
+          },
+          "priced_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priced Value Eur"
+          },
+          "return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Pct"
+          },
+          "start_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Value Eur"
+          },
+          "value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Eur"
+          },
+          "weight_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight Pct"
+          }
+        },
+        "required": [
+          "asset_class",
+          "holdings"
+        ],
+        "title": "AirsHoldingSegment",
+        "type": "object"
+      },
+      "AirsModelChoice": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "positions": {
+            "title": "Positions",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "positions"
+        ],
+        "title": "AirsModelChoice",
+        "type": "object"
+      },
+      "AirsModelPositionLeftover": {
+        "properties": {
+          "fonds": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fonds"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "percentage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percentage"
+          }
+        },
+        "title": "AirsModelPositionLeftover",
+        "type": "object"
+      },
+      "AirsPortfolioOverview": {
+        "description": "A portfolio: your name for it, AIRS's numbers for it.\n\n\u26a0 `link_source` IS PART OF THE ROW, NOT A DETAIL. `name` comes from the Fixed portfolio this\nbook is paired with, and 27 of 28 pairings are an unconfirmed name match. A wrong pairing\nputs a real book's money under another strategy's name, and \u2014 because the risk variants of a\nstrategy hold the SAME instruments \u2014 nothing else on the row would look wrong.",
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "begin_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Begin Value Eur"
+          },
+          "deposits_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deposits Eur"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "dynamic_portefeuille": {
+            "title": "Dynamic Portefeuille",
+            "type": "string"
+          },
+          "end_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Value Eur"
+          },
+          "fixed_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixed Name"
+          },
+          "fixed_portfolio_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixed Portfolio Id"
+          },
+          "fixed_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixed Type"
+          },
+          "holdings": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdings"
+          },
+          "income_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Income Eur"
+          },
+          "investment_result_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Investment Result Eur"
+          },
+          "isins": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isins"
+          },
+          "latest_month_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Month Pct"
+          },
+          "link_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Reason"
+          },
+          "link_source": {
+            "title": "Link Source",
+            "type": "string"
+          },
+          "months": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Months"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "periode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Periode"
+          },
+          "price_result_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Result Eur"
+          },
+          "reconciles": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reconciles"
+          },
+          "residual_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual Eur"
+          },
+          "withdrawals_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawals Eur"
+          },
+          "ytd_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ytd Pct"
+          }
+        },
+        "required": [
+          "name",
+          "dynamic_portefeuille",
+          "link_source"
+        ],
+        "title": "AirsPortfolioOverview",
         "type": "object"
       },
       "AssetGridResponse": {
@@ -4585,6 +5526,61 @@
             ],
             "title": "Benchmark Ytd Pct"
           },
+          "book_comparable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Comparable"
+          },
+          "book_gap_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Gap Pct"
+          },
+          "book_portefeuille": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Portefeuille"
+          },
+          "book_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Reason"
+          },
+          "book_ytd_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Ytd Pct"
+          },
           "portfolio_since_pct": {
             "anyOf": [
               {
@@ -8275,6 +9271,126 @@
         ]
       }
     },
+    "/api/airs/account-model-links": {
+      "get": {
+        "description": "Which MODEL is each AIRS ACCOUNT running \u2014 decided, guessed, or neither.\n\nThis is the only bridge between the ISINs (models have them, and AIRS values nothing) and\nthe money (accounts have it, and carry no ISIN). It cannot be derived: the holdings do not\nidentify the model \u2014 BUS_FTS_Bepoff/DEF/NEU_AFS hold the IDENTICAL 27 ISINs \u2014 so the name\nis the only discriminator, and the name is four conventions and a typo. Hence a guess that\nrefuses rather than approximates, plus a stored human decision.",
+        "operationId": "airs_account_model_links_api_airs_account_model_links_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirsAccountModelLinks"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Airs Account Model Links",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/account-model-links/{portefeuille}": {
+      "delete": {
+        "description": "Forget the decision \u2014 the guess speaks again. NOT the same as storing \"none\".",
+        "operationId": "clear_airs_account_model_link_api_airs_account_model_links__portefeuille__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Clear Airs Account Model Link Api Airs Account Model Links  Portefeuille  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear Airs Account Model Link",
+        "tags": [
+          "airs"
+        ]
+      },
+      "put": {
+        "description": "Record which model an account runs. `model_portfolio_id: null` means \"explicitly none\".",
+        "operationId": "set_airs_account_model_link_api_airs_account_model_links__portefeuille__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AirsAccountLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Set Airs Account Model Link Api Airs Account Model Links  Portefeuille  Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Airs Account Model Link",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/accounts": {
       "get": {
         "description": "The AIRS ACCOUNTS \u2014 what the books actually made, on AIRS's own EUR values.\n\nA different object from the model portfolios: a model is a COMPOSITION (weights), which AIRS\nhas nothing to value \u2014 of 58 models and 39 valued accounts, the overlap is zero. The models\nanswer \"would this strategy work\" (and need yfinance, since nothing else can price a set of\nweights); these answer \"what did this book make\", and AIRS is the system of record.",
@@ -8339,6 +9455,49 @@
           }
         },
         "summary": "Airs Account Holdings",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/accounts/{portefeuille}/isins": {
+      "get": {
+        "description": "An account's holdings with an ISIN attached to each, price-checked.\n\nThe account has the money and no ISIN; its model has the ISINs and nothing AIRS values.\nThis joins them row-by-row inside the pair confirmed on `/account-model-links`, and then\nREFUSES TO TRUST ITS OWN NAME MATCH: every row is checked against the instrument's own\nclose, because a name cannot see a share class (IE00BNDS1P30 vs IE00BNDS1Q47 are both\n\"Vanguard ESG Global Corporate Bond UCITS ETF EUR Hedged\" \u2014 Acc and Inc, \u20ac4.79 vs \u20ac3.99,\nand they compound differently).",
+        "operationId": "airs_account_isins_api_airs_accounts__portefeuille__isins_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirsAccountIsins"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Account Isins",
         "tags": [
           "airs"
         ]
@@ -9017,6 +10176,32 @@
           }
         },
         "summary": "Airs Portfolios From Db",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/portfolios/overview": {
+      "get": {
+        "description": "Every AIRS book in one table: named by the Fixed portfolio it runs, valued by AIRS.\n\nThe Fixed side has the ISINs and your nickname and AIRS values none of it; the Dynamic side\nhas the money and no ISIN. Overlap between the two: zero. This is the pair, composed.",
+        "operationId": "airs_portfolios_overview_api_airs_portfolios_overview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AirsPortfolioOverview"
+                  },
+                  "title": "Response Airs Portfolios Overview Api Airs Portfolios Overview Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Airs Portfolios Overview",
         "tags": [
           "airs"
         ]

@@ -1,9 +1,45 @@
 """
 portfolio.py
-Parse AIRS Excel export and compute YTD returns in EUR.
+Parse the AIRS Vermogensoverzicht (VOLK) Excel export.
+
+WHAT AIRS GIVES US PER HOLDING, AND WHAT WE MAKE OF IT
+    The sheet carries thirteen columns:
+
+        Fondsomschrijving · Aantal · Kostprijs lopend jaar · Beginwaarde lopend jaar ·
+        Beginwaarde lopend jaar EUR · Huidige koers · Huidige waarde · Huidige waarde EUR ·
+        Weging · Fondsresultaat · Valutaresultaat · Resultaat in % · Valuta
+
+    We derive `weight` / `ytd_return_*` from the values ourselves AND carry AIRS's own
+    `Weging` / `Resultaat in %` beside them, deliberately unreconciled: two independent
+    statements of the same quantity are a cross-check, and collapsing them into one would
+    throw away the only evidence that either is right.
+
+⚠ OURS AND AIRS'S ARE 100× APART, AND BOTH ARE NAMED `pct`.
+    `ytd_return_pct` is a FRACTION we compute; `airs_result_pct` is AIRS's `Resultaat in %`
+    as reported, a PERCENT — and they are the same quantity (the EUR return). Measured on a
+    real download (BUS_MTS_OFF_AFS_DYN, row `Visa`): AIRS 11.41 against our
+    (38211.21-34298.74)/34298.74 = 0.1141. `Weging` (5.46) vs our `weight` (0.0546) is the
+    same trap. NOTHING here rescales either into the other: they are carried side by side
+    precisely so the two can be compared, and a reader who sees only one is told which.
+
+⚠ `fund_result_eur` / `fx_result_eur` ARE IN EUR — MEASURED, NOT ASSUMED.
+    `Fondsresultaat` + `Valutaresultaat` = the EUR value delta: Visa 3099 + 813.18 =
+    3912.18 against 38211.21 - 34298.74 = 3912.47 (to rounding). They are NOT local — the
+    local delta is 3553.96, which matches neither leg, so a holding's `Fondsresultaat` is
+    its performance measured in euros, not in its own currency.
+
+    They are the prize: the split of a holding's result into PERFORMANCE and FX. Nothing we
+    compute can produce it — our `ytd_return_pct` and `ytd_return_local_pct` bracket the FX
+    leg but never isolate it.
+
+⚠ A HOLDING'S FIGURE IS NOT THE PORTFOLIO'S. Do not aggregate anything here into a
+    portfolio return: these are price returns over a book with deposits and withdrawals,
+    and `AITopSelectie OFF DYN` measures -5.85% that way against AIRS's own +46.12%. The
+    portfolio return is `airs_performance.cumulatief_rendement`; see `_airs_accounts.py`.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Optional
@@ -22,6 +58,49 @@ class ParsedHolding:
     ytd_return_eur: Optional[float]
     ytd_return_pct: Optional[float]
     ytd_return_local_pct: Optional[float]
+    # --- AIRS's own columns, as reported (see the module docstring on units) ---
+    cost_basis_local: Optional[float] = None      # Kostprijs lopend jaar
+    current_price_local: Optional[float] = None   # Huidige koers
+    airs_weight: Optional[float] = None           # Weging
+    fund_result_eur: Optional[float] = None       # Fondsresultaat  (performance leg, EUR)
+    fx_result_eur: Optional[float] = None         # Valutaresultaat (FX leg, EUR)
+    airs_result_pct: Optional[float] = None       # Resultaat in %
+
+
+def _norm(name: object) -> str:
+    """A column header reduced to its comparable form: case- and whitespace-insensitive.
+
+    AIRS ships `Huidige waarde  EUR` with TWO spaces, which the literal header strings this
+    parser used to carry matched only by luck. Normalising is what makes that a non-event.
+    """
+    return re.sub(r"\s+", " ", str(name)).strip().lower()
+
+
+def _resolve_columns(df: pd.DataFrame) -> dict[str, str]:
+    """{normalised header -> the actual column}. First wins, so a duplicate header (pandas
+    renames those `X.1`) cannot silently displace the real one."""
+    out: dict[str, str] = {}
+    for c in df.columns:
+        out.setdefault(_norm(c), c)
+    return out
+
+
+def _col(cols: dict[str, str], header: str) -> Optional[str]:
+    """The real column for `header`, or None.
+
+    ⚠ EXACT match on the normalised name — never a prefix. `Huidige waarde` and
+    `Huidige waarde  EUR` are DIFFERENT columns (local vs EUR), and a `startswith` would
+    hand back the EUR one for the local lookup: a silent 1.16× on every USD holding.
+    """
+    return cols.get(_norm(header))
+
+
+def _num(row: pd.Series, col: Optional[str]) -> Optional[float]:
+    """`col` off `row` as a float, or None when absent/blank. A 0 is a value, not a gap."""
+    if not col:
+        return None
+    v = pd.to_numeric(row.get(col), errors="coerce")
+    return float(v) if pd.notna(v) else None
 
 
 def parse_airs_excel(file_bytes: bytes) -> list[ParsedHolding]:
@@ -30,17 +109,29 @@ def parse_airs_excel(file_bytes: bytes) -> list[ParsedHolding]:
     Weight is computed from Huidige waarde EUR as share of total.
     """
     df = pd.read_excel(BytesIO(file_bytes))
+    cols = _resolve_columns(df)
 
-    col_name = "Fondsomschrijving"
-    col_qty = "Aantal"
-    col_start_eur = "Beginwaarde lopend jaar EUR"
-    col_current_eur = "Huidige waarde  EUR"
-    col_start_local = "Beginwaarde lopend jaar"
-    col_current_local = "Huidige waarde"
-    col_ccy = "Valuta"
+    col_name = _col(cols, "Fondsomschrijving")
+    col_qty = _col(cols, "Aantal")
+    col_start_eur = _col(cols, "Beginwaarde lopend jaar EUR")
+    col_current_eur = _col(cols, "Huidige waarde  EUR")
+    col_start_local = _col(cols, "Beginwaarde lopend jaar")
+    col_current_local = _col(cols, "Huidige waarde")
+    col_ccy = _col(cols, "Valuta")
+    # AIRS's own figures — all optional: an older export that lacks them must still parse.
+    col_cost_local = _col(cols, "Kostprijs lopend jaar")
+    col_price_local = _col(cols, "Huidige koers")
+    col_weging = _col(cols, "Weging")
+    col_fund_result = _col(cols, "Fondsresultaat")
+    col_fx_result = _col(cols, "Valutaresultaat")
+    col_result_pct = _col(cols, "Resultaat in %")
 
-    required = [col_name, col_start_eur, col_current_eur]
-    missing = [c for c in required if c not in df.columns]
+    required = {
+        "Fondsomschrijving": col_name,
+        "Beginwaarde lopend jaar EUR": col_start_eur,
+        "Huidige waarde  EUR": col_current_eur,
+    }
+    missing = [want for want, got in required.items() if not got]
     if missing:
         raise ValueError(
             f"Excel missing columns: {missing}. "
@@ -57,13 +148,11 @@ def parse_airs_excel(file_bytes: bytes) -> list[ParsedHolding]:
         if not name:
             continue
 
-        start_eur = pd.to_numeric(row.get(col_start_eur), errors="coerce")
-        current_eur = pd.to_numeric(row.get(col_current_eur), errors="coerce")
-        qty = pd.to_numeric(row.get(col_qty), errors="coerce") if col_qty in df.columns else None
-        ccy = str(row.get(col_ccy, "")).strip() if col_ccy in df.columns else ""
+        qty = pd.to_numeric(row.get(col_qty), errors="coerce") if col_qty else None
+        ccy = str(row.get(col_ccy, "")).strip() if col_ccy else ""
 
-        start_val = float(start_eur) if pd.notna(start_eur) else None
-        current_val = float(current_eur) if pd.notna(current_eur) else None
+        start_val = _num(row, col_start_eur)
+        current_val = _num(row, col_current_eur)
 
         # Weight = current EUR value / total current EUR
         weight: Optional[float] = None
@@ -80,15 +169,14 @@ def parse_airs_excel(file_bytes: bytes) -> list[ParsedHolding]:
 
         # Currency-neutral return (local currency)
         ytd_local_pct: Optional[float] = None
-        if col_start_local in df.columns and col_current_local in df.columns:
-            start_local = pd.to_numeric(row.get(col_start_local), errors="coerce")
-            current_local = pd.to_numeric(row.get(col_current_local), errors="coerce")
-            if pd.notna(start_local) and pd.notna(current_local) and float(start_local) != 0:
-                ytd_local_pct = round((float(current_local) - float(start_local)) / abs(float(start_local)), 6)
+        start_local = _num(row, col_start_local)
+        current_local = _num(row, col_current_local)
+        if start_local is not None and current_local is not None and start_local != 0:
+            ytd_local_pct = round((current_local - start_local) / abs(start_local), 6)
 
         results.append(ParsedHolding(
             holding_name=name,
-            quantity=int(qty) if pd.notna(qty) else None,
+            quantity=int(qty) if qty is not None and pd.notna(qty) else None,
             currency=ccy,
             weight=weight,
             start_value_eur=start_val,
@@ -96,6 +184,13 @@ def parse_airs_excel(file_bytes: bytes) -> list[ParsedHolding]:
             ytd_return_eur=ytd_eur,
             ytd_return_pct=ytd_pct,
             ytd_return_local_pct=ytd_local_pct,
+            # AIRS's own, as reported — never rescaled, never recomputed.
+            cost_basis_local=_num(row, col_cost_local),
+            current_price_local=_num(row, col_price_local),
+            airs_weight=_num(row, col_weging),
+            fund_result_eur=_num(row, col_fund_result),
+            fx_result_eur=_num(row, col_fx_result),
+            airs_result_pct=_num(row, col_result_pct),
         ))
 
     return results

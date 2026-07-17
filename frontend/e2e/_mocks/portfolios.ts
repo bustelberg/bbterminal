@@ -308,6 +308,50 @@ export const FIXTURE_LINKABLE = {
 };
 
 /**
+ * Accounts -> models. Real names and real shapes (AirSPMS, 2026-07-17).
+ *
+ * The `source` field is what this fixture exists to pin. A `guess` is a name pattern; a
+ * `manual` is a person. They must never look alike, because the wrong risk profile of a
+ * strategy holds nearly the same instruments — BUS_FTS_Bepoff/DEF/NEU_AFS hold the IDENTICAL
+ * 27 ISINs — so a wrong link reads as perfectly plausible and nobody re-checks it.
+ */
+export const FIXTURE_ACCOUNT_LINKS = {
+  accounts: [
+    // Confirmed by a human — always wins over any guess.
+    {
+      portefeuille: 'StarTopSelectie OFF DYN', ytd_pct: 2.4, months: 7,
+      model_portfolio_id: 2094, model_name: 'StarTopSelectie OFF FX', model_positions: 24,
+      source: 'manual', reason: null,
+    },
+    // Pattern-matched only. `BUS_FTS_OFF_DYN` <-> `BUS_FTS_OFF_AFS` — the suffix-REPLACED
+    // convention, which is the one that broke the first matcher.
+    {
+      portefeuille: 'BUS_FTS_OFF_DYN', ytd_pct: -6.13, months: 7,
+      model_portfolio_id: 1990, model_name: 'BUS_FTS_OFF_AFS', model_positions: 25,
+      source: 'guess', reason: "exact stem match on 'busftsoff'",
+    },
+    // AIRS mangles the word itself (AAND -> AAN + _d), so there is no guess to make.
+    {
+      portefeuille: 'BUS_BM_AAN_kw_EUR_2026_d', ytd_pct: 13.93, months: 7,
+      model_portfolio_id: null, model_name: null, model_positions: null,
+      source: 'none', reason: "no model has the stem 'busbmaankweur2026'",
+    },
+    // The cycle: an account that is ALSO a one-line model row, so it matched itself.
+    {
+      portefeuille: 'TOPS_AZTS_L', ytd_pct: 0.0, months: 7,
+      model_portfolio_id: null, model_name: null, model_positions: null,
+      source: 'none', reason: 'the only stem match is the account itself',
+    },
+  ],
+  models: [
+    { id: 2094, name: 'StarTopSelectie OFF FX', positions: 24 },
+    { id: 1990, name: 'BUS_FTS_OFF_AFS', positions: 25 },
+    { id: 1991, name: 'BUS_FTS_NEU_AFS', positions: 27 },
+    { id: 1810, name: 'BUS_BM_AAND_kw_EUR_2026', positions: 1 },
+  ],
+};
+
+/**
  * The Analyse modal's payload. The buckets are the point: a real sector, a FUND bucket (we hold
  * no look-through — an ETF's listing tells you nothing about its contents), and Cash.
  */
@@ -340,6 +384,13 @@ export const FIXTURE_ANALYSIS = {
     benchmark_since_pct: 12.77,
     since_excess_pct: 37.84,
     ytd_is_since: false,
+    // The book (AIRS) beside the strategy (yfinance). Windows match here, so the gap is real
+    // drift: the strategy read +51.48% while the book AIRS holds made +46.12%.
+    book_portefeuille: 'BUS_Defensief_Dyn',
+    book_ytd_pct: 46.12,
+    book_comparable: true,
+    book_gap_pct: 5.36,
+    book_reason: null,
   },
   axes: [
     {
@@ -424,6 +475,182 @@ export async function mockPortfolios(page: Page) {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify(FIXTURE_PORTFOLIOS),
+    });
+  });
+  /**
+   * The overview — the pair composed. Name from the Fixed side, numbers from the Dynamic side.
+   *
+   * `link_source` is the point of the fixture: a `guess`-named row must never look like a
+   * confirmed one, because a mis-pairing files a real book's money under another strategy's
+   * name and nothing else on the row would look wrong.
+   */
+  await page.route('**/api/airs/portfolios/overview**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          name: 'Bustelberg Defensief', description: 'Defensief FX',
+          dynamic_portefeuille: 'BUS_Defensief_Dyn', fixed_name: 'BUS_Defensief_FX',
+          fixed_portfolio_id: 1933, fixed_type: 'fixed (8.5)', isins: 40,
+          link_source: 'guess', link_reason: "exact stem match on 'busdefensief'",
+          as_of: '2026-07-16', periode: '2026-07-16', months: 7,
+          ytd_pct: 2.68, latest_month_pct: -0.12, price_result_eur: 14851,
+          income_eur: 15514, investment_result_eur: 30447, deposits_eur: 0, withdrawals_eur: 0,
+          begin_value_eur: 1135000, end_value_eur: 1165895, holdings: 41,
+          reconciles: true, residual_eur: 0,
+        },
+        {
+          name: 'EuropaTopSelectie Offensief', description: 'Europa Offensief FX',
+          dynamic_portefeuille: 'EuropaTopSelect OFF DYN', fixed_name: 'BUS_EUR_OFF_FX',
+          fixed_portfolio_id: 1973, fixed_type: 'fixed (0)', isins: 26,
+          link_source: 'manual', link_reason: null,
+          as_of: '2026-07-16', periode: '2026-07-16', months: 7,
+          ytd_pct: -1.28, latest_month_pct: 0.4, price_result_eur: -12000,
+          income_eur: 3000, investment_result_eur: -9000, deposits_eur: 0, withdrawals_eur: 0,
+          begin_value_eur: 1000000, end_value_eur: 991000, holdings: 27,
+          reconciles: true, residual_eur: 0,
+        },
+        // Unlinked: real AIRS numbers, no nickname, no ISINs. Hidden by default, not deleted.
+        {
+          name: 'BUS_BM_AAN_kw_EUR_2026_d', description: null,
+          dynamic_portefeuille: 'BUS_BM_AAN_kw_EUR_2026_d', fixed_name: null,
+          fixed_portfolio_id: null, fixed_type: null, isins: null,
+          link_source: 'none', link_reason: "no model has the stem 'busbmaankweur2026'",
+          as_of: '2026-07-16', periode: '2026-07-16', months: 7,
+          ytd_pct: 13.93, latest_month_pct: 1.1, price_result_eur: 139300,
+          income_eur: 0, investment_result_eur: 139300, deposits_eur: 0, withdrawals_eur: 0,
+          begin_value_eur: 1000000, end_value_eur: 1139300, holdings: 1,
+          reconciles: true, residual_eur: 0,
+        },
+      ]),
+    });
+  });
+  // The accounts list. Every money figure is the YEAR's (summed across AIRS's monthly rows) —
+  // `latest_month_pct` is a different window, not a rival YTD.
+  await page.route('**/api/airs/accounts', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([{
+        portefeuille: 'BUS_Defensief_Dyn', periode: '2026-07-16', as_of: '2026-07-16', months: 7,
+        begin_value_eur: 1135000, end_value_eur: 1165895, ytd_pct: 2.68, latest_month_pct: -0.12,
+        price_result_eur: 14851, income_eur: 15514, investment_result_eur: 30447,
+        deposits_eur: 0, withdrawals_eur: 0, residual_eur: 0, reconciles: true, holdings: 41,
+      }]),
+    });
+  });
+  await page.route('**/api/airs/accounts/*/holdings**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        portefeuille: 'BUS_Defensief_Dyn', as_of: '2026-07-16', ytd_pct: 2.68,
+        price_result_eur: 14851, income_eur: 15514,
+        rows: [
+          { holding_name: 'ASML Holding', quantity: 27, currency: 'EUR', weight: 0.0359,
+            start_value_eur: 24878, current_value_eur: 41834, ytd_return_eur: 16956,
+            ytd_return_pct: 0.6816, ytd_return_local_pct: 0.6816 },
+          { holding_name: 'iShares Global Corp Bond ETF EUR H Dist', quantity: 42841,
+            currency: 'EUR', weight: 0.1534, start_value_eur: 183505, current_value_eur: 178797,
+            ytd_return_eur: -4708, ytd_return_pct: -0.0257, ytd_return_local_pct: -0.0257 },
+          { holding_name: 'Star Selection Index', quantity: 21100, currency: 'EUR',
+            weight: 0.0176, start_value_eur: 22003, current_value_eur: 20522,
+            ytd_return_eur: -1481, ytd_return_pct: -0.0673, ytd_return_local_pct: -0.0673 },
+          { holding_name: 'Aedifica', quantity: 400, currency: 'EUR', weight: 0.029,
+            start_value_eur: 33416, current_value_eur: 33787, ytd_return_eur: 371,
+            ytd_return_pct: 0.0111, ytd_return_local_pct: 0.0111 },
+          // ⚠ No opening value: its return is UNDEFINED, and its weight still counts.
+          { holding_name: 'Effectenrekening', quantity: 0, currency: 'EUR', weight: 0.0141,
+            start_value_eur: 0, current_value_eur: 16468, ytd_return_eur: null,
+            ytd_return_pct: null, ytd_return_local_pct: null },
+        ],
+      }),
+    });
+  });
+  /**
+   * An account's holdings with ISINs attached. Real rows from BUS_Defensief_Dyn.
+   *
+   * The three verdicts must stay visibly apart. `unpriced` is the subtle one: the name matched
+   * and NOTHING checked it, which is precisely where the Acc/Inc share-class trap lives — so it
+   * must not read as a pass.
+   */
+  await page.route('**/api/airs/accounts/*/isins**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        portefeuille: 'BUS_Defensief_Dyn',
+        model_name: 'BUS_Defensief_FX',
+        model_source: 'guess',
+        as_of: '2026-07-16',
+        // AIRS's own Beleggingscategorie. ⚠ Bonds is 88% ETF — an "ETF" bucket would empty it.
+        segments: [
+          { asset_class: 'Equity', holdings: 1, value_eur: 41834, start_value_eur: 24878, weight_pct: 3.59,
+            gain_eur: 16956, return_pct: 68.16, priced_value_eur: 41834, etf_value_eur: 0 },
+          { asset_class: 'Bonds', holdings: 1, value_eur: 178797, start_value_eur: 183505, weight_pct: 15.34,
+            gain_eur: -4708, return_pct: -2.57, priced_value_eur: 178797, etf_value_eur: 178797 },
+          { asset_class: 'Real estate', holdings: 1, value_eur: 33787, start_value_eur: 33416, weight_pct: 2.9,
+            gain_eur: 371, return_pct: 1.11, priced_value_eur: 33787, etf_value_eur: 0 },
+          { asset_class: 'Alternatives', holdings: 1, value_eur: 20522, start_value_eur: 22003, weight_pct: 1.76,
+            gain_eur: -1481, return_pct: -6.73, priced_value_eur: 20522, etf_value_eur: 0 },
+          // ⚠ Real exposure, undefined return: it counts in the weight, never in the return.
+          { asset_class: 'Cash', holdings: 1, value_eur: 16468, start_value_eur: 0, weight_pct: 1.41,
+            gain_eur: null, return_pct: null, priced_value_eur: 0, etf_value_eur: 0 },
+        ],
+        rows: [
+          // Confirmed by the price: implied €1549 against ASML's own close.
+          {
+            holding_name: 'ASML Holding', lines: 1, quantity: 27, currency: 'EUR',
+            asset_class: 'Equity', categorie: 'AAND', is_etf: false,
+            isin: 'NL0010273215', model_fonds: 'ASML Holding', name_score: 100,
+            implied_price_eur: 1549.4, our_price_eur: 1510.89, price_ratio: 1.03,
+            verdict: 'ok', our_instrument: 'ASML Holding N.V.',
+          },
+          // ⚠ The model's ISIN is the fund's USD (Dist) class at €77.94; the book holds the
+          // EUR-hedged class at €4.17. 19x apart, both quoted EUR — FX cannot explain it.
+          {
+            holding_name: 'iShares Global Corp Bond ETF EUR H Dist', lines: 1, quantity: 42841,
+            currency: 'EUR', asset_class: 'Bonds', categorie: 'OBL', is_etf: true,
+            isin: 'IE00BJSFQW37', model_fonds: 'iShs Glb Crp Bond ETF EUR',
+            name_score: 80, implied_price_eur: 4.1735, our_price_eur: 77.938, price_ratio: 0.0535,
+            verdict: 'price_mismatch',
+            our_instrument: 'iShares Global Corp Bond UCITS ETF USD (Dist)',
+          },
+          // Name-matched only — a Leonteq AMC Yahoo cannot price. Nothing confirms it.
+          {
+            holding_name: 'Star Selection Index', lines: 1, quantity: 21100, currency: 'EUR',
+            asset_class: 'Alternatives', categorie: 'ALTBEL', is_etf: false,
+            isin: 'CH1381833321', model_fonds: 'Star Selection Index', name_score: 100,
+            implied_price_eur: null, our_price_eur: null, price_ratio: null,
+            verdict: 'unpriced', our_instrument: null,
+          },
+          { holding_name: 'Aedifica', lines: 1, quantity: 400, currency: 'EUR',
+            asset_class: 'Real estate', categorie: 'VAS', is_etf: false, isin: 'BE0003851681',
+            name_score: 100, verdict: 'ok', our_instrument: 'Aedifica NV/SA' },
+          { holding_name: 'Effectenrekening', lines: 1, quantity: 0, currency: 'EUR',
+            asset_class: 'Cash', categorie: null, is_etf: false, isin: null,
+            name_score: 28, verdict: 'unpriced', our_instrument: null },
+        ],
+        // The model holds it; the book does not. Real drift.
+        unmatched_model_positions: [
+          { fonds: 'Ish DJS GSD 100', isin: 'DE000A0F5UH1', percentage: 0.9 },
+        ],
+      }),
+    });
+  });
+  // Accounts -> models. The three `source` values are the point of the fixture: they must stay
+  // visibly different, because "a human confirmed this" and "we pattern-matched a name" are
+  // not the same claim about which strategy a book is running.
+  await page.route('**/api/airs/account-model-links**', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(FIXTURE_ACCOUNT_LINKS),
     });
   });
   await page.route('**/api/airs/model-portfolios/performance**', async (route) => {

@@ -18,11 +18,165 @@ import { mockPortfolios } from './_mocks/portfolios';
  * support — a 75.78% YTD on a model defined eight days ago is the best-performing portfolio
  * in the list, until you notice it never held those weights.
  */
+/**
+ * The overview — the pair composed into the row you actually want.
+ *
+ * Its own describe, with NO source-table click: the whole point is that it answers without one.
+ */
+test.describe('/portfolios overview', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockAuth(page);
+    await mockPortfolios(page);
+    await page.goto('/portfolios');
+  });
+
+  const row = (page: import('@playwright/test').Page, name: string) =>
+    page.locator('tr').filter({ hasText: name }).first();
+
+  test('the overview is the front page and the sources are shut', async ({ page }) => {
+    await expect(page.getByRole('heading', { name: /^Portfolios ·/ })).toBeVisible();
+    // The three source tables must not be rendered until asked for.
+    await expect(page.getByRole('heading', { name: /AIRS Fixed Portfolio/ })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: /AIRS Dynamic Portfolio/ })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Dynamic → Fixed' })).toHaveCount(0);
+  });
+
+  test('a portfolio is shown by the name you gave it, not by AIRS s code', async ({ page }) => {
+    // The nickname comes from the Fixed side; the money from the Dynamic side. Neither row is
+    // the portfolio on its own.
+    const r = row(page, 'Bustelberg Defensief');
+    await expect(r).toContainText('BUS_Defensief_Dyn');   // AIRS's codes stay, quietly
+    await expect(r).toContainText('BUS_Defensief_FX');
+    await expect(r).toContainText('+2.68%');
+  });
+
+  test('a guessed name is flagged; a confirmed one is not', async ({ page }) => {
+    // ⚠ A mis-pairing files a real book's money under another strategy's name and NOTHING else
+    // on the row would look wrong — the risk variants hold the same instruments. So the
+    // distinction between "a person confirmed this name" and "a string matched" must survive.
+    await expect(row(page, 'Bustelberg Defensief')).toContainText('⚠');
+    await expect(row(page, 'EuropaTopSelectie Offensief')).not.toContainText('⚠');
+  });
+
+  test('unlinked books are hidden by default but not discarded', async ({ page }) => {
+    // A benchmark has real AIRS numbers and no nickname. Hiding it is a default, not a claim
+    // that it is not a portfolio.
+    await expect(row(page, 'BUS_BM_AAN_kw_EUR_2026_d')).toHaveCount(0);
+    await page.getByText(/Linked only/).click();
+    await expect(row(page, 'BUS_BM_AAN_kw_EUR_2026_d')).toBeVisible();
+    await expect(row(page, 'BUS_BM_AAN_kw_EUR_2026_d')).toContainText('+13.93%');
+  });
+
+  /**
+   * Holdings grouped by AIRS's own Beleggingscategorie.
+   *
+   * ⚠ ETFs ARE COUNTED, NEVER BUCKETED. AIRS classifies what a holding INVESTS IN, not its
+   * wrapper — an equity ETF is Equity, a bond ETF is Bonds. Measured: 10 of the 11 bond ISINs
+   * are ETFs, and on BUS_Defensief an "ETFs" bucket would move 43.20 of the 48.65% bond sleeve
+   * out of Bonds, so a defensive book would read as holding almost none.
+   */
+  test('holdings are grouped by asset class, with real estate its own bucket', async ({ page }) => {
+    await row(page, 'Bustelberg Defensief').click();
+    const sub = page.locator('td[colspan] table tbody');
+    for (const seg of ['Equity', 'Bonds', 'Real estate', 'Alternatives', 'Cash']) {
+      await expect(sub.locator('tr').filter({ hasText: seg }).first()).toBeVisible();
+    }
+    // The header carries the segment's own figures.
+    const bonds = sub.locator('tr').filter({ hasText: 'Bonds' }).first();
+    await expect(bonds).toContainText('15.34%');
+    await expect(bonds).toContainText('-2.57%');
+  });
+
+  test('Analyse opens the strategy modal and shows book-vs-strategy drift', async ({ page }) => {
+    // ⚠ The row is the BOOK (AIRS); the modal is the STRATEGY (yfinance). They are different
+    // objects and disagree by up to 6.58pp — so the modal must NAME the object it describes and
+    // put the book's number beside it, or a reader thinks they clicked into the row they see.
+    const analyse = row(page, 'Bustelberg Defensief').getByRole('button', { name: 'Analyse' });
+    await expect(analyse).toBeVisible();
+    await analyse.click();
+
+    const modal = page.getByRole('dialog').or(page.locator('.fixed').filter({ hasText: 'Return (€)' })).first();
+    await expect(page.getByText('Book vs strategy (YTD)')).toBeVisible();
+    await expect(page.getByText('Strategy (our prices)')).toBeVisible();
+    await expect(page.getByText('Book (AIRS)')).toBeVisible();
+    // Both numbers, and the drift between them.
+    await expect(page.getByText('+51.48%').first()).toBeVisible();   // strategy
+    await expect(page.getByText('+46.12%').first()).toBeVisible();   // book
+    await expect(page.getByText(/\+5\.36% drift/)).toBeVisible();
+  });
+
+  test('an unlinked portfolio offers no Analyse button', async ({ page }) => {
+    // Analyse needs a Fixed portfolio to describe. An unlinked book has none.
+    await page.getByText(/Linked only/).click();
+    const r = row(page, 'BUS_BM_AAN_kw_EUR_2026_d');
+    await expect(r.getByRole('button', { name: 'Analyse' })).toHaveCount(0);
+  });
+
+  test('each segment figure sits under the column it belongs to', async ({ page }) => {
+    // ⚠ Column drift is SILENT: an extra blank cell in the header shifted every figure one to
+    // the right, and a weight renders perfectly well under "Start (€)". Nothing looks broken —
+    // it just answers a different question than the header above it claims.
+    await row(page, 'Bustelberg Defensief').click();
+    const sub = page.locator('td[colspan] table');
+    const headers = await sub.locator('thead th').allInnerTexts();
+    const bonds = sub.locator('tbody tr').filter({ hasText: 'Bonds' }).first();
+    const cells = await bonds.locator('td').allInnerTexts();
+    expect(cells).toHaveLength(headers.length);          // one cell per column, no shifting
+    // The headers are CSS-uppercased, so innerText gives "WEIGHT" — compare case-insensitively.
+    const at = (label: string) => {
+      const i = headers.findIndex((h) => h.trim().toLowerCase() === label.toLowerCase());
+      expect(i, `column ${label} exists`).toBeGreaterThan(-1);
+      return cells[i].trim();
+    };
+    expect(at('Weight')).toBe('15.34%');                 // the weight is under Weight
+    expect(at('Start (€)')).toBe('€183,505');            // not under Start
+    expect(at('Now (€)')).toBe('€178,797');
+    expect(at('Gain (€)')).toBe('€-4,708');
+    expect(at('Return')).toContain('-2.57%');
+  });
+
+  test('an ETF is counted inside its asset class, not split out of it', async ({ page }) => {
+    await row(page, 'Bustelberg Defensief').click();
+    const sub = page.locator('td[colspan] table tbody');
+    // The bond ETF sits under Bonds and is annotated there — it does not get its own bucket.
+    await expect(sub.locator('tr').filter({ hasText: 'Bonds' }).first())
+      .toContainText('via ETFs');
+    await expect(sub.locator('tr').filter({ hasText: /^ETFs?\b/ })).toHaveCount(0);
+  });
+
+  test('a segment with no opening value shows no return, and still shows its weight', async ({ page }) => {
+    // ⚠ Cash is real exposure with an UNDEFINED return. Putting it in sum(current)/sum(start)
+    // would report its entire balance as gain — on MoTopSelectie that is €600,750 of "profit".
+    await row(page, 'Bustelberg Defensief').click();
+    const cash = page.locator('td[colspan] table tbody tr').filter({ hasText: 'Cash' }).first();
+    await expect(cash).toContainText('1.41%');     // the weight is real
+    await expect(cash).toContainText('€16,468');   // so is the value
+    await expect(cash).not.toContainText('%0');    // but no return is invented
+  });
+
+  test('expanding a portfolio shows ISIN and name from Fixed, everything else from AIRS', async ({ page }) => {
+    await row(page, 'Bustelberg Defensief').click();
+    const pos = (fund: string) =>
+      page.locator('td[colspan] table tbody tr').filter({ hasText: fund }).first();
+    // ISIN + fund name from the Fixed portfolio; qty/value/return are AIRS's own.
+    await expect(pos('ASML Holding')).toContainText('NL0010273215');
+    await expect(pos('ASML Holding')).toContainText('€41,834');
+    // The price contradicts this ISIN — it must not read as fact.
+    await expect(pos('iShares Global Corp Bond ETF EUR H Dist')).toContainText('⚠');
+    // Nothing checked this one. Not a pass.
+    await expect(pos('Star Selection Index')).toContainText('?');
+  });
+});
+
 test.describe('/portfolios', () => {
   test.beforeEach(async ({ page }) => {
     await mockAuth(page);
     await mockPortfolios(page);
     await page.goto('/portfolios');
+    // The Fixed / Dynamic / pairing tables are collapsed by default — the overview above them
+    // answers the everyday question. Everything below this line is about the SOURCES, so open
+    // them. (That they are shut by default is asserted in "the overview is the front page".)
+    await page.getByRole('button', { name: /Source tables/ }).click();
   });
 
   const row = (page: import('@playwright/test').Page, name: string) =>
@@ -358,8 +512,12 @@ test.describe('/portfolios', () => {
   });
 
   test('sorting by Sharpe sinks the absent rows in BOTH directions', async ({ page }) => {
-    // 2nd cell — the 1st is now the Analyse button.
-    const names = async () => (await page.locator('tbody tr td:nth-child(2)').allInnerTexts())
+    // 2nd cell — the 1st is now the Analyse button. ⚠ Scoped to the Fixed section: unscoped,
+    // this sweeps every table on the page, and the overview's 2nd column (ISINs) leads the
+    // list — so the assertion reads "40" and the sort under test is never observed.
+    const names = async () => (await page.locator('section')
+      .filter({ hasText: 'AIRS Fixed Portfolio' })
+      .locator('tbody tr td:nth-child(2)').allInnerTexts())
       .map((t) => t.replace(/[▸▾]/g, '').trim());
 
     const sharpe = page.getByRole('button', { name: /Sharpe/ });
@@ -604,5 +762,131 @@ test.describe('/portfolios', () => {
     // 'not in grid' — the ISIN is not an instrument we hold, so there is nothing to bridge.
     const inhouse = posRow('IE00077FRP95');
     await expect(inhouse.getByRole('button', { name: 'Sound?' })).toHaveCount(0);
+  });
+
+  /**
+   * ISINs attached to an account's holdings.
+   *
+   * The account has the money and no ISIN; its model has the ISINs. The join is a name match —
+   * and a name CANNOT see a share class: IE00BNDS1P30 and IE00BNDS1Q47 are both "Vanguard ESG
+   * Global Corporate Bond UCITS ETF EUR Hedged" (Acc and Inc), €4.79 vs €3.99, compounding
+   * differently. So every row is price-checked, and what must never collapse is the difference
+   * between "the price confirms this", "the price CONTRADICTS this", and "nothing checked it".
+   */
+  test.describe('holdings → ISINs', () => {
+    test.beforeEach(async ({ page }) => {
+      // ⚠ Scoped to the Dynamic section. The overview at the top of the page shows AIRS's codes
+      // too, so an unscoped `.first()` expands THAT row and this panel never opens — the test
+      // then fails on a panel it never touched.
+      await page.locator('section').filter({ hasText: 'AIRS Dynamic Portfolio' })
+        .locator('tr').filter({ hasText: 'BUS_Defensief_Dyn' }).first().click();
+    });
+
+    // ⚠ Scoped to the INNER table. `page.locator('tr').filter({hasText})` also matches the
+    // expanded account row, which wraps the whole sub-table — so every assertion about one
+    // holding would silently read every other holding's text too, and "no ⚠ on this row"
+    // passes or fails based on an unrelated position.
+    const posRow = (page: import('@playwright/test').Page, fund: string) =>
+      page.locator('td[colspan] table tbody tr').filter({ hasText: fund }).first();
+
+    test('a price-confirmed ISIN renders plainly', async ({ page }) => {
+      const r = posRow(page, 'ASML Holding');
+      await expect(r).toContainText('NL0010273215');
+      await expect(r).not.toContainText('⚠');
+    });
+
+    test('an ISIN the price contradicts is flagged, not shown as fact', async ({ page }) => {
+      // The model's ISIN is the fund's USD (Dist) class (€77.94); the book holds the EUR-hedged
+      // class (€4.17). 19x apart, both EUR. Rendering this bare would hand a reader the wrong
+      // instrument's identity with no hint anything is off.
+      const r = posRow(page, 'iShares Global Corp Bond ETF EUR H Dist');
+      await expect(r).toContainText('IE00BJSFQW37');
+      await expect(r).toContainText('⚠');
+    });
+
+    test('an unchecked ISIN is not dressed as a confirmed one', async ({ page }) => {
+      // A Leonteq AMC — Yahoo has no listing, so nothing corroborates the name match. This is
+      // exactly where a wrong share class would hide, so it cannot look like a pass.
+      const r = posRow(page, 'Star Selection Index');
+      await expect(r).toContainText('CH1381833321');
+      await expect(r).toContainText('?');
+    });
+
+    test('the header names the model and says the pairing is unconfirmed', async ({ page }) => {
+      const panel = page.locator('section').filter({ hasText: 'AIRS Dynamic Portfolio' });
+      await expect(panel).toContainText('BUS_Defensief_FX');
+      await expect(panel).toContainText('Pairing unconfirmed');
+      // A model position the book does not hold is drift worth stating, not a silent absence.
+      await expect(panel).toContainText('Ish DJS GSD 100');
+    });
+  });
+
+  /**
+   * Accounts -> models. The pairing is the only bridge between the ISINs (models have them,
+   * AIRS values none of them) and the money (accounts have it, and carry no ISIN).
+   *
+   * What must be regression-tested is NOT that a link renders — it is that a GUESS never looks
+   * like a DECISION. The risk variants of a strategy hold the SAME instruments
+   * (BUS_FTS_Bepoff/DEF/NEU_AFS share 27 of 27 ISINs), so a wrong link is invisible on
+   * inspection: the holdings agree, the name looks right, and nobody re-checks it. The badge is
+   * the only thing standing between "we pattern-matched a string" and "a person decided".
+   */
+  test.describe('accounts → models', () => {
+    const linkRow = (page: import('@playwright/test').Page, name: string) =>
+      page.locator('tr').filter({ hasText: name }).first();
+
+    test('a guessed pairing is never dressed as a confirmed one', async ({ page }) => {
+      const confirmed = linkRow(page, 'StarTopSelectie OFF DYN');
+      await expect(confirmed).toContainText('manual');
+
+      const guessed = linkRow(page, 'BUS_FTS_OFF_DYN');
+      await expect(guessed).toContainText('guess');
+      // Both carry a model; only the badge distinguishes a decision from a string match.
+      await expect(guessed.locator('select')).toHaveValue('1990');
+    });
+
+    test('an account we refuse to guess says so rather than showing the nearest model', async ({ page }) => {
+      // AIRS mangles the word itself (BUS_BM_AAND... -> BUS_BM_AAN..._d), so there is no rule
+      // to apply. Offering the nearest name would be a fabricated pairing.
+      const none = linkRow(page, 'BUS_BM_AAN_kw_EUR_2026_d');
+      await expect(none.locator('select')).toHaveValue('');
+      await expect(none).toContainText('none selected');
+    });
+
+    test('an account that matched only itself gets no link', async ({ page }) => {
+      // TOPS_AZTS_L is both an account and a one-line wrapper model, so it matched itself at a
+      // perfect score. "This account runs itself" is no information wearing certainty.
+      const cycle = linkRow(page, 'TOPS_AZTS_L');
+      await expect(cycle.locator('select')).toHaveValue('');
+    });
+
+    test('choosing a model records a decision, and clearing one is a different act', async ({ page }) => {
+      const calls: { method: string; body: string | null }[] = [];
+      await page.route('**/api/airs/account-model-links/**', async (route) => {
+        calls.push({ method: route.request().method(), body: route.request().postData() });
+        await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+      });
+
+      const guessed = linkRow(page, 'BUS_FTS_OFF_DYN');
+      // Confirming the guess by picking it explicitly.
+      await guessed.locator('select').selectOption('1990');
+      await expect.poll(() => calls.length).toBeGreaterThan(0);
+      expect(calls[0].method).toBe('PUT');
+      expect(JSON.parse(calls[0].body ?? '{}')).toMatchObject({ model_portfolio_id: 1990 });
+
+      // "Not a model" stores NULL — a decision. It must NOT be sent as a DELETE, which would
+      // only forget, letting the guess return on the next read.
+      calls.length = 0;
+      await guessed.locator('select').selectOption('none');
+      await expect.poll(() => calls.length).toBeGreaterThan(0);
+      expect(calls[0].method).toBe('PUT');
+      expect(JSON.parse(calls[0].body ?? '{}')).toMatchObject({ model_portfolio_id: null });
+
+      // Whereas going back to undecided forgets the decision entirely.
+      calls.length = 0;
+      await guessed.locator('select').selectOption('');
+      await expect.poll(() => calls.length).toBeGreaterThan(0);
+      expect(calls[0].method).toBe('DELETE');
+    });
   });
 });

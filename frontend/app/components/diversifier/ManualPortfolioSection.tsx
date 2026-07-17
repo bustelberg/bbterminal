@@ -60,7 +60,7 @@ export default function ManualPortfolioSection({
         )}
       </div>
       <p className="text-xs text-fg-subtle mb-3">
-        Fix each holding&apos;s target weight + rebalance band; the portfolio is reset to target whenever <em>any</em> holding
+        Fix each holding&apos;s target weight + rebalance band; the portfolio is reset to target whenever <em>any</em>{' '}holding
         drifts outside its band. Compared against vanilla momentum over the common window.
       </p>
 

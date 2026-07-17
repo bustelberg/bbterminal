@@ -419,25 +419,25 @@ export default function Documentation() {
 
           <Section id="overview" title="Overview">
             <p>
-              <strong>Every</strong> <code className="text-warn-300">/api/*</code> endpoint requires a Supabase JWT — there is no
+              <strong>Every</strong> <code className="text-warn-300">/api/*</code>{' '}endpoint requires a Supabase JWT — there is no
               unauthenticated read access. The auth flow is the same for every caller (the web app, an external script, the
-              IBKR rebalancer): you exchange your <strong>email + password</strong> for an
+              IBKR rebalancer): you exchange your <strong>email + password</strong>{' '}for an
               {' '}<code className="text-warn-300">access_token</code>, then pass it as
-              {' '}<code className="text-warn-300">Authorization: Bearer …</code> on each call.
+              {' '}<code className="text-warn-300">Authorization: Bearer …</code>{' '}on each call.
             </p>
             <p>
               Tokens are minted by Supabase Auth directly, not by this API — you POST to
-              {' '}<code className="text-warn-300">$SUPABASE_URL/auth/v1/token?grant_type=password</code> with the public
-              {' '}<code className="text-warn-300">anon</code> key as the <code className="text-warn-300">apikey</code> header.
+              {' '}<code className="text-warn-300">$SUPABASE_URL/auth/v1/token?grant_type=password</code>{' '}with the public
+              {' '}<code className="text-warn-300">anon</code> key as the <code className="text-warn-300">apikey</code>{' '}header.
               Tokens last about 1&nbsp;hour; after that you either re-authenticate or use the returned
               {' '}<code className="text-warn-300">refresh_token</code> (<code className="text-warn-300">grant_type=refresh_token</code>).
             </p>
             <p>
-              <strong>What you can call depends on your account&apos;s role</strong> — see <a href="#tiers" className="text-accent-400 hover:underline">Access tiers</a> below.
+              <strong>What you can call depends on your account&apos;s role</strong> — see <a href="#tiers" className="text-accent-400 hover:underline">Access tiers</a>{' '}below.
               The token mechanism is identical regardless of role; only the set of allowed paths differs.
             </p>
             <p>
-              For one-off probing, the <a href="/api" className="text-accent-400 hover:underline">/api page</a> in this app does
+              For one-off probing, the <a href="/api" className="text-accent-400 hover:underline">/api page</a>{' '}in this app does
               all of that for you with Try buttons and copy-as-curl. For an automated script, use the Python client below.
             </p>
           </Section>
@@ -481,7 +481,7 @@ export default function Documentation() {
                     <td className="px-3 py-2 font-mono text-fg">admin</td>
                     <td className="px-3 py-2 text-fg-muted"><code className="text-warn-300">app_metadata.role == &apos;admin&apos;</code></td>
                     <td className="px-3 py-2 text-fg-muted">
-                      Every <code className="text-warn-300">/api/*</code> endpoint, including the <code className="text-warn-300">/api/admin/*</code> surface
+                      Every <code className="text-warn-300">/api/*</code> endpoint, including the <code className="text-warn-300">/api/admin/*</code>{' '}surface
                       documented below.
                     </td>
                   </tr>
@@ -489,10 +489,10 @@ export default function Documentation() {
               </table>
             </div>
             <p className="text-xs text-fg-subtle">
-              <code className="text-warn-300">/api/auth/*</code> is self-authenticating — those endpoints verify your token
-              themselves (e.g. <code className="text-warn-300">GET /api/auth/me</code> returns your id, email, and role; use it to
-              check which tier you&apos;re in). SSE endpoints need the token as the <code className="text-warn-300">Authorization</code> header,
-              so a browser <code className="text-warn-300">EventSource</code> won&apos;t work — read the stream with an HTTP client that sets headers.
+              <code className="text-warn-300">/api/auth/*</code>{' '}is self-authenticating — those endpoints verify your token
+              themselves (e.g. <code className="text-warn-300">GET /api/auth/me</code>{' '}returns your id, email, and role; use it to
+              check which tier you&apos;re in). SSE endpoints need the token as the <code className="text-warn-300">Authorization</code>{' '}header,
+              so a browser <code className="text-warn-300">EventSource</code>{' '}won&apos;t work — read the stream with an HTTP client that sets headers.
             </p>
           </Section>
 
@@ -510,7 +510,7 @@ export default function Documentation() {
 
           <Section id="python-client" title="Python client">
             <p>
-              Drop <code className="text-warn-300">bbterminal_client.py</code> into your Python repo. One class, sync API,
+              Drop <code className="text-warn-300">bbterminal_client.py</code>{' '}into your Python repo. One class, sync API,
               handles login + token refresh transparently. Only depends on <code className="text-warn-300">requests</code>.
             </p>
             <CodeBlock lang="python" code={PYTHON_CLIENT_SOURCE} />
@@ -518,8 +518,8 @@ export default function Documentation() {
 
           <Section id="env-vars" title="Environment variables">
             <p>
-              <code className="text-warn-300">BBTerminalClient.from_env()</code> reads five variables. Keep them in a
-              {' '}<code className="text-warn-300">.env</code> file (gitignored) or your secrets manager — never commit the password.
+              <code className="text-warn-300">BBTerminalClient.from_env()</code>{' '}reads five variables. Keep them in a
+              {' '}<code className="text-warn-300">.env</code>{' '}file (gitignored) or your secrets manager — never commit the password.
             </p>
             <p className="text-xs text-warn-300/80">
               The URL + anon key below are auto-filled from this deployment — paste straight into a sibling repo&apos;s
@@ -544,14 +544,14 @@ export default function Documentation() {
           <Section id="design" title="Why this design">
             <ul className="list-disc list-outside space-y-1.5 pl-5 text-sm">
               <li>
-                <strong>One file, one class.</strong> No package boilerplate. Easy to vendor and review.
+                <strong>One file, one class.</strong>{' '}No package boilerplate. Easy to vendor and review.
               </li>
               <li>
-                <strong>Sync, not async.</strong> Your rebalancer is probably a sleep-loop or cron — async adds complexity
+                <strong>Sync, not async.</strong>{' '}Your rebalancer is probably a sleep-loop or cron — async adds complexity
                 without benefit at single-request cadence.
               </li>
               <li>
-                <strong>Transparent token lifecycle.</strong> You never think about Bearer tokens. The client refreshes
+                <strong>Transparent token lifecycle.</strong>{' '}You never think about Bearer tokens. The client refreshes
                 ~60&nbsp;s before expiry and retries on 401 once (handles the rare race where the token expired
                 between the freshness check and the actual call).
               </li>
@@ -562,7 +562,7 @@ export default function Documentation() {
                 <code className="text-warn-300">realtime</code>, etc. that you don&apos;t need for this single-purpose client.
               </li>
               <li>
-                <strong><code className="text-warn-300">from_env()</code> factory</strong> keeps the password out of source.
+                <strong><code className="text-warn-300">from_env()</code> factory</strong>{' '}keeps the password out of source.
                 The constructor still accepts explicit args if you&apos;d rather inject from a secrets manager.
               </li>
             </ul>
@@ -598,8 +598,8 @@ export default function Documentation() {
           <Section id="reference" title="Endpoint reference">
             <p>
               Every admin endpoint at a glance. The{' '}
-              <a href="/api" className="text-accent-400 hover:underline">/api page</a> lets you call each one
-              interactively; the <code className="text-warn-300">BBTerminalClient</code> above exposes one method per row.
+              <a href="/api" className="text-accent-400 hover:underline">/api page</a>{' '}lets you call each one
+              interactively; the <code className="text-warn-300">BBTerminalClient</code>{' '}above exposes one method per row.
             </p>
             <div className="overflow-auto border border-neutral-800/40 rounded-lg">
               <table className="w-full text-xs">

@@ -123,7 +123,7 @@ export default function ExposureReturnsBreakdown({
           <Stat label="Net effect on captured return" value={fmtPct(data.net, true)} cls={cls(data.net)} />
         </div>
         <p className="text-[10px] text-fg-faint">
-          Counts the <span className="font-mono">1 − exposure</span> slice of each de-risked month&apos;s market move. A negative &quot;avoided downside&quot; that outweighs the missed upside (positive net) means trimming those months helped.
+          Counts the <span className="font-mono">1 − exposure</span>{' '}slice of each de-risked month&apos;s market move. A negative &quot;avoided downside&quot; that outweighs the missed upside (positive net) means trimming those months helped.
         </p>
       </div>
 

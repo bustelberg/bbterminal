@@ -75,9 +75,9 @@ export default function BenchmarksPanel() {
     <section className="bg-card border border-neutral-800/40 rounded-xl p-5 space-y-3">
       <div>
         <h3 className="text-sm font-semibold text-fg-strong">Benchmarks</h3>
-        <p className="text-[11px] text-fg-faint mt-0.5">
-          Cap-weighted, rebuilt from our own constituents — same basis as a portfolio, so the
-          numbers are comparable.
+        <p className="text-[11px] text-fg-faint mt-0.5"
+          title="Rebuilt from our own membership, prices and FX — the same basis a portfolio is measured on, which is what makes the two comparable.">
+          Cap-weighted, rebuilt from our own constituents.
         </p>
       </div>
 
@@ -207,7 +207,7 @@ function IndexDetail({ d }: { d: ReconstructedIndex }) {
           <>
             It would print <span className="font-mono">+21.70%</span> instead of{' '}
             <span className="font-mono">{pct(d.ytd_local_pct)}</span>. Checked against SPY (the
-            real index), which is <span className="font-mono">+9.02%</span> USD.
+            real index), which is <span className="font-mono">+9.02%</span>{' '}USD.
           </>
         )}
         {d.label === 'ACWI' && (
@@ -221,8 +221,8 @@ function IndexDetail({ d }: { d: ReconstructedIndex }) {
         {d.label === 'AEX' && (
           <>
             Fully covered (<span className="font-mono">{d.priced_of_universe}</span> priced) and{' '}
-            <strong>capped at 15%</strong> per constituent, as the real index is — uncapped, ASML
-            alone would be <span className="font-mono">37.5%</span> of it. Composition is
+            <strong>capped at 15%</strong>{' '}per constituent, as the real index is — uncapped, ASML
+            alone would be <span className="font-mono">37.5%</span>{' '}of it. Composition is
             Wikipedia&apos;s, as of the date above; the cap is applied at the start of the window
             rather than at Euronext&apos;s review date, and full market cap is not the index&apos;s
             free float.

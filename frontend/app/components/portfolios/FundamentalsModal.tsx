@@ -97,7 +97,7 @@ function QualityStrip({ metrics }: { metrics: QualityMetric[] }) {
   if (metrics.length && !measured.length) {
     return (
       <div className="bg-inset border border-neutral-800/40 rounded-lg px-3 py-2 text-[11px] text-fg-subtle">
-        <strong className="text-fg">These four cannot judge this company.</strong> Every one of them
+        <strong className="text-fg">These four cannot judge this company.</strong>{' '}Every one of them
         is built on ROIC, gross margin or cash conversion, and a bank has none of the three in a
         comparable sense — lending IS the business, so its capital is its product and its operating
         cash flow tracks its loan book. It needs its own measures (net interest margin, efficiency
@@ -214,7 +214,7 @@ export default function FundamentalsModal({ isin, fonds, onClose }: {
             {/* ⚠ A non-home listing's history has HOLES — the band would be drawn across them. */}
             {!d.is_home && (
               <div className="bg-warn-500/10 border border-warn-500/20 rounded-lg px-3 py-2 text-[11px] text-warn-300">
-                <strong>{d.symbol}</strong> is not this ISIN&apos;s home listing. GuruFocus&apos;s
+                <strong>{d.symbol}</strong>{' '}is not this ISIN&apos;s home listing. GuruFocus&apos;s
                 history on a secondary listing has gaps (Apple: 91 records on Nasdaq, 63 on Zurich
                 with a five-year hole), so treat every line here as indicative.
               </div>
@@ -364,7 +364,7 @@ export default function FundamentalsModal({ isin, fonds, onClose }: {
               currency ({d.currency}) and our price is{' '}
               <span className="font-mono">{d.yahoo_symbol}</span> ({d.price_currency}) — two
               listings of one share class, and their gap would otherwise read as mispricing.
-              {' '}⚠ These are <strong>restated</strong> figures: a 2019 ROIC here is what 2019 looks
+              {' '}⚠ These are <strong>restated</strong>{' '}figures: a 2019 ROIC here is what 2019 looks
               like now, not what anyone could see in 2019.
             </p>
           </div>
