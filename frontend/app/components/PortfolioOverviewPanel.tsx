@@ -124,6 +124,7 @@ export default function PortfolioOverviewPanel() {
           <table className="w-full text-xs">
             <thead className="bg-card sticky top-0 z-10">
               <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+                <th className="px-3 py-1.5 font-medium text-left" />{/* Analyse */}
                 <th className="px-3 py-1.5 font-medium text-left">Name</th>
                 <th className="px-3 py-1.5 font-medium text-right"
                   title="Positions in the Fixed portfolio — the ISINs this pairing can reach. Blank = not linked to one.">
@@ -160,6 +161,22 @@ export default function PortfolioOverviewPanel() {
                   <Fragment key={r.dynamic_portefeuille}>
                     <tr onClick={() => void expand(r.dynamic_portefeuille)}
                       className="hover:bg-accent-500/10 transition-colors cursor-pointer">
+                      {/* Analyse, leftmost. Describes the FIXED portfolio (composition +
+                          attribution), which is why it needs `fixed_portfolio_id` and an unlinked
+                          row cannot offer it. stopPropagation so it does not also toggle the row. */}
+                      <td className="px-3 py-1.5 whitespace-nowrap">
+                        {r.fixed_portfolio_id != null && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setAnalyse({ id: r.fixed_portfolio_id!, name: r.name });
+                            }}
+                            className="text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-fg"
+                          >
+                            Analyse
+                          </button>
+                        )}
+                      </td>
                       <td className="px-3 py-1.5 text-fg whitespace-nowrap">
                         <span className="text-fg-faint mr-1.5">{isOpen ? '▾' : '▸'}</span>
                         {r.name}
@@ -174,20 +191,6 @@ export default function PortfolioOverviewPanel() {
                         <span className="text-fg-faint font-mono text-[10px] ml-2">
                           {r.dynamic_portefeuille}{r.fixed_name ? ` · ${r.fixed_name}` : ''}
                         </span>
-                        {/* Analyse describes the FIXED portfolio (its composition + attribution),
-                            which is why it needs `fixed_portfolio_id` and an unlinked row cannot
-                            offer it. stopPropagation so it does not also toggle the row. */}
-                        {r.fixed_portfolio_id != null && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setAnalyse({ id: r.fixed_portfolio_id!, name: r.name });
-                            }}
-                            className="ml-2 text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-fg align-middle"
-                          >
-                            Analyse
-                          </button>
-                        )}
                       </td>
                       <td className="px-3 py-1.5 text-right font-mono text-fg-subtle">{r.isins ?? '—'}</td>
                       <td className={`px-3 py-1.5 text-right font-mono font-semibold ${tone(r.ytd_pct)}`}>
@@ -210,7 +213,7 @@ export default function PortfolioOverviewPanel() {
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={9} className="px-3 py-3 bg-inset">
+                        <td colSpan={10} className="px-3 py-3 bg-inset">
                           <Holdings d={detail[r.dynamic_portefeuille]} i={isins[r.dynamic_portefeuille]} />
                         </td>
                       </tr>
