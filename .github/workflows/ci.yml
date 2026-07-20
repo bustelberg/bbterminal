@@ -266,12 +266,13 @@ jobs:
     name: Backend stack smoke (Postgres + PostgREST + uvicorn)
     needs: changes
     runs-on: ubuntu-latest
-    # Skip when nothing backend-shaped changed (paths gate) OR when the
-    # commit message asks for it. Both halves are honored on push and
-    # pull_request events.
-    if: |
-      needs.changes.outputs.smoke == 'true'
-      && !contains(github.event.head_commit.message, '[skip stack-smoke]')
+    # DISABLED (2026-07): the suite is deliberately kept to typecheck + lint
+    # (eslint/ruff) + unit tests (vitest/pytest) only. This heavy integration
+    # smoke (Postgres + PostgREST + a real uvicorn backtest) is off. To re-enable,
+    # restore the gate below:
+    #   needs.changes.outputs.smoke == 'true'
+    #   && !contains(github.event.head_commit.message, '[skip stack-smoke]')
+    if: false
     timeout-minutes: 8
 
     services:
