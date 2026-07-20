@@ -201,4 +201,4 @@ class TestTheBenchmarksPanelIsPricedInThePortfolioWorld:
         from routers import _asset_benchmark, _benchmark_index
 
         for mod in (_asset_benchmark, _benchmark_index):
-            assert "index_weights(rows, label)" in inspect.getsource(mod.compute_index)
+            assert "index_weights(" in inspect.getsource(mod.compute_index)

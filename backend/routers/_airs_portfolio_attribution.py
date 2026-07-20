@@ -39,6 +39,7 @@ swallowed.
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 
 from deps import supabase
 from routers._airs_portfolio_analysis import (
@@ -67,6 +68,84 @@ def _weighted(rows: list[tuple[float, float]]) -> float:
     """Weighted return of (weight, return_pct) pairs, renormalised over the weights given."""
     w = sum(x[0] for x in rows)
     return sum(x[0] * x[1] for x in rows) / w if w > 0 else 0.0
+
+
+def _model_holdings(portfolio_id: int, eff: str | None, start: str) -> list[dict]:
+    """The model's NOMINAL composition as attribution legs: weight = the design percentage,
+    return = the yfinance EUR return over `start` (`compute_holding_marks`)."""
+    pos = (supabase.table("airs_model_portfolio_position")
+           .select("isin,fonds,percentage,datum")
+           .eq("portfolio_id", portfolio_id).execute().data or [])
+    if eff:
+        pos = [r for r in pos if r.get("datum") == eff]
+    held = sorted({r["isin"] for r in pos if r.get("isin")})
+    marks = compute_holding_marks(held, start)
+    out: list[dict] = []
+    for r in pos:
+        isin = r.get("isin")
+        m = marks.get(isin) if isin else None
+        out.append({
+            "isin": isin,
+            "weight_pct": float(r.get("percentage") or 0),
+            "return_pct": None if not isin else (m or {}).get("return_pct"),
+            "airs_name": r.get("fonds"),
+            "is_cash": not isin,
+        })
+    return out
+
+
+def _book_holdings(portfolio_id: int) -> list[dict] | None:
+    """The paired AIRS BOOK as attribution legs: weight = the START-of-window EUR value (as a % of
+    the book), return = the VOLK start->current EUR PRICE return. None when no book is paired.
+
+    ⚠ THE WEIGHT IS THE BEGINWAARDE, NOT THE HUIDIGE WAARDE. Weighting a window's return by the
+    CURRENT value overweights the winners (a holding that doubled now carries ~2x the share it
+    started with), which retroactively inflates the portfolio return — the same look-ahead bias
+    the benchmark avoids with start-of-window cap weights. Measured on AITopSelectie: current-
+    weighting read +58.75% against the book's true +44.99% price return. Start-weighting reproduces
+    the realised return exactly (Sigma start_i*ret_i / Sigma start_i = (Sigma cur - Sigma start) /
+    Sigma start). A holding with no Beginwaarde was not held when the window opened (bought during
+    the year), so it has weight 0 and drops out — correct for a 1 Jan-anchored attribution.
+
+    The per-holding return is a price return (no income) — which is exactly what makes it
+    comparable to the benchmark's price return in the Brinson identity. The book's flow-aware
+    `cumulatief_rendement` is the headline (the Return tile), NOT the attributable sleeve, so the
+    two deliberately differ (`attributable_pct` / `excluded_return_pct` already say by how much).
+    ISIN comes from the price-gated name matcher (`resolve_account_isins`) — the same bridge the
+    book weight-bars use — so a holding that fails to resolve drops out here exactly as it does there.
+    """
+    from routers._airs_account_links import list_account_links  # noqa: PLC0415
+    from routers._airs_holding_isin import resolve_account_isins  # noqa: PLC0415
+
+    link = next((a for a in list_account_links()["accounts"]
+                 if a.get("model_portfolio_id") == portfolio_id), None)
+    if not link:
+        return None
+    rows = resolve_account_isins(link["portefeuille"]).get("rows") or []
+    total = sum(float(r.get("start_value_eur") or 0) for r in rows) or 1.0
+    out: list[dict] = []
+    for r in rows:
+        start_val = float(r.get("start_value_eur") or 0)
+        cur = float(r.get("current_value_eur") or 0)
+        is_cash = r.get("asset_class") == "Cash" or not r.get("isin")
+        ret = None
+        if not is_cash and start_val > 0:
+            ret = (cur / start_val - 1.0) * 100.0
+        out.append({
+            "isin": r.get("isin"),
+            "weight_pct": start_val / total * 100.0,    # START-of-window (Beginwaarde) weight
+            "return_pct": ret,
+            "airs_name": r.get("holding_name"),
+            "is_cash": is_cash,
+        })
+    return out
+
+
+def _portfolio_holdings(source: str, portfolio_id: int, eff: str | None,
+                        start: str) -> list[dict] | None:
+    """Attribution legs from the chosen source. None only when `source=book` and no book is paired."""
+    return (_book_holdings(portfolio_id) if source == "book"
+            else _model_holdings(portfolio_id, eff, start))
 
 
 def _display_name(row: dict | None, source_name: str | None) -> str | None:
@@ -118,8 +197,14 @@ def _overlaps(h: dict, other_isins: set[str], other_names: list[str]) -> bool:
 
 
 def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
-                        window: str = "ytd", axis: str = "sector") -> dict:
-    """Brinson-Fachler over one window, plus the names that drove it."""
+                        window: str = "ytd", axis: str = "sector",
+                        source: str = "model") -> dict:
+    """Brinson-Fachler over one window, plus the names that drove it.
+
+    `source="book"` decomposes the paired AIRS BOOK's actual holdings + returns instead of the
+    yfinance model reconstruction; the benchmark is priced from the book's window (the calendar
+    year, since AIRS reports the book over 1 Jan -> today) and is yfinance either way.
+    """
     idx = _AXIS_IDX.get(axis, 0)
 
     p = (supabase.table("airs_model_portfolio")
@@ -128,36 +213,40 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         return {}
     p = p[0]
     eff = p.get("positions_datum")
-    start = eff if window == "since" else ytd_anchor_for(eff)
+    if source == "book":
+        # AIRS reports the book over the calendar year; 'since' has no book equivalent.
+        start = f"{date.today().year}-01-01"
+    else:
+        start = eff if window == "since" else ytd_anchor_for(eff)
     if not start:
         return {}
 
-    pos = (supabase.table("airs_model_portfolio_position")
-           .select("isin,fonds,percentage,datum")
-           .eq("portfolio_id", portfolio_id).execute().data or [])
-    if eff:
-        pos = [r for r in pos if r.get("datum") == eff]
+    holdings = _portfolio_holdings(source, portfolio_id, eff, start)
+    if holdings is None:
+        return {"portfolio_id": portfolio_id, "name": p["name"], "benchmark": benchmark_label,
+                "window": window, "axis": axis, "start": start, "source": source, "rows": [],
+                "attributable_pct": 0.0,
+                "note": "No paired AIRS book to attribute for this model."}
 
-    held = sorted({r["isin"] for r in pos if r.get("isin")})
+    held = sorted({h["isin"] for h in holdings if h.get("isin")})
     grid = _grid(held)
     codes = _country_by_code()
-    marks = compute_holding_marks(held, start)
 
     # --- the portfolio: split into attributable and not ---------------------------------
     attributable: list[dict] = []
     excluded: list[dict] = []
     total_w = 0.0
-    for r in pos:
-        w = float(r.get("percentage") or 0)
+    for h in holdings:
+        w = h["weight_pct"]
         if w <= 0:
             continue
         total_w += w
-        isin = r.get("isin")
+        isin = h.get("isin")
+        is_cash = h.get("is_cash", not isin)
         row = grid.get(isin) if isin else None
-        bucket = _buckets(row, is_cash=not isin, isin=isin, codes=codes)[idx]
-        m = marks.get(isin) if isin else None
+        bucket = _buckets(row, is_cash=is_cash, isin=isin, codes=codes)[idx]
         # Cash returns a flat 0% — its drag is a FACT, so it is carried, not dropped.
-        ret = 0.0 if not isin else (m or {}).get("return_pct")
+        ret = 0.0 if is_cash else h.get("return_pct")
 
         # ⚠ TWO KINDS OF EXCLUSION, AND THEY ARE NOT THE SAME FACT.
         #
@@ -179,8 +268,8 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         # `name` is the CANONICAL label (asset_grid, joined by ISIN) so this table and the index's
         # speak one vocabulary; `airs_name` keeps AIRS's own label, which is what you see in AIRS
         # itself and is the row's identity there. Display only — see `_display_name`.
-        item = {"isin": isin, "name": _display_name(row, r.get("fonds")),
-                "airs_name": r.get("fonds"), "weight_pct": w,
+        item = {"isin": isin, "name": _display_name(row, h.get("airs_name")),
+                "airs_name": h.get("airs_name"), "weight_pct": w,
                 "return_pct": ret, "bucket": bucket, "reason": reason}
         if reason:
             excluded.append(item)
@@ -226,7 +315,7 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     b_w_total = sum(w for rows in b_by_bucket.values() for w, _ in rows)
     if p_w_total <= 0 or b_w_total <= 0:
         return {"portfolio_id": portfolio_id, "name": p["name"], "benchmark": benchmark_label,
-                "window": window, "axis": axis, "start": start, "rows": [],
+                "window": window, "axis": axis, "start": start, "source": source, "rows": [],
                 "attributable_pct": 0.0, "note": "Nothing in this model can be attributed."}
 
     p_by_bucket: dict[str, list[tuple[float, float]]] = {}
@@ -351,6 +440,8 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         "window": window,
         "axis": axis,
         "start": start,
+        # Where the portfolio legs came from: the yfinance model, or the paired AIRS book.
+        "source": source,
         # The attributable sleeve's own numbers. NOT the headline — see the module docstring.
         "portfolio_return_pct": r_p_total,
         "benchmark_return_pct": r_b_total,
@@ -382,6 +473,7 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
 
 
 async def compute_attribution_async(portfolio_id: int, benchmark_label: str = SP500_LABEL,
-                                    window: str = "ytd", axis: str = "sector") -> dict:
+                                    window: str = "ytd", axis: str = "sector",
+                                    source: str = "model") -> dict:
     return await asyncio.to_thread(
-        compute_attribution, portfolio_id, benchmark_label, window, axis)
+        compute_attribution, portfolio_id, benchmark_label, window, axis, source)

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from deps import supabase
 
@@ -113,9 +113,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
     if not _LOCK.acquire(blocking=False):
         return {"status": "busy", "message": "An AIRS refresh is already running"}
     try:
-        from airs_scanner import (  # noqa: PLC0415
-            download_portfolio_sync, download_vermogensoverzicht_sync,
-        )
+        from airs_scanner import download_portfolio_sync  # noqa: PLC0415
         from portfolio import parse_airs_excel  # noqa: PLC0415
         from routers.airs import _parse_att_excel, _save_performance_to_db  # noqa: PLC0415
 
@@ -164,8 +162,9 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
                 _log.warning("[airs_vermogen] %s Rendement failed: %s: %s", name, type(e).__name__, e)
             # Vermogensoverzicht (VOLK) → airs_holding.
             try:
-                vmo = download_vermogensoverzicht_sync(name, van, tot)
-                holdings_total += _save_holdings(name, tot, parse_airs_excel(vmo))
+                # Most recent VALUED date, not today (which AirSPMS has not valued yet).
+                v_as_of, vmo = _vermogen_most_recent(name, van)
+                holdings_total += _save_holdings(name, v_as_of, parse_airs_excel(vmo))
                 vermogen_ok += 1
             except Exception as e:
                 _STATUS["errors"].append(f"{name} (Vermogensoverzicht): {type(e).__name__}: {e}")
@@ -209,6 +208,82 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
         return dict(_STATUS)
     finally:
         _STATUS["running"] = False
+        _LOCK.release()
+
+
+def _vermogen_most_recent(name: str, van: str) -> tuple[str, bytes]:
+    """The Vermogensoverzicht for the most recent AVAILABLE valuation date, and that date.
+
+    ⚠ AirSPMS VALUES END-OF-DAY. So `today` has no Vermogensoverzicht until its valuation runs, and
+    a weekend or holiday never gets one — a request for an unvalued `datum_tot` returns an empty
+    ~49-byte body (`Response too small`). The Rendement (ATT) report does NOT share this: it returns
+    MONTHLY rows regardless of the exact date, which is why a same-day refresh fails on VOLK alone.
+
+    So walk back from today and take the first date that returns a real file. That date IS the
+    snapshot's as_of — the holdings are valued as of THEN, not today (matching what the AirSPMS UI
+    shows, which also defaults to the last valued date, e.g. Friday's on a Monday).
+    """
+    from airs_scanner import download_vermogensoverzicht_sync  # noqa: PLC0415
+
+    last_err: Exception | None = None
+    for back in range(0, 7):
+        tot = (date.today() - timedelta(days=back)).isoformat()
+        try:
+            return tot, download_vermogensoverzicht_sync(name, van, tot)
+        except RuntimeError as e:
+            # Unvalued date → empty body / error page. Try the day before. A real auth failure
+            # returns the same on EVERY date, exhausts the loop, and is raised below.
+            last_err = e
+    raise RuntimeError(f"no valued Vermogensoverzicht in the last 7 days ({last_err})")
+
+
+def refresh_one_portfolio(portefeuille: str) -> dict:
+    """Re-scan ONE portfolio's Rendement (ATT) + Vermogensoverzicht (VOLK) and store both — the
+    per-row "Refresh" on the overview table.
+
+    Reuses the exact download → parse → save path the full daily scan uses, so a single row's
+    refresh and the whole-fleet refresh can never diverge. Serialized against the full scan (and
+    other single refreshes) via `_LOCK` — they share ONE AirSPMS session, which must not be driven
+    by two threads at once. A few seconds: two downloads (plus a login only if the session lapsed).
+    """
+    if not _LOCK.acquire(blocking=False):
+        return {"status": "busy", "message": "An AIRS refresh is already running", "portefeuille": portefeuille}
+    try:
+        from airs_scanner import download_portfolio_sync  # noqa: PLC0415
+        from portfolio import parse_airs_excel  # noqa: PLC0415
+        from routers.airs import _parse_att_excel, _save_performance_to_db  # noqa: PLC0415
+
+        today = date.today()
+        van, tot = f"{today.year}-01-01", today.isoformat()
+        errors: list[str] = []
+        rendement_ok = vermogen_ok = holdings = 0
+        vermogen_as_of = tot
+        # Independent — one report failing must not lose the other (same as the fleet loop).
+        try:
+            att = download_portfolio_sync(portefeuille, van, tot)
+            _save_performance_to_db(portefeuille, _parse_att_excel(att))
+            rendement_ok = 1
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"Rendement: {type(e).__name__}: {e}")
+            _log.warning("[airs_vermogen] %s single Rendement failed: %s", portefeuille, e)
+        try:
+            # Most recent VALUED date, not today — see `_vermogen_most_recent`.
+            vermogen_as_of, vmo = _vermogen_most_recent(portefeuille, van)
+            holdings = _save_holdings(portefeuille, vermogen_as_of, parse_airs_excel(vmo))
+            vermogen_ok = 1
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"Vermogensoverzicht: {type(e).__name__}: {e}")
+            _log.warning("[airs_vermogen] %s single Vermogensoverzicht failed: %s", portefeuille, e)
+        return {
+            "status": "ok" if (rendement_ok or vermogen_ok) else "error",
+            "portefeuille": portefeuille,
+            "as_of": vermogen_as_of if vermogen_ok else tot,
+            "holdings_rows": holdings,
+            "rendement_stored": bool(rendement_ok),
+            "vermogen_stored": bool(vermogen_ok),
+            "errors": errors,
+        }
+    finally:
         _LOCK.release()
 
 

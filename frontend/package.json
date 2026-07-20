@@ -12,7 +12,8 @@
     "gen:types": "openapi-typescript ../backend/openapi.json -o lib/api-types.ts --default-non-nullable=false",
     "e2e": "playwright test",
     "e2e:headed": "playwright test --headed",
-    "e2e:ui": "playwright test --ui"
+    "e2e:ui": "playwright test --ui",
+    "e2e:serve": "node e2e/serve.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.9.0",

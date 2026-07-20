@@ -4,6 +4,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import type { ModelPortfolioAttribution } from '../../../lib/types/api';
+import { Provenance, type SourceKey } from '../../../lib/provenance';
 import InfoTip from '../InfoTip';
 import Formula, { Op, Paren, V, VBar } from '../Formula';
 
@@ -116,22 +117,21 @@ function selectionWhy(
  * The dotted underline is the affordance. A tooltip nobody knows is there is a tooltip that does
  * not exist.
  */
-function Th({ label, sub, help, align = 'right' }: {
+function Th({ label, help, prov, align = 'right' }: {
   label: React.ReactNode;
-  sub?: string;
   help: string;
+  // The per-column provenance ⓘ (source / when / how). One per column — every cell below shares it.
+  prov?: React.ReactNode;
   align?: 'left' | 'right';
 }) {
   return (
-    <th className={`px-2 py-1.5 font-medium ${align === 'left' ? 'text-left' : 'text-right'}`}>
+    <th className={`px-2 py-1.5 font-medium whitespace-nowrap ${align === 'left' ? 'text-left' : 'text-right'}`}>
       <InfoTip text={help}>
         <span className="decoration-dotted underline decoration-neutral-600 underline-offset-2 hover:text-accent-400 transition-colors">
           {label}
         </span>
       </InfoTip>
-      {sub && (
-        <div className="text-[9px] font-normal normal-case text-fg-faint">{sub}</div>
-      )}
+      {prov}
     </th>
   );
 }
@@ -205,10 +205,12 @@ function Legend({ rIndex, axis }: { rIndex: string; axis: string }) {
   );
 }
 
-function Names({ title, rows, hint }: {
+function Names({ title, rows, hint, src, asOf }: {
   title: string;
   rows: NonNullable<ModelPortfolioAttribution['top_contributors']>;
   hint: string;
+  src: SourceKey;
+  asOf?: string | null;
 }) {
   if (!rows?.length) return null;
   return (
@@ -230,14 +232,17 @@ function Names({ title, rows, hint }: {
         <thead>
           <tr className="text-fg-faint text-[9px] uppercase tracking-wide">
             <th className="py-0.5 pr-2 text-left font-medium">Name</th>
-            <th className="py-0.5 px-1 text-right font-medium">
-              <InfoTip text="Its weight in the model over this window."><span className="decoration-dotted underline decoration-neutral-600 underline-offset-2">Wt</span></InfoTip>
+            <th className="py-0.5 px-1 text-right font-medium whitespace-nowrap">
+              <InfoTip text="Its weight in the model over this window."><span className="decoration-dotted underline decoration-neutral-600 underline-offset-2">w<sub>t</sub></span></InfoTip>
+              <Provenance source={src} asOf={asOf} note="weight over the window" how="The holding's weight in this basket." />
             </th>
-            <th className="py-0.5 px-1 text-right font-medium">
+            <th className="py-0.5 px-1 text-right font-medium whitespace-nowrap">
               <InfoTip text="What it returned over the window, in EUR."><span className="decoration-dotted underline decoration-neutral-600 underline-offset-2">Ret.</span></InfoTip>
+              <Provenance source={src} asOf={asOf} note="EUR return over the window" how="The holding's EUR return over the window." />
             </th>
-            <th className="py-0.5 pl-1 text-right font-medium">
+            <th className="py-0.5 pl-1 text-right font-medium whitespace-nowrap">
               <InfoTip text={"Weight × return — how many percentage points of the model's return this single company is responsible for.\n\nA big move in a tiny position contributes little, so this is the column that says which companies actually mattered."}><span className="decoration-dotted underline decoration-neutral-600 underline-offset-2">Contr.</span></InfoTip>
+              <Provenance source="derived" note="contribution" how="Weight × return — this holding's share of the basket's return." />
             </th>
           </tr>
         </thead>
@@ -264,8 +269,12 @@ function Names({ title, rows, hint }: {
   );
 }
 
-export default function AttributionPanel({ id, benchmark, window, onClose }: {
-  id: number; benchmark: string; window: 'ytd' | 'since'; onClose: () => void;
+export default function AttributionPanel({ id, benchmark, window, source = 'model',
+  portfolioAsOf, benchmarkAsOf, onClose }: {
+  id: number; benchmark: string; window: 'ytd' | 'since';
+  source?: 'model' | 'book';
+  portfolioAsOf?: string | null; benchmarkAsOf?: string | null;
+  onClose: () => void;
 }) {
   const [axis, setAxis] = useState<Axis>('sector');
   const [data, setData] = useState<ModelPortfolioAttribution | null>(null);
@@ -277,7 +286,7 @@ export default function AttributionPanel({ id, benchmark, window, onClose }: {
       try {
         const r = await apiFetch(
           `${API_URL}/api/airs/model-portfolios/${id}/attribution`
-          + `?benchmark=${benchmark}&window=${window}&axis=${axis}`);
+          + `?benchmark=${benchmark}&window=${window}&axis=${axis}&source=${source}`);
         const b = await r.json().catch(() => null);
         if (cancelled) return;
         if (!r.ok) { setError(b?.detail ?? `HTTP ${r.status}`); return; }
@@ -287,13 +296,16 @@ export default function AttributionPanel({ id, benchmark, window, onClose }: {
       }
     })();
     return () => { cancelled = true; };
-  }, [id, benchmark, window, axis]);
+  }, [id, benchmark, window, axis, source]);
 
   const label = window === 'ytd' ? 'YTD' : 'Since inception';
   // ONE source for the word: the axis the server actually computed, NOT the picker's state. If
   // the two disagree — a response still in flight, a server that normalises an unknown axis —
   // the labels must describe the numbers ON SCREEN, not the request that asked for them.
   const w = AXIS_WORD[data?.axis ?? axis] ?? 'group';
+  // Where the PORTFOLIO side of every number came from — the AIRS book's VOLK values, or our
+  // yfinance reconstruction. The benchmark side is always yfinance; the effect columns are derived.
+  const pSrc: SourceKey = (data?.source ?? source) === 'book' ? 'airs_volk' : 'yfinance';
 
   return (
     <section className="bg-card border border-neutral-800/40 rounded-xl p-4">
@@ -342,6 +354,19 @@ export default function AttributionPanel({ id, benchmark, window, onClose }: {
 
       {data && (
         <>
+          {/* Which world the portfolio legs came from. Book = AIRS's actual holdings, priced by
+              AIRS over the calendar year; the per-holding returns are price-only (no income), so
+              the attributed excess differs from the book's income-inclusive headline. */}
+          {data.source === 'book' && (
+            <p className="text-[11px] text-accent-400 mb-2">
+              {'AIRS book — actual holdings over the calendar year (benchmark stays yfinance). '}
+              {'Per-holding returns are price-only, so this excess differs from the book’s '}
+              {'income-inclusive headline return.'}
+            </p>
+          )}
+          {data.note && (
+            <p className="text-[11px] text-warn-300 mb-2">⚠ {data.note}</p>
+          )}
           {/* ⚠ The identity IS the decomposition. If it fails, these are just three columns. */}
           {!data.reconciles && (
             <p className="text-[11px] text-neg-300 mb-2">
@@ -420,25 +445,40 @@ export default function AttributionPanel({ id, benchmark, window, onClose }: {
                 <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
                   <Th align="left" label={w}
                     help={`The ${w}s the excess is split across.\n\nEvery ${w} either side holds appears — including the ones the index holds and you don't, because choosing not to own something is a decision the numbers can price.`} />
-                  <Th label={<>w<sub>P</sub></>} sub="you"
+                  <Th label={<>w<sub>P</sub></>}
+                    prov={<Provenance source={pSrc} asOf={portfolioAsOf} note={`your weight in this ${w}`}
+                      how={`Your weight in this ${w} ÷ the attributable sleeve's total (funds & cash removed, renormalised to 100%).`} />}
                     help={`Your weight in this ${w}, as a % of the attributable sleeve — funds and cash removed, the rest renormalised to 100%.\n\nNot the raw model weight: the table only explains what it can decompose.`} />
-                  <Th label={<>w<sub>B</sub></>} sub="index"
+                  <Th label={<>w<sub>B</sub></>}
+                    prov={<Provenance source="benchmark" asOf={benchmarkAsOf} note={`the index's weight in this ${w}`}
+                      how="The index's weight in this bucket at the START of the window (not today's cap — that would be look-ahead)." />}
                     help={`The index's weight in this ${w}, at the start of the window.\n\nStart-of-window, because weighting by today's market cap is look-ahead bias: a company that doubled would retroactively be given twice the share of the index it actually had.`} />
-                  <Th label={<>R<sub>P</sub></>} sub="your return"
+                  <Th label={<>R<sub>P</sub></>}
+                    prov={<Provenance source={pSrc} asOf={portfolioAsOf} note={`your return in this ${w}`}
+                      how={`Your holdings' EUR return in this ${w} over the window.`} />}
                     help={`What your holdings in this ${w} returned, in EUR, over this window.\n\nA dash means you hold nothing here.`} />
                   {/* The reference point. Allocation is scored against THIS number, so it has to
                       be on the screen — an over/underweight is judged by whether its sector beat
                       or lagged the index as a whole, not by whether it went up. */}
                   <Th label={<>R<sub>B</sub></>}
-                    sub={`index total ${pct(data.benchmark_return_pct, 1)}`}
+                    prov={<Provenance source="benchmark" asOf={benchmarkAsOf} note={`the index's return in this ${w}`}
+                      how={`The index's holdings' EUR return in this ${w}. Allocation scores it against the index total (${pct(data.benchmark_return_pct, 1)}).`} />}
                     help={`What the index's holdings in this ${w} returned, in EUR.\n\nCompare it to the index's total (${pct(data.benchmark_return_pct, 1)}) — that comparison is the allocation effect. A ${w} can rise and still have been a bad place to be, if it rose by less than the index.`} />
-                  <Th label="Allocation" sub={`right ${w}s?`}
+                  <Th label="Allocation"
+                    prov={<Provenance source="derived" note="Brinson-Fachler allocation — the right buckets?"
+                      how={`(wP − wB) × (RB − index total ${pct(data.benchmark_return_pct, 1)}).`} />}
                     help={`Your over/underweight, multiplied by how that ${w} did versus the index as a whole.\n\nPositive means you leaned into a ${w} that beat the index, or avoided one that lagged it. It is judged at the index's returns, so your company-picking is held constant — this column is only about where you placed the money.\n\nThe catch: overweighting a ${w} that rose 5% while the index rose 10% is negative. It went up, and it was still the wrong place to be.`} />
-                  <Th label="Selection" sub="right companies?"
+                  <Th label="Selection"
+                    prov={<Provenance source="derived" note="Brinson selection — the right companies?"
+                      how="wB × (RP − RB)." />}
                     help={`Your companies against the index's companies inside the ${w}, scored at the index's weight.\n\nUsing the index's weight is what makes it purely about the picks — how much you held is the Allocation column's job, not this one.`} />
-                  <Th label="Interact." sub="the cross term"
+                  <Th label="Interact."
+                    prov={<Provenance source="derived" note="interaction (the cross term)"
+                      how="(wP − wB) × (RP − RB)." />}
                     help={`Your tilt multiplied by your selection edge.\n\nThe part that can't be assigned cleanly to either column: a big overweight and good picks in the same ${w} reinforce each other, and that reinforcement belongs to neither alone.\n\nUsually small. When it is large, the tilt and the picks were pulling hard in the same direction.`} />
-                  <Th label="Total" sub={`= this ${w}'s excess`}
+                  <Th label="Total"
+                    prov={<Provenance source="derived" note="this bucket's share of the excess"
+                      how="Allocation + Selection + Interaction." />}
                     help={`Allocation + selection + interaction for this ${w} — how much of the total excess came from here.\n\nThe column sums to the whole excess. That identity is checked, not assumed.`} />
                 </tr>
               </thead>
@@ -488,12 +528,13 @@ export default function AttributionPanel({ id, benchmark, window, onClose }: {
 
           <div className="grid gap-4 md:grid-cols-3">
             <Names title="Biggest contributors" rows={data.top_contributors ?? []}
-              hint="weight × return, in EUR" />
+              hint="weight × return, in EUR" src={pSrc} asOf={portfolioAsOf} />
             <Names title="Biggest detractors" rows={data.top_detractors ?? []}
-              hint="what cost you the most" />
+              hint="what cost you the most" src={pSrc} asOf={portfolioAsOf} />
             {/* The other half of "why" — and the half a holdings-only view can never show. */}
             <Names title={`${benchmark} winners you didn’t own`} rows={data.missed_winners ?? []}
-              hint="matched by COMPANY, not ISIN — a share class is not a different business" />
+              hint="matched by COMPANY, not ISIN — a share class is not a different business"
+              src="benchmark" asOf={benchmarkAsOf} />
           </div>
         </>
       )}

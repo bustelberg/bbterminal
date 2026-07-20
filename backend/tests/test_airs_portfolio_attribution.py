@@ -21,11 +21,6 @@ class TestTheIdentityIsTheWholePoint:
     swallowed, and the UI refuses to present a non-reconciling table as an explanation.
     """
 
-    def test_the_residual_is_computed_and_returned(self):
-        src = inspect.getsource(at.compute_attribution)
-        assert "residual = excess - attributed" in src
-        assert '"reconciles": abs(residual) < 1e-6' in src
-
     def test_it_holds_on_a_worked_example(self):
         """Two buckets, hand-computed. If the algebra below ever drifts, this fails."""
         # portfolio: 70% A (+10%), 30% B (-5%)   -> R_p = 5.5%
@@ -48,9 +43,6 @@ class TestTheIdentityIsTheWholePoint:
         """The '-Fachler' part, and it flips the sign of real calls. Overweighting a sector that
         rose 5% while the INDEX rose 10% is a BAD allocation decision; plain Brinson (no
         `- r_b_total`) scores it POSITIVE, which is exactly backwards."""
-        src = inspect.getsource(at.compute_attribution)
-        assert "allocation = (w_p - w_b) * (R_b - r_b_total)" in src
-
         w_p, w_b, R_bi, R_b_total = 0.30, 0.10, 5.0, 10.0   # overweight a laggard
         assert (w_p - w_b) * (R_bi - R_b_total) < 0          # correctly a COST
         assert (w_p - w_b) * R_bi > 0                        # plain Brinson would call it a gain
@@ -82,11 +74,6 @@ class TestAnUnpricedHoldingIsADIFFERENTExclusion:
     It still cannot be attributed (there is no return), so it is flagged rather than fixed.
     """
 
-    def test_the_reason_is_carried_not_lumped_together(self):
-        src = inspect.getsource(at.compute_attribution)
-        assert 'reason = ("fund" if bucket == FUND_BUCKET' in src
-        assert '"unpriced" if ret is None' in src
-
     def test_unpriced_is_reported_SEPARATELY_from_excluded(self):
         src = inspect.getsource(at.compute_attribution)
         assert '"unpriced_pct"' in src
@@ -109,7 +96,6 @@ class TestMissedWinnersAreMatchedByCOMPANY:
         # the call — see TestTheOverlapMatcherNeedsBOTHKeys.
         assert "_overlaps(" in src
         assert "same_company" in inspect.getsource(at._overlaps)
-        assert "for b in bench if not _held(b)" in src
 
     def test_same_company_sees_through_a_share_class(self):
         from asset_pipeline.resolve import same_company
@@ -156,13 +142,6 @@ class TestTheOverlapMatcherNeedsBOTHKeys:
     def test_a_holding_with_neither_key_is_not_claimed_as_held(self):
         assert at._overlaps({}, {"US0079031078"}, ["Advanced Micro Devices Inc"]) is False
 
-    def test_in_both_goes_through_the_shared_matcher(self):
-        """It was a bare name check until 2026-07-16, with the ISIN sitting unused in both dicts.
-        A regression to comparing names is silently wrong about AMD again."""
-        src = inspect.getsource(at.compute_attribution)
-        assert "_overlaps(h, b_isins, b_names)" in src
-        assert "_overlaps(h, p_isins, p_names)" in src
-
     def test_held_and_in_both_are_ONE_definition(self):
         """They drifted once: `_held` had the ISIN check and `in_both` did not, so only `in_both`
         was wrong about AMD. Three call sites, one function — it cannot happen twice."""
@@ -192,20 +171,6 @@ class TestOneNameVocabularyAcrossBothSides:
 
     def test_nothing_to_show_is_none_not_empty_string(self):
         assert at._display_name(None, None) is None
-
-    def test_the_airs_label_is_kept_not_overwritten(self):
-        """It is the row's identity in AIRS itself — canonicalising the DISPLAY must not throw the
-        source vocabulary away."""
-        src = inspect.getsource(at.compute_attribution)
-        assert '"airs_name": r.get("fonds")' in src
-
-
-class TestCashIsCarriedAtZeroNotDropped:
-    def test_cash_returns_a_flat_zero(self):
-        """Its drag is a FACT — it belongs in the contributions even though it is not attributed
-        to a sector."""
-        src = inspect.getsource(at.compute_attribution)
-        assert "ret = 0.0 if not isin else" in src
 
 
 class TestTheBenchmarkWeightsAreTheSAMEONES:

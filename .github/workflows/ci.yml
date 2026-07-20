@@ -183,7 +183,13 @@ jobs:
   e2e:
     name: Frontend e2e (Playwright)
     needs: changes
-    if: needs.changes.outputs.frontend == 'true'
+    # ⏸ DISABLED — the Playwright e2e suite no longer gates CI: it cost ~1 min/run (mostly the
+    # per-run production build) for regression value that tsc + eslint + vitest + the backend
+    # stack-smoke already largely cover. The specs and config REMAIN — run them locally on demand
+    # with `npm run e2e` (or `npm run e2e:serve` once + targeted `npm run e2e -- <spec> --grep …`
+    # for the fast ~2s warm-server path). To re-enable in CI, restore the condition to:
+    #     if: needs.changes.outputs.frontend == 'true'
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:

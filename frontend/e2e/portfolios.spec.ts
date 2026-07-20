@@ -96,26 +96,30 @@ test.describe('/portfolios overview', () => {
     await analyse.click();
 
     const modal = page.getByRole('dialog').or(page.locator('.fixed').filter({ hasText: 'Return (€)' })).first();
+    // Scope to the Return tile — "Book (AIRS)" is also the label of the Source dropdown option in
+    // the modal header, so an unscoped getByText matches two elements.
+    const returnTile = modal.locator('section').filter({ hasText: 'Return (€)' });
     await expect(page.getByText('Book vs strategy (YTD)')).toBeVisible();
-    await expect(page.getByText('Strategy (our prices)')).toBeVisible();
-    await expect(page.getByText('Book (AIRS)')).toBeVisible();
+    await expect(returnTile.getByText('Strategy (our prices)')).toBeVisible();
+    await expect(returnTile.getByText('Book (AIRS)')).toBeVisible();
     // Both numbers, and the drift between them.
     await expect(page.getByText('+51.48%').first()).toBeVisible();   // strategy
     await expect(page.getByText('+46.12%').first()).toBeVisible();   // book
     await expect(page.getByText(/\+5\.36% drift/)).toBeVisible();
   });
 
-  test('the Weights toggle reweights the portfolio bars by the AIRS book', async ({ page }) => {
-    // ⚠ Book weights change ONLY the portfolio side — the benchmark and the sector/region/
-    // currency vocabulary stay yfinance, because the benchmark cannot be priced any other way.
-    // The toggle re-fetches; the mock returns Technology at 45% (model) vs 52% (book).
+  test('the Source toggle reweights the portfolio bars by the AIRS book', async ({ page }) => {
+    // ⚠ The Source toggle (Model | Book) changes ONLY the portfolio side — the benchmark and the
+    // sector/region/currency vocabulary stay yfinance, because the benchmark cannot be priced any
+    // other way. It re-fetches with weight_by=book&source=book; the mock returns Technology at 45%
+    // (model) vs 52% (book).
     await row(page, 'Bustelberg Defensief').getByRole('button', { name: 'Analyse' }).click();
     const modal = page.getByRole('dialog');
     await expect(modal.getByText(/Composition vs/)).toBeVisible();
 
-    await modal.getByRole('combobox', { name: 'Weights' }).selectOption('book');
-    // The subtitle names the active basis, and a Technology bar re-weights.
-    await expect(modal.getByText(/book weights/)).toBeVisible();
+    await modal.getByRole('combobox', { name: 'Source' }).selectOption('book');
+    // The subtitle names the active source, and a Technology bar re-weights.
+    await expect(modal.getByText(/AIRS book/)).toBeVisible();
     await expect(modal.getByText('52%').first()).toBeVisible();
   });
 

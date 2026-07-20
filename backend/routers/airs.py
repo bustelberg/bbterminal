@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import io
 from routers import _airs_portfolio_store as store
+from routers._asset_financials import BasketRequest, PerformanceResponse, PriceSeriesResponse
 from routers._sse import sse_event, sse_message
 import queue as thread_queue
 import threading
@@ -317,6 +318,17 @@ async def airs_set_portfolio_display_name(portfolio_id: int, body: SetDisplayNam
     return await asyncio.to_thread(_run)
 
 
+class PortfolioPerfSources(BaseModel):
+    """As-of dates of the inputs behind this row's numbers — for per-value traceability on the
+    grid. Every field is an already-loaded date SURFACED, not recomputed: the model figures
+    (YTD / Since / Sharpe / Sortino) are a yfinance close series converted at FX, over a
+    composition we scraped from AIRS, so those three dates are what "as of when" means here."""
+
+    yf_close: str | None = None      # latest yfinance close date behind this model's return
+    fx: str | None = None            # latest FX rate date used for the EUR conversion
+    model_scan: str | None = None    # when the composition itself was last scraped from AIRS
+
+
 class ModelPortfolioPerformance(BaseModel):
     """One model portfolio's performance, in EUR: YTD, since-inception, Sharpe, Sortino.
 
@@ -386,6 +398,8 @@ class ModelPortfolioPerformance(BaseModel):
     low_coverage: bool = False
     partial_coverage: bool = False
     cash_pct: float = 0.0
+    # Where these numbers came from, as-of when — for per-value traceability on the grid.
+    sources: PortfolioPerfSources | None = None
 
 
 @router.get("/api/airs/model-portfolios/performance",
@@ -468,9 +482,23 @@ class PortfolioAnalysisReturns(BaseModel):
     the two rows are the same number by construction, and the UI says so.
     """
 
+    # Where the PRIMARY portfolio numbers come from: "model" (yfinance reconstruction) or "book"
+    # (AIRS's own cumulatief_rendement). The benchmark is yfinance either way.
+    source: str = "model"
+    # True when a paired AIRS book exists — so the UI can explain a blank 'book' return as "no
+    # paired book" rather than a computation failure.
+    book_available: bool | None = None
     ytd_from: str | None = None
     since_from: str | None = None
     portfolio_ytd_pct: float | None = None
+    # As-of dates behind the numbers, for the per-value provenance ⓘ. `portfolio_as_of` is the
+    # yfinance close date (model source) or the AIRS book snapshot date (book source); the benchmark
+    # is always yfinance.
+    portfolio_as_of: str | None = None
+    benchmark_as_of: str | None = None
+    # The yfinance model YTD, ALWAYS carried (even when `source=book` makes the primary the book),
+    # so the Book-vs-strategy drift tile reads the strategy number regardless of the toggle.
+    strategy_ytd_pct: float | None = None
     benchmark_ytd_pct: float | None = None
     ytd_excess_pct: float | None = None
     portfolio_since_pct: float | None = None
@@ -488,6 +516,7 @@ class PortfolioAnalysisReturns(BaseModel):
     # `book_reason` says why — a gap across two windows is not drift.
     book_portefeuille: str | None = None
     book_ytd_pct: float | None = None
+    book_as_of: str | None = None            # the AIRS book snapshot date — for the drift tile's ⓘ
     book_comparable: bool | None = None
     book_gap_pct: float | None = None
     book_reason: str | None = None
@@ -509,7 +538,7 @@ class ModelPortfolioAnalysis(BaseModel):
     cannot see inside this" — true, and more useful than a confident wrong split.
     """
 
-    portfolio_id: int
+    portfolio_id: int | None = None    # null for an ad-hoc basket (a stock / group has no id)
     name: str | None = None
     as_of: str | None = None
     benchmark: str
@@ -542,18 +571,75 @@ class ModelPortfolioAnalysis(BaseModel):
 @router.get("/api/airs/model-portfolios/{portfolio_id}/analysis",
             response_model=ModelPortfolioAnalysis)
 async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP500",
-                                        weight_by: str = "model"):
+                                        weight_by: str = "model", source: str = "model"):
     """Sector / region / currency split of one model portfolio, beside the benchmark's.
 
     `weight_by=book` weights the portfolio bars by the paired AIRS book's actual EUR holdings
     instead of the model's nominal weights; the benchmark and the classification are unchanged.
+
+    `source=book` reads the RETURN numbers from AIRS's own book (`cumulatief_rendement` + the
+    VOLK per-holding results) instead of the yfinance model reconstruction. The benchmark stays
+    yfinance either way, so the two are comparable.
     """
     from routers._airs_portfolio_analysis import (  # noqa: PLC0415
         compute_portfolio_analysis_async,
     )
 
     basis = weight_by if weight_by in ("model", "book") else "model"
-    return await compute_portfolio_analysis_async(portfolio_id, benchmark, basis)
+    src = source if source in ("model", "book") else "model"
+    return await compute_portfolio_analysis_async(portfolio_id, benchmark, basis, src)
+
+
+@router.get("/api/airs/model-portfolios/{portfolio_id}/risk-windows",
+            response_model=PerformanceResponse)
+async def airs_model_portfolio_risk_windows(portfolio_id: int):
+    """Whole-portfolio returns+risk over 2/4/8-year windows — the Analyse modal's Risk section.
+
+    The model's holdings priced as ONE value-weighted daily EUR basket (yfinance / `asset_price`),
+    so it is the same metric table an instrument or a sleeve gets. yfinance-only by nature (AIRS has
+    no daily history); 404 when the portfolio has no priceable holdings."""
+    from routers._airs_portfolio_analysis import (  # noqa: PLC0415
+        compute_portfolio_risk_windows_async,
+    )
+
+    return await compute_portfolio_risk_windows_async(portfolio_id)
+
+
+@router.get("/api/airs/model-portfolios/{portfolio_id}/price-series",
+            response_model=PriceSeriesResponse)
+async def airs_portfolio_price_series(portfolio_id: int):
+    """The whole portfolio's price-steadiness series (Fundamental → Stock price) — its holdings as
+    one value-weighted EUR index. Same shape as the basket / single-instrument endpoints."""
+    from routers._airs_portfolio_analysis import portfolio_basket_request  # noqa: PLC0415
+    from routers._asset_financials import _basket_price_series  # noqa: PLC0415
+
+    req = await asyncio.to_thread(portfolio_basket_request, portfolio_id)
+    return await asyncio.to_thread(_basket_price_series, req)
+
+
+@router.get("/api/airs/model-portfolios/{portfolio_id}/owner-earnings-stream")
+async def airs_portfolio_owner_earnings_stream(portfolio_id: int):
+    """SSE: the whole portfolio's blended owner-earnings (Fundamental → Owner earnings), streaming
+    per-holding progress then the result — its holdings run through the same basket blender."""
+    from fastapi.responses import StreamingResponse  # noqa: PLC0415
+
+    from routers._airs_portfolio_analysis import portfolio_basket_request  # noqa: PLC0415
+    from routers._asset_financials import _basket_owner_earnings_events  # noqa: PLC0415
+
+    req = await asyncio.to_thread(portfolio_basket_request, portfolio_id)
+    return StreamingResponse(_basket_owner_earnings_events(req), media_type="text/event-stream")
+
+
+@router.post("/api/airs/basket/analysis", response_model=ModelPortfolioAnalysis)
+async def airs_basket_analysis(req: BasketRequest, benchmark: str = "SP500"):
+    """Composition + return of an ARBITRARY basket (a single stock, a group) beside the benchmark —
+    the same payload as the model-portfolio analysis, so ONE Analyse view serves a stock (a basket
+    of one) and a portfolio alike. yfinance only (a basket has no AIRS book)."""
+    from routers._airs_portfolio_analysis import (  # noqa: PLC0415
+        compute_basket_analysis_async,
+    )
+
+    return await compute_basket_analysis_async(req.holdings, benchmark, req.label)
 
 
 class AttributionName(BaseModel):
@@ -638,6 +724,10 @@ class ModelPortfolioAttribution(BaseModel):
     benchmark_coverage_pct: float | None = None
     window: str                      # ytd | since
     axis: str                        # sector | region | currency
+    # "model" (yfinance reconstruction) or "book" (paired AIRS book's actual holdings + returns).
+    source: str = "model"
+    # Set when there is nothing to attribute (e.g. `source=book` but no paired book).
+    note: str | None = None
     start: str | None = None
     portfolio_return_pct: float = 0.0
     benchmark_return_pct: float = 0.0
@@ -661,13 +751,19 @@ class ModelPortfolioAttribution(BaseModel):
             response_model=ModelPortfolioAttribution)
 async def airs_model_portfolio_attribution(
     portfolio_id: int, benchmark: str = "SP500", window: str = "ytd", axis: str = "sector",
+    source: str = "model",
 ):
-    """Brinson-Fachler attribution of one model against a benchmark, over one window."""
+    """Brinson-Fachler attribution of one model against a benchmark, over one window.
+
+    `source=book` decomposes the paired AIRS book's actual holdings + returns instead of the
+    yfinance model reconstruction (calendar-year window; benchmark stays yfinance).
+    """
     from routers._airs_portfolio_attribution import (  # noqa: PLC0415
         compute_attribution_async,
     )
 
-    return await compute_attribution_async(portfolio_id, benchmark, window, axis)
+    src = source if source in ("model", "book") else "model"
+    return await compute_attribution_async(portfolio_id, benchmark, window, axis, src)
 
 
 class ModelPortfolioPosition(BaseModel):
@@ -837,6 +933,96 @@ def _shape_positions(raw: dict) -> ModelPortfolioPositions:
     )
 
 
+def _shape_book_positions(portfolio_id: int) -> ModelPortfolioPositions:
+    """The paired AIRS BOOK's own holdings, with AIRS's own per-holding EUR values — the
+    book-source twin of `_shape_positions`.
+
+    Where the model path shows the model's composition priced from yfinance (per-SHARE closes),
+    this shows what the book ACTUALLY holds, valued by AIRS: `start_price_eur` / `end_price_eur`
+    are the Beginwaarde / Huidige waarde (position VALUES over the calendar year, 1 Jan -> the
+    snapshot), and `return_pct` is the VOLK price return between them. Rows differ from the model's
+    — a book holds a different set than the composition it tracks — which is the point of the toggle.
+
+    ISIN comes from the price-gated name matcher (`resolve_account_isins`), the same bridge every
+    other book surface uses. Returns an empty set (never the model's) when no book is paired, so
+    the toggle can say "no book" rather than silently showing the wrong thing.
+    """
+    from deps import IN_CHUNK_SIZE  # noqa: PLC0415
+    from routers._airs_account_links import list_account_links  # noqa: PLC0415
+    from routers._airs_holding_isin import resolve_account_isins  # noqa: PLC0415
+
+    pf = (supabase.table("airs_model_portfolio").select("id,name")
+          .eq("id", portfolio_id).limit(1).execute().data or [])
+    pf_name = pf[0]["name"] if pf else str(portfolio_id)
+
+    link = next((a for a in list_account_links()["accounts"]
+                 if a.get("model_portfolio_id") == portfolio_id), None)
+    if not link:
+        return ModelPortfolioPositions(
+            portfolio=pf_name, portfolio_id=portfolio_id, datum=None, dates=[], rows=[],
+            matched=0, unmatched=0, ytd_from=None, cached_at=None)
+
+    res = resolve_account_isins(link["portefeuille"])
+    brows = res.get("rows") or []
+    as_of = res.get("as_of")
+    jan1 = f"{dt_date.today().year}-01-01"
+    # ⚠ START-of-window (Beginwaarde) weights, not current. This table's contract is that weighting
+    # the Return column by the percentages reproduces the portfolio return exactly — and that only
+    # holds with start weights: current-value weights overweight the winners (a holding that
+    # doubled now carries ~2x its starting share), reading +58.75% against the book's true +44.99%
+    # price return. Same look-ahead bias the benchmark and the book attribution both avoid.
+    total = sum(float(r.get("start_value_eur") or 0) for r in brows) or 1.0
+
+    isins = sorted({r["isin"] for r in brows if r.get("isin")})
+    known: set[str] = set()
+    for i in range(0, len(isins), IN_CHUNK_SIZE):
+        got = (supabase.table("asset_execution").select("isin")
+               .in_("isin", isins[i:i + IN_CHUNK_SIZE]).execute().data or [])
+        known.update(r["isin"] for r in got)
+
+    out: list[ModelPortfolioPosition] = []
+    for r in brows:
+        isin = r.get("isin")
+        cur_v = r.get("current_value_eur")
+        start_v = r.get("start_value_eur")
+        start_price = end_price = None
+        start_date = end_date = None
+        ret = None
+        if cur_v is not None:
+            end_price = float(cur_v)
+            end_date = as_of
+        if start_v is not None and float(start_v) > 0 and cur_v is not None:
+            # Beginwaarde / Huidige waarde are POSITION VALUES, not per-share prices — the return
+            # between them is the VOLK price return, exactly what the book figure weights together.
+            start_price = float(start_v)
+            start_date = jan1
+            ret = (float(cur_v) / float(start_v) - 1.0) * 100.0
+        out.append(ModelPortfolioPosition(
+            fonds=r.get("holding_name"),
+            isin=isin,
+            percentage=((float(start_v) / total * 100.0)
+                        if start_v and float(start_v) > 0 else None),
+            valuta=r.get("currency"),
+            categorie=r.get("asset_class"),
+            sector=r.get("sector"),
+            regio=None,
+            known_instrument=bool(isin and isin in known),
+            currency=r.get("currency"),
+            last_close=as_of,
+            start_date=start_date,
+            start_price_eur=start_price,
+            end_date=end_date,
+            end_price_eur=end_price,
+            return_pct=ret,
+        ))
+
+    matched = sum(1 for r in out if r.known_instrument)
+    return ModelPortfolioPositions(
+        portfolio=pf_name, portfolio_id=portfolio_id, datum=as_of, dates=[], rows=out,
+        matched=matched, unmatched=len([r for r in out if r.isin]) - matched,
+        ytd_from=jan1, cached_at=None)
+
+
 def _live_positions(portfolio_id: int, datum: str | None) -> dict:
     """Fetch from AIRS and REFRESH THE CACHE with what came back — a live read that left the
     stored copy behind would guarantee the two disagree."""
@@ -856,9 +1042,14 @@ def _live_positions(portfolio_id: int, datum: str | None) -> dict:
             response_model=ModelPortfolioPositions)
 async def airs_model_portfolio_positions(
     portfolio_id: int, datum: str | None = None, refresh: bool = False,
+    source: str = "model",
 ):
     """One model portfolio's positions — the XLS export that DOES carry an ISIN (the AIRS
     *holdings* sheet does not; it has only a fund name).
+
+    `source=book` instead returns the paired AIRS BOOK's own holdings, with AIRS's own per-holding
+    EUR values (Beginwaarde / Huidige waarde) — a different set of rows than the model composition,
+    and never cached (the caching below is for the model XLS path).
 
     SERVED FROM OUR CACHE by default: the scan already downloaded this XLS to count the
     portfolio's holdings, so re-scraping AirSPMS on every expand is pure waste (and a
@@ -874,6 +1065,9 @@ async def airs_model_portfolio_positions(
     every time we add an instrument, so it is recomputed on every read. Cached, a "not in
     grid" flag would be wrong the moment the grid catches up.
     """
+    if source == "book":
+        return await asyncio.to_thread(_shape_book_positions, portfolio_id)
+
     if not refresh and datum is None:
         cached = await asyncio.to_thread(store.load_positions, portfolio_id)
         if cached is not None:
@@ -1085,6 +1279,17 @@ async def airs_vermogen_refresh():
     return {"status": "started"}
 
 
+@router.post("/api/airs/portfolios/{portefeuille}/refresh")
+async def airs_portfolio_refresh(portefeuille: str):
+    """Re-scan ONE portfolio's AIRS Rendement + Vermogensoverzicht and store both — the per-row
+    Refresh on the overview table. Awaited (a few seconds: two downloads), so the client can
+    re-fetch the row on success. Serialized against the full scan via the module lock; returns
+    `{status: busy}` if a fleet refresh is in flight."""
+    from airs_vermogen import refresh_one_portfolio  # noqa: PLC0415
+
+    return await asyncio.to_thread(refresh_one_portfolio, portefeuille)
+
+
 @router.get("/api/airs/vermogen/status")
 async def airs_vermogen_status():
     """Status of the Vermogensoverzicht refresh job: in-flight progress, last
@@ -1257,6 +1462,13 @@ class AirsAccountHolding(BaseModel):
     # Beginwaarde of 0; dividing by it is infinite and calling it flat is a claim.
     ytd_return_pct: float | None = None
     ytd_return_local_pct: float | None = None
+    # AIRS's OWN figures — populated by scans from 2026-07-17 on; NULL in older snapshots.
+    cost_basis_local: float | None = None      # Kostprijs lopend jaar
+    current_price_local: float | None = None   # Huidige koers
+    airs_weight: float | None = None           # Weging
+    fund_result_eur: float | None = None       # Fondsresultaat — the performance leg (EUR)
+    fx_result_eur: float | None = None         # Valutaresultaat — the FX leg (EUR)
+    airs_result_pct: float | None = None       # Resultaat in % (a PERCENT, not a fraction)
 
 
 class AirsAccountDetail(BaseModel):
@@ -1443,6 +1655,10 @@ class AirsHoldingSegment(BaseModel):
     start_value_eur: float | None = None
     weight_pct: float | None = None
     gain_eur: float | None = None
+    # The gain split into its two legs, summed across the segment — the performance (stock) leg and
+    # the currency leg. NULL until a scan from 2026-07-17 on has populated the per-holding figures.
+    fund_eur: float | None = None        # Σ Fondsresultaat — the performance leg (EUR)
+    fx_eur: float | None = None          # Σ Valutaresultaat — the FX leg (EUR)
     return_pct: float | None = None
     priced_value_eur: float | None = None
     etf_value_eur: float | None = None   # ETFs are counted here, never bucketed as a sibling

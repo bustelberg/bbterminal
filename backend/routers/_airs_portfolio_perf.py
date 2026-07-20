@@ -568,6 +568,8 @@ def compute_portfolio_performance(year: int | None = None) -> list[dict]:
     # away the very opening bar we just went and fetched.
     fx_from = min([lookback, *(s[0][0] for s in closes.values() if s)])
     fx = _fx({e.get("currency") for e in ex.values()}, fx_from, today)
+    # Latest FX rate date behind every EUR figure — surfaced for per-value traceability, not recomputed.
+    fx_asof = max((d for rates in fx.values() for d in rates), default=None)
     eur: dict[int, list[tuple[str, float]]] = {
         e["analysis_id"]: _eur_series(closes[e["analysis_id"]], e.get("currency"), fx)
         for e in ex.values() if closes.get(e["analysis_id"])
@@ -681,6 +683,12 @@ def compute_portfolio_performance(year: int | None = None) -> list[dict]:
         stats = (annualized_stats(rets, periods_per_year=TRADING_DAYS)
                  if len(rets) >= MIN_STAT_DAYS else None)
 
+        # The latest yfinance close date behind THIS model's return — the max over the legs it
+        # actually priced (a leg with a stale series pins its own older date). Surfaced, not
+        # recomputed, for the per-value ⓘ on the grid.
+        yf_asof = max((s[-1][0] for _, s in legs if s), default=None)
+        scanned = p.get("positions_scanned_at")
+
         out.append({
             "portfolio_id": p["id"],
             "name": p["name"],
@@ -736,6 +744,13 @@ def compute_portfolio_performance(year: int | None = None) -> list[dict]:
             "low_coverage": not enough,
             "partial_coverage": enough and covered < GOOD_COVERAGE_PCT,
             "cash_pct": cash_w,
+            # Where these numbers came from, as-of when — the model return is a yfinance close
+            # series converted at FX over a composition scraped from AIRS.
+            "sources": {
+                "yf_close": yf_asof,
+                "fx": fx_asof,
+                "model_scan": str(scanned)[:10] if scanned else None,
+            },
         })
 
     out.sort(key=lambda r: (r["ytd_pct"] is None, -(r["ytd_pct"] or 0)))

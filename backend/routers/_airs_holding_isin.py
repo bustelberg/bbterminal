@@ -171,7 +171,8 @@ def _dedupe(holdings: list[dict]) -> list[dict]:
         if k in agg:
             cur = agg[k]
             cur["quantity"] = (cur.get("quantity") or 0) + (h.get("quantity") or 0)
-            for k in ("current_value_eur", "start_value_eur", "ytd_return_eur"):
+            for k in ("current_value_eur", "start_value_eur", "ytd_return_eur",
+                      "fund_result_eur", "fx_result_eur"):
                 cur[k] = (cur.get(k) or 0) + (h.get(k) or 0)
             cur["weight"] = (cur.get("weight") or 0) + (h.get("weight") or 0)
             cur["lines"] = cur.get("lines", 1) + 1
@@ -267,6 +268,14 @@ def _segments(rows: list[dict]) -> list[dict]:
             "weight_pct": round(100 * value / total, 2) if total else None,
             # The sum of the Gain column: an unpriced row's gain is None, not 0.
             "gain_eur": round(now - start, 2) if priced else None,
+            # The gain split, summed — NULL when the snapshot predates the AIRS-own columns (all
+            # None), so the segment shows "—" rather than a false €0.
+            "fund_eur": (round(sum(v for r in rs
+                                   if (v := r.get("fund_result_eur")) is not None), 2)
+                         if any(r.get("fund_result_eur") is not None for r in rs) else None),
+            "fx_eur": (round(sum(v for r in rs
+                                 if (v := r.get("fx_result_eur")) is not None), 2)
+                       if any(r.get("fx_result_eur") is not None for r in rs) else None),
             "return_pct": round(100 * (now / start - 1), 2) if start else None,
             "priced_value_eur": round(now, 2),
             # ⚠ ETFs are counted, never bucketed: an equity ETF is Equity. Stated as a share of
@@ -300,7 +309,7 @@ def resolve_account_isins(portefeuille: str) -> dict:
     as_of = str(snap[0]["as_of_date"])
     holdings = _dedupe(supabase.table("airs_holding")
                        .select("holding_name,quantity,currency,weight,current_value_eur,"
-                               "start_value_eur,ytd_return_eur")
+                               "start_value_eur,ytd_return_eur,fund_result_eur,fx_result_eur")
                        .eq("portefeuille", portefeuille).eq("as_of_date", as_of)
                        .limit(500).execute().data or [])
     pos = (supabase.table("airs_model_portfolio_position")
@@ -374,6 +383,8 @@ def resolve_account_isins(portefeuille: str) -> dict:
             "current_value_eur": val,
             "start_value_eur": h.get("start_value_eur"),
             "ytd_return_eur": h.get("ytd_return_eur"),
+            "fund_result_eur": h.get("fund_result_eur"),
+            "fx_result_eur": h.get("fx_result_eur"),
             "isin": isin,
             "model_fonds": (p or {}).get("fonds"),
             "model_pct": (p or {}).get("percentage"),

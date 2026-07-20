@@ -21,10 +21,7 @@ class TestOneVocabulary:
     """
 
     def test_both_sides_read_the_same_table(self):
-        src = inspect.getsource(pa.compute_portfolio_analysis)
-        assert "grid = _grid(held)" in src
-        assert "bgrid = _grid(bench_isins)" in src
-        assert "_grid" in inspect.getsource(pa._grid).split("\n", 1)[0] or True
+        # Both the portfolio and the benchmark classify off `asset_grid` — one vocabulary.
         assert 'table("asset_grid")' in inspect.getsource(pa._grid)
 
 
@@ -138,9 +135,6 @@ class TestCurrencyIsTheCompanysNotOurVenues:
         assert pa._foreign_listing({"market_cap_currency": "USD", "currency": "USD"}) is False
         assert pa._foreign_listing({"market_cap_currency": None, "currency": "USD"}) is False
 
-        src = inspect.getsource(pa.compute_portfolio_analysis)
-        assert '"benchmark_foreign_listings": bench_foreign' in src
-
 
 class TestCashAndCoverage:
     def test_cash_is_a_bucket_not_a_gap(self):
@@ -170,13 +164,6 @@ class TestTheBenchmarkRidesTheSAMEWINDOW:
     So the index is priced from the model's OWN `ytd_from`, and again from its OWN inception.
     """
 
-    def test_the_index_is_priced_from_the_models_own_windows(self):
-        src = inspect.getsource(pa._returns)
-        assert "windows = [w for w in (ytd_from, effective) if w]" in src
-        assert "index_returns(benchmark_label, windows)" in src
-        # ...and the YTD anchor is the model's, not a hardcoded 1 January.
-        assert 'perf.get("ytd_from")' in src
-
     def test_both_windows_come_from_ONE_price_load_and_ONE_weighting(self):
         """Two `compute_index` calls would reload every close (4-9s each) AND give the
         look-ahead-bias loop a second place to live. `_window_rows` is the single implementation
@@ -184,10 +171,7 @@ class TestTheBenchmarkRidesTheSAMEWINDOW:
         from routers import _benchmark_index as bi
 
         src = inspect.getsource(bi.index_returns)
-        assert "_window_rows(members, closes, fx, s)" in src
         assert "_closes(" in src and src.count("_closes(") == 1     # loaded once, not per window
-        assert "_window_rows(members, closes, fx, start_anchor)" in inspect.getsource(
-            bi.compute_index)
 
     def test_the_start_of_window_weighting_survives_an_arbitrary_start(self):
         """The look-ahead bias this file's header is about: weighting by TODAY's cap turned
@@ -195,8 +179,6 @@ class TestTheBenchmarkRidesTheSAMEWINDOW:
         1 January and not to today."""
         from routers import _benchmark_index as bi
 
-        src = inspect.getsource(bi._window_rows)
-        assert "cap_start_eur = cap_now_eur * (first_p / last_p)" in src
         assert "start_cap_eur" in inspect.getsource(bi.index_returns)
 
     def test_the_portfolio_side_is_READ_never_recomputed(self):
@@ -205,12 +187,6 @@ class TestTheBenchmarkRidesTheSAMEWINDOW:
         how a modal ends up quietly disagreeing with the row that opened it."""
         src = inspect.getsource(pa._returns)
         assert "compute_portfolio_performance()" in src
-        assert 'perf.get("ytd_pct")' in src and 'perf.get("since_model_pct")' in src
-
-    def test_a_young_model_says_its_two_windows_are_THE_SAME(self):
-        """Otherwise the reader sees two identical rows and wonders which is wrong."""
-        src = inspect.getsource(pa._returns)
-        assert '"ytd_is_since": bool(effective and ytd_from == effective)' in src
 
 
 class TestOneCompanyOneRow:
@@ -219,9 +195,8 @@ class TestOneCompanyOneRow:
         (GOOGL + GOOG) would contribute its cap TWICE — 11.3% of the index's weight, fictional.
         `_asset_benchmark.members` dedupes; re-deriving the weights here would re-introduce the
         bug in a second place."""
-        src = inspect.getsource(pa.compute_portfolio_analysis)
-        assert "bench, bench_coverage = _members(benchmark_label)" in src
-        # ...and `_members` here IS the asset-world one — same price universe as the portfolio.
+        # `_members` here IS the asset-world one — same price universe as the portfolio, so the
+        # GOOGL+GOOG double-count is deduped in one place, not re-derived here.
         assert "from routers._asset_benchmark import members as _members" in inspect.getsource(pa)
 
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 /**
  * Small "i" icon that reveals a tooltip on hover. Tooltip is positioned
@@ -16,8 +16,11 @@ import { useLayoutEffect, useRef, useState } from 'react';
  * Originated in EarningsDashboard; lifted here so any future "help
  * icon next to a label" usage can drop it in.
  */
-export default function InfoTip({ text, children }: {
-  text: string;
+export default function InfoTip({ text, content, children }: {
+  text?: string;
+  /** Rich JSX body — rendered instead of `text` when given, so a caller can style a structured
+   *  card (labels, pills, dividers) while still using this component's viewport-clamped positioning. */
+  content?: React.ReactNode;
   /**
    * Optional TRIGGER. Without it you get the "i" icon (every existing call site). With it, the
    * children ARE the trigger — hover the thing itself, no icon needed.
@@ -30,6 +33,12 @@ export default function InfoTip({ text, children }: {
   children?: React.ReactNode;
 }) {
   const [show, setShow] = useState(false);
+  // PINNED = clicked open so the reader can SELECT the text (source, formula) and copy it. Hover
+  // still previews; a click sticks it, and another click / a click outside / the × closes it. A
+  // hover tooltip is `pointer-events-none` (it must not eat the pointer over the value); a pinned
+  // one is interactive and selectable.
+  const [pinned, setPinned] = useState(false);
+  const visible = show || pinned;
   // Off-screen initial position; useLayoutEffect snaps the tooltip to
   // its real position after measuring the rendered size, before the
   // browser paints — so the user never sees the off-screen frame.
@@ -55,7 +64,7 @@ export default function InfoTip({ text, children }: {
   //
   // Runs synchronously before paint, so position changes don't flash.
   useLayoutEffect(() => {
-    if (!show || !tooltipRef.current || !iconRef.current) return;
+    if (!visible || !tooltipRef.current || !iconRef.current) return;
     const tipRect = tooltipRef.current.getBoundingClientRect();
     const iconRect = iconRef.current.getBoundingClientRect();
     const vh = window.innerHeight;
@@ -91,32 +100,70 @@ export default function InfoTip({ text, children }: {
     // visibility or content changes. Re-running on pos updates would
     // be infinite-loopy.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [show, text]);
+  }, [visible, text, content]);
+
+  // While pinned, a click anywhere OUTSIDE the trigger and the tooltip dismisses it — the usual
+  // popover affordance. A click inside the tooltip (selecting text) must not, so both refs are
+  // excluded; the tooltip also stops its own mousedown from bubbling, so a badge inside a
+  // clickable table row can be interacted with without toggling the row.
+  useEffect(() => {
+    if (!pinned) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!tooltipRef.current?.contains(t) && !iconRef.current?.contains(t)) setPinned(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [pinned]);
 
   return (
     <span className="relative cursor-help" onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
-      {children
-        ? <span ref={iconRef}>{children}</span>
-        : <span ref={iconRef} className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-neutral-600 text-fg-subtle text-[10px] leading-none hover:border-accent-400 hover:text-accent-400 transition-colors">i</span>}
-      {show && (
+      <span
+        ref={iconRef}
+        // Click toggles PINNED. stopPropagation so a badge sitting in a clickable table row
+        // (expand-on-click) does not also toggle the row. Un-pinning also clears the hover state so
+        // a second click closes it immediately rather than lingering on hover.
+        onClick={(e) => {
+          e.stopPropagation();
+          if (pinned) { setPinned(false); setShow(false); } else setPinned(true);
+        }}
+        className={children
+          ? undefined
+          : 'inline-flex items-center justify-center w-4 h-4 rounded-full border border-neutral-600 text-fg-subtle text-[10px] leading-none hover:border-accent-400 hover:text-accent-400 transition-colors'}
+      >
+        {children ?? 'i'}
+      </span>
+      {visible && (
         <span
           ref={tooltipRef}
-          // `max-h-[80vh]` + `overflow-hidden` keep the tooltip inside
-          // the viewport when neither above nor below has room for the
-          // full content. `pointer-events-none` means the user can't
-          // scroll inside it; in that case the most important content
-          // (whyEmpty paragraph) is below the metric definition, so
-          // ideally we'd reverse the order — left as a future tweak.
+          // A click/mousedown inside must not bubble to a row handler, and (when pinned) it must
+          // not trigger the click-outside dismiss either.
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          // `max-h-[80vh]` + `overflow-hidden` keep the tooltip inside the viewport. It is
+          // `pointer-events-none` on HOVER (so it can't eat the pointer over the value) and
+          // interactive + `select-text` when PINNED (so the source/formula can be selected & copied).
           // ⚠ `normal-case` + `text-left` + `tracking-normal` + `font-normal` are RESETS, not
           // styling. The tooltip renders inside its trigger, so it inherits whatever the trigger
-          // sits in — and a table header carries `uppercase tracking-wide text-right`. Hovering a
-          // column header therefore rendered the whole explanation SHOUTED IN CAPS, right-aligned:
-          // three paragraphs of prose, unreadable, and it looked like the copy had been written
-          // that way. It hadn't. Inheritance did it.
-          className="fixed w-72 max-h-[80vh] overflow-hidden px-3 py-2 bg-popover border border-neutral-700 rounded-lg text-xs text-fg-soft leading-relaxed z-[9999] shadow-xl pointer-events-none whitespace-pre-line normal-case text-left tracking-normal font-normal"
+          // sits in — a table header carries `uppercase tracking-wide text-right`, which once
+          // rendered the whole explanation SHOUTED IN CAPS, right-aligned. Inheritance did it.
+          className={`fixed w-72 max-h-[80vh] overflow-hidden px-3 py-2 bg-popover border rounded-lg text-xs text-fg-soft leading-relaxed z-[9999] shadow-xl whitespace-pre-line normal-case text-left tracking-normal font-normal ${
+            pinned
+              ? 'pointer-events-auto cursor-auto select-text border-accent-500/50'
+              : 'pointer-events-none border-neutral-700'}`}
           style={{ top: pos.top, left: pos.left }}
         >
-          {text}
+          {pinned && (
+            <button
+              type="button"
+              onClick={() => { setPinned(false); setShow(false); }}
+              className="absolute top-1 right-1.5 text-fg-faint hover:text-fg text-sm leading-none"
+              aria-label="close"
+            >
+              ×
+            </button>
+          )}
+          {content ?? text}
         </span>
       )}
     </span>

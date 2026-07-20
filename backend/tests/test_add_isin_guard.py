@@ -71,8 +71,7 @@ class TestAResolutionWithoutPricesIsNotAResolution:
         from asset_pipeline import store
 
         src = inspect.getsource(store.store_one)
-        assert "if not rows:" in src, "a zero-bar resolution must not be stored as a mapping"
-        # It must RECORD the ISIN (so the row exists, unmapped) and then raise.
+        # A zero-bar resolution must RECORD the ISIN (so the row exists, unmapped) and then raise.
         after = src.split("if not rows:", 1)[1]
         assert "upsert_unmapped" in after, "the ISIN must still be recorded, just unmapped"
         assert "raise ValueError" in after

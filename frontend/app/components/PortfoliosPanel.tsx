@@ -2,6 +2,8 @@
 
 import { Fragment, useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
+import { Provenance, type SourceKey } from '../../lib/provenance';
+import { SnapshotAge } from '../../lib/snapshotAge';
 import { VARIANT_FILTERS } from './portfolioVariants';
 import { runSSE } from '../../lib/stream';
 import { API_URL } from '../../lib/apiUrl';
@@ -65,7 +67,10 @@ type Perf = ModelPortfolioPerformance;
  *  ⚠ stays: a partial year is honest, but it is not comparable to a full one. */
 const isPartialYear = (p: Perf) => p.model_changed_in_period;
 
-type PosState = { loading: boolean; data?: ModelPortfolioPositions; error?: string };
+type PosState = { loading: boolean; data?: ModelPortfolioPositions; error?: string;
+  // Which source produced this data — so a re-open knows whether to refetch, and the table
+  // knows whether it is showing the model composition or the AIRS book's own holdings.
+  source?: 'model' | 'book' };
 /** One row of a model's composition, as the API shapes it — derived, never re-declared, so it
  *  cannot drift from the contract. */
 type PositionRow = NonNullable<ModelPortfolioPositions['rows']>[number];
@@ -190,30 +195,44 @@ export default function PortfoliosPanel() {
   // of work for a table nobody asked to see.
   const [open, setOpen] = useState<number | null>(null);
   const [pos, setPos] = useState<Record<number, PosState>>({});
+  // The expanded table shows either the MODEL composition (yfinance-priced) or the paired AIRS
+  // BOOK's own holdings (AIRS's own EUR values). A single view mode across rows — one is open at
+  // a time — mirroring the Analyse modal's Source toggle.
+  const [posSource, setPosSource] = useState<'model' | 'book'>('model');
 
   // Cached by default — the scan already downloaded this XLS to count the holdings, so
   // re-scraping AirSPMS on every expand is a several-second wait for data we hold. `refresh`
-  // and a historical `datum` both go live.
-  const loadPositions = async (id: number, datum?: string, refresh?: boolean) => {
-    setPos((p) => ({ ...p, [id]: { loading: true } }));
+  // and a historical `datum` both go live. `source=book` reads the paired book from our DB.
+  const loadPositions = async (id: number, datum?: string, refresh?: boolean,
+                               sourceOverride?: 'model' | 'book') => {
+    const src = sourceOverride ?? posSource;
+    setPos((p) => ({ ...p, [id]: { loading: true, source: src } }));
     try {
       const params = new URLSearchParams();
       if (datum) params.set('datum', datum);
       if (refresh) params.set('refresh', 'true');
+      if (src === 'book') params.set('source', 'book');
       const qs = params.toString() ? `?${params}` : '';
       const r = await apiFetch(`${API_URL}/api/airs/model-portfolios/${id}/positions${qs}`);
       const b = await r.json().catch(() => null);
-      if (!r.ok) { setPos((p) => ({ ...p, [id]: { loading: false, error: b?.detail ?? `HTTP ${r.status}` } })); return; }
-      setPos((p) => ({ ...p, [id]: { loading: false, data: b as ModelPortfolioPositions } }));
+      if (!r.ok) { setPos((p) => ({ ...p, [id]: { loading: false, source: src, error: b?.detail ?? `HTTP ${r.status}` } })); return; }
+      setPos((p) => ({ ...p, [id]: { loading: false, source: src, data: b as ModelPortfolioPositions } }));
     } catch (e) {
-      setPos((p) => ({ ...p, [id]: { loading: false, error: e instanceof Error ? e.message : String(e) } }));
+      setPos((p) => ({ ...p, [id]: { loading: false, source: src, error: e instanceof Error ? e.message : String(e) } }));
     }
   };
 
   const toggle = (id: number) => {
     if (open === id) { setOpen(null); return; }
     setOpen(id);
-    if (!pos[id]?.data) void loadPositions(id);
+    if (!pos[id]?.data || pos[id]?.source !== posSource) void loadPositions(id);
+  };
+
+  // Flip the whole expanded table between the model composition and the AIRS book, and refetch
+  // the open row in the new source.
+  const setSource = (id: number, s: 'model' | 'book') => {
+    setPosSource(s);
+    void loadPositions(id, undefined, false, s);
   };
 
   const scan = async () => {
@@ -499,6 +518,8 @@ export default function PortfoliosPanel() {
                     <td colSpan={14} className="px-3 py-3 bg-inset">
                       <Positions
                         state={pos[r.id]}
+                        source={pos[r.id]?.source ?? 'model'}
+                        onSource={(s) => setSource(r.id, s)}
                         onPickDate={(d) => void loadPositions(r.id, d)}
                         onRefresh={() => void loadPositions(r.id, undefined, true)}
                         // A link edit re-reads from OUR cache, never from AIRS: the composition
@@ -570,6 +591,8 @@ function YtdCell({ p }: { p: Portfolio }) {
       {isPartialYear(f) && <span className="text-warn-400" aria-label="partial year">⚠</span>}
       {approx && <span className="text-warn-400" aria-label="approximate">≈</span>}
       <span className={colour}>{v >= 0 ? '+' : ''}{v.toFixed(2)}%</span>
+      <Provenance source="yfinance" asOf={f.sources?.yf_close} note="asset_price close, EUR via fx_rate"
+        how="Buy-and-hold EUR return of the composition from the YTD anchor (max of 1 Jan and the model's inception) to the latest close, weighted by the model's percentages." />
     </span>
   );
 }
@@ -692,6 +715,8 @@ function SinceCell({ p }: { p: Portfolio }) {
   return (
     <span title={`EUR return since this composition took effect on ${f.model_effective} — ${statDays(f)} trading day(s) ago. Realized, not backtested: these are the weights it has held for that whole window.`}>
       <Pct v={f.since_model_pct} />
+      <Provenance source="yfinance" asOf={f.sources?.yf_close} note="asset_price close, EUR via fx_rate"
+        how="Same buy-and-hold EUR return, measured from the composition's own inception (model_effective) to the latest close." />
     </span>
   );
 }
@@ -731,6 +756,10 @@ function RatioCell({ p, kind }: { p: Portfolio; kind: 'sharpe' | 'sortino' }) {
     <span className={v >= 0 ? 'text-fg' : 'text-neg-400'}
       title={`${kind === 'sharpe' ? 'Sharpe' : 'Sortino'} of the daily EUR curve since ${f.model_effective}, annualized over ${statDays(f)} trading days at rf = 0.${vol}`}>
       {v.toFixed(2)}
+      <Provenance source="yfinance" asOf={f.sources?.yf_close} note="asset_price daily EUR curve"
+        how={kind === 'sharpe'
+          ? 'Mean ÷ standard deviation of the daily EUR return series since inception, annualized ×√252, risk-free = 0.'
+          : 'Mean ÷ downside deviation (negative days only) of the daily EUR returns since inception, annualized ×√252, risk-free = 0.'} />
     </span>
   );
 }
@@ -761,6 +790,8 @@ function CagrCell({ p }: { p: Portfolio }) {
   return (
     <span title={`Geometric annualized return since ${f.model_effective}, over ${f.years_running?.toFixed(2)} years. Compounding this rate for that long reproduces the ${f.since_model_pct?.toFixed(2)}% in Since incep.`}>
       <Pct v={f.cagr_pct} />
+      <Provenance source="yfinance" asOf={f.sources?.yf_close} note="asset_price daily EUR curve"
+        how="Geometric annualized return: (1 + since-inception return) ^ (365.25 / days held) − 1." />
     </span>
   );
 }
@@ -865,10 +896,31 @@ type Position = ModelPortfolioPositions['rows'][number];
  *    unresolved    — no Yahoo listing (a structured product, an in-house fund, a queued ETF).
  *    not-yet-held  — no close on or before the window opened, so it cannot be marked from there.
  */
-function MarkCells({ p, ytdFrom }: { p: Position; ytdFrom?: string | null }) {
+function MarkCells({ p, ytdFrom, source }: {
+  p: Position; ytdFrom?: string | null; source: 'model' | 'book';
+}) {
   const eur = (v: number) => v.toLocaleString('en-GB', {
     minimumFractionDigits: 2, maximumFractionDigits: 2,
   });
+  // Where each mark comes from: the book's own EUR position values (AIRS VOLK) or our yfinance
+  // close × FX. A look-through row is neither — it's a computed basket index. See <Provenance>.
+  const isBookMark = source === 'book';
+  const markSrc: SourceKey = p.lookthrough ? 'derived' : isBookMark ? 'airs_volk' : 'yfinance';
+  const startNote = p.lookthrough ? 'look-through basket, indexed to 100'
+    : isBookMark ? 'Beginwaarde (start-of-year value)' : 'close in EUR at that date’s FX';
+  const endNote = p.lookthrough ? 'look-through basket, indexed to 100'
+    : isBookMark ? 'Huidige waarde (snapshot value)' : 'latest close in EUR';
+  const startHow = p.lookthrough
+    ? 'Look-through: the linked model’s basket indexed to 100 at the window open — only the Start→End return is a real number.'
+    : isBookMark
+      ? 'AIRS Beginwaarde — the position’s own EUR value at the start of the year (1 Jan).'
+      : 'The holding’s last yfinance close on or before the window opened, converted to EUR at that date’s FX rate.';
+  const endHow = p.lookthrough
+    ? 'Look-through: the linked model’s basket value now, indexed the same way as Start.'
+    : isBookMark
+      ? 'AIRS Huidige waarde — the position’s own EUR value at the snapshot date.'
+      : 'The holding’s latest yfinance close, converted to EUR at that date’s FX rate.';
+  const returnHow = 'End ÷ Start − 1. An EUR return, so it carries the FX leg — a USD holding can rise in dollars yet fall here.';
 
   if (p.start_price_eur == null || p.end_price_eur == null) {
     // ⚠ A STALE SERIES IS NOT A BROKEN MAPPING, and the blank looks identical. Meta Platforms is
@@ -926,6 +978,7 @@ function MarkCells({ p, ytdFrom }: { p: Position; ytdFrom?: string | null }) {
           {lt && <span aria-label="look-through" className="text-accent-400 mr-1">↳</span>}
           {eur(p.start_price_eur)}
         </span>
+        <Provenance source={markSrc} asOf={p.start_date} note={startNote} how={startHow} />
       </td>
       <td className="px-3 py-1.5 font-mono whitespace-nowrap">
         <span className={est ? 'text-warn-300' : lt ? 'text-accent-400/80' : 'text-fg-subtle'}
@@ -936,10 +989,16 @@ function MarkCells({ p, ytdFrom }: { p: Position; ytdFrom?: string | null }) {
       <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
         <span className={lt ? 'text-accent-400' : 'text-fg'}
           title={lt ? ltWhy : local(p.end_price_local, p.end_date)}>{eur(p.end_price_eur)}</span>
+        <Provenance source={markSrc} asOf={p.end_date} note={endNote} how={endHow} />
       </td>
       <td className={`px-3 py-1.5 font-mono whitespace-nowrap ${lt ? 'text-accent-400/80' : 'text-fg-subtle'}`}>{p.end_date}</td>
       <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
         {p.return_pct != null ? <Pct v={p.return_pct} /> : <span className="text-fg-faint">—</span>}
+        {p.return_pct != null && (
+          <Provenance source="derived" asOf={p.end_date}
+            note={source === 'book' ? 'Huidige / Beginwaarde − 1 (EUR)' : 'End / Start − 1 (EUR)'}
+            how={returnHow} />
+        )}
       </td>
     </>
   );
@@ -1198,12 +1257,15 @@ function LinkCell({ p, ctx, ownerId, onSaved }: {
  * The ISIN is the whole point: it's an EXACT join into `asset_execution`, where the AIRS
  * holdings sheet only ever gave us a fund name ("Alphabet - C", "L` Oreal") that no amount
  * of fuzzy matching resolves safely. */
-function Positions({ state, onPickDate, onRefresh, onLinkSaved }: {
+function Positions({ state, source, onSource, onPickDate, onRefresh, onLinkSaved }: {
   state?: PosState;
+  source: 'model' | 'book';
+  onSource: (s: 'model' | 'book') => void;
   onPickDate: (datum: string) => void;
   onRefresh: () => void;
   onLinkSaved: () => void;
 }) {
+  const isBook = source === 'book';
   const pid = state?.data?.portfolio_id;
   const [linkCtx, setLinkCtx] = useState<LinkCtx | null>(null);
   // Which holding's soundness charts are open. Null = none.
@@ -1234,14 +1296,37 @@ function Positions({ state, onPickDate, onRefresh, onLinkSaved }: {
   const d = state.data;
   if (!d) return null;
 
+  // Model composition (yfinance) vs the paired AIRS book's own holdings. Rendered in both the
+  // empty and populated states, so a book with no rows can always be switched back to Model.
+  const sourceToggle = (
+    <label className="flex items-center gap-1.5 text-[11px] text-fg-muted"
+      title="Source: Model = this portfolio's composition, priced from yfinance (per-share closes). Book (AIRS) = the paired AIRS book's ACTUAL holdings, valued by AIRS itself (Beginwaarde / Huidige waarde in EUR, over the calendar year). Different rows — a book holds a different set than the composition it tracks.">
+      Source
+      <select value={source} aria-label="Positions source"
+        onChange={(e) => onSource(e.target.value as 'model' | 'book')}
+        className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[11px] text-fg focus:border-accent-500">
+        <option value="model">Model</option>
+        <option value="book">Book (AIRS)</option>
+      </select>
+    </label>
+  );
+
   if (d.rows.length === 0) {
     return (
-      <p className="text-[11px] text-fg-faint">
-        No fixed-model rows for any of its {d.dates.length} snapshot date(s). AIRS only stores a
-        composition for portfolios of type <span className="font-mono">fixed (…)</span> — the{' '}
-        <span className="font-mono">meervoudig</span> / <span className="font-mono">normaal</span>{' '}
-        ones (benchmarks, multi-model) have none. That is an answer, not a failed fetch.
-      </p>
+      <div className="space-y-2">
+        <div className="flex items-center gap-3 text-[11px]">{sourceToggle}</div>
+        <p className="text-[11px] text-fg-faint">
+          {isBook ? (
+            <>No AIRS book is paired with this model, so there are no book holdings to value.
+            Pair one on this page, or switch Source back to <span className="font-mono">Model</span>.</>
+          ) : (
+            <>No fixed-model rows for any of its {d.dates.length} snapshot date(s). AIRS only stores a
+            composition for portfolios of type <span className="font-mono">fixed (…)</span> — the{' '}
+            <span className="font-mono">meervoudig</span> / <span className="font-mono">normaal</span>{' '}
+            ones (benchmarks, multi-model) have none. That is an answer, not a failed fetch.</>
+          )}
+        </p>
+      </div>
     );
   }
 
@@ -1250,8 +1335,10 @@ function Positions({ state, onPickDate, onRefresh, onLinkSaved }: {
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-3 flex-wrap text-[11px]">
+        {sourceToggle}
         <span className="text-fg-soft">
-          <span className="font-mono text-fg">{d.rows.length}</span> positions ·{' '}
+          <span className="font-mono text-fg">{d.rows.length}</span>{' '}
+          {isBook ? 'book holdings' : 'positions'} ·{' '}
           <span className="text-pos-400 font-mono">{d.matched}</span> matched to our instruments ·{' '}
           <span className={d.unmatched ? 'text-warn-300 font-mono' : 'text-fg-faint font-mono'}>{d.unmatched}</span> not ·{' '}
           <span className="font-mono">{total.toFixed(2)}%</span>{' '}total
@@ -1259,37 +1346,52 @@ function Positions({ state, onPickDate, onRefresh, onLinkSaved }: {
               half the portfolios — it is the date the composition took effect. */}
           {d.ytd_from && (
             <> · marks from{' '}
-              <span className="font-mono text-fg" title="The YTD window: max(1 Jan, this composition's effective date). Weighting the Return (€) column by these percentages reproduces the portfolio's YTD exactly.">
+              <span className="font-mono text-fg" title={isBook
+                ? "AIRS's calendar-year window (1 Jan → the snapshot). Weighting the Return (€) column by these START-of-window (Beginwaarde) weights reproduces the book's PRICE return — a hair below its headline cumulatief_rendement, which also includes income."
+                : "The YTD window: max(1 Jan, this composition's effective date). Weighting the Return (€) column by these percentages reproduces the portfolio's YTD exactly."}>
                 {d.ytd_from}
               </span>
             </>
           )}
+          {isBook && d.datum && (
+            <> · <SnapshotAge asOf={d.datum} prefix="valued" /></>
+          )}
         </span>
         {/* AirSPMS's date dropdown always LEADS with today, which is an empty placeholder —
-            so the default is the newest snapshot that actually has rows, not the first one. */}
-        <label className="flex items-center gap-1.5 text-fg-muted">
-          Snapshot
-          <select value={d.datum ?? ''} onChange={(e) => onPickDate(e.target.value)}
-            className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[11px] font-mono text-fg focus:border-accent-500">
-            {d.dates.map((x) => <option key={x} value={x}>{x}</option>)}
-          </select>
-        </label>
+            so the default is the newest snapshot that actually has rows, not the first one.
+            Book holdings are a single DB snapshot, so neither the picker nor Refresh applies. */}
+        {!isBook && d.dates.length > 0 && (
+          <label className="flex items-center gap-1.5 text-fg-muted">
+            Snapshot
+            <select value={d.datum ?? ''} onChange={(e) => onPickDate(e.target.value)}
+              className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[11px] font-mono text-fg focus:border-accent-500">
+              {d.dates.map((x) => <option key={x} value={x}>{x}</option>)}
+            </select>
+          </label>
+        )}
 
         {/* Say it's cached. A cached answer shown as if it were fresh is exactly how a stale
             holding gets trusted — and this one can be minutes or days old. */}
-        <span className="flex items-center gap-1.5 ml-auto">
-          {d.cached_at ? (
-            <span className="text-fg-faint" title={`Served from our DB, stored ${new Date(d.cached_at).toLocaleString()}. AIRS was not contacted.`}>
-              cached <span className="font-mono">{new Date(d.cached_at).toLocaleDateString()}</span>
-            </span>
-          ) : (
-            <span className="text-pos-400" title="Fetched live from AirSPMS just now.">live</span>
-          )}
-          <button type="button" onClick={onRefresh}
-            className="text-[11px] px-2 py-1 rounded-lg hover:bg-overlay/5 text-accent-400 transition-colors">
-            Refresh from AIRS
-          </button>
-        </span>
+        {isBook ? (
+          <span className="ml-auto text-accent-400"
+            title="These holdings and values come from the paired AIRS book (airs_holding), read from our DB.">
+            AIRS book
+          </span>
+        ) : (
+          <span className="flex items-center gap-1.5 ml-auto">
+            {d.cached_at ? (
+              <span className="text-fg-faint" title={`Served from our DB, stored ${new Date(d.cached_at).toLocaleString()}. AIRS was not contacted.`}>
+                cached <span className="font-mono">{new Date(d.cached_at).toLocaleDateString()}</span>
+              </span>
+            ) : (
+              <span className="text-pos-400" title="Fetched live from AirSPMS just now.">live</span>
+            )}
+            <button type="button" onClick={onRefresh}
+              className="text-[11px] px-2 py-1 rounded-lg hover:bg-overlay/5 text-accent-400 transition-colors">
+              Refresh from AIRS
+            </button>
+          </span>
+        )}
       </div>
 
       <div className="overflow-auto rounded-lg border border-neutral-800/40 max-h-[50vh]">
@@ -1316,19 +1418,29 @@ function Positions({ state, onPickDate, onRefresh, onLinkSaved }: {
               <th className="px-3 py-1.5 font-medium text-left">Region</th>
               {/* The arithmetic behind the portfolio's YTD, one holding at a time. Weight these
                   returns and you get the number in the row above, exactly. */}
-              <th className="px-3 py-1.5 font-medium text-right" title="The holding's price in EUR when the YTD window opened — its last close on or before that date.">
+              <th className="px-3 py-1.5 font-medium text-right" title={isBook
+                ? "The POSITION's value in EUR at the start of the year (AIRS Beginwaarde) — not a per-share price. Weighting the Return column by these start values reproduces the book's price return."
+                : "The holding's price in EUR when the YTD window opened — its last close on or before that date."}>
                 Start (€)
               </th>
-              <th className="px-3 py-1.5 font-medium text-left" title="The date of that close. It can sit a day or two before the window opened (a weekend, a holiday) — it is the last price at which the position was actually marked.">
+              <th className="px-3 py-1.5 font-medium text-left" title={isBook
+                ? "The start of AIRS's calendar-year window (1 Jan)."
+                : "The date of that close. It can sit a day or two before the window opened (a weekend, a holiday) — it is the last price at which the position was actually marked."}>
                 Start date
               </th>
-              <th className="px-3 py-1.5 font-medium text-right" title="Its latest close, in EUR.">
+              <th className="px-3 py-1.5 font-medium text-right" title={isBook
+                ? "The POSITION's value in EUR at the snapshot (AIRS Huidige waarde) — not a per-share price."
+                : "Its latest close, in EUR."}>
                 End (€)
               </th>
-              <th className="px-3 py-1.5 font-medium text-left" title="The date of that close. It LAGS for some holdings — vendors publish unevenly — so these dates are not all the same day, and the stale ones are marked at their last known price.">
+              <th className="px-3 py-1.5 font-medium text-left" title={isBook
+                ? "The date AIRS valued the book (its latest snapshot)."
+                : "The date of that close. It LAGS for some holdings — vendors publish unevenly — so these dates are not all the same day, and the stale ones are marked at their last known price."}>
                 End date
               </th>
-              <th className="px-3 py-1.5 font-medium text-right" title="Return in EUR from start to end. This is the exact quantity the portfolio's YTD weights together — it carries the FX leg, so a USD holding can rise in dollars and fall here.">
+              <th className="px-3 py-1.5 font-medium text-right" title={isBook
+                ? "AIRS's own EUR price return for this holding over the year (Huidige waarde / Beginwaarde − 1). Weighting this by the Start-value weights reproduces the book's price return."
+                : "Return in EUR from start to end. This is the exact quantity the portfolio's YTD weights together — it carries the FX leg, so a USD holding can rise in dollars and fall here."}>
                 Return (€)
               </th>
             </tr>
@@ -1360,11 +1472,18 @@ function Positions({ state, onPickDate, onRefresh, onLinkSaved }: {
                 <LinkCell p={p} ctx={linkCtx} ownerId={d.portfolio_id} onSaved={onLinkSaved} />
                 <td className="px-3 py-1.5 text-right font-mono text-fg">
                   {p.percentage != null ? `${p.percentage.toFixed(2)}%` : '—'}
+                  {p.percentage != null && (
+                    <Provenance source={isBook ? 'airs_volk' : 'airs_model'} asOf={d.datum}
+                      note={isBook ? 'start-of-year value weight' : 'nominal % from the fixed model'}
+                      how={isBook
+                        ? 'The holding’s Beginwaarde as a share of the book’s total start-of-year value.'
+                        : 'The model’s own nominal percentage for this holding, as scraped from the AIRS composition.'} />
+                  )}
                 </td>
                 <td className="px-3 py-1.5 font-mono text-fg-muted">{p.valuta ?? '—'}</td>
                 <td className="px-3 py-1.5 text-fg-subtle">{p.sector ?? '—'}</td>
                 <td className="px-3 py-1.5 text-fg-subtle">{p.regio ?? '—'}</td>
-                <MarkCells p={p} ytdFrom={d.ytd_from} />
+                <MarkCells p={p} ytdFrom={d.ytd_from} source={source} />
               </tr>
             ))}
           </tbody>

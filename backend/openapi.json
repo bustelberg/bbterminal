@@ -270,6 +270,39 @@
       },
       "AirsAccountHolding": {
         "properties": {
+          "airs_result_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Airs Result Pct"
+          },
+          "airs_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Airs Weight"
+          },
+          "cost_basis_local": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Basis Local"
+          },
           "currency": {
             "anyOf": [
               {
@@ -281,6 +314,17 @@
             ],
             "title": "Currency"
           },
+          "current_price_local": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Price Local"
+          },
           "current_value_eur": {
             "anyOf": [
               {
@@ -291,6 +335,28 @@
               }
             ],
             "title": "Current Value Eur"
+          },
+          "fund_result_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fund Result Eur"
+          },
+          "fx_result_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fx Result Eur"
           },
           "holding_name": {
             "title": "Holding Name",
@@ -837,6 +903,28 @@
               }
             ],
             "title": "Etf Value Eur"
+          },
+          "fund_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fund Eur"
+          },
+          "fx_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fx Eur"
           },
           "gain_eur": {
             "anyOf": [
@@ -2395,6 +2483,49 @@
           "name"
         ],
         "title": "BacktestStats",
+        "type": "object"
+      },
+      "BasketHolding": {
+        "properties": {
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          },
+          "weight": {
+            "default": 0.0,
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "isin"
+        ],
+        "title": "BasketHolding",
+        "type": "object"
+      },
+      "BasketRequest": {
+        "properties": {
+          "holdings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BasketHolding"
+            },
+            "title": "Holdings",
+            "type": "array"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "title": "BasketRequest",
         "type": "object"
       },
       "BenchmarkCompare": {
@@ -4492,8 +4623,15 @@
             "title": "Name"
           },
           "portfolio_id": {
-            "title": "Portfolio Id",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Id"
           },
           "returns": {
             "anyOf": [
@@ -4523,7 +4661,6 @@
           }
         },
         "required": [
-          "portfolio_id",
           "benchmark"
         ],
         "title": "ModelPortfolioAnalysis",
@@ -4614,6 +4751,17 @@
             ],
             "title": "Name"
           },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
           "portfolio_id": {
             "title": "Portfolio Id",
             "type": "integer"
@@ -4640,6 +4788,11 @@
             },
             "title": "Rows",
             "type": "array"
+          },
+          "source": {
+            "default": "model",
+            "title": "Source",
+            "type": "string"
           },
           "start": {
             "anyOf": [
@@ -4828,6 +4981,16 @@
               }
             ],
             "title": "Sortino"
+          },
+          "sources": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PortfolioPerfSources"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "stat_days": {
             "default": 0,
@@ -5496,6 +5659,208 @@
         "title": "OptimizeResponse",
         "type": "object"
       },
+      "PerformanceResponse": {
+        "properties": {
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbol"
+          },
+          "windows": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PerformanceWindow"
+            },
+            "title": "Windows",
+            "type": "array"
+          }
+        },
+        "title": "PerformanceResponse",
+        "type": "object"
+      },
+      "PerformanceWindow": {
+        "properties": {
+          "ann_vol_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ann Vol Pct"
+          },
+          "available": {
+            "default": false,
+            "title": "Available",
+            "type": "boolean"
+          },
+          "cagr_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cagr Pct"
+          },
+          "coverage_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage Pct"
+          },
+          "from_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Date"
+          },
+          "max_drawdown_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Drawdown Pct"
+          },
+          "pos_12m_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pos 12M Pct"
+          },
+          "r2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "R2"
+          },
+          "sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe"
+          },
+          "sortino": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sortino"
+          },
+          "to_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Date"
+          },
+          "trading_days": {
+            "default": 0,
+            "title": "Trading Days",
+            "type": "integer"
+          },
+          "up_days_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Up Days Pct"
+          },
+          "years": {
+            "title": "Years",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "years"
+        ],
+        "title": "PerformanceWindow",
+        "type": "object"
+      },
       "PortfolioAnalysisAxis": {
         "properties": {
           "axis": {
@@ -5520,6 +5885,17 @@
       "PortfolioAnalysisReturns": {
         "description": "The model's EUR return beside the benchmark's \u2014 over the SAME windows, both times.\n\n\u26a0 A BENCHMARK MEASURED OVER A DIFFERENT WINDOW IS NOT A BENCHMARK, IT IS A NUMBER. A model's\n\"YTD\" opens at `max(1 Jan, its inception)`, and for the 27 models younger than the year that\nis NOT 1 January. Putting a 9-day portfolio return beside the index's full-year return and\ncalling the gap out-performance would be nonsense that looks exactly like a finding. So the\nindex is priced from the model's OWN `ytd_from`, and again from its OWN inception.\n\n`ytd_is_since` is true when the model is younger than the year: the two windows coincide, so\nthe two rows are the same number by construction, and the UI says so.",
         "properties": {
+          "benchmark_as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark As Of"
+          },
           "benchmark_since_pct": {
             "anyOf": [
               {
@@ -5541,6 +5917,28 @@
               }
             ],
             "title": "Benchmark Ytd Pct"
+          },
+          "book_as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book As Of"
+          },
+          "book_available": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Available"
           },
           "book_comparable": {
             "anyOf": [
@@ -5597,6 +5995,17 @@
             ],
             "title": "Book Ytd Pct"
           },
+          "portfolio_as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio As Of"
+          },
           "portfolio_since_pct": {
             "anyOf": [
               {
@@ -5640,6 +6049,22 @@
               }
             ],
             "title": "Since From"
+          },
+          "source": {
+            "default": "model",
+            "title": "Source",
+            "type": "string"
+          },
+          "strategy_ytd_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Ytd Pct"
           },
           "ytd_excess_pct": {
             "anyOf": [
@@ -5853,6 +6278,46 @@
           "company_id"
         ],
         "title": "PortfolioMemberIn",
+        "type": "object"
+      },
+      "PortfolioPerfSources": {
+        "description": "As-of dates of the inputs behind this row's numbers \u2014 for per-value traceability on the\ngrid. Every field is an already-loaded date SURFACED, not recomputed: the model figures\n(YTD / Since / Sharpe / Sortino) are a yfinance close series converted at FX, over a\ncomposition we scraped from AIRS, so those three dates are what \"as of when\" means here.",
+        "properties": {
+          "fx": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fx"
+          },
+          "model_scan": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Scan"
+          },
+          "yf_close": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Yf Close"
+          }
+        },
+        "title": "PortfolioPerfSources",
         "type": "object"
       },
       "PortfolioSaveRequest": {
@@ -6121,6 +6586,82 @@
           }
         },
         "title": "PortfolioUpdate",
+        "type": "object"
+      },
+      "PricePoint": {
+        "properties": {
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          },
+          "value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Eur"
+          }
+        },
+        "required": [
+          "date",
+          "value"
+        ],
+        "title": "PricePoint",
+        "type": "object"
+      },
+      "PriceSeriesResponse": {
+        "properties": {
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "points": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PricePoint"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbol"
+          }
+        },
+        "title": "PriceSeriesResponse",
         "type": "object"
       },
       "PruneRequest": {
@@ -9519,6 +10060,60 @@
         ]
       }
     },
+    "/api/airs/basket/analysis": {
+      "post": {
+        "description": "Composition + return of an ARBITRARY basket (a single stock, a group) beside the benchmark \u2014\nthe same payload as the model-portfolio analysis, so ONE Analyse view serves a stock (a basket\nof one) and a portfolio alike. yfinance only (a basket has no AIRS book).",
+        "operationId": "airs_basket_analysis_api_airs_basket_analysis_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "SP500",
+              "title": "Benchmark",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BasketRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelPortfolioAnalysis"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Basket Analysis",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/crm-relaties": {
       "get": {
         "description": "The latest stored CRM 'Alle relaties' export, parsed on the fly from the\nraw .xls in `airs_crm_relaties_raw` into a generic `{columns, rows}` table\n(whatever columns the export has). Empty until the daily job has run it.",
@@ -9691,7 +10286,7 @@
     },
     "/api/airs/model-portfolios/{portfolio_id}/analysis": {
       "get": {
-        "description": "Sector / region / currency split of one model portfolio, beside the benchmark's.\n\n`weight_by=book` weights the portfolio bars by the paired AIRS book's actual EUR holdings\ninstead of the model's nominal weights; the benchmark and the classification are unchanged.",
+        "description": "Sector / region / currency split of one model portfolio, beside the benchmark's.\n\n`weight_by=book` weights the portfolio bars by the paired AIRS book's actual EUR holdings\ninstead of the model's nominal weights; the benchmark and the classification are unchanged.\n\n`source=book` reads the RETURN numbers from AIRS's own book (`cumulatief_rendement` + the\nVOLK per-holding results) instead of the yfinance model reconstruction. The benchmark stays\nyfinance either way, so the two are comparable.",
         "operationId": "airs_model_portfolio_analysis_api_airs_model_portfolios__portfolio_id__analysis_get",
         "parameters": [
           {
@@ -9720,6 +10315,16 @@
             "schema": {
               "default": "model",
               "title": "Weight By",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "model",
+              "title": "Source",
               "type": "string"
             }
           }
@@ -9754,7 +10359,7 @@
     },
     "/api/airs/model-portfolios/{portfolio_id}/attribution": {
       "get": {
-        "description": "Brinson-Fachler attribution of one model against a benchmark, over one window.",
+        "description": "Brinson-Fachler attribution of one model against a benchmark, over one window.\n\n`source=book` decomposes the paired AIRS book's actual holdings + returns instead of the\nyfinance model reconstruction (calendar-year window; benchmark stays yfinance).",
         "operationId": "airs_model_portfolio_attribution_api_airs_model_portfolios__portfolio_id__attribution_get",
         "parameters": [
           {
@@ -9793,6 +10398,16 @@
             "schema": {
               "default": "sector",
               "title": "Axis",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "model",
+              "title": "Source",
               "type": "string"
             }
           }
@@ -10035,9 +10650,50 @@
         ]
       }
     },
+    "/api/airs/model-portfolios/{portfolio_id}/owner-earnings-stream": {
+      "get": {
+        "description": "SSE: the whole portfolio's blended owner-earnings (Fundamental \u2192 Owner earnings), streaming\nper-holding progress then the result \u2014 its holdings run through the same basket blender.",
+        "operationId": "airs_portfolio_owner_earnings_stream_api_airs_model_portfolios__portfolio_id__owner_earnings_stream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Portfolio Owner Earnings Stream",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/model-portfolios/{portfolio_id}/positions": {
       "get": {
-        "description": "One model portfolio's positions \u2014 the XLS export that DOES carry an ISIN (the AIRS\n*holdings* sheet does not; it has only a fund name).\n\nSERVED FROM OUR CACHE by default: the scan already downloaded this XLS to count the\nportfolio's holdings, so re-scraping AirSPMS on every expand is pure waste (and a\nseveral-second wait on an authenticated round-trip). Goes to AIRS only when:\n  * `refresh=true`   \u2014 the user explicitly wants the current truth, or\n  * `datum` is given \u2014 a historical snapshot, of which we cache only the newest, or\n  * we have nothing stored for this portfolio yet.\n\nA cached answer carries `cached_at` and the UI says so. A cached response presented as\nfresh is exactly how a stale holding gets trusted.\n\n`known_instrument` is NEVER cached \u2014 it is a join against `asset_execution`, which grows\nevery time we add an instrument, so it is recomputed on every read. Cached, a \"not in\ngrid\" flag would be wrong the moment the grid catches up.",
+        "description": "One model portfolio's positions \u2014 the XLS export that DOES carry an ISIN (the AIRS\n*holdings* sheet does not; it has only a fund name).\n\n`source=book` instead returns the paired AIRS BOOK's own holdings, with AIRS's own per-holding\nEUR values (Beginwaarde / Huidige waarde) \u2014 a different set of rows than the model composition,\nand never cached (the caching below is for the model XLS path).\n\nSERVED FROM OUR CACHE by default: the scan already downloaded this XLS to count the\nportfolio's holdings, so re-scraping AirSPMS on every expand is pure waste (and a\nseveral-second wait on an authenticated round-trip). Goes to AIRS only when:\n  * `refresh=true`   \u2014 the user explicitly wants the current truth, or\n  * `datum` is given \u2014 a historical snapshot, of which we cache only the newest, or\n  * we have nothing stored for this portfolio yet.\n\nA cached answer carries `cached_at` and the UI says so. A cached response presented as\nfresh is exactly how a stale holding gets trusted.\n\n`known_instrument` is NEVER cached \u2014 it is a join against `asset_execution`, which grows\nevery time we add an instrument, so it is recomputed on every read. Cached, a \"not in\ngrid\" flag would be wrong the moment the grid catches up.",
         "operationId": "airs_model_portfolio_positions_api_airs_model_portfolios__portfolio_id__positions_get",
         "parameters": [
           {
@@ -10074,6 +10730,16 @@
               "title": "Refresh",
               "type": "boolean"
             }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "model",
+              "title": "Source",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -10099,6 +10765,92 @@
           }
         },
         "summary": "Airs Model Portfolio Positions",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/model-portfolios/{portfolio_id}/price-series": {
+      "get": {
+        "description": "The whole portfolio's price-steadiness series (Fundamental \u2192 Stock price) \u2014 its holdings as\none value-weighted EUR index. Same shape as the basket / single-instrument endpoints.",
+        "operationId": "airs_portfolio_price_series_api_airs_model_portfolios__portfolio_id__price_series_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceSeriesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Portfolio Price Series",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/model-portfolios/{portfolio_id}/risk-windows": {
+      "get": {
+        "description": "Whole-portfolio returns+risk over 2/4/8-year windows \u2014 the Analyse modal's Risk section.\n\nThe model's holdings priced as ONE value-weighted daily EUR basket (yfinance / `asset_price`),\nso it is the same metric table an instrument or a sleeve gets. yfinance-only by nature (AIRS has\nno daily history); 404 when the portfolio has no priceable holdings.",
+        "operationId": "airs_model_portfolio_risk_windows_api_airs_model_portfolios__portfolio_id__risk_windows_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerformanceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Model Portfolio Risk Windows",
         "tags": [
           "airs"
         ]
@@ -10228,6 +10980,47 @@
           }
         },
         "summary": "Airs Portfolios Overview",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/portfolios/{portefeuille}/refresh": {
+      "post": {
+        "description": "Re-scan ONE portfolio's AIRS Rendement + Vermogensoverzicht and store both \u2014 the per-row\nRefresh on the overview table. Awaited (a few seconds: two downloads), so the client can\nre-fetch the row on success. Serialized against the full scan via the module lock; returns\n`{status: busy}` if a fleet refresh is in flight.",
+        "operationId": "airs_portfolio_refresh_api_airs_portfolios__portefeuille__refresh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Portfolio Refresh",
         "tags": [
           "airs"
         ]
@@ -11074,6 +11867,220 @@
         ]
       }
     },
+    "/api/asset-pipeline/basket/owner-earnings": {
+      "post": {
+        "description": "A weight-blended owner-earnings index (base 100) for a GROUP, from the holdings that have\nowner earnings \u2014 the Fundamental \u2192 Owner-earnings tab for a sleeve. `note` states the covered\nweight; `applicable=false` when nothing in the group has owner earnings.",
+        "operationId": "basket_owner_earnings_api_asset_pipeline_basket_owner_earnings_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BasketRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinancialSeriesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Basket Owner Earnings",
+        "tags": [
+          "asset-pipeline",
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/basket/owner-earnings/stream": {
+      "post": {
+        "description": "SSE variant of the blended owner-earnings endpoint: emits `{type:'progress',done,total,isin,\nstatus}` per holding, then `{type:'result',payload:<FinancialSeriesResponse>}`.",
+        "operationId": "basket_owner_earnings_stream_api_asset_pipeline_basket_owner_earnings_stream_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BasketRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Basket Owner Earnings Stream",
+        "tags": [
+          "asset-pipeline",
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/basket/performance": {
+      "post": {
+        "description": "Per-window returns + risk for a GROUP of holdings \u2014 the same 2/4/8-year metrics as the\nsingle-instrument endpoint, computed off a value-weighted daily EUR index of the sleeve.\n`coverage_pct` per window says how much of the group's weight is actually represented.",
+        "operationId": "basket_performance_api_asset_pipeline_basket_performance_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BasketRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerformanceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Basket Performance",
+        "tags": [
+          "asset-pipeline",
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/basket/price-series": {
+      "post": {
+        "description": "Monthly EUR value index of a GROUP for the price-steadiness chart (Fundamental \u2192 Stock\nprice). Value-weighted buy-and-hold of the sleeve, base 1.0.",
+        "operationId": "basket_price_series_api_asset_pipeline_basket_price_series_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BasketRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceSeriesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Basket Price Series",
+        "tags": [
+          "asset-pipeline",
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/benchmark-risk/{label}": {
+      "get": {
+        "description": "The benchmark's own 2/4/8-year returns+risk \u2014 its investable ETF (SP500\u2192SPY, ACWI\u2192ISAC),\npriced the same daily-EUR way, so the Analyse Risk table can sit a sleeve beside its\nbenchmark. 404 for a label with no mapped ETF.",
+        "operationId": "benchmark_risk_api_asset_pipeline_benchmark_risk__label__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "label",
+            "required": true,
+            "schema": {
+              "title": "Label",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerformanceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Benchmark Risk",
+        "tags": [
+          "asset-pipeline",
+          "asset-pipeline"
+        ]
+      }
+    },
     "/api/asset-pipeline/dividends/coverage": {
       "get": {
         "description": "`{ISIN: {company_id, exchange, gf_unsubscribed, has_data}}` for every\ncompany carrying an ISIN (~2.5k). The grid joins this on `isin` client-side \u2014\nan ISIN absent from this map has no GuruFocus company behind it at all, which\nis the majority of the grid (ETFs, crypto, un-ingested equities).",
@@ -11728,6 +12735,114 @@
         ]
       }
     },
+    "/api/asset-pipeline/owner-earnings/isin/{isin}": {
+      "get": {
+        "description": "Owner earnings (net income + D&A \u2212 capex) over time, in MILLIONS of the listing currency\nand EUR \u2014 the one fundamental the /portfolios \"Fundamental\" panel charts.\n\nCOMPUTED from three GuruFocus lines across two statements, off the same cached `financials`\nblob every other financial column reads, so it is free for any company already pulled.\n\n200 with `applicable=false` when a component line does not exist for this template; 404 when\nthe ISIN reaches no financial statements at all (a fund, a dead OTC line).",
+        "operationId": "owner_earnings_by_isin_api_asset_pipeline_owner_earnings_isin__isin__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "isin",
+            "required": true,
+            "schema": {
+              "title": "Isin",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinancialSeriesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Owner Earnings By Isin",
+        "tags": [
+          "asset-pipeline",
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/price-series/isin/{isin}": {
+      "get": {
+        "description": "Monthly split-adjusted close (native + EUR) for the price-steadiness chart \u2014 yfinance /\n`asset_price` ONLY, the same source /portfolios prices everything else with.\n\n404 when the ISIN has no priced Yahoo listing or no stored bars.",
+        "operationId": "price_series_by_isin_api_asset_pipeline_price_series_isin__isin__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "isin",
+            "required": true,
+            "schema": {
+              "title": "Isin",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "years",
+            "required": false,
+            "schema": {
+              "default": 15,
+              "title": "Years",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceSeriesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Price Series By Isin",
+        "tags": [
+          "asset-pipeline",
+          "asset-pipeline"
+        ]
+      }
+    },
     "/api/asset-pipeline/queue": {
       "post": {
         "description": "Add ISINs to the async ingest queue as `pending` (instant \u2014 no Yahoo).\nA single background worker drains them. Skips already-ingested (ok) ISINs.\nReturns {queued, skipped_existing, input}.",
@@ -11904,6 +13019,50 @@
         },
         "summary": "Resolve Asset",
         "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/risk/isin/{isin}": {
+      "get": {
+        "description": "Per-window returns + risk (CAGR + its log-fit R\u00b2, annualized vol, Sharpe, Sortino, max\ndrawdown, % up days) over 2/4/8-year trailing windows, from the daily EUR price \u2014 the same\n`asset_price` source /portfolios prices with. Comparing a metric across windows is a\ndistribution-drift probe. 404 when the ISIN has no priced listing or too few bars.",
+        "operationId": "risk_by_isin_api_asset_pipeline_risk_isin__isin__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "isin",
+            "required": true,
+            "schema": {
+              "title": "Isin",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerformanceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Risk By Isin",
+        "tags": [
+          "asset-pipeline",
           "asset-pipeline"
         ]
       }

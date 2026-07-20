@@ -3,6 +3,8 @@
 import { Fragment, useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
+import { Provenance } from '../../lib/provenance';
+import { SnapshotAge } from '../../lib/snapshotAge';
 import type { AirsAccount, AirsAccountDetail, AirsAccountIsins } from '../../lib/types/api';
 
 /**
@@ -92,8 +94,10 @@ export default function AirsAccountsPanel() {
         </h3>
         <p className="text-[11px] text-fg-faint mt-0.5"
           title="The live books, valued by AIRS. A Fixed portfolio is a composition of weights, which AIRS has nothing to value — the two do not overlap.">
-          AIRS EUR values, for the year.
-          {asOf && <> As of <span className="font-mono text-fg-subtle">{asOf}</span>.</>}
+          AIRS EUR values, for the year.{' '}
+          {/* ⚠ AIRS values only change when the daily scan runs. A stale snapshot read as current
+              is how a 4-day-old AMD value showed +142% while AIRS-live was +126%. */}
+          <SnapshotAge asOf={asOf} />
         </p>
       </div>
 
@@ -145,6 +149,8 @@ export default function AirsAccountsPanel() {
                       </td>
                       <td className={`px-3 py-1.5 text-right font-mono font-semibold ${tone(a.ytd_pct)}`}>
                         {pct(a.ytd_pct)}
+                        <Provenance source="airs_att" asOf={a.as_of} note="cumulatief_rendement (the compounded year)"
+                          how="Every month's return compounded together; flow-aware (accounts for deposits & withdrawals), never end ÷ begin." />
                       </td>
                       {/* The latest month — muted because it is the smaller window, not because
                           it is suspect. It answers "how is it going right now". */}
@@ -153,11 +159,19 @@ export default function AirsAccountsPanel() {
                           ? `The most recent of ${a.months} monthly rows AIRS reports for this year. The YTD beside it is all ${a.months} compounded.`
                           : undefined}>
                         {pct(a.latest_month_pct)}
+                        <Provenance source="airs_att" asOf={a.as_of} note="rendement (the latest month)"
+                          how="AIRS's own return figure for the most recent monthly row only — a different window than the YTD beside it, not a rival to it." />
                       </td>
                       <td className={`px-3 py-1.5 text-right font-mono ${tone(a.price_result_eur)}`}>
                         {eur(a.price_result_eur)}
+                        <Provenance source="airs_att" asOf={a.as_of} note="koersresultaat"
+                          how="AIRS's price gains for the year — summed across every month, with income excluded." />
                       </td>
-                      <td className="px-3 py-1.5 text-right font-mono text-fg-subtle">{eur(a.income_eur)}</td>
+                      <td className="px-3 py-1.5 text-right font-mono text-fg-subtle">
+                        {eur(a.income_eur)}
+                        <Provenance source="airs_att" asOf={a.as_of} note="opbrengsten (dividends + coupons)"
+                          how="AIRS's investment income for the year — dividends and coupons. No price return contains this, which is why the positions never sum to the YTD." />
+                      </td>
                       {/* ⚠ A total that does not tie to the value change is not a total. AIRS's own
                           identity is end − begin − deposits + withdrawals == beleggingsresultaat;
                           when it fails we are missing a month, and the figure is short by exactly
@@ -169,8 +183,14 @@ export default function AirsAccountsPanel() {
                           : 'Ties exactly to the value change: end − begin − deposits + withdrawals.'}>
                         {eur(a.investment_result_eur)}
                         {a.reconciles === false && <span className="text-warn-400 ml-1">⚠</span>}
+                        <Provenance source="airs_att" asOf={a.as_of} note="beleggingsresultaat"
+                          how="AIRS's total investing result for the year: price result + income + accrued interest − costs. Ties exactly to end − begin − deposits + withdrawals." />
                       </td>
-                      <td className="px-3 py-1.5 text-right font-mono text-fg-soft">{eur(a.end_value_eur)}</td>
+                      <td className="px-3 py-1.5 text-right font-mono text-fg-soft">
+                        {eur(a.end_value_eur)}
+                        <Provenance source="airs_att" asOf={a.as_of} note="eindvermogen (end value)"
+                          how="AIRS's end-of-period total account value, in EUR." />
+                      </td>
                       <td className="px-3 py-1.5 text-right font-mono text-fg-subtle">{a.holdings ?? '—'}</td>
                     </tr>
                     {isOpen && (

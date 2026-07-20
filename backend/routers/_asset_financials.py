@@ -1016,6 +1016,591 @@ async def financial_line_by_isin(isin: str, item: str, refresh: bool = False):
     return await asyncio.to_thread(_line_item_for_isin, isin, item, force=refresh)
 
 
+# OWNER EARNINGS — Buffett's proxy for the cash a business actually throws off to its owners,
+# and the one fundamental the /portfolios "Fundamental" panel charts. It is NOT a line GuruFocus
+# reports; it is COMPUTED from three that it does, and — unlike `total_debt` — its components span
+# TWO statements, so it cannot ride the single-section `_summed_series` path in `_ITEMS`:
+#
+#     owner earnings = net income + D&A − capital expenditure
+#
+# Sign: capex is reported NEGATIVE (an outflow), so the three are SUMMED (+capex subtracts it).
+# Net income is the shareholders' line (see the `net_income` entry) — what an owner actually owns.
+# A period is emitted ONLY when all three components report there; a partial sum would understate
+# the figure and read as a real number, the same discipline `_summed_series` uses.
+_OWNER_EARNINGS_COMPONENTS: tuple[tuple[str, str], ...] = (
+    ("Net Income", "income"),
+    ("Depreciation, Depletion and Amortization", "income"),
+    ("Capital Expenditure", "cashflow"),
+)
+_OWNER_EARNINGS_NOTE = "Net income + D&A − capex."
+
+
+def _owner_earnings_series(blob: dict, cadence: str) -> list[FinancialPoint]:
+    """The owner-earnings series for one cadence, aligned across the three source statements.
+
+    Only fiscal periods where EVERY component reported a value are emitted — a hole in any
+    one line drops the period rather than treating the missing part as zero."""
+    maps: list[dict[str, float]] = [
+        {p.date: p.value for p in _series(blob, cadence, field, section)}
+        for field, section in _OWNER_EARNINGS_COMPONENTS
+    ]
+    if any(not m for m in maps):
+        return []
+    common = set(maps[0])
+    for m in maps[1:]:
+        common &= set(m)
+    return [
+        FinancialPoint(date=day, value=sum(m[day] for m in maps))
+        for day in sorted(common)
+    ]
+
+
+def _owner_earnings_for_isin(isin: str, *, force: bool = False) -> FinancialSeriesResponse:
+    """Owner earnings over time, via whichever GuruFocus bridge reaches this ISIN."""
+    resolved = resolve_gf_listing(isin, phrase="owner earnings")
+    company_id = resolved["company_id"]
+    ticker, exchange = resolved["ticker"], resolved["exchange"]
+    currency, is_home = resolved["currency"], resolved["is_home"]
+
+    blob, hit_api = _fetch_financials_raw(ticker, exchange, force=force)
+    if blob is None:
+        _mark_financials(isin, company_id, has=False)
+        raise HTTPException(404, _NO_FINANCIALS.format(symbol=f"{exchange}:{ticker}"))
+    _mark_financials(isin, company_id, has=True)
+
+    params = (blob.get("financials") or {}).get("financial_template_parameters") or {}
+    template = _TEMPLATES.get(str(params.get("ind_template") or "").upper())
+    base = dict(
+        item="owner_earnings", label="Owner earnings", phrase="owner earnings",
+        unit=_UNIT_MILLIONS, note=_OWNER_EARNINGS_NOTE,
+        symbol=f"{exchange}:{ticker}", currency=currency,
+        company_id=company_id, is_home=is_home, fetched=hit_api, template=template,
+    )
+    # All three lines must exist. Net income and D&A are in every template; a bank's capex is 0
+    # (present, not absent), so this only trips for a genuinely non-operating statement.
+    if not all(_has_line(blob, f, s) for f, s in _OWNER_EARNINGS_COMPONENTS):
+        return FinancialSeriesResponse(annual=[], quarterly=[], applicable=False, **base)
+
+    annual = _owner_earnings_series(blob, "annuals")
+    quarterly = _owner_earnings_series(blob, "quarterly")
+    fx_from = _convert_to_eur(annual, currency)
+    _convert_to_eur(quarterly, currency)
+    return FinancialSeriesResponse(annual=annual, quarterly=quarterly, fx_from=fx_from, **base)
+
+
+@router.get("/api/asset-pipeline/owner-earnings/isin/{isin}",
+            response_model=FinancialSeriesResponse)
+async def owner_earnings_by_isin(isin: str, refresh: bool = False):
+    """Owner earnings (net income + D&A − capex) over time, in MILLIONS of the listing currency
+    and EUR — the one fundamental the /portfolios "Fundamental" panel charts.
+
+    COMPUTED from three GuruFocus lines across two statements, off the same cached `financials`
+    blob every other financial column reads, so it is free for any company already pulled.
+
+    200 with `applicable=false` when a component line does not exist for this template; 404 when
+    the ISIN reaches no financial statements at all (a fund, a dead OTC line)."""
+    return await asyncio.to_thread(_owner_earnings_for_isin, isin, force=refresh)
+
+
+# PRICE STEADINESS — the market's version of the owner-earnings compounding test. yfinance
+# (`asset_price`) ONLY, split-adjusted and EUR-converted through EXACTLY the helpers /portfolios
+# prices its models with, so the price on this chart is the price everything else on the page uses
+# (never GuruFocus — a second vendor's adjustment + FX conventions would be a different number).
+# Monthly (last close of each calendar month) — daily bars add noise, not trend, and a monthly
+# series over 15 years is ~180 points a log-fit reads cleanly and a payload carries lightly.
+class PricePoint(BaseModel):
+    date: str
+    value: float                   # split-adjusted close, native (listing) currency
+    value_eur: float | None = None
+
+
+class PriceSeriesResponse(BaseModel):
+    isin: str | None = None        # null for a basket (a group has no single ISIN)
+    symbol: str | None = None      # the yfinance symbol (or the group label)
+    currency: str | None = None    # native listing currency (EUR when unknown/euro-quoted)
+    points: list[PricePoint] = []
+
+
+def _price_series_for_isin(isin: str, years: int = 15) -> PriceSeriesResponse:
+    """Monthly split-adjusted close (native + EUR) for one ISIN, off `asset_price`."""
+    from datetime import date, timedelta  # noqa: PLC0415
+
+    from routers._airs_portfolio_perf import _closes, _executions, _fx  # noqa: PLC0415
+    from routers._benchmark_index import _rate, _split_adjust  # noqa: PLC0415
+
+    ex = (_executions([isin]) or {}).get(isin)
+    if not ex or not ex.get("analysis_id"):
+        raise HTTPException(404, f"No priced Yahoo listing for {isin} — nothing to chart.")
+    aid = ex["analysis_id"]
+    since = (date.today() - timedelta(days=365 * max(1, years))).isoformat()
+    today = date.today().isoformat()
+    raw = (_closes([aid], since, today) or {}).get(aid) or []
+    if not raw:
+        raise HTTPException(404, f"No stored price series for {isin} ({ex.get('yahoo_symbol')}).")
+
+    ccy = (ex.get("currency") or "").upper()
+    is_eur = not ccy or ccy == "EUR"
+    adjusted, _ = _split_adjust(raw)
+    # Last positive close of each calendar month (raw is ascending, so a later write wins).
+    by_month: dict[str, tuple[str, float]] = {}
+    for d, v in adjusted:
+        if v > 0:
+            by_month[d[:7]] = (d, v)
+    fx = {} if is_eur else _fx({ccy}, since, today)
+
+    points: list[PricePoint] = []
+    for d, v in sorted(by_month.values()):
+        if is_eur:
+            veur: float | None = round(v, 4)
+        else:
+            r = _rate(fx, ccy, d)
+            veur = round(v / r, 4) if r else None
+        points.append(PricePoint(date=d, value=round(v, 4), value_eur=veur))
+    return PriceSeriesResponse(
+        isin=isin, symbol=ex.get("yahoo_symbol"), currency=ccy or "EUR", points=points)
+
+
+@router.get("/api/asset-pipeline/price-series/isin/{isin}",
+            response_model=PriceSeriesResponse)
+async def price_series_by_isin(isin: str, years: int = 15):
+    """Monthly split-adjusted close (native + EUR) for the price-steadiness chart — yfinance /
+    `asset_price` ONLY, the same source /portfolios prices everything else with.
+
+    404 when the ISIN has no priced Yahoo listing or no stored bars."""
+    return await asyncio.to_thread(_price_series_for_isin, isin, years)
+
+
+# PERFORMANCE — returns AND risk, across several trailing windows, off the SAME daily EUR price
+# everything else on /portfolios uses. Computed in EUR (what a euro owner actually bears, FX vol
+# included), on daily returns. Each window carries a CAGR + the R² of its LOG-LINEAR price fit (how
+# STEADILY that CAGR was earned — a straight line on a log axis is steady compounding), plus vol,
+# Sharpe, Sortino, max drawdown and % up days. Sharpe/Sortino/vol/return come from `annualized_stats`
+# (ONE definition, shared with the AIRS model-portfolio metrics); max drawdown is the worst
+# peak-to-trough on the same curve. Windows load ONCE (the longest) and slice — no re-read per window.
+# Short/medium/long trailing windows — the same metric across all three is a DISTRIBUTION-DRIFT
+# probe: when a company's recent regime (2y) diverges sharply from its long run (8y), the numbers
+# separate. CAGR/vol/Sharpe/Sortino are annualized and up-days is a rate, so those compare cleanly;
+# max drawdown tilts larger with horizon (more chances for a big fall) and R² RISES with horizon by
+# construction (trend-to-noise grows ~√time) — Apple reads ~0.21 / 0.79 / 0.94 over 2/5/10y though
+# nothing about it changed. R² is still reported at every window (the drift view wants it), but that
+# horizon tilt is stated in its info card so a lower 2y R² is not misread as pure drift.
+_PERF_WINDOWS: tuple[int, ...] = (2, 4, 8)
+
+
+class PerformanceWindow(BaseModel):
+    years: int
+    available: bool = False        # false when the series does not reach back this far
+    from_date: str | None = None
+    to_date: str | None = None
+    trading_days: int = 0
+    cagr_pct: float | None = None          # geometric annualized return over the window
+    r2: float | None = None                # R² of log(price) ~ time — steadiness of the compounding
+    ann_vol_pct: float | None = None
+    sharpe: float | None = None
+    sortino: float | None = None
+    max_drawdown_pct: float | None = None
+    up_days_pct: float | None = None
+    # Rolling 1-year win rate: of the window's trading days, the share from which a 12-month hold
+    # ended positive. A robust "consistency" read — a crash that recovered still scores high, unlike
+    # the log-fit R² which a dip-and-recover wrecks.
+    pos_12m_pct: float | None = None
+    # BASKET only: the share of the group's weight actually priced into this window's index (a
+    # holding that had not listed at the window start, or is unpriceable, drops out and the rest is
+    # renormalized). null for a single instrument.
+    coverage_pct: float | None = None
+
+
+class PerformanceResponse(BaseModel):
+    isin: str | None = None
+    symbol: str | None = None
+    currency: str | None = None    # native listing currency (the metrics themselves are EUR)
+    label: str | None = None       # basket: the group name
+    windows: list[PerformanceWindow] = []
+
+
+def _window_metrics(
+    w: int, dates: list[str], prices: "np.ndarray", *,  # noqa: F821
+    coverage_pct: float | None = None,
+) -> PerformanceWindow:
+    """Returns+risk over the trailing `w`-year slice of ONE daily-EUR series (a single instrument
+    or a basket index). `dates`/`prices` must reach ~1 year past the window start so the rolling
+    1-year win rate is defined. Shared by the per-ISIN and basket paths so both read one definition."""
+    from datetime import date, timedelta  # noqa: PLC0415
+
+    import numpy as np  # noqa: PLC0415
+
+    from momentum.diversification import annualized_stats  # noqa: PLC0415
+
+    def pct(x: float | None) -> float | None:
+        return None if x is None else round(x * 100, 2)
+
+    cutoff = (date.today() - timedelta(days=365 * w)).isoformat()
+    i0 = next((k for k, d in enumerate(dates) if d >= cutoff), None)
+    covers = i0 is not None and date.fromisoformat(dates[0]) <= date.fromisoformat(cutoff) + timedelta(days=45)
+    if not covers or i0 is None or (len(prices) - i0) < 30:
+        return PerformanceWindow(years=w, available=False, coverage_pct=coverage_pct)
+
+    ords = np.asarray([date.fromisoformat(d).toordinal() for d in dates], dtype=np.int64)
+    j = np.searchsorted(ords, ords - 365, side="right") - 1
+    tr12 = np.full(len(prices), np.nan)
+    ok = j >= 0
+    tr12[ok] = prices[ok] / prices[j[ok]] - 1.0
+
+    p, ds = prices[i0:], dates[i0:]
+    base = date.fromisoformat(dates[0])
+    tt = np.asarray([(date.fromisoformat(d) - base).days for d in ds], dtype=float) / 365.25
+    rets = (p[1:] / p[:-1] - 1.0).tolist()
+    st = annualized_stats(rets, periods_per_year=252)
+    max_dd = float((p / np.maximum.accumulate(p) - 1.0).min())
+    r2 = _r2_logfit(tt, p)
+    tr = tr12[i0:]
+    tr = tr[~np.isnan(tr)]
+    pos_12m = float((tr > 0).mean()) if tr.size else None
+    return PerformanceWindow(
+        years=w, available=True, from_date=ds[0], to_date=ds[-1], trading_days=len(p),
+        cagr_pct=pct(st.ann_return), r2=None if r2 is None else round(r2, 3),
+        ann_vol_pct=pct(st.ann_vol),
+        sharpe=None if st.sharpe is None else round(st.sharpe, 2),
+        sortino=None if st.sortino is None else round(st.sortino, 2),
+        max_drawdown_pct=pct(max_dd), up_days_pct=pct(st.win_rate),
+        pos_12m_pct=pct(pos_12m), coverage_pct=coverage_pct,
+    )
+
+
+def _r2_logfit(t: "np.ndarray", prices: "np.ndarray") -> float | None:  # noqa: F821
+    """R² of the ordinary-least-squares fit of log(price) on time. All prices are > 0 (the EUR
+    series drops non-positive bars), so the log is always defined."""
+    import numpy as np  # noqa: PLC0415
+
+    if len(prices) < 3:
+        return None
+    ly = np.log(prices)
+    tm, ym = float(t.mean()), float(ly.mean())
+    sxx = float(((t - tm) ** 2).sum())
+    syy = float(((ly - ym) ** 2).sum())
+    if sxx == 0 or syy == 0:
+        return None
+    b = float(((t - tm) * (ly - ym)).sum()) / sxx
+    a = ym - b * tm
+    ss_res = float(((ly - (a + b * t)) ** 2).sum())
+    return 1.0 - ss_res / syy
+
+
+def _performance_for_isin(isin: str, windows: tuple[int, ...] = _PERF_WINDOWS) -> PerformanceResponse:
+    """Per-window returns+risk for one ISIN, off ONE daily-EUR load sliced per window."""
+    from datetime import date, timedelta  # noqa: PLC0415
+
+    import numpy as np  # noqa: PLC0415
+
+    from routers._airs_portfolio_perf import (  # noqa: PLC0415
+        _closes, _eur_series, _executions, _fx,
+    )
+
+    ex = (_executions([isin]) or {}).get(isin)
+    if not ex or not ex.get("analysis_id"):
+        raise HTTPException(404, f"No priced Yahoo listing for {isin} — no performance to compute.")
+    aid = ex["analysis_id"]
+    max_years = max(windows)
+    # Load ONE extra year past the longest window (+ slack) so the rolling 1-year win rate is
+    # defined for every day inside every window — each day needs a price ~12 months earlier.
+    since = (date.today() - timedelta(days=365 * (max_years + 1) + 45)).isoformat()
+    today = date.today().isoformat()
+    raw = (_closes([aid], since, today) or {}).get(aid) or []
+    ccy = (ex.get("currency") or "").upper()
+    fx = _fx({ccy}, since, today) if ccy and ccy != "EUR" else {}
+    eur = _eur_series(raw, ccy, fx)
+    if len(eur) < 30:
+        raise HTTPException(404, f"Too few price bars for {isin} to measure performance ({len(eur)}).")
+
+    dates = [d for d, _ in eur]
+    prices = np.asarray([v for _, v in eur], dtype=float)
+    out = [_window_metrics(w, dates, prices) for w in windows]
+    return PerformanceResponse(
+        isin=isin, symbol=ex.get("yahoo_symbol"), currency=ccy or "EUR", windows=out)
+
+
+# The investable ETF that stands in for each analysis benchmark on the RISK table — ONE real daily
+# series (fast, and it's what you'd actually hold), rather than a 490–2,000-name daily rebuild. The
+# tiny tracking gap vs the cap-weighted rebuild is immaterial for vol / Sharpe / drawdown.
+_BENCHMARK_RISK_ETF = {"SP500": "US78462F1030", "ACWI": "IE00B6R52259"}
+
+
+@router.get("/api/asset-pipeline/benchmark-risk/{label}", response_model=PerformanceResponse)
+async def benchmark_risk(label: str):
+    """The benchmark's own 2/4/8-year returns+risk — its investable ETF (SP500→SPY, ACWI→ISAC),
+    priced the same daily-EUR way, so the Analyse Risk table can sit a sleeve beside its
+    benchmark. 404 for a label with no mapped ETF."""
+    isin = _BENCHMARK_RISK_ETF.get(label.upper())
+    if not isin:
+        raise HTTPException(404, f"No benchmark ETF mapped for {label!r}.")
+    return await asyncio.to_thread(_performance_for_isin, isin)
+
+
+@router.get("/api/asset-pipeline/risk/isin/{isin}", response_model=PerformanceResponse)
+async def risk_by_isin(isin: str):
+    """Per-window returns + risk (CAGR + its log-fit R², annualized vol, Sharpe, Sortino, max
+    drawdown, % up days) over 2/4/8-year trailing windows, from the daily EUR price — the same
+    `asset_price` source /portfolios prices with. Comparing a metric across windows is a
+    distribution-drift probe. 404 when the ISIN has no priced listing or too few bars."""
+    return await asyncio.to_thread(_performance_for_isin, isin)
+
+
+# ── BASKET (group) aggregation ───────────────────────────────────────────────────────────────
+# A portfolio's asset-class sleeve (Equity, Bonds…) as ONE thing: a value-weighted daily EUR index
+# of its holdings, built through `_index` (the same buy-and-hold curve every /portfolios figure is
+# read off, so the sleeve's number and the book's number can't diverge). Holdings that are
+# unpriceable or had not listed at the window start drop out and the rest is renormalized —
+# `coverage_pct` reports how much of the sleeve, by weight, actually made it in.
+class BasketHolding(BaseModel):
+    isin: str
+    weight: float = 0.0
+
+
+class BasketRequest(BaseModel):
+    holdings: list[BasketHolding] = []
+    label: str | None = None
+
+
+def _group_eur_legs(holdings: list[BasketHolding], since: str, today: str):
+    """(legs, group_weight) — `legs` is [(group-fraction weight, daily-EUR series)] for the
+    priceable holdings, one batched price + FX load. `group_weight` is the raw weight total so
+    coverage can be read as held-weight ÷ group-weight."""
+    from routers._airs_portfolio_perf import (  # noqa: PLC0415
+        _closes, _eur_series, _executions, _fx,
+    )
+
+    total = sum(max(0.0, h.weight or 0.0) for h in holdings) or 1.0
+    isins = [h.isin for h in holdings if h.isin]
+    ex_map = _executions(isins)
+    ccys = {(ex_map[i].get("currency") or "").upper() for i in ex_map} - {"", "EUR"}
+    fx = _fx(ccys, since, today) if ccys else {}
+    aids = [ex_map[i]["analysis_id"] for i in ex_map if ex_map[i].get("analysis_id")]
+    closes = _closes(aids, since, today) if aids else {}
+
+    legs: list[tuple[float, list[tuple[str, float]]]] = []
+    for h in holdings:
+        ex = ex_map.get(h.isin)
+        if not ex or not ex.get("analysis_id"):
+            continue
+        raw = closes.get(ex["analysis_id"]) or []
+        if not raw:
+            continue
+        eur = _eur_series(raw, (ex.get("currency") or "").upper(), fx)
+        if len(eur) >= 2:
+            legs.append((max(0.0, h.weight or 0.0) / total, eur))
+    return legs, total
+
+
+def _basket_index_series(req: BasketRequest, years: int) -> tuple[list[str], "np.ndarray", float]:  # noqa: F821
+    """A daily EUR buy-and-hold index of the group over ~`years`+1y, as (dates, values, coverage).
+    Anchored one year before the longest window so the rolling 1-year win rate is defined."""
+    from datetime import date, timedelta  # noqa: PLC0415
+
+    import numpy as np  # noqa: PLC0415
+
+    from routers._airs_portfolio_perf import _index  # noqa: PLC0415
+
+    since = (date.today() - timedelta(days=365 * (years + 1) + 45)).isoformat()
+    today = date.today().isoformat()
+    legs, _ = _group_eur_legs(req.holdings, since, today)
+    if not legs:
+        return [], np.asarray([], dtype=float), 0.0
+    idates, ivalues, w_total = _index(legs, since, return_dates=True)
+    if not idates or w_total <= 0:
+        return [], np.asarray([], dtype=float), w_total
+    # `values[0]` is the base (1.0) at the anchor; pair it with the anchor date so the series is
+    # a plain [(date, value)] like a single instrument's.
+    dates = [since, *idates]
+    values = np.asarray(ivalues, dtype=float)
+    return dates, values, w_total
+
+
+def _basket_performance(req: BasketRequest) -> PerformanceResponse:
+    if not req.holdings:
+        raise HTTPException(422, "No holdings supplied.")
+    windows = _PERF_WINDOWS
+    dates, prices, coverage = _basket_index_series(req, max(windows))
+    if not dates:
+        raise HTTPException(404, "No priceable holdings in this group.")
+    cov = round(coverage * 100, 1)
+    out = [_window_metrics(w, dates, prices, coverage_pct=cov) for w in windows]
+    return PerformanceResponse(
+        symbol=req.label, currency="EUR", label=req.label, windows=out)
+
+
+@router.post("/api/asset-pipeline/basket/performance", response_model=PerformanceResponse)
+async def basket_performance(req: BasketRequest):
+    """Per-window returns + risk for a GROUP of holdings — the same 2/4/8-year metrics as the
+    single-instrument endpoint, computed off a value-weighted daily EUR index of the sleeve.
+    `coverage_pct` per window says how much of the group's weight is actually represented."""
+    return await asyncio.to_thread(_basket_performance, req)
+
+
+# Number of years the basket's steadiness (Fundamental → Stock price) chart looks back.
+_BASKET_PRICE_YEARS = 10
+
+
+def _basket_price_series(req: BasketRequest) -> PriceSeriesResponse:
+    """Monthly EUR index of the group for the price-steadiness chart. Base 1.0 (a basket has no
+    single native currency, so this is EUR-only — the modal renders one chart)."""
+    if not req.holdings:
+        raise HTTPException(422, "No holdings supplied.")
+    dates, values, coverage = _basket_index_series(req, _BASKET_PRICE_YEARS)
+    if not dates:
+        raise HTTPException(404, "No priceable holdings in this group.")
+    by_month: dict[str, tuple[str, float]] = {}
+    for d, v in zip(dates, values.tolist(), strict=True):
+        if v > 0:
+            by_month[d[:7]] = (d, v)
+    points = [PricePoint(date=d, value=round(v, 6), value_eur=round(v, 6))
+              for d, v in sorted(by_month.values())]
+    return PriceSeriesResponse(
+        isin=None, symbol=req.label, currency="EUR", points=points)
+
+
+@router.post("/api/asset-pipeline/basket/price-series", response_model=PriceSeriesResponse)
+async def basket_price_series(req: BasketRequest):
+    """Monthly EUR value index of a GROUP for the price-steadiness chart (Fundamental → Stock
+    price). Value-weighted buy-and-hold of the sleeve, base 1.0."""
+    return await asyncio.to_thread(_basket_price_series, req)
+
+
+def _basket_owner_earnings(req: BasketRequest) -> FinancialSeriesResponse:
+    """A weight-blended owner-earnings INDEX for the group (base 100), from the holdings that HAVE
+    owner earnings. Each covered holding's annual series is normalized to a common base year and
+    combined by portfolio weight; holdings without owner earnings (bonds, ETFs, cash) drop out and
+    the note reports the covered weight. Annual only — quarterly fiscal alignment across companies
+    is not meaningful."""
+    if not req.holdings:
+        raise HTTPException(422, "No holdings supplied.")
+    return _blend_covered_oe(_collect_covered_oe(req))
+
+
+def _holding_oe(isin: str) -> tuple[dict[int, float] | None, str]:
+    """One holding's positive annual owner earnings as {year: EUR}, with a status word for the
+    progress stream: ok · thin (<3 usable years) · no_data · n/a (bank/etc) · none (no financials)."""
+    try:
+        oe = _owner_earnings_for_isin(isin)
+    except HTTPException:
+        return None, "none"
+    if not oe.applicable:
+        return None, "n/a"
+    if not oe.annual:
+        return None, "no_data"
+    by_year = {int(p.date[:4]): (p.value_eur if p.value_eur is not None else p.value)
+               for p in oe.annual}
+    by_year = {y: v for y, v in by_year.items() if v is not None and v > 0}
+    if len(by_year) < 3:
+        return None, "thin"
+    return by_year, "ok"
+
+
+def _collect_covered_oe(req: BasketRequest) -> list[tuple[float, dict[int, float]]]:
+    """The (group-fraction weight, {year: EUR}) of every holding that HAS owner earnings."""
+    total = sum(max(0.0, h.weight or 0.0) for h in req.holdings) or 1.0
+    covered: list[tuple[float, dict[int, float]]] = []
+    for h in req.holdings:
+        w = max(0.0, h.weight or 0.0) / total
+        if w <= 0 or not h.isin:
+            continue
+        by_year, _status = _holding_oe(h.isin)
+        if by_year:
+            covered.append((w, by_year))
+    return covered
+
+
+def _blend_covered_oe(covered: list[tuple[float, dict[int, float]]]) -> FinancialSeriesResponse:
+    """Blend the covered holdings' owner earnings into ONE base-100 index — the math only (no
+    fetching, so it is instant), shared by the plain and streaming endpoints.
+
+    Base year: the earliest year ≥60% of the covered weight shares, so the index opens on a broad
+    base. Each year mixes only the holdings priced at BOTH the base and that year, renormalized —
+    a clean weighted-average growth index."""
+    base = dict(item="owner_earnings", label="Owner earnings", phrase="owner earnings",
+                unit=_UNIT_MILLIONS, currency="EUR", quarterly=[])
+    if not covered:
+        return FinancialSeriesResponse(
+            annual=[], applicable=False,
+            note="No holding in this group has owner-earnings data (bonds/ETFs/cash have none).",
+            **base)
+
+    from datetime import date as _date  # noqa: PLC0415
+
+    cov_w = sum(w for w, _ in covered)
+    years = sorted({y for _, m in covered for y in m})
+    base_year = next((y for y in years if sum(w for w, m in covered if y in m) >= 0.60 * cov_w),
+                     years[0])
+    raw_index: list[tuple[int, float]] = []
+    for y in years:
+        if y < base_year:
+            continue
+        num = den = 0.0
+        for w, m in covered:
+            if base_year in m and y in m:
+                num += w * (m[y] / m[base_year])
+                den += w
+        if den > 0:
+            raw_index.append((y, num / den))
+
+    # Show only the last ~11 years (the modal caps display at 10) and rebase to 100 at the first
+    # shown year — within that window the composition is stable, so the fit is clean.
+    cutoff_year = _date.today().year - 11
+    shown = [(y, v) for y, v in raw_index if y >= cutoff_year] or raw_index[-11:]
+    b0 = shown[0][1] if shown else 1.0
+    pts = [FinancialPoint(date=f"{y}-12-31", value=round(100.0 * v / b0, 2),
+                          value_eur=round(100.0 * v / b0, 2)) for y, v in shown]
+    covered_pct = round(100.0 * cov_w, 1)
+    return FinancialSeriesResponse(
+        annual=pts, applicable=bool(pts),
+        note=(f"Weight-blended index (base 100) of the {len(covered)} holdings that have owner "
+              f"earnings — {covered_pct}% of the group by weight; the rest (bonds/ETFs/cash) have none."),
+        **base)
+
+
+@router.post("/api/asset-pipeline/basket/owner-earnings", response_model=FinancialSeriesResponse)
+async def basket_owner_earnings(req: BasketRequest):
+    """A weight-blended owner-earnings index (base 100) for a GROUP, from the holdings that have
+    owner earnings — the Fundamental → Owner-earnings tab for a sleeve. `note` states the covered
+    weight; `applicable=false` when nothing in the group has owner earnings."""
+    return await asyncio.to_thread(_basket_owner_earnings, req)
+
+
+def _sse(obj: dict) -> str:
+    import json  # noqa: PLC0415
+
+    return f"data: {json.dumps(obj)}\n\n"
+
+
+async def _basket_owner_earnings_events(req: BasketRequest):
+    """Per-holding progress, then the blended result — so a slow sleeve shows which stock it is on
+    rather than one long spinner. Each holding is resolved off the thread pool."""
+    import asyncio as _asyncio  # noqa: PLC0415
+
+    items = [h for h in req.holdings if h.isin and (h.weight or 0.0) > 0]
+    total_w = sum(max(0.0, h.weight or 0.0) for h in req.holdings) or 1.0
+    n = len(items)
+    yield _sse({"type": "progress", "done": 0, "total": n})
+    covered: list[tuple[float, dict[int, float]]] = []
+    for i, h in enumerate(items):
+        by_year, status = await _asyncio.to_thread(_holding_oe, h.isin)
+        if by_year:
+            covered.append((max(0.0, h.weight or 0.0) / total_w, by_year))
+        yield _sse({"type": "progress", "done": i + 1, "total": n, "isin": h.isin, "status": status})
+    result = await _asyncio.to_thread(_blend_covered_oe, covered)
+    yield _sse({"type": "result", "payload": result.model_dump()})
+
+
+@router.post("/api/asset-pipeline/basket/owner-earnings/stream")
+async def basket_owner_earnings_stream(req: BasketRequest):
+    """SSE variant of the blended owner-earnings endpoint: emits `{type:'progress',done,total,isin,
+    status}` per holding, then `{type:'result',payload:<FinancialSeriesResponse>}`."""
+    from fastapi.responses import StreamingResponse  # noqa: PLC0415
+
+    if not req.holdings:
+        raise HTTPException(422, "No holdings supplied.")
+    return StreamingResponse(_basket_owner_earnings_events(req), media_type="text/event-stream")
+
+
 class FundamentalPoint(BaseModel):
     date: str
     value: float

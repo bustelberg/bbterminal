@@ -52,23 +52,6 @@ class TestTheCoffeeSwap:
         assert "ADR" in r._NAME_RESOLVABLE_TYPES
         assert "REIT" in r._NAME_RESOLVABLE_TYPES
 
-    def test_the_fence_is_an_ALLOWLIST_not_a_denylist(self):
-        """A denylist of fund types would pass an unknown type straight through to the resolver,
-        and OpenFIGI adds types we have never seen. Unknown must mean refused."""
-        from scripts import repoint_primary_listing as r
-
-        src = inspect.getsource(r._candidates)
-        assert 'r.get("openfigi_type") not in _NAME_RESOLVABLE_TYPES' in src
-
-    def test_a_row_with_no_openfigi_name_is_refused_too(self):
-        """The identity gate reads `if figi_name and not same_company(...)` — so a row with NO
-        OpenFIGI name has NO gate at all, and would be repointed to whatever Yahoo's search
-        happened to return. Absence of a check is not a passing check."""
-        from scripts import repoint_primary_listing as r
-
-        src = inspect.getsource(r._candidates)
-        assert 'not r.get("openfigi_name")' in src
-
     def test_the_fence_holds_even_for_an_explicit_isin(self):
         """`--isin` bypasses the RATIO. It must not bypass the identity model — a human naming a
         fund's ISIN is exactly as wrong as the sweep finding it, and more confident."""

@@ -189,8 +189,44 @@ def _weigh(items: list[tuple[float, tuple[str, str, str]]]) -> dict[str, dict[st
     return out
 
 
-def _returns(portfolio_id: int, effective: str | None, benchmark_label: str) -> dict:
+def _apply_book_source(result: dict, benchmark_label: str) -> None:
+    """Swap the PRIMARY portfolio return for AIRS's own book number (`cumulatief_rendement`), and
+    re-price the benchmark over the book's window — the calendar year, 1 Jan -> today.
+
+    AIRS reports the book only over the calendar year, flow-aware and INCLUDING income, and keeps
+    NO composition history — so 'since inception' has no book equivalent and is cleared rather than
+    left showing the yfinance model's number under a 'book' banner. `strategy_ytd_pct` still carries
+    the yfinance figure, so the Book-vs-strategy drift tile is unaffected by the swap.
+    """
+    jan1 = f"{date.today().year}-01-01"
+    p_ytd = result.get("book_ytd_pct")             # already computed by `_book_return`
+    bench = index_returns(benchmark_label, [jan1]) if p_ytd is not None else {}
+    b_ytd = (bench.get(jan1) or {}).get("eur_pct")
+    result.update({
+        "source": "book",
+        "ytd_from": jan1 if p_ytd is not None else None,
+        "portfolio_ytd_pct": p_ytd,
+        # `book_as_of` was set by `_book_return` (runs in both source modes); the benchmark stays
+        # yfinance, so `benchmark_as_of` from the model path above is left as-is.
+        "portfolio_as_of": result.get("book_as_of"),
+        "benchmark_ytd_pct": b_ytd,
+        "ytd_excess_pct": (p_ytd - b_ytd) if (p_ytd is not None and b_ytd is not None) else None,
+        # AIRS has no since-inception for the book — clear the model's rather than mislabel it.
+        "since_from": None,
+        "portfolio_since_pct": None,
+        "benchmark_since_pct": None,
+        "since_excess_pct": None,
+        "ytd_is_since": False,
+    })
+
+
+def _returns(portfolio_id: int, effective: str | None, benchmark_label: str,
+             source: str = "model") -> dict:
     """EUR return of the model vs the benchmark — over the SAME two windows, both times.
+
+    `source="book"` swaps the PRIMARY portfolio return for AIRS's own book figure (see
+    `_apply_book_source`); the yfinance model is still computed (it pins `strategy_ytd_pct` for the
+    drift tile) and the benchmark stays yfinance either way, so the two remain comparable.
 
     ⚠ A BENCHMARK MEASURED OVER A DIFFERENT WINDOW IS NOT A BENCHMARK, IT IS A NUMBER.
         The model's "YTD" opens at `max(1 Jan, its inception)` — for the 27 models younger than
@@ -230,11 +266,21 @@ def _returns(portfolio_id: int, effective: str | None, benchmark_label: str) -> 
     b_ytd = (bench.get(ytd_from) or {}).get("eur_pct") if ytd_from else None
     b_since = (bench.get(effective) or {}).get("eur_pct") if effective else None
     p_ytd, p_since = perf.get("ytd_pct"), perf.get("since_model_pct")
+    yf_asof = (perf.get("sources") or {}).get("yf_close")
 
-    return {
+    result = {
+        "source": "model",
         "ytd_from": ytd_from,
         "since_from": effective,
         "portfolio_ytd_pct": p_ytd,
+        # As-of dates for the per-value provenance ⓘ. The model return and the benchmark are both
+        # yfinance close series; `_apply_book_source` overrides `portfolio_as_of` with the book
+        # snapshot date when the source is the AIRS book.
+        "portfolio_as_of": yf_asof,
+        "benchmark_as_of": yf_asof,
+        # The yfinance strategy YTD, pinned so the Book-vs-strategy sub-tile stays meaningful even
+        # when `source=book` makes the primary column the AIRS book.
+        "strategy_ytd_pct": p_ytd,
         "benchmark_ytd_pct": b_ytd,
         # The excess. Stated, so nobody subtracts two numbers measured over windows they did not
         # check were the same.
@@ -248,6 +294,11 @@ def _returns(portfolio_id: int, effective: str | None, benchmark_label: str) -> 
         "ytd_is_since": bool(effective and ytd_from == effective),
         **_book_return(portfolio_id, ytd_from, p_ytd),
     }
+    result["book_available"] = bool(result.get("book_portefeuille"))
+    # `source=book` overrides the PRIMARY portfolio return with AIRS's own; benchmark stays yfinance.
+    if source == "book":
+        _apply_book_source(result, benchmark_label)
+    return result
 
 
 def _book_return(portfolio_id: int, ytd_from: str | None, model_ytd: float | None) -> dict:
@@ -277,11 +328,17 @@ def _book_return(portfolio_id: int, ytd_from: str | None, model_ytd: float | Non
     link = next((a for a in list_account_links()["accounts"]
                  if a.get("model_portfolio_id") == portfolio_id), None)
     if not link:
-        return {"book_portefeuille": None, "book_ytd_pct": None,
+        return {"book_portefeuille": None, "book_ytd_pct": None, "book_as_of": None,
                 "book_comparable": None,
                 "book_reason": "No Dynamic portfolio is paired with this one."}
 
     book_ytd = link.get("ytd_pct")
+    # The book's freshness — the latest AIRS scan of its holdings. Always returned (both source
+    # modes) so the Book-vs-strategy tile's ⓘ can date the book number regardless of the toggle.
+    _bh = (supabase.table("airs_holding").select("as_of_date")
+           .eq("portefeuille", link["portefeuille"]).order("as_of_date", desc=True)
+           .limit(1).execute().data or [])
+    book_as_of = str(_bh[0]["as_of_date"]) if _bh else None
     aligned = ytd_from == f"{date.today().year}-01-01"
     if book_ytd is None:
         reason = "AIRS reports no return for the paired book."
@@ -294,6 +351,7 @@ def _book_return(portfolio_id: int, ytd_from: str | None, model_ytd: float | Non
     return {
         "book_portefeuille": link["portefeuille"],
         "book_ytd_pct": book_ytd,
+        "book_as_of": book_as_of,
         "book_comparable": bool(aligned and book_ytd is not None),
         "book_reason": reason,
         # The strategy minus the book: what the weights promised, less what the book delivered.
@@ -361,8 +419,13 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
 
 def compute_portfolio_analysis(portfolio_id: int,
                                benchmark_label: str = SP500_LABEL,
-                               weight_by: str = "model") -> dict:
+                               weight_by: str = "model",
+                               source: str = "model") -> dict:
     """The portfolio's composition beside the benchmark's, on one set of buckets.
+
+    `source` ("model" | "book") picks where the RETURN numbers come from: the yfinance model
+    reconstruction, or AIRS's own book (`cumulatief_rendement`). The benchmark is yfinance either
+    way. Composition weighting is a separate axis — see `weight_by`.
 
     `weight_by`:
       "model" (default) — the strategy's nominal weights (`percentage`). What it is DESIGNED to
@@ -487,13 +550,164 @@ def compute_portfolio_analysis(portfolio_id: int,
         "benchmark_universe_members": bench_coverage.get("universe_members") or 0,
         "benchmark_priced": bench_coverage.get("priced") or 0,
         "benchmark_coverage_pct": bench_coverage.get("covered_pct"),
-        "returns": _returns(portfolio_id, p.get("positions_datum"), benchmark_label),
+        "returns": _returns(portfolio_id, p.get("positions_datum"), benchmark_label, source),
         "axes": axes,
     }
 
 
 async def compute_portfolio_analysis_async(portfolio_id: int,
                                            benchmark_label: str = SP500_LABEL,
-                                           weight_by: str = "model") -> dict:
+                                           weight_by: str = "model",
+                                           source: str = "model") -> dict:
     return await asyncio.to_thread(compute_portfolio_analysis, portfolio_id, benchmark_label,
-                                   weight_by)
+                                   weight_by, source)
+
+
+def portfolio_basket_request(portfolio_id: int):
+    """A model portfolio's holdings as a `BasketRequest` — the bridge that lets the whole portfolio
+    reuse the same basket engines (performance, owner earnings, price series) an instrument / group
+    does. 404 when the portfolio has no priceable positions."""
+    from fastapi import HTTPException  # noqa: PLC0415
+
+    from routers._asset_financials import BasketHolding, BasketRequest  # noqa: PLC0415
+
+    p = (supabase.table("airs_model_portfolio")
+         .select("id,name,positions_datum").eq("id", portfolio_id).limit(1).execute().data or [])
+    if not p:
+        raise HTTPException(404, f"No model portfolio {portfolio_id}.")
+    p = p[0]
+    pos = (supabase.table("airs_model_portfolio_position")
+           .select("isin,percentage,datum").eq("portfolio_id", portfolio_id).execute().data or [])
+    if p.get("positions_datum"):
+        pos = [r for r in pos if r.get("datum") == p["positions_datum"]]
+    holdings = [BasketHolding(isin=r["isin"], weight=float(r.get("percentage") or 0))
+                for r in pos if r.get("isin") and float(r.get("percentage") or 0) > 0]
+    if not holdings:
+        raise HTTPException(404, "No priceable holdings in this portfolio.")
+    return BasketRequest(holdings=holdings, label=p.get("name"))
+
+
+def compute_portfolio_risk_windows(portfolio_id: int):
+    """The whole portfolio's returns+risk windows (Analyse → Risk section). Its holdings, priced
+    as ONE value-weighted EUR basket — the same 2/4/8-year table a single instrument or a sleeve
+    gets. Daily-yfinance only, so this exists only in the yfinance world (AIRS keeps no daily
+    history), which is why the Analyse modal gates it behind the yfinance source."""
+    from routers._asset_financials import _basket_performance  # noqa: PLC0415
+
+    return _basket_performance(portfolio_basket_request(portfolio_id))
+
+
+async def compute_portfolio_risk_windows_async(portfolio_id: int):
+    return await asyncio.to_thread(compute_portfolio_risk_windows, portfolio_id)
+
+
+def _basket_returns(holdings, benchmark_label: str) -> dict:
+    """YTD EUR return of an arbitrary basket vs the benchmark — the Analyse Return tile for a stock
+    or a group. A basket has no AIRS book and no inception, so 'since inception' is null and the
+    figure is always yfinance (`asset_price`), priced the same way the benchmark is."""
+    from datetime import date  # noqa: PLC0415
+
+    from routers._asset_financials import BasketRequest, _basket_index_series  # noqa: PLC0415
+
+    jan1 = f"{date.today().year}-01-01"
+    dates, values, _cov = _basket_index_series(BasketRequest(holdings=list(holdings)), 2)
+    p_ytd = p_asof = None
+    if len(dates) >= 2:
+        base_i = None
+        for i, d in enumerate(dates):
+            if d <= jan1:
+                base_i = i
+        if base_i is not None and float(values[base_i]) > 0:
+            p_ytd = (float(values[-1]) / float(values[base_i]) - 1.0) * 100.0
+            p_asof = dates[-1]
+    bench = index_returns(benchmark_label, [jan1]) if p_ytd is not None else {}
+    b_ytd = (bench.get(jan1) or {}).get("eur_pct")
+    return {
+        "source": "model", "ytd_from": jan1, "since_from": None,
+        "portfolio_ytd_pct": p_ytd, "portfolio_as_of": p_asof, "benchmark_as_of": p_asof,
+        "strategy_ytd_pct": p_ytd, "benchmark_ytd_pct": b_ytd,
+        "ytd_excess_pct": (p_ytd - b_ytd) if (p_ytd is not None and b_ytd is not None) else None,
+        "portfolio_since_pct": None, "benchmark_since_pct": None, "since_excess_pct": None,
+        "ytd_is_since": False, "book_available": False,
+    }
+
+
+def _classify_items(holdings, codes):
+    """(port_items, classified_w, total_w, foreign, holding_count) for a basket — the portfolio
+    side of the composition, built exactly like `compute_portfolio_analysis` does for a model."""
+    held = sorted({h.isin for h in holdings if h.isin})
+    grid = _grid(held)
+    items: list[tuple[float, tuple[str, str, str]]] = []
+    classified = total = 0.0
+    foreign = count = 0
+    for h in holdings:
+        w = float(h.weight or 0)
+        if w <= 0:
+            continue
+        total += w
+        row = grid.get(h.isin) if h.isin else None
+        b = _buckets(row, is_cash=not h.isin, isin=h.isin, codes=codes)
+        if b[0] != UNKNOWN_BUCKET:
+            classified += w
+        if row and _foreign_listing(row):
+            foreign += 1
+        if h.isin:
+            count += 1
+        items.append((w, b))
+    return items, classified, total, foreign, count
+
+
+def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: str | None = None) -> dict:
+    """Composition + return of an ARBITRARY basket (a single stock, a group, an ad-hoc set) beside
+    the benchmark — the same shape `compute_portfolio_analysis` returns, so ONE Analyse view serves
+    a stock (a basket of one) and a portfolio alike. yfinance only: a basket has no AIRS book."""
+    codes = _country_by_code()
+    port_items, classified_w, total_w, port_foreign, port_holdings = _classify_items(holdings, codes)
+
+    bench, bench_coverage = _members(benchmark_label)
+    bench_isins = sorted({m["isin"] for m in bench if m.get("isin")})
+    bgrid = _grid(bench_isins)
+    bench_items: list[tuple[float, tuple[str, str, str]]] = []
+    bench_classified = bench_total = 0.0
+    bench_foreign = 0
+    for m in bench:
+        cap = float(m.get("market_cap_eur") or 0)
+        if cap <= 0:
+            continue
+        bench_total += cap
+        row = bgrid.get(m.get("isin") or "")
+        b = _buckets(row, is_cash=False, isin=m.get("isin"), codes=codes)
+        if b[0] != UNKNOWN_BUCKET:
+            bench_classified += cap
+        if row and _foreign_listing(row):
+            bench_foreign += 1
+        bench_items.append((cap, b))
+
+    pw, bw = _weigh(port_items), _weigh(bench_items)
+    axes = []
+    for axis in ("sector", "region", "currency"):
+        keys = set(pw[axis]) | set(bw[axis])
+        rows = [{"bucket": k, "portfolio_pct": pw[axis].get(k, 0.0),
+                 "benchmark_pct": bw[axis].get(k, 0.0),
+                 "diff_pct": pw[axis].get(k, 0.0) - bw[axis].get(k, 0.0)} for k in keys]
+        rows.sort(key=lambda r: -max(r["portfolio_pct"], r["benchmark_pct"]))
+        axes.append({"axis": axis, "rows": rows})
+
+    return {
+        "portfolio_id": None, "name": name, "as_of": None,
+        "benchmark": benchmark_label, "benchmark_members": len(bench_items),
+        "holdings": port_holdings, "weight_basis": "model", "weight_note": None,
+        "covered_pct": (classified_w / total_w * 100.0) if total_w > 0 else 0.0,
+        "benchmark_covered_pct": (bench_classified / bench_total * 100.0) if bench_total > 0 else 0.0,
+        "foreign_listings": port_foreign, "benchmark_foreign_listings": bench_foreign,
+        "benchmark_universe_members": bench_coverage.get("universe_members") or 0,
+        "benchmark_priced": bench_coverage.get("priced") or 0,
+        "benchmark_coverage_pct": bench_coverage.get("covered_pct"),
+        "returns": _basket_returns(holdings, benchmark_label),
+        "axes": axes,
+    }
+
+
+async def compute_basket_analysis_async(holdings, benchmark_label: str = SP500_LABEL,
+                                        name: str | None = None) -> dict:
+    return await asyncio.to_thread(compute_basket_analysis, holdings, benchmark_label, name)

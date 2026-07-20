@@ -37,10 +37,15 @@ export default defineConfig({
   // Run against the production build per Next.js's official Playwright
   // guidance — `next dev` enforces a per-project singleton in Next 16,
   // so it can't coexist with the developer's running dev server. Port
-  // 3100 keeps it out of the way of dev (3000). The first boot pays
-  // a ~30s build cost; subsequent runs reuse the `.next` cache for ~10s.
-  // `reuseExistingServer` skips the boot when one is already up (handy
-  // when iterating on a single test).
+  // 3100 keeps it out of the way of dev (3000).
+  //
+  // ⚡ FAST LOCAL ITERATION: this command rebuilds (~35s) on every fresh
+  // `npm run e2e`. To skip that, run `npm run e2e:serve` ONCE in its own
+  // terminal (build + persistent server) and leave it up; `reuseExistingServer`
+  // then skips the boot and a targeted run is ~2s:
+  //     npm run e2e -- portfolios.spec.ts --grep "book-vs-strategy"
+  // Restart e2e:serve after app-code changes; test-only edits need no rebuild.
+  // CI always does the clean build+start below (correctness gate).
   webServer: {
     command: 'npm run build && npx next start --port 3100',
     url: 'http://127.0.0.1:3100',

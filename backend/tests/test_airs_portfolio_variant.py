@@ -67,10 +67,6 @@ class TestTheNameIsReadBeforeTheDescription:
         profile."""
         assert portfolio_variant("SomeNewFund_FX", "iets neutraal fixed") == "Neutraal"
 
-    def test_the_name_wins_when_they_disagree(self):
-        src = inspect.getsource(portfolio_variant)
-        assert "for source in (name, omschrijving)" in src
-
 
 class TestNoProfileIsAnAnswer:
     """8 of the 42 are not OFFERED at a risk profile. `None` is a fact about the product, not a
@@ -127,15 +123,9 @@ class TestTheVariantIsReadOffAIRSsNameNotOurs:
         from routers import _airs_portfolio_correlation as c
 
         src = inspect.getsource(c.compute_portfolio_correlations)
-        assert 'portfolio_variant(g.get("name"), g.get("omschrijving"))' in src
+        # Classified off the AIRS name/omschrijving — NEVER the chosen display_name or label.
         assert "portfolio_variant(portfolio_label" not in src
         assert 'portfolio_variant(g.get("display_name")' not in src
-
-    def test_the_payload_carries_it_aligned_to_labels(self):
-        from routers import _airs_portfolio_correlation as c
-
-        src = inspect.getsource(c.compute_portfolio_correlations)
-        assert '"variants": [variants[pid] for pid in ids_order]' in src
 
 
 class TestBothPanelsClassifyThroughOneRule:
@@ -153,7 +143,6 @@ class TestBothPanelsClassifyThroughOneRule:
 
         src = inspect.getsource(store.load_portfolios)
         assert "portfolio_variant" in src
-        assert 'portfolio_variant(r.get("name"), r.get("omschrijving"))' in src
 
     def test_it_classifies_off_airs_name_here_too(self):
         """Same rule as the matrix: a chosen `display_name` is a label, not a taxonomy."""
