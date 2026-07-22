@@ -295,7 +295,7 @@ function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket
 
   const rows = holdings.filter((h) => h.bucket === bucket);
   const totalW = rows.reduce((s, h) => s + (h.weight_pct ?? 0), 0) || 1;
-  // Renormalise each holding's (current-value) weight WITHIN the sleeve, then contribution =
+  // Renormalise each holding's (opening-value) weight WITHIN the sleeve, then contribution =
   // weight × return (in pp of the sleeve return). Σ contribution == the sleeve figure exactly.
   const items = rows.map((h) => {
     const w = (h.weight_pct ?? 0) / totalW * 100;

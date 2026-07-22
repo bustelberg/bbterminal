@@ -514,12 +514,12 @@ function SegmentHeader({ s, asOf, holdings, onAnalyse, onFundamental }: {
       </td>
       <td className={`px-3 py-1 text-right font-mono font-semibold ${tone(s.return_pct)}`}
         title={partial
-          ? `Weighted-average return of this segment's priced holdings (${eur(s.priced_value_eur)} of ${eur(s.value_eur)}). The rest has no opening value — not held when the year opened — so its return is undefined, not zero.`
-          : 'The weighted average of the holdings\' returns, each weighted by its current value (Weight). Price return only — no income, not flow-aware.'}>
+          ? `Start-weighted value change of this segment's priced holdings (${eur(s.priced_value_eur)} of ${eur(s.value_eur)}). The rest has no opening value — not held when the year opened — so its return is undefined, not zero.`
+          : 'The start-weighted value change — Σ current ÷ Σ start − 1, each holding weighted by its OPENING value. Price return only — no income, not flow-aware.'}>
         {s.return_pct == null ? '—' : pct(s.return_pct)}
         {partial && s.return_pct != null && <span className="text-warn-400 ml-1">*</span>}
-        <Provenance source="airs_volk" asOf={asOf} kind="formula" note="segment weighted return"
-          how="Σ(weight × return) ÷ Σweight over the segment's priced holdings (weight = current value)." />
+        <Provenance source="airs_volk" asOf={asOf} kind="formula" note="segment return"
+          how="Σ current ÷ Σ start − 1 over the segment's priced holdings (each weighted by its opening value)." />
       </td>
     </tr>
   );
@@ -608,16 +608,17 @@ function Holdings({ d, i, portefeuille, onOverride }: {
   const grouped = new Set(ordered.flatMap(([, g]) => g.map((r) => r.holding_name)));
   const rest = all.filter((r) => !grouped.has(r.holding_name));
   if (rest.length) ordered.push([null, rest]);
-  // The top TOTAL row: all weights summed (≈100%), and the portfolio return as the WEIGHTED
-  // AVERAGE of the individual positions' returns — Σ(weightᵢ · returnᵢ) / Σweightᵢ, using the
-  // displayed Weight and per-row return, so the total is exactly what the rows below say (and the
-  // same basis each bucket uses). A row with no opening value (undefined return) drops out.
+  // The top TOTAL row: all weights summed (≈100%), and the portfolio's START-WEIGHTED value change
+  // — Σcurrent ÷ Σstart − 1, equivalently each position's return weighted by its OPENING value.
+  // ⚠ NOT Σ(displayed-weight × return): the Weight column is today's value share, and weighting by
+  // it lets a big winner (up +148%, now 3× its share) dominate — that read +56.11% on a book whose
+  // true return was +41.98% (≈ the +43.08% flow-aware book figure). Start-weighting is the honest
+  // number and the one that lines up with `cumulatief_rendement`. Undefined-return rows drop out.
   const totalWeight = all.reduce((s, r) => s + (r.weight ?? 0), 0);
-  const retRows = all.filter((r) => r.ytd_return_pct != null && r.weight != null);
-  const wSum = retRows.reduce((s, r) => s + (r.weight ?? 0), 0);
-  const totalReturn = wSum !== 0
-    ? retRows.reduce((s, r) => s + (r.weight ?? 0) * (r.ytd_return_pct ?? 0), 0) / wSum
-    : null;
+  const pricedRows = all.filter((r) => (r.start_value_eur ?? 0) !== 0 && r.current_value_eur != null);
+  const startSum = pricedRows.reduce((s, r) => s + (r.start_value_eur ?? 0), 0);
+  const nowSum = pricedRows.reduce((s, r) => s + (r.current_value_eur ?? 0), 0);
+  const totalReturn = startSum !== 0 ? nowSum / startSum - 1 : null;
   return (
     <div className="space-y-2">
       {/* ⚠ Stated BEFORE the numbers — a reader coming from a weights table will try to add
@@ -671,7 +672,7 @@ function Holdings({ d, i, portefeuille, onOverride }: {
               </td>
               <td className="px-3 py-1.5 text-right font-mono text-fg-strong">{(totalWeight * 100).toFixed(2)}%</td>
               <td className={`px-3 py-1.5 text-right font-mono ${totalReturn == null ? 'text-fg-faint' : tone(totalReturn)}`}
-                title="Weighted average of the positions' returns — Σ(weight × return) ÷ Σweight over holdings with an opening value (the same basis each bucket uses). Price return only — not flow-aware.">
+                title="Start-weighted value change — Σ current ÷ Σ start − 1 over holdings with an opening value (each position's return weighted by its OPENING value, the same basis each bucket uses). Price return only — not flow-aware, so it is close to but not exactly the book's cumulatief_rendement.">
                 {totalReturn == null ? '—' : pct(totalReturn * 100)}
               </td>
             </tr>

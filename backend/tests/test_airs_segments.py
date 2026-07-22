@@ -82,16 +82,17 @@ class TestReturnAndWeightDoNotCoverTheSameHoldings:
         assert segs["Equity"]["value_eur"] == segs["Equity"]["priced_value_eur"]
 
 
-class TestTheSegmentReturnIsAWeightedAverage:
-    def test_it_is_the_weight_weighted_average_of_the_holdings_returns(self):
-        # The sleeve return is Σ(weightᵢ · returnᵢ) / Σweightᵢ, weighted by each holding's CURRENT
-        # value — the number the reader reconstructs from the Weight and Return columns.
+class TestTheSegmentReturnIsTheStartWeightedValueChange:
+    def test_it_is_sum_now_over_sum_start(self):
+        # The sleeve return is Σnow / Σstart − 1 — the basket's actual value change, i.e. each
+        # holding's return weighted by its OPENING value. NOT weighted by current value, which lets a
+        # winner (now a bigger share) dominate: that would read 66.67% here (= (200·100%+100·0%)/300),
+        # inflating the true 50%.
         segs = {s["asset_class"]: s for s in _segments([
-            H("A", "Equity", 200, 100),     # +100%, current value 200
-            H("B", "Equity", 100, 100),     #    0%, current value 100
+            H("A", "Equity", 200, 100),     # +100%
+            H("B", "Equity", 100, 100),     #    0%
         ])}
-        # (200·100% + 100·0%) / 300 = 66.67% — NOT 50% (= 300/200−1), and not the flat mean of 50%.
-        assert segs["Equity"]["return_pct"] == 66.67
+        assert segs["Equity"]["return_pct"] == 50.0     # 300/200 − 1
         assert segs["Equity"]["gain_eur"] == 100.0
 
 
