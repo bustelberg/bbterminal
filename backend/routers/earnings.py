@@ -317,6 +317,49 @@ async def get_earnings_metrics(company_id: int):
         raise HTTPException(status_code=500, detail=f"Query failed: {e}")
 
 
+@router.get("/api/earnings/by-isin/{isin}/metrics")
+async def get_earnings_metrics_by_isin(isin: str):
+    """Dashboard metrics for a company resolved BY ISIN — the /portfolios
+    Fundamental modal bridge (ISIN → `company.isin` → company_id, "Bridge A").
+
+    Only the ~13% of instruments backed by a `company` row have earnings
+    metrics; everything else (ETFs, structured products, foreign listings with
+    no company row) 404s here, and the modal falls back to its owner-earnings /
+    price tabs, which work for every ISIN. Returns
+    `{company_id, company_name, currency, metrics}` — `currency` is the
+    exchange's `currency_code` (the reporting/trading currency the FCF/share
+    chart converts to EUR), mirroring how `/api/companies` derives it.
+    """
+    def _resolve() -> dict | None:
+        resp = (
+            supabase.table("company")
+            .select("company_id,company_name,gurufocus_exchange:gurufocus_exchange(currency_code)")
+            .eq("isin", isin)
+            .limit(1)
+            .execute()
+        )
+        if not resp.data:
+            return None
+        row = resp.data[0]
+        exch = row.pop("gurufocus_exchange", None) or {}
+        return {
+            "company_id": row["company_id"],
+            "company_name": row.get("company_name"),
+            "currency": exch.get("currency_code"),
+        }
+
+    try:
+        info = await asyncio.to_thread(_resolve)
+        if info is None:
+            raise HTTPException(status_code=404, detail="No company record for this ISIN")
+        rows = await asyncio.to_thread(load_company_metric_rows, info["company_id"])
+        return {**info, "metrics": rows}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Query failed: {e}")
+
+
 @router.get("/api/earnings/{company_id}/metric-codes")
 async def get_earnings_metric_codes(company_id: int):
     """Debug: distinct metric codes stored for a company."""

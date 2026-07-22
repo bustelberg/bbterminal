@@ -8,7 +8,9 @@ from routers._airs_holding_isin import _is_etf, _segments
 
 
 def H(name, cls, value, start=None, etf=False):
-    return {"holding_name": name, "asset_class": cls, "current_value_eur": value,
+    # `_segments` groups by the CALCULATED CLASS (`bucket`, incl. any manual override), so the
+    # holding carries it; `asset_class` is kept for the fields that still read AIRS's own label.
+    return {"holding_name": name, "asset_class": cls, "bucket": cls, "current_value_eur": value,
             "start_value_eur": start, "is_etf": etf}
 
 
@@ -80,26 +82,29 @@ class TestReturnAndWeightDoNotCoverTheSameHoldings:
         assert segs["Equity"]["value_eur"] == segs["Equity"]["priced_value_eur"]
 
 
-class TestTheSegmentReturnIsBuiltLikeAHoldingsOwn:
-    def test_it_is_the_value_weighted_price_return(self):
-        # AIRS restates each opening value to the current quantity, so sum(now)/sum(start)-1 is
-        # the basket's price return on exactly the basis each row already uses.
+class TestTheSegmentReturnIsAWeightedAverage:
+    def test_it_is_the_weight_weighted_average_of_the_holdings_returns(self):
+        # The sleeve return is Σ(weightᵢ · returnᵢ) / Σweightᵢ, weighted by each holding's CURRENT
+        # value — the number the reader reconstructs from the Weight and Return columns.
         segs = {s["asset_class"]: s for s in _segments([
-            H("A", "Equity", 200, 100),
-            H("B", "Equity", 100, 100),
+            H("A", "Equity", 200, 100),     # +100%, current value 200
+            H("B", "Equity", 100, 100),     #    0%, current value 100
         ])}
-        assert segs["Equity"]["return_pct"] == 50.0     # 300/200 - 1, not the mean of +100%/0%
+        # (200·100% + 100·0%) / 300 = 66.67% — NOT 50% (= 300/200−1), and not the flat mean of 50%.
+        assert segs["Equity"]["return_pct"] == 66.67
         assert segs["Equity"]["gain_eur"] == 100.0
 
 
 class TestOrderAndCoverage:
     def test_cash_and_unclassified_sort_last(self):
+        # The producible buckets are these five — Real estate is not one of its own (VAS folds into
+        # Alternatives in `classify_bucket`) — and Cash + Unclassified sort last.
         order = [s["asset_class"] for s in _segments([
             H("c", "Cash", 1, 0), H("u", "Unclassified", 1, 1),
             H("b", "Bonds", 1, 1), H("e", "Equity", 1, 1),
-            H("r", "Real estate", 1, 1), H("a", "Alternatives", 1, 1),
+            H("a", "Alternatives", 1, 1),
         ])]
-        assert order == ["Equity", "Bonds", "Real estate", "Alternatives", "Cash", "Unclassified"]
+        assert order == ["Equity", "Bonds", "Alternatives", "Cash", "Unclassified"]
 
     def test_weights_are_shares_of_the_book(self):
         segs = {s["asset_class"]: s for s in _segments([

@@ -910,6 +910,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/asset-bucket-override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Asset Bucket Override
+         * @description Manually pin (or clear) a holding's Class. Keyed by ISIN — a property of the instrument,
+         *     remembered forever, and it beats the calculated `classify_bucket`. A null/empty bucket deletes
+         *     the override (revert to Auto). Returns `{isin, bucket}` (bucket null when cleared).
+         */
+        post: operations["set_asset_bucket_override_api_airs_asset_bucket_override_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/basket/analysis": {
         parameters: {
             query?: never;
@@ -1054,6 +1076,9 @@ export interface paths {
          *     `source=book` reads the RETURN numbers from AIRS's own book (`cumulatief_rendement` + the
          *     VOLK per-holding results) instead of the yfinance model reconstruction. The benchmark stays
          *     yfinance either way, so the two are comparable.
+         *
+         *     `bucket` (an allocation label — Equity, Bonds, …) filters the CHART axes to that asset-class
+         *     sleeve; the `allocation` bar itself stays over the whole model so a reader can re-select.
          */
         get: operations["airs_model_portfolio_analysis_api_airs_model_portfolios__portfolio_id__analysis_get"];
         put?: never;
@@ -3396,6 +3421,35 @@ export interface paths {
          *     best score is weak), and a shortlist of alternatives to pick from.
          */
         get: operations["match_airs_portfolio_api_earnings_airs_portfolios__portfolio_name__match_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/by-isin/{isin}/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Earnings Metrics By Isin
+         * @description Dashboard metrics for a company resolved BY ISIN — the /portfolios
+         *     Fundamental modal bridge (ISIN → `company.isin` → company_id, "Bridge A").
+         *
+         *     Only the ~13% of instruments backed by a `company` row have earnings
+         *     metrics; everything else (ETFs, structured products, foreign listings with
+         *     no company row) 404s here, and the modal falls back to its owner-earnings /
+         *     price tabs, which work for every ISIN. Returns
+         *     `{company_id, company_name, currency, metrics}` — `currency` is the
+         *     exchange's `currency_code` (the reporting/trading currency the FCF/share
+         *     chart converts to EUR), mirroring how `/api/companies` derives it.
+         */
+        get: operations["get_earnings_metrics_by_isin_api_earnings_by_isin__isin__metrics_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6224,8 +6278,16 @@ export interface components {
         AirsHoldingIsin: {
             /** Asset Class */
             asset_class?: string | null;
+            /** Bucket */
+            bucket?: string | null;
+            /** Bucket Overridden */
+            bucket_overridden?: boolean | null;
             /** Categorie */
             categorie?: string | null;
+            /** Continent */
+            continent?: string | null;
+            /** Country */
+            country?: string | null;
             /** Currency */
             currency?: string | null;
             /** Current Value Eur */
@@ -6257,6 +6319,8 @@ export interface components {
             price_ratio?: number | null;
             /** Quantity */
             quantity?: number | null;
+            /** Region */
+            region?: string | null;
             /** Sector */
             sector?: string | null;
             /** Start Value Eur */
@@ -6382,6 +6446,13 @@ export interface components {
             withdrawals_eur?: number | null;
             /** Ytd Pct */
             ytd_pct?: number | null;
+        };
+        /** AssetBucketOverride */
+        AssetBucketOverride: {
+            /** Bucket */
+            bucket?: string | null;
+            /** Isin */
+            isin: string;
         };
         /** AssetGridResponse */
         AssetGridResponse: {
@@ -6844,6 +6915,29 @@ export interface components {
         Body_upload_scan_api_asset_pipeline_upload_scan_post: {
             /** File */
             file: string;
+        };
+        /**
+         * BookHoldingDetail
+         * @description One paired-book holding, for a non-equity sleeve's contribution + currency view.
+         *
+         *     `weight_pct` is the holding's CURRENT value as a share of the whole book, so that within ANY
+         *     bucket, Σ (weight_pct / Σ_bucket weight_pct) · return_pct reproduces that bucket's weighted
+         *     return exactly (weight = the position's Weight). `currency` is the holding's quote currency (a
+         *     fair first-order FX signal for a bond/ETF sleeve — NOT folded to Unclassified like the fund axes).
+         */
+        BookHoldingDetail: {
+            /** Bucket */
+            bucket: string;
+            /** Currency */
+            currency?: string | null;
+            /** Isin */
+            isin?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Return Pct */
+            return_pct?: number | null;
+            /** Weight Pct */
+            weight_pct: number;
         };
         /** BuildUniverseRequest */
         BuildUniverseRequest: {
@@ -7549,11 +7643,16 @@ export interface components {
          *     ⚠ FUNDS ARE NOT LOOKED THROUGH, and the payload says so rather than pretending. An ETF's
          *     listing tells you nothing about what it holds — 24 of the 26 held ETFs have a "sector" of
          *     literally `etf` or `Equity`; an Amsterdam-listed MSCI World ETF is not European exposure; and
-         *     quoted in EUR it still holds mostly USD assets. So every fund lands in ONE bucket, "Fund (not
-         *     looked through)", on ALL THREE axes. A 40%-ETF portfolio shows a 40% bar that means "we
-         *     cannot see inside this" — true, and more useful than a confident wrong split.
+         *     quoted in EUR it still holds mostly USD assets. So every fund folds into "Unclassified" on ALL
+         *     THREE axes — a 40%-ETF portfolio shows a 40% Unclassified bar meaning "we cannot see inside
+         *     this", true and more useful than a confident wrong split.
          */
         ModelPortfolioAnalysis: {
+            /**
+             * Allocation
+             * @default []
+             */
+            allocation?: components["schemas"]["PortfolioAllocationSlice"][];
             /** As Of */
             as_of?: string | null;
             /**
@@ -7590,6 +7689,11 @@ export interface components {
              * @default 0
              */
             benchmark_universe_members?: number;
+            /**
+             * Book Holdings
+             * @default []
+             */
+            book_holdings?: components["schemas"]["BookHoldingDetail"][];
             /**
              * Covered Pct
              * @default 0
@@ -8108,6 +8212,23 @@ export interface components {
             up_days_pct?: number | null;
             /** Years */
             years: number;
+        };
+        /**
+         * PortfolioAllocationSlice
+         * @description One asset-class slice of the portfolio's OWN composition (no benchmark side).
+         *
+         *     AIRS's `categorie` says what a holding INVESTS IN (an equity ETF is AAND, a bond ETF is OBL);
+         *     the ETF flag is the orthogonal wrapper axis. So only EQUITY is split into direct vs ETF — a
+         *     bond ETF is Bonds, not "ETF Bonds". Buckets: Equity | ETF Equity | Bonds | Alternatives | Cash
+         *     (Real estate folds into Alternatives) | Unclassified.
+         */
+        PortfolioAllocationSlice: {
+            /** Bucket */
+            bucket: string;
+            /** Pct */
+            pct: number;
+            /** Return Pct */
+            return_pct?: number | null;
         };
         /** PortfolioAnalysisAxis */
         PortfolioAnalysisAxis: {
@@ -10014,6 +10135,39 @@ export interface operations {
             };
         };
     };
+    set_asset_bucket_override_api_airs_asset_bucket_override_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssetBucketOverride"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     airs_basket_analysis_api_airs_basket_analysis_post: {
         parameters: {
             query?: {
@@ -10177,6 +10331,7 @@ export interface operations {
                 benchmark?: string;
                 weight_by?: string;
                 source?: string;
+                bucket?: string | null;
             };
             header?: never;
             path: {
@@ -13208,6 +13363,37 @@ export interface operations {
             header?: never;
             path: {
                 portfolio_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_earnings_metrics_by_isin_api_earnings_by_isin__isin__metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                isin: string;
             };
             cookie?: never;
         };

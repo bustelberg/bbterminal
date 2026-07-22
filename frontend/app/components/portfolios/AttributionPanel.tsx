@@ -39,9 +39,12 @@ const n = (v: number | null | undefined) => v ?? 0;
  *  `InfoTip`, not the native attribute, because the browser delays that by ~1-2 seconds. */
 function Eff({ v, title }: { v?: number | null; title?: string }) {
   if (v == null) return <span className="text-fg-faint">—</span>;
+  // An allocation / selection / interaction effect and a contribution are all WEIGHT × RETURN
+  // decompositions of the excess — percentage POINTS (pp), never percent. The excess is a
+  // difference of two returns; % here would claim a different quantity.
   const body = Math.abs(v) < 0.005
     ? <span className="text-fg-faint">—</span>
-    : <span className={v >= 0 ? 'text-pos-400' : 'text-neg-400'}>{pct(v)}</span>;
+    : <span className={v >= 0 ? 'text-pos-400' : 'text-neg-400'}>{`${v >= 0 ? '+' : ''}${v.toFixed(2)}pp`}</span>;
   return title ? <InfoTip text={title}>{body}</InfoTip> : body;
 }
 

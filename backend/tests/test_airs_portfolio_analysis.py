@@ -54,9 +54,9 @@ class TestFundsAreNotLookedThrough:
                            codes={"US": "United States"}) == (
             "Technology", "North America", "USD")
 
-    def test_the_bucket_is_NAMED_never_blank(self):
-        """A blank reads as "nothing". This is emphatically something."""
-        assert "not looked through" in pa.FUND_BUCKET.lower()
+    def test_a_fund_folds_into_unclassified(self):
+        """A fund is a black box on these axes, so it is labelled Unclassified — never blank."""
+        assert pa.FUND_BUCKET == pa.UNKNOWN_BUCKET == "Unclassified"
 
 
 class TestRegionIsTheIssuersNotOurVenues:

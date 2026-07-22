@@ -522,6 +522,36 @@ class PortfolioAnalysisReturns(BaseModel):
     book_reason: str | None = None
 
 
+class PortfolioAllocationSlice(BaseModel):
+    """One asset-class slice of the portfolio's OWN composition (no benchmark side).
+
+    AIRS's `categorie` says what a holding INVESTS IN (an equity ETF is AAND, a bond ETF is OBL);
+    the ETF flag is the orthogonal wrapper axis. So only EQUITY is split into direct vs ETF — a
+    bond ETF is Bonds, not "ETF Bonds". Buckets: Equity | ETF Equity | Bonds | Alternatives | Cash
+    (Real estate folds into Alternatives) | Unclassified.
+    """
+    bucket: str
+    pct: float
+    # The bucket's value-weighted YTD price return (from the paired book); null when no book.
+    return_pct: float | None = None
+
+
+class BookHoldingDetail(BaseModel):
+    """One paired-book holding, for a non-equity sleeve's contribution + currency view.
+
+    `weight_pct` is the holding's CURRENT value as a share of the whole book, so that within ANY
+    bucket, Σ (weight_pct / Σ_bucket weight_pct) · return_pct reproduces that bucket's weighted
+    return exactly (weight = the position's Weight). `currency` is the holding's quote currency (a
+    fair first-order FX signal for a bond/ETF sleeve — NOT folded to Unclassified like the fund axes).
+    """
+    name: str | None = None
+    isin: str | None = None
+    bucket: str
+    currency: str | None = None
+    weight_pct: float
+    return_pct: float | None = None
+
+
 class ModelPortfolioAnalysis(BaseModel):
     """A model portfolio's composition beside a benchmark's, on ONE set of buckets.
 
@@ -533,9 +563,9 @@ class ModelPortfolioAnalysis(BaseModel):
     ⚠ FUNDS ARE NOT LOOKED THROUGH, and the payload says so rather than pretending. An ETF's
     listing tells you nothing about what it holds — 24 of the 26 held ETFs have a "sector" of
     literally `etf` or `Equity`; an Amsterdam-listed MSCI World ETF is not European exposure; and
-    quoted in EUR it still holds mostly USD assets. So every fund lands in ONE bucket, "Fund (not
-    looked through)", on ALL THREE axes. A 40%-ETF portfolio shows a 40% bar that means "we
-    cannot see inside this" — true, and more useful than a confident wrong split.
+    quoted in EUR it still holds mostly USD assets. So every fund folds into "Unclassified" on ALL
+    THREE axes — a 40%-ETF portfolio shows a 40% Unclassified bar meaning "we cannot see inside
+    this", true and more useful than a confident wrong split.
     """
 
     portfolio_id: int | None = None    # null for an ad-hoc basket (a stock / group has no id)
@@ -566,12 +596,20 @@ class ModelPortfolioAnalysis(BaseModel):
     benchmark_coverage_pct: float | None = None
     returns: PortfolioAnalysisReturns | None = None
     axes: list[PortfolioAnalysisAxis] = []
+    # The portfolio's OWN asset-class split, weighted by the active basis (model % or book EUR). A
+    # composition read, not a benchmark comparison — so no benchmark side. Empty for an ad-hoc
+    # basket (no AIRS `categorie` to split equity ETFs by).
+    allocation: list[PortfolioAllocationSlice] = []
+    # Per-holding book detail — the source for a non-equity sleeve's contribution breakdown +
+    # currency chart (where sector/region/SP500 say nothing). Empty for a basket or an unpaired model.
+    book_holdings: list[BookHoldingDetail] = []
 
 
 @router.get("/api/airs/model-portfolios/{portfolio_id}/analysis",
             response_model=ModelPortfolioAnalysis)
 async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP500",
-                                        weight_by: str = "model", source: str = "model"):
+                                        weight_by: str = "model", source: str = "model",
+                                        bucket: str | None = None):
     """Sector / region / currency split of one model portfolio, beside the benchmark's.
 
     `weight_by=book` weights the portfolio bars by the paired AIRS book's actual EUR holdings
@@ -580,14 +618,19 @@ async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP5
     `source=book` reads the RETURN numbers from AIRS's own book (`cumulatief_rendement` + the
     VOLK per-holding results) instead of the yfinance model reconstruction. The benchmark stays
     yfinance either way, so the two are comparable.
+
+    `bucket` (an allocation label — Equity, Bonds, …) filters the CHART axes to that asset-class
+    sleeve; the `allocation` bar itself stays over the whole model so a reader can re-select.
     """
+    from routers._airs_holding_isin import BUCKET_ORDER  # noqa: PLC0415
     from routers._airs_portfolio_analysis import (  # noqa: PLC0415
         compute_portfolio_analysis_async,
     )
 
     basis = weight_by if weight_by in ("model", "book") else "model"
     src = source if source in ("model", "book") else "model"
-    return await compute_portfolio_analysis_async(portfolio_id, benchmark, basis, src)
+    bucket_filter = bucket if bucket in BUCKET_ORDER else None
+    return await compute_portfolio_analysis_async(portfolio_id, benchmark, basis, src, bucket_filter)
 
 
 @router.get("/api/airs/model-portfolios/{portfolio_id}/risk-windows",
@@ -1614,8 +1657,20 @@ class AirsHoldingIsin(BaseModel):
     # AIRS's own Beleggingscategorie, mapped. ⚠ It classifies what a holding INVESTS IN, not its
     # wrapper — an equity ETF is Equity, a bond ETF is Bonds. `is_etf` is the second axis.
     asset_class: str | None = None
+    # The smart asset-class label — Equity | Equity ETF | Bonds | Alternatives | Cash | Unclassified
+    # (Unclassified = genuinely unsure). AIRS's categorie first, then the asset grid + the name.
+    bucket: str | None = None
+    # True when the bucket above came from a MANUAL override (asset_bucket_override), not the
+    # calculated class — so the UI can badge it and offer "revert to Auto".
+    bucket_overridden: bool | None = None
     categorie: str | None = None
+    # Geography straight from the execution instrument's yfinance fields (asset_grid), joined by
+    # ISIN. `region` is the MSCI ACWI region. ⚠ For an ETF these describe its LISTING, not what it
+    # holds — the grid cannot look inside a fund.
     sector: str | None = None
+    country: str | None = None
+    continent: str | None = None
+    region: str | None = None
     is_etf: bool | None = None
     quantity: float | None = None
     currency: str | None = None
@@ -1695,6 +1750,39 @@ async def airs_account_isins(portefeuille: str):
     from routers._airs_holding_isin import resolve_account_isins_async  # noqa: PLC0415
 
     return await resolve_account_isins_async(portefeuille)
+
+
+class AssetBucketOverride(BaseModel):
+    isin: str
+    # The Class to pin, or null/empty to CLEAR the override (revert to the calculated class).
+    bucket: str | None = None
+
+
+@router.post("/api/airs/asset-bucket-override")
+async def set_asset_bucket_override(body: AssetBucketOverride):
+    """Manually pin (or clear) a holding's Class. Keyed by ISIN — a property of the instrument,
+    remembered forever, and it beats the calculated `classify_bucket`. A null/empty bucket deletes
+    the override (revert to Auto). Returns `{isin, bucket}` (bucket null when cleared)."""
+    from routers._airs_holding_isin import BUCKET_ORDER  # noqa: PLC0415
+
+    isin = (body.isin or "").strip()
+    if not isin:
+        raise HTTPException(status_code=422, detail="isin is required")
+    bucket = (body.bucket or "").strip() or None
+
+    def _apply() -> None:
+        if bucket is None:
+            supabase.table("asset_bucket_override").delete().eq("isin", isin).execute()
+        else:
+            supabase.table("asset_bucket_override").upsert(
+                {"isin": isin, "bucket": bucket, "updated_at": datetime.now(UTC).isoformat()},
+                on_conflict="isin").execute()
+
+    if bucket is not None and bucket not in BUCKET_ORDER:
+        raise HTTPException(status_code=422,
+                            detail=f"bucket must be one of {BUCKET_ORDER} (or null to clear)")
+    await asyncio.to_thread(_apply)
+    return {"isin": isin, "bucket": bucket}
 
 
 @router.get("/api/airs/account-model-links", response_model=AirsAccountModelLinks)

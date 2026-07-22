@@ -1,6 +1,7 @@
 import os
 import queue
 import threading
+import time
 from urllib.parse import urlencode
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
@@ -177,6 +178,28 @@ def _looks_like_html(body: bytes) -> bool:
     return head.startswith((b"<!doctype", b"<html", b"<!--", b"<head", b"<?php"))
 
 
+# A transient connection reset drops the request but not the account — the socket
+# died mid-flight (AirSPMS/Cloudflare closing an idle keep-alive, a brief blip),
+# so a rebuilt session and a retry usually succeed. Distinct from a login bounce
+# (HTML body → the worker's re-login retry) or a real fault (re-raised).
+_MAX_TRANSIENT_RETRIES = 2
+_TRANSIENT_BACKOFF_S = (0.5, 1.5)
+_TRANSIENT_CONN_MARKERS = (
+    "econnreset", "econnrefused", "etimedout", "epipe",
+    "socket hang up", "connection closed", "connection reset",
+    "connection aborted", "network error", "connection terminated",
+)
+
+
+def _is_transient_conn_error(e: Exception) -> bool:
+    """True when an exception is a transient network reset (ECONNRESET / socket
+    hang up / connection closed) worth one silent retry, rather than an auth or
+    content problem. Matches on the Playwright error text (its errors carry the
+    node-style errno string, e.g. `read ECONNRESET`)."""
+    msg = str(e).lower()
+    return any(marker in msg for marker in _TRANSIENT_CONN_MARKERS)
+
+
 class _AirsSession:
     """Keeps a single Playwright browser on a dedicated thread for authenticated requests."""
 
@@ -213,7 +236,22 @@ class _AirsSession:
             job, result_q = self._queue.get()
             try:
                 ensure_logged_in()
-                resp = job(page)
+
+                # Retry a transient connection reset (ECONNRESET / socket hang up):
+                # the socket died mid-request but the account is fine, so rebuild the
+                # session and try again a couple of times with a short backoff. A
+                # non-transient error (or the last attempt) re-raises to the caller.
+                resp = None
+                for attempt in range(_MAX_TRANSIENT_RETRIES + 1):
+                    try:
+                        resp = job(page)
+                        break
+                    except Exception as e:
+                        if attempt >= _MAX_TRANSIENT_RETRIES or not _is_transient_conn_error(e):
+                            raise
+                        time.sleep(_TRANSIENT_BACKOFF_S[min(attempt, len(_TRANSIENT_BACKOFF_S) - 1)])
+                        close_session()
+                        ensure_logged_in()
 
                 # If we got HTML back (session expired / login bounce), re-login
                 # once and re-run the job from scratch.

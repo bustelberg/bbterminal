@@ -58,9 +58,20 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-/** The designed popover body: Source (+ field) · When (+ freshness pill) · How (the formula). */
-function ProvenanceCard({ source, asOf, note, how }: {
-  source: SourceKey; asOf?: string | null; note?: string; how?: string;
+/**
+ * HOW a number came to exist — and there are only ever TWO honest answers:
+ *   'copied'  — read straight out of the source above, unchanged, at the When date. Nothing was
+ *               computed on our side; the digits are exactly what the vendor reported.
+ *   'formula' — WE computed it here, a formula over data (whose inputs come from the Source above).
+ *               `how` carries the formula itself (e.g. "Now ÷ Start − 1 = …").
+ * Every value on the page is one or the other; the card states which so a reader never has to guess
+ * whether a number was reported or derived. (`how` alone, with no kind, is the legacy free-text.)
+ */
+export type ProvKind = 'copied' | 'formula';
+
+/** The designed popover body: Source (WHERE + field) · When · How (copied vs formula). */
+function ProvenanceCard({ source, asOf, note, how, kind }: {
+  source: SourceKey; asOf?: string | null; note?: string; how?: string; kind?: ProvKind;
 }) {
   const s = SOURCE[source];
   const f = asOf ? snapshotFreshness(asOf) : null;
@@ -85,7 +96,17 @@ function ProvenanceCard({ source, asOf, note, how }: {
             )
             : <span className="text-fg-muted">no dated source (a structural / computed value)</span>}
         </Field>
-        {how && <Field label="How"><span className="text-fg-soft leading-relaxed">{how}</span></Field>}
+        {(kind || how) && (
+          <Field label="How">
+            <span className="text-fg-soft leading-relaxed">
+              {kind === 'copied'
+                ? <>Copied straight from {s.label}{asOf ? ` (${asOf})` : ''}, as reported — not computed here.</>
+                : kind === 'formula'
+                  ? <>A formula on the data{how ? <>: <span className="text-fg">{how}</span></> : <> we compute here</>}.</>
+                  : how}
+            </span>
+          </Field>
+        )}
       </div>
     </div>
   );
@@ -96,13 +117,14 @@ function ProvenanceCard({ source, asOf, note, how }: {
  *  a stale number reads as stale at a glance — no bare glyphs.
  *
  *  `note` — the specific field/line at the source ("cumulatief_rendement", "Beginwaarde").
- *  `how`  — the derivation / formula that produced this number. */
-export function Provenance({ source, asOf, note, how }: {
-  source: SourceKey; asOf?: string | null; note?: string; how?: string;
+ *  `kind` — 'copied' (read from the source, unchanged) or 'formula' (computed here); the only two
+ *           ways a number arrives. `how` carries the formula when kind is 'formula'. */
+export function Provenance({ source, asOf, note, how, kind }: {
+  source: SourceKey; asOf?: string | null; note?: string; how?: string; kind?: ProvKind;
 }) {
   const stale = asOf ? snapshotFreshness(asOf)?.tone === 'stale' : false;
   return (
-    <InfoTip content={<ProvenanceCard source={source} asOf={asOf} note={note} how={how} />}>
+    <InfoTip content={<ProvenanceCard source={source} asOf={asOf} note={note} how={how} kind={kind} />}>
       <span
         className={`ml-1 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full align-middle
           text-[9px] font-semibold leading-none cursor-help transition-colors ${

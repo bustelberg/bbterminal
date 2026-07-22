@@ -110,6 +110,89 @@ def _is_etf(grid_row: dict | None) -> bool:
     name = grid_row.get("name") or ""
     return bool(_ETF_WORD.search(name)) or "UCITS" in name.upper()
 
+
+# ── The asset-class label a reader sees (and the allocation bar sums to) ──────────────────────
+# Six buckets. Only EQUITY carries the ETF split (Equity vs Equity ETF) — AIRS's `categorie` knows
+# an equity ETF invests in equity (AAND) and a bond ETF in bonds (OBL), so a bond ETF is Bonds, not
+# "ETF Bonds". Defined here, where every signal is at hand, so the column and the bar cannot drift.
+BUCKET_EQUITY = "Equity"
+BUCKET_EQUITY_ETF = "Equity ETF"
+BUCKET_BONDS = "Bonds"
+BUCKET_ALTS = "Alternatives"
+BUCKET_CASH = "Cash"
+BUCKET_UNKNOWN = "Unclassified"
+BUCKET_ORDER = [BUCKET_EQUITY, BUCKET_EQUITY_ETF, BUCKET_BONDS, BUCKET_ALTS, BUCKET_CASH, BUCKET_UNKNOWN]
+
+# asset_grid.asset_class values that mean "a fund wrapper" (yfinance/leonteq vocabulary).
+_GRID_FUND_CLASSES = {"etf", "fund", "etc", "etp"}
+
+# yfinance speaks two spellings for a couple of sectors; canonicalise so the column doesn't show
+# one sector twice. And a `sector` of literally `etf`/`equity`/`bond`… is a leftover from the
+# asset-class fallback, not a sector — a fund is opaque, so it reads "—", never a fake sector.
+_SECTOR_ALIASES = {"Basic Materials": "Materials", "Financial Services": "Financials"}
+_NOT_A_SECTOR = {"equity", "bonds", "bond", "commodity", "short commodity", "crypto", "etf", "fund"}
+
+
+def _display_sector(raw: str | None) -> str | None:
+    """The instrument's own yfinance sector (asset_grid) — canonical spelling, or None when it is
+    not a real sector (a fund we cannot look through, or an asset-class leftover)."""
+    if not raw or raw.strip().lower() in _NOT_A_SECTOR:
+        return None
+    return _SECTOR_ALIASES.get(raw, raw)
+
+# Fixed-income tells for the FALLBACK only (when AIRS gave no categorie). A coupon rate in the name
+# ("6,5% Rabobank Certificaten 14-perp.") is the strongest; the rest are bond/fund name fragments.
+_BOND_WORDS = re.compile(
+    r"\b(bond|obligat|coupon|perp|treasur|gilt|bund|govie|sovereign|"
+    r"floating\s*rate|frn|senior\s*(?:notes?|debt)|subordinat|high\s*yield|"
+    r"aggregate|corp(?:orate)?\s*bond)\b|\d[\.,]?\d*\s*%",
+    re.I)
+
+
+def _looks_like_bond(*names: str | None) -> bool:
+    hay = " ".join(n for n in names if n)
+    return bool(_BOND_WORDS.search(hay))
+
+
+def classify_bucket(asset_class: str | None, is_etf: bool, isin: str | None,
+                    name: str | None, grid: dict | None) -> str:
+    """The single best asset-class label for one holding — the column a reader sees.
+
+    Signals, STRONGEST FIRST, and it stops at the first that decides:
+      1. AIRS's own `categorie` (already mapped into `asset_class`) — it classifies what a holding
+         INVESTS IN, so an equity ETF is Equity and a bond ETF is Bonds. Present for every paired
+         holding, so this is the usual answer.
+      2. The asset grid's yfinance class (equity / a fund class / crypto / commodity).
+      3. The name — a coupon rate or a bond word.
+    Returns 'Unclassified' ONLY when nothing above decides — an honest "unsure", never a guess
+    dressed as a fact. Only EQUITY splits on the ETF wrapper; Bonds/Alternatives/Cash do not.
+    """
+    g = grid or {}
+    # 1a. Cash — no instrument at all, or an explicit cash line.
+    if asset_class == BUCKET_CASH or (not isin and (name or "").strip().lower() in _CASH_NAMES):
+        return BUCKET_CASH
+    # 1b. AIRS's own class (the strongest signal).
+    if asset_class == BUCKET_BONDS:
+        return BUCKET_BONDS
+    if asset_class in (BUCKET_ALTS, "Real estate"):
+        return BUCKET_ALTS
+    if asset_class == BUCKET_EQUITY:
+        return BUCKET_EQUITY_ETF if is_etf else BUCKET_EQUITY
+    # 2/3. No AIRS class (an unpaired holding) — fall back to the grid, then the name.
+    gac = (g.get("asset_class") or "").lower()
+    if gac == "bond" or _looks_like_bond(name, g.get("name"), g.get("leonteq_name")):
+        return BUCKET_BONDS
+    if gac in ("crypto", "commodity"):
+        return BUCKET_ALTS
+    if gac == "equity":
+        return BUCKET_EQUITY
+    if is_etf or gac in _GRID_FUND_CLASSES:
+        # A fund we cannot see into, with no bond tell — the overwhelming default is an equity ETF.
+        return BUCKET_EQUITY_ETF
+    # 4. Nothing decided — say so.
+    return BUCKET_UNKNOWN
+
+
 # The implied price may legitimately differ from our last close: AIRS marks a different day, and
 # a bond ETF barely moves. Beyond this it is not the same instrument — the share-class errors
 # this exists to catch are 19x and 20x, not 10%.
@@ -218,9 +301,16 @@ def _last_closes(isins: list[str], as_of: str) -> dict[str, dict]:
     return out
 
 
-# Display order. Cash and Unclassified last: they are not asset classes anyone allocates to,
-# they are what is left.
-_SEGMENT_ORDER = ["Equity", "Bonds", "Real estate", "Alternatives", "Cash", "Unclassified"]
+def _load_bucket_overrides(isins: list[str]) -> dict[str, str]:
+    """{isin: bucket} for the ISINs a user has manually pinned. An override is a property of the
+    INSTRUMENT (asset_bucket_override, keyed by ISIN) and beats the calculated class."""
+    out: dict[str, str] = {}
+    uniq = sorted({i for i in isins if i})
+    for i in range(0, len(uniq), 100):
+        for r in (supabase.table("asset_bucket_override")
+                  .select("isin,bucket").in_("isin", uniq[i:i + 100]).execute().data or []):
+            out[r["isin"]] = r["bucket"]
+    return out
 
 
 def _segments(rows: list[dict]) -> list[dict]:
@@ -235,15 +325,17 @@ def _segments(rows: list[dict]) -> list[dict]:
         with no opening value. `return_pct` therefore spans only the priced part, and
         `priced_value_eur` states how much that is. A segment where they differ is saying so.
 
-    ⚠ IT IS A PRICE RETURN, LIKE THE HOLDINGS IT IS BUILT FROM. AIRS restates each opening value
-        to the current quantity, so `sum(current)/sum(start) - 1` is the basket's price return on
-        exactly the basis each row already uses. It carries no income and is not flow-aware, so
-        the segments do NOT sum to the portfolio's own figure — the same caveat the holdings
-        already carry, and the reason this is not computed against `cumulatief_rendement`.
+    ⚠ IT IS A WEIGHTED AVERAGE OF PRICE RETURNS. Each holding's return (now/start − 1) is weighted
+        by its CURRENT value, so the sleeve figure is exactly Σ(weightᵢ · returnᵢ) over the rows
+        below it — the number the reader reconstructs from the Weight and Return columns. It carries
+        no income and is not flow-aware, so the segments do NOT sum to the book's own
+        `cumulatief_rendement`, which is why it is not computed against that.
     """
+    # Group by the CALCULATED CLASS (the six-bucket `bucket` — incl. any manual override), not the
+    # raw AIRS asset_class: Equity and Equity ETF split apart, and a bond ETF sits under Bonds.
     by: dict[str, list[dict]] = {}
     for r in rows:
-        by.setdefault(r["asset_class"], []).append(r)
+        by.setdefault(r.get("bucket") or BUCKET_UNKNOWN, []).append(r)
     total = sum((r.get("current_value_eur") or 0) for r in rows)
 
     out: list[dict] = []
@@ -254,7 +346,14 @@ def _segments(rows: list[dict]) -> list[dict]:
                   and r.get("current_value_eur") is not None]
         start = sum((r.get("start_value_eur") or 0) for r in priced)
         now = sum((r.get("current_value_eur") or 0) for r in priced)
+        # The sleeve return is the WEIGHTED AVERAGE of its holdings' returns, each weighted by its
+        # CURRENT value (its Weight) — i.e. exactly Σ(weightᵢ · returnᵢ) over the rows below it.
+        # Weighting by current value ≡ weighting by the displayed Weight (Weging = value ÷ book).
+        wret = sum(r["current_value_eur"] * (r["current_value_eur"] / r["start_value_eur"] - 1)
+                   for r in priced)
         out.append({
+            # The output field keeps the name `asset_class` (frontend/model unchanged), but it now
+            # carries the calculated bucket — the segment IS the Class group.
             "asset_class": name,
             "holdings": len(rs),
             "value_eur": round(value, 2),
@@ -276,15 +375,15 @@ def _segments(rows: list[dict]) -> list[dict]:
             "fx_eur": (round(sum(v for r in rs
                                  if (v := r.get("fx_result_eur")) is not None), 2)
                        if any(r.get("fx_result_eur") is not None for r in rs) else None),
-            "return_pct": round(100 * (now / start - 1), 2) if start else None,
+            "return_pct": round(100 * wret / now, 2) if now else None,
             "priced_value_eur": round(now, 2),
             # ⚠ ETFs are counted, never bucketed: an equity ETF is Equity. Stated as a share of
             # the segment so "Bonds 48.65%, of which 43.20% via ETFs" is one row, not two.
             "etf_value_eur": round(sum((r.get("current_value_eur") or 0)
                                        for r in rs if r.get("is_etf")), 2),
         })
-    out.sort(key=lambda s: (_SEGMENT_ORDER.index(s["asset_class"])
-                            if s["asset_class"] in _SEGMENT_ORDER else 99))
+    out.sort(key=lambda s: (BUCKET_ORDER.index(s["asset_class"])
+                            if s["asset_class"] in BUCKET_ORDER else 99))
     return out
 
 
@@ -323,13 +422,15 @@ def resolve_account_isins(portefeuille: str) -> dict:
     grid: dict[str, dict] = {}
     for i in range(0, len(isins), 100):
         for g in (supabase.table("asset_grid")
-                  .select("isin,name,openfigi_name,leonteq_name,leonteq_product_type")
+                  .select("isin,name,openfigi_name,leonteq_name,leonteq_product_type,"
+                          "country,continent,msci_region,asset_class,sector")
                   .in_("isin", isins[i:i + 100]).execute().data or []):
             grid[g["isin"]] = g
 
     scores = [[_score(h["holding_name"], p, grid) for p in pos] for h in holdings]
     pairing = _assign(scores)
 
+    overrides = _load_bucket_overrides(isins)   # manual Class pins, keyed by ISIN — they win
     closes = _last_closes(isins, as_of)
     ccys = {c["currency"] for c in closes.values() if c.get("currency")}
     # The window only has to reach the close we compare against; `_rate` walks back to the last
@@ -370,13 +471,30 @@ def resolve_account_isins(portefeuille: str) -> dict:
             asset_class = "Cash"
         else:
             asset_class = "Unclassified"
+        # Country / continent / region come straight from the execution instrument's own yfinance
+        # geo (asset_grid), joined by ISIN — the same per-row data the Instruments grid shows.
+        # `region` is the MSCI ACWI region (North America / Europe / Pacific / EM…). ⚠ For an ETF
+        # these describe its LISTING, not its holdings (the grid can't see inside a fund).
+        g = grid.get(isin or "") or {}
+        is_etf = _is_etf(g)
+        # The smart six-bucket label — a manual override (pinned by ISIN) wins over the calculated
+        # class. `bucket_overridden` tells the UI which rows a user has set by hand.
+        override = overrides.get(isin or "")
+        bucket = override or classify_bucket(asset_class, is_etf, isin, h["holding_name"], g)
         rows.append({
             "holding_name": h["holding_name"],
             "lines": h.get("lines", 1),
             "asset_class": asset_class,
+            # The smart six-bucket label (Equity | Equity ETF | Bonds | Alternatives | Cash |
+            # Unclassified) — the /portfolios "Class" column, and what the allocation bar sums.
+            "bucket": bucket,
+            "bucket_overridden": bool(override),
             "categorie": cat or None,
-            "sector": (p or {}).get("sector") or None,
-            "is_etf": _is_etf(grid.get(isin or "")),
+            "sector": _display_sector(g.get("sector")),
+            "country": g.get("country") or None,
+            "continent": g.get("continent") or None,
+            "region": g.get("msci_region") or None,
+            "is_etf": is_etf,
             "quantity": qty,
             "currency": h.get("currency"),
             "weight": h.get("weight"),

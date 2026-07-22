@@ -92,15 +92,15 @@ class TestMissedWinnersAreMatchedByCOMPANY:
 
     def test_the_isin_is_not_the_identity(self):
         src = inspect.getsource(at.compute_attribution)
-        # The name leg now lives in the shared `_overlaps`, so assert the delegation rather than
-        # the call — see TestTheOverlapMatcherNeedsBOTHKeys.
+        # The name leg now lives in the shared `_overlaps`, and it is EXACT ROOT equality (not
+        # same_company's fuzzy floor) — see TestTheNameLegIsExactNotFuzzy.
         assert "_overlaps(" in src
-        assert "same_company" in inspect.getsource(at._overlaps)
+        assert "_company_root" in inspect.getsource(at._overlaps)
 
-    def test_same_company_sees_through_a_share_class(self):
-        from asset_pipeline.resolve import same_company
-
-        assert same_company("Alphabet Inc.", "Alphabet Inc") is True
+    def test_it_sees_through_a_share_class(self):
+        # Alphabet class A vs class C — two ISINs, one business, identical root.
+        h = {"isin": "US02079K1079", "name": "Alphabet Inc."}
+        assert at._overlaps(h, {"US02079K3059"}, ["Alphabet Inc"]) is True
 
 
 class TestTheOverlapMatcherNeedsBOTHKeys:
@@ -117,12 +117,10 @@ class TestTheOverlapMatcherNeedsBOTHKeys:
     business, which no ISIN check can ever see. Hence both legs, ISIN first.
     """
 
-    def test_an_acronym_defeats_the_name_matcher(self):
-        """The measured fact the ISIN leg exists for. If this ever starts passing, the name
-        matcher improved — it does NOT make the ISIN leg redundant (Alphabet still needs name)."""
-        from asset_pipeline.resolve import same_company
-
-        assert same_company("AMD", "Advanced Micro Devices Inc") is False
+    def test_an_acronym_is_not_caught_by_the_name_leg(self):
+        """The measured fact the ISIN leg exists for: AMD by name alone — root 'amd' vs 'advanced
+        micro devices', no exact match — needs the ISIN leg (next test)."""
+        assert at._overlaps({"name": "AMD"}, set(), ["Advanced Micro Devices Inc"]) is False
 
     def test_the_isin_wins_when_the_names_disagree(self):
         """AMD: one ISIN, two names."""
@@ -141,6 +139,32 @@ class TestTheOverlapMatcherNeedsBOTHKeys:
 
     def test_a_holding_with_neither_key_is_not_claimed_as_held(self):
         assert at._overlaps({}, {"US0079031078"}, ["Advanced Micro Devices Inc"]) is False
+
+
+class TestTheNameLegIsExactNotFuzzy:
+    """⚠ A SHARED WORD IS NOT A SHARED COMPANY.
+
+    `same_company` is right for a listing↔issuer match ("NVIDIA CORP" ↔ "NVIDIA Corporation") but
+    catastrophic here: `_company_root('S&P Global Inc')` reduces to the SINGLE generic token
+    'global' (the initials S, P drop as single letters), which token_set_ratio then matches to
+    EVERY name containing 'global'. Measured 2026-07-18 on a Financials bucket: the model held 5
+    names and the panel claimed 8 index overlaps — Coinbase Global and Apollo Global Management
+    among them, held by nobody. The intersection needs strict identity, so the name leg is EXACT
+    root equality: a share class shares the same root, an unrelated 'Global' does not.
+    """
+
+    def test_a_shared_generic_word_is_not_a_match(self):
+        # Coinbase (index only) must NOT match the model's S&P Global just because both say "Global".
+        h = {"isin": "USxxxxxCOIN", "name": "Coinbase Global, Inc."}
+        assert at._overlaps(h, set(), ["S&P Global Inc.", "MSCI Inc.", "Visa Inc."]) is False
+
+    def test_apollo_global_is_not_sp_global(self):
+        h = {"isin": "USxxxxAPOLLO", "name": "Apollo Global Management, Inc."}
+        assert at._overlaps(h, set(), ["S&P Global Inc."]) is False
+
+    def test_the_real_holding_still_matches_by_name(self):
+        # And the genuine overlap (no ISIN on this side) still marks — same root.
+        assert at._overlaps({"name": "S&P Global Inc."}, set(), ["S&P Global Inc."]) is True
 
     def test_held_and_in_both_are_ONE_definition(self):
         """They drifted once: `_held` had the ISIN check and `in_both` did not, so only `in_both`

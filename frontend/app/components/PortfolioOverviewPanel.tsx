@@ -7,6 +7,7 @@ import { Provenance } from '../../lib/provenance';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
 import OwnerEarningsModal from './portfolios/OwnerEarningsModal';
 import { type Basket } from './portfolios/PerformanceModal';
+import { allocColor, bucketLabel, BUCKET_ORDER } from './portfolios/allocationColors';
 
 /** What an Analyse/Fundamental modal is opened for: one instrument (isin), a group (basket), or a
  *  whole portfolio (portfolioId, resolved to a basket server-side). */
@@ -165,6 +166,15 @@ export default function PortfolioOverviewPanel() {
     if (resolved) setIsins((m) => ({ ...m, [p]: resolved }));
   };
 
+  // Re-fetch just one account's ISIN resolution (after a manual Class override), so the row
+  // re-groups under its new bucket without collapsing/re-opening the whole holdings table.
+  const refreshIsins = useCallback(async (p: string) => {
+    const i = await apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(p)}/isins`);
+    if (!i.ok) return;
+    const resolved = (await i.json()) as AirsAccountIsins;
+    setIsins((m) => ({ ...m, [p]: resolved }));
+  }, []);
+
   const view = (rows ?? []).filter((r) => (onlyLinked ? !!r.fixed_name : true));
   const linked = (rows ?? []).filter((r) => !!r.fixed_name).length;
   const unconfirmed = (rows ?? []).filter((r) => r.link_source === 'guess').length;
@@ -233,7 +243,7 @@ export default function PortfolioOverviewPanel() {
       {rows && (
         <div className="overflow-auto rounded-lg border border-neutral-800/40 max-h-[70vh]">
           <table className="w-full text-xs whitespace-nowrap">
-            <thead className="bg-card sticky top-0 z-10">
+            <thead className="bg-card sticky top-0 z-10 [&_th]:bg-card">
               <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
                 <th className="px-3 py-1.5 font-medium text-left" />{/* Analyse */}
                 <th className="px-3 py-1.5 font-medium text-left">Name</th>
@@ -246,22 +256,9 @@ export default function PortfolioOverviewPanel() {
                   YTD
                 </th>
                 <th className="px-3 py-1.5 font-medium text-right"
-                  title="AIRS's rendement from its newest row — the LATEST MONTH, a different window from the year. Not a rival YTD.">
-                  Last month
+                  title="AIRS's rendement from its newest row — the current (latest) month, a different window from the year. Not a rival YTD.">
+                  Current month
                 </th>
-                <th className="px-3 py-1.5 font-medium text-right"
-                  title="AIRS's koersresultaat for the year — price gains, income excluded.">
-                  Price result
-                </th>
-                <th className="px-3 py-1.5 font-medium text-right"
-                  title="AIRS's opbrengsten for the year — dividends and coupons.">
-                  Income
-                </th>
-                <th className="px-3 py-1.5 font-medium text-right"
-                  title="AIRS's beleggingsresultaat for the year. Ties exactly to the value change: end − begin − deposits + withdrawals.">
-                  Invest. result
-                </th>
-                <th className="px-3 py-1.5 font-medium text-right">Value</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800/20">
@@ -328,46 +325,29 @@ export default function PortfolioOverviewPanel() {
                           {r.dynamic_portefeuille}{r.fixed_name ? ` · ${r.fixed_name}` : ''}
                         </span>
                       </td>
-                      <td className="px-3 py-1.5 text-right font-mono text-fg-subtle">{r.isins ?? '—'}</td>
+                      <td className="px-3 py-1.5 text-right font-mono text-fg-subtle">
+                        {r.isins ?? '—'}
+                        {r.isins != null && (
+                          <Provenance source="airs_model" kind="formula" note="position count"
+                            how="a count of the positions in the paired Fixed portfolio" />
+                        )}
+                      </td>
                       <td className={`px-3 py-1.5 text-right font-mono font-semibold ${tone(r.ytd_pct)}`}>
                         {pct(r.ytd_pct)}
-                        <Provenance source="airs_att" asOf={r.as_of} note="cumulatief_rendement (the compounded year)"
-                          how="Monthly investment returns compounded, net of the timing of deposits and withdrawals." />
+                        <Provenance source="airs_att" asOf={r.as_of} kind="copied"
+                          note="cumulatief_rendement — AIRS's own compounded year, net of deposit/withdrawal timing" />
                       </td>
                       <td className={`px-3 py-1.5 text-right font-mono ${tone(r.latest_month_pct)}`}>
                         {pct(r.latest_month_pct)}
-                        <Provenance source="airs_att" asOf={r.as_of} note="rendement (the latest month)"
-                          how="AIRS return for the most recent month." />
-                      </td>
-                      <td className={`px-3 py-1.5 text-right font-mono ${tone(r.price_result_eur)}`}>
-                        {eur(r.price_result_eur)}
-                        <Provenance source="airs_att" asOf={r.as_of} note="koersresultaat"
-                          how="AIRS price result for the year (koersresultaat); income excluded." />
-                      </td>
-                      <td className="px-3 py-1.5 text-right font-mono text-fg-subtle">
-                        {eur(r.income_eur)}
-                        <Provenance source="airs_att" asOf={r.as_of} note="opbrengsten (dividends + coupons)"
-                          how="AIRS income for the year: dividends and coupons (opbrengsten)." />
-                      </td>
-                      <td className={`px-3 py-1.5 text-right font-mono ${tone(r.investment_result_eur)}`}
-                        title={r.reconciles === false
-                          ? `⚠ Does not reconcile: off by ${eur(r.residual_eur)} against the book's own value change. A month is probably missing from our copy, so this total is short.`
-                          : undefined}>
-                        {eur(r.investment_result_eur)}
-                        {r.reconciles === false && <span className="text-warn-400 ml-1">⚠</span>}
-                        <Provenance source="airs_att" asOf={r.as_of} note="beleggingsresultaat"
-                          how={`Price ${eur(r.price_result_eur)} + income ${eur(r.income_eur)} + accrued − costs (beleggingsresultaat).`} />
-                      </td>
-                      <td className="px-3 py-1.5 text-right font-mono text-fg-soft">
-                        {eur(r.end_value_eur)}
-                        <Provenance source="airs_att" asOf={r.as_of} note="eindvermogen (end value)"
-                          how="AIRS end value for the period (eindvermogen)." />
+                        <Provenance source="airs_att" asOf={r.as_of} kind="copied"
+                          note="rendement — AIRS's return for the most recent month" />
                       </td>
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={9} className="px-3 py-3 bg-inset">
-                          <Holdings d={detail[r.dynamic_portefeuille]} i={isins[r.dynamic_portefeuille]} />
+                        <td colSpan={5} className="px-3 py-3 bg-inset">
+                          <Holdings d={detail[r.dynamic_portefeuille]} i={isins[r.dynamic_portefeuille]}
+                            portefeuille={r.dynamic_portefeuille} onOverride={refreshIsins} />
                         </td>
                       </tr>
                     )}
@@ -396,6 +376,57 @@ export default function PortfolioOverviewPanel() {
  * Global Corporate Bond UCITS ETF EUR Hedged", Acc and Inc, €4.79 vs €3.99, compounding
  * differently). It must not look like `ok`.
  */
+/** The smart asset-class label with its palette dot — shares the allocation bar's colours so the
+ *  Class column and the bar read as one system. `—` when the row has no bucket (unresolved).
+ *
+ *  For an ISIN-bearing row it is EDITABLE: an overlaid `<select>` lets a user pin the Class (or
+ *  pick "Auto" to revert to the calculated one). The choice is persisted per ISIN and beats the
+ *  calculation forever; an overridden badge wears a ring on its dot. Cash (no ISIN) is read-only. */
+function BucketBadge({ bucket, isin, overridden, onOverride }: {
+  bucket?: string | null; isin?: string | null; overridden?: boolean | null;
+  onOverride?: (isin: string, bucket: string | null) => void | Promise<void>;
+}) {
+  const [saving, setSaving] = useState(false);
+  if (!bucket) return <span className="text-fg-faint">—</span>;
+
+  const dot = (
+    <span className="w-2 h-2 rounded-sm inline-block shrink-0"
+      style={{ backgroundColor: allocColor(bucket), boxShadow: overridden ? '0 0 0 1.5px var(--color-bg-page), 0 0 0 2.5px currentColor' : undefined }} />
+  );
+  // Read-only for cash / unresolved rows (no ISIN to pin).
+  if (!isin || !onOverride) {
+    return (
+      <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+        {dot}<span className="text-fg-soft">{bucketLabel(bucket)}</span>
+      </span>
+    );
+  }
+  return (
+    <span className={`relative inline-flex items-center gap-1.5 whitespace-nowrap rounded px-1 -mx-1 ${saving ? 'opacity-50' : 'hover:bg-overlay/5'}`}
+      title={overridden ? 'Class manually set — pick “Auto” to revert to the calculated class.' : 'Auto-classified — click to override the Class.'}>
+      {dot}
+      <span className="text-fg-soft">{bucketLabel(bucket)}</span>
+      {overridden && <span className="text-accent-400 text-[9px] leading-none">✎</span>}
+      {/* The picker overlays the whole cell, invisible, so the badge stays the visible affordance. */}
+      <select
+        aria-label="Set Class"
+        value={overridden ? bucket : ''}
+        disabled={saving}
+        onClick={(e) => e.stopPropagation()}
+        onChange={async (e) => {
+          const v = e.target.value || null;   // '' = Auto (clear the override)
+          setSaving(true);
+          try { await onOverride(isin, v); } finally { setSaving(false); }
+        }}
+        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+      >
+        <option value="">Auto (calculated)</option>
+        {BUCKET_ORDER.map((b) => <option key={b} value={b}>{bucketLabel(b)}</option>)}
+      </select>
+    </span>
+  );
+}
+
 function IsinCell({ r }: { r: NonNullable<AirsAccountIsins['rows']>[number] | undefined }) {
   if (!r?.isin) return <span className="text-fg-faint">—</span>;
   const mismatch = r.verdict === 'price_mismatch';
@@ -436,7 +467,7 @@ function SegmentHeader({ s, asOf, holdings, onAnalyse, onFundamental }: {
   const etfPct = s.value_eur && s.etf_value_eur ? (100 * s.etf_value_eur) / s.value_eur : 0;
   const partial = s.value_eur != null && s.priced_value_eur != null
     && Math.abs(s.value_eur - s.priced_value_eur) > 1;
-  const label = s.asset_class ?? 'Group';
+  const label = bucketLabel(s.asset_class) || 'Group';
   const target: ModalTarget = { name: label, basket: { holdings, label } };
   const cls = 'text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300 whitespace-nowrap';
   return (
@@ -452,58 +483,43 @@ function SegmentHeader({ s, asOf, holdings, onAnalyse, onFundamental }: {
         )}
       </td>
       <td className="px-3 py-1 font-semibold text-fg-strong">
-        {s.asset_class}
+        {label}
         <span className="text-fg-faint font-normal ml-2">
           {s.holdings} holding{s.holdings === 1 ? '' : 's'}
+          <Provenance source="airs_volk" asOf={asOf} kind="formula" note="holdings in this segment"
+            how="a count of the segment's holdings" />
           {etfPct >= 0.5 && (
             <span title={`${eur(s.etf_value_eur)} of this segment is held via ETFs. An equity ETF is Equity and a bond ETF is Bonds — the wrapper does not change the exposure.`}>
               {' · '}{etfPct.toFixed(0)}% via ETFs
+              <Provenance source="airs_volk" asOf={asOf} kind="formula" note="ETF share of the segment"
+                how="ETF value ÷ segment value (both EUR)" />
             </span>
           )}
         </span>
       </td>
-      {/* ⚠ ONE CELL PER COLUMN, and the money cells sit under the columns they sum. The table is
-          [Fundamental] · Fund · ISIN · Qty · Ccy · Weight · Start · Now · Perf · FX · Return —
-          eleven (the leading Fundamental cell is emitted above). An extra blank here shifts every
-          figure one column right, which is silent: a weight renders perfectly well under "Start (€)". */}
+      {/* ⚠ ONE CELL PER COLUMN. The table is [Fundamental] · Fund · ISIN · Class · Sector · Country
+          · Region · Ccy · Weight · Return — ten (the leading Fundamental cell is emitted above). An
+          extra blank here shifts every figure one column right, which is silent: a weight renders
+          perfectly well under "Ccy". */}
       <td />{/* ISIN */}
-      <td />{/* Qty */}
+      <td />{/* Class */}
+      <td />{/* Sector */}
+      <td />{/* Country */}
+      <td />{/* Region */}
       <td />{/* Ccy */}
       <td className="px-3 py-1 text-right font-mono text-fg-subtle">
         {s.weight_pct == null ? '—' : `${s.weight_pct.toFixed(2)}%`}
-        <Provenance source="airs_volk" asOf={asOf} note="segment weight"
-          how="Segment value as a share of the book." />
-      </td>
-      <td className="px-3 py-1 text-right font-mono text-fg-subtle">
-        {eur(s.start_value_eur)}
-        <Provenance source="airs_volk" asOf={asOf} note="segment Beginwaarde"
-          how="Sum of the segment's opening values (Beginwaarde)." />
-      </td>
-      <td className="px-3 py-1 text-right font-mono text-fg">
-        {eur(s.value_eur)}
-        <Provenance source="airs_volk" asOf={asOf} note="segment Huidige waarde"
-          how="Sum of the segment's current values (Huidige waarde)." />
-      </td>
-      <td className={`px-3 py-1 text-right font-mono ${tone(s.fund_eur)}`}>
-        {eur(s.fund_eur)}
-        <Provenance source="airs_volk" asOf={asOf} note="segment Fondsresultaat"
-          how="Sum of the segment's performance legs (the stock price moves), in EUR." />
-      </td>
-      <td className={`px-3 py-1 text-right font-mono ${tone(s.fx_eur)}`}>
-        {eur(s.fx_eur)}
-        <Provenance source="airs_volk" asOf={asOf} note="segment Valutaresultaat"
-          how="Sum of the segment's currency legs (the FX moves), in EUR." />
+        <Provenance source="airs_volk" asOf={asOf} kind="formula" note="segment weight"
+          how="segment value ÷ book total (summed from the AIRS VOLK position values)" />
       </td>
       <td className={`px-3 py-1 text-right font-mono font-semibold ${tone(s.return_pct)}`}
         title={partial
-          ? `Price return over ${eur(s.priced_value_eur)} of this segment's ${eur(s.value_eur)}. The rest has no opening value — it was not held when the year opened — so its return is undefined, not zero.`
-          : 'Price return: the segment valued at the year\'s open (restated to today\'s quantities) against today. No income, not flow-aware — so the segments do not sum to the portfolio\'s figure.'}>
+          ? `Weighted-average return of this segment's priced holdings (${eur(s.priced_value_eur)} of ${eur(s.value_eur)}). The rest has no opening value — not held when the year opened — so its return is undefined, not zero.`
+          : 'The weighted average of the holdings\' returns, each weighted by its current value (Weight). Price return only — no income, not flow-aware.'}>
         {s.return_pct == null ? '—' : pct(s.return_pct)}
         {partial && s.return_pct != null && <span className="text-warn-400 ml-1">*</span>}
-        <Provenance source="airs_volk" asOf={asOf} note="segment price return"
-          how={partial
-            ? `Price return over the priced part of the segment (${eur(s.priced_value_eur)} of ${eur(s.value_eur)}).`
-            : `Now ÷ Start − 1 = ${eur(s.value_eur)} ÷ ${eur(s.start_value_eur)} − 1 = ${s.return_pct == null ? '—' : pct(s.return_pct)}`} />
+        <Provenance source="airs_volk" asOf={asOf} kind="formula" note="segment weighted return"
+          how="Σ(weight × return) ÷ Σweight over the segment's priced holdings (weight = current value)." />
       </td>
     </tr>
   );
@@ -539,21 +555,50 @@ function FundamentalCell({ isin, name, onAnalyse, onFundamental }: {
   );
 }
 
-function Holdings({ d, i }: { d?: AirsAccountDetail; i?: AirsAccountIsins }) {
+function Holdings({ d, i, portefeuille, onOverride }: {
+  d?: AirsAccountDetail; i?: AirsAccountIsins;
+  portefeuille?: string; onOverride?: (p: string) => void | Promise<void>;
+}) {
   const [fund, setFund] = useState<ModalTarget | null>(null);
   const [perf, setPerf] = useState<ModalTarget | null>(null);
+  // Persist a manual Class pin (or clear it → Auto), then re-fetch this account so the row
+  // re-groups under its new bucket.
+  const setBucket = useCallback(async (isin: string, bucket: string | null) => {
+    await apiFetch(`${API_URL}/api/airs/asset-bucket-override`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isin, bucket }),
+    });
+    if (portefeuille && onOverride) await onOverride(portefeuille);
+  }, [portefeuille, onOverride]);
   if (!d) return <p className="text-[11px] text-fg-subtle">Loading holdings…</p>;
   if (!d.rows?.length) return <p className="text-[11px] text-fg-subtle">No holdings snapshot stored.</p>;
   const byName = new Map((i?.rows ?? []).map((r) => [r.holding_name, r]));
   const mismatches = (i?.rows ?? []).filter((r) => r.verdict === 'price_mismatch').length;
 
-  // Grouped by AIRS's asset class, in the backend's order (Cash and Unclassified last — they are
-  // not classes anyone allocates to, they are what is left). A holding whose class we do not know
+  // Grouped by the CALCULATED Class (the `bucket`, incl. manual overrides), in the backend's order
+  // (Cash and Unclassified last — they are what is left). A holding whose class we do not know
   // still renders: it falls in the trailing ungrouped block rather than vanishing from a table
   // that is supposed to account for the whole book.
-  const all = d.rows ?? [];
+  // ⚠ AIRS bills one instrument on SEVERAL lines — BUS_Neutraal lists "6,5% Rabobank Certificaten
+  // 14-perp." at 1.64% AND 0.01%. The ISIN/segment side already dedupes (resolve_account_isins), so
+  // merge by name here too, summing weight + values, or the same holding shows as two rows. The
+  // return % is identical for two lines of one instrument (same price move), so keep the first's.
+  const merged = new Map<string, NonNullable<AirsAccountDetail['rows']>[number]>();
+  for (const r of d.rows ?? []) {
+    const cur = merged.get(r.holding_name);
+    if (!cur) { merged.set(r.holding_name, { ...r }); continue; }
+    const add = (a?: number | null, b?: number | null) => (a == null && b == null ? a : (a ?? 0) + (b ?? 0));
+    cur.weight = add(cur.weight, r.weight);
+    cur.quantity = add(cur.quantity, r.quantity);
+    cur.current_value_eur = add(cur.current_value_eur, r.current_value_eur);
+    cur.start_value_eur = add(cur.start_value_eur, r.start_value_eur);
+    cur.ytd_return_eur = add(cur.ytd_return_eur, r.ytd_return_eur);
+    cur.fund_result_eur = add(cur.fund_result_eur, r.fund_result_eur);
+    cur.fx_result_eur = add(cur.fx_result_eur, r.fx_result_eur);
+  }
+  const all = [...merged.values()];
   const segs = i?.segments ?? [];
-  const classOf = (name: string) => byName.get(name)?.asset_class ?? null;
+  const classOf = (name: string) => byName.get(name)?.bucket ?? null;
   const ordered: [AirsHoldingSegment | null, typeof all][] = segs.length
     ? segs
       .map((s) => [s, all.filter((r) => classOf(r.holding_name) === s.asset_class)] as
@@ -563,6 +608,16 @@ function Holdings({ d, i }: { d?: AirsAccountDetail; i?: AirsAccountIsins }) {
   const grouped = new Set(ordered.flatMap(([, g]) => g.map((r) => r.holding_name)));
   const rest = all.filter((r) => !grouped.has(r.holding_name));
   if (rest.length) ordered.push([null, rest]);
+  // The top TOTAL row: all weights summed (≈100%), and the portfolio return as the WEIGHTED
+  // AVERAGE of the individual positions' returns — Σ(weightᵢ · returnᵢ) / Σweightᵢ, using the
+  // displayed Weight and per-row return, so the total is exactly what the rows below say (and the
+  // same basis each bucket uses). A row with no opening value (undefined return) drops out.
+  const totalWeight = all.reduce((s, r) => s + (r.weight ?? 0), 0);
+  const retRows = all.filter((r) => r.ytd_return_pct != null && r.weight != null);
+  const wSum = retRows.reduce((s, r) => s + (r.weight ?? 0), 0);
+  const totalReturn = wSum !== 0
+    ? retRows.reduce((s, r) => s + (r.weight ?? 0) * (r.ytd_return_pct ?? 0), 0) / wSum
+    : null;
   return (
     <div className="space-y-2">
       {/* ⚠ Stated BEFORE the numbers — a reader coming from a weights table will try to add
@@ -587,7 +642,7 @@ function Holdings({ d, i }: { d?: AirsAccountDetail; i?: AirsAccountIsins }) {
       </p>
       <div className="overflow-auto rounded-lg border border-neutral-800/40 max-h-[50vh]">
         <table className="w-full text-xs">
-          <thead className="bg-card sticky top-0">
+          <thead className="bg-card sticky top-0 z-20 [&_th]:bg-card">
             <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
               <th className="px-2 py-1.5 font-medium text-left" />{/* Fundamental */}
               <th className="px-3 py-1.5 font-medium text-left">Fund</th>
@@ -595,17 +650,31 @@ function Holdings({ d, i }: { d?: AirsAccountDetail; i?: AirsAccountIsins }) {
                 title="From the Fixed portfolio, then price-checked against that instrument's own close. ⚠ = the price disagrees; ? = no series, so nothing confirms the name.">
                 ISIN
               </th>
-              <th className="px-3 py-1.5 font-medium text-right">Qty</th>
+              <th className="px-3 py-1.5 font-medium text-left"
+                title="Smart asset-class label — Stocks · Stock ETF · Bonds · Alternatives · Cash · Unclassified (genuinely unsure). AIRS's own class first, then the instrument's grid data and name.">
+                Class
+              </th>
+              <th className="px-3 py-1.5 font-medium text-left" title="The instrument's own yfinance sector. A fund is opaque, so it reads “—”.">Sector</th>
+              <th className="px-3 py-1.5 font-medium text-left">Country</th>
+              <th className="px-3 py-1.5 font-medium text-left" title="MSCI region from the instrument's yfinance geo. ⚠ For an ETF this describes its listing, not what it holds.">Region</th>
               <th className="px-3 py-1.5 font-medium text-left">Ccy</th>
               <th className="px-3 py-1.5 font-medium text-right">Weight</th>
-              <th className="px-3 py-1.5 font-medium text-right" title="Beginwaarde lopend jaar EUR — restated to today's quantity.">Start (€)</th>
-              <th className="px-3 py-1.5 font-medium text-right" title="Huidige waarde EUR.">Now (€)</th>
-              <th className="px-3 py-1.5 font-medium text-right" title="Fondsresultaat — the gain from the stock's own price move, in EUR (currency excluded). Perf + FX = the total gain.">Perf (€)</th>
-              <th className="px-3 py-1.5 font-medium text-right" title="Valutaresultaat — the gain or loss from the exchange rate move, in EUR.">FX (€)</th>
               <th className="px-3 py-1.5 font-medium text-right">Return</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-800/20">
+            {/* TOTAL — all weights summed and the value-weighted price return, at the top. */}
+            <tr className="bg-overlay/[0.04] font-semibold border-b border-neutral-800/40">
+              <td className="px-2 py-1.5" />{/* Fundamental */}
+              <td className="px-3 py-1.5 text-fg-strong" colSpan={7}>
+                Total · {all.length} holding{all.length === 1 ? '' : 's'}
+              </td>
+              <td className="px-3 py-1.5 text-right font-mono text-fg-strong">{(totalWeight * 100).toFixed(2)}%</td>
+              <td className={`px-3 py-1.5 text-right font-mono ${totalReturn == null ? 'text-fg-faint' : tone(totalReturn)}`}
+                title="Weighted average of the positions' returns — Σ(weight × return) ÷ Σweight over holdings with an opening value (the same basis each bucket uses). Price return only — not flow-aware.">
+                {totalReturn == null ? '—' : pct(totalReturn * 100)}
+              </td>
+            </tr>
             {ordered.map(([seg, group]) => {
               const groupHoldings = group
                 .map((r) => ({ isin: byName.get(r.holding_name)?.isin, weight: r.weight ?? 0, name: r.holding_name }))
@@ -619,36 +688,19 @@ function Holdings({ d, i }: { d?: AirsAccountDetail; i?: AirsAccountIsins }) {
                 <FundamentalCell isin={byName.get(r.holding_name)?.isin} name={r.holding_name} onAnalyse={setPerf} onFundamental={setFund} />
                 <td className="px-3 py-1.5 text-fg-soft pl-6">{r.holding_name}</td>
                 <td className="px-3 py-1.5"><IsinCell r={byName.get(r.holding_name)} /></td>
-                <td className="px-3 py-1.5 text-right font-mono text-fg-subtle">
-                  {r.quantity != null ? r.quantity.toLocaleString('en-US') : '—'}
-                </td>
+                <td className="px-3 py-1.5"><BucketBadge bucket={byName.get(r.holding_name)?.bucket}
+                  isin={byName.get(r.holding_name)?.isin} overridden={byName.get(r.holding_name)?.bucket_overridden}
+                  onOverride={setBucket} /></td>
+                <td className="px-3 py-1.5 text-fg-subtle">{byName.get(r.holding_name)?.sector || '—'}</td>
+                <td className="px-3 py-1.5 text-fg-subtle">{byName.get(r.holding_name)?.country || '—'}</td>
+                <td className="px-3 py-1.5 text-fg-subtle">{byName.get(r.holding_name)?.region || '—'}</td>
                 <td className="px-3 py-1.5 font-mono text-fg-muted">{r.currency || '—'}</td>
                 <td className="px-3 py-1.5 text-right font-mono text-fg-subtle">
                   {r.weight != null ? `${(r.weight * 100).toFixed(2)}%` : '—'}
                   {r.weight != null && (
-                    <Provenance source="airs_volk" asOf={d.as_of} note="Weging"
-                      how="Position value as a share of the book (Weging)." />
+                    <Provenance source="airs_volk" asOf={d.as_of} kind="copied"
+                      note="Weging — AIRS's own position weight" />
                   )}
-                </td>
-                <td className="px-3 py-1.5 text-right font-mono text-fg-subtle">
-                  {eur(r.start_value_eur)}
-                  <Provenance source="airs_volk" asOf={d.as_of} note="Beginwaarde lopend jaar EUR"
-                    how="AIRS opening value, restated to today's quantity (Beginwaarde)." />
-                </td>
-                <td className="px-3 py-1.5 text-right font-mono text-fg">
-                  {eur(r.current_value_eur)}
-                  <Provenance source="airs_volk" asOf={d.as_of} note="Huidige waarde EUR"
-                    how="AIRS current value (Huidige waarde)." />
-                </td>
-                <td className={`px-3 py-1.5 text-right font-mono ${tone(r.fund_result_eur)}`}>
-                  {eur(r.fund_result_eur)}
-                  <Provenance source="airs_volk" asOf={d.as_of} note="Fondsresultaat (performance leg)"
-                    how="AIRS's performance leg — the gain from the stock's own price move, in EUR (currency excluded). Perf + FX = the total gain." />
-                </td>
-                <td className={`px-3 py-1.5 text-right font-mono ${tone(r.fx_result_eur)}`}>
-                  {eur(r.fx_result_eur)}
-                  <Provenance source="airs_volk" asOf={d.as_of} note="Valutaresultaat (FX leg)"
-                    how="AIRS's currency leg — the gain or loss from the exchange-rate move, in EUR." />
                 </td>
                 {/* ⚠ A dash, never 0%. No opening value = the return is UNDEFINED, not flat. */}
                 <td className={`px-3 py-1.5 text-right font-mono ${tone(r.ytd_return_pct)}`}
@@ -657,7 +709,7 @@ function Holdings({ d, i }: { d?: AirsAccountDetail; i?: AirsAccountIsins }) {
                     : undefined}>
                   {r.ytd_return_pct == null ? '—' : pct(r.ytd_return_pct * 100)}
                   {r.ytd_return_pct != null && (
-                    <Provenance source="airs_volk" asOf={d.as_of} note="Resultaat (price return)"
+                    <Provenance source="airs_volk" asOf={d.as_of} kind="formula" note="Resultaat (price return)"
                       how={`Now ÷ Start − 1 = ${eur(r.current_value_eur)} ÷ ${eur(r.start_value_eur)} − 1 = ${pct(r.ytd_return_pct * 100)}`} />
                   )}
                 </td>

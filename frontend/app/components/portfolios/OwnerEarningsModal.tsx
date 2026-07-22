@@ -10,6 +10,7 @@ import { runSSE } from '../../../lib/stream';
 import { chartTheme } from '../../../lib/chartTheme';
 import type { FinancialSeriesResponse } from '../../../lib/types/api';
 import { type Basket } from './PerformanceModal';
+import FundamentalCharts from './FundamentalCharts';
 
 type Cadence = 'annual' | 'quarterly';
 type Basis = 'native' | 'eur';
@@ -81,6 +82,28 @@ function logFit(dates: string[], levels: (number | null)[]): Fit {
     line[i] = Math.exp(a + b * ((Date.parse(dates[i]) - t0) / MS_PER_YEAR));
   }
   return { r2, cagr: Math.exp(b) - 1, line, used, have };
+}
+
+/**
+ * Standard deviation of period-over-period growth rates — the level's growth
+ * VOLATILITY, the steadiness partner to the fit's R². R² asks "do the points sit
+ * on ONE compounding trend?"; SD asks "how much does the year-to-year step
+ * wobble?" — a business can hug its trend (high R²) yet lurch period to period.
+ *
+ * Only consecutive periods that are BOTH positive contribute a rate (a growth
+ * rate across a loss year has no meaning); sample SD (n−1); null under 2 rates.
+ * Measured on each currency basis so FX-driven wobble shows in EUR, like R².
+ */
+function growthSd(levels: (number | null)[]): number | null {
+  const rates: number[] = [];
+  for (let i = 1; i < levels.length; i++) {
+    const prev = levels[i - 1], curr = levels[i];
+    if (prev != null && curr != null && prev > 0 && curr > 0) rates.push(curr / prev - 1);
+  }
+  if (rates.length < 2) return null;
+  const mean = rates.reduce((s, v) => s + v, 0) / rates.length;
+  const variance = rates.reduce((s, v) => s + (v - mean) ** 2, 0) / (rates.length - 1);
+  return Math.sqrt(variance);
 }
 
 /**
@@ -256,25 +279,37 @@ export default function OwnerEarningsModal({
   const isEurNative = ccy === 'EUR' || ccy === '';
   const effBasis: Basis = isEurNative ? 'eur' : basis;
 
-  const { fitNative, fitEur, chartData, negatives } = useMemo(() => {
+  const { fitNative, fitEur, sdNative, sdEur, chartData, negatives } = useMemo(() => {
     const dates = rows.map((p) => p.date);
     const native = rows.map((p) => p.value);
     const eur = rows.map((p) => p.value_eur);
     const fN = logFit(dates, native);
     const fE = logFit(dates, eur);
+    const sdN = growthSd(native);
+    const sdE = growthSd(eur);
     const level = effBasis === 'eur' ? eur : native;
     const fitLine = (effBasis === 'eur' ? fE : fN).line;
-    const cd = rows.map((p, i) => ({
-      label: p.label, date: p.date,
-      // A non-positive level cannot sit on a log axis — null it so the line simply gaps there.
-      value: level[i] != null && level[i]! > 0 ? level[i] : null,
-      fit: fitLine[i],
-    }));
+    const sdShown = effBasis === 'eur' ? sdE : sdN;
+    const cd = rows.map((p, i) => {
+      const f = fitLine[i];
+      // ±1 growth-SD corridor around the trend — the SD's line on the chart, the
+      // way the dashed trend is R²'s. A wider band = lumpier year-to-year growth.
+      const lowerRaw = f != null && sdShown != null ? f * (1 - sdShown) : null;
+      return {
+        label: p.label, date: p.date,
+        // A non-positive level cannot sit on a log axis — null it so the line simply gaps there.
+        value: level[i] != null && level[i]! > 0 ? level[i] : null,
+        fit: f,
+        fitUpper: f != null && sdShown != null ? f * (1 + sdShown) : null,
+        // A band edge ≤0 (growth SD > 100%) can't sit on a log axis either — gap it.
+        fitLower: lowerRaw != null && lowerRaw > 0 ? lowerRaw : null,
+      };
+    });
     // The years that gap the log line — and WHY. A negative owner-earnings year is a LOSS year, a
     // fundamental fact worth naming, not a hole. Named here so 2009 doesn't read as missing data.
     const neg = rows.flatMap((p, i) => (level[i] != null && level[i]! <= 0
       ? [{ label: p.label, value: level[i]! }] : []));
-    return { fitNative: fN, fitEur: fE, chartData: cd, negatives: neg };
+    return { fitNative: fN, fitEur: fE, sdNative: sdN, sdEur: sdE, chartData: cd, negatives: neg };
   }, [rows, effBasis]);
 
   const shownFit = effBasis === 'eur' ? fitEur : fitNative;
@@ -406,11 +441,14 @@ export default function OwnerEarningsModal({
 
         {!loading && !error && !notApplicable && canFit && (
           <div className="space-y-2">
-            {/* The headline: R² on BOTH bases + the CAGR the fit implies. */}
+            {/* The headline: R² + growth SD on BOTH bases + the CAGR the fit implies. */}
             <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs">
               <span className="text-[10px] uppercase tracking-wide text-fg-faint">Steadiness R²</span>
               <R2Stat label={isEurNative ? 'EUR' : ccy || 'Native'} r2={fitNative.r2} />
               {!isEurNative && <R2Stat label="EUR" r2={fitEur.r2} />}
+              <span className="text-[10px] uppercase tracking-wide text-fg-faint">Growth SD</span>
+              <SdStat label={isEurNative ? 'EUR' : ccy || 'Native'} sd={sdNative} />
+              {!isEurNative && <SdStat label="EUR" sd={sdEur} />}
               {shownFit.cagr != null && (
                 <span className="text-fg-muted">
                   CAGR{' '}
@@ -437,9 +475,18 @@ export default function OwnerEarningsModal({
                   labelFormatter={(_l, payload) => String(payload?.[0]?.payload?.date ?? '')}
                   formatter={(value, key) => [
                     money(Number(value), moneyCcy, valueKind),
-                    key === 'fit' ? 'Trend' : seriesLabel,
+                    key === 'fit' ? 'Trend'
+                      : key === 'fitUpper' ? '+1 SD'
+                        : key === 'fitLower' ? '−1 SD'
+                          : seriesLabel,
                   ]}
                 />
+                {/* ±1 growth-SD corridor around the trend — drawn first so the trend
+                    and the series sit on top of it. */}
+                <Line type="monotone" dataKey="fitUpper" stroke={chartTheme.warn} strokeWidth={1}
+                  strokeDasharray="2 3" strokeOpacity={0.45} dot={false} isAnimationActive={false} connectNulls name="fitUpper" />
+                <Line type="monotone" dataKey="fitLower" stroke={chartTheme.warn} strokeWidth={1}
+                  strokeDasharray="2 3" strokeOpacity={0.45} dot={false} isAnimationActive={false} connectNulls name="fitLower" />
                 <Line type="monotone" dataKey="fit" stroke={chartTheme.warn} strokeWidth={2}
                   strokeDasharray="5 4" dot={false} isAnimationActive={false} connectNulls name="fit" />
                 <Line type="monotone" dataKey="value" stroke={chartTheme.accent}
@@ -457,6 +504,7 @@ export default function OwnerEarningsModal({
               <span className="text-warn-300"> 0.8–0.95 lumpy</span> ·
               <span className="text-neg-400"> &lt;0.8 erratic</span>),
               shown for {isEarnings ? 'reporting' : 'listing'} currency and EUR.
+              {' · '}Growth SD = SD of period-over-period growth (lower = steadier); the faint dashed band is ±1 SD around the trend.
               {note && <> · {note}</>}
             </div>
             {/* Named, not hidden: a negative period can't sit on a log axis, and a reader seeing a
@@ -466,6 +514,16 @@ export default function OwnerEarningsModal({
                 Excluded (non-positive): {negatives.map((nv) => `${nv.label} ${money(nv.value, moneyCcy, valueKind)}`).join(', ')}.
               </div>
             )}
+          </div>
+        )}
+
+        {/* Full fundamental chart suite (the /earnings dashboard), reused per
+            single company. Single-instrument mode only — a basket/portfolio has
+            no single company_id to resolve. */}
+        {!isAgg && isin && (
+          <div className="mt-6 pt-5 border-t border-neutral-800/40 space-y-3">
+            <h3 className="text-sm font-semibold text-fg-strong">Fundamentals</h3>
+            <FundamentalCharts isin={isin} name={name} />
           </div>
         )}
       </div>
@@ -481,6 +539,20 @@ function R2Stat({ label, r2 }: { label: string; r2: number | null }) {
     <span className="text-fg-muted">
       {label}{' '}
       <span className={`font-mono font-semibold ${tone}`}>{r2 == null ? '—' : r2.toFixed(2)}</span>
+    </span>
+  );
+}
+
+/** A growth-rate SD (shown as a %) with a steadiness colour — LOWER is steadier,
+ * so the scale inverts R²'s. Bands match the app's FCF-growth-SD convention
+ * (green ≤0.2, amber 0.2–0.5, red above); grey when unmeasurable. */
+function SdStat({ label, sd }: { label: string; sd: number | null }) {
+  const tone = sd == null ? 'text-fg-faint'
+    : sd <= 0.2 ? 'text-pos-400' : sd <= 0.5 ? 'text-warn-300' : 'text-neg-400';
+  return (
+    <span className="text-fg-muted">
+      {label}{' '}
+      <span className={`font-mono font-semibold ${tone}`}>{sd == null ? '—' : `${(sd * 100).toFixed(1)}%`}</span>
     </span>
   );
 }

@@ -78,7 +78,7 @@ test.describe('/portfolios overview', () => {
   test('holdings are grouped by asset class, with real estate its own bucket', async ({ page }) => {
     await row(page, 'Bustelberg Defensief').click();
     const sub = page.locator('td[colspan] table tbody');
-    for (const seg of ['Equity', 'Bonds', 'Real estate', 'Alternatives', 'Cash']) {
+    for (const seg of ['Stocks', 'Bonds', 'Real estate', 'Alternatives', 'Cash']) {
       await expect(sub.locator('tr').filter({ hasText: seg }).first()).toBeVisible();
     }
     // The header carries the segment's own figures.
@@ -87,39 +87,17 @@ test.describe('/portfolios overview', () => {
     await expect(bonds).toContainText('-2.57%');
   });
 
-  test('Analyse opens the strategy modal and shows book-vs-strategy drift', async ({ page }) => {
-    // ⚠ The row is the BOOK (AIRS); the modal is the STRATEGY (yfinance). They are different
-    // objects and disagree by up to 6.58pp — so the modal must NAME the object it describes and
-    // put the book's number beside it, or a reader thinks they clicked into the row they see.
-    const analyse = row(page, 'Bustelberg Defensief').getByRole('button', { name: 'Analyse' });
-    await expect(analyse).toBeVisible();
-    await analyse.click();
-
-    const modal = page.getByRole('dialog').or(page.locator('.fixed').filter({ hasText: 'Return (€)' })).first();
-    // Scope to the Return tile — "Book (AIRS)" is also the label of the Source dropdown option in
-    // the modal header, so an unscoped getByText matches two elements.
-    const returnTile = modal.locator('section').filter({ hasText: 'Return (€)' });
-    await expect(page.getByText('Book vs strategy (YTD)')).toBeVisible();
-    await expect(returnTile.getByText('Strategy (our prices)')).toBeVisible();
-    await expect(returnTile.getByText('Book (AIRS)')).toBeVisible();
-    // Both numbers, and the drift between them.
-    await expect(page.getByText('+51.48%').first()).toBeVisible();   // strategy
-    await expect(page.getByText('+46.12%').first()).toBeVisible();   // book
-    await expect(page.getByText(/\+5\.36% drift/)).toBeVisible();
-  });
-
-  test('the Source toggle reweights the portfolio bars by the AIRS book', async ({ page }) => {
-    // ⚠ The Source toggle (Model | Book) changes ONLY the portfolio side — the benchmark and the
-    // sector/region/currency vocabulary stay yfinance, because the benchmark cannot be priced any
-    // other way. It re-fetches with weight_by=book&source=book; the mock returns Technology at 45%
-    // (model) vs 52% (book).
+  test('the portfolio bars are weighted by the AIRS book, with no Source toggle', async ({ page }) => {
+    // AIRS is the FIXED primary source (no Model|Book toggle) — the modal always fetches
+    // weight_by=book&source=book. The benchmark and the sector/region/currency vocabulary stay
+    // yfinance. The mock returns Technology at 52% (book) vs 45% (model), so book weighting shows 52%.
     await row(page, 'Bustelberg Defensief').getByRole('button', { name: 'Analyse' }).click();
     const modal = page.getByRole('dialog');
-    await expect(modal.getByText(/Composition vs/)).toBeVisible();
-
-    await modal.getByRole('combobox', { name: 'Source' }).selectOption('book');
-    // The subtitle names the active source, and a Technology bar re-weights.
-    await expect(modal.getByText(/AIRS book/)).toBeVisible();
+    await expect(modal.getByRole('combobox', { name: 'Benchmark' })).toBeVisible();
+    // No Source selector any more.
+    await expect(modal.getByRole('combobox', { name: 'Source' })).toHaveCount(0);
+    // Select the Stocks class to reveal the sector composition; book weighting shows Technology 52%.
+    await modal.getByRole('button', { name: /Stocks/ }).click();
     await expect(modal.getByText('52%').first()).toBeVisible();
   });
 
@@ -131,8 +109,8 @@ test.describe('/portfolios overview', () => {
   });
 
   test('each segment figure sits under the column it belongs to', async ({ page }) => {
-    // ⚠ Column drift is SILENT: an extra blank cell in the header shifted every figure one to
-    // the right, and a weight renders perfectly well under "Start (€)". Nothing looks broken —
+    // ⚠ Column drift is SILENT: an extra blank cell in the header shifts every figure one to the
+    // right, and a weight renders perfectly well under the wrong header. Nothing looks broken —
     // it just answers a different question than the header above it claims.
     await row(page, 'Bustelberg Defensief').click();
     const sub = page.locator('td[colspan] table');
@@ -147,10 +125,7 @@ test.describe('/portfolios overview', () => {
       return cells[i].trim();
     };
     expect(at('Weight')).toBe('15.34%');                 // the weight is under Weight
-    expect(at('Start (€)')).toBe('€183,505');            // not under Start
-    expect(at('Now (€)')).toBe('€178,797');
-    expect(at('Gain (€)')).toBe('€-4,708');
-    expect(at('Return')).toContain('-2.57%');
+    expect(at('Return')).toContain('-2.57%');            // the return is under Return
   });
 
   test('an ETF is counted inside its asset class, not split out of it', async ({ page }) => {
@@ -349,29 +324,29 @@ test.describe('/portfolios', () => {
 
     const modal = page.getByRole('dialog');
     await expect(modal).toBeVisible();
-    await expect(modal).toContainText('Composition vs');
-    // Two series -> a legend is mandatory; identity is never colour-alone. One legend per CHART
-    // (scoped to the legend text, since the returns tile also has a "Portfolio" column header).
-    const legend = modal.locator('.recharts-legend-item-text');
-    await expect(legend.filter({ hasText: /^Portfolio$/ })).toHaveCount(3);
-    await expect(legend.filter({ hasText: /^SP500$/ })).toHaveCount(3);
-    // All three axes.
+    await expect(modal.getByRole('combobox', { name: 'Benchmark' })).toBeVisible();
+
+    // NOTHING selected on open → the whole-portfolio scorecard (portfolio vs index + excess) and a
+    // prompt to pick a class. No composition charts yet.
+    await expect(modal.getByText('Return (YTD)')).toBeVisible();
+    await expect(modal).toContainText('+51.48%');    // portfolio YTD
+    await expect(modal).toContainText('+12.41%');    // ...and the index over THAT window
+    await expect(modal).toContainText('+39.07pp');   // excess (a difference of two returns → pp)
+    await expect(modal.getByText(/Select a class/)).toBeVisible();
+    await expect(modal.locator('.chart-legend')).toHaveCount(0);
+
+    // Pick the Stocks class → the sector/region/currency charts appear (one legend each), and the
+    // whole-portfolio scorecard is replaced by the class's own return.
+    await modal.getByRole('button', { name: /Stocks/ }).click();
+    const legend = modal.locator('.chart-legend');
+    await expect(legend).toHaveCount(3);
+    await expect(legend.filter({ hasText: /Portfolio/ })).toHaveCount(3);
+    await expect(legend.filter({ hasText: /SP500/ })).toHaveCount(3);
     for (const axis of ['Sector', 'Region', 'Currency']) {
       await expect(modal.getByRole('heading', { name: axis })).toBeVisible();
     }
-    // ⚠ The honest bucket: we do not look through funds, and the chart says so. (The axis label
-    // wraps across two SVG tspans, so match the un-broken half.)
-    await expect(modal).toContainText('Fund (not looked');
-    await expect(modal).toContainText('we hold no look-through');
-
-    // The returns tile — portfolio vs index, over the model's OWN windows, each stating its
-    // start date. A benchmark measured over a different period is not a benchmark.
-    await expect(modal.getByRole('heading', { name: 'Return (€)' })).toBeVisible();
-    await expect(modal).toContainText('+51.48%');    // portfolio YTD
-    await expect(modal).toContainText('+12.41%');    // ...and the index over THAT window
-    await expect(modal).toContainText('+39.07%');    // excess
-    await expect(modal).toContainText('from 2026-01-01');
-    await expect(modal).toContainText('from 2025-12-30');   // inception ≠ 1 Jan
+    // Funds fold into Unclassified rather than inventing a sector split.
+    await expect(modal).toContainText('Unclassified');
 
     // The button must NOT have toggled the row open — that would be two actions on one press.
     await expect(page.getByText('marks from')).toHaveCount(0);
@@ -395,13 +370,14 @@ test.describe('/portfolios', () => {
     await expect(modal).toContainText('67%');
   });
 
-  test('clicking a return row explains WHY — allocation vs selection', async ({ page }) => {
+  test('the Attribution button explains WHY — allocation vs selection', async ({ page }) => {
     await row(page, 'AITopSelectie OFF FX').getByRole('button', { name: 'Analyse' }).click();
     const modal = page.getByRole('dialog');
 
     // The attribution is not shown until asked for — an excess is a fact, the "why" is a question.
     await expect(modal.getByRole('heading', { name: /^Why —/ })).toHaveCount(0);
-    await modal.getByText('Since inception').click();
+    await modal.getByRole('button', { name: /Stocks/ }).click();   // Attribution lives in the Stocks view
+    await modal.getByRole('button', { name: 'Attribution' }).click();
 
     const panel = modal.getByRole('heading', { name: /^Why —/ });
     await expect(panel).toBeVisible();
@@ -409,8 +385,8 @@ test.describe('/portfolios', () => {
     // Brinson separates the two mistakes: the SECTORS you chose vs the STOCKS inside them.
     await expect(modal).toContainText('Allocation');
     await expect(modal).toContainText('Selection');
-    await expect(modal).toContainText('-7.51%');   // Industrials: bad SELECTION
-    await expect(modal).toContainText('-5.07%');   // Consumer Cyclical: bad ALLOCATION
+    await expect(modal).toContainText('-7.51pp');   // Industrials: bad SELECTION
+    await expect(modal).toContainText('-5.07pp');   // Consumer Cyclical: bad ALLOCATION
 
     // ⚠ The unpriced Healthcare position makes its sector read as UNOWNED, so that row's
     // allocation effect is a FALSE finding — not a missing one. It must be called out.
@@ -428,7 +404,8 @@ test.describe('/portfolios', () => {
   test('the allocation column explains ITSELF — the number alone means nothing', async ({ page }) => {
     await row(page, 'AITopSelectie OFF FX').getByRole('button', { name: 'Analyse' }).click();
     const modal = page.getByRole('dialog');
-    await modal.getByText('Since inception').click();
+    await modal.getByRole('button', { name: /Stocks/ }).click();   // Attribution lives in the Stocks view
+    await modal.getByRole('button', { name: 'Attribution' }).click();
     await expect(modal.getByRole('heading', { name: /^Why —/ })).toBeVisible();
 
     // The headline conclusion, in a sentence — the reader should not have to subtract two
@@ -448,7 +425,7 @@ test.describe('/portfolios', () => {
     // Consumer Cyclical: a big overweight in a sector that badly lagged the index — the classic
     // misread ("but it went UP").
     const cc = modal.locator('tr').filter({ hasText: 'Consumer Cyclical' });
-    await cc.getByText('-5.07%').hover();           // its Allocation value
+    await cc.getByText('-5.07pp').hover();           // its Allocation value
     await expect(modal.getByText(/34\.0% vs the index's 13\.0%/)).toBeVisible();
     await expect(modal.getByText(/lagged the index/).first()).toBeVisible();
   });
@@ -456,14 +433,15 @@ test.describe('/portfolios', () => {
   test('every column header explains itself', async ({ page }) => {
     await row(page, 'AITopSelectie OFF FX').getByRole('button', { name: 'Analyse' }).click();
     const modal = page.getByRole('dialog');
-    await modal.getByText('Since inception').click();
+    await modal.getByRole('button', { name: /Stocks/ }).click();   // Attribution lives in the Stocks view
+    await modal.getByRole('button', { name: 'Attribution' }).click();
     await expect(modal.getByRole('heading', { name: /^Why —/ })).toBeVisible();
 
     // Every column is a term of art or a subscripted symbol. A reader who has to GUESS what one
     // means will guess wrong in a way that looks right — so each one carries its own explanation,
     // shown on hover IMMEDIATELY. The native `title=` attribute cannot do this: the browser
     // delays it by 1-2 seconds and the delay is not configurable.
-    // (Scoped to the attribution section — the Return tile has a thead of its own.)
+    // (Scoped to the attribution section's own thead.)
     const head = modal.locator('section').filter({ hasText: 'Why —' }).locator('thead').first();
 
     // The one the whole panel exists to prevent: a bucket can rise and still have been the wrong
@@ -487,7 +465,8 @@ test.describe('/portfolios', () => {
   test('the wording follows the axis — never “sector” while showing regions', async ({ page }) => {
     await row(page, 'AITopSelectie OFF FX').getByRole('button', { name: 'Analyse' }).click();
     const modal = page.getByRole('dialog');
-    await modal.getByText('Since inception').click();
+    await modal.getByRole('button', { name: /Stocks/ }).click();   // Attribution lives in the Stocks view
+    await modal.getByRole('button', { name: 'Attribution' }).click();
     const panel = modal.locator('section').filter({ hasText: 'Why —' }).first();
     await expect(panel).toBeVisible();
 
@@ -511,7 +490,8 @@ test.describe('/portfolios', () => {
   test('the formulas are real MathML, not letters glued together', async ({ page }) => {
     await row(page, 'AITopSelectie OFF FX').getByRole('button', { name: 'Analyse' }).click();
     const modal = page.getByRole('dialog');
-    await modal.getByText('Since inception').click();
+    await modal.getByRole('button', { name: /Stocks/ }).click();   // Attribution lives in the Stocks view
+    await modal.getByRole('button', { name: 'Attribution' }).click();
     await expect(modal.getByRole('heading', { name: /^Why —/ })).toBeVisible();
 
     // Native MathML — no library, no bundle. It buys three things hand-rolled <sub> cannot:
@@ -658,17 +638,19 @@ test.describe('/portfolios', () => {
   test('clicking a composition bar drills into the holdings behind it', async ({ page }) => {
     await row(page, 'AITopSelectie OFF FX').getByRole('button', { name: 'Analyse' }).click();
     const modal = page.getByRole('dialog');
-    await expect(modal).toContainText('Composition vs');
+    await expect(modal.getByRole('combobox', { name: 'Benchmark' })).toBeVisible();
+    // Reveal the Stocks composition charts first (nothing is selected on open).
+    await modal.getByRole('button', { name: /Stocks/ }).click();
 
-    // Click Technology (index 0) in the Sector chart's portfolio bar.
+    // Click Technology — the first (largest-share) bar row in the Sector chart.
     const sector = modal.locator('section').filter({ has: page.getByRole('heading', { name: 'Sector', exact: true }) });
-    await sector.locator('.recharts-bar-rectangle').first().click();
+    await sector.locator('button').first().click();
 
     // The bucket-detail panel opens with BOTH sides + the Brinson tilt.
     await expect(modal.getByRole('heading', { name: /Sector: *Technology/ })).toBeVisible();
     await expect(modal).toContainText('Arista Networks');   // your holding in the bucket
     await expect(modal).toContainText('NVIDIA Corp');       // an index constituent in the bucket
-    await expect(modal).toContainText('top 2 of 82');       // the cap + true count
+    await expect(modal).toContainText('constituents');      // the full index side is listed
     await expect(modal).toContainText('selection');         // the tilt decomposition
     // Contribution (weight × return) is shown for BOTH sides — your names and the index's.
     await expect(modal).toContainText('+4.43');             // Arista's contribution to the model

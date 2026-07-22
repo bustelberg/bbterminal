@@ -23,9 +23,8 @@ ONE VOCABULARY, OR THE COMPARISON IS A LIE
                    not the currency exposure.
 
     We have no constituent data for these funds, so we cannot decompose them. The honest move is
-    to say so: every fund goes into ONE bucket, `Fund (not looked through)`, on ALL THREE axes.
-    A portfolio that is 40% ETF then shows a 40% bar that reads "we can't see inside this" —
-    which is TRUE, and far more useful than a confident, wrong sector split.
+    to say so: every fund folds into `Unclassified` on ALL THREE axes — a confident wrong sector
+    split would be worse than one bucket that reads "we can't see inside this".
 
     (For a single-stock holding the listing currency IS a fair proxy for currency exposure, and
     the domicile a fair proxy for region. Imperfect, standard, and not misleading.)
@@ -49,11 +48,12 @@ from routers._asset_benchmark import index_returns
 from routers._asset_benchmark import members as _members
 from routers._benchmark_index import SP500_LABEL
 
-# The single bucket every fund lands in, on every axis. Named, not blank — a blank reads as
-# "nothing", and this is emphatically something.
-FUND_BUCKET = "Fund (not looked through)"
 CASH_BUCKET = "Cash"
 UNKNOWN_BUCKET = "Unclassified"
+# A fund is a black box on these axes — an ETF's listing tells you nothing about its holdings — so
+# it FOLDS INTO Unclassified rather than being split into a sector/region/currency it never had.
+# (Kept as its own name for the callers that still reference it; the value is UNKNOWN_BUCKET.)
+FUND_BUCKET = UNKNOWN_BUCKET
 
 _FUND_CLASSES = {"etf", "fund", "etc", "etp", "crypto", "commodity"}
 
@@ -77,6 +77,26 @@ _SECTOR_ALIASES = {
 # the ETF/asset-class fallback. A bucket named "Equity" inside a sector chart is noise wearing a
 # label; it is an absence, and it says so.
 _NOT_A_SECTOR = {"equity", "bonds", "commodity", "short commodity", "crypto", "etf"}
+
+# ── Asset-class allocation (the portfolio's OWN split, no benchmark) ──────────────────────────
+# AIRS's `categorie` classifies what a holding INVESTS IN — an equity ETF is AAND, a bond ETF is
+# OBL — so the ETF wrapper is an ORTHOGONAL axis. Only EQUITY is split into direct vs ETF; a bond
+# ETF is Bonds. Real estate (VAS, the REITs) folds into Alternatives to match the requested buckets.
+_CATEGORIE_TO_CLASS = {"AAND": "Equity", "OBL": "Bonds", "VAS": "Real estate", "ALTBEL": "Alternatives"}
+# Bucket order for the allocation bar. Must match `_airs_holding_isin.BUCKET_ORDER`; a literal here
+# (not an import) to avoid a module-level cycle — `classify_bucket` is imported per-call instead.
+_ALLOC_ORDER = ["Equity", "Equity ETF", "Bonds", "Alternatives", "Cash", UNKNOWN_BUCKET]
+
+
+def _weigh_alloc(items: list[tuple[float, str]]) -> list[dict]:
+    """Sum the (weight, bucket) pairs into ordered percentage slices (drops empty buckets)."""
+    total = sum(w for w, _ in items)
+    if total <= 0:
+        return []
+    agg: dict[str, float] = defaultdict(float)
+    for w, b in items:
+        agg[b] += w
+    return [{"bucket": b, "pct": agg[b] / total * 100.0} for b in _ALLOC_ORDER if agg.get(b)]
 
 
 def _sector(raw: str | None) -> str:
@@ -156,8 +176,8 @@ def _buckets(row: dict | None, is_cash: bool, isin: str | None = None,
         return CASH_BUCKET, CASH_BUCKET, CASH_BUCKET
     if not row:
         return UNKNOWN_BUCKET, UNKNOWN_BUCKET, UNKNOWN_BUCKET
-    # A fund is opaque on ALL THREE axes — see the module docstring. Not just its sector: its
-    # listing venue and quote currency say nothing about what it holds either.
+    # A fund is opaque on ALL THREE axes — its listing venue, sector and quote currency say nothing
+    # about what it holds — so it folds into Unclassified (FUND_BUCKET == UNKNOWN_BUCKET).
     if (row.get("asset_class") or "").lower() in _FUND_CLASSES:
         return FUND_BUCKET, FUND_BUCKET, FUND_BUCKET
     return (
@@ -391,6 +411,7 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
 
     grid = _grid(sorted({r["isin"] for r in rows if r.get("isin")}))
     items: list[tuple[float, tuple[str, str, str]]] = []
+    alloc_items: list[tuple[float, str]] = []
     classified_w = total_w = 0.0
     foreign = holdings = 0
     for r in rows:
@@ -411,16 +432,53 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
         if grow and _foreign_listing(grow):
             foreign += 1
         items.append((w, b))
+        # The book row is already classified by resolve_account_isins (the shared classifier).
+        alloc_items.append((w, r.get("bucket") or UNKNOWN_BUCKET))
     if not items:
         return None
-    return {"items": items, "classified_w": classified_w, "total_w": total_w,
-            "foreign": foreign, "holdings": holdings, "portefeuille": link["portefeuille"]}
+    # Per-bucket return = the WEIGHTED AVERAGE of its holdings' returns, each weighted by its CURRENT
+    # value — Σ(nowᵢ · retᵢ) ÷ Σnowᵢ, i.e. exactly Σ(weightᵢ · returnᵢ) over the holdings (weight =
+    # the position's share of the book). For the allocation pie's legend + the sleeve views. Same
+    # priced basis the segments use: start != 0, now known. Alongside it the per-HOLDING detail
+    # (current-weight + return), so a non-equity sleeve's contribution breakdown reconciles to the
+    # sleeve figure: Σ over a bucket of (nowᵢ / Σnow) · retᵢ == that bucket's return above, exactly.
+    bucket_agg: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])  # [Σ now·ret, Σ now]
+    priced = [(r, float(r.get("start_value_eur") or 0), float(r["current_value_eur"]))
+              for r in rows
+              if float(r.get("start_value_eur") or 0) != 0 and r.get("current_value_eur") is not None]
+    total_now = sum(n for _r, _s, n in priced) or 1.0
+    holdings_detail: list[dict] = []
+    for r, start, now in priced:
+        b = r.get("bucket") or UNKNOWN_BUCKET
+        ret = now / start - 1.0
+        bucket_agg[b][0] += now * ret
+        bucket_agg[b][1] += now
+        isin = r.get("isin")
+        grow = grid.get(isin) if isin else None
+        # The holding's own quote currency — NOT folded to Unclassified the way the fund axes are.
+        # For a bond/ETF sleeve the quote currency is a fair first-order FX signal (a EUR-quoted line
+        # vs a USD one), which is exactly what the sleeve currency chart is for.
+        cur = (grow.get("market_cap_currency") or grow.get("currency")) if grow else None
+        holdings_detail.append({
+            "name": r.get("holding_name"),
+            "isin": isin,
+            "bucket": b,
+            "currency": cur,
+            "weight_pct": now / total_now * 100.0,   # CURRENT-value share of the whole book
+            "return_pct": ret * 100.0,
+        })
+    bucket_returns = {b: (v[0] / v[1]) * 100.0 for b, v in bucket_agg.items() if v[1]}
+    return {"items": items, "alloc_items": alloc_items, "bucket_returns": bucket_returns,
+            "holdings_detail": holdings_detail,
+            "classified_w": classified_w, "total_w": total_w, "foreign": foreign,
+            "holdings": holdings, "portefeuille": link["portefeuille"]}
 
 
 def compute_portfolio_analysis(portfolio_id: int,
                                benchmark_label: str = SP500_LABEL,
                                weight_by: str = "model",
-                               source: str = "model") -> dict:
+                               source: str = "model",
+                               bucket_filter: str | None = None) -> dict:
     """The portfolio's composition beside the benchmark's, on one set of buckets.
 
     `source` ("model" | "book") picks where the RETURN numbers come from: the yfinance model
@@ -441,16 +499,20 @@ def compute_portfolio_analysis(portfolio_id: int,
     p = p[0]
 
     pos = (supabase.table("airs_model_portfolio_position")
-           .select("isin,fonds,percentage,datum")
+           .select("isin,fonds,percentage,datum,categorie")
            .eq("portfolio_id", portfolio_id).execute().data or [])
     if p.get("positions_datum"):
         pos = [r for r in pos if r.get("datum") == p["positions_datum"]]
 
     # --- the portfolio side -------------------------------------------------------------
+    from routers._airs_holding_isin import (  # noqa: PLC0415  (avoid a module-level cycle)
+        _load_bucket_overrides, classify_bucket)
     codes = _country_by_code()
     held = sorted({r["isin"] for r in pos if r.get("isin")})
+    overrides = _load_bucket_overrides(held)   # manual Class pins win, so the bar matches the column
     grid = _grid(held)
     port_items: list[tuple[float, tuple[str, str, str]]] = []
+    alloc_items: list[tuple[float, str]] = []
     classified_w = total_w = 0.0
     port_foreign = 0
     for r in pos:
@@ -466,6 +528,12 @@ def compute_portfolio_analysis(portfolio_id: int,
         if row and _foreign_listing(row):
             port_foreign += 1
         port_items.append((w, b))
+        # Asset class from AIRS's `categorie` (what it invests in); then the shared classifier, so a
+        # model position and the same holding in the book table land in the identical bucket.
+        ac = "Cash" if not isin else _CATEGORIE_TO_CLASS.get((r.get("categorie") or "").strip().upper())
+        is_etf = bool(row) and (row.get("asset_class") or "").lower() in _FUND_CLASSES
+        bucket = overrides.get(isin or "") or classify_bucket(ac, is_etf, isin, r.get("fonds"), row)
+        alloc_items.append((w, bucket))
 
     # --- the benchmark side -------------------------------------------------------------
     # Deduped, one row per company (the GOOGL/GOOG double-count is 11.3% of the index), and drawn
@@ -493,22 +561,43 @@ def compute_portfolio_analysis(portfolio_id: int,
     # The model side is always built (it is the fallback). When the reader asks for book weights
     # and a priced book exists, swap the portfolio items for the book's — nothing else moves, so
     # the benchmark and the classification stay exactly as they were.
+    # The paired book drives book-weighting (if asked) AND the per-bucket returns for the pie —
+    # a return is a property of the held instruments, not the weighting basis. Loaded once.
+    book = _book_port_items(portfolio_id, codes)
     weight_basis, weight_note = "model", None
     port_holdings = len([r for r in pos if r.get("isin")])
     if weight_by == "book":
-        book = _book_port_items(portfolio_id, codes)
         if book:
             port_items = book["items"]
+            alloc_items = book["alloc_items"]
             classified_w, total_w = book["classified_w"], book["total_w"]
             port_foreign, port_holdings = book["foreign"], book["holdings"]
             weight_basis = "book"
         else:
             weight_note = "No priced book to weight by — showing the model's own weights."
+    bucket_returns = book["bucket_returns"] if book else {}
 
-    pw, bw = _weigh(port_items), _weigh(bench_items)
+    # The charts show the (optionally) filtered asset-class sleeve — click a bar of the allocation
+    # bar to sub-select. `alloc_items` is parallel to `port_items` (same loop), so zip to filter;
+    # the allocation bar itself stays FULL (below), so the reader can re-select.
+    #
+    # ⚠ REGION and CURRENCY describe EVERY holding; SECTOR describes only EQUITY. A bond or a fund
+    # has no equity sector — it would pile into "Unclassified" and drown the real sectors — so the
+    # sector axis is computed over the equity sleeve alone. Each is then intersected with whatever
+    # class the allocation bar has selected (so selecting Bonds empties the sector chart, as it
+    # should — sector is not relevant there).
+    _EQUITY = {"Equity", "Equity ETF"}
+    general_items = port_items
+    if bucket_filter:
+        general_items = [pi for pi, ai in zip(port_items, alloc_items) if ai[1] == bucket_filter]
+    sector_items = [pi for pi, ai in zip(port_items, alloc_items)
+                    if ai[1] in _EQUITY and (not bucket_filter or ai[1] == bucket_filter)]
+    pw_general, pw_sector = _weigh(general_items), _weigh(sector_items)
+    bw = _weigh(bench_items)
 
     axes = []
     for axis in ("sector", "region", "currency"):
+        pw = pw_sector if axis == "sector" else pw_general
         keys = set(pw[axis]) | set(bw[axis])
         rows = [{
             "bucket": k,
@@ -552,15 +641,24 @@ def compute_portfolio_analysis(portfolio_id: int,
         "benchmark_coverage_pct": bench_coverage.get("covered_pct"),
         "returns": _returns(portfolio_id, p.get("positions_datum"), benchmark_label, source),
         "axes": axes,
+        # The portfolio's own asset-class split, on the active weighting basis; each slice carries
+        # the bucket's value-weighted YTD price return (from the paired book), for the pie legend.
+        "allocation": [{**s, "return_pct": bucket_returns.get(s["bucket"])}
+                       for s in _weigh_alloc(alloc_items)],
+        # Per-holding book detail (bucket / currency / start-weight / return) — the source for a
+        # non-equity sleeve's contribution + currency view, where sector-vs-SP500 says nothing.
+        # Empty when no book is paired (a model with no book has no per-holding returns).
+        "book_holdings": book["holdings_detail"] if book else [],
     }
 
 
 async def compute_portfolio_analysis_async(portfolio_id: int,
                                            benchmark_label: str = SP500_LABEL,
                                            weight_by: str = "model",
-                                           source: str = "model") -> dict:
+                                           source: str = "model",
+                                           bucket_filter: str | None = None) -> dict:
     return await asyncio.to_thread(compute_portfolio_analysis, portfolio_id, benchmark_label,
-                                   weight_by, source)
+                                   weight_by, source, bucket_filter)
 
 
 def portfolio_basket_request(portfolio_id: int):
@@ -705,6 +803,9 @@ def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: 
         "benchmark_coverage_pct": bench_coverage.get("covered_pct"),
         "returns": _basket_returns(holdings, benchmark_label),
         "axes": axes,
+        # A basket has no AIRS book, so no per-holding book returns — the non-equity sleeve view is
+        # a portfolio-only feature.
+        "book_holdings": [],
     }
 
 

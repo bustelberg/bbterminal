@@ -59,10 +59,6 @@ _NON_ATTRIBUTABLE = {FUND_BUCKET, CASH_BUCKET, UNKNOWN_BUCKET}
 
 _AXIS_IDX = {"sector": 0, "region": 1, "currency": 2}
 
-# An index sector can list ~70 constituents; the click-through shows only the largest few (the
-# count travels alongside), so the payload stays bounded even for the ~1,400-name ACWI.
-_BUCKET_HOLDINGS_CAP = 15
-
 
 def _weighted(rows: list[tuple[float, float]]) -> float:
     """Weighted return of (weight, return_pct) pairs, renormalised over the weights given."""
@@ -175,25 +171,30 @@ def _overlaps(h: dict, other_isins: set[str], other_names: list[str]) -> bool:
             spelled-out name is exactly what a token matcher cannot bridge, and AMD was the ONE
             of 16 tech names in the measured case that failed.
       NAME  catches TWO ISINs under ONE BUSINESS — Alphabet class A in the index vs class C in
-            the model. No ISIN comparison can ever see that.
+            the model. No ISIN comparison can ever see that. But the name test is EXACT ROOT
+            EQUALITY, not `same_company`'s fuzzy floor — see below.
 
-    `_held` (the missed-winners gate) has had this shape all along; this check was NAME-ONLY
-    until 2026-07-16 and so marked AMD as a bet held OUTSIDE the index — while the index held it
-    at 0.55% and it was the model's 2nd-largest contributor at +7.83pp. Precisely the module's
-    own "false finding that is actionable, and the action is wrong".
+    ⚠ THE NAME TEST MUST BE EXACT ROOT EQUALITY, NOT `same_company`. `same_company` is right for
+    matching a listing to ITS OWN issuer ("NVIDIA CORP" ↔ "NVIDIA Corporation") — a loose floor
+    that tolerates noise. Here it is catastrophic: `_company_root("S&P Global Inc")` reduces to the
+    single generic token 'global' (the initials S, P drop as single letters), and token_set_ratio
+    then matches 'global' to EVERY name containing it — "Coinbase Global", "Apollo Global
+    Management" — so index-only names get marked as held. Measured: on a Financials bucket the model
+    held 5 names and the panel claimed 8 index overlaps, Coinbase among them, held by nobody.
+    A share class (Alphabet A vs C, different ISINs) shares the SAME root; an unrelated company that
+    merely shares a word does not. Exact equality is the line between them.
 
-    ⚠ Do NOT re-route this through a shared display name to make the fuzzy match succeed. The
-    ISIN is already in both dicts; deriving a name FROM it only to fuzzy-match the names is
-    strictly lossier, and it would make correctness depend on a LABEL — so a rename (the
-    /companies "GF name" correction, a Yahoo refresh) would silently break the match months
-    later, out of an unrelated change. Structural, not incidental.
+    ⚠ Do NOT re-route this through a shared display name to make a fuzzy match succeed. The ISIN is
+    already in both dicts; deriving a name FROM it only to match the names is strictly lossier, and
+    it would make correctness depend on a LABEL — a rename (the /companies "GF name" correction, a
+    Yahoo refresh) would silently break the match. Structural, not incidental.
     """
     if h.get("isin") and h["isin"] in other_isins:
         return True
     # Imported here, not at module top, to keep clear of a circular import through asset_pipeline.
-    from asset_pipeline.resolve import same_company  # noqa: PLC0415
-    n = h.get("name")
-    return bool(n) and any(same_company(n, o) for o in other_names)
+    from asset_pipeline.resolve import _company_root  # noqa: PLC0415
+    root = _company_root(h.get("name"))
+    return bool(root) and any(_company_root(o) == root for o in other_names)
 
 
 def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
@@ -260,10 +261,9 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         #                  for "avoiding" Healthcare. That is a false finding, not a missing one.
         #                  It still has to be excluded (there is no return to attribute), so it is
         #                  flagged LOUDLY instead — `unpriced_pct` + the affected buckets.
-        reason = ("fund" if bucket == FUND_BUCKET
-                  else "cash" if bucket == CASH_BUCKET
+        reason = ("cash" if bucket == CASH_BUCKET
                   else "unpriced" if ret is None
-                  else "unclassified" if bucket == UNKNOWN_BUCKET
+                  else "unclassified" if bucket == UNKNOWN_BUCKET   # funds fold in here now
                   else None)
         # `name` is the CANONICAL label (asset_grid, joined by ISIN) so this table and the index's
         # speak one vocabulary; `airs_name` keeps AIRS's own label, which is what you see in AIRS
@@ -355,16 +355,17 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         # HELD ON BOTH SIDES — ISIN first, name as the share-class fallback. See `_overlaps` for
         # why both matchers are needed and why a shared display name is NOT the fix. Marked so the
         # overlap between what you hold and what the index holds is visible at a glance — and, by
-        # contrast, so are the genuinely different bets. The portfolio side matches against the
-        # FULL index bucket (not the capped top-15), so a match to a smaller index name is not
-        # missed.
+        # contrast, so are the genuinely different bets. Both sides carry the FULL index bucket, so
+        # a match to a smaller index name is not missed.
         p_names = [h["name"] for h in p_hold if h.get("name")]
         b_names = [h["name"] for h in b_hold_all if h.get("name")]
         p_isins = {h["isin"] for h in p_hold if h.get("isin")}
         b_isins = {h["isin"] for h in b_hold_all if h.get("isin")}
         for h in p_hold:
             h["in_both"] = _overlaps(h, b_isins, b_names)
-        b_hold = b_hold_all[:_BUCKET_HOLDINGS_CAP]
+        # The full index bucket — the drill-down lists every constituent (sorted client-side); no
+        # cap. Sorted largest-weight first so the default view is meaningful before any re-sort.
+        b_hold = b_hold_all
         for h in b_hold:
             h["in_both"] = _overlaps(h, p_isins, p_names)
         rows_out.append({

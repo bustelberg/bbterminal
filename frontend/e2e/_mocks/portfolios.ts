@@ -399,7 +399,7 @@ export const FIXTURE_ANALYSIS = {
       axis: 'sector',
       rows: [
         { bucket: 'Technology', portfolio_pct: 45, benchmark_pct: 36.3, diff_pct: 8.7 },
-        { bucket: 'Fund (not looked through)', portfolio_pct: 20, benchmark_pct: 0, diff_pct: 20 },
+        { bucket: 'Unclassified', portfolio_pct: 20, benchmark_pct: 0, diff_pct: 20 },
         { bucket: 'Industrials', portfolio_pct: 25, benchmark_pct: 7.3, diff_pct: 17.7 },
         { bucket: 'Healthcare', portfolio_pct: 0, benchmark_pct: 8.8, diff_pct: -8.8 },
         { bucket: 'Cash', portfolio_pct: 10, benchmark_pct: 0, diff_pct: 10 },
@@ -424,6 +424,19 @@ export const FIXTURE_ANALYSIS = {
         { bucket: 'Cash', portfolio_pct: 10, benchmark_pct: 0, diff_pct: 10 },
       ],
     },
+  ],
+  // The class selector (pie) + its per-class return, and the per-holding book detail behind a
+  // non-equity sleeve's contribution + currency view.
+  allocation: [
+    { bucket: 'Equity', pct: 60, return_pct: 51.48 },
+    { bucket: 'Bonds', pct: 25, return_pct: -2.4 },
+    { bucket: 'Cash', pct: 15, return_pct: null },
+  ],
+  book_holdings: [
+    { name: 'NVIDIA Corporation', isin: 'US67066G1040', bucket: 'Equity', currency: 'USD', weight_pct: 36, return_pct: 60 },
+    { name: 'ASML Holding', isin: 'NL0010273215', bucket: 'Equity', currency: 'EUR', weight_pct: 24, return_pct: 40 },
+    { name: 'iShares Global Corp Bond ETF', isin: 'IE00B0000001', bucket: 'Bonds', currency: 'EUR', weight_pct: 25, return_pct: -2.4 },
+    { name: 'Cash', isin: null, bucket: 'Cash', currency: null, weight_pct: 15, return_pct: null },
   ],
 };
 

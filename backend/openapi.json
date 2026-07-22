@@ -667,6 +667,28 @@
             ],
             "title": "Asset Class"
           },
+          "bucket": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bucket"
+          },
+          "bucket_overridden": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bucket Overridden"
+          },
           "categorie": {
             "anyOf": [
               {
@@ -677,6 +699,28 @@
               }
             ],
             "title": "Categorie"
+          },
+          "continent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Continent"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
           },
           "currency": {
             "anyOf": [
@@ -818,6 +862,17 @@
               }
             ],
             "title": "Quantity"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
           },
           "sector": {
             "anyOf": [
@@ -1319,6 +1374,30 @@
           "link_source"
         ],
         "title": "AirsPortfolioOverview",
+        "type": "object"
+      },
+      "AssetBucketOverride": {
+        "properties": {
+          "bucket": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bucket"
+          },
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          }
+        },
+        "required": [
+          "isin"
+        ],
+        "title": "AssetBucketOverride",
         "type": "object"
       },
       "AssetGridResponse": {
@@ -2686,6 +2765,69 @@
           "file"
         ],
         "title": "Body_upload_scan_api_asset_pipeline_upload_scan_post",
+        "type": "object"
+      },
+      "BookHoldingDetail": {
+        "description": "One paired-book holding, for a non-equity sleeve's contribution + currency view.\n\n`weight_pct` is the holding's CURRENT value as a share of the whole book, so that within ANY\nbucket, \u03a3 (weight_pct / \u03a3_bucket weight_pct) \u00b7 return_pct reproduces that bucket's weighted\nreturn exactly (weight = the position's Weight). `currency` is the holding's quote currency (a\nfair first-order FX signal for a bond/ETF sleeve \u2014 NOT folded to Unclassified like the fund axes).",
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Pct"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "bucket",
+          "weight_pct"
+        ],
+        "title": "BookHoldingDetail",
         "type": "object"
       },
       "BuildUniverseRequest": {
@@ -4535,8 +4677,16 @@
         "type": "object"
       },
       "ModelPortfolioAnalysis": {
-        "description": "A model portfolio's composition beside a benchmark's, on ONE set of buckets.\n\nBoth sides are classified from `asset_grid`'s yfinance attributes, joined by ISIN \u2014 the\nportfolio lives in the ISIN world and the benchmark in the `company` world, and putting two\ndifferent sector taxonomies in one chart invents differences that are not there. (All 493\nSP500 members are present in `asset_grid` with a sector, so nothing is lost.)\n\n\u26a0 FUNDS ARE NOT LOOKED THROUGH, and the payload says so rather than pretending. An ETF's\nlisting tells you nothing about what it holds \u2014 24 of the 26 held ETFs have a \"sector\" of\nliterally `etf` or `Equity`; an Amsterdam-listed MSCI World ETF is not European exposure; and\nquoted in EUR it still holds mostly USD assets. So every fund lands in ONE bucket, \"Fund (not\nlooked through)\", on ALL THREE axes. A 40%-ETF portfolio shows a 40% bar that means \"we\ncannot see inside this\" \u2014 true, and more useful than a confident wrong split.",
+        "description": "A model portfolio's composition beside a benchmark's, on ONE set of buckets.\n\nBoth sides are classified from `asset_grid`'s yfinance attributes, joined by ISIN \u2014 the\nportfolio lives in the ISIN world and the benchmark in the `company` world, and putting two\ndifferent sector taxonomies in one chart invents differences that are not there. (All 493\nSP500 members are present in `asset_grid` with a sector, so nothing is lost.)\n\n\u26a0 FUNDS ARE NOT LOOKED THROUGH, and the payload says so rather than pretending. An ETF's\nlisting tells you nothing about what it holds \u2014 24 of the 26 held ETFs have a \"sector\" of\nliterally `etf` or `Equity`; an Amsterdam-listed MSCI World ETF is not European exposure; and\nquoted in EUR it still holds mostly USD assets. So every fund folds into \"Unclassified\" on ALL\nTHREE axes \u2014 a 40%-ETF portfolio shows a 40% Unclassified bar meaning \"we cannot see inside\nthis\", true and more useful than a confident wrong split.",
         "properties": {
+          "allocation": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PortfolioAllocationSlice"
+            },
+            "title": "Allocation",
+            "type": "array"
+          },
           "as_of": {
             "anyOf": [
               {
@@ -4595,6 +4745,14 @@
             "default": 0,
             "title": "Benchmark Universe Members",
             "type": "integer"
+          },
+          "book_holdings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BookHoldingDetail"
+            },
+            "title": "Book Holdings",
+            "type": "array"
           },
           "covered_pct": {
             "default": 0.0,
@@ -5859,6 +6017,36 @@
           "years"
         ],
         "title": "PerformanceWindow",
+        "type": "object"
+      },
+      "PortfolioAllocationSlice": {
+        "description": "One asset-class slice of the portfolio's OWN composition (no benchmark side).\n\nAIRS's `categorie` says what a holding INVESTS IN (an equity ETF is AAND, a bond ETF is OBL);\nthe ETF flag is the orthogonal wrapper axis. So only EQUITY is split into direct vs ETF \u2014 a\nbond ETF is Bonds, not \"ETF Bonds\". Buckets: Equity | ETF Equity | Bonds | Alternatives | Cash\n(Real estate folds into Alternatives) | Unclassified.",
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "pct": {
+            "title": "Pct",
+            "type": "number"
+          },
+          "return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Pct"
+          }
+        },
+        "required": [
+          "bucket",
+          "pct"
+        ],
+        "title": "PortfolioAllocationSlice",
         "type": "object"
       },
       "PortfolioAnalysisAxis": {
@@ -10060,6 +10248,46 @@
         ]
       }
     },
+    "/api/airs/asset-bucket-override": {
+      "post": {
+        "description": "Manually pin (or clear) a holding's Class. Keyed by ISIN \u2014 a property of the instrument,\nremembered forever, and it beats the calculated `classify_bucket`. A null/empty bucket deletes\nthe override (revert to Auto). Returns `{isin, bucket}` (bucket null when cleared).",
+        "operationId": "set_asset_bucket_override_api_airs_asset_bucket_override_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssetBucketOverride"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Asset Bucket Override",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/basket/analysis": {
       "post": {
         "description": "Composition + return of an ARBITRARY basket (a single stock, a group) beside the benchmark \u2014\nthe same payload as the model-portfolio analysis, so ONE Analyse view serves a stock (a basket\nof one) and a portfolio alike. yfinance only (a basket has no AIRS book).",
@@ -10286,7 +10514,7 @@
     },
     "/api/airs/model-portfolios/{portfolio_id}/analysis": {
       "get": {
-        "description": "Sector / region / currency split of one model portfolio, beside the benchmark's.\n\n`weight_by=book` weights the portfolio bars by the paired AIRS book's actual EUR holdings\ninstead of the model's nominal weights; the benchmark and the classification are unchanged.\n\n`source=book` reads the RETURN numbers from AIRS's own book (`cumulatief_rendement` + the\nVOLK per-holding results) instead of the yfinance model reconstruction. The benchmark stays\nyfinance either way, so the two are comparable.",
+        "description": "Sector / region / currency split of one model portfolio, beside the benchmark's.\n\n`weight_by=book` weights the portfolio bars by the paired AIRS book's actual EUR holdings\ninstead of the model's nominal weights; the benchmark and the classification are unchanged.\n\n`source=book` reads the RETURN numbers from AIRS's own book (`cumulatief_rendement` + the\nVOLK per-holding results) instead of the yfinance model reconstruction. The benchmark stays\nyfinance either way, so the two are comparable.\n\n`bucket` (an allocation label \u2014 Equity, Bonds, \u2026) filters the CHART axes to that asset-class\nsleeve; the `allocation` bar itself stays over the whole model so a reader can re-select.",
         "operationId": "airs_model_portfolio_analysis_api_airs_model_portfolios__portfolio_id__analysis_get",
         "parameters": [
           {
@@ -10326,6 +10554,22 @@
               "default": "model",
               "title": "Source",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bucket",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bucket"
             }
           }
         ],
@@ -15057,6 +15301,47 @@
           }
         },
         "summary": "Match Airs Portfolio",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/by-isin/{isin}/metrics": {
+      "get": {
+        "description": "Dashboard metrics for a company resolved BY ISIN \u2014 the /portfolios\nFundamental modal bridge (ISIN \u2192 `company.isin` \u2192 company_id, \"Bridge A\").\n\nOnly the ~13% of instruments backed by a `company` row have earnings\nmetrics; everything else (ETFs, structured products, foreign listings with\nno company row) 404s here, and the modal falls back to its owner-earnings /\nprice tabs, which work for every ISIN. Returns\n`{company_id, company_name, currency, metrics}` \u2014 `currency` is the\nexchange's `currency_code` (the reporting/trading currency the FCF/share\nchart converts to EUR), mirroring how `/api/companies` derives it.",
+        "operationId": "get_earnings_metrics_by_isin_api_earnings_by_isin__isin__metrics_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "isin",
+            "required": true,
+            "schema": {
+              "title": "Isin",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Earnings Metrics By Isin",
         "tags": [
           "earnings"
         ]
