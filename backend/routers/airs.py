@@ -539,10 +539,11 @@ class PortfolioAllocationSlice(BaseModel):
 class BookHoldingDetail(BaseModel):
     """One paired-book holding, for a non-equity sleeve's contribution + currency view.
 
-    `weight_pct` is the holding's CURRENT value as a share of the whole book, so that within ANY
-    bucket, Σ (weight_pct / Σ_bucket weight_pct) · return_pct reproduces that bucket's weighted
-    return exactly (weight = the position's Weight). `currency` is the holding's quote currency (a
-    fair first-order FX signal for a bond/ETF sleeve — NOT folded to Unclassified like the fund axes).
+    `weight_pct` is the holding's OPENING value (beginwaarde) as a share of the whole book, so that
+    within ANY bucket, Σ (weight_pct / Σ_bucket weight_pct) · return_pct reproduces that bucket's
+    START-weighted return (Σnow/Σstart−1) exactly — the true value change, not the current-value
+    weighting that lets a big winner dominate. `currency` is the holding's quote currency (a fair
+    first-order FX signal for a bond/ETF sleeve — NOT folded to Unclassified like the fund axes).
     """
     name: str | None = None
     isin: str | None = None

@@ -436,22 +436,22 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
         alloc_items.append((w, r.get("bucket") or UNKNOWN_BUCKET))
     if not items:
         return None
-    # Per-bucket return = the WEIGHTED AVERAGE of its holdings' returns, each weighted by its CURRENT
-    # value — Σ(nowᵢ · retᵢ) ÷ Σnowᵢ, i.e. exactly Σ(weightᵢ · returnᵢ) over the holdings (weight =
-    # the position's share of the book). For the allocation pie's legend + the sleeve views. Same
-    # priced basis the segments use: start != 0, now known. Alongside it the per-HOLDING detail
-    # (current-weight + return), so a non-equity sleeve's contribution breakdown reconciles to the
-    # sleeve figure: Σ over a bucket of (nowᵢ / Σnow) · retᵢ == that bucket's return above, exactly.
-    bucket_agg: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])  # [Σ now·ret, Σ now]
+    # Per-bucket return = the START-WEIGHTED value change, Σnow ÷ Σstart − 1 (equivalently each
+    # holding's return weighted by its OPENING value). NOT current-value weighted: a holding up +148%
+    # has tripled its share of the book, so weighting by current value lets one winner dominate and
+    # inflates the figure (AITopSelectie: +56.11% current-weighted vs +41.98% true, book +43.08%).
+    # For the allocation pie's legend + the sleeve views. Alongside it the per-HOLDING detail
+    # (start-weight + return), so a non-equity sleeve's contribution breakdown reconciles to the
+    # sleeve figure: Σ over a bucket of (startᵢ / Σstart) · retᵢ == that bucket's return above, exactly.
+    bucket_agg: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])  # [Σ start, Σ now]
     priced = [(r, float(r.get("start_value_eur") or 0), float(r["current_value_eur"]))
               for r in rows
               if float(r.get("start_value_eur") or 0) != 0 and r.get("current_value_eur") is not None]
-    total_now = sum(n for _r, _s, n in priced) or 1.0
+    total_start = sum(s for _r, s, _n in priced) or 1.0
     holdings_detail: list[dict] = []
     for r, start, now in priced:
         b = r.get("bucket") or UNKNOWN_BUCKET
-        ret = now / start - 1.0
-        bucket_agg[b][0] += now * ret
+        bucket_agg[b][0] += start
         bucket_agg[b][1] += now
         isin = r.get("isin")
         grow = grid.get(isin) if isin else None
@@ -464,10 +464,10 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
             "isin": isin,
             "bucket": b,
             "currency": cur,
-            "weight_pct": now / total_now * 100.0,   # CURRENT-value share of the whole book
-            "return_pct": ret * 100.0,
+            "weight_pct": start / total_start * 100.0,   # OPENING-value share of the whole book
+            "return_pct": (now / start - 1.0) * 100.0,
         })
-    bucket_returns = {b: (v[0] / v[1]) * 100.0 for b, v in bucket_agg.items() if v[1]}
+    bucket_returns = {b: (v[1] / v[0] - 1) * 100.0 for b, v in bucket_agg.items() if v[0]}
     return {"items": items, "alloc_items": alloc_items, "bucket_returns": bucket_returns,
             "holdings_detail": holdings_detail,
             "classified_w": classified_w, "total_w": total_w, "foreign": foreign,

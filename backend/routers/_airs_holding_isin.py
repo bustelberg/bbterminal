@@ -325,11 +325,14 @@ def _segments(rows: list[dict]) -> list[dict]:
         with no opening value. `return_pct` therefore spans only the priced part, and
         `priced_value_eur` states how much that is. A segment where they differ is saying so.
 
-    ⚠ IT IS A WEIGHTED AVERAGE OF PRICE RETURNS. Each holding's return (now/start − 1) is weighted
-        by its CURRENT value, so the sleeve figure is exactly Σ(weightᵢ · returnᵢ) over the rows
-        below it — the number the reader reconstructs from the Weight and Return columns. It carries
-        no income and is not flow-aware, so the segments do NOT sum to the book's own
-        `cumulatief_rendement`, which is why it is not computed against that.
+    ⚠ IT IS THE START-WEIGHTED VALUE CHANGE — `Σnow / Σstart − 1`, the basket's actual price return,
+        equivalently each holding's return weighted by its OPENING value (beginwaarde). NOT weighted
+        by the CURRENT value: a holding up +148% has tripled its share of the book, so current-value
+        weighting lets that one winner dominate and inflates the figure (measured: AITopSelectie read
+        +56.11% current-weighted vs +41.98% true, against a +43.08% book). Start-weighting is the
+        unbiased number and the one that lines up with the book. It carries no income and is not
+        flow-aware, so the segments still do NOT exactly sum to `cumulatief_rendement` (income + flow
+        timing), which is why it is not computed against that — but it is close, not 14pp off.
     """
     # Group by the CALCULATED CLASS (the six-bucket `bucket` — incl. any manual override), not the
     # raw AIRS asset_class: Equity and Equity ETF split apart, and a bond ETF sits under Bonds.
@@ -346,11 +349,6 @@ def _segments(rows: list[dict]) -> list[dict]:
                   and r.get("current_value_eur") is not None]
         start = sum((r.get("start_value_eur") or 0) for r in priced)
         now = sum((r.get("current_value_eur") or 0) for r in priced)
-        # The sleeve return is the WEIGHTED AVERAGE of its holdings' returns, each weighted by its
-        # CURRENT value (its Weight) — i.e. exactly Σ(weightᵢ · returnᵢ) over the rows below it.
-        # Weighting by current value ≡ weighting by the displayed Weight (Weging = value ÷ book).
-        wret = sum(r["current_value_eur"] * (r["current_value_eur"] / r["start_value_eur"] - 1)
-                   for r in priced)
         out.append({
             # The output field keeps the name `asset_class` (frontend/model unchanged), but it now
             # carries the calculated bucket — the segment IS the Class group.
@@ -375,7 +373,7 @@ def _segments(rows: list[dict]) -> list[dict]:
             "fx_eur": (round(sum(v for r in rs
                                  if (v := r.get("fx_result_eur")) is not None), 2)
                        if any(r.get("fx_result_eur") is not None for r in rs) else None),
-            "return_pct": round(100 * wret / now, 2) if now else None,
+            "return_pct": round(100 * (now / start - 1), 2) if start else None,
             "priced_value_eur": round(now, 2),
             # ⚠ ETFs are counted, never bucketed: an equity ETF is Equity. Stated as a share of
             # the segment so "Bonds 48.65%, of which 43.20% via ETFs" is one row, not two.
