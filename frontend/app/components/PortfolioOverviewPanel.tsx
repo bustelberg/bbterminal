@@ -862,9 +862,14 @@ function Holdings({ d, i, portefeuille, onOverride }: {
           </span>
         )}
       </div>
-      <div className="overflow-auto rounded-lg border border-neutral-800/40 max-h-[50vh]">
+      <div className="overflow-x-auto rounded-lg border border-neutral-800/40">
+        {/* ⚠ `overflow-x-auto`, NOT `overflow-auto`, and no max-height: the holdings grow to their
+            content and the PAGE scrolls them. The horizontal container stays — 17 columns are
+            wider than a narrow viewport, and a dense table must scroll inside its own box so the
+            page never scrolls sideways. The header loses `sticky top-0` with the scrollport it was
+            sticking to; leaving the class would read as if it still did something. */}
         <table className="w-auto text-xs whitespace-nowrap">
-          <thead className="bg-card sticky top-0 z-20 [&_th]:bg-card">
+          <thead className="bg-card z-20 [&_th]:bg-card">
             <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
               <th className="px-2 py-1.5 font-medium text-left" />{/* Fundamental */}
               <th className="px-3 py-1.5 font-medium text-left">Fund</th>

@@ -150,6 +150,23 @@ function Th({ label, help, prov, align = 'right' }: {
  * inside that bucket, and R̄B = the benchmark's TOTAL return — the reference allocation is scored
  * against, which is the single fact that makes the column readable.
  */
+/** One headline number, in the tile language the rest of the modal already speaks. */
+function Stat({ label, value, tone, hint, strong }: {
+  label: string; value: string; tone?: number | null; hint?: string; strong?: boolean;
+}) {
+  const cls = tone == null ? 'text-fg-strong' : tone >= 0 ? 'text-pos-400' : 'text-neg-400';
+  return (
+    <div className={`rounded-lg px-3 py-1.5 min-w-[6.5rem] border ${
+      strong ? 'bg-accent-500/10 border-accent-500/30' : 'bg-elevated border-neutral-800/40'}`}>
+      <div className="text-[9px] uppercase tracking-wide text-fg-faint flex items-center gap-1">
+        {label}
+        {hint && <InfoTip text={hint} />}
+      </div>
+      <div className={`text-sm font-mono font-semibold ${cls}`}>{value}</div>
+    </div>
+  );
+}
+
 function Legend({ rIndex, axis }: { rIndex: string; axis: string }) {
   const w = AXIS_WORD[axis] ?? 'group';
   // The two deviations every effect is built from — spelled once, reused, so the formulas below
@@ -176,35 +193,41 @@ function Legend({ rIndex, axis }: { rIndex: string; axis: string }) {
           </Paren>
         </Formula>
       ),
-      meaning: `Your tilt × how that ${w} did against the index as a whole (${rIndex}). Did you put the money in the right ${w}s? A ${w} that rose but rose by less than the index was still the wrong place to be.`,
+      meaning: `Where the money was placed, scored against the index total (${rIndex}).`,
     },
     {
       name: 'Selection',
       formula: <Formula><V name="w" sub="B" /><Op>×</Op>{edge}</Formula>,
-      meaning: `Your companies vs the index’s companies inside the ${w}, priced at the index’s weight. Purely the picks — how much you held is Allocation’s job.`,
+      meaning: `The companies chosen inside the ${w}, at the index’s weight.`,
     },
     {
       name: 'Interaction',
       formula: <Formula>{tilt}<Op>×</Op>{edge}</Formula>,
-      meaning: 'Tilt × pick-edge. The part that needs both: it only exists because you deviated on weight and on companies at once. Positive when they agree (overweight where you were good), negative when they fight.',
-    },
-    {
-      name: 'Total',
-      formula: <span className="text-fg-subtle">Allocation + Selection + Interaction</span>,
-      meaning: `This ${w}’s share of the excess. The column sums to the whole excess — that identity is checked, not assumed.`,
+      meaning: 'The cross term. Requires a tilt and a pick edge at once.',
     },
   ];
   return (
-    <dl className="mt-2 mb-3 grid gap-x-3 gap-y-1.5 text-[11px]"
-      style={{ gridTemplateColumns: 'auto auto 1fr' }}>
+    // A quiet strip, not a table of prose. ⚠ The MEANINGS are tooltips now, not columns: they were
+    // printed here word for word AND on the stat tiles above, so the panel said everything twice.
+    // The formula is the one thing a tooltip cannot replace — a reader looking at a −5.07 wants to
+    // see which numbers made it, at a glance, beside the table that shows them.
+    <div className="bg-inset rounded-lg px-3 py-2 mb-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[11px]">
       {rows.map((r) => (
         <Fragment key={r.name}>
-          <dt className="font-semibold text-fg whitespace-nowrap">{r.name}</dt>
-          <dd className="font-mono text-accent-400 whitespace-nowrap">{r.formula}</dd>
-          <dd className="text-fg-subtle leading-relaxed">{r.meaning}</dd>
+          <InfoTip text={r.meaning}>
+            <span className="inline-flex items-baseline gap-1.5 cursor-help">
+              <span className="text-fg-muted">{r.name}</span>
+              <span className="font-mono text-accent-400">{r.formula}</span>
+            </span>
+          </InfoTip>
         </Fragment>
       ))}
-    </dl>
+      {/* The symbol key. It belongs beside the symbols, not in the panel header two blocks up. */}
+      <span className="text-fg-faint ml-auto">
+        <V name="w" /> weight · <V name="R" /> return · <V name="P" /> you ·{' '}
+        <V name="B" /> index · <VBar name="R" sub="B" /> index total
+      </span>
+    </div>
   );
 }
 
@@ -311,28 +334,13 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
   const pSrc: SourceKey = (data?.source ?? source) === 'book' ? 'airs_volk' : 'yfinance';
 
   return (
-    <section className="bg-card border border-neutral-800/40 rounded-xl p-4">
+    <section className="bg-card border border-accent-500/30 rounded-xl p-4">
       <div className="flex items-start justify-between gap-3 mb-2">
         <div>
           <h4 className="text-sm font-semibold text-fg-strong">
             {`Why — ${label} vs ${benchmark}`}
           </h4>
-          {/* The key. Set in the SAME notation as the formulas below — a legend written in a
-              different alphabet from the thing it explains is not a legend. */}
-          <p className="text-[11px] text-fg-faint mt-0.5">
-            {'Brinson-Fachler. '}
-            <Formula className="text-fg-subtle"><V name="w" /></Formula>
-            {' = weight, '}
-            <Formula className="text-fg-subtle"><V name="R" /></Formula>
-            {' = return; subscript '}
-            <Formula className="text-fg-subtle"><V name="P" /></Formula>
-            {' = you, '}
-            <Formula className="text-fg-subtle"><V name="B" /></Formula>
-            {' = the index in that group. '}
-            <Formula className="text-fg-subtle"><VBar name="R" sub="B" /></Formula>
-            {' = the index’s TOTAL return, which is what Allocation is scored against. '}
-            {'Hover any header or cell for that row in words.'}
-          </p>
+          <p className="text-[11px] text-fg-faint mt-0.5">Brinson-Fachler attribution</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <select value={axis} onChange={(e) => { setData(null); setAxis(e.target.value as Axis); }}
@@ -360,11 +368,12 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
           {/* Which world the portfolio legs came from. Book = AIRS's actual holdings, priced by
               AIRS over the calendar year; the per-holding returns are price-only (no income), so
               the attributed excess differs from the book's income-inclusive headline. */}
+          {/* ⚠ Quiet, not accent. It is a caveat on the numbers, not a headline: in accent blue at
+              full width it out-shouted the tiles it qualifies. */}
           {data.source === 'book' && (
-            <p className="text-[11px] text-accent-400 mb-2">
-              {'AIRS book — actual holdings over the calendar year (benchmark stays yfinance). '}
-              {'Per-holding returns are price-only, so this excess differs from the book’s '}
-              {'income-inclusive headline return.'}
+            <p className="text-[11px] text-fg-faint mb-2">
+              {'AIRS book, calendar year. Returns are price only, so this excess differs from '}
+              {'the income-inclusive headline.'}
             </p>
           )}
           {data.note && (
@@ -392,55 +401,53 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
             </p>
           )}
 
-          {/* What each column MEANS and the arithmetic that produces it — a reader looking at a
-              −5.07 wants to know which numbers made it, and prose alone cannot say. */}
-          <Legend rIndex={pct(data.benchmark_return_pct, 1)} axis={data.axis ?? axis} />
-
-          {/* The conclusion, in a sentence. The totals row already contains it, but "which of the
-              two mistakes was this?" is the entire question the reader opened this panel to ask,
-              and making them subtract two numbers to find out is making them do the work. */}
+          {/* THE ANSWER, FIRST AND AS TILES. This is the question the reader opened the panel to
+              ask, and it was three sentences buried between two others. Same visual language as
+              the modal above (micro-label + mono value), so the panel reads as part of it.
+              ⚠ The excess arithmetic and the per-effect definitions moved into the tiles' own
+              tooltips: on screen at all times they are noise, one hover away they are exactly
+              what a reader wants. */}
           {(() => {
-            const alloc = (data.rows ?? []).reduce((s, r) => s + n(r.allocation_pct), 0);
-            const sel = (data.rows ?? []).reduce((s, r) => s + n(r.selection_pct), 0);
-            const dominant = Math.abs(sel) >= Math.abs(alloc) ? 'selection' : 'allocation';
-            // "cost you +2.75%" is not a sentence. The verb already carries the sign, so the
-            // number must not carry it again.
-            const verb = (v: number) => (v >= 0 ? 'added' : 'cost you');
-            const mag = (v: number) => `${Math.abs(v).toFixed(2)}pp`;
+            const sum = (k: 'allocation_pct' | 'selection_pct' | 'interaction_pct') =>
+              (data.rows ?? []).reduce((t, r) => t + n(r[k]), 0);
+            const alloc = sum('allocation_pct');
+            const sel = sum('selection_pct');
+            const inter = sum('interaction_pct');
+            const pp = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}pp`;
             return (
-              <p className="text-xs text-fg mb-2 bg-inset rounded-lg px-3 py-2">
-                {dominant === 'selection'
-                  ? `Mostly the companies, not the ${AXIS_WORD[data.axis ?? 'sector'] ?? 'group'}s: `
-                  : `Mostly the ${AXIS_WORD[data.axis ?? 'sector'] ?? 'group'}s, not the companies: `}
-                {`your ${AXIS_WORD[data.axis ?? 'sector'] ?? 'group'} tilts `}
-                <span className={alloc >= 0 ? 'text-pos-400' : 'text-neg-400'}>
-                  {verb(alloc)} {mag(alloc)}
-                </span>
-                {', and the companies you picked inside them '}
-                <span className={sel >= 0 ? 'text-pos-400' : 'text-neg-400'}>
-                  {verb(sel)} {mag(sel)}
-                </span>
-                {'.'}
-              </p>
+              <>
+                <div className="flex flex-wrap items-stretch gap-2 mb-2">
+                  <Stat label="Excess" value={pct(data.excess_pct)} tone={data.excess_pct} strong
+                    hint={`Portfolio ${pct(data.portfolio_return_pct)} minus ${benchmark} ${pct(data.benchmark_return_pct)}.\n\nThe three effects sum to this, and that identity is checked, not assumed.`} />
+                  <Stat label="Selection" value={pp(sel)} tone={sel}
+                    hint={`The companies chosen inside each ${w}, scored at the index’s weight.`} />
+                  <Stat label="Allocation" value={pp(alloc)} tone={alloc}
+                    hint={`Where the money was placed, scored against the index total (${pct(data.benchmark_return_pct, 1)}).`} />
+                  <Stat label="Interaction" value={pp(inter)} tone={inter}
+                    hint="The cross term. Requires a weight tilt and a pick edge at once." />
+                </div>
+                <p className="text-xs text-fg-soft mb-3">
+                  {Math.abs(sel) >= Math.abs(alloc)
+                    ? `Mostly the companies, not the ${w}s.`
+                    : `Mostly the ${w}s, not the companies.`}
+                  {/* ⚠ Shown only when something IS excluded. At full coverage the old line read
+                      "Explains 100% of the model. 0% is excluded", spending three clauses to say
+                      nothing was left out — a caveat that fires when it does not apply trains a
+                      reader to skip it, which is exactly when it needs to be read. */}
+                  {(data.excluded_pct ?? 0) >= 0.5 && (
+                    <span className="text-fg-faint">
+                      {' Excludes '}
+                      <span className="font-mono">{(data.excluded_pct ?? 0).toFixed(0)}%</span>
+                      {' of the model (funds and cash).'}
+                    </span>
+                  )}
+                </p>
+              </>
             );
           })()}
 
-          <p className="text-[11px] text-fg-subtle mb-2">
-            {'Explains '}
-            <span className="font-mono text-fg">{(data.attributable_pct ?? 0).toFixed(0)}%</span>
-            {' of the model. '}
-            <span className="font-mono">{(data.excluded_pct ?? 0).toFixed(0)}%</span>
-            {' is excluded — funds and cash are not a sector bet, so they are not decomposed as '}
-            {'one. Attributed excess '}
-            <span className="font-mono">{pct(data.excess_pct)}</span>
-            {' = portfolio '}
-            <span className="font-mono">{pct(data.portfolio_return_pct)}</span>
-            {' − '}
-            {benchmark}
-            {' '}
-            <span className="font-mono">{pct(data.benchmark_return_pct)}</span>
-            {'.'}
-          </p>
+          {/* The arithmetic, beside the table it explains — the tiles say WHAT, this says HOW. */}
+          <Legend rIndex={pct(data.benchmark_return_pct, 1)} axis={data.axis ?? axis} />
 
           <div className="overflow-auto rounded-lg border border-neutral-800/40 mb-3">
             <table className="w-full text-[11px]">

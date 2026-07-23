@@ -2,6 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { INFO_ICON } from '../../../lib/infoIcon';
+import { AboutCard } from '../../../lib/tipCard';
 
 /** Small "i" hover tip with viewport-clamped fixed positioning, used beside
  * each quality-criterion label. */
@@ -28,10 +29,11 @@ export default function InfoTip({ text }: { text: string }) {
       <span ref={iconRef} className={INFO_ICON}>i</span>
       {show && (
         <span
-          className="fixed w-56 px-3 py-2 bg-popover border border-neutral-700 rounded-lg text-xs text-fg-soft leading-relaxed z-[9999] shadow-xl pointer-events-none whitespace-normal break-words"
+          className="fixed w-72 px-3 py-2 bg-popover border border-neutral-700 rounded-lg text-xs text-fg-soft leading-relaxed z-[9999] shadow-xl pointer-events-none whitespace-normal break-words"
           style={{ top: pos.top, left: pos.left, transform: 'translate(-50%, 0)' }}
         >
-          {text}
+          {/* Same shell as every other tooltip — see lib/tipCard. */}
+          <AboutCard text={text} />
         </span>
       )}
     </span>

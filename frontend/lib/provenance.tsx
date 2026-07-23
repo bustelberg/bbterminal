@@ -14,6 +14,7 @@
  */
 import InfoTip from '../app/components/InfoTip';
 import { INFO_ICON, INFO_ICON_WARN } from './infoIcon';
+import { TipCard } from './tipCard';
 import { trimStop } from './provenanceText';
 import { snapshotFreshness, type SnapshotTone } from './snapshotAge';
 
@@ -78,16 +79,10 @@ function ProvenanceCard({ source, asOf, note, how, kind }: {
   const s = SOURCE[source];
   const f = asOf ? snapshotFreshness(asOf) : null;
   return (
-    <div className="space-y-2 min-w-[13rem]">
-      <div>
-        <div className="flex items-center gap-1.5 mb-0.5">
-          <span className="text-[9px] uppercase tracking-wider text-fg-faint">Source</span>
-          {s.vendor && <span className="text-[9px] text-fg-faint">· {s.vendor}</span>}
-        </div>
-        <div className="text-fg-strong font-semibold leading-tight">{s.label}</div>
-        {note && <div className="text-fg-muted text-[11px] mt-0.5">{note}</div>}
-      </div>
-      <div className="border-t border-neutral-800/40 pt-2 space-y-1.5">
+    // The shared shell — identical chrome to every other tooltip; only the FIELDS differ.
+    <TipCard label="Source" title={s.label} subtitle={note}
+      labelSuffix={s.vendor ? <span className="text-[9px] text-fg-faint">· {s.vendor}</span> : undefined}>
+      <>
         <Field label="When">
           {asOf
             ? (
@@ -109,8 +104,8 @@ function ProvenanceCard({ source, asOf, note, how, kind }: {
             </span>
           </Field>
         )}
-      </div>
-    </div>
+      </>
+    </TipCard>
   );
 }
 

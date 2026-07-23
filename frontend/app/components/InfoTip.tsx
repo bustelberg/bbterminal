@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { INFO_ICON } from '../../lib/infoIcon';
+import { AboutCard } from '../../lib/tipCard';
 
 /**
  * Small "i" icon that reveals a tooltip on hover. Tooltip is positioned
@@ -164,7 +165,9 @@ export default function InfoTip({ text, content, children }: {
               ×
             </button>
           )}
-          {content ?? text}
+          {/* ⚠ Plain text goes through the SAME card shell the provenance tooltip uses — one edit
+              here instead of 44 call sites, and no tooltip can drift back to a bare paragraph. */}
+          {content ?? (text ? <AboutCard text={text} /> : null)}
         </span>
       )}
     </span>

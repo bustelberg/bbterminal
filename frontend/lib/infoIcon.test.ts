@@ -18,7 +18,11 @@ import { describe, expect, it } from 'vitest';
 import { INFO_ICON, INFO_ICON_WARN } from './infoIcon';
 
 const ROOTS = ['app', 'lib'];
-const SELF = 'infoIcon';
+
+/** The modules that DEFINE the shared icon and card. Everything else must only import them.
+ *  ⚠ Named exactly, never by prefix: a future `infoIconLegacy.tsx` would exempt itself from the
+ *  very check it needs to fail. */
+const DEFINERS = new Set(['infoIcon.ts', 'infoIcon.test.ts', 'tipCard.tsx', 'tipCard.test.ts']);
 
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];
@@ -26,7 +30,7 @@ function sourceFiles(dir: string): string[] {
     if (entry === 'node_modules' || entry.startsWith('.')) continue;
     const p = join(dir, entry);
     if (statSync(p).isDirectory()) out.push(...sourceFiles(p));
-    else if (/\.tsx?$/.test(entry) && !entry.includes(SELF)) out.push(p);
+    else if (/\.tsx?$/.test(entry) && !DEFINERS.has(entry)) out.push(p);
   }
   return out;
 }
@@ -47,6 +51,27 @@ describe('there is exactly one info icon', () => {
     const offenders = FILES.filter((f) => pattern.test(readFileSync(f, 'utf8')))
       .map((f) => f.replace(process.cwd(), ''));
     expect(offenders).toEqual([]);
+  });
+
+  it('no file hand-rolls the tooltip CARD shell either', () => {
+    // ⚠ The icon forked four ways; the card it opens forked twice — a designed provenance card
+    // beside bare paragraphs. Same gesture, two objects. `lib/tipCard` is the only shell.
+    //
+    // ⚠ A SUBSTRING, NOT A REGEX. `/min-w-[13rem]/` reads as a CHARACTER CLASS — it matches a
+    // single one of 1,3,r,e,m and never the literal token, so the check passed over every file
+    // while finding nothing. A vacuous green guard is worse than no guard: it is a claim that
+    // something is checked.
+    const SHELL = 'space-y-2 min-w-[13rem]';
+    const offenders = FILES.filter((f) => readFileSync(f, 'utf8').includes(SHELL))
+      .map((f) => f.replace(process.cwd(), ''));
+    expect(offenders).toEqual([]);
+  });
+
+  it('...and that shell string is the one tipCard actually uses', () => {
+    // Pins the guard above to reality: if the shell is restyled, this fails and the guard gets
+    // updated with it, instead of silently watching for a string that no longer exists.
+    expect(readFileSync(join(process.cwd(), 'lib/tipCard.tsx'), 'utf8'))
+      .toContain('space-y-2 min-w-[13rem]');
   });
 
   it('the two variants share their geometry, differing only in hue', () => {
