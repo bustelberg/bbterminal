@@ -3,11 +3,22 @@ portfolio.py
 Parse the AIRS Vermogensoverzicht (VOLK) Excel export.
 
 WHAT AIRS GIVES US PER HOLDING, AND WHAT WE MAKE OF IT
-    The sheet carries thirteen columns:
+    The sheet carries fourteen columns:
 
         Fondsomschrijving · Aantal · Kostprijs lopend jaar · Beginwaarde lopend jaar ·
         Beginwaarde lopend jaar EUR · Huidige koers · Huidige waarde · Huidige waarde EUR ·
-        Weging · Fondsresultaat · Valutaresultaat · Resultaat in % · Valuta
+        Weging · Fondsresultaat · Valutaresultaat · Resultaat in % · Valuta · ISIN-code
+
+⚠ `ISIN-code` IS OPTIONAL AND IS THE MOST VALUABLE COLUMN ON THE SHEET.
+    It was switched on in AirSPMS on 2026-07-23; every snapshot taken before that has only
+    `Fondsomschrijving`, a NAME. That is why `_airs_holding_isin` exists at all — it recovers
+    the identity by fuzzy-matching the name against the Fixed portfolio's positions and then
+    price-checking the result, and when the stored model predates a swap that machinery has to
+    place a holding it has no position for (measured: four books reported `Invesco Wld EW ETF
+    Acc` as DE000A0F5UH1). An ISIN on the book's own row ends all of that: the join is exact.
+
+    It is parsed as OPTIONAL, permanently. An older snapshot must keep parsing, and a portfolio
+    whose export does not carry the column must not fail — it falls back to the name route.
 
     We derive `weight` / `ytd_return_*` from the values ourselves AND carry AIRS's own
     `Weging` / `Resultaat in %` beside them, deliberately unreconciled: two independent
@@ -50,6 +61,9 @@ import pandas as pd
 @dataclass
 class ParsedHolding:
     holding_name: str
+    # AIRS's own ISIN for the position (`ISIN-code`). None on the cash line, on a pre-2026-07-23
+    # snapshot, and on anything that is not a well-formed ISIN — see `_isin`.
+    isin: Optional[str]
     quantity: Optional[int]
     currency: str
     weight: Optional[float]
@@ -95,6 +109,37 @@ def _col(cols: dict[str, str], header: str) -> Optional[str]:
     return cols.get(_norm(header))
 
 
+# AIRS is not consistent about this header across its exports: the model-portfolio sheet says
+# `ISINCode`, the Vermogensoverzicht says `ISIN-code`. Both are accepted; `_norm` handles case and
+# whitespace, so only the hyphen actually differs.
+_ISIN_HEADERS = ("ISIN-code", "ISINCode", "ISIN")
+
+# ISO 6166: two-letter country, nine alphanumerics, one check digit.
+_ISIN_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
+
+
+def _isin(row: pd.Series, col: Optional[str]) -> Optional[str]:
+    """AIRS's ISIN for this row, or None.
+
+    ⚠ THE CASH LINE'S EMPTY CELL ARRIVES AS THE STRING `"nan"`, WHICH IS TRUTHY. pandas reads a
+    blank as float NaN, `str()` renders it `"nan"`, and every downstream test of "does this row
+    have an ISIN" then says yes — the same trap that once counted a cash line as a holding.
+
+    Anything that is not a well-formed ISIN is treated as ABSENT rather than stored: a malformed
+    identity is worse than none, because it matches no instrument while looking like an answer,
+    and the row would stop falling back to the name route that would have resolved it.
+    """
+    if not col:
+        return None
+    v = row.get(col)
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return None
+    s = str(v).strip().upper()
+    if s in ("", "NAN", "NONE", "NAT"):
+        return None
+    return s if _ISIN_RE.match(s) else None
+
+
 def _num(row: pd.Series, col: Optional[str]) -> Optional[float]:
     """`col` off `row` as a float, or None when absent/blank. A 0 is a value, not a gap."""
     if not col:
@@ -125,6 +170,7 @@ def parse_airs_excel(file_bytes: bytes) -> list[ParsedHolding]:
     col_fund_result = _col(cols, "Fondsresultaat")
     col_fx_result = _col(cols, "Valutaresultaat")
     col_result_pct = _col(cols, "Resultaat in %")
+    col_isin = next((c for c in (_col(cols, h) for h in _ISIN_HEADERS) if c), None)
 
     required = {
         "Fondsomschrijving": col_name,
@@ -176,6 +222,7 @@ def parse_airs_excel(file_bytes: bytes) -> list[ParsedHolding]:
 
         results.append(ParsedHolding(
             holding_name=name,
+            isin=_isin(row, col_isin),
             quantity=int(qty) if qty is not None and pd.notna(qty) else None,
             currency=ccy,
             weight=weight,

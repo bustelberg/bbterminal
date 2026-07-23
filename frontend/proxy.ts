@@ -1,6 +1,5 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
-import { isAuthBypassEnabled } from '@/lib/authBypass'
 import { isUserAllowedPath } from '@/lib/userAllowedPaths'
 
 // Paths that are accessible to anyone — including not-yet-logged-in users
@@ -11,17 +10,12 @@ function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATH_PREFIXES.some((p) => pathname === p || pathname.startsWith(p))
 }
 
+// ⚠ THERE IS NO AUTH BYPASS, AND THERE MUST NOT BE ONE AGAIN. `E2E_BYPASS_AUTH` used to
+// short-circuit this function so Playwright could reach any route without a login. The e2e suite
+// is gone (unit tests only — see CLAUDE.md), and with it the only reason this file ever held an
+// env-var-controlled way to switch authentication off. Anything that needs to test around auth
+// should test a pure function, not disable the gate.
 export async function proxy(request: NextRequest) {
-  // Playwright e2e short-circuit. Fires only with `E2E_BYPASS_AUTH=1`
-  // (set by `playwright.config.ts` / CI, never in dev or on Vercel) AND
-  // when NOT running on Vercel (the `VERCEL` env var is the kill-switch),
-  // so a stray prod env var can never disable auth on a real deployment.
-  // Skips the Supabase server-side session call so tests can hit any
-  // route without a real login; tests mock /api/* via `page.route()`.
-  if (isAuthBypassEnabled(process.env.E2E_BYPASS_AUTH, process.env.VERCEL)) {
-    return NextResponse.next({ request })
-  }
-
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(

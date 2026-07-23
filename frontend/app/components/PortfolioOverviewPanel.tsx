@@ -3,11 +3,13 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
+import { dialog } from '../../lib/dialog';
 import { Provenance } from '../../lib/provenance';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
 import OwnerEarningsModal from './portfolios/OwnerEarningsModal';
 import { type Basket } from './portfolios/PerformanceModal';
 import { allocColor, bucketLabel, BUCKET_ORDER } from './portfolios/allocationColors';
+import { groupStats, startBasis, type GroupStats } from './portfolios/startWeights';
 
 /** What an Analyse/Fundamental modal is opened for: one instrument (isin), a group (basket), or a
  *  whole portfolio (portfolioId, resolved to a basket server-side). */
@@ -72,6 +74,26 @@ export default function PortfolioOverviewPanel() {
   const [refreshMsg, setRefreshMsg] = useState<{ text: string; kind: 'info' | 'error' | 'ok' } | null>(null);
   const [refreshingRows, setRefreshingRows] = useState<Set<string>>(new Set());
 
+  // Fetch ONE account's holdings + ISIN resolution into the caches. Split out of `expand` because
+  // a refresh has to be able to re-fetch a row that is ALREADY open: clearing the caches without
+  // re-fetching left the open row on "Loading holdings…" for ever, since nothing re-requests until
+  // the next click — the row had to be collapsed and re-expanded by hand to recover.
+  const loadDetail = useCallback(async (p: string) => {
+    // Fetched together: a holding briefly showing its value without its identity, or worse with
+    // the wrong one, is not an improvement over showing neither.
+    const [h, i] = await Promise.all([
+      apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(p)}/holdings`),
+      apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(p)}/isins`),
+    ]);
+    if (!h.ok) return;
+    // Awaited BEFORE the updaters: a setState callback is not async, so `await` inside one
+    // stores the Promise itself and the row renders `[object Promise]`-shaped nothing.
+    const holdings = (await h.json()) as AirsAccountDetail;
+    const resolved = i.ok ? ((await i.json()) as AirsAccountIsins) : null;
+    setDetail((d) => ({ ...d, [p]: holdings }));
+    if (resolved) setIsins((m) => ({ ...m, [p]: resolved }));
+  }, []);
+
   const loadOverview = useCallback(async () => {
     try {
       const r = await apiFetch(`${API_URL}/api/airs/portfolios/overview`);
@@ -108,6 +130,9 @@ export default function PortfolioOverviewPanel() {
       setDetail((d) => { const n = { ...d }; delete n[portefeuille]; return n; });
       setIsins((m) => { const n = { ...m }; delete n[portefeuille]; return n; });
       await loadOverview();
+      // ⚠ Dropping the cache is only half of it. An OPEN row re-renders straight into
+      // "Loading holdings…" and stays there, because only a click re-requests — so re-fetch here.
+      if (open === portefeuille) await loadDetail(portefeuille);
     } catch (e) {
       setRefreshMsg({ text: `${portefeuille}: ${e instanceof Error ? e.message : String(e)}`, kind: 'error' });
     } finally {
@@ -141,6 +166,7 @@ export default function PortfolioOverviewPanel() {
       setDetail({});
       setIsins({});
       await loadOverview();
+      if (open) await loadDetail(open);   // same trap as refreshOne — an open row must re-fetch
     } catch (e) {
       setRefreshMsg({ text: e instanceof Error ? e.message : String(e), kind: 'error' });
     } finally {
@@ -151,19 +177,7 @@ export default function PortfolioOverviewPanel() {
   const expand = async (p: string) => {
     setOpen(open === p ? null : p);
     if (detail[p] || open === p) return;
-    // Fetched together: a holding briefly showing its value without its identity, or worse with
-    // the wrong one, is not an improvement over showing neither.
-    const [h, i] = await Promise.all([
-      apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(p)}/holdings`),
-      apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(p)}/isins`),
-    ]);
-    if (!h.ok) return;
-    // Awaited BEFORE the updaters: a setState callback is not async, so `await` inside one
-    // stores the Promise itself and the row renders `[object Promise]`-shaped nothing.
-    const holdings = (await h.json()) as AirsAccountDetail;
-    const resolved = i.ok ? ((await i.json()) as AirsAccountIsins) : null;
-    setDetail((d) => ({ ...d, [p]: holdings }));
-    if (resolved) setIsins((m) => ({ ...m, [p]: resolved }));
+    await loadDetail(p);
   };
 
   // Re-fetch just one account's ISIN resolution (after a manual Class override), so the row
@@ -324,6 +338,16 @@ export default function PortfolioOverviewPanel() {
                         <span className="text-fg-faint font-mono text-[10px] ml-2">
                           {r.dynamic_portefeuille}{r.fixed_name ? ` · ${r.fixed_name}` : ''}
                         </span>
+                        {/* The name is the FIXED side's, reached through a pairing — so its card
+                            states the pairing, which for 27 of 28 rows is an unapproved guess. */}
+                        <Provenance source="airs_model" kind={r.fixed_name ? 'formula' : 'copied'}
+                          note={r.fixed_name ? 'name — from the Fixed portfolio this book is paired with' : 'name — the AIRS book itself; no Fixed portfolio paired'}
+                          how={r.fixed_name
+                            ? `${r.dynamic_portefeuille} paired with ${r.fixed_name}${
+                              r.link_source === 'guess'
+                                ? ` by a name match nobody has approved (${r.link_reason ?? 'name match'}) — ⚠ the risk variants of a strategy hold the same instruments, so no other column would reveal a wrong pairing.`
+                                : ' by a confirmed link.'}`
+                            : undefined} />
                       </td>
                       <td className="px-3 py-1.5 text-right font-mono text-fg-subtle">
                         {r.isins ?? '—'}
@@ -427,7 +451,65 @@ function BucketBadge({ bucket, isin, overridden, onOverride }: {
   );
 }
 
-function IsinCell({ r }: { r: NonNullable<AirsAccountIsins['rows']>[number] | undefined }) {
+/** HOW an ISIN came to be on this row — the name match that proposed it AND the price check that
+ *  did or did not confirm it. `verdict` is the field that matters; `name_score` alone is not a pass
+ *  (a fund's Acc/Inc share classes have near-identical names and different ISINs). */
+function isinHow(r: NonNullable<AirsAccountIsins['rows']>[number]): string {
+  // The book states its own ISIN (AIRS's `ISIN-code`, since 2026-07-23) — nothing is inferred, so
+  // the card says so plainly. The price check here is no longer testing a pairing; it tests OUR
+  // price series for that instrument, which is a check we could not make before.
+  if (r.isin_source === 'book') {
+    const checked = r.verdict === 'ok'
+      ? `Our own price series agrees: €${r.implied_price_eur}/unit implied here vs €${r.our_price_eur} (ratio ${r.price_ratio}).`
+      : r.verdict === 'price_mismatch'
+        ? `⚠ Our own price series DISAGREES: €${r.implied_price_eur}/unit implied here vs €${r.our_price_eur} for ${r.our_instrument ?? 'our instrument'} (ratio ${r.price_ratio}). The identity is AIRS's, so this points at OUR listing for it, not at the match.`
+        : 'We hold no price series for it, so nothing cross-checks our side.';
+    return `read straight off the holding — AIRS's own ISIN-code column. No name matching was involved. ${checked}`;
+  }
+  if (r.isin_overridden) {
+    // ⚠ A pin is an IDENTITY, not a verification — so the card leads with who decided it and
+    // still reports what the price said, exactly as on a matched row.
+    const checked = r.verdict === 'ok'
+      ? `The price then CONFIRMED it independently: €${r.implied_price_eur}/unit implied here vs €${r.our_price_eur} for that ISIN (ratio ${r.price_ratio}).`
+      : r.verdict === 'price_mismatch'
+        ? `⚠ The price CONTRADICTS it: €${r.implied_price_eur}/unit implied here vs €${r.our_price_eur} (ratio ${r.price_ratio}). Check the ISIN.`
+        : 'We hold no price series for it, so nothing confirms it.';
+    return `set by hand${r.isin_override_note ? ` — ${r.isin_override_note}` : ''}. The Fixed portfolio has no position for this holding, so no match could produce an ISIN. ${checked}`;
+  }
+  if (r.verdict === 'unmatched') {
+    return `the Fixed portfolio has no position for this holding. The only one left was “${
+      r.rejected_fonds ?? '—'}” (${r.rejected_isin ?? '—'}), and both the name (score ${
+      r.name_score}) and the price say that is a different instrument, so it was refused. The stored model is out of date: re-scan the Fixed portfolio.`;
+  }
+  const matched = `matched to the Fixed portfolio's “${r.model_fonds ?? '—'}” by name${
+    r.name_score != null ? ` (score ${r.name_score})` : ''}`;
+  if (r.verdict === 'ok') {
+    return `${matched}, then confirmed on price: €${r.implied_price_eur}/unit implied here vs €${r.our_price_eur} for that ISIN (ratio ${r.price_ratio}).`;
+  }
+  if (r.verdict === 'price_mismatch') {
+    return `${matched}, then CONTRADICTED on price: €${r.implied_price_eur}/unit implied here vs €${r.our_price_eur} for ${r.our_instrument ?? 'that ISIN'} (ratio ${r.price_ratio}).`;
+  }
+  return `${matched}. We hold no price series for it, so NOTHING confirms the match — not the same as a pass.`;
+}
+
+function IsinCell({ r, onPin }: {
+  r: NonNullable<AirsAccountIsins['rows']>[number] | undefined;
+  /** Supply/clear this holding's ISIN by hand. Absent = read-only (a cash line has nothing to pin). */
+  onPin?: (holdingName: string, current?: string | null) => void | Promise<void>;
+}) {
+  // ⚠ NOT a bare dash. A blank in this column reads as "this line has no ISIN", i.e. cash — and
+  // this is the opposite: a real instrument the model has no position for. Say which, and make it
+  // the affordance for fixing it, since no re-match can ever find an ISIN that is not in the data.
+  if (r?.verdict === 'unmatched') {
+    return (
+      <button type="button" disabled={!onPin}
+        onClick={(e) => { e.stopPropagation(); void onPin?.(r.holding_name, null); }}
+        title={`The Fixed portfolio has no position for this holding. The only one left was “${r.rejected_fonds ?? '—'}” (${r.rejected_isin ?? '—'}), which the name and the price both say is a different instrument, so it was refused rather than published as this holding's ISIN. Re-scan the Fixed portfolio, or click to set the ISIN by hand.`}
+        className="text-warn-500 whitespace-nowrap underline decoration-dotted underline-offset-2 hover:text-warn-400 disabled:no-underline">
+        no model position
+      </button>
+    );
+  }
   if (!r?.isin) return <span className="text-fg-faint">—</span>;
   const mismatch = r.verdict === 'price_mismatch';
   const unpriced = r.verdict === 'unpriced';
@@ -436,6 +518,15 @@ function IsinCell({ r }: { r: NonNullable<AirsAccountIsins['rows']>[number] | un
       <span className={mismatch ? 'text-neg-400' : unpriced ? 'text-fg-muted' : 'text-fg-soft'}>
         {r.isin}
       </span>
+      {/* A pinned identity must never read as a match. Same ✎ the Class override wears. */}
+      {r.isin_overridden && (
+        <button type="button" disabled={!onPin}
+          onClick={(e) => { e.stopPropagation(); void onPin?.(r.holding_name, r.isin); }}
+          title="ISIN set by hand — the Fixed portfolio has no position for this holding. Click to change it, or clear it to go back to matching."
+          className="text-accent-400 text-[9px] leading-none ml-1 align-middle hover:text-accent-300">
+          ✎
+        </button>
+      )}
       {mismatch && (
         <span className="text-neg-400 ml-1" title={`⚠ The price says this is NOT the same instrument. This holding implies €${r.implied_price_eur}/unit; ${r.isin} last closed at €${r.our_price_eur} (${r.our_instrument ?? 'our instrument'}) — a ratio of ${r.price_ratio}. Either the Fixed portfolio carries the wrong ISIN, or the book holds a different share class than it specifies.`}>⚠</span>
       )}
@@ -458,15 +549,18 @@ function IsinCell({ r }: { r: NonNullable<AirsAccountIsins['rows']>[number] | un
  *   AIRS's classification and it is the right one: 10 of the 11 bond ISINs are ETFs, so an "ETF"
  *   bucket would empty Bonds and make a defensive book read as holding almost none.
  */
-function SegmentHeader({ s, asOf, holdings, onAnalyse, onFundamental }: {
+function SegmentHeader({ s, asOf, holdings, stats, onAnalyse, onFundamental }: {
   s: AirsHoldingSegment; asOf?: string | null;
   holdings: { isin: string; weight: number }[];
+  /** ⚠ EVERY FIGURE ON THIS ROW COMES FROM THE HOLDINGS UNDER IT (`groupStats`), not from the
+   *  backend's own per-segment numbers — it computes those over a different row set, and a header
+   *  that disagrees with the lines beneath it is a second source of truth with no way to tell
+   *  which is right. `s` is used only for the label. */
+  stats: GroupStats;
   onAnalyse: (v: ModalTarget) => void;
   onFundamental: (v: ModalTarget) => void;
 }) {
-  const etfPct = s.value_eur && s.etf_value_eur ? (100 * s.etf_value_eur) / s.value_eur : 0;
-  const partial = s.value_eur != null && s.priced_value_eur != null
-    && Math.abs(s.value_eur - s.priced_value_eur) > 1;
+  const { etfPct, partial } = stats;
   const label = bucketLabel(s.asset_class) || 'Group';
   const target: ModalTarget = { name: label, basket: { holdings, label } };
   const cls = 'text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300 whitespace-nowrap';
@@ -485,22 +579,22 @@ function SegmentHeader({ s, asOf, holdings, onAnalyse, onFundamental }: {
       <td className="px-3 py-1 font-semibold text-fg-strong">
         {label}
         <span className="text-fg-faint font-normal ml-2">
-          {s.holdings} holding{s.holdings === 1 ? '' : 's'}
+          {stats.holdings} holding{stats.holdings === 1 ? '' : 's'}
           <Provenance source="airs_volk" asOf={asOf} kind="formula" note="holdings in this segment"
-            how="a count of the segment's holdings" />
+            how="a count of the rows listed below this header — not a separate figure." />
           {etfPct >= 0.5 && (
-            <span title={`${eur(s.etf_value_eur)} of this segment is held via ETFs. An equity ETF is Equity and a bond ETF is Bonds — the wrapper does not change the exposure.`}>
+            <span title={`${eur(stats.valueEur * (etfPct / 100))} of this segment is held via ETFs. An equity ETF is Equity and a bond ETF is Bonds — the wrapper does not change the exposure.`}>
               {' · '}{etfPct.toFixed(0)}% via ETFs
               <Provenance source="airs_volk" asOf={asOf} kind="formula" note="ETF share of the segment"
-                how="ETF value ÷ segment value (both EUR)" />
+                how="the value of the fund-wrapped rows below ÷ this segment's total value (both EUR)." />
             </span>
           )}
         </span>
       </td>
       {/* ⚠ ONE CELL PER COLUMN. The table is [Fundamental] · Fund · ISIN · Class · Sector · Country
-          · Region · Ccy · Weight · Return — ten (the leading Fundamental cell is emitted above). An
-          extra blank here shifts every figure one column right, which is silent: a weight renders
-          perfectly well under "Ccy". */}
+          · Region · Ccy · Start wt · Weight · Return — eleven (the leading Fundamental cell is
+          emitted above). An extra blank here shifts every figure one column right, which is
+          silent: a weight renders perfectly well under "Ccy". */}
       <td />{/* ISIN */}
       <td />{/* Class */}
       <td />{/* Sector */}
@@ -508,18 +602,34 @@ function SegmentHeader({ s, asOf, holdings, onAnalyse, onFundamental }: {
       <td />{/* Region */}
       <td />{/* Ccy */}
       <td className="px-3 py-1 text-right font-mono text-fg-subtle">
-        {s.weight_pct == null ? '—' : `${s.weight_pct.toFixed(2)}%`}
-        <Provenance source="airs_volk" asOf={asOf} kind="formula" note="segment weight"
-          how="segment value ÷ book total (summed from the AIRS VOLK position values)" />
+        {stats.startWeightPct == null ? '—' : `${stats.startWeightPct.toFixed(2)}%`}
+        {stats.startWeightPct != null && (
+          <Provenance source="airs_volk" asOf={asOf} kind="formula" note="segment start weight"
+            how={`the Start wt column of the ${stats.holdings} row${stats.holdings === 1 ? '' : 's'} below, added up. Equivalently this segment's opening value ÷ the book's. Weighting each segment's return by it gives the book's return.`} />
+        )}
       </td>
-      <td className={`px-3 py-1 text-right font-mono font-semibold ${tone(s.return_pct)}`}
+      <td className="px-3 py-1 text-right font-mono text-fg-subtle">
+        {stats.weightPct == null ? '—' : `${stats.weightPct.toFixed(2)}%`}
+        {stats.weightPct != null && (
+          <Provenance source="airs_volk" asOf={asOf} kind="formula" note="segment weight, as of today"
+            how={`the Weight column of the ${stats.holdings} row${stats.holdings === 1 ? '' : 's'} below, added up (AIRS's own Weging per position).`} />
+        )}
+      </td>
+      <td className={`px-3 py-1 text-right font-mono font-semibold ${tone(stats.returnPct)}`}
         title={partial
-          ? `Start-weighted value change of this segment's priced holdings (${eur(s.priced_value_eur)} of ${eur(s.value_eur)}). The rest has no opening value — not held when the year opened — so its return is undefined, not zero.`
+          ? `Start-weighted value change of this segment's priced holdings (${eur(stats.pricedValueEur)} of ${eur(stats.valueEur)}). The rest has no opening value — not held when the year opened — so its return is undefined, not zero.`
           : 'The start-weighted value change — Σ current ÷ Σ start − 1, each holding weighted by its OPENING value. Price return only — no income, not flow-aware.'}>
-        {s.return_pct == null ? '—' : pct(s.return_pct)}
-        {partial && s.return_pct != null && <span className="text-warn-400 ml-1">*</span>}
+        {stats.returnPct == null ? '—' : pct(stats.returnPct)}
+        {partial && stats.returnPct != null && <span className="text-warn-400 ml-1">*</span>}
+        {/* ONE formula, in the two columns the reader can see. `contributionPct` is Σ(Start wt ×
+            Return) over the rows below; dividing by the segment's own Start wt turns that
+            book-level figure into the segment's own return. */}
         <Provenance source="airs_volk" asOf={asOf} kind="formula" note="segment return"
-          how="Σ current ÷ Σ start − 1 over the segment's priced holdings (each weighted by its opening value)." />
+          how={stats.returnPct == null || stats.contributionPct == null || !stats.startWeightPct
+            ? 'no holding here has an opening value, so this segment has no return to state.'
+            // ⚠ pp, not %. The contribution is a share OF THE BOOK's return; printing it "+5.46%"
+            // beside the segment's own "+6.60%" reads as two rival returns.
+            : `Σ (each row's Start wt × its Return) = ${stats.contributionPct >= 0 ? '+' : ''}${stats.contributionPct.toFixed(2)}pp, which is what this segment added to the book's return. As the segment's OWN return that is ÷ its ${stats.startWeightPct.toFixed(2)}% Start wt = ${pct(stats.returnPct)}.${partial ? ' Priced rows only — the rest had no opening value, so their return is undefined, not zero.' : ''}`} />
       </td>
     </tr>
   );
@@ -570,10 +680,34 @@ function Holdings({ d, i, portefeuille, onOverride }: {
     });
     if (portefeuille && onOverride) await onOverride(portefeuille);
   }, [portefeuille, onOverride]);
+  // Supply this holding's ISIN by hand. The ONLY route when the model has no position for it —
+  // no matching can find an ISIN that is not in the data. Keyed by name, so it fixes every book
+  // holding the same instrument at once; an empty answer clears the pin.
+  const pinIsin = useCallback(async (holdingName: string, current?: string | null) => {
+    const v = await dialog.prompt(
+      `The Fixed portfolio has no position for “${holdingName}”, so its ISIN has to be supplied by hand. It is still price-checked afterwards, and applies to every portfolio holding this instrument. Leave empty to clear.`,
+      { title: 'Set ISIN', defaultValue: current ?? '', placeholder: 'e.g. IE000OEF25S1' });
+    if (v == null) return;                       // cancelled — not the same as cleared
+    const res = await apiFetch(`${API_URL}/api/airs/holding-isin-override`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ holding_name: holdingName, isin: v.trim() || null }),
+    });
+    if (!res.ok) {
+      const b = (await res.json().catch(() => null)) as { detail?: string } | null;
+      await dialog.alert(b?.detail || `Could not save the ISIN (HTTP ${res.status}).`);
+      return;
+    }
+    if (portefeuille && onOverride) await onOverride(portefeuille);
+  }, [portefeuille, onOverride]);
   if (!d) return <p className="text-[11px] text-fg-subtle">Loading holdings…</p>;
   if (!d.rows?.length) return <p className="text-[11px] text-fg-subtle">No holdings snapshot stored.</p>;
   const byName = new Map((i?.rows ?? []).map((r) => [r.holding_name, r]));
   const mismatches = (i?.rows ?? []).filter((r) => r.verdict === 'price_mismatch').length;
+  // How many identities are AIRS's OWN (exact) vs recovered by matching a fund name. Stated once
+  // per table rather than badged on every row: during the changeover it is the whole table that
+  // is one or the other, and it is what says whether a book still needs re-scanning.
+  const named = (i?.rows ?? []).filter((r) => r.isin_source === 'model').length;
+  const exact = (i?.rows ?? []).filter((r) => r.isin_source === 'book').length;
 
   // Grouped by the CALCULATED Class (the `bucket`, incl. manual overrides), in the backend's order
   // (Cash and Unclassified last — they are what is left). A holding whose class we do not know
@@ -615,28 +749,35 @@ function Holdings({ d, i, portefeuille, onOverride }: {
   // true return was +41.98% (≈ the +43.08% flow-aware book figure). Start-weighting is the honest
   // number and the one that lines up with `cumulatief_rendement`. Undefined-return rows drop out.
   const totalWeight = all.reduce((s, r) => s + (r.weight ?? 0), 0);
-  const pricedRows = all.filter((r) => (r.start_value_eur ?? 0) !== 0 && r.current_value_eur != null);
-  const startSum = pricedRows.reduce((s, r) => s + (r.start_value_eur ?? 0), 0);
-  const nowSum = pricedRows.reduce((s, r) => s + (r.current_value_eur ?? 0), 0);
-  const totalReturn = startSum !== 0 ? nowSum / startSum - 1 : null;
+  // The Total AND the Start-wt column come from ONE call: Σ(start weight × return) is
+  // Σ(current−start) ÷ Σstart identically, and computing the two separately is exactly how a
+  // column and the figure it is supposed to explain drift apart. See `startWeights.ts`.
+  const basis = startBasis(all);
+  const { priced: pricedRows, startSum, nowSum, totalReturn, weightOf: startWeight } = basis;
   return (
     <div className="space-y-2">
       {/* ⚠ Stated BEFORE the numbers — a reader coming from a weights table will try to add
           these up and conclude something is broken. One line; the reasoning is on hover. */}
       <p className="text-[10px] text-fg-faint leading-relaxed"
-        title="Price returns: AIRS restates each opening value to the current quantity, so a purchase is not a gain. The portfolio's own figure is flow-aware and includes income, which no price return carries — so these do not sum to it.">
-        ISIN and fund name from the Fixed portfolio; other columns from AIRS. Price returns — they
-        do <strong>not</strong>{' '}sum to the portfolio&apos;s{' '}
+        title="Price returns: AIRS restates each opening value to the current quantity, so a purchase is not a gain. The portfolio's own figure is flow-aware and includes income, which no price return carries, so these do not sum to it.">
+        {exact > 0 && named === 0
+          ? 'ISINs are AIRS’s own, per holding. '
+          : exact > 0
+            ? `${exact} ISIN${exact === 1 ? '' : 's'} from AIRS, ${named} matched by name. `
+            : 'ISIN and fund name from the Fixed portfolio. '}
+        Other columns from AIRS. Weight the Return column by{' '}
+        <strong>Start wt</strong>, not Weight, to reach the Total. Price returns do not sum to the
+        portfolio&apos;s{' '}
         <span className={`font-mono ${tone(d.ytd_pct)}`}>{pct(d.ytd_pct)}</span>, which is
-        flow-aware and includes <span className="font-mono">{eur(d.income_eur)}</span>{' '}income.
+        flow-aware and includes <span className="font-mono">{eur(d.income_eur)}</span>{' '}of income.
         {mismatches > 0 && (
           <span className="text-neg-400">{' '}{mismatches} ISIN{mismatches === 1 ? '' : 's'}{' '}
             {mismatches === 1 ? 'disagrees' : 'disagree'} with the price.</span>
         )}
         {i?.unmatched_model_positions && i.unmatched_model_positions.length > 0 && (
           <span className="text-fg-muted"
-            title="Held by the Fixed portfolio but not by this book — implementation drift.">
-            {' '}Not held here:{' '}
+            title="Held by the Fixed portfolio but not by this book: implementation drift.">
+            {' '}Not held:{' '}
             {i.unmatched_model_positions.map((u) => u.fonds).join(', ')}.
           </span>
         )}
@@ -648,7 +789,7 @@ function Holdings({ d, i, portefeuille, onOverride }: {
               <th className="px-2 py-1.5 font-medium text-left" />{/* Fundamental */}
               <th className="px-3 py-1.5 font-medium text-left">Fund</th>
               <th className="px-3 py-1.5 font-medium text-left"
-                title="From the Fixed portfolio, then price-checked against that instrument's own close. ⚠ = the price disagrees; ? = no series, so nothing confirms the name.">
+                title="AIRS's own ISIN-code where the book carries one (exact), else matched by name to a Fixed portfolio position, else pinned by hand. Always price-checked against that instrument's own close. ⚠ = the price disagrees; ? = no series, so nothing cross-checks it.">
                 ISIN
               </th>
               <th className="px-3 py-1.5 font-medium text-left"
@@ -659,7 +800,14 @@ function Holdings({ d, i, portefeuille, onOverride }: {
               <th className="px-3 py-1.5 font-medium text-left">Country</th>
               <th className="px-3 py-1.5 font-medium text-left" title="MSCI region from the instrument's yfinance geo. ⚠ For an ETF this describes its listing, not what it holds.">Region</th>
               <th className="px-3 py-1.5 font-medium text-left">Ccy</th>
-              <th className="px-3 py-1.5 font-medium text-right">Weight</th>
+              <th className="px-3 py-1.5 font-medium text-right"
+                title="Share of the book at the START of the year (Beginwaarde ÷ total Beginwaarde). This is the weight the Return column belongs to: weighting each return by it reproduces the Total exactly. “—” = no opening value, so the holding was not there when the year began.">
+                Start wt
+              </th>
+              <th className="px-3 py-1.5 font-medium text-right"
+                title="AIRS's own Weging — today's share of the book. It answers what you hold NOW; it is NOT the weight behind the Return column, because a holding that rose carries a bigger share today than it held while it was rising.">
+                Weight
+              </th>
               <th className="px-3 py-1.5 font-medium text-right">Return</th>
             </tr>
           </thead>
@@ -669,11 +817,28 @@ function Holdings({ d, i, portefeuille, onOverride }: {
               <td className="px-2 py-1.5" />{/* Fundamental */}
               <td className="px-3 py-1.5 text-fg-strong" colSpan={7}>
                 Total · {all.length} holding{all.length === 1 ? '' : 's'}
+                <Provenance source="airs_volk" asOf={d.as_of} kind="formula" note="holdings in the book"
+                  how="a count of the AIRS positions, merged where AIRS bills one instrument on several lines." />
               </td>
-              <td className="px-3 py-1.5 text-right font-mono text-fg-strong">{(totalWeight * 100).toFixed(2)}%</td>
+              <td className="px-3 py-1.5 text-right font-mono text-fg-strong">
+                {startSum === 0 ? '—' : '100.00%'}
+                <Provenance source="airs_volk" asOf={d.as_of} kind="formula" note="total start weight"
+                  how="100% by construction — it is each priced holding's opening value over their sum. The point is the column below it: those shares times the Return column give the Total return exactly." />
+              </td>
+              <td className="px-3 py-1.5 text-right font-mono text-fg-strong">
+                {(totalWeight * 100).toFixed(2)}%
+                <Provenance source="airs_volk" asOf={d.as_of} kind="formula" note="total weight"
+                  how="Σ of the positions' own AIRS weights (Weging)." />
+              </td>
               <td className={`px-3 py-1.5 text-right font-mono ${totalReturn == null ? 'text-fg-faint' : tone(totalReturn)}`}
                 title="Start-weighted value change — Σ current ÷ Σ start − 1 over holdings with an opening value (each position's return weighted by its OPENING value, the same basis each bucket uses). Price return only — not flow-aware, so it is close to but not exactly the book's cumulatief_rendement.">
                 {totalReturn == null ? '—' : pct(totalReturn * 100)}
+                {/* Same formula as a segment row, minus the renormalising step: the Start wt
+                    column already sums to 100% here, so there is nothing to divide by. */}
+                <Provenance source="airs_volk" asOf={d.as_of} kind="formula" note="start-weighted price return"
+                  how={totalReturn == null
+                    ? 'no holding has an opening value, so the book has no price return to compute.'
+                    : `Σ (each row's Start wt × its Return) over the ${pricedRows.length} holding${pricedRows.length === 1 ? '' : 's'} with an opening value — the Start wt column sums to 100%, so nothing is renormalised. Equivalently ${eur(nowSum)} ÷ ${eur(startSum)} − 1 = ${pct(totalReturn * 100)}. Price return only — not flow-aware, so it is close to but NOT the book's cumulatief_rendement.`} />
               </td>
             </tr>
             {ordered.map(([seg, group]) => {
@@ -683,24 +848,100 @@ function Holdings({ d, i, portefeuille, onOverride }: {
               return (
               <Fragment key={seg?.asset_class ?? 'x'}>
                 {seg && <SegmentHeader s={seg} asOf={d.as_of} holdings={groupHoldings}
+                  stats={groupStats(group, basis, {
+                    weightOfRow: (r) => r.weight,
+                    isEtf: (r) => !!byName.get(r.holding_name)?.is_etf,
+                  })}
                   onAnalyse={setPerf} onFundamental={setFund} />}
-                {group.map((r, n) => (
+                {group.map((r, n) => {
+                  const g = byName.get(r.holding_name);
+                  return (
               <tr key={`${r.holding_name}-${n}`} className="hover:bg-overlay/[0.02]">
-                <FundamentalCell isin={byName.get(r.holding_name)?.isin} name={r.holding_name} onAnalyse={setPerf} onFundamental={setFund} />
-                <td className="px-3 py-1.5 text-fg-soft pl-6">{r.holding_name}</td>
-                <td className="px-3 py-1.5"><IsinCell r={byName.get(r.holding_name)} /></td>
-                <td className="px-3 py-1.5"><BucketBadge bucket={byName.get(r.holding_name)?.bucket}
-                  isin={byName.get(r.holding_name)?.isin} overridden={byName.get(r.holding_name)?.bucket_overridden}
-                  onOverride={setBucket} /></td>
-                <td className="px-3 py-1.5 text-fg-subtle">{byName.get(r.holding_name)?.sector || '—'}</td>
-                <td className="px-3 py-1.5 text-fg-subtle">{byName.get(r.holding_name)?.country || '—'}</td>
-                <td className="px-3 py-1.5 text-fg-subtle">{byName.get(r.holding_name)?.region || '—'}</td>
-                <td className="px-3 py-1.5 font-mono text-fg-muted">{r.currency || '—'}</td>
+                <FundamentalCell isin={g?.isin} name={r.holding_name} onAnalyse={setPerf} onFundamental={setFund} />
+                <td className="px-3 py-1.5 text-fg-soft pl-6">
+                  {r.holding_name}
+                  <Provenance source="airs_volk" asOf={d.as_of} kind="copied"
+                    note="Fonds — the position's own name in the AIRS book" />
+                </td>
+                <td className="px-3 py-1.5">
+                  <IsinCell r={g} onPin={pinIsin} />
+                  {/* ⚠ The ISIN is the one column NOT read off a source — it is INFERRED (a name
+                      match, then a price check), so its card carries both steps. */}
+                  {g && (g.isin || g.verdict === 'unmatched') && (
+                    <Provenance
+                      source={g.isin_source === 'book' ? 'airs_volk'
+                        : g.isin_overridden ? 'derived' : 'airs_model'}
+                      asOf={g.isin_source === 'book' ? d.as_of : undefined}
+                      kind={g.isin_source === 'book' ? 'copied' : 'formula'}
+                      note={g.isin_source === 'book'
+                        ? "ISIN-code — the holding's own ISIN in the AIRS book"
+                        : g.isin_overridden
+                          ? 'ISIN — pinned by hand, then price-checked'
+                          : g.verdict === 'unmatched'
+                            ? 'ISIN — refused; no Fixed portfolio position matches this holding'
+                            : 'ISIN — matched by NAME to a Fixed portfolio position'}
+                      how={isinHow(g)} />
+                  )}
+                </td>
+                {/* Provenance sits OUTSIDE the badge: BucketBadge overlays an invisible `<select>`
+                    across its whole span, which would swallow the hover. */}
+                <td className="px-3 py-1.5">
+                  <BucketBadge bucket={g?.bucket} isin={g?.isin}
+                    overridden={g?.bucket_overridden} onOverride={setBucket} />
+                  {g?.bucket && (
+                    <Provenance source="derived" kind="formula"
+                      note={g.bucket_overridden ? 'Class — manually pinned' : 'Class — the smart asset-class label'}
+                      how={g.bucket_overridden
+                        ? 'a manual override pinned to this ISIN, which beats the calculated class for good.'
+                        : `AIRS's own Beleggingscategorie${g.categorie ? ` (“${g.categorie}”)` : ''}, then refined by the instrument's grid data (fund/ETF, asset class, name).`} />
+                  )}
+                </td>
+                <td className="px-3 py-1.5 text-fg-subtle">
+                  {g?.sector || '—'}
+                  {g?.sector && (
+                    <Provenance source="yfinance" kind="copied"
+                      note="sector — the instrument's own sector in asset_grid, joined by ISIN" />
+                  )}
+                </td>
+                {/* ⚠ `country` coalesces domicile over LISTING, so a US name priced on a thin German
+                    line can read "Germany". The card says so rather than the column lying quietly. */}
+                <td className="px-3 py-1.5 text-fg-subtle">
+                  {g?.country || '—'}
+                  {g?.country && (
+                    <Provenance source="yfinance" kind="formula" note="country — where the issuer is domiciled"
+                      how="Yahoo's assetProfile.country, falling back to the LISTING's country when Yahoo reports no domicile — for a thin foreign line that fallback names the venue, not the issuer." />
+                  )}
+                </td>
+                <td className="px-3 py-1.5 text-fg-subtle">
+                  {g?.region || '—'}
+                  {g?.region && (
+                    <Provenance source="yfinance" kind="formula" note="region — the MSCI ACWI region"
+                      how="derived from the resolved country above. ⚠ For an ETF it describes the fund's own listing, not what the fund holds." />
+                  )}
+                </td>
+                <td className="px-3 py-1.5 font-mono text-fg-muted">
+                  {r.currency || '—'}
+                  {r.currency && (
+                    <Provenance source="airs_volk" asOf={d.as_of} kind="copied"
+                      note="Valuta — the currency AIRS books this position in" />
+                  )}
+                </td>
+                {/* ⚠ A dash, never 0.00%. No opening value means the holding was NOT THERE when
+                    the year began, which is why it has no return either — not that it held none
+                    of the book. */}
+                <td className="px-3 py-1.5 text-right font-mono text-fg-subtle">
+                  {(() => { const sw = startWeight(r); return sw == null ? '—' : `${(sw * 100).toFixed(2)}%`; })()}
+                  {startWeight(r) != null && (
+                    <Provenance source="airs_volk" asOf={d.as_of} kind="formula"
+                      note="start weight — the share of the book this holding was at the year's open"
+                      how={`Beginwaarde ÷ the book's total Beginwaarde = ${eur(r.start_value_eur)} ÷ ${eur(startSum)}. This is the weight the Return beside it belongs to.`} />
+                  )}
+                </td>
                 <td className="px-3 py-1.5 text-right font-mono text-fg-subtle">
                   {r.weight != null ? `${(r.weight * 100).toFixed(2)}%` : '—'}
                   {r.weight != null && (
                     <Provenance source="airs_volk" asOf={d.as_of} kind="copied"
-                      note="Weging — AIRS's own position weight" />
+                      note="Weging — AIRS's own position weight, as of today" />
                   )}
                 </td>
                 {/* ⚠ A dash, never 0%. No opening value = the return is UNDEFINED, not flat. */}
@@ -715,7 +956,8 @@ function Holdings({ d, i, portefeuille, onOverride }: {
                   )}
                 </td>
               </tr>
-                ))}
+                  );
+                })}
               </Fragment>
               );
             })}

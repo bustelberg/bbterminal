@@ -6,7 +6,9 @@ are hypothetical.
 """
 from __future__ import annotations
 
-from routers._airs_holding_isin import _assign, _dedupe, _norm, _score
+from routers._airs_holding_isin import (
+    _WEAK_NAME, _assign, _dedupe, _norm, _score, pairing_refused,
+)
 
 
 def P(fonds, isin=None):
@@ -104,3 +106,64 @@ class TestTheAccountBillsOneInstrumentOnSeveralLines:
                         "weight": 0.0237}])
         assert out[0]["lines"] == 1
         assert out[0]["quantity"] == 148
+
+
+class TestAPairingTheModelCannotSupportIsRefused:
+    """⚠ A 1:1 ASSIGNMENT MUST PLACE EVERY HOLDING, EVEN ONE THE MODEL DOES NOT CONTAIN.
+
+    When the stored model snapshot predates a swap in AIRS, the book holds an instrument with no
+    position to pair with — and the assignment cannot say "none". It hands the holding whatever
+    orphan is left, at any score, and we published that ISIN as the answer.
+
+    Measured 2026-07-23. AIRS's Fixed portfolios now hold `Invesco Wld EW ETF Acc`
+    (IE000OEF25S1); our snapshots (positions_datum 2025-04-28) still hold `Ish DJS GSD 100`
+    (DE000A0F5UH1) — and all four BUS_* books reported the Invesco holding AS DE000A0F5UH1.
+    BUS_WTS_Duurzaam_Dyn (snapshot 2025-02-14) scattered six more.
+    """
+
+    # (holding, declined position, score) — every one a DIFFERENT instrument. Real rows.
+    WRONG = [
+        ("Invesco World Equal Weight ETF Acc", "Ish DJS GSD 100", 34.5),
+        ("Merck & Co", "Amazon.com", 36.4),
+        ("Chipotle Mexican Grill", "Apple", 38.7),
+        ("Eli Lilly & Co.", "Netflix", 43.5),
+        ("Novo Nordisk", "Nvidia", 43.5),
+        ("Lululemon Athletica", "Alphabet - C", 44.4),
+        ("Adobe Systems", "Zoetis - A", 47.6),
+    ]
+    # The genuine findings: the row pairing is RIGHT and the ISIN on it is wrong (share class,
+    # venue). Refusing these would throw away what the price check is FOR.
+    FINDINGS = [
+        ("iShares Global Corp Bond ETF EUR H Dist", "iShs Glb Crp Bond ETF EU", 80.5),
+        ("Samsung Electronics", "Samsung Electron", 91.4),
+        ("Taiwan Semiconductor Manufact.", "Taiwan Semicond Manuf", 98.2),
+        ("SK Hynix Inc", "SK Hynic", 100.0),
+        ("Indutrade AB", "Indutrade AB", 100.0),
+        ("3i Group", "3i Group", 100.0),
+    ]
+
+    def test_a_wrong_instrument_is_refused_rather_than_published(self):
+        for holding, declined, score in self.WRONG:
+            assert pairing_refused("price_mismatch", score), \
+                f"{holding} was published as {declined} (score {score})"
+
+    def test_a_real_share_class_finding_survives(self):
+        """⚠ `unmatched` and `price_mismatch` are OPPOSITE findings, not degrees of one."""
+        for holding, pos, score in self.FINDINGS:
+            assert not pairing_refused("price_mismatch", score), \
+                f"{holding} -> {pos} is a real finding, not a bad pairing (score {score})"
+
+    def test_the_two_populations_do_not_overlap(self):
+        """The rule is only safe because the measured gap is wide and empty — 47.6 to 80.5, with
+        the threshold inside it. If a future account lands in that gap, this rule needs evidence
+        before it is widened, not a nudged constant."""
+        assert max(s for _, _, s in self.WRONG) < _WEAK_NAME < min(s for _, _, s in self.FINDINGS)
+
+    def test_neither_signal_alone_may_refuse(self):
+        """⚠ THE CONJUNCTION IS THE WHOLE RULE."""
+        # A weak name that the price did not contradict. `Effectenrekening` -> `Liquiditeiten`
+        # scores 27.6 and is RIGHT — cash, by elimination.
+        assert not pairing_refused("unpriced", 27.6)
+        assert not pairing_refused("ok", 27.6)
+        # And a contradicted price with a name that agrees is the finding above, not a bad pair.
+        assert not pairing_refused("price_mismatch", 100.0)

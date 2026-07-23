@@ -654,7 +654,7 @@
         "type": "object"
       },
       "AirsHoldingIsin": {
-        "description": "One account holding, with the ISIN we believe it is \u2014 and how much to believe it.\n\n\u26a0 `verdict` IS THE FIELD THAT MATTERS, AND `name_score` IS NOT.\n  ok             the implied price agrees with that ISIN's own close (FX-converted)\n  price_mismatch it does NOT \u2014 the ISIN is not what the book holds, or the book drifted\n  unpriced       we have no series for it, so there is NOTHING confirming the name match\n\n`unpriced` is not a pass. The name matched and nothing checked it \u2014 which for a fund is\nexactly where the Acc/Inc share-class trap lives.",
+        "description": "One account holding, with the ISIN we believe it is \u2014 and how much to believe it.\n\n\u26a0 `verdict` IS THE FIELD THAT MATTERS, AND `name_score` IS NOT.\n  ok             the implied price agrees with that ISIN's own close (FX-converted)\n  price_mismatch it does NOT \u2014 the ISIN is not what the book holds, or the book drifted\n  unpriced       we have no series for it, so there is NOTHING confirming the name match\n  unmatched      NO ISIN: the model has no position for this holding at all\n\n`unpriced` is not a pass. The name matched and nothing checked it \u2014 which for a fund is\nexactly where the Acc/Inc share-class trap lives.\n\n\u26a0 `unmatched` AND `price_mismatch` ARE OPPOSITE FINDINGS, NOT DEGREES OF ONE. A mismatch means\nthe row pairing is RIGHT and the ISIN on it is wrong (a share class, a venue) \u2014 a finding\nabout the model. `unmatched` means the pairing itself was refused: the name says a different\ninstrument and the price independently agrees, which is what a STALE model snapshot looks like\nwhen the book has since swapped a position. `rejected_isin`/`rejected_fonds` name the leftover\nwe declined; re-scan the model portfolio to fix it.",
         "properties": {
           "asset_class": {
             "anyOf": [
@@ -781,6 +781,39 @@
             ],
             "title": "Isin"
           },
+          "isin_overridden": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin Overridden"
+          },
+          "isin_override_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin Override Note"
+          },
+          "isin_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin Source"
+          },
           "lines": {
             "default": 1,
             "title": "Lines",
@@ -873,6 +906,28 @@
               }
             ],
             "title": "Region"
+          },
+          "rejected_fonds": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejected Fonds"
+          },
+          "rejected_isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejected Isin"
           },
           "sector": {
             "anyOf": [
@@ -2768,7 +2823,7 @@
         "type": "object"
       },
       "BookHoldingDetail": {
-        "description": "One paired-book holding, for a non-equity sleeve's contribution + currency view.\n\n`weight_pct` is the holding's CURRENT value as a share of the whole book, so that within ANY\nbucket, \u03a3 (weight_pct / \u03a3_bucket weight_pct) \u00b7 return_pct reproduces that bucket's weighted\nreturn exactly (weight = the position's Weight). `currency` is the holding's quote currency (a\nfair first-order FX signal for a bond/ETF sleeve \u2014 NOT folded to Unclassified like the fund axes).",
+        "description": "One paired-book holding, for a non-equity sleeve's contribution + currency view.\n\n`weight_pct` is the holding's OPENING value (beginwaarde) as a share of the whole book, so that\nwithin ANY bucket, \u03a3 (weight_pct / \u03a3_bucket weight_pct) \u00b7 return_pct reproduces that bucket's\nSTART-weighted return (\u03a3now/\u03a3start\u22121) exactly \u2014 the true value change, not the current-value\nweighting that lets a big winner dominate. `currency` is the holding's quote currency (a fair\nfirst-order FX signal for a bond/ETF sleeve \u2014 NOT folded to Unclassified like the fund axes).",
         "properties": {
           "bucket": {
             "title": "Bucket",
@@ -4197,6 +4252,41 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HoldingIsinOverride": {
+        "properties": {
+          "holding_name": {
+            "title": "Holding Name",
+            "type": "string"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "holding_name"
+        ],
+        "title": "HoldingIsinOverride",
         "type": "object"
       },
       "HoldingStateInfo": {
@@ -10357,6 +10447,46 @@
           }
         },
         "summary": "Airs Crm Relaties",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/holding-isin-override": {
+      "post": {
+        "description": "Pin (or clear) the ISIN of an account holding the model has no position for.\n\nKeyed by holding NAME, so one entry fixes every book that holds it (the measured case appears\nin four). \u26a0 It decides IDENTITY ONLY: the pinned ISIN is price-checked like any other, so a\nwrong one comes back `price_mismatch` rather than being trusted because a human typed it.",
+        "operationId": "set_holding_isin_override_api_airs_holding_isin_override_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HoldingIsinOverride"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Holding Isin Override",
         "tags": [
           "airs"
         ]

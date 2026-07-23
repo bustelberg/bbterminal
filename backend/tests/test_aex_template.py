@@ -16,8 +16,6 @@ from __future__ import annotations
 import inspect
 from datetime import date
 
-import pytest
-
 from index_universe.templates import TEMPLATES, get_template
 from index_universe.templates.aex import AEXTemplate, _parse_as_of, _resolve_companies, scrape_aex
 
@@ -148,10 +146,7 @@ class TestTheTemplateNeverInventsACompany:
         assert before < write
 
 
-@pytest.mark.skip(reason="hits Wikipedia + OpenFIGI; run manually when the page shape is in doubt")
-class TestAgainstTheLivePage:
-    def test_the_page_still_parses(self):
-        as_of, cons = scrape_aex()
-        assert len(cons) == 25
-        assert as_of.year >= 2024
-        assert all(c["bare"] and "." not in c["bare"] for c in cons)
+# ⚠ There was a `TestAgainstTheLivePage` here that called `scrape_aex()` for real — it hit
+# Wikipedia and OpenFIGI, so it was permanently `@pytest.mark.skip`ed and never ran. Removed
+# 2026-07-23: this repo is unit tests only, and a network test that is always skipped is not a
+# test, it is a comment that costs a collection. Check the page shape by hand when in doubt.

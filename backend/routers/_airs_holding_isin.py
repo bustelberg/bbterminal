@@ -1,13 +1,28 @@
 """Attaching an ISIN to an AIRS account's holdings — and refusing to trust the name that did it.
 
 THE PROBLEM
-    An account (`airs_holding`) carries real quantities and real EUR values, and NO ISIN — only
-    `Fondsomschrijving`, a fund name. Its model (`airs_model_portfolio_position`) carries the
-    ISINs and nothing AIRS will value. Pairing the two portfolios is `_airs_account_links`; this
-    module does the row-level join inside a confirmed pair.
+    An account (`airs_holding`) carries real quantities and real EUR values, and — until
+    2026-07-23 — NO ISIN, only `Fondsomschrijving`, a fund name. Its model
+    (`airs_model_portfolio_position`) carries the ISINs and nothing AIRS will value. Pairing the
+    two portfolios is `_airs_account_links`; this module does the row-level join inside a pair.
 
     Measured end-to-end on BUS_Defensief_Dyn <-> BUS_Defensief_FX: 40 of 41 holdings resolve,
     the leftover being a model position (`Ish DJS GSD 100`, DE000A0F5UH1) the book does not hold.
+
+⚠ THE VERMOGENSOVERZICHT NOW CARRIES `ISIN-code`, AND WHERE IT DOES, NONE OF THE BELOW APPLIES.
+    Switched on in AirSPMS 2026-07-23. The book states its own ISIN, so the join is EXACT: no
+    scoring, no assignment, no leftover to place. `isin_source` says which route a row took —
+    `book` (exact) / `override` (a human) / `model` (the name match).
+
+    THE NAME ROUTE IS NOT DEAD AND MUST NOT BE DELETED. Every snapshot taken before that date has
+    no ISIN and is what history is made of; the cash line never has one; and a portfolio whose
+    export omits the column still has to resolve. The four mechanisms below are what makes that
+    fallback work, and they are all still live for those rows.
+
+    THE PRICE CHECK MATTERS MORE, NOT LESS. On a name match it tests the pairing. On an exact
+    ISIN there is no pairing to test — so it tests OUR series for that instrument instead, and a
+    mismatch means our own listing is wrong (the Stuttgart/Vienna trap), which is a finding we
+    previously had no way to make at all.
 
 FOUR THINGS MAKE IT WORK, AND EACH ONE WAS MEASURED FAILING WITHOUT THE OTHERS
     1. DEDUPE THE ACCOUNT FIRST. It lists one instrument on several lines — BUS_Defensief_Dyn
@@ -27,6 +42,32 @@ FOUR THINGS MAKE IT WORK, AND EACH ONE WAS MEASURED FAILING WITHOUT THE OTHERS
     4. GATE ON THE PRICE, NOT ON THE NAME SCORE. The score is worthless as confidence here:
        `Effectenrekening` -> `Liquiditeiten` scores 28 and is RIGHT (cash, by elimination); the
        duplicate line scored 33 and was WRONG. The implied price is independent evidence.
+
+⚠ A 1:1 ASSIGNMENT MUST PLACE EVERY HOLDING, INCLUDING ONE THE MODEL DOES NOT CONTAIN.
+    When the stored model snapshot predates a swap in AIRS, the book holds an instrument that has
+    no position to pair with — and the assignment does not get to say "none". It hands the holding
+    whatever orphan is left over, at any score, and we published that ISIN as the answer.
+
+    Measured 2026-07-23 on the four BUS_* books: AIRS's Fixed portfolio now holds `Invesco Wld EW
+    ETF Acc` (IE000OEF25S1), our snapshot (positions_datum 2025-04-28) still holds `Ish DJS GSD
+    100` (DE000A0F5UH1), and every one of the four reported the Invesco holding AS DE000A0F5UH1.
+    BUS_WTS_Duurzaam_Dyn (snapshot 2025-02-14) scattered six: Merck -> Amazon, Chipotle -> Apple,
+    Novo Nordisk -> Nvidia, Eli Lilly -> Netflix, Lululemon -> Alphabet, Adobe -> Zoetis.
+
+    NEITHER SIGNAL ALONE CAN REFUSE THESE, WHICH IS WHY IT SURVIVED SO LONG. A low score is not
+    grounds to reject (cash scores 28 and is right); a contradicted price is not either (it is
+    the module's most valuable FINDING — the right row carrying the wrong share class). It is the
+    CONJUNCTION that is decisive: the name says these are different instruments and the price
+    agrees, independently. Measured over all 28 paired accounts, the two populations do not
+    overlap or even come close — the 10 wrong-instrument rows score 34.5-47.6, the 8 genuine
+    share-class findings score 80.5-100, and `_WEAK_NAME` (60) sits in the empty gap between them.
+
+    So a weak-name AND price-contradicted pairing is REFUSED (`verdict='unmatched'`, no ISIN) and
+    its position goes back to `unmatched_model_positions`, where it belongs: the book does not
+    hold it. The rejected candidate rides along in `rejected_isin`/`rejected_fonds` so the row can
+    say what it declined, rather than showing a bare blank that reads as "cash".
+
+    ⚠ THIS IS A GUARD, NOT A REPAIR. The stale snapshot is the bug; re-scan the model portfolio.
 
 ⚠ THE NAME CANNOT SEE A SHARE CLASS, AND THAT IS THE WHOLE DANGER.
     `IE00BNDS1P30` and `IE00BNDS1Q47` are both "Vanguard ESG Global Corporate Bond UCITS ETF
@@ -243,6 +284,18 @@ def _assign(scores: list[list[float]]) -> dict[int, int]:
     return out
 
 
+def pairing_refused(verdict: str, name_score: float) -> bool:
+    """Is this pairing the leftover of a stale model snapshot rather than a real match?
+
+    ⚠ BOTH SIGNALS, NEVER EITHER ALONE — see the module docstring. A weak name is not grounds to
+    refuse (cash scores 28 and is right); a contradicted price is not either (it is the module's
+    most valuable finding). Only their conjunction is decisive, and measured over all 28 paired
+    accounts the two populations sit either side of `_WEAK_NAME` with nothing in between:
+    wrong-instrument 34.5-47.6, genuine share-class findings 80.5-100.
+    """
+    return verdict == "price_mismatch" and name_score < _WEAK_NAME
+
+
 def _dedupe(holdings: list[dict]) -> list[dict]:
     """One row per INSTRUMENT. See point 1: the account bills one instrument on several lines,
     and a 1:1 assignment over rows must then place the spare on something."""
@@ -299,6 +352,18 @@ def _last_closes(isins: list[str], as_of: str) -> dict[str, dict]:
                           "date": str(rec["date"])[:10], "symbol": r.get("yahoo_symbol"),
                           "name": r.get("name")}
     return out
+
+
+def _load_isin_overrides() -> dict[str, dict]:
+    """{normalised holding name: row} — the identities a human supplied by hand.
+
+    Keyed on the NAME (see the migration): what instrument a fund name denotes does not depend on
+    which book holds it, and the measured case appears in four books at once. Small table, read
+    whole — there is nothing to filter it by that would not cost more than reading it.
+    """
+    rows = (supabase.table("airs_holding_isin_override")
+            .select("holding_name,isin,note").limit(1000).execute().data or [])
+    return {(r["holding_name"] or "").strip().casefold(): r for r in rows if r.get("isin")}
 
 
 def _load_bucket_overrides(isins: list[str]) -> dict[str, str]:
@@ -405,7 +470,7 @@ def resolve_account_isins(portefeuille: str) -> dict:
                 "unmatched_model_positions": []}
     as_of = str(snap[0]["as_of_date"])
     holdings = _dedupe(supabase.table("airs_holding")
-                       .select("holding_name,quantity,currency,weight,current_value_eur,"
+                       .select("holding_name,isin,quantity,currency,weight,current_value_eur,"
                                "start_value_eur,ytd_return_eur,fund_result_eur,fx_result_eur")
                        .eq("portefeuille", portefeuille).eq("as_of_date", as_of)
                        .limit(500).execute().data or [])
@@ -416,7 +481,26 @@ def resolve_account_isins(portefeuille: str) -> dict:
         return {"portefeuille": portefeuille, "model_name": row["model_name"], "as_of": as_of,
                 "reason": "nothing to match", "rows": [], "unmatched_model_positions": []}
 
+    # ── Identity, strongest source first ────────────────────────────────────────────────────
+    # 1. AIRS'S OWN `ISIN-code` ON THE BOOK ROW. Switched on 2026-07-23; where present there is
+    #    nothing to infer and the join below is exact.
+    # 2. A hand-supplied pin, for a holding the model has no position for.
+    # 3. The name match — the original route, and still the only one for pre-2026-07-23 snapshots.
+    # 1 and 2 are taken OUT of the 1:1 assignment: their identity is settled, and leaving them in
+    # would let a settled holding consume some unrelated leftover position — the very bug this
+    # module exists to answer.
+    own = {i: (h.get("isin") or None) for i, h in enumerate(holdings)}
+    pinned = _load_isin_overrides()
+    pin_of = {i: (None if own[i] else pinned.get((h["holding_name"] or "").strip().casefold()))
+              for i, h in enumerate(holdings)}
+    free = [i for i in range(len(holdings)) if not own[i] and not pin_of[i]]
+    # The model position carrying the same ISIN — for AIRS's `categorie` and the model weight, NOT
+    # for identity. Absent is fine and is not drift on our side: the Class falls back to the grid.
+    by_isin = {p["isin"]: j for j, p in enumerate(pos) if p.get("isin")}
+
     isins = [p["isin"] for p in pos if p.get("isin")]
+    isins += [x for x in own.values() if x]
+    isins += [x["isin"] for x in pin_of.values() if x]
     grid: dict[str, dict] = {}
     for i in range(0, len(isins), 100):
         for g in (supabase.table("asset_grid")
@@ -425,8 +509,11 @@ def resolve_account_isins(portefeuille: str) -> dict:
                   .in_("isin", isins[i:i + 100]).execute().data or []):
             grid[g["isin"]] = g
 
-    scores = [[_score(h["holding_name"], p, grid) for p in pos] for h in holdings]
-    pairing = _assign(scores)
+    # Scored over the FREE holdings only, then mapped back to real holding indices.
+    scores = [[_score(holdings[i]["holding_name"], p, grid) for p in pos] for i in free]
+    assigned = _assign(scores) if free else {}
+    pairing = {free[a]: j for a, j in assigned.items()}
+    score_of = {free[a]: scores[a][j] for a, j in assigned.items()}
 
     overrides = _load_bucket_overrides(isins)   # manual Class pins, keyed by ISIN — they win
     closes = _last_closes(isins, as_of)
@@ -437,12 +524,20 @@ def resolve_account_isins(portefeuille: str) -> dict:
 
     rows = []
     for i, h in enumerate(holdings):
-        j = pairing.get(i)
+        pin, mine = pin_of[i], own[i]
+        # An ISIN-bearing holding is joined to its model position EXACTLY, for the category only.
+        j = by_isin.get(mine) if mine else pairing.get(i)
         p = pos[j] if j is not None else None
-        name_score = scores[i][j] if j is not None else 0.0
-        isin = (p or {}).get("isin")
+        name_score = score_of.get(i, 0.0)
+        # ⚠ NEITHER A BOOK ISIN NOR A PIN SKIPS THE VERIFICATION — they decide IDENTITY only. The
+        # price check below runs on them exactly as on a name match. On an exact ISIN it is no
+        # longer testing the pairing (there is none); it tests OUR series for that instrument, and
+        # a mismatch there means our listing is wrong — a more valuable finding, not a weaker one.
+        isin = mine or (pin["isin"] if pin else (p or {}).get("isin"))
         qty, val = h.get("quantity"), h.get("current_value_eur")
         implied = (float(val) / float(qty)) if qty and val else None
+        # What we declined, if we end up declining it. Kept so the row can name its dead end.
+        rejected_isin = rejected_fonds = None
 
         # ⚠ Convert OUR close into EUR — never compare it raw to an EUR-implied price.
         native_eur = None
@@ -459,6 +554,19 @@ def resolve_account_isins(portefeuille: str) -> dict:
             verdict = "ok"
         else:
             verdict = "price_mismatch"
+        # ⚠ THE ASSIGNMENT COULD NOT SAY "NONE", SO SAY IT HERE. Two independent signals both
+        # reject this pairing: the name says a different instrument and the price agrees. That is
+        # the leftover of a stale model snapshot, not a share-class finding — so hand back NO
+        # ISIN rather than one we have twice been told is wrong. See the module docstring.
+        # ⚠ ONLY A NAME MATCH CAN BE REFUSED. `mine` was joined exactly and a pin has no pairing
+        # at all; for both, `name_score` is 0.0 because nothing was ever scored — feeding that to
+        # `pairing_refused` would discard a KNOWN ISIN on the strength of a score that does not
+        # exist. The refusal is about the inference, and here there is none.
+        if not mine and p is not None and pairing_refused(verdict, name_score):
+            rejected_isin, rejected_fonds = isin, (p or {}).get("fonds")
+            verdict, isin, p = "unmatched", None, None
+            pairing.pop(i, None)          # its position is UNMATCHED — the book does not hold it
+            native_eur = ratio = None
         # AIRS's own category, via the model position this holding matched. A holding we could
         # not pair has none — `Unclassified`, never quietly folded into Equity, which is the
         # bucket a reader would least question.
@@ -502,18 +610,39 @@ def resolve_account_isins(portefeuille: str) -> dict:
             "fund_result_eur": h.get("fund_result_eur"),
             "fx_result_eur": h.get("fx_result_eur"),
             "isin": isin,
+            # WHERE the identity came from, because the three are not equally strong and a reader
+            # cannot tell by looking at the digits:
+            #   book     AIRS's own `ISIN-code` on the holding — exact, nothing inferred
+            #   override a human supplied it (the model had no position for the holding)
+            #   model    the name match — a guess, however good, and the reason `verdict` exists
+            "isin_source": ("book" if mine else "override" if pin else "model" if isin else None),
+            # True = a human supplied this ISIN because the model had no position for the holding.
+            # The UI badges it: a pinned identity is not a match, and must not read as one.
+            "isin_overridden": bool(pin),
+            "isin_override_note": (pin or {}).get("note"),
             "model_fonds": (p or {}).get("fonds"),
             "model_pct": (p or {}).get("percentage"),
-            "name_score": round(name_score, 1),
-            "weak_name": name_score < _WEAK_NAME,
+            # Meaningless where nothing was scored (an exact ISIN, or a pin), so `None` rather
+            # than a 0.0 that would render as "we matched this at zero confidence".
+            "name_score": None if (pin or mine) else round(name_score, 1),
+            "weak_name": None if (pin or mine) else name_score < _WEAK_NAME,
             "implied_price_eur": round(implied, 4) if implied else None,
             "our_price_eur": round(native_eur, 4) if native_eur else None,
             "price_ratio": round(ratio, 4) if ratio else None,
             "verdict": verdict,
             "our_instrument": (c or {}).get("name"),
+            # Only set on `unmatched`: the leftover position we declined, so the row can say what
+            # it refused instead of showing a blank that reads as "this holding has no ISIN".
+            "rejected_isin": rejected_isin,
+            "rejected_fonds": rejected_fonds,
         })
     rows.sort(key=lambda r: -(r["current_value_eur"] or 0))
+    # A position is claimed by the assignment OR by any settled identity naming the same ISIN.
+    # Without that second clause an exactly-joined or pinned holding would leave its own position
+    # reading as "not held here" — drift that is not there, invented by the fix for drift that is.
+    settled = {x["isin"] for x in pin_of.values() if x} | {x for x in own.values() if x}
     taken = {pairing[i] for i in pairing}
+    taken |= {j for j, p in enumerate(pos) if p.get("isin") in settled}
     segments = _segments(rows)
     return {
         "portefeuille": portefeuille,

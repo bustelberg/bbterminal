@@ -1,12 +1,14 @@
 """`parse_airs_excel` against the real Vermogensoverzicht (VOLK) header.
 
-The sheet's thirteen columns, verbatim from AIRS:
+The sheet's fourteen columns, verbatim from AIRS:
 
     Fondsomschrijving · Aantal · Kostprijs lopend jaar · Beginwaarde lopend jaar ·
     Beginwaarde lopend jaar EUR · Huidige koers · Huidige waarde · Huidige waarde  EUR ·
-    Weging · Fondsresultaat · Valutaresultaat · Resultaat in % · Valuta
+    Weging · Fondsresultaat · Valutaresultaat · Resultaat in % · Valuta · ISIN-code
 
 Note `Huidige waarde  EUR` — TWO spaces. That is not a typo here; it is what AIRS ships.
+`ISIN-code` was switched on 2026-07-23 and is OPTIONAL: it is what lets `_airs_holding_isin` join
+exactly instead of fuzzy-matching a fund name, but every older snapshot lacks it entirely.
 """
 from __future__ import annotations
 
@@ -35,6 +37,7 @@ _ROW = {
     "Valutaresultaat": 961.25,
     "Resultaat in %": 14.95,                  # AIRS's own return (a percent)
     "Valuta": "USD",
+    "ISIN-code": "US0320951017",              # AIRS's own ISIN (since 2026-07-23)
 }
 
 
@@ -152,3 +155,46 @@ class TestAnOlderExportStillParses:
         h = _one({"Resultaat in %": 0, "Fondsresultaat": 0})
         assert h.airs_result_pct == 0.0
         assert h.fund_result_eur == 0.0
+
+
+class TestTheIsinColumn:
+    """⚠ THE MOST VALUABLE COLUMN ON THE SHEET, AND THE EASIEST TO GET SUBTLY WRONG.
+
+    It ends the fuzzy name matching in `_airs_holding_isin` — but only if what reaches the DB is
+    an ISIN or nothing. A junk value there is worse than an absent one: it matches no instrument
+    while looking like an answer, and it stops the row falling back to the name route that would
+    have resolved it.
+    """
+
+    def test_the_isin_is_parsed(self):
+        assert _one().isin == "US0320951017"
+
+    def test_an_absent_column_parses_to_none_not_an_error(self):
+        """⚠ EVERY SNAPSHOT BEFORE 2026-07-23 LACKS IT. Requiring it would break all of history."""
+        row = {k: v for k, v in _ROW.items() if k != "ISIN-code"}
+        assert parse_airs_excel(_xls([row]))[0].isin is None
+
+    def test_the_cash_lines_blank_does_not_arrive_as_the_string_nan(self):
+        """⚠ THE TRAP. pandas reads a blank cell as float NaN, `str()` renders it `"nan"`, and
+        `"nan"` is TRUTHY — so every "does this row have an ISIN" test says yes. The same trap
+        once counted a cash line as a holding."""
+        cash = dict(_ROW, **{"Fondsomschrijving": "Liquiditeiten", "ISIN-code": None})
+        h = parse_airs_excel(_xls([cash]))[0]
+        assert h.isin is None, f"got {h.isin!r}"
+        assert not h.isin
+
+    @pytest.mark.parametrize("bad", ["", "  ", "n/a", "US032095101", "US03209510177",
+                                     "0320951017US", "US0320951O1X"])
+    def test_a_malformed_value_is_treated_as_absent(self, bad):
+        """Too short, too long, digits where the country code goes, a non-digit check digit —
+        none of these are an ISIN, and storing one would be a phantom identity."""
+        assert _one({"ISIN-code": bad}).isin is None
+
+    def test_it_is_normalised_to_upper_case(self):
+        assert _one({"ISIN-code": " us0320951017 "}).isin == "US0320951017"
+
+    def test_airs_other_spelling_of_the_header_is_accepted(self):
+        """AIRS is not consistent across its exports: the model-portfolio sheet says `ISINCode`,
+        the Vermogensoverzicht says `ISIN-code`."""
+        row = {k: v for k, v in _ROW.items() if k != "ISIN-code"} | {"ISINCode": "US0320951017"}
+        assert parse_airs_excel(_xls([row]))[0].isin == "US0320951017"

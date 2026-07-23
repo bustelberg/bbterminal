@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import re
 from routers import _airs_portfolio_store as store
 from routers._asset_financials import BasketRequest, PerformanceResponse, PriceSeriesResponse
 from routers._sse import sse_event, sse_message
@@ -1648,9 +1649,17 @@ class AirsHoldingIsin(BaseModel):
       ok             the implied price agrees with that ISIN's own close (FX-converted)
       price_mismatch it does NOT — the ISIN is not what the book holds, or the book drifted
       unpriced       we have no series for it, so there is NOTHING confirming the name match
+      unmatched      NO ISIN: the model has no position for this holding at all
 
     `unpriced` is not a pass. The name matched and nothing checked it — which for a fund is
     exactly where the Acc/Inc share-class trap lives.
+
+    ⚠ `unmatched` AND `price_mismatch` ARE OPPOSITE FINDINGS, NOT DEGREES OF ONE. A mismatch means
+    the row pairing is RIGHT and the ISIN on it is wrong (a share class, a venue) — a finding
+    about the model. `unmatched` means the pairing itself was refused: the name says a different
+    instrument and the price independently agrees, which is what a STALE model snapshot looks like
+    when the book has since swapped a position. `rejected_isin`/`rejected_fonds` name the leftover
+    we declined; re-scan the model portfolio to fix it.
     """
 
     holding_name: str
@@ -1680,8 +1689,20 @@ class AirsHoldingIsin(BaseModel):
     start_value_eur: float | None = None
     ytd_return_eur: float | None = None
     isin: str | None = None
+    # WHERE the identity came from. The three are not equally strong and the digits look the same:
+    #   book     AIRS's own `ISIN-code` on the holding (since 2026-07-23) — exact, nothing inferred
+    #   override supplied BY HAND, because the model has no position for this holding
+    #   model    the fuzzy name match against the Fixed portfolio — a guess, hence `verdict`
+    # None when the row has no ISIN at all.
+    isin_source: str | None = None
+    # True = the ISIN was supplied BY HAND (airs_holding_isin_override) because the model has no
+    # position for this holding. A pinned identity is not a match and must not read as one — but it
+    # is still price-checked, so `verdict` means exactly what it means on every other row.
+    isin_overridden: bool | None = None
+    isin_override_note: str | None = None
     model_fonds: str | None = None
     model_pct: float | None = None
+    # None on a pinned row: nothing was scored, and a 0.0 would read as "matched at no confidence".
     name_score: float | None = None
     weak_name: bool | None = None
     implied_price_eur: float | None = None
@@ -1689,6 +1710,10 @@ class AirsHoldingIsin(BaseModel):
     price_ratio: float | None = None
     verdict: str
     our_instrument: str | None = None
+    # Only on `unmatched`: the leftover model position we DECLINED to pair this holding with, so
+    # the row can name its dead end instead of showing a blank (which reads as "cash").
+    rejected_isin: str | None = None
+    rejected_fonds: str | None = None
 
 
 class AirsHoldingSegment(BaseModel):
@@ -1751,6 +1776,47 @@ async def airs_account_isins(portefeuille: str):
     from routers._airs_holding_isin import resolve_account_isins_async  # noqa: PLC0415
 
     return await resolve_account_isins_async(portefeuille)
+
+
+class HoldingIsinOverride(BaseModel):
+    holding_name: str
+    # The ISIN to pin, or null/empty to CLEAR the override (back to matching against the model).
+    isin: str | None = None
+    note: str | None = None
+
+
+# An ISIN is 12 chars: 2-letter country, 9 alphanumeric, 1 check digit. Checked because this field
+# is hand-typed, and a malformed value would sit in the table looking like an identity while
+# matching no instrument — the row would read "we know what this is" and price nothing.
+_ISIN_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
+
+
+@router.post("/api/airs/holding-isin-override")
+async def set_holding_isin_override(body: HoldingIsinOverride):
+    """Pin (or clear) the ISIN of an account holding the model has no position for.
+
+    Keyed by holding NAME, so one entry fixes every book that holds it (the measured case appears
+    in four). ⚠ It decides IDENTITY ONLY: the pinned ISIN is price-checked like any other, so a
+    wrong one comes back `price_mismatch` rather than being trusted because a human typed it.
+    """
+    name = (body.holding_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="holding_name is required")
+    isin = (body.isin or "").strip().upper() or None
+    if isin and not _ISIN_RE.match(isin):
+        raise HTTPException(status_code=422, detail=f"{isin!r} is not a well-formed ISIN")
+
+    def _apply() -> None:
+        if isin is None:
+            supabase.table("airs_holding_isin_override").delete().eq("holding_name", name).execute()
+        else:
+            supabase.table("airs_holding_isin_override").upsert(
+                {"holding_name": name, "isin": isin, "note": (body.note or "").strip() or None,
+                 "updated_at": datetime.now(UTC).isoformat()},
+                on_conflict="holding_name").execute()
+
+    await asyncio.to_thread(_apply)
+    return {"holding_name": name, "isin": isin}
 
 
 class AssetBucketOverride(BaseModel):

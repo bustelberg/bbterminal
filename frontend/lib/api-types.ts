@@ -976,6 +976,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/holding-isin-override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Holding Isin Override
+         * @description Pin (or clear) the ISIN of an account holding the model has no position for.
+         *
+         *     Keyed by holding NAME, so one entry fixes every book that holds it (the measured case appears
+         *     in four). ⚠ It decides IDENTITY ONLY: the pinned ISIN is price-checked like any other, so a
+         *     wrong one comes back `price_mismatch` rather than being trusted because a human typed it.
+         */
+        post: operations["set_holding_isin_override_api_airs_holding_isin_override_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/model-portfolios": {
         parameters: {
             query?: never;
@@ -6271,9 +6295,17 @@ export interface components {
          *       ok             the implied price agrees with that ISIN's own close (FX-converted)
          *       price_mismatch it does NOT — the ISIN is not what the book holds, or the book drifted
          *       unpriced       we have no series for it, so there is NOTHING confirming the name match
+         *       unmatched      NO ISIN: the model has no position for this holding at all
          *
          *     `unpriced` is not a pass. The name matched and nothing checked it — which for a fund is
          *     exactly where the Acc/Inc share-class trap lives.
+         *
+         *     ⚠ `unmatched` AND `price_mismatch` ARE OPPOSITE FINDINGS, NOT DEGREES OF ONE. A mismatch means
+         *     the row pairing is RIGHT and the ISIN on it is wrong (a share class, a venue) — a finding
+         *     about the model. `unmatched` means the pairing itself was refused: the name says a different
+         *     instrument and the price independently agrees, which is what a STALE model snapshot looks like
+         *     when the book has since swapped a position. `rejected_isin`/`rejected_fonds` name the leftover
+         *     we declined; re-scan the model portfolio to fix it.
          */
         AirsHoldingIsin: {
             /** Asset Class */
@@ -6300,6 +6332,12 @@ export interface components {
             is_etf?: boolean | null;
             /** Isin */
             isin?: string | null;
+            /** Isin Overridden */
+            isin_overridden?: boolean | null;
+            /** Isin Override Note */
+            isin_override_note?: string | null;
+            /** Isin Source */
+            isin_source?: string | null;
             /**
              * Lines
              * @default 1
@@ -6321,6 +6359,10 @@ export interface components {
             quantity?: number | null;
             /** Region */
             region?: string | null;
+            /** Rejected Fonds */
+            rejected_fonds?: string | null;
+            /** Rejected Isin */
+            rejected_isin?: string | null;
             /** Sector */
             sector?: string | null;
             /** Start Value Eur */
@@ -6920,10 +6962,11 @@ export interface components {
          * BookHoldingDetail
          * @description One paired-book holding, for a non-equity sleeve's contribution + currency view.
          *
-         *     `weight_pct` is the holding's CURRENT value as a share of the whole book, so that within ANY
-         *     bucket, Σ (weight_pct / Σ_bucket weight_pct) · return_pct reproduces that bucket's weighted
-         *     return exactly (weight = the position's Weight). `currency` is the holding's quote currency (a
-         *     fair first-order FX signal for a bond/ETF sleeve — NOT folded to Unclassified like the fund axes).
+         *     `weight_pct` is the holding's OPENING value (beginwaarde) as a share of the whole book, so that
+         *     within ANY bucket, Σ (weight_pct / Σ_bucket weight_pct) · return_pct reproduces that bucket's
+         *     START-weighted return (Σnow/Σstart−1) exactly — the true value change, not the current-value
+         *     weighting that lets a big winner dominate. `currency` is the holding's quote currency (a fair
+         *     first-order FX signal for a bond/ETF sleeve — NOT folded to Unclassified like the fund axes).
          */
         BookHoldingDetail: {
             /** Bucket */
@@ -7484,6 +7527,15 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HoldingIsinOverride */
+        HoldingIsinOverride: {
+            /** Holding Name */
+            holding_name: string;
+            /** Isin */
+            isin?: string | null;
+            /** Note */
+            note?: string | null;
         };
         /** HoldingStateInfo */
         HoldingStateInfo: {
@@ -10219,6 +10271,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    set_holding_isin_override_api_airs_holding_isin_override_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HoldingIsinOverride"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

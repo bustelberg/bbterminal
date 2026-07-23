@@ -75,6 +75,9 @@ def _save_holdings(portefeuille: str, as_of: str, holdings) -> int:
             "portefeuille": portefeuille,
             "as_of_date": as_of,
             "holding_name": h.holding_name,
+            # AIRS's own ISIN (`ISIN-code`, switched on 2026-07-23). None on the cash line and on
+            # every snapshot older than that — `_airs_holding_isin` falls back to the name route.
+            "isin": h.isin,
             "quantity": h.quantity,
             "currency": h.currency,
             "weight": h.weight,
